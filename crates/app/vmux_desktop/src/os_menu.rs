@@ -15,11 +15,9 @@ use std::sync::LazyLock;
 #[cfg(target_os = "macos")]
 use vmux_browser::HostFocusIntent;
 #[cfg(target_os = "macos")]
-use vmux_command::ReadAppCommands;
-use vmux_command::{
-    AppCommand, BrowserCommand, CommandDefinition, CommandInvocation, LayoutCommand, StackCommand,
-    WriteAppCommands, build_native_root_menu, open::OpenCommand,
-};
+use vmux_command::ReadCommandRequests;
+use vmux_command::{CommandDefinition, CommandInvocation, WriteCommandRequests};
+use vmux_layout::stack::StackRequest;
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
 pub struct OsMenuPlugin;
@@ -28,6 +26,8 @@ impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::bookmark_menu::BookmarkMenuPlugin)
             .add_message::<crate::window_manager::CloseVmuxWindow>()
+            .add_message::<StackRequest>()
+            .add_message::<vmux_browser::OpenRequest>()
             .init_resource::<LastMenuCommandAt>()
             .init_resource::<LastStackCloseAt>()
             .init_resource::<LastNativePageOpenAt>()
@@ -41,18 +41,19 @@ impl Plugin for OsMenuPlugin {
             .add_systems(
                 Update,
                 (
-                    forward_menu_events.in_set(WriteAppCommands),
+                    forward_menu_events.in_set(WriteCommandRequests),
                     sync_menu_locale,
-                    remember_stack_close_commands.after(WriteAppCommands),
-                    remember_native_page_open_commands.after(WriteAppCommands),
+                    remember_stack_close_commands.after(vmux_command::DispatchCommandInvocations),
+                    remember_native_page_open_requests
+                        .after(vmux_command::DispatchCommandInvocations),
                     hide_window_on_close_request
                         .after(remember_stack_close_commands)
-                        .after(remember_native_page_open_commands),
+                        .after(remember_native_page_open_requests),
                     sync_close_menu_item.after(hide_window_on_close_request),
                 ),
             );
         #[cfg(target_os = "macos")]
-        app.add_systems(Update, sync_edit_menu_items.after(ReadAppCommands));
+        app.add_systems(Update, sync_edit_menu_items.after(ReadCommandRequests));
     }
 }
 
@@ -93,7 +94,8 @@ fn setup(world: &mut World) {
         query.iter(world).cloned().collect::<Vec<_>>()
     };
     let mut menu = Menu::new();
-    build_native_root_menu(&mut menu, &definitions).unwrap();
+    append_application_menu(&menu).unwrap();
+    CommandDefinition::append_native_menus(&definitions, &mut menu).unwrap();
     append_standard_edit_menu(&menu);
     let locale = world
         .get_resource::<vmux_setting::AppSettings>()
@@ -237,6 +239,41 @@ fn append_standard_edit_menu(menu: &Menu) {
         return;
     };
     let _ = menu.append(&edit);
+}
+
+fn append_application_menu(menu: &Menu) -> Result<(), muda::Error> {
+    use muda::{AboutMetadata, PredefinedMenuItem, Submenu};
+
+    let app_name = match env!("VMUX_BUILD_PROFILE") {
+        "release" => "Vmux".to_string(),
+        "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
+        "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
+        other => format!("Vmux ({other})"),
+    };
+    let version = match env!("VMUX_BUILD_PROFILE") {
+        "local" | "dev" => format!("v{} ({})", env!("CARGO_PKG_VERSION"), env!("VMUX_GIT_HASH")),
+        _ => format!("v{}", env!("CARGO_PKG_VERSION")),
+    };
+    let submenu = Submenu::new(app_name, true);
+    let quit = MenuItem::with_id(
+        "app_quit",
+        "Close Vmux",
+        true,
+        Some("super+q".parse().unwrap()),
+    );
+    submenu.append_items(&[
+        &PredefinedMenuItem::about(
+            None,
+            Some(AboutMetadata {
+                version: Some(version),
+                copyright: Some(String::new()),
+                ..default()
+            }),
+        ),
+        &PredefinedMenuItem::separator(),
+        &quit,
+    ])?;
+    menu.append(&submenu)
 }
 
 #[cfg(target_os = "macos")]
@@ -394,30 +431,26 @@ fn handle_quit_request(world: &mut World) {
 }
 
 fn remember_stack_close_commands(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<StackRequest>,
     mut last_stack_close: ResMut<LastStackCloseAt>,
 ) {
-    for cmd in reader.read() {
-        if matches!(
-            cmd,
-            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close))
-        ) {
+    for request in reader.read() {
+        if matches!(request, StackRequest::Close) {
             last_stack_close.0 = Some(std::time::Instant::now());
         }
     }
 }
 
-fn remember_native_page_open_commands(
-    mut reader: MessageReader<AppCommand>,
+fn remember_native_page_open_requests(
+    mut reader: MessageReader<vmux_browser::OpenRequest>,
     mut last_native_page_open: ResMut<LastNativePageOpenAt>,
 ) {
-    for cmd in reader.read() {
-        if matches!(
-            cmd,
-            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InPlace {
-                url: Some(url)
-            })) if url.starts_with("vmux://")
-        ) {
+    for request in reader.read() {
+        if request
+            .url
+            .as_deref()
+            .is_some_and(|url| url.starts_with("vmux://"))
+        {
             last_native_page_open.0 = Some(std::time::Instant::now());
         }
     }
@@ -550,9 +583,18 @@ mod tests {
     }
 
     #[test]
+    fn application_menu_contains_close_item() {
+        let menu = Menu::new();
+        append_application_menu(&menu).unwrap();
+        assert!(find_menu_item(menu.items(), "app_quit").is_some());
+    }
+
+    #[test]
     fn unsuppressed_window_close_hides_window() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<StackRequest>()
+            .add_message::<vmux_browser::OpenRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
@@ -570,15 +612,14 @@ mod tests {
     fn window_close_request_after_stack_close_command_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<StackRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Close);
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });
@@ -592,17 +633,16 @@ mod tests {
     fn window_close_request_after_native_page_open_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<StackRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(vmux_command::BrowserCommand::Open(
-                vmux_command::open::OpenCommand::InPlace {
-                    url: Some("vmux://terminal".to_string()),
-                },
-            )));
+            .resource_mut::<Messages<vmux_browser::OpenRequest>>()
+            .write(vmux_browser::OpenRequest {
+                url: Some("vmux://terminal".to_string()),
+            });
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });
@@ -616,6 +656,7 @@ mod tests {
     fn delayed_window_close_request_after_native_page_open_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<StackRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
@@ -635,6 +676,7 @@ mod tests {
     fn close_menu_item_disabled_when_all_windows_hidden() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<StackRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 

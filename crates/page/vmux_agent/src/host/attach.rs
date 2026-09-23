@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_command::WriteAppCommands;
+use vmux_command::WriteCommandRequests;
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentKind;
 use vmux_service::client::ServiceClient;
@@ -24,7 +24,7 @@ impl Plugin for AttachPlugin {
         app.add_systems(
             Update,
             handle_resume_in_acp
-                .in_set(WriteAppCommands)
+                .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
                 .after(super::command::CommandSet::ToolCalls)
                 .before(super::command::CommandSet::Commands),

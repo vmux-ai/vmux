@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use vmux_command::WriteAppCommands;
+use vmux_command::WriteCommandRequests;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::ClientMessage;
 use vmux_terminal::ServiceMessageSet;
@@ -24,7 +24,7 @@ impl Plugin for WorkspacePlugin {
                 send_pending_agent_continuations,
             )
                 .chain()
-                .in_set(WriteAppCommands)
+                .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet),
         );
     }

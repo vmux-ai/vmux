@@ -307,10 +307,9 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::OpenCommandLine => {
-                commands.write_message(vmux_command::host::command::AppCommand::Browser(
-                    vmux_command::host::command::BrowserCommand::Bar(
-                        vmux_command::host::command::BrowserBarCommand::OpenExBar,
-                    ),
+                commands.write_message(vmux_command::CommandInvocation::new(
+                    entity,
+                    "browser_open_ex_bar",
                 ));
                 continue;
             }

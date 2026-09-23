@@ -11,11 +11,17 @@ impl AtomicFile {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
+        let permissions = std::fs::metadata(path)
+            .ok()
+            .map(|metadata| metadata.permissions());
         std::fs::create_dir_all(parent)?;
         let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
         temporary.write_all(bytes)?;
         temporary.flush()?;
         temporary.as_file().sync_all()?;
+        if let Some(permissions) = permissions {
+            temporary.as_file().set_permissions(permissions)?;
+        }
         temporary.persist(path).map_err(|error| error.error)?;
         Self::sync_parent(parent)
     }
@@ -191,6 +197,22 @@ mod tests {
         AtomicFile::write(&path, b"second").unwrap();
 
         assert_eq!(std::fs::read(path).unwrap(), b"second");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_file_preserves_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("executable");
+        std::fs::write(&path, b"first").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        AtomicFile::write(&path, b"second").unwrap();
+
+        let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755);
     }
 
     #[test]

@@ -8,10 +8,8 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
+use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
-use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, StackCommand, WriteAppCommands,
-};
 use vmux_core::input::KeyStroke;
 use vmux_core::page::PageReady;
 use vmux_core::terminal::{
@@ -23,6 +21,7 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
+use vmux_layout::stack::StackRequest;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
@@ -43,6 +42,11 @@ impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         vmux_core::register_host_spawn(app, "terminal");
+        super::command::CloseRequest::register(app);
+        super::command::NextRequest::register(app);
+        super::command::PrevRequest::register(app);
+        super::command::ClearRequest::register(app);
+        super::command::CopyModeRequest::register(app);
         app.add_plugins(crate::contract::TerminalContractPlugin)
             .register_type::<crate::launch::TerminalLaunch>()
             .register_type::<crate::launch::TerminalKind>()
@@ -80,7 +84,7 @@ impl Plugin for TerminalServicePlugin {
             .add_systems(
                 Update,
                 (respond_terminal_spawn, respond_processes_monitor_spawn)
-                    .in_set(vmux_command::ReadAppCommands),
+                    .in_set(vmux_command::ReadCommandRequests),
             )
             .add_observer(on_restart_pty)
             .add_observer(on_terminal_removed);
@@ -171,10 +175,12 @@ impl Plugin for TerminalUpdatePlugin {
                     try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
                     resolve_pending_terminal_cwd,
                     poll_service_messages
-                        .in_set(WriteAppCommands)
+                        .in_set(WriteCommandRequests)
                         .in_set(ServiceMessageSet),
                     flush_pending_terminal_input,
-                    handle_terminal_copy_mode_command.in_set(vmux_command::ReadAppCommands),
+                    handle_terminal_navigation_commands.in_set(vmux_command::ReadCommandRequests),
+                    handle_terminal_clear_command.in_set(vmux_command::ReadCommandRequests),
+                    handle_terminal_copy_mode_command.in_set(vmux_command::ReadCommandRequests),
                 )
                     .chain(),
             );
@@ -1073,7 +1079,7 @@ fn try_connect_service(
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PollServiceWriters<'w> {
-    app_commands: MessageWriter<'w, AppCommand>,
+    stack_requests: MessageWriter<'w, StackRequest>,
     agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
     agent_queries: MessageWriter<'w, vmux_service::agent_events::AgentQueryRequest>,
     agent_tool_calls: MessageWriter<'w, vmux_service::agent_events::AgentToolCallRequest>,
@@ -1452,11 +1458,7 @@ fn poll_service_messages(
                 if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
                     let tab = child_of.get();
                     commands.entity(tab).insert(LastActivatedAt::now());
-                    writers
-                        .app_commands
-                        .write(AppCommand::Layout(LayoutCommand::Stack(
-                            StackCommand::Close,
-                        )));
+                    writers.stack_requests.write(StackRequest::Close);
                 }
             }
             ServiceMessage::ProcessList { processes } => {
@@ -2603,24 +2605,14 @@ fn on_term_scroll(
 
 fn on_term_link_open(
     trigger: On<BinReceive<TermLinkOpenRequest>>,
-    mut app_commands: MessageWriter<AppCommand>,
-    mut issued: MessageWriter<vmux_command::CommandIssued>,
-    user_q: Query<Entity, With<vmux_core::team::User>>,
+    mut stack_requests: MessageWriter<StackRequest>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let url = trigger.payload.url.clone();
     if url.is_empty() {
         return;
     }
-    let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-        url: Some(url),
-    }));
-    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-    issued.write(vmux_command::CommandIssued {
-        caller,
-        command: cmd.clone(),
-    });
-    app_commands.write(cmd);
+    stack_requests.write(StackRequest::Open { url: Some(url) });
     if let Some(proxy) = proxy.as_ref() {
         let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
     }
@@ -3103,7 +3095,7 @@ fn on_restart_pty(
 }
 
 fn handle_terminal_copy_mode_command(
-    mut er: MessageReader<AppCommand>,
+    mut requests: MessageReader<super::command::CopyModeRequest>,
     targeted_terminals: Query<
         (&ProcessId, &ChildOf),
         (With<Terminal>, With<KeyboardOwner>, Without<ProcessExited>),
@@ -3115,7 +3107,7 @@ fn handle_terminal_copy_mode_command(
     mut local_copy_mode: ResMut<LocalCopyModeState>,
 ) {
     let Some(service) = service else {
-        for _ in er.read() {}
+        for _ in requests.read() {}
         return;
     };
     let target_processes = resolve_terminal_input_targets(
@@ -3129,14 +3121,64 @@ fn handle_terminal_copy_mode_command(
             .map(|(pid, child_of)| (child_of.get(), *pid)),
     );
     let active_process_id = target_processes.first().copied();
-    for cmd in er.read() {
-        if matches!(
-            cmd,
-            AppCommand::Terminal(vmux_command::TerminalCommand::CopyMode)
-        ) && let Some(process_id) = active_process_id
-        {
+    for _ in requests.read() {
+        if let Some(process_id) = active_process_id {
             set_local_copy_mode(&mut local_copy_mode, process_id, true);
             service.0.send(ClientMessage::EnterCopyMode { process_id });
+        }
+    }
+}
+
+fn handle_terminal_navigation_commands(
+    mut close_requests: MessageReader<super::command::CloseRequest>,
+    mut next_requests: MessageReader<super::command::NextRequest>,
+    mut previous_requests: MessageReader<super::command::PrevRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    terminals: Query<&ChildOf, With<Terminal>>,
+    mut stack_requests: MessageWriter<StackRequest>,
+) {
+    let terminal_is_focused = focus
+        .stack
+        .is_some_and(|stack| terminals.iter().any(|child_of| child_of.get() == stack));
+    if !terminal_is_focused {
+        close_requests.clear();
+        next_requests.clear();
+        previous_requests.clear();
+        return;
+    }
+    for _ in close_requests.read() {
+        stack_requests.write(StackRequest::Close);
+    }
+    for _ in next_requests.read() {
+        stack_requests.write(StackRequest::Focus(
+            vmux_layout::target::SiblingDirection::Next,
+        ));
+    }
+    for _ in previous_requests.read() {
+        stack_requests.write(StackRequest::Focus(
+            vmux_layout::target::SiblingDirection::Previous,
+        ));
+    }
+}
+
+fn handle_terminal_clear_command(
+    mut requests: MessageReader<super::command::ClearRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    mut pending_inputs: Query<&mut PendingTerminalInput>,
+    mut commands: Commands,
+) {
+    let terminal = crate::target::active_terminal_for_tab(focus.stack, &terminals);
+    for _ in requests.read() {
+        let Some(terminal) = terminal else {
+            continue;
+        };
+        if let Ok(mut pending) = pending_inputs.get_mut(terminal) {
+            pending.data.push(0x0c);
+        } else {
+            commands
+                .entity(terminal)
+                .insert(PendingTerminalInput { data: vec![0x0c] });
         }
     }
 }
@@ -3448,19 +3490,18 @@ mod tests {
     }
 
     #[test]
-    fn term_link_open_emits_browser_open_command() {
+    fn term_link_open_emits_stack_open_request() {
         #[derive(Resource, Default)]
-        struct Captured(Vec<AppCommand>);
-        fn capture(mut r: MessageReader<AppCommand>, mut c: ResMut<Captured>) {
-            for m in r.read() {
-                c.0.push(m.clone());
+        struct Captured(Vec<StackRequest>);
+        fn capture(mut requests: MessageReader<StackRequest>, mut captured: ResMut<Captured>) {
+            for request in requests.read() {
+                captured.0.push(request.clone());
             }
         }
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<AppCommand>()
-            .add_message::<vmux_command::CommandIssued>()
+            .add_message::<StackRequest>()
             .init_resource::<Captured>()
             .add_observer(on_term_link_open)
             .add_systems(Update, capture);
@@ -3476,13 +3517,11 @@ mod tests {
 
         let captured = app.world().resource::<Captured>();
         assert!(
-            captured.0.iter().any(|c| matches!(
-                c,
-                AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-                    url: Some(u),
-                })) if u == "https://vmux.ai"
+            captured.0.iter().any(|request| matches!(
+                request,
+                StackRequest::Open { url: Some(url) } if url == "https://vmux.ai"
             )),
-            "expected InNewStack open command, got {:?}",
+            "expected stack open request, got {:?}",
             captured.0
         );
     }
@@ -4039,9 +4078,15 @@ mod tests {
             ..Default::default()
         };
         let mut state = TerminalWebShortcutState::default();
+        let definitions = [vmux_command::CommandDefinition::new(
+            "browser_open_page_in_command_bar",
+            "Edit Page",
+            "Browser > Bar",
+        )
+        .direct("Super+l")];
 
         assert_eq!(
-            resolve_terminal_web_shortcut(&event, None, &[], &mut state),
+            resolve_terminal_web_shortcut(&event, None, &definitions, &mut state),
             TerminalWebShortcutAction::Command("browser_open_page_in_command_bar".to_string())
         );
     }
@@ -4060,9 +4105,12 @@ mod tests {
             ..Default::default()
         };
         let mut state = TerminalWebShortcutState::default();
-        let definitions = [
-            <vmux_layout::toggle::ToggleRequest as vmux_command::RegisteredCommand>::definition(),
-        ];
+        let definitions = [vmux_command::CommandDefinition::new(
+            "toggle_layout",
+            "Toggle Layout",
+            "Layout > Layout",
+        )
+        .direct("Super+Shift+S")];
 
         assert_eq!(
             resolve_terminal_web_shortcut(&event, None, &definitions, &mut state),

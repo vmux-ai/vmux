@@ -42,7 +42,8 @@ pub(super) struct DirectionalOpenPlugin;
 
 impl Plugin for DirectionalOpenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, handle_open_in_pane.in_set(LayoutRequestSet::Handle));
+        app.add_message::<PaneRequest>()
+            .add_systems(Update, handle_open_in_pane.in_set(LayoutRequestSet::Handle));
     }
 }
 
@@ -895,15 +896,12 @@ fn handle_open_in_pane(
             continue;
         };
 
-        let resolved = vmux_command::open::resolve_url(
-            url.as_deref(),
-            effective_startup_url.as_ref().map(|s| s.0.as_str()),
-        );
-        let resolved = if resolved.is_empty() {
-            vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref())
-        } else {
-            resolved
-        };
+        let resolved = url
+            .clone()
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| {
+                vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref())
+            });
 
         let split_dir = direction_to_split(direction);
 

@@ -3,7 +3,7 @@ mod runtime;
 mod view;
 
 use bevy::{ecs::message::MessageReader, prelude::*};
-use vmux_command::ReadAppCommands;
+use vmux_command::ReadCommandRequests;
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 
 pub use appearance::{ColorSchemeChanged, ResolvedColorScheme, ResolvedScheme, SystemAppearance};
@@ -29,7 +29,7 @@ impl Plugin for SettingsPlugin {
             vmux_layout::LayoutContractPlugin,
         ))
         .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
-        .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands));
+        .add_systems(Update, respond_settings_spawn.in_set(ReadCommandRequests));
     }
 }
 

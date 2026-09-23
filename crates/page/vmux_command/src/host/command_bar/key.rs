@@ -1,5 +1,5 @@
 use crate::event::CommandBarKey;
-use crate::{AppCommand, CommandIssued, ReadAppCommands};
+use crate::{CommandDefinition, CommandInvocation, ReadCommandRequests};
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 
@@ -7,26 +7,68 @@ pub(crate) struct KeyPlugin;
 
 impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, echo_key_command.in_set(ReadAppCommands));
+        CommandBarKeyRequest::register(app);
+        app.add_systems(Update, echo_key_command.in_set(ReadCommandRequests));
     }
 }
 
-fn echo_key_command(mut issued: MessageReader<CommandIssued>, mut commands: Commands) {
-    for issue in issued.read() {
-        let AppCommand::CommandBar(key) = issue.command else {
-            continue;
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct CommandBarKeyRequest {
+    caller: Entity,
+    key: CommandBarKey,
+}
+
+impl CommandBarKeyRequest {
+    pub fn register(app: &mut App) {
+        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("command_bar_next", "Next Result", "Command Bar")
+                .hidden()
+                .direct_when("ArrowDown", Some("command-bar"))
+                .direct_when("Ctrl+n", Some("command-bar"))
+                .direct_when("Ctrl+j", Some("command-bar")),
+            CommandDefinition::new("command_bar_previous", "Previous Result", "Command Bar")
+                .hidden()
+                .direct_when("ArrowUp", Some("command-bar"))
+                .direct_when("Ctrl+p", Some("command-bar"))
+                .direct_when("Ctrl+k", Some("command-bar")),
+            CommandDefinition::new("command_bar_complete", "Accept Completion", "Command Bar")
+                .hidden()
+                .direct_when("Tab", Some("command-bar")),
+            CommandDefinition::new("command_bar_dismiss", "Dismiss Command Bar", "Command Bar")
+                .hidden()
+                .direct_when("Escape", Some("command-bar"))
+                .direct_when("Ctrl+c", Some("command-bar")),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        let key = match invocation.id.as_str() {
+            "command_bar_next" => CommandBarKey::Next,
+            "command_bar_previous" => CommandBarKey::Previous,
+            "command_bar_complete" => CommandBarKey::Complete,
+            "command_bar_dismiss" => CommandBarKey::Dismiss,
+            _ => return None,
         };
-        commands.trigger(BinHostEmitEvent::from_event(
-            issue.caller,
-            &CommandBarKey::from(key),
-        ));
+        Some(Self {
+            caller: invocation.caller,
+            key,
+        })
+    }
+}
+
+fn echo_key_command(mut requests: MessageReader<CommandBarKeyRequest>, mut commands: Commands) {
+    for request in requests.read() {
+        commands.trigger(BinHostEmitEvent::from_event(request.caller, &request.key));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CommandBarKeyCommand;
     use vmux_api::BinEvent;
 
     #[derive(Resource, Default)]
@@ -50,16 +92,15 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(KeyPlugin)
-                .add_message::<CommandIssued>()
                 .init_resource::<Echoed>()
                 .add_observer(Echoed::record);
             app
         }
 
-        fn issue(app: &mut App, caller: Entity, command: AppCommand) {
+        fn issue(app: &mut App, caller: Entity, key: CommandBarKey) {
             app.world_mut()
-                .resource_mut::<bevy::ecs::message::Messages<CommandIssued>>()
-                .write(CommandIssued { caller, command });
+                .resource_mut::<bevy::ecs::message::Messages<CommandBarKeyRequest>>()
+                .write(CommandBarKeyRequest { caller, key });
             app.update();
         }
     }
@@ -70,11 +111,7 @@ mod tests {
         let pressed = app.world_mut().spawn_empty().id();
         let other = app.world_mut().spawn_empty().id();
 
-        Echo::issue(
-            &mut app,
-            pressed,
-            AppCommand::CommandBar(CommandBarKeyCommand::Next),
-        );
+        Echo::issue(&mut app, pressed, CommandBarKey::Next);
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
@@ -87,19 +124,5 @@ mod tests {
                 .iter()
                 .any(|(entity, _)| *entity == other)
         );
-    }
-
-    #[test]
-    fn a_command_that_is_not_a_command_bar_key_is_left_alone() {
-        let mut app = Echo::app();
-        let caller = app.world_mut().spawn_empty().id();
-
-        Echo::issue(
-            &mut app,
-            caller,
-            AppCommand::Terminal(crate::TerminalCommand::Clear),
-        );
-
-        assert!(app.world().resource::<Echoed>().0.is_empty());
     }
 }

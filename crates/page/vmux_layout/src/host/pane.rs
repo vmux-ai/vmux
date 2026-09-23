@@ -11,8 +11,7 @@ use bevy::{
 };
 use moonshine_save::prelude::*;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-#[cfg(test)]
-use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand};
+use vmux_command::{CommandDefinition, CommandInvocation};
 #[cfg(test)]
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 #[cfg(test)]
@@ -21,7 +20,7 @@ use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 #[cfg(test)]
-use super::command::LayoutCommandPlugin;
+use super::command::LayoutRequestPlugin;
 use super::pane_arrangement::ArrangementPlugin;
 use super::pane_close::ClosePlugin;
 pub use super::pane_close::{ForcePaneClose, PendingPaneClose};
@@ -83,22 +82,178 @@ pub enum PaneRequest {
     ToggleZoom,
 }
 
+impl PaneRequest {
+    pub fn register(app: &mut App) {
+        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("toggle_pane", "Next Pane", "Layout > Pane")
+                .hidden()
+                .chord("Ctrl+b, o"),
+            CommandDefinition::new("close_pane", "Close Pane", "Layout > Pane").chord("Ctrl+b, x"),
+            CommandDefinition::new("zoom_pane", "Zoom Pane", "Layout > Pane")
+                .hidden()
+                .chord("Ctrl+b, z"),
+            CommandDefinition::new("select_pane_left", "Select Left Pane", "Layout > Pane")
+                .chord("Ctrl+b, h")
+                .chord("Ctrl+b, ArrowLeft"),
+            CommandDefinition::new("select_pane_right", "Select Right Pane", "Layout > Pane")
+                .chord("Ctrl+b, l")
+                .chord("Ctrl+b, ArrowRight"),
+            CommandDefinition::new("select_pane_up", "Select Up Pane", "Layout > Pane")
+                .chord("Ctrl+b, k")
+                .chord("Ctrl+b, ArrowUp"),
+            CommandDefinition::new("select_pane_down", "Select Down Pane", "Layout > Pane")
+                .chord("Ctrl+b, j")
+                .chord("Ctrl+b, ArrowDown"),
+            CommandDefinition::new("swap_pane_prev", "Swap Pane Previous", "Layout > Pane")
+                .chord("Ctrl+b, {"),
+            CommandDefinition::new("swap_pane_next", "Swap Pane Next", "Layout > Pane")
+                .chord("Ctrl+b, }"),
+            CommandDefinition::new("rotate_forward", "Rotate Forward", "Layout > Pane")
+                .hidden()
+                .chord("Ctrl+b, r")
+                .chord("Ctrl+b, Ctrl+o"),
+            CommandDefinition::new("rotate_backward", "Rotate Backward", "Layout > Pane")
+                .hidden()
+                .chord("Ctrl+b, Shift+r")
+                .chord("Ctrl+b, Alt+o"),
+            CommandDefinition::new("mirror_panes", "Mirror Panes", "Layout > Pane")
+                .chord("Ctrl+b, m"),
+            CommandDefinition::new(
+                "mirror_panes_horizontal",
+                "Mirror Panes Horizontally",
+                "Layout > Pane",
+            )
+            .chord("Ctrl+b, Alt+h"),
+            CommandDefinition::new(
+                "mirror_panes_vertical",
+                "Mirror Panes Vertically",
+                "Layout > Pane",
+            )
+            .chord("Ctrl+b, Alt+v"),
+            CommandDefinition::new("equalize_pane_size", "Equalize Pane Size", "Layout > Pane")
+                .chord("Ctrl+b, Shift+e")
+                .chord("Ctrl+b, ="),
+            CommandDefinition::new("resize_pane_left", "Resize Pane Left", "Layout > Pane")
+                .chord("Ctrl+b, Ctrl+ArrowLeft")
+                .chord("Ctrl+b, Alt+ArrowLeft"),
+            CommandDefinition::new("resize_pane_right", "Resize Pane Right", "Layout > Pane")
+                .chord("Ctrl+b, Ctrl+ArrowRight")
+                .chord("Ctrl+b, Alt+ArrowRight"),
+            CommandDefinition::new("resize_pane_up", "Resize Pane Up", "Layout > Pane")
+                .chord("Ctrl+b, Ctrl+ArrowUp")
+                .chord("Ctrl+b, Alt+ArrowUp"),
+            CommandDefinition::new("resize_pane_down", "Resize Pane Down", "Layout > Pane")
+                .chord("Ctrl+b, Ctrl+ArrowDown")
+                .chord("Ctrl+b, Alt+ArrowDown"),
+            CommandDefinition::new("open_in_pane_top", "Open in Pane Top", "Browser > Open")
+                .direct("Super+Shift+K"),
+            CommandDefinition::new("open_in_pane_right", "Open in Pane Right", "Browser > Open")
+                .alias("split_v")
+                .direct("Super+Shift+L")
+                .chord("Ctrl+b, %"),
+            CommandDefinition::new(
+                "open_in_pane_bottom",
+                "Open in Pane Bottom",
+                "Browser > Open",
+            )
+            .alias("split_h")
+            .direct("Super+Shift+J")
+            .chord("Ctrl+b, \""),
+            CommandDefinition::new("open_in_pane_left", "Open in Pane Left", "Browser > Open")
+                .direct("Super+Shift+H"),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        let request = match invocation.id.as_str() {
+            "toggle_pane" => Self::Focus(PaneFocus::Next),
+            "close_pane" => Self::Close,
+            "zoom_pane" => Self::ToggleZoom,
+            "select_pane_left" => Self::Focus(PaneFocus::Direction(PaneDirection::Left)),
+            "select_pane_right" => Self::Focus(PaneFocus::Direction(PaneDirection::Right)),
+            "select_pane_up" => Self::Focus(PaneFocus::Direction(PaneDirection::Top)),
+            "select_pane_down" => Self::Focus(PaneFocus::Direction(PaneDirection::Bottom)),
+            "swap_pane_prev" => Self::Arrange(PaneArrangement::Swap(SiblingDirection::Previous)),
+            "swap_pane_next" => Self::Arrange(PaneArrangement::Swap(SiblingDirection::Next)),
+            "rotate_forward" => Self::Arrange(PaneArrangement::Rotate(SiblingDirection::Next)),
+            "rotate_backward" => Self::Arrange(PaneArrangement::Rotate(SiblingDirection::Previous)),
+            "mirror_panes" => Self::Arrange(PaneArrangement::Mirror(None)),
+            "mirror_panes_horizontal" => {
+                Self::Arrange(PaneArrangement::Mirror(Some(PaneSplitDirection::Row)))
+            }
+            "mirror_panes_vertical" => {
+                Self::Arrange(PaneArrangement::Mirror(Some(PaneSplitDirection::Column)))
+            }
+            "equalize_pane_size" => Self::Resize(PaneResize::Equalize),
+            "resize_pane_left" => Self::Resize(PaneResize::Direction(PaneDirection::Left)),
+            "resize_pane_right" => Self::Resize(PaneResize::Direction(PaneDirection::Right)),
+            "resize_pane_up" => Self::Resize(PaneResize::Direction(PaneDirection::Top)),
+            "resize_pane_down" => Self::Resize(PaneResize::Direction(PaneDirection::Bottom)),
+            "open_in_pane_top" => Self::Open(PaneOpenRequest {
+                direction: PaneDirection::Top,
+                target: invocation
+                    .argument("target")
+                    .unwrap_or(PaneTarget::NewSplit),
+                mode: invocation
+                    .argument("mode")
+                    .unwrap_or(PaneOpenMode::NewStack),
+                url: invocation.argument("url"),
+            }),
+            "open_in_pane_right" => Self::Open(PaneOpenRequest {
+                direction: PaneDirection::Right,
+                target: invocation
+                    .argument("target")
+                    .unwrap_or(PaneTarget::NewSplit),
+                mode: invocation
+                    .argument("mode")
+                    .unwrap_or(PaneOpenMode::NewStack),
+                url: invocation.argument("url"),
+            }),
+            "open_in_pane_bottom" => Self::Open(PaneOpenRequest {
+                direction: PaneDirection::Bottom,
+                target: invocation
+                    .argument("target")
+                    .unwrap_or(PaneTarget::NewSplit),
+                mode: invocation
+                    .argument("mode")
+                    .unwrap_or(PaneOpenMode::NewStack),
+                url: invocation.argument("url"),
+            }),
+            "open_in_pane_left" => Self::Open(PaneOpenRequest {
+                direction: PaneDirection::Left,
+                target: invocation
+                    .argument("target")
+                    .unwrap_or(PaneTarget::NewSplit),
+                mode: invocation
+                    .argument("mode")
+                    .unwrap_or(PaneOpenMode::NewStack),
+                url: invocation.argument("url"),
+            }),
+            _ => return None,
+        };
+        Some(request)
+    }
+}
+
 pub struct PanePlugin;
 
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<SideSheetCardCollapsed>()
-            .add_message::<PaneRequest>()
-            .add_plugins((
-                TreePlugin,
-                IdentityPlugin,
-                ArrangementPlugin,
-                OpenPlugin,
-                PaneZoomPlugin,
-                FocusPlugin,
-                ResizePlugin,
-                ClosePlugin,
-            ));
+        PaneRequest::register(app);
+        app.register_type::<SideSheetCardCollapsed>().add_plugins((
+            TreePlugin,
+            IdentityPlugin,
+            ArrangementPlugin,
+            OpenPlugin,
+            PaneZoomPlugin,
+            FocusPlugin,
+            ResizePlugin,
+            ClosePlugin,
+        ));
     }
 }
 
@@ -1949,7 +2104,7 @@ mod tests {
     #[test]
     fn zoom_command_inserts_zoomed_with_correct_hidden_set() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -1999,8 +2154,8 @@ mod tests {
             .insert(LastActivatedAt::now());
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::ToggleZoom);
 
         app.update();
 
@@ -2015,7 +2170,7 @@ mod tests {
     #[test]
     fn zoom_command_on_zoomed_tab_removes_zoomed() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -2065,14 +2220,14 @@ mod tests {
             .insert(LastActivatedAt::now());
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::ToggleZoom);
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_some());
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::ToggleZoom);
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_none());
     }
@@ -2080,7 +2235,7 @@ mod tests {
     #[test]
     fn zoom_command_on_single_pane_tab_is_noop() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -2101,8 +2256,8 @@ mod tests {
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(only)));
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::ToggleZoom);
         app.update();
 
         assert!(app.world().get::<Zoomed>(tab).is_none());
@@ -2114,7 +2269,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             CommandPlugin,
-            LayoutCommandPlugin,
+            LayoutRequestPlugin,
             PaneZoomPlugin,
         ));
 
@@ -2145,7 +2300,7 @@ mod tests {
     #[test]
     fn split_command_auto_unzooms_first() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -2195,21 +2350,19 @@ mod tests {
             .insert(LastActivatedAt::now());
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::ToggleZoom);
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_some());
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction: PaneDirection::Bottom,
-                    target: PaneTarget::NewSplit,
-                    mode: PaneOpenMode::NewStack,
-                    url: None,
-                },
-            )));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Open(PaneOpenRequest {
+                direction: PaneDirection::Bottom,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            }));
         app.update();
 
         assert!(
@@ -2221,7 +2374,7 @@ mod tests {
     #[test]
     fn select_command_auto_unzooms() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
@@ -2271,15 +2424,15 @@ mod tests {
             .insert(LastActivatedAt::now());
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::ToggleZoom);
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_some());
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft,
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Focus(PaneFocus::Direction(
+                PaneDirection::Left,
             )));
         app.update();
 
@@ -2295,7 +2448,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             CommandPlugin,
-            LayoutCommandPlugin,
+            LayoutRequestPlugin,
             PaneZoomPlugin,
         ));
 
@@ -2336,7 +2489,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             CommandPlugin,
-            LayoutCommandPlugin,
+            LayoutRequestPlugin,
             PaneZoomPlugin,
         ));
 
@@ -2378,7 +2531,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             CommandPlugin,
-            LayoutCommandPlugin,
+            LayoutRequestPlugin,
             PaneZoomPlugin,
         ));
 
@@ -2441,8 +2594,8 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt(3), ChildOf(right_bot)));
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::ToggleZoom);
 
         app.update();
 
@@ -2467,7 +2620,7 @@ mod tests {
 
     fn build_in_pane_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutCommandPlugin))
+        app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
             .add_message::<crate::LayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
@@ -2665,20 +2818,17 @@ mod tests {
 
     #[test]
     fn in_pane_new_split_right_creates_pane_to_the_right() {
-        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
         let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction: PaneDirection::Right,
-                    target: PaneTarget::NewSplit,
-                    mode: PaneOpenMode::NewStack,
-                    url: Some("https://x".into()),
-                },
-            )));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Open(PaneOpenRequest {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: Some("https://x".into()),
+            }));
         app.update();
 
         assert!(
@@ -2718,20 +2868,17 @@ mod tests {
 
     #[test]
     fn in_pane_new_split_warps_cursor_to_new_pane() {
-        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
         let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction: PaneDirection::Right,
-                    target: PaneTarget::NewSplit,
-                    mode: PaneOpenMode::NewStack,
-                    url: Some("https://x".into()),
-                },
-            )));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Open(PaneOpenRequest {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: Some("https://x".into()),
+            }));
         app.update();
 
         let children: Vec<Entity> = app
@@ -2751,20 +2898,17 @@ mod tests {
 
     #[test]
     fn in_pane_new_split_without_url_opens_the_start_page() {
-        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
         let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction: PaneDirection::Right,
-                    target: PaneTarget::NewSplit,
-                    mode: PaneOpenMode::NewStack,
-                    url: None,
-                },
-            )));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Open(PaneOpenRequest {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            }));
         app.update();
 
         assert!(app.world().get::<PaneSplit>(pane).is_some());
@@ -2781,20 +2925,17 @@ mod tests {
 
     #[test]
     fn in_pane_existing_in_place_navigates_neighbor_active_stack() {
-        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
         let (_tab, _split, _left, right) = build_pre_split(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction: PaneDirection::Right,
-                    target: PaneTarget::Existing,
-                    mode: PaneOpenMode::InPlace,
-                    url: Some("https://new".into()),
-                },
-            )));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Open(PaneOpenRequest {
+                direction: PaneDirection::Right,
+                target: PaneTarget::Existing,
+                mode: PaneOpenMode::InPlace,
+                url: Some("https://new".into()),
+            }));
         app.update();
 
         let collected = app.world().resource::<InPaneCollectedSpawns>();
@@ -2818,20 +2959,17 @@ mod tests {
 
     #[test]
     fn in_pane_existing_new_stack_adds_stack_to_neighbor() {
-        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
         let (_tab, _split, _left, right) = build_pre_split(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction: PaneDirection::Right,
-                    target: PaneTarget::Existing,
-                    mode: PaneOpenMode::NewStack,
-                    url: Some("https://x".into()),
-                },
-            )));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Open(PaneOpenRequest {
+                direction: PaneDirection::Right,
+                target: PaneTarget::Existing,
+                mode: PaneOpenMode::NewStack,
+                url: Some("https://x".into()),
+            }));
         app.update();
 
         let collected = app.world().resource::<InPaneCollectedSpawns>();
@@ -2867,20 +3005,17 @@ mod tests {
 
     #[test]
     fn in_pane_existing_falls_back_to_new_split_when_no_sibling() {
-        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
         let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction: PaneDirection::Right,
-                    target: PaneTarget::Existing,
-                    mode: PaneOpenMode::InPlace,
-                    url: Some("https://x".into()),
-                },
-            )));
+            .resource_mut::<Messages<PaneRequest>>()
+            .write(PaneRequest::Open(PaneOpenRequest {
+                direction: PaneDirection::Right,
+                target: PaneTarget::Existing,
+                mode: PaneOpenMode::InPlace,
+                url: Some("https://x".into()),
+            }));
         app.update();
 
         assert!(

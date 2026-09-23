@@ -168,11 +168,7 @@ pub fn write_manifest_to(path: &Path, manifest: &ToolsManifest) -> Result<(), St
     manifest.version = MANIFEST_VERSION;
     manifest.normalize();
     let source = toml::to_string_pretty(&manifest).map_err(|error| error.to_string())?;
-    let parent = path.parent().ok_or("tools manifest has no parent")?;
-    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let temporary = path.with_extension("toml.tmp");
-    std::fs::write(&temporary, source).map_err(|error| error.to_string())?;
-    std::fs::rename(&temporary, path).map_err(|error| error.to_string())
+    vmux_path::AtomicFile::write(path, source.as_bytes()).map_err(|error| error.to_string())
 }
 
 pub(crate) fn add_packages(

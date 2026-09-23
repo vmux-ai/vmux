@@ -370,28 +370,22 @@ mod tests {
 
     #[test]
     fn header_request_rkyv_roundtrip() {
-        let original = HeaderRequest {
-            header_command: "back".into(),
-        };
+        let original = HeaderRequest::PreviousPage;
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let recovered = rkyv::from_bytes::<HeaderRequest, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(recovered.header_command, "back");
+        assert_eq!(recovered, original);
     }
 
     #[test]
     fn tabs_request_rkyv_roundtrip() {
-        let original = TabsRequest {
-            command: "switch-tab".into(),
-            tab_id: Some("work".into()),
-            target_tab_id: Some("home".into()),
-            drop_placement: Some(TabDropPlacement::Before),
+        let original = TabsRequest::Reorder {
+            tab_id: "work".into(),
+            target_tab_id: "home".into(),
+            drop_placement: TabDropPlacement::Before,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let recovered = rkyv::from_bytes::<TabsRequest, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(recovered.command, "switch-tab");
-        assert_eq!(recovered.tab_id.as_deref(), Some("work"));
-        assert_eq!(recovered.target_tab_id.as_deref(), Some("home"));
-        assert_eq!(recovered.drop_placement, Some(TabDropPlacement::Before));
+        assert_eq!(recovered, original);
     }
 
     #[test]
@@ -404,7 +398,10 @@ mod tests {
 }
 #[derive(
     Clone,
+    Copy,
     Debug,
+    PartialEq,
+    Eq,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
@@ -412,8 +409,11 @@ mod tests {
     rkyv::Deserialize,
 )]
 #[vmux_api::ui_event(target = "layout")]
-pub struct HeaderRequest {
-    pub header_command: String,
+pub enum HeaderRequest {
+    PreviousPage,
+    NextPage,
+    Reload,
+    FocusAddressBar,
 }
 
 #[derive(
@@ -569,6 +569,8 @@ pub struct TabRow {
 #[derive(
     Clone,
     Debug,
+    PartialEq,
+    Eq,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
@@ -576,14 +578,19 @@ pub struct TabRow {
     rkyv::Deserialize,
 )]
 #[vmux_api::ui_event(target = "layout")]
-pub struct TabsRequest {
-    pub command: String,
-    #[serde(default)]
-    pub tab_id: Option<String>,
-    #[serde(default)]
-    pub target_tab_id: Option<String>,
-    #[serde(default)]
-    pub drop_placement: Option<TabDropPlacement>,
+pub enum TabsRequest {
+    New,
+    Close {
+        tab_id: Option<String>,
+    },
+    Switch {
+        tab_id: String,
+    },
+    Reorder {
+        tab_id: String,
+        target_tab_id: String,
+        drop_placement: TabDropPlacement,
+    },
 }
 
 #[derive(
@@ -679,6 +686,8 @@ pub struct StackNode {
 #[derive(
     Clone,
     Debug,
+    PartialEq,
+    Eq,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
@@ -686,16 +695,15 @@ pub struct StackNode {
     rkyv::Deserialize,
 )]
 #[vmux_api::ui_event(target = "layout")]
-pub struct SideSheetRequest {
-    pub command: String,
-    #[serde(default)]
-    pub pane_id: String,
-    #[serde(default)]
-    pub stack_id: u64,
-    #[serde(default)]
-    pub line: u32,
-    #[serde(default)]
-    pub path: String,
+pub enum SideSheetRequest {
+    ActivateStack { pane_id: u64, stack_id: u64 },
+    CloseStack { pane_id: u64, stack_id: u64 },
+    NewStack { pane_id: u64 },
+    OpenProjectPath { pane_id: u64, path: String },
+    CollapseCard { pane_id: u64 },
+    ExpandCard { pane_id: u64 },
+    CollapseSection { pane_id: u64, path: String },
+    ExpandSection { pane_id: u64, path: String },
 }
 
 #[derive(

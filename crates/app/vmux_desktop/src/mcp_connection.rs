@@ -16,7 +16,6 @@ use vmux_api::mcp::{
     McpServerAction, McpServerEntry, McpServerRequest, McpServerResult, McpServerStatus,
     McpServers, McpServersRequest,
 };
-use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
 };
@@ -105,16 +104,14 @@ impl McpConnections {
     fn drain(
         mut tasks: Query<(Entity, &mut McpActionTask)>,
         browsers: NonSend<Browsers>,
-        mut app_commands: MessageWriter<AppCommand>,
+        mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
         proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
         mut commands: Commands,
     ) {
         for (entity, mut task) in &mut tasks {
             while let Ok(url) = task.progress.get_mut().try_recv() {
                 if browsers.can_emit_to(&task.target) {
-                    app_commands.write(AppCommand::Browser(BrowserCommand::Open(
-                        OpenCommand::InNewStack { url: Some(url) },
-                    )));
+                    stack_requests.write(vmux_layout::stack::StackRequest::Open { url: Some(url) });
                 }
             }
             let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {

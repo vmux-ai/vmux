@@ -1,10 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
-use vmux_api::command_bar::CommandBarPick;
+use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
 use vmux_command::host::FileStatusPicked;
-use vmux_command::{
-    AppCommand, BrowserBarCommand, BrowserCommand, CommandIssued, CommandIssuer, ReadAppCommands,
-};
+use vmux_command::{CommandDefinition, CommandInvocation, CommandIssuer, ReadCommandRequests};
 use vmux_core::event::{
     ExplorerGoto, FileEncoding, FileEncodingAction, FileEncodingSet, FileIndent, FileKey,
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
@@ -17,22 +15,77 @@ pub(crate) struct KeyPlugin;
 
 impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
+        FileKeyRequest::register(app);
         app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
-            .add_systems(Update, echo_key_command.in_set(ReadAppCommands))
+            .add_systems(Update, echo_key_command.in_set(ReadCommandRequests))
             .add_systems(Update, apply_status_picks)
             .add_observer(open_status_picker);
     }
 }
 
-fn echo_key_command(mut issued: MessageReader<CommandIssued>, mut commands: Commands) {
-    for issue in issued.read() {
-        let AppCommand::File(key) = issue.command else {
-            continue;
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct FileKeyRequest {
+    caller: Entity,
+    key: FileKey,
+}
+
+impl FileKeyRequest {
+    pub fn register(app: &mut App) {
+        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("file_toggle_explorer", "Toggle Explorer", "Editor")
+                .hidden()
+                .direct_when("Super+b", Some("files")),
+            CommandDefinition::new("file_reveal_in_explorer", "Reveal In Explorer", "Editor")
+                .hidden()
+                .direct_when("Super+Shift+e", Some("files"))
+                .direct_when("Ctrl+Shift+e", Some("files")),
+            CommandDefinition::new("file_panel_next", "Next Panel Row", "Editor")
+                .hidden()
+                .direct_when("ArrowDown", Some("files.panel")),
+            CommandDefinition::new("file_panel_previous", "Previous Panel Row", "Editor")
+                .hidden()
+                .direct_when("ArrowUp", Some("files.panel")),
+            CommandDefinition::new("file_panel_choose", "Choose Panel Row", "Editor")
+                .hidden()
+                .direct_when("Enter", Some("files.panel"))
+                .direct_when("Tab", Some("files.panel")),
+            CommandDefinition::new("file_panel_dismiss", "Close Panel", "Editor")
+                .hidden()
+                .direct_when("Escape", Some("files.panel")),
+            CommandDefinition::new("file_find", "Find In File", "Editor")
+                .direct_when("Super+f", Some("files")),
+            CommandDefinition::new("file_find_in_files", "Find In Files", "Editor")
+                .direct_when("Super+Shift+f", Some("files"))
+                .direct_when("Ctrl+Shift+f", Some("files")),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        let key = match invocation.id.as_str() {
+            "file_toggle_explorer" => FileKey::ToggleExplorer,
+            "file_reveal_in_explorer" => FileKey::RevealInExplorer,
+            "file_panel_next" => FileKey::PanelNext,
+            "file_panel_previous" => FileKey::PanelPrevious,
+            "file_panel_choose" => FileKey::PanelChoose,
+            "file_panel_dismiss" => FileKey::PanelDismiss,
+            "file_find" => FileKey::Find { forward: true },
+            "file_find_in_files" => FileKey::FindInFiles,
+            _ => return None,
         };
-        commands.trigger(BinHostEmitEvent::from_event(
-            issue.caller,
-            &FileKey::from(key),
-        ));
+        Some(Self {
+            caller: invocation.caller,
+            key,
+        })
+    }
+}
+
+fn echo_key_command(mut requests: MessageReader<FileKeyRequest>, mut commands: Commands) {
+    for request in requests.read() {
+        commands.trigger(BinHostEmitEvent::from_event(request.caller, &request.key));
     }
 }
 
@@ -45,10 +98,16 @@ fn open_status_picker(
     if !views.contains(caller) {
         return;
     }
-    let Some(bar) = BrowserBarCommand::opening(trigger.event().payload.picker) else {
-        return;
+    let id = match trigger.event().payload.picker {
+        CommandBarPicker::GotoLine => "browser_open_goto_line",
+        CommandBarPicker::Indent => "browser_open_indentation",
+        CommandBarPicker::LineEnding => "browser_open_line_ending",
+        CommandBarPicker::Encoding => "browser_open_encoding",
+        CommandBarPicker::EncodingReopen => "browser_open_reopen_with_encoding",
+        CommandBarPicker::EncodingSave => "browser_open_save_with_encoding",
+        CommandBarPicker::Space => return,
     };
-    issuer.issue(caller, AppCommand::Browser(BrowserCommand::Bar(bar)));
+    issuer.issue_id(caller, id);
 }
 
 fn apply_status_picks(
@@ -133,7 +192,6 @@ fn apply_status_picks(
 mod tests {
     use super::*;
     use vmux_api::BinEvent;
-    use vmux_command::FileKeyCommand;
 
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, String)>);
@@ -157,17 +215,16 @@ mod tests {
             app.add_plugins(MinimalPlugins)
                 .add_plugins(KeyPlugin)
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-                .add_message::<CommandIssued>()
                 .add_message::<FileStatusPicked>()
                 .init_resource::<Echoed>()
                 .add_observer(Echoed::record);
             app
         }
 
-        fn issue(app: &mut App, caller: Entity, command: AppCommand) {
+        fn issue(app: &mut App, caller: Entity, key: FileKey) {
             app.world_mut()
-                .resource_mut::<bevy::ecs::message::Messages<CommandIssued>>()
-                .write(CommandIssued { caller, command });
+                .resource_mut::<bevy::ecs::message::Messages<FileKeyRequest>>()
+                .write(FileKeyRequest { caller, key });
             app.update();
         }
     }
@@ -178,11 +235,7 @@ mod tests {
         let pressed = app.world_mut().spawn_empty().id();
         let other = app.world_mut().spawn_empty().id();
 
-        Echo::issue(
-            &mut app,
-            pressed,
-            AppCommand::File(FileKeyCommand::PanelChoose),
-        );
+        Echo::issue(&mut app, pressed, FileKey::PanelChoose);
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
@@ -195,20 +248,6 @@ mod tests {
                 .iter()
                 .any(|(entity, _)| *entity == other)
         );
-    }
-
-    #[test]
-    fn a_command_that_is_not_a_file_key_is_left_alone() {
-        let mut app = Echo::app();
-        let caller = app.world_mut().spawn_empty().id();
-
-        Echo::issue(
-            &mut app,
-            caller,
-            AppCommand::Terminal(vmux_command::TerminalCommand::Clear),
-        );
-
-        assert!(app.world().resource::<Echoed>().0.is_empty());
     }
 
     #[derive(Resource, Default)]
@@ -232,7 +271,6 @@ mod tests {
             app.add_plugins(MinimalPlugins)
                 .add_plugins(KeyPlugin)
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-                .add_message::<CommandIssued>()
                 .add_message::<FileStatusPicked>()
                 .init_resource::<Reopened>()
                 .add_observer(Reopened::record);

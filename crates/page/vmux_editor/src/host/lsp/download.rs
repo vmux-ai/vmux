@@ -20,7 +20,16 @@ fn client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(600))
-        .redirect(reqwest::redirect::Policy::limited(5))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 5 {
+                return attempt.error("too many redirects");
+            }
+            if trusted_url(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.error("redirect URL must use HTTPS")
+            }
+        }))
         .user_agent(concat!("vmux/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|error| error.to_string())
@@ -28,8 +37,14 @@ fn client() -> Result<reqwest::blocking::Client, String> {
 
 fn checked_url(url: &str) -> Result<url::Url, String> {
     let url = url::Url::parse(url).map_err(|error| error.to_string())?;
+    trusted_url(&url)
+        .then_some(url)
+        .ok_or_else(|| "download URL must use HTTPS".to_string())
+}
+
+fn trusted_url(url: &url::Url) -> bool {
     if url.scheme() == "https" {
-        return Ok(url);
+        return true;
     }
     let loopback = url.host_str().is_some_and(|host| {
         host.eq_ignore_ascii_case("localhost")
@@ -37,10 +52,7 @@ fn checked_url(url: &str) -> Result<url::Url, String> {
                 .parse::<std::net::IpAddr>()
                 .is_ok_and(|address| address.is_loopback())
     });
-    if url.scheme() == "http" && loopback {
-        return Ok(url);
-    }
-    Err("download URL must use HTTPS".to_string())
+    url.scheme() == "http" && loopback
 }
 
 pub fn sha256_from_manifest(
@@ -270,5 +282,14 @@ mod tests {
         let body = format!("{hash}  {filename}\n").into_bytes().leak();
         let digest = sha256_from_manifest(&serve_once(body), filename, 1024).unwrap();
         assert_eq!(digest.as_str(), hash);
+    }
+
+    #[test]
+    fn download_urls_allow_https_and_loopback_http_only() {
+        assert!(checked_url("https://example.com/file").is_ok());
+        assert!(checked_url("http://127.0.0.1/file").is_ok());
+        assert!(checked_url("http://localhost/file").is_ok());
+        assert!(checked_url("http://example.com/file").is_err());
+        assert!(checked_url("file:///tmp/file").is_err());
     }
 }

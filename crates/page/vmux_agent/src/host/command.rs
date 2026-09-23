@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_command::{AppCommand, WriteAppCommands};
+use vmux_command::{CommandCatalog, WriteCommandRequests};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
@@ -39,14 +39,19 @@ impl Plugin for CommandPlugin {
                 CommandSet::Commands,
             )
                 .chain()
-                .in_set(WriteAppCommands)
+                .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet),
         )
         .add_systems(
             Update,
             (
                 forward_history_open_intent.in_set(CommandSet::History),
-                handle_agent_tool_calls.in_set(CommandSet::ToolCalls),
+                handle_agent_tool_calls
+                    .in_set(CommandSet::ToolCalls)
+                    .before(vmux_mcp::tools::ToolDispatchSet),
+                finish_agent_tool_calls
+                    .after(vmux_mcp::tools::ToolDispatchFlush)
+                    .before(CommandSet::Commands),
                 handle_agent_commands.in_set(CommandSet::Commands),
             ),
         )
@@ -147,39 +152,10 @@ pub(crate) fn preserve_current_focus_in_layout_snapshot(
     }
 }
 
-pub(crate) fn agent_may_dispatch_app_command(command: &AppCommand) -> bool {
-    use vmux_command::{
-        BrowserCommand, BrowserNavigationCommand, BrowserViewCommand, TerminalCommand,
-    };
-
-    match command {
-        AppCommand::Terminal(command) => match command {
-            TerminalCommand::Close | TerminalCommand::Clear | TerminalCommand::CopyMode => true,
-            TerminalCommand::Next | TerminalCommand::Previous => false,
-        },
-        AppCommand::Browser(BrowserCommand::Navigation(command)) => match command {
-            BrowserNavigationCommand::PrevPage
-            | BrowserNavigationCommand::NextPage
-            | BrowserNavigationCommand::Reload
-            | BrowserNavigationCommand::HardReload
-            | BrowserNavigationCommand::Stop => true,
-        },
-        AppCommand::Browser(BrowserCommand::View(command)) => match command {
-            BrowserViewCommand::ZoomIn
-            | BrowserViewCommand::ZoomOut
-            | BrowserViewCommand::ZoomReset
-            | BrowserViewCommand::DevTools
-            | BrowserViewCommand::ViewSource
-            | BrowserViewCommand::Print => true,
-        },
-        AppCommand::Layout(_)
-        | AppCommand::Browser(BrowserCommand::Open(_))
-        | AppCommand::Browser(BrowserCommand::Bar(_))
-        | AppCommand::Service(_)
-        | AppCommand::CommandBar(_)
-        | AppCommand::Chat(_)
-        | AppCommand::File(_) => false,
-    }
+#[derive(Component)]
+struct PendingAgentToolCall {
+    request_id: AgentRequestId,
+    sid: String,
 }
 
 fn command_arguments(input: &vmux_api::json::JsonValue) -> Result<serde_json::Value, String> {
@@ -205,7 +181,6 @@ pub(crate) struct AgentSpaceWriters<'w, 's> {
     bookmark_mutation: MessageWriter<'w, vmux_layout::bookmark::BookmarkMutation>,
     focus_pane: MessageWriter<'w, FocusPaneRequest>,
     rename_profile: MessageWriter<'w, RenameProfileRequest>,
-    issued: MessageWriter<'w, vmux_command::CommandIssued>,
     attention: MessageWriter<'w, vmux_core::notify::AgentAttention>,
     agents: Query<
         'w,
@@ -222,9 +197,9 @@ pub(crate) struct AgentSpaceWriters<'w, 's> {
 }
 
 fn handle_agent_tool_calls(
+    mut commands: Commands,
     mut reader: MessageReader<AgentToolCallRequest>,
-    mut command_writer: MessageWriter<AgentCommandRequest>,
-    mut query_writer: MessageWriter<AgentQueryRequest>,
+    tools: vmux_mcp::tools::ToolCatalog,
     service: Option<Res<ServiceClient>>,
 ) {
     for req in reader.read() {
@@ -241,22 +216,21 @@ fn handle_agent_tool_calls(
                 continue;
             }
         };
-        match vmux_mcp::tools::dispatch_from_tool_call(&req.name, args) {
-            Ok(vmux_mcp::tools::DispatchTarget::Command(command)) => {
-                command_writer.write(AgentCommandRequest {
-                    request_id: req.request_id,
-                    origin: CommandOrigin::Agent {
-                        sid: Some(req.sid.clone()),
-                        anchor: None,
+        match tools.call(
+            &req.name,
+            args,
+            None,
+            "",
+            vmux_mcp::tools::ToolCallPolicy::agent(),
+        ) {
+            Ok(call) => {
+                commands.spawn((
+                    call,
+                    PendingAgentToolCall {
+                        request_id: req.request_id,
+                        sid: req.sid.clone(),
                     },
-                    command,
-                });
-            }
-            Ok(vmux_mcp::tools::DispatchTarget::Query(query)) => {
-                query_writer.write(AgentQueryRequest {
-                    request_id: req.request_id,
-                    query,
-                });
+                ));
             }
             Err(message) => {
                 if let Some(service) = service.as_ref() {
@@ -268,6 +242,52 @@ fn handle_agent_tool_calls(
                 }
             }
         }
+    }
+}
+
+fn finish_agent_tool_calls(
+    mut commands: Commands,
+    calls: Query<
+        (
+            Entity,
+            &PendingAgentToolCall,
+            &vmux_mcp::tools::ToolDispatchResult,
+        ),
+        Added<vmux_mcp::tools::ToolDispatchResult>,
+    >,
+    mut command_writer: MessageWriter<AgentCommandRequest>,
+    mut query_writer: MessageWriter<AgentQueryRequest>,
+    service: Option<Res<ServiceClient>>,
+) {
+    for (entity, pending, result) in &calls {
+        match result.result() {
+            Ok(vmux_mcp::tools::DispatchTarget::Command(command)) => {
+                command_writer.write(AgentCommandRequest {
+                    request_id: pending.request_id,
+                    origin: CommandOrigin::Agent {
+                        sid: Some(pending.sid.clone()),
+                        anchor: None,
+                    },
+                    command,
+                });
+            }
+            Ok(vmux_mcp::tools::DispatchTarget::Query(query)) => {
+                query_writer.write(AgentQueryRequest {
+                    request_id: pending.request_id,
+                    query,
+                });
+            }
+            Err(message) => {
+                if let Some(service) = service.as_ref() {
+                    service.0.send(ClientMessage::AgentToolResult {
+                        request_id: pending.request_id,
+                        content: message,
+                        is_error: true,
+                    });
+                }
+            }
+        }
+        commands.entity(entity).despawn();
     }
 }
 
@@ -299,7 +319,7 @@ pub(crate) fn remote_agents(
 
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    mut app_commands: MessageWriter<AppCommand>,
+    mut command_catalog: CommandCatalog,
     mut browser_nav_writer: MessageWriter<vmux_layout::BrowserNavigateRequest>,
     mut browser_go_back_writer: MessageWriter<vmux_layout::BrowserGoBackRequest>,
     mut browser_go_forward_writer: MessageWriter<vmux_layout::BrowserGoForwardRequest>,
@@ -348,7 +368,7 @@ fn handle_agent_commands(
             ServiceAgentCommand::FileTouched { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::FileSearch { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::TurnEnded { .. } => AgentCommandResult::Ok,
-            ServiceAgentCommand::AppCommand { id, args } => {
+            ServiceAgentCommand::InvokeCommand { id, args } => {
                 let args = match command_arguments(args) {
                     Ok(args) => args,
                     Err(message) => {
@@ -361,47 +381,15 @@ fn handle_agent_commands(
                         continue;
                     }
                 };
-                match AppCommand::from_mcp_call(id, args) {
-                    Some(Ok(command)) => {
-                        if origin_is_agent(&request.origin)
-                            && !agent_may_dispatch_app_command(&command)
-                        {
-                            AgentCommandResult::Error(
-                                "focus-changing app command is disabled for agents".to_string(),
-                            )
-                        } else {
-                            if let Some(caller) = caller {
-                                writers.issued.write(vmux_command::CommandIssued {
-                                    caller,
-                                    command: command.clone(),
-                                });
-                            }
-                            app_commands.write(command);
-                            AgentCommandResult::Ok
-                        }
-                    }
-                    Some(Err(message)) => AgentCommandResult::Error(message),
-                    None => match AppCommand::from_mcp_id(id) {
-                        Some(command) => {
-                            if origin_is_agent(&request.origin)
-                                && !agent_may_dispatch_app_command(&command)
-                            {
-                                AgentCommandResult::Error(
-                                    "focus-changing app command is disabled for agents".to_string(),
-                                )
-                            } else {
-                                if let Some(caller) = caller {
-                                    writers.issued.write(vmux_command::CommandIssued {
-                                        caller,
-                                        command: command.clone(),
-                                    });
-                                }
-                                app_commands.write(command);
-                                AgentCommandResult::Ok
-                            }
-                        }
-                        None => AgentCommandResult::Error(format!("unknown app command: {id}")),
-                    },
+                let caller = caller.unwrap_or(Entity::PLACEHOLDER);
+                let result = if origin_is_agent(&request.origin) {
+                    command_catalog.invoke_agent(caller, id, args)
+                } else {
+                    command_catalog.invoke(caller, id, args)
+                };
+                match result {
+                    Ok(()) => AgentCommandResult::Ok,
+                    Err(message) => AgentCommandResult::Error(message),
                 }
             }
             ServiceAgentCommand::NewTerminalTab {
@@ -747,6 +735,56 @@ mod tests {
     use vmux_service::protocol::ProcessId;
     use vmux_terminal::Terminal;
 
+    #[derive(Resource, Default)]
+    struct CapturedAgentCommands(Vec<ServiceAgentCommand>);
+
+    impl CapturedAgentCommands {
+        fn read(mut requests: MessageReader<AgentCommandRequest>, mut captured: ResMut<Self>) {
+            for request in requests.read() {
+                captured.0.push(request.command.clone());
+            }
+        }
+    }
+
+    #[test]
+    fn agent_tools_dispatch_through_the_owning_world() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_mcp::tools::ToolsPlugin))
+            .add_message::<AgentToolCallRequest>()
+            .add_message::<AgentCommandRequest>()
+            .add_message::<AgentQueryRequest>()
+            .init_resource::<CapturedAgentCommands>()
+            .add_systems(
+                Update,
+                (
+                    handle_agent_tool_calls.before(vmux_mcp::tools::ToolDispatchSet),
+                    finish_agent_tool_calls
+                        .after(vmux_mcp::tools::ToolDispatchFlush)
+                        .before(CapturedAgentCommands::read),
+                    CapturedAgentCommands::read,
+                ),
+            );
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentToolCallRequest>>()
+            .write(AgentToolCallRequest {
+                request_id: AgentRequestId::new(),
+                sid: "agent".to_string(),
+                name: "notify".to_string(),
+                args: vmux_api::json::JsonValue::from(serde_json::json!({"body": "done"})),
+            });
+        app.update();
+
+        assert!(matches!(
+            app.world().resource::<CapturedAgentCommands>().0.as_slice(),
+            [ServiceAgentCommand::Notify {
+                title: None,
+                body: Some(body),
+            }] if body == "done"
+        ));
+    }
+
     #[test]
     pub(crate) fn update_settings_via_apply_mutates_resource_and_returns_ron() {
         let mut settings = test_settings();
@@ -938,22 +976,6 @@ mod tests {
         assert_eq!(snapshot.focused.stack.as_deref(), Some("stack:3"));
         assert!(!snapshot.tabs[0].is_active);
         assert!(snapshot.tabs[1].is_active);
-    }
-
-    #[test]
-    pub(crate) fn agent_app_command_filter_blocks_focus_changers() {
-        assert!(!agent_may_dispatch_app_command(&AppCommand::Browser(
-            vmux_command::BrowserCommand::Open(vmux_command::OpenCommand::InNewStack { url: None }),
-        )));
-        assert!(!agent_may_dispatch_app_command(&AppCommand::Browser(
-            vmux_command::BrowserCommand::Bar(vmux_command::BrowserBarCommand::OpenCommandBar),
-        )));
-        assert!(!agent_may_dispatch_app_command(&AppCommand::Terminal(
-            vmux_command::TerminalCommand::Next,
-        )));
-        assert!(agent_may_dispatch_app_command(&AppCommand::Terminal(
-            vmux_command::TerminalCommand::Clear,
-        )));
     }
 
     #[test]

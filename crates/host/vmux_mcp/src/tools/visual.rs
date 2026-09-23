@@ -54,33 +54,38 @@ fn register(mut tools: ToolSpawner) {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ScreenshotArgs {
     pane: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SimulatorTapArgs {
     x: u32,
     y: u32,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SimulatorSwipeArgs {
     start_x: u32,
     start_y: u32,
     end_x: u32,
     end_y: u32,
-    duration_ms: Option<u64>,
+    duration_ms: Option<u32>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SimulatorTypeArgs {
-    text: Option<String>,
+    text: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SimulatorKeyArgs {
-    keycode: u32,
+    keycode: u8,
 }
 
 #[derive(Deserialize)]
@@ -102,11 +107,13 @@ impl From<SimulatorButtonArg> for SimulatorButton {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SimulatorButtonArgs {
     button: SimulatorButtonArg,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct BrowserSnapshotArgs {
     target: Option<String>,
 }
@@ -128,21 +135,37 @@ impl ScrollTarget {
 }
 
 #[derive(Deserialize)]
-struct BrowserScrollArgs {
-    to: Option<ScrollTarget>,
-    delta: Option<i64>,
+#[serde(deny_unknown_fields)]
+struct BrowserScrollPositionArgs {
+    to: ScrollTarget,
     target: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserScrollDeltaArgs {
+    delta: i32,
+    target: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BrowserScrollArgs {
+    Position(BrowserScrollPositionArgs),
+    Delta(BrowserScrollDeltaArgs),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RecordStartArgs {
     #[serde(default)]
     gif: bool,
-    max_secs: Option<u64>,
+    max_secs: Option<u32>,
     pane: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RecordStopArgs {
     dir: Option<String>,
     name: Option<String>,
@@ -200,7 +223,7 @@ fn simulator_swipe(mut commands: Commands, calls: ToolCalls<VisualTool>) {
                 start_y: args.start_y,
                 end_x: args.end_x,
                 end_y: args.end_y,
-                duration_ms: duration_ms as u32,
+                duration_ms,
             },
         }))
     }
@@ -213,9 +236,8 @@ fn simulator_swipe(mut commands: Commands, calls: ToolCalls<VisualTool>) {
 fn simulator_type(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: SimulatorTypeArgs = call.parse("simulator_type")?;
-        let text = args
-            .text
-            .filter(|text| !text.is_empty())
+        let text = (!args.text.is_empty())
+            .then_some(args.text)
             .ok_or("simulator_type.text is empty")?;
         Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
             action: SimulatorAction::TypeText(text),
@@ -230,10 +252,8 @@ fn simulator_type(mut commands: Commands, calls: ToolCalls<VisualTool>) {
 fn simulator_key(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let args: SimulatorKeyArgs = call.parse("simulator_key")?;
-        let keycode = u8::try_from(args.keycode)
-            .map_err(|_| "simulator_key.keycode must be between 0 and 255".to_string())?;
         Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
-            action: SimulatorAction::Key(keycode),
+            action: SimulatorAction::Key(args.keycode),
         }))
     }
 
@@ -278,25 +298,13 @@ fn browser_snapshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
 
 fn browser_scroll(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        if call
-            .arguments
-            .get("delta")
-            .is_some_and(|value| !value.is_null() && value.as_i64().is_none())
-        {
-            return Err("browser_scroll.delta must be an integer".to_string());
-        }
         let args: BrowserScrollArgs = call.parse("browser_scroll")?;
-        let delta = args
-            .delta
-            .map(i32::try_from)
-            .transpose()
-            .map_err(|_| "browser_scroll.delta is out of range".to_string())?;
-        let to = args.to.map(ScrollTarget::into_string);
-        if to.is_some() == delta.is_some() {
-            return Err("browser_scroll requires exactly one of `to` or `delta`".to_string());
-        }
+        let (to, delta, target) = match args {
+            BrowserScrollArgs::Position(args) => (Some(args.to.into_string()), None, args.target),
+            BrowserScrollArgs::Delta(args) => (None, Some(args.delta), args.target),
+        };
         Ok(DispatchTarget::Query(AgentQuery::BrowserScroll {
-            pane: OptionalText::trim(args.target),
+            pane: OptionalText::trim(target),
             to,
             delta,
             anchor: call.anchor,
@@ -313,7 +321,7 @@ fn record_start(mut commands: Commands, calls: ToolCalls<VisualTool>) {
         let args: RecordStartArgs = call.parse("record_start")?;
         Ok(DispatchTarget::Query(AgentQuery::RecordStart {
             gif: args.gif,
-            max_secs: args.max_secs.unwrap_or(600) as u32,
+            max_secs: args.max_secs.unwrap_or(600),
             pane: OptionalText::trim(args.pane),
         }))
     }

@@ -9,7 +9,7 @@ impl Plugin for WakePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            keep_awake_while_command_bar_opening.after(crate::ReadAppCommands),
+            keep_awake_while_command_bar_opening.after(crate::ReadCommandRequests),
         );
     }
 }

@@ -255,6 +255,28 @@ mod tests {
     }
 
     #[test]
+    fn agent_command_catalog_rkyv_round_trip() {
+        let query = AgentQuery::ListCommands;
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&query).unwrap();
+        let recovered: AgentQuery =
+            rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(recovered, query);
+
+        let result = AgentQueryResult::Commands(vec![AgentCommandTool {
+            name: "terminal_clear".to_string(),
+            description: "Clear Terminal".to_string(),
+            input_schema: JsonValue::Object(vec![(
+                "type".to_string(),
+                JsonValue::String("object".to_string()),
+            )]),
+        }]);
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&result).unwrap();
+        let recovered: AgentQueryResult =
+            rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(recovered, result);
+    }
+
+    #[test]
     fn agent_query_screenshot_rkyv_round_trip() {
         let q = AgentQuery::Screenshot {
             pane: Some("pane:42".into()),
@@ -656,7 +678,10 @@ mod tests {
 
     #[test]
     fn settings_query_result_rkyv_roundtrip() {
-        let r = AgentQueryResult::Settings("{\"auto_update\":true}".to_string());
+        let r = AgentQueryResult::Settings(JsonValue::Object(vec![(
+            "auto_update".to_string(),
+            JsonValue::Bool(true),
+        )]));
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&r).unwrap();
         let decoded = rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, r);

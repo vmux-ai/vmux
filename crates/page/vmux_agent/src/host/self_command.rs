@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use bevy::prelude::*;
-use vmux_command::WriteAppCommands;
+use vmux_command::WriteCommandRequests;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, ClientMessage, ProcessId};
@@ -41,7 +41,7 @@ impl Plugin for SelfCommandPlugin {
             Update,
             handle_agent_self_commands
                 .in_set(SelfCommandSet)
-                .in_set(WriteAppCommands)
+                .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
                 .after(vmux_layout::worktree::TabDirectoryRebindSet)
                 .before(vmux_terminal::plugin::respond_terminal_stack_spawn),

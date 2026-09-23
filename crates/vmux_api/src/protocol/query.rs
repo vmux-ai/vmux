@@ -1,5 +1,116 @@
 use super::SimulatorAction;
-use crate::ProcessId;
+use crate::{ProcessId, json::JsonValue};
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AgentSpace {
+    pub id: String,
+    pub name: String,
+    pub profile: String,
+    pub is_active: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AgentBookmark {
+    pub uuid: String,
+    pub url: String,
+    pub title: String,
+    pub favicon_url: String,
+}
+
+impl AgentBookmark {
+    pub fn new(
+        uuid: impl Into<String>,
+        url: impl Into<String>,
+        title: impl Into<String>,
+        favicon_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            uuid: uuid.into(),
+            url: url.into(),
+            title: title.into(),
+            favicon_url: favicon_url.into(),
+        }
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentBookmarkNode {
+    Entry {
+        #[serde(flatten)]
+        bookmark: AgentBookmark,
+    },
+    Folder {
+        uuid: String,
+        name: String,
+        collapsed: bool,
+        children: Vec<AgentBookmark>,
+    },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AgentBookmarks {
+    pub pins: Vec<AgentBookmark>,
+    pub roots: Vec<AgentBookmarkNode>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AgentCommandTool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: JsonValue,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQuery {
@@ -51,6 +162,7 @@ pub enum AgentQuery {
         anchor: ProcessId,
     },
     VaultStatus,
+    ListCommands,
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -58,8 +170,8 @@ pub enum AgentQueryResult {
     Layout(crate::protocol::layout::LayoutSnapshot),
     VaultStatus(crate::vault::VaultStatusSnapshot),
     Text(String),
-    Settings(String),
-    Spaces(String),
+    Settings(JsonValue),
+    Spaces(Vec<AgentSpace>),
     CommandExit {
         seq: u64,
         exit: Option<i32>,
@@ -82,4 +194,6 @@ pub enum AgentQueryResult {
         auto_stopped: bool,
     },
     Error(String),
+    Bookmarks(AgentBookmarks),
+    Commands(Vec<AgentCommandTool>),
 }

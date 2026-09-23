@@ -27,7 +27,7 @@ impl Plugin for RecordingPlugin {
                     drain_recordings,
                 )
                     .chain()
-                    .after(vmux_command::WriteAppCommands),
+                    .after(vmux_command::WriteCommandRequests),
             );
     }
 }

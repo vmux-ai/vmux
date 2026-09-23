@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::WriteAppCommands;
+use vmux_command::WriteCommandRequests;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{
-    AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage,
+    AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentCommandResult, AgentQuery,
+    AgentQueryResult, AgentRequestId, AgentSpace, ClientMessage, JsonValue,
 };
 use vmux_setting::AppSettings;
 use vmux_terminal::ServiceMessageSet;
@@ -30,7 +31,7 @@ impl Plugin for QueryPlugin {
             Update,
             handle_agent_queries
                 .in_set(QuerySet)
-                .in_set(WriteAppCommands)
+                .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
                 .after(super::workspace::send_pending_agent_continuations),
         )
@@ -70,8 +71,8 @@ pub(super) struct ListedSpaces<'w, 's> {
 }
 
 impl ListedSpaces<'_, '_> {
-    fn json(&self) -> String {
-        let mut rows: Vec<(u32, String, serde_json::Value)> = Vec::new();
+    fn rows(&self) -> Vec<AgentSpace> {
+        let mut rows: Vec<(u32, AgentSpace)> = Vec::new();
         for (entity, id, name, is_active, order) in &self.spaces {
             let local = self
                 .focused_window
@@ -82,30 +83,45 @@ impl ListedSpaces<'_, '_> {
                         == Some(focused)
                 });
             let order = order.map(|order| order.0).unwrap_or(u32::MAX);
-            if let Some((existing_order, _, row)) = rows
-                .iter_mut()
-                .find(|(_, existing_id, _)| existing_id == &id.0)
+            if let Some((existing_order, row)) =
+                rows.iter_mut().find(|(_, existing)| existing.id == id.0)
             {
                 *existing_order = (*existing_order).min(order);
                 if local {
-                    row["is_active"] = serde_json::json!(is_active);
+                    row.is_active = is_active;
                 }
                 continue;
             }
             rows.push((
                 order,
-                id.0.clone(),
-                serde_json::json!({
-                    "id": id.0,
-                    "name": name.to_string(),
-                    "profile": vmux_space::model::bootstrap_profile_name(),
-                    "is_active": local && is_active,
-                }),
+                AgentSpace {
+                    id: id.0.clone(),
+                    name: name.to_string(),
+                    profile: vmux_space::model::bootstrap_profile_name(),
+                    is_active: local && is_active,
+                },
             ));
         }
-        rows.sort_by_key(|(order, _, _)| *order);
-        let rows: Vec<serde_json::Value> = rows.into_iter().map(|(_, _, row)| row).collect();
-        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())
+        rows.sort_by_key(|(order, _)| *order);
+        rows.into_iter().map(|(_, row)| row).collect()
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct AgentCatalogs<'w, 's> {
+    spaces: ListedSpaces<'w, 's>,
+    commands: Query<'w, 's, &'static vmux_command::CommandDefinition>,
+}
+
+impl AgentCatalogs<'_, '_> {
+    fn command_tools(&self) -> Vec<vmux_service::protocol::AgentCommandTool> {
+        let mut tools = self
+            .commands
+            .iter()
+            .filter_map(vmux_command::CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        tools
     }
 }
 
@@ -113,7 +129,7 @@ fn handle_agent_queries(
     mut reader: MessageReader<AgentQueryRequest>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
-    listed_spaces: ListedSpaces,
+    catalogs: AgentCatalogs,
     bm_pins: Query<
         (
             &vmux_core::Uuid,
@@ -187,7 +203,12 @@ fn handle_agent_queries(
                 });
             }
             AgentQuery::GetSettings => {
-                let result = AgentQueryResult::Settings(settings.to_json());
+                let result = match serde_json::to_value(&*settings) {
+                    Ok(settings) => AgentQueryResult::Settings(JsonValue::from(settings)),
+                    Err(error) => {
+                        AgentQueryResult::Error(format!("failed to serialize settings: {error}"))
+                    }
+                };
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,
                     result,
@@ -196,7 +217,13 @@ fn handle_agent_queries(
             AgentQuery::ListSpaces => {
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,
-                    result: AgentQueryResult::Spaces(listed_spaces.json()),
+                    result: AgentQueryResult::Spaces(catalogs.spaces.rows()),
+                });
+            }
+            AgentQuery::ListCommands => {
+                service.0.send(ClientMessage::AgentQueryResponse {
+                    request_id: request.request_id,
+                    result: AgentQueryResult::Commands(catalogs.command_tools()),
                 });
             }
             AgentQuery::VaultStatus => {
@@ -208,55 +235,71 @@ fn handle_agent_queries(
                 });
             }
             AgentQuery::BookmarkList => {
-                let row = |u: &vmux_core::Uuid, m: &vmux_core::PageMetadata| {
-                    serde_json::json!({
-                        "uuid": u.0,
-                        "url": m.url,
-                        "title": m.title,
-                        "favicon_url": m.icon.favicon_url(),
+                let mut pin_rows: Vec<(u32, AgentBookmark)> = bm_pins
+                    .iter()
+                    .map(|(uuid, metadata, order)| {
+                        (
+                            order.0,
+                            AgentBookmark::new(
+                                uuid.0.clone(),
+                                metadata.url.clone(),
+                                metadata.title.clone(),
+                                metadata.icon.favicon_url(),
+                            ),
+                        )
                     })
-                };
-                let mut pin_rows: Vec<(u32, serde_json::Value)> =
-                    bm_pins.iter().map(|(u, m, o)| (o.0, row(u, m))).collect();
+                    .collect();
                 pin_rows.sort_by_key(|(order, _)| *order);
-                let pins: Vec<serde_json::Value> = pin_rows.into_iter().map(|(_, v)| v).collect();
-                let mut roots: Vec<(u32, serde_json::Value)> = Vec::new();
+                let pins = pin_rows.into_iter().map(|(_, bookmark)| bookmark).collect();
+                let mut roots: Vec<(u32, AgentBookmarkNode)> = Vec::new();
                 for (uuid, name, children, collapsed, order) in bm_folders.iter() {
-                    let mut kids: Vec<(u32, serde_json::Value)> = Vec::new();
+                    let mut kids: Vec<(u32, AgentBookmark)> = Vec::new();
                     if let Some(children) = children {
                         for child in children.iter() {
-                            if let Ok((u, m, order)) = bm_children.get(child) {
-                                kids.push((order.0, row(u, m)));
+                            if let Ok((child_uuid, metadata, child_order)) = bm_children.get(child)
+                            {
+                                kids.push((
+                                    child_order.0,
+                                    AgentBookmark::new(
+                                        child_uuid.0.clone(),
+                                        metadata.url.clone(),
+                                        metadata.title.clone(),
+                                        metadata.icon.favicon_url(),
+                                    ),
+                                ));
                             }
                         }
                     }
                     kids.sort_by_key(|(order, _)| *order);
-                    let kids: Vec<serde_json::Value> =
-                        kids.into_iter().map(|(_, row)| row).collect();
+                    let children = kids.into_iter().map(|(_, bookmark)| bookmark).collect();
                     roots.push((
                         order.0,
-                        serde_json::json!({
-                            "kind": "folder",
-                            "uuid": uuid.0,
-                            "name": name.as_str(),
-                            "collapsed": collapsed,
-                            "children": kids,
-                        }),
+                        AgentBookmarkNode::Folder {
+                            uuid: uuid.0.clone(),
+                            name: name.to_string(),
+                            collapsed,
+                            children,
+                        },
                     ));
                 }
                 for (uuid, meta, order) in bm_top.iter() {
-                    let mut entry = row(uuid, meta);
-                    entry["kind"] = serde_json::json!("entry");
-                    roots.push((order.0, entry));
+                    roots.push((
+                        order.0,
+                        AgentBookmarkNode::Entry {
+                            bookmark: AgentBookmark::new(
+                                uuid.0.clone(),
+                                meta.url.clone(),
+                                meta.title.clone(),
+                                meta.icon.favicon_url(),
+                            ),
+                        },
+                    ));
                 }
                 roots.sort_by_key(|(order, _)| *order);
-                let roots: Vec<serde_json::Value> = roots.into_iter().map(|(_, v)| v).collect();
-                let json =
-                    serde_json::to_string(&serde_json::json!({"pins": pins, "roots": roots}))
-                        .unwrap_or_else(|_| "{}".to_string());
+                let roots = roots.into_iter().map(|(_, node)| node).collect();
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,
-                    result: AgentQueryResult::Spaces(json),
+                    result: AgentQueryResult::Bookmarks(AgentBookmarks { pins, roots }),
                 });
             }
             AgentQuery::Screenshot { ref pane } => {
@@ -533,21 +576,20 @@ mod tests {
             ChildOf(second_root),
         ));
 
-        let json = app
+        let rows = app
             .world_mut()
-            .run_system_once(|spaces: ListedSpaces| spaces.json())
+            .run_system_once(|spaces: ListedSpaces| spaces.rows())
             .unwrap();
-        let rows: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
 
         assert_eq!(rows.len(), 2);
-        assert_eq!(
-            rows.iter().find(|row| row["id"] == "shared").unwrap()["is_active"],
-            false
+        assert!(
+            !rows
+                .iter()
+                .find(|row| row.id == "shared")
+                .unwrap()
+                .is_active
         );
-        assert_eq!(
-            rows.iter().find(|row| row["id"] == "local").unwrap()["is_active"],
-            true
-        );
+        assert!(rows.iter().find(|row| row.id == "local").unwrap().is_active);
     }
 
     #[test]

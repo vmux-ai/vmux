@@ -1,0 +1,7 @@
+[
+    (
+        kind: list_spaces,
+        description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with rename_space / delete_space.",
+        input_schema: (type: Object),
+    ),
+]

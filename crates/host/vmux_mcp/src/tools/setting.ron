@@ -1,0 +1,7 @@
+[
+    (
+        kind: get_settings,
+        description: "Return the full vmux settings as a JSON snapshot.",
+        input_schema: (type: Object),
+    ),
+]

@@ -19,14 +19,14 @@ impl Plugin for SnapshotPlugin {
         app.init_resource::<PendingNavSnapshots>()
             .add_systems(
                 Update,
-                drive_pending_nav_snapshots.after(vmux_command::WriteAppCommands),
+                drive_pending_nav_snapshots.after(vmux_command::WriteCommandRequests),
             )
             .add_systems(
                 Update,
                 (start_snapshots, shape_snapshot_results)
                     .chain()
                     .after(crate::scroll::run_scrolls)
-                    .after(vmux_command::WriteAppCommands),
+                    .after(vmux_command::WriteCommandRequests),
             );
     }
 }

@@ -16,6 +16,7 @@ pub struct SpacePlugin;
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
+        OpenRequest::register(app);
         app.add_plugins(vmux_layout::LayoutContractPlugin)
             .init_resource::<ActiveSpace>()
             .init_resource::<vmux_layout::space::ActiveSpaceEntity>()
@@ -31,7 +32,7 @@ impl Plugin for SpacePlugin {
                 Update,
                 update_effective_startup_dir
                     .in_set(vmux_layout::settings::EffectiveStartupDirSet)
-                    .before(vmux_command::ReadAppCommands),
+                    .before(vmux_command::ReadCommandRequests),
             )
             .add_systems(Update, sync_space_name_to_id)
             .add_systems(
@@ -50,7 +51,7 @@ impl Plugin for SpacePlugin {
             .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
             .add_systems(
                 Update,
-                respond_spaces_spawn.in_set(vmux_command::ReadAppCommands),
+                respond_spaces_spawn.in_set(vmux_command::ReadCommandRequests),
             )
             .add_plugins((
                 HostedPagePlugin::<Spaces>::default(),
@@ -68,7 +69,7 @@ impl Plugin for SpacePlugin {
             .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(
                 Update,
-                handle_open_in_new_space.in_set(vmux_command::ReadAppCommands),
+                handle_open_in_new_space.in_set(vmux_command::ReadCommandRequests),
             )
             .add_systems(Update, broadcast_spaces_to_views);
     }
@@ -77,6 +78,43 @@ impl Plugin for SpacePlugin {
 #[derive(Message, Clone)]
 pub struct SaveSpaceRequest {
     pub path: PathBuf,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct OpenRequest {
+    pub url: Option<String>,
+}
+
+impl OpenRequest {
+    pub fn register(app: &mut App) {
+        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vec![
+            vmux_command::CommandDefinition::new(
+                "open_in_new_space",
+                "Open in New Space",
+                "Browser > Open",
+            )
+            .accelerator("super+shift+n")
+            .mcp(vmux_command::CommandMcp::new(
+                "Open a page in a brand-new Space (top-level profile). Spaces are the highest-level container and each carries its own profile (cookies, identity, theme). Use only when the user explicitly asks for a new profile, a separate identity, or a top-level workspace switch.",
+                vmux_command::InputSchema::object().optional(
+                    "url",
+                    vmux_command::InputSchema::string().description(
+                        "Absolute URL to open in the new Space. If omitted, opens the startup URL.",
+                    ),
+                ),
+            )),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
+        (invocation.id == "open_in_new_space").then(|| Self {
+            url: invocation.argument("url"),
+        })
+    }
 }
 
 fn update_effective_startup_url(
@@ -751,7 +789,7 @@ fn on_space_request(
 
 #[allow(clippy::too_many_arguments)]
 fn handle_open_in_new_space(
-    mut reader: MessageReader<vmux_command::AppCommand>,
+    mut reader: MessageReader<OpenRequest>,
     spaces: SpaceQuery,
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     child_of: Query<&ChildOf>,
@@ -763,13 +801,7 @@ fn handle_open_in_new_space(
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
-    for cmd in reader.read() {
-        let vmux_command::AppCommand::Browser(vmux_command::BrowserCommand::Open(
-            vmux_command::open::OpenCommand::InNewSpace { url },
-        )) = cmd
-        else {
-            continue;
-        };
+    for request in reader.read() {
         let Some(window) = focused_window.0 else {
             continue;
         };
@@ -811,7 +843,8 @@ fn handle_open_in_new_space(
         let startup_dir = settings
             .as_deref()
             .and_then(|settings| settings.startup_dir(&id));
-        let content = url
+        let content = request
+            .url
             .as_deref()
             .filter(|url| !url.is_empty())
             .map(|url| TabLayoutSpawnContent::Url {
@@ -863,6 +896,26 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
+
+    #[test]
+    fn space_mcp_definition_dispatches_to_the_typed_request() {
+        let definitions = OpenRequest::definitions();
+        let tools = definitions
+            .iter()
+            .filter_map(vmux_command::CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["open_in_new_space"],
+        );
+        let invocation =
+            vmux_command::CommandInvocation::new(Entity::PLACEHOLDER, "open_in_new_space")
+                .with_arguments(serde_json::json!({"url": "https://vmux.ai"}));
+        assert!(OpenRequest::from_invocation(&invocation).is_some());
+    }
 
     fn test_settings() -> AppSettings {
         AppSettings {

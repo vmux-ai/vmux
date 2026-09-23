@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use vmux_command::WriteAppCommands;
+use vmux_command::WriteCommandRequests;
 use vmux_core::agent::AgentKind;
 use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch};
 use vmux_layout::pane::Pane;
@@ -26,7 +26,7 @@ impl Plugin for FollowPlugin {
                 handle_agent_file_search,
             )
                 .chain()
-                .in_set(WriteAppCommands)
+                .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
                 .after(super::command::CommandSet::Commands),
         );

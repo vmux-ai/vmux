@@ -7,7 +7,7 @@ use vmux_core::event::{FileEncoding, FileEncodingAction, FileEncodingEvent, File
 use crate::edit::EditCommand;
 use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
-use crate::host::file_lifecycle::{FileBuffer, ForcedEncoding};
+use crate::host::file_lifecycle::{FileBuffer, FileLoadTask, ForcedEncoding};
 use crate::host::status::FileInitialMetaSent;
 
 pub(super) struct EncodingPlugin;
@@ -42,6 +42,7 @@ fn on_file_encoding_set(
             .remove::<Editor>()
             .remove::<vmux_git::GitDiffSource>()
             .remove::<FileBuffer>()
+            .remove::<FileLoadTask>()
             .remove::<FileInitialMetaSent>()
             .remove::<crate::lsp::manager::LintRan>();
         manager.change(&view.path);

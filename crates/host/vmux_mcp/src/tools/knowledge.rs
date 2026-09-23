@@ -52,33 +52,38 @@ enum VaultProvider {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct OpenVaultArgs {
     provider: Option<VaultProvider>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SetConversationTitleArgs {
-    title: Option<String>,
+    title: String,
 }
 
 #[derive(Deserialize)]
-struct SearchArgs {
-    query: Option<String>,
+#[serde(deny_unknown_fields)]
+struct SearchKnowledgeArgs {
+    query: String,
     limit: Option<u64>,
 }
 
 #[derive(Deserialize)]
-struct ReadArgs {
-    path: Option<String>,
+#[serde(deny_unknown_fields)]
+struct ReadKnowledgeArgs {
+    path: String,
     line: Option<u64>,
     limit: Option<u64>,
 }
 
 #[derive(Deserialize)]
-struct WriteArgs {
+#[serde(deny_unknown_fields)]
+struct WriteKnowledgeArgs {
     path: Option<String>,
-    title: Option<String>,
-    content: Option<String>,
+    title: String,
+    content: String,
 }
 
 fn vault_status(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
@@ -138,7 +143,7 @@ fn set_conversation_title(mut commands: Commands, calls: ToolCalls<KnowledgeTool
 fn search(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("search_knowledge")?;
-        let args: SearchArgs = call.parse("search_knowledge")?;
+        let args: SearchKnowledgeArgs = call.parse("search_knowledge")?;
         let query = Text::required(args.query, "search_knowledge.query is empty")?;
         let limit = args.limit.unwrap_or(20);
         if !(1..=100).contains(&limit) {
@@ -159,7 +164,7 @@ fn search(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
 fn read(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("read_knowledge")?;
-        let args: ReadArgs = call.parse("read_knowledge")?;
+        let args: ReadKnowledgeArgs = call.parse("read_knowledge")?;
         let path = Text::required(args.path, "read_knowledge.path is empty")?;
         let line = args.line.unwrap_or(1);
         let limit = args.limit.unwrap_or(200);
@@ -185,7 +190,7 @@ fn read(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
 fn write(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
         let anchor = call.require_anchor("write_knowledge")?;
-        let args: WriteArgs = call.parse("write_knowledge")?;
+        let args: WriteKnowledgeArgs = call.parse("write_knowledge")?;
         let path = args.path.and_then(Text::trimmed);
         let title = Text::required(args.title, "write_knowledge.title is empty")?;
         let content = Text::required(args.content, "write_knowledge.content is empty")?;
@@ -210,9 +215,7 @@ impl Text {
         (!value.is_empty()).then(|| value.to_string())
     }
 
-    fn required(value: Option<String>, error: &str) -> Result<String, String> {
-        value
-            .and_then(Self::trimmed)
-            .ok_or_else(|| error.to_string())
+    fn required(value: String, error: &str) -> Result<String, String> {
+        Self::trimmed(value).ok_or_else(|| error.to_string())
     }
 }

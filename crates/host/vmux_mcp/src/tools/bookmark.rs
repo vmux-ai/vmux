@@ -37,29 +37,51 @@ fn register(mut tools: ToolSpawner) {
 }
 
 #[derive(Deserialize)]
-struct PageArgs {
-    url: Option<String>,
+#[serde(deny_unknown_fields)]
+struct BookmarkAddArgs {
+    url: String,
     title: Option<String>,
     favicon_url: Option<String>,
     folder: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct UuidArgs {
-    uuid: Option<String>,
+#[serde(deny_unknown_fields)]
+struct BookmarkRemoveArgs {
+    uuid: String,
 }
 
 #[derive(Deserialize)]
-struct PinArgs {
-    uuid: Option<String>,
-    url: Option<String>,
+#[serde(deny_unknown_fields)]
+struct BookmarkUnpinArgs {
+    uuid: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExistingPinArgs {
+    uuid: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PagePinArgs {
+    url: String,
     title: Option<String>,
     favicon_url: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct FolderArgs {
-    name: Option<String>,
+#[serde(untagged)]
+enum BookmarkPinArgs {
+    Existing(ExistingPinArgs),
+    Page(PagePinArgs),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BookmarkFolderCreateArgs {
+    name: String,
 }
 
 fn list(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
@@ -74,7 +96,7 @@ fn list(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
 
 fn add(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: PageArgs = call.parse("bookmark_add")?;
+        let args: BookmarkAddArgs = call.parse("bookmark_add")?;
         let url = RequiredText::get(args.url, "bookmark_add.url is required")?;
         Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
             AgentBookmarkCommand::Add {
@@ -95,7 +117,7 @@ fn add(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
 
 fn remove(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: UuidArgs = call.parse("bookmark_remove")?;
+        let args: BookmarkRemoveArgs = call.parse("bookmark_remove")?;
         let uuid = RequiredText::get(args.uuid, "bookmark_remove.uuid is required")?;
         Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
             AgentBookmarkCommand::Remove { uuid },
@@ -109,21 +131,21 @@ fn remove(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
 
 fn pin(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: PinArgs = call.parse("bookmark_pin")?;
-        if let Some(uuid) = RequiredText::optional(args.uuid) {
-            return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                AgentBookmarkCommand::Pin { uuid },
-            )));
-        }
-        let url = RequiredText::get(args.url, "bookmark_pin requires uuid or url")?;
-        Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
-            AgentBookmarkCommand::PinUrl {
+        let args: BookmarkPinArgs = call.parse("bookmark_pin")?;
+        let command = match args {
+            BookmarkPinArgs::Existing(args) => AgentBookmarkCommand::Pin {
+                uuid: RequiredText::get(args.uuid, "bookmark_pin.uuid is required")?,
+            },
+            BookmarkPinArgs::Page(args) => AgentBookmarkCommand::PinUrl {
                 page: AgentBookmarkPage {
-                    url,
+                    url: RequiredText::get(args.url, "bookmark_pin.url is required")?,
                     title: args.title,
                     favicon_url: args.favicon_url,
                 },
             },
+        };
+        Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
+            command,
         )))
     }
 
@@ -134,7 +156,7 @@ fn pin(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
 
 fn unpin(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: UuidArgs = call.parse("bookmark_unpin")?;
+        let args: BookmarkUnpinArgs = call.parse("bookmark_unpin")?;
         let uuid = RequiredText::get(args.uuid, "bookmark_unpin.uuid is required")?;
         Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
             AgentBookmarkCommand::Unpin { uuid },
@@ -148,7 +170,7 @@ fn unpin(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
 
 fn create_folder(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: FolderArgs = call.parse("bookmark_folder_create")?;
+        let args: BookmarkFolderCreateArgs = call.parse("bookmark_folder_create")?;
         let name = RequiredText::get(args.name, "bookmark_folder_create.name is required")?;
         Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand(
             AgentBookmarkCommand::CreateFolder { name },
@@ -163,11 +185,9 @@ fn create_folder(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
 struct RequiredText;
 
 impl RequiredText {
-    fn optional(value: Option<String>) -> Option<String> {
-        value.filter(|value| !value.trim().is_empty())
-    }
-
-    fn get(value: Option<String>, error: &str) -> Result<String, String> {
-        Self::optional(value).ok_or_else(|| error.to_string())
+    fn get(value: String, error: &str) -> Result<String, String> {
+        (!value.trim().is_empty())
+            .then_some(value)
+            .ok_or_else(|| error.to_string())
     }
 }

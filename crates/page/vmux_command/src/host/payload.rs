@@ -167,8 +167,12 @@ pub fn command_list(
     definitions: &[CommandDefinition],
 ) -> Vec<CommandBarEntry> {
     let mut entries = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for definition in definitions {
-        if definition.hidden || superseded.contains(&definition.id.as_str()) {
+        if definition.hidden
+            || superseded.contains(&definition.id.as_str())
+            || !seen.insert(definition.id.as_str())
+        {
             continue;
         }
         entries.push(CommandBarEntry {

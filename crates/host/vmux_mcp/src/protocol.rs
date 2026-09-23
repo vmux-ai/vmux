@@ -26,8 +26,8 @@ impl Plugin for McpPlugin {
                 (
                     McpSet::Route,
                     crate::tools::ToolDispatchSet,
+                    crate::tools::ToolDispatchFlush,
                     McpSet::StartTasks,
-                    McpSet::PollTasks,
                     McpSet::BuildResponses,
                 )
                     .chain(),
@@ -37,7 +37,6 @@ impl Plugin for McpPlugin {
                 (
                     route_request.in_set(McpSet::Route),
                     start_tool_tasks.in_set(McpSet::StartTasks),
-                    poll_tool_tasks.in_set(McpSet::PollTasks),
                     build_responses.in_set(McpSet::BuildResponses),
                 ),
             );
@@ -48,7 +47,6 @@ impl Plugin for McpPlugin {
 enum McpSet {
     Route,
     StartTasks,
-    PollTasks,
     BuildResponses,
 }
 
@@ -121,26 +119,61 @@ impl McpServer {
             .spawn((
                 McpRequest,
                 Name::new(format!("MCP request {sequence}")),
-                McpRequestId(id),
+                McpRequestId(id.clone()),
                 McpMethod(method),
                 McpParams(params),
                 McpRequestSequence(sequence),
             ))
             .id();
 
-        loop {
-            self.app.update();
-            if let Some(response) = self
-                .app
-                .world()
-                .get::<McpResponse>(request)
-                .map(|response| response.0.clone())
-            {
-                self.app.world_mut().despawn(request);
-                return Some(response);
-            }
-            tokio::task::yield_now().await;
+        self.app.update();
+        if let Some(response) = self
+            .app
+            .world_mut()
+            .entity_mut(request)
+            .take::<McpResponse>()
+        {
+            self.app.world_mut().despawn(request);
+            return Some(response.0);
         }
+
+        let Some(task) = self.app.world_mut().entity_mut(request).take::<McpTask>() else {
+            self.app.world_mut().despawn(request);
+            return Some(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": -32603,
+                    "message": "request did not produce a response"
+                }
+            }));
+        };
+        let result = task.0.await.unwrap_or_else(|_| {
+            Err("MCP tool task stopped before producing a response".to_string())
+        });
+        self.app
+            .world_mut()
+            .entity_mut(request)
+            .insert(McpReply::Result(result));
+        self.app.update();
+        let response = self
+            .app
+            .world_mut()
+            .entity_mut(request)
+            .take::<McpResponse>()
+            .map(|response| response.0)
+            .unwrap_or_else(|| {
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {
+                        "code": -32603,
+                        "message": "request result did not produce a response"
+                    }
+                })
+            });
+        self.app.world_mut().despawn(request);
+        Some(response)
     }
 }
 
@@ -196,22 +229,6 @@ type PendingRequests<'w, 's> = Query<
         &'static McpRequestSequence,
     ),
     (With<McpRequest>, Without<McpRouted>),
->;
-
-type RegisteredTools<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static Name,
-        &'static crate::tools::ToolAliases,
-        &'static crate::tools::ToolDescription,
-        &'static crate::tools::ToolInputSchema,
-        &'static crate::tools::ToolAccess,
-        &'static crate::tools::ToolOrder,
-        Option<&'static crate::tools::ShellAware>,
-    ),
-    With<crate::tools::McpTool>,
 >;
 
 pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
@@ -271,7 +288,7 @@ async fn handle_message(
 fn route_request(
     mut commands: Commands,
     requests: PendingRequests,
-    tools: RegisteredTools,
+    tools: crate::tools::ToolCatalog,
     config: Res<McpConfig>,
 ) {
     let Some((entity, method, params, _)) =
@@ -288,32 +305,11 @@ fn route_request(
                 .insert(McpReply::Result(Ok(initialize_result(&params.0))));
         }
         "tools/list" => {
-            let mut definitions = Vec::new();
-            for (_, name, _, description, schema, access, order, shell_aware) in &tools {
-                if !access.0.allows(config.acp_session, config.acp_terminals) {
-                    continue;
-                }
-                let mut description = description.0.clone();
-                if shell_aware.is_some() {
-                    description.push_str(&crate::tools::ShellNote::for_shell(&config.shell));
-                }
-                definitions.push((
-                    order.0,
-                    crate::tools::ToolDefinition {
-                        name: name.as_str().to_string(),
-                        description,
-                        input_schema: schema.0.clone(),
-                    },
-                ));
-            }
-            definitions.sort_by_key(|(order, _)| *order);
-            let definitions = definitions
-                .into_iter()
-                .map(|(_, definition)| definition)
-                .collect::<Vec<_>>();
-            commands
-                .entity(entity)
-                .insert(McpReply::Result(Ok(json!({ "tools": definitions }))));
+            let definitions =
+                tools.definitions(config.acp_session, config.acp_terminals, &config.shell);
+            commands.entity(entity).insert(crate::tools::ToolOutcome(Ok(
+                crate::tools::ToolExecution::List { definitions },
+            )));
         }
         "tools/call" => {
             let Some(name) = params.0.get("name").and_then(Value::as_str) else {
@@ -323,34 +319,27 @@ fn route_request(
                 return;
             };
             let normalized = crate::tools::canonical_tool_name(name);
-            let tool = tools.iter().find(|(_, registered, aliases, ..)| {
-                registered.as_str() == normalized
-                    || aliases.0.iter().any(|alias| alias == normalized)
-            });
-            let Some((tool, registered, _, _, _, access, _, _)) = tool else {
-                commands
-                    .entity(entity)
-                    .insert(McpReply::Result(Err(format!("unknown tool: {normalized}"))));
-                return;
-            };
-            if !access.0.allows(config.acp_session, config.acp_terminals) {
-                commands.entity(entity).insert(McpReply::Result(Err(format!(
-                    "tool {normalized} is unavailable for ACP sessions"
-                ))));
-                return;
-            }
             let arguments = params
                 .0
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            commands.entity(entity).insert(crate::tools::ToolCall {
-                tool,
-                name: registered.as_str().to_string(),
+            match tools.call(
+                normalized,
                 arguments,
-                anchor: config.anchor,
-                host_shell: config.shell.clone(),
-            });
+                config.anchor,
+                &config.shell,
+                crate::tools::ToolCallPolicy::mcp(config.acp_session, config.acp_terminals),
+            ) {
+                Ok(call) => {
+                    commands.entity(entity).insert(call);
+                }
+                Err(message) => {
+                    commands
+                        .entity(entity)
+                        .insert(McpReply::Result(Err(message)));
+                }
+            }
         }
         method => {
             commands.entity(entity).insert(McpReply::ProtocolError {
@@ -386,27 +375,6 @@ fn start_tool_tasks(world: &mut World) {
             let _ = sender.send(execution.execute(task_config).await);
         }));
         world.entity_mut(entity).insert(McpTask(receiver));
-    }
-}
-
-fn poll_tool_tasks(world: &mut World) {
-    let mut completed = Vec::new();
-    {
-        let mut query = world.query::<(Entity, &mut McpTask)>();
-        for (entity, mut task) in query.iter_mut(world) {
-            match task.0.try_recv() {
-                Ok(result) => completed.push((entity, result)),
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => completed.push((
-                    entity,
-                    Err("MCP tool task stopped before producing a response".to_string()),
-                )),
-            }
-        }
-    }
-    for (entity, result) in completed {
-        world.entity_mut(entity).remove::<McpTask>();
-        world.entity_mut(entity).insert(McpReply::Result(result));
     }
 }
 
@@ -459,6 +427,30 @@ fn initialize_result(params: &Value) -> Value {
 impl crate::tools::ToolExecution {
     async fn execute(self, config: McpConfig) -> Result<Value, String> {
         match self {
+            Self::List { mut definitions } => {
+                if let Ok(connection) = vmux_client::client::ServiceConnection::connect().await
+                    && let Ok(AgentQueryResult::Commands(commands)) =
+                        agent_query(&connection, AgentQuery::ListCommands).await
+                {
+                    definitions =
+                        crate::tools::ToolDefinition::merge_commands(definitions, commands)?;
+                }
+                Ok(json!({ "tools": definitions }))
+            }
+            Self::Command {
+                name,
+                arguments,
+                anchor,
+            } => {
+                run_agent_command(
+                    AgentCommand::InvokeCommand {
+                        id: name,
+                        args: vmux_client::protocol::JsonValue::from(arguments),
+                    },
+                    anchor,
+                )
+                .await
+            }
             Self::Protocol {
                 tool: crate::tools::ProtocolTool::ReadFile,
                 arguments,
@@ -1114,14 +1106,29 @@ pub fn query_result_to_mcp_response(result: vmux_client::protocol::AgentQueryRes
                 "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::Settings(json_str) => {
+        AgentQueryResult::Settings(settings) => {
+            let value = serde_json::Value::try_from(&settings).unwrap_or(serde_json::Value::Null);
+            let text = serde_json::to_string(&value).unwrap_or_default();
             json!({
-                "content": [{"type": "text", "text": json_str}]
+                "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::Spaces(json_str) => {
+        AgentQueryResult::Spaces(spaces) => {
+            let text = serde_json::to_string(&spaces).unwrap_or_default();
             json!({
-                "content": [{"type": "text", "text": json_str}]
+                "content": [{"type": "text", "text": text}]
+            })
+        }
+        AgentQueryResult::Bookmarks(bookmarks) => {
+            let text = serde_json::to_string(&bookmarks).unwrap_or_default();
+            json!({
+                "content": [{"type": "text", "text": text}]
+            })
+        }
+        AgentQueryResult::Commands(commands) => {
+            let text = serde_json::to_string(&commands).unwrap_or_default();
+            json!({
+                "content": [{"type": "text", "text": text}]
             })
         }
         AgentQueryResult::CommandExit { seq, exit } => {

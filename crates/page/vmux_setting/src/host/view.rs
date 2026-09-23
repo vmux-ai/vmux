@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
 use vmux_core::page::PageReady;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::{
@@ -23,6 +22,7 @@ pub struct SettingsViewPlugin;
 
 impl Plugin for SettingsViewPlugin {
     fn build(&self, app: &mut App) {
+        OpenSettingsRequest::register(app);
         app.init_resource::<CurrentUpdateCheckStatus>()
             .add_message::<CheckForUpdatesRequest>()
             .add_plugins((
@@ -44,14 +44,35 @@ impl Plugin for SettingsViewPlugin {
             .add_systems(
                 Update,
                 handle_open_settings_command
-                    .in_set(vmux_command::ReadAppCommands)
-                    .after(vmux_command::WriteAppCommands),
+                    .in_set(vmux_command::ReadCommandRequests)
+                    .after(vmux_command::WriteCommandRequests),
             );
     }
 }
 
 #[derive(Component, Default)]
 pub struct Settings;
+
+#[derive(Message)]
+struct OpenSettingsRequest;
+
+impl OpenSettingsRequest {
+    fn register(app: &mut App) {
+        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vec![
+            vmux_command::CommandDefinition::new("open_settings", "Settings", "Layout > Window")
+                .hidden()
+                .direct("Super+,"),
+        ]
+    }
+
+    fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
+        (invocation.id == "open_settings").then_some(Self)
+    }
+}
 
 impl Settings {
     pub fn new() -> impl Bundle {
@@ -252,18 +273,12 @@ fn on_check_for_updates(
 }
 
 fn handle_open_settings_command(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<OpenSettingsRequest>,
     focus: Option<Res<FocusedStack>>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut page_open: MessageWriter<PageOpenRequest>,
 ) {
-    for cmd in reader.read() {
-        if !matches!(
-            *cmd,
-            AppCommand::Layout(LayoutCommand::Window(WindowCommand::Settings))
-        ) {
-            continue;
-        }
+    for _ in reader.read() {
         let Some(focus) = focus.as_ref() else {
             continue;
         };

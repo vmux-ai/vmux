@@ -16,15 +16,11 @@ use crate::event::{
     CommandBarPanelCloseEvent, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarRequest,
     CommandBarSizeEvent, OpenId, SearchEngine, SearchEngineSetting,
 };
-use crate::open::OpenCommand;
-use crate::open_target::OpenTarget;
+use crate::open_target::{OpenTarget, PaneDirection};
 use crate::snapshot::{
     ClaimedUrl, CommandBarUiState, ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
-use crate::{
-    AppCommand, BrowserBarCommand, BrowserCommand, CommandInvocation, LayoutCommand, PaneCommand,
-    ReadAppCommands, SpaceCommand, StackCommand,
-};
+use crate::{CommandDefinition, CommandInvocation, ReadCommandRequests};
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::event::space::SpaceRequest;
@@ -47,6 +43,8 @@ pub(crate) struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
+        CommandBarOpenRequest::register(app);
+        SpaceOpenRequest::register(app);
         app.init_resource::<PendingLaunch>()
             .add_message::<vmux_core::ContributedCommandChosen>()
             .add_message::<InlineTransitionRequested>()
@@ -72,7 +70,7 @@ impl Plugin for InputPlugin {
             .add_systems(
                 Update,
                 handle_open_command_bar
-                    .in_set(ReadAppCommands)
+                    .in_set(ReadCommandRequests)
                     .after(prewarm_command_bar_modal)
                     .after(vmux_core::workspace::TabCommandSet)
                     .after(vmux_core::workspace::StackCommandSet),
@@ -93,13 +91,106 @@ impl Plugin for InputPlugin {
             .add_systems(
                 Update,
                 deferred_dismiss_modal
-                    .after(ReadAppCommands)
+                    .after(ReadCommandRequests)
                     .before(vmux_core::workspace::ComputeFocusSet),
             )
             .add_systems(
                 PostUpdate,
                 reveal_command_bar.chain().after(LayoutSystems::Layout),
             );
+    }
+}
+
+#[derive(vmux_macro::CommandBar)]
+#[shortcut(chord = "Ctrl+b, s")]
+struct SpaceOpenRequest;
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandBarOpenRequest {
+    Toggle,
+    EditPage,
+    Path,
+    Commands,
+    Ex,
+    Picker(CommandBarPicker),
+}
+
+impl CommandBarOpenRequest {
+    pub fn register(app: &mut App) {
+        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("browser_open_command_bar", "Command Bar", "Browser > Bar")
+                .accelerator("super+k")
+                .direct("Super+k")
+                .direct("Super+p")
+                .expose_to_mcp(),
+            CommandDefinition::new(
+                "browser_open_page_in_command_bar",
+                "Edit Page",
+                "Browser > Bar",
+            )
+            .accelerator("super+l")
+            .direct("Super+l")
+            .expose_to_mcp(),
+            CommandDefinition::new("browser_open_path_bar", "Path Navigator", "Browser > Bar")
+                .accelerator("super+/")
+                .direct("Super+/")
+                .expose_to_mcp(),
+            CommandDefinition::new("browser_open_commands", "Commands", "Browser > Bar")
+                .direct(">")
+                .expose_to_mcp(),
+            CommandDefinition::new("browser_open_ex_bar", "Vim Command Line", "Browser > Bar")
+                .expose_to_mcp(),
+            CommandDefinition::new("browser_open_goto_line", "Go to Line", "Browser > Bar")
+                .expose_to_mcp(),
+            CommandDefinition::new(
+                "browser_open_indentation",
+                "Select Indentation",
+                "Browser > Bar",
+            )
+            .expose_to_mcp(),
+            CommandDefinition::new(
+                "browser_open_line_ending",
+                "Select End of Line Sequence",
+                "Browser > Bar",
+            )
+            .expose_to_mcp(),
+            CommandDefinition::new("browser_open_encoding", "Select Encoding", "Browser > Bar")
+                .expose_to_mcp(),
+            CommandDefinition::new(
+                "browser_open_reopen_with_encoding",
+                "Reopen with Encoding",
+                "Browser > Bar",
+            )
+            .expose_to_mcp(),
+            CommandDefinition::new(
+                "browser_open_save_with_encoding",
+                "Save with Encoding",
+                "Browser > Bar",
+            )
+            .expose_to_mcp(),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        let request = match invocation.id.as_str() {
+            "browser_open_command_bar" => Self::Toggle,
+            "browser_open_page_in_command_bar" => Self::EditPage,
+            "browser_open_path_bar" => Self::Path,
+            "browser_open_commands" => Self::Commands,
+            "browser_open_ex_bar" => Self::Ex,
+            "browser_open_goto_line" => Self::Picker(CommandBarPicker::GotoLine),
+            "browser_open_indentation" => Self::Picker(CommandBarPicker::Indent),
+            "browser_open_line_ending" => Self::Picker(CommandBarPicker::LineEnding),
+            "browser_open_encoding" => Self::Picker(CommandBarPicker::Encoding),
+            "browser_open_reopen_with_encoding" => Self::Picker(CommandBarPicker::EncodingReopen),
+            "browser_open_save_with_encoding" => Self::Picker(CommandBarPicker::EncodingSave),
+            _ => return None,
+        };
+        Some(request)
     }
 }
 
@@ -373,7 +464,7 @@ fn command_bar_size_should_apply(
 }
 
 #[derive(Default)]
-struct CommandBarOpenRequest {
+struct CommandBarOpenState {
     should_toggle: bool,
     should_dismiss: bool,
     should_dismiss_nav: bool,
@@ -382,60 +473,66 @@ struct CommandBarOpenRequest {
     picker: Option<CommandBarPicker>,
 }
 
-fn command_bar_open_request(
-    commands: impl IntoIterator<Item = AppCommand>,
-) -> CommandBarOpenRequest {
-    let mut request = CommandBarOpenRequest::default();
-    for cmd in commands {
-        match cmd {
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)) => {
+impl CommandBarOpenState {
+    fn picker_id(picker: CommandBarPicker) -> Option<&'static str> {
+        match picker {
+            CommandBarPicker::GotoLine => Some("browser_open_goto_line"),
+            CommandBarPicker::Indent => Some("browser_open_indentation"),
+            CommandBarPicker::LineEnding => Some("browser_open_line_ending"),
+            CommandBarPicker::Encoding => Some("browser_open_encoding"),
+            CommandBarPicker::EncodingReopen => Some("browser_open_reopen_with_encoding"),
+            CommandBarPicker::EncodingSave => Some("browser_open_save_with_encoding"),
+            CommandBarPicker::Space => None,
+        }
+    }
+}
+
+fn command_bar_open_state<'a>(
+    requests: impl IntoIterator<Item = &'a CommandBarOpenRequest>,
+    ids: impl IntoIterator<Item = &'a str>,
+) -> CommandBarOpenState {
+    let mut request = CommandBarOpenState::default();
+    for open in requests {
+        match open {
+            CommandBarOpenRequest::Toggle => {
                 request.should_toggle = true;
                 request.url_override = Some(String::new());
             }
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPageInCommandBar)) => {
+            CommandBarOpenRequest::EditPage => {
                 request.should_toggle = true;
                 request.replace_active_stack = true;
             }
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPathBar)) => {
+            CommandBarOpenRequest::Path => {
                 request.should_toggle = true;
                 request.url_override = Some("/".to_string());
             }
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommands)) => {
+            CommandBarOpenRequest::Commands => {
                 request.should_toggle = true;
                 request.url_override = Some(">".to_string());
             }
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenExBar)) => {
+            CommandBarOpenRequest::Ex => {
                 request.should_toggle = true;
                 request.url_override = Some(":".to_string());
             }
-            AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)) => {
+            CommandBarOpenRequest::Picker(picker) => {
                 request.should_toggle = true;
-                request.picker = Some(CommandBarPicker::Space);
+                request.picker = Some(*picker);
                 request.url_override = Some(String::new());
             }
-            AppCommand::Browser(BrowserCommand::Bar(bar)) => {
-                let Some(picker) = bar.picker() else {
-                    continue;
-                };
-                request.should_toggle = true;
-                request.picker = Some(picker);
-                request.url_override = Some(String::new());
-            }
-            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)) => {
+        }
+    }
+    for id in ids {
+        match id {
+            "stack_close" => {
                 request.should_dismiss = true;
             }
-            AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Next | StackCommand::Previous,
-            ))
-            | AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft
-                | PaneCommand::SelectRight
-                | PaneCommand::SelectUp
-                | PaneCommand::SelectDown,
-            )) => {
+            "stack_next" | "stack_previous" | "select_pane_left" | "select_pane_right"
+            | "select_pane_up" | "select_pane_down" => {
                 request.should_dismiss_nav = true;
             }
-            _ => {}
+            _ => {
+                continue;
+            }
         }
     }
     request
@@ -446,7 +543,9 @@ fn command_bar_toggle_should_open(is_open: bool, picker: Option<CommandBarPicker
 }
 
 fn handle_open_command_bar(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<CommandInvocation>,
+    mut open_requests: MessageReader<CommandBarOpenRequest>,
+    mut open_space_picker: MessageReader<SpaceOpenRequest>,
     layout_q: Query<
         (Entity, Has<CommandBarPanelActive>, Option<&HostWindow>),
         With<RendersLauncherPanel>,
@@ -462,6 +561,19 @@ fn handle_open_command_bar(
     locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
+    let mut request = command_bar_open_state(
+        open_requests.read(),
+        reader.read().map(|invocation| invocation.id.as_str()),
+    );
+    if open_space_picker.read().next().is_some() {
+        request.should_toggle = true;
+        request.picker = Some(CommandBarPicker::Space);
+        request.url_override = Some(String::new());
+    }
+    if !request.should_toggle && !request.should_dismiss && !request.should_dismiss_nav {
+        return;
+    }
+
     let Some((layout_e, is_open, _)) = layout_q
         .iter()
         .find(|(_, _, host)| {
@@ -481,7 +593,6 @@ fn handle_open_command_bar(
         .unwrap_or_else(Locale::preferred);
     let definitions = definitions.iter().cloned().collect::<Vec<_>>();
 
-    let request = command_bar_open_request(reader.read().cloned());
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
     let should_dismiss_nav = request.should_dismiss_nav;
@@ -556,23 +667,27 @@ fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
     ));
 }
 
-fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
-    match target {
-        Some(OpenTarget::InPlace) | None => OpenCommand::InPlace { url: Some(url) },
-        Some(OpenTarget::InNewStack) => OpenCommand::InNewStack { url: Some(url) },
+fn open_invocation(caller: Entity, target: Option<OpenTarget>, url: String) -> CommandInvocation {
+    let (id, arguments) = match target {
+        Some(OpenTarget::InPlace) | None => ("open_in_place", serde_json::json!({ "url": url })),
+        Some(OpenTarget::InNewStack) => ("open_in_new_stack", serde_json::json!({ "url": url })),
         Some(OpenTarget::InPane {
             direction,
             target,
             mode,
-        }) => OpenCommand::InPane {
-            direction,
-            target,
-            mode,
-            url: Some(url),
-        },
-        Some(OpenTarget::InNewTab) => OpenCommand::InNewTab { url: Some(url) },
-        Some(OpenTarget::InNewSpace) => OpenCommand::InNewSpace { url: Some(url) },
-    }
+        }) => (
+            match direction {
+                PaneDirection::Top => "open_in_pane_top",
+                PaneDirection::Right => "open_in_pane_right",
+                PaneDirection::Bottom => "open_in_pane_bottom",
+                PaneDirection::Left => "open_in_pane_left",
+            },
+            serde_json::json!({ "url": url, "target": target, "mode": mode }),
+        ),
+        Some(OpenTarget::InNewTab) => ("open_in_new_tab", serde_json::json!({ "url": url })),
+        Some(OpenTarget::InNewSpace) => ("open_in_new_space", serde_json::json!({ "url": url })),
+    };
+    CommandInvocation::new(caller, id).with_arguments(arguments)
 }
 
 struct Home;
@@ -639,18 +754,14 @@ fn on_command_bar_request(
         Query<&ClaimedUrl>,
     ),
     resources: (Res<CommandBarUiState>, Option<Res<ResolvedLocale>>),
-    mut writer_params: ParamSet<(
-        MessageWriter<AppCommand>,
-        MessageWriter<PageOpenRequest>,
-        MessageWriter<TerminalSpawnRequest>,
-    )>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
     mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     mut stack_chosen: MessageWriter<StackInPaneChosen>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut ex_lines: MessageWriter<crate::host::ExLineSubmitted>,
     mut picked: MessageWriter<crate::host::FileStatusPicked>,
-    mut issued: MessageWriter<crate::CommandIssued>,
     mut command_invocations: MessageWriter<CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -716,7 +827,7 @@ fn on_command_bar_request(
                     } else {
                         commands.entity(stack).remove::<PendingPromptAttachments>();
                     }
-                    writer_params.p1().write(PageOpenRequest {
+                    page_open_requests.write(PageOpenRequest {
                         target: PageOpenTarget::Stack(stack),
                         url,
                         request_id: None,
@@ -737,7 +848,7 @@ fn on_command_bar_request(
                     expanded.parent().unwrap_or(&expanded)
                 };
                 if let Some(pane_e) = focus.pane {
-                    writer_params.p2().write(TerminalSpawnRequest {
+                    terminal_spawn_requests.write(TerminalSpawnRequest {
                         cwd: Some(dir.to_path_buf()),
                         target: TerminalSpawnTarget::NewStackInPane(pane_e),
                         metadata: Some(PageMetadata {
@@ -778,14 +889,7 @@ fn on_command_bar_request(
                         custom_keyboard_restore = true;
                     }
                 } else {
-                    let target = *open;
-                    let cmd =
-                        AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
-                    issued.write(crate::CommandIssued {
-                        caller,
-                        command: cmd.clone(),
-                    });
-                    writer_params.p0().write(cmd);
+                    command_invocations.write(open_invocation(caller, *open, url));
                 }
             }
         }
@@ -817,7 +921,7 @@ fn on_command_bar_request(
                 {
                     let active_pane_opt = focus.pane;
                     if let Some(pane_e) = active_pane_opt {
-                        writer_params.p2().write(TerminalSpawnRequest {
+                        terminal_spawn_requests.write(TerminalSpawnRequest {
                             cwd: cwd.clone(),
                             target: TerminalSpawnTarget::NewStackInPane(pane_e),
                             metadata: Some(PageMetadata {
@@ -827,15 +931,11 @@ fn on_command_bar_request(
                             }),
                         });
                     } else {
-                        let cmd =
-                            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-                                url: Some("vmux://terminal/".into()),
-                            }));
-                        issued.write(crate::CommandIssued {
+                        command_invocations.write(open_invocation(
                             caller,
-                            command: cmd.clone(),
-                        });
-                        writer_params.p0().write(cmd);
+                            Some(OpenTarget::InNewStack),
+                            "vmux://terminal/".into(),
+                        ));
                     }
                 }
             }
@@ -852,14 +952,7 @@ fn on_command_bar_request(
                     custom_keyboard_restore = true;
                 }
             } else if let Some(url) = ContributedPage::page_url(&contributed_pages, id) {
-                let target = *open;
-                let cmd =
-                    AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
-                issued.write(crate::CommandIssued {
-                    caller,
-                    command: cmd.clone(),
-                });
-                writer_params.p0().write(cmd);
+                command_invocations.write(open_invocation(caller, *open, url));
                 custom_keyboard_restore = true;
             } else {
                 command_invocations.write(CommandInvocation::new(caller, id));
@@ -890,13 +983,8 @@ fn on_command_bar_request(
         }
         CommandBarRequest::Pick { pick } => {
             if let CommandBarPick::Picker(next) = pick {
-                if let Some(bar) = BrowserBarCommand::opening(*next) {
-                    let cmd = AppCommand::Browser(BrowserCommand::Bar(bar));
-                    issued.write(crate::CommandIssued {
-                        caller,
-                        command: cmd.clone(),
-                    });
-                    writer_params.p0().write(cmd);
+                if let Some(id) = CommandBarOpenState::picker_id(*next) {
+                    command_invocations.write(CommandInvocation::new(caller, id));
                 }
             } else {
                 picked.write(crate::host::FileStatusPicked {
@@ -1066,12 +1154,44 @@ mod tests {
     use super::*;
     use crate::event::CommandBarOpenEvent;
     use crate::event::CommandBarSpace;
-    use crate::{CommandPlugin, ReadAppCommands};
+    use crate::{CommandPlugin, ReadCommandRequests};
     use crate::{command_bar_open_payload, localized_command_name};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
     use vmux_api::BinEvent;
     use vmux_core::overlay::OverlayState;
+
+    #[test]
+    fn command_bar_mcp_definitions_are_the_dispatchable_command_set() {
+        let definitions = CommandBarOpenRequest::definitions();
+        let tools = definitions
+            .iter()
+            .filter_map(CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "browser_open_command_bar",
+                "browser_open_page_in_command_bar",
+                "browser_open_path_bar",
+                "browser_open_commands",
+                "browser_open_ex_bar",
+                "browser_open_goto_line",
+                "browser_open_indentation",
+                "browser_open_line_ending",
+                "browser_open_encoding",
+                "browser_open_reopen_with_encoding",
+                "browser_open_save_with_encoding",
+            ],
+        );
+        for tool in tools {
+            let invocation = CommandInvocation::new(Entity::PLACEHOLDER, tool.name);
+            assert!(CommandBarOpenRequest::from_invocation(&invocation).is_some());
+        }
+    }
 
     #[test]
     fn build_payload_includes_commands_and_target() {
@@ -1081,6 +1201,7 @@ mod tests {
                 |pages: Query<&ContributedPage>, commands: Query<&ContributedCommand>| {
                     let definitions = [crate::CommandDefinition {
                         id: "test_command".to_string(),
+                        aliases: Vec::new(),
                         label: "Test Command".to_string(),
                         group: "Test".to_string(),
                         accelerator: None,
@@ -1088,6 +1209,7 @@ mod tests {
                         native_menu: false,
                         shortcut_label: None,
                         shortcuts: Vec::new(),
+                        mcp: None,
                     }];
                     build_command_bar_open_payload(
                         OpenId(7),
@@ -1538,9 +1660,12 @@ mod tests {
 
     #[test]
     fn space_open_command_opens_space_switch_mode() {
-        let request = command_bar_open_request([AppCommand::Layout(LayoutCommand::Space(
-            SpaceCommand::Open,
-        ))]);
+        let request = CommandBarOpenState {
+            should_toggle: true,
+            picker: Some(CommandBarPicker::Space),
+            url_override: Some(String::new()),
+            ..Default::default()
+        };
 
         assert!(request.should_toggle);
         assert_eq!(request.picker, Some(CommandBarPicker::Space));
@@ -1549,47 +1674,54 @@ mod tests {
 
     #[test]
     fn every_status_bar_command_asserts_its_own_picker() {
-        for (bar, expected) in [
-            (BrowserBarCommand::OpenGotoLine, CommandBarPicker::GotoLine),
-            (BrowserBarCommand::OpenIndentation, CommandBarPicker::Indent),
+        for (id, expected) in [
+            ("browser_open_goto_line", CommandBarPicker::GotoLine),
+            ("browser_open_indentation", CommandBarPicker::Indent),
+            ("browser_open_line_ending", CommandBarPicker::LineEnding),
+            ("browser_open_encoding", CommandBarPicker::Encoding),
             (
-                BrowserBarCommand::OpenLineEnding,
-                CommandBarPicker::LineEnding,
-            ),
-            (BrowserBarCommand::OpenEncoding, CommandBarPicker::Encoding),
-            (
-                BrowserBarCommand::OpenReopenWithEncoding,
+                "browser_open_reopen_with_encoding",
                 CommandBarPicker::EncodingReopen,
             ),
             (
-                BrowserBarCommand::OpenSaveWithEncoding,
+                "browser_open_save_with_encoding",
                 CommandBarPicker::EncodingSave,
             ),
         ] {
-            let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(bar))]);
+            let open = CommandBarOpenRequest::from_invocation(&CommandInvocation::new(
+                Entity::PLACEHOLDER,
+                id,
+            ))
+            .unwrap();
+            let request = command_bar_open_state([&open], std::iter::empty());
 
-            assert!(request.should_toggle, "{bar:?}");
-            assert_eq!(request.picker, Some(expected), "{bar:?}");
+            assert!(request.should_toggle, "{id}");
+            assert_eq!(request.picker, Some(expected), "{id}");
             assert_eq!(
-                BrowserBarCommand::opening(expected),
-                Some(bar),
-                "the round trip is what lets a sub-list re-open the bar"
+                CommandBarOpenState::picker_id(expected),
+                Some(id),
+                "the picker returns to its command"
             );
         }
     }
 
     #[test]
     fn the_generic_bar_commands_assert_no_picker() {
-        for bar in [
-            BrowserBarCommand::OpenCommandBar,
-            BrowserBarCommand::OpenPathBar,
-            BrowserBarCommand::OpenCommands,
-            BrowserBarCommand::OpenExBar,
+        for id in [
+            "browser_open_command_bar",
+            "browser_open_path_bar",
+            "browser_open_commands",
+            "browser_open_ex_bar",
         ] {
-            let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(bar))]);
+            let open = CommandBarOpenRequest::from_invocation(&CommandInvocation::new(
+                Entity::PLACEHOLDER,
+                id,
+            ))
+            .unwrap();
+            let request = command_bar_open_state([&open], std::iter::empty());
 
-            assert_eq!(request.picker, None, "{bar:?}");
-            assert!(request.should_toggle, "{bar:?}");
+            assert_eq!(request.picker, None, "{id}");
+            assert!(request.should_toggle, "{id}");
         }
     }
 
@@ -1609,18 +1741,15 @@ mod tests {
 
     #[test]
     fn open_in_new_stack_does_not_dismiss_command_bar() {
-        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Open(
-            OpenCommand::InNewStack { url: None },
-        ))]);
+        let request = command_bar_open_state(std::iter::empty(), ["open_in_new_stack"]);
 
         assert!(!request.should_dismiss);
     }
 
     #[test]
     fn open_command_bar_forces_empty_url_override() {
-        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(
-            BrowserBarCommand::OpenCommandBar,
-        ))]);
+        let open = CommandBarOpenRequest::Toggle;
+        let request = command_bar_open_state([&open], std::iter::empty());
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, Some(String::new()));
@@ -1628,9 +1757,8 @@ mod tests {
 
     #[test]
     fn open_page_in_command_bar_leaves_url_override_unset_so_current_url_is_prefilled() {
-        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(
-            BrowserBarCommand::OpenPageInCommandBar,
-        ))]);
+        let open = CommandBarOpenRequest::EditPage;
+        let request = command_bar_open_state([&open], std::iter::empty());
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, None);
@@ -1647,7 +1775,9 @@ mod tests {
 
     fn panel_app() -> App {
         let mut app = App::new();
-        app.add_message::<AppCommand>()
+        app.add_message::<CommandInvocation>()
+            .add_message::<CommandBarOpenRequest>()
+            .add_message::<SpaceOpenRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
@@ -1682,8 +1812,17 @@ mod tests {
             .expect("open payload should round-trip")
     }
 
-    fn send(app: &mut App, command: AppCommand) {
-        app.world_mut().write_message(command);
+    fn send(app: &mut App, id: &str) {
+        if id == "space_open" {
+            app.world_mut().write_message(SpaceOpenRequest);
+        } else if let Some(request) =
+            CommandBarOpenRequest::from_invocation(&CommandInvocation::new(Entity::PLACEHOLDER, id))
+        {
+            app.world_mut().write_message(request);
+        } else {
+            app.world_mut()
+                .write_message(CommandInvocation::new(Entity::PLACEHOLDER, id));
+        }
         app.update();
     }
 
@@ -1692,10 +1831,7 @@ mod tests {
         let mut app = panel_app();
         let layout = app.world_mut().spawn(RendersLauncherPanel).id();
 
-        send(
-            &mut app,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
-        );
+        send(&mut app, "browser_open_command_bar");
 
         assert_eq!(
             emitted_to_page(&app),
@@ -1722,10 +1858,7 @@ mod tests {
             .workspace
             .stack = Some(stack);
 
-        send(
-            &mut app,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
-        );
+        send(&mut app, "browser_open_command_bar");
 
         assert_eq!(
             emitted_to_page(&app),
@@ -1742,10 +1875,7 @@ mod tests {
             .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
-        send(
-            &mut app,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
-        );
+        send(&mut app, "browser_open_command_bar");
 
         assert_eq!(
             emitted_to_page(&app),
@@ -1783,10 +1913,7 @@ mod tests {
             .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
-        send(
-            &mut app,
-            AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)),
-        );
+        send(&mut app, "space_open");
 
         assert_eq!(
             emitted_to_page(&app),
@@ -1800,10 +1927,7 @@ mod tests {
         let mut app = panel_app();
         app.world_mut().spawn(RendersLauncherPanel);
 
-        send(
-            &mut app,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPageInCommandBar)),
-        );
+        send(&mut app, "browser_open_page_in_command_bar");
 
         assert_eq!(open_payload(&app).target, Some(OpenTarget::InPlace));
     }
@@ -1926,7 +2050,7 @@ mod tests {
             .system_sets
             .get_key(vmux_core::workspace::StackCommandSet.intern())
             .unwrap();
-        let read_command_systems = graph.systems_in_set(ReadAppCommands.intern()).unwrap();
+        let read_command_systems = graph.systems_in_set(ReadCommandRequests.intern()).unwrap();
         let tab_command_systems = graph
             .systems_in_set(vmux_core::workspace::StackCommandSet.intern())
             .unwrap();
@@ -1943,73 +2067,60 @@ mod tests {
     }
 
     #[test]
-    fn build_open_command_none_target_yields_in_place() {
-        let cmd = build_open_command(None, "https://example.com".to_string());
+    fn open_invocation_none_target_yields_in_place() {
+        let invocation = open_invocation(Entity::PLACEHOLDER, None, "https://example.com".into());
+        assert_eq!(invocation.id, "open_in_place");
         assert_eq!(
-            cmd,
-            OpenCommand::InPlace {
-                url: Some("https://example.com".to_string())
-            }
+            invocation.argument::<String>("url").as_deref(),
+            Some("https://example.com")
         );
     }
 
     #[test]
-    fn build_open_command_in_place_target_yields_in_place() {
-        let cmd = build_open_command(Some(OpenTarget::InPlace), "https://example.com".to_string());
-        assert_eq!(
-            cmd,
-            OpenCommand::InPlace {
-                url: Some("https://example.com".to_string())
-            }
+    fn open_invocation_in_place_target_yields_in_place() {
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
+            Some(OpenTarget::InPlace),
+            "https://example.com".into(),
         );
+        assert_eq!(invocation.id, "open_in_place");
     }
 
     #[test]
-    fn build_open_command_in_new_stack_target() {
-        let cmd = build_open_command(
+    fn open_invocation_in_new_stack_target() {
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
             Some(OpenTarget::InNewStack),
             "https://example.com".to_string(),
         );
-        assert_eq!(
-            cmd,
-            OpenCommand::InNewStack {
-                url: Some("https://example.com".to_string())
-            }
-        );
+        assert_eq!(invocation.id, "open_in_new_stack");
     }
 
     #[test]
-    fn build_open_command_in_new_tab_target() {
-        let cmd = build_open_command(
+    fn open_invocation_in_new_tab_target() {
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
             Some(OpenTarget::InNewTab),
             "https://example.com".to_string(),
         );
-        assert_eq!(
-            cmd,
-            OpenCommand::InNewTab {
-                url: Some("https://example.com".to_string())
-            }
-        );
+        assert_eq!(invocation.id, "open_in_new_tab");
     }
 
     #[test]
-    fn build_open_command_in_new_space_target() {
-        let cmd = build_open_command(
+    fn open_invocation_in_new_space_target() {
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
             Some(OpenTarget::InNewSpace),
             "https://example.com".to_string(),
         );
-        assert_eq!(
-            cmd,
-            OpenCommand::InNewSpace {
-                url: Some("https://example.com".to_string())
-            }
-        );
+        assert_eq!(invocation.id, "open_in_new_space");
     }
 
     #[test]
-    fn build_open_command_in_pane_target() {
+    fn open_invocation_in_pane_target() {
         use crate::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-        let cmd = build_open_command(
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
             Some(OpenTarget::InPane {
                 direction: PaneDirection::Right,
                 target: PaneTarget::NewSplit,
@@ -2017,15 +2128,9 @@ mod tests {
             }),
             "https://example.com".to_string(),
         );
-        assert_eq!(
-            cmd,
-            OpenCommand::InPane {
-                direction: PaneDirection::Right,
-                target: PaneTarget::NewSplit,
-                mode: PaneOpenMode::NewStack,
-                url: Some("https://example.com".to_string()),
-            }
-        );
+        assert_eq!(invocation.id, "open_in_pane_right");
+        assert_eq!(invocation.argument("target"), Some(PaneTarget::NewSplit));
+        assert_eq!(invocation.argument("mode"), Some(PaneOpenMode::NewStack));
     }
 
     #[test]

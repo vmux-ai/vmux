@@ -85,14 +85,8 @@ impl AgentApprovalStore {
     }
 
     fn save(&self) -> std::io::Result<()> {
-        let Some(parent) = self.path.parent() else {
-            return Ok(());
-        };
-        std::fs::create_dir_all(parent)?;
         let bytes = serde_json::to_vec_pretty(&self.grants).map_err(std::io::Error::other)?;
-        let temp = self.path.with_extension("json.tmp");
-        std::fs::write(&temp, bytes)?;
-        std::fs::rename(temp, &self.path)
+        vmux_path::AtomicFile::write(&self.path, &bytes)
     }
 }
 

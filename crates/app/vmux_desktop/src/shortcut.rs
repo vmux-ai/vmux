@@ -1,11 +1,14 @@
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
-use vmux_command::WriteAppCommands;
+use vmux_command::WriteCommandRequests;
 pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Keymap, Modifiers};
 use vmux_setting::{AppSettings, SettingsLoadSet};
 
 pub struct ShortcutPlugin;
+
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct ShortcutInit;
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
@@ -13,17 +16,18 @@ impl Plugin for ShortcutPlugin {
             .add_systems(
                 Startup,
                 init_shortcuts
+                    .in_set(ShortcutInit)
                     .after(SettingsLoadSet)
                     .after(vmux_command::RegisterCommandDefinitions),
             )
-            .add_systems(Update, process_key_input.in_set(WriteAppCommands));
+            .add_systems(Update, process_key_input.in_set(WriteCommandRequests));
 
         #[cfg(target_os = "macos")]
         app.add_plugins(crate::native_keyboard::NativeKeyboardPlugin);
     }
 }
 
-pub(crate) fn init_shortcuts(
+fn init_shortcuts(
     mut commands: Commands,
     settings: Option<Res<AppSettings>>,
     definitions: Query<&vmux_command::CommandDefinition>,
@@ -153,13 +157,14 @@ fn is_modifier_key(key: KeyCode) -> bool {
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::{
-        AppCommand, BrowserCommand, CommandPlugin, LayoutCommand, OpenCommand, PaneDirection,
-        PaneOpenMode, PaneTarget, SpaceCommand, TabCommand,
-    };
+    use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
+    use vmux_command::{CommandInvocation, CommandPlugin};
+    use vmux_layout::pane::{PaneArrangement, PaneFocus, PaneOpenRequest, PaneRequest};
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
+    use vmux_layout::tab::{TabFocus, TabRequest};
+    use vmux_layout::target::SiblingDirection;
     use vmux_setting::{
         AppSettings, BrowserSettings, KeyComboDef, ShortcutDef, ShortcutEntry, ShortcutSettings,
     };
@@ -169,6 +174,12 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_plugins(ShortcutPlugin)
             .insert_resource(ButtonInput::<KeyCode>::default());
+        PaneRequest::register(&mut app);
+        TabRequest::register(&mut app);
+        app.world_mut().spawn(
+            vmux_command::CommandDefinition::new("space_open", "Spaces", "Layout > Space")
+                .chord("Ctrl+b, s"),
+        );
         app.update();
         app
     }
@@ -179,6 +190,12 @@ mod tests {
             .add_plugins(ShortcutPlugin)
             .insert_resource(settings)
             .insert_resource(ButtonInput::<KeyCode>::default());
+        PaneRequest::register(&mut app);
+        TabRequest::register(&mut app);
+        app.world_mut().spawn(
+            vmux_command::CommandDefinition::new("space_open", "Spaces", "Layout > Space")
+                .chord("Ctrl+b, s"),
+        );
         app.update();
         app
     }
@@ -314,7 +331,6 @@ mod tests {
 
     #[test]
     fn leader_h_emits_select_pane_left() {
-        use vmux_command::PaneCommand;
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
@@ -327,23 +343,22 @@ mod tests {
         press(&mut app, KeyCode::KeyH);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<PaneRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft
+            requests,
+            vec![PaneRequest::Focus(PaneFocus::Direction(
+                PaneDirection::Left
             ))]
         );
     }
 
     #[test]
     fn leader_l_emits_select_pane_right() {
-        use vmux_command::PaneCommand;
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
@@ -356,23 +371,22 @@ mod tests {
         press(&mut app, KeyCode::KeyL);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<PaneRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectRight
+            requests,
+            vec![PaneRequest::Focus(PaneFocus::Direction(
+                PaneDirection::Right
             ))]
         );
     }
 
     #[test]
     fn leader_j_emits_select_pane_down() {
-        use vmux_command::PaneCommand;
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
@@ -385,23 +399,22 @@ mod tests {
         press(&mut app, KeyCode::KeyJ);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<PaneRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectDown
+            requests,
+            vec![PaneRequest::Focus(PaneFocus::Direction(
+                PaneDirection::Bottom
             ))]
         );
     }
 
     #[test]
     fn leader_k_emits_select_pane_up() {
-        use vmux_command::PaneCommand;
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
@@ -414,17 +427,15 @@ mod tests {
         press(&mut app, KeyCode::KeyK);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<PaneRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectUp
-            ))]
+            requests,
+            vec![PaneRequest::Focus(PaneFocus::Direction(PaneDirection::Top))]
         );
     }
 
@@ -442,16 +453,13 @@ mod tests {
         press(&mut app, KeyCode::KeyS);
         app.update();
 
-        let commands: Vec<_> = app
+        let invocations: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<CommandInvocation>>()
             .drain()
             .collect();
 
-        assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
-        );
+        assert_eq!(invocations[0].id, "space_open");
     }
 
     #[test]
@@ -463,16 +471,13 @@ mod tests {
         press(&mut app, KeyCode::KeyS);
         app.update();
 
-        let commands: Vec<_> = app
+        let invocations: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<CommandInvocation>>()
             .drain()
             .collect();
 
-        assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
-        );
+        assert_eq!(invocations[0].id, "space_open");
     }
 
     #[test]
@@ -486,25 +491,26 @@ mod tests {
         press(&mut app, KeyCode::KeyS);
         app.update();
 
-        let commands: Vec<_> = app
+        let invocations: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<CommandInvocation>>()
             .drain()
             .collect();
 
-        assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
-        );
+        assert_eq!(invocations[0].id, "space_open");
     }
 
     #[test]
     fn default_tmux_rotate_and_mirror_chords_emit_commands() {
-        use vmux_command::PaneCommand;
-
         for (key, expected) in [
-            (KeyCode::KeyR, PaneCommand::RotateForward),
-            (KeyCode::KeyM, PaneCommand::Mirror),
+            (
+                KeyCode::KeyR,
+                PaneRequest::Arrange(PaneArrangement::Rotate(SiblingDirection::Next)),
+            ),
+            (
+                KeyCode::KeyM,
+                PaneRequest::Arrange(PaneArrangement::Mirror(None)),
+            ),
         ] {
             let mut app = test_app();
             press(&mut app, KeyCode::ControlLeft);
@@ -517,16 +523,13 @@ mod tests {
             press(&mut app, key);
             app.update();
 
-            let commands: Vec<_> = app
+            let requests: Vec<_> = app
                 .world_mut()
-                .resource_mut::<Messages<AppCommand>>()
+                .resource_mut::<Messages<PaneRequest>>()
                 .drain()
                 .collect();
 
-            assert_eq!(
-                commands,
-                vec![AppCommand::Layout(LayoutCommand::Pane(expected))]
-            );
+            assert_eq!(requests, vec![expected]);
         }
     }
 
@@ -547,16 +550,13 @@ mod tests {
         press(&mut app, KeyCode::KeyS);
         app.update();
 
-        let commands: Vec<_> = app
+        let invocations: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<CommandInvocation>>()
             .drain()
             .collect();
 
-        assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
-        );
+        assert_eq!(invocations[0].id, "space_open");
     }
 
     #[test]
@@ -577,28 +577,25 @@ mod tests {
         press(&mut app, KeyCode::Digit5);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<PaneRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
-            commands,
-            vec![AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction: PaneDirection::Right,
-                    target: PaneTarget::NewSplit,
-                    mode: PaneOpenMode::NewStack,
-                    url: None,
-                }
-            ))]
+            requests,
+            vec![PaneRequest::Open(PaneOpenRequest {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            })]
         );
     }
 
     #[test]
     fn configured_leader_x_overrides_the_default_stack_close() {
-        use vmux_command::PaneCommand;
         let mut app = test_app_with_settings(current_settings_with_leader("b"));
 
         press(&mut app, KeyCode::ControlLeft);
@@ -614,16 +611,13 @@ mod tests {
         press(&mut app, KeyCode::KeyX);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<PaneRequest>>()
             .drain()
             .collect();
 
-        assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close))]
-        );
+        assert_eq!(requests, vec![PaneRequest::Close]);
     }
 
     #[test]
@@ -644,22 +638,20 @@ mod tests {
         press(&mut app, KeyCode::Quote);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<PaneRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
-            commands,
-            vec![AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction: PaneDirection::Bottom,
-                    target: PaneTarget::NewSplit,
-                    mode: PaneOpenMode::NewStack,
-                    url: None,
-                }
-            ))]
+            requests,
+            vec![PaneRequest::Open(PaneOpenRequest {
+                direction: PaneDirection::Bottom,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            })]
         );
     }
 
@@ -680,15 +672,15 @@ mod tests {
         press(&mut app, KeyCode::KeyN);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<TabRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Tab(TabCommand::Next))]
+            requests,
+            vec![TabRequest::Focus(TabFocus::Sibling(SiblingDirection::Next))]
         );
     }
 
@@ -709,15 +701,17 @@ mod tests {
         press(&mut app, KeyCode::KeyP);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<TabRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
-            commands,
-            vec![AppCommand::Layout(LayoutCommand::Tab(TabCommand::Previous))]
+            requests,
+            vec![TabRequest::Focus(TabFocus::Sibling(
+                SiblingDirection::Previous
+            ))]
         );
     }
 
@@ -738,17 +732,12 @@ mod tests {
         press(&mut app, KeyCode::KeyC);
         app.update();
 
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<TabRequest>>()
             .drain()
             .collect();
 
-        assert_eq!(
-            commands,
-            vec![AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewTab { url: None }
-            ))]
-        );
+        assert_eq!(requests, vec![TabRequest::Open { url: None }]);
     }
 }

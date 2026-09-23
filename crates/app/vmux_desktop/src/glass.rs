@@ -7,6 +7,7 @@ pub(crate) struct GlassPlugin;
 
 impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
+        ToggleFullscreenRequest::register(app);
         app.init_non_send::<GlassState>()
             .add_systems(PreUpdate, install_window_glass)
             .add_systems(
@@ -18,7 +19,7 @@ impl Plugin for GlassPlugin {
             )
             .add_systems(
                 Update,
-                handle_toggle_fullscreen_command.in_set(vmux_command::ReadAppCommands),
+                handle_toggle_fullscreen_command.in_set(vmux_command::ReadCommandRequests),
             )
             .add_systems(
                 Last,
@@ -29,6 +30,31 @@ impl Plugin for GlassPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct ToggleFullscreenRequest;
+
+impl ToggleFullscreenRequest {
+    pub fn register(app: &mut App) {
+        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vec![
+            vmux_command::CommandDefinition::new(
+                "toggle_fullscreen",
+                "Toggle Fullscreen",
+                "Layout > Window",
+            )
+            .accelerator("ctrl+super+f")
+            .hidden(),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
+        (invocation.id == "toggle_fullscreen").then_some(Self)
     }
 }
 
@@ -275,16 +301,9 @@ fn ensure_window_active_after_reveal(
 fn handle_toggle_fullscreen_command(
     state: NonSend<GlassState>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
-    mut reader: MessageReader<vmux_command::AppCommand>,
+    mut reader: MessageReader<ToggleFullscreenRequest>,
 ) {
-    use vmux_command::{AppCommand, LayoutCommand, WindowCommand};
-
-    let toggle = reader.read().any(|cmd| {
-        matches!(
-            cmd,
-            AppCommand::Layout(LayoutCommand::Window(WindowCommand::ToggleFullscreen))
-        )
-    });
+    let toggle = reader.read().next().is_some();
     if toggle
         && let Some(parent_window) = focused_window
             .0

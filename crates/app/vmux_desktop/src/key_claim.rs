@@ -124,6 +124,7 @@ mod tests {
     impl Seam {
         fn app() -> App {
             let mut keymap = Keymap::default();
+            keymap.register(["stack_close", "close_pane"]);
             keymap.extend(
                 Source::Settings,
                 [

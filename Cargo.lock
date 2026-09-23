@@ -10378,15 +10378,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_command_mcp"
-version = "0.0.34"
-dependencies = [
- "serde_json",
- "vmux_command",
- "vmux_macro",
-]
-
-[[package]]
 name = "vmux_core"
 version = "0.0.34"
 dependencies = [
@@ -10667,8 +10658,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "vmux_api",
  "vmux_client",
- "vmux_command_mcp",
  "vmux_macro",
 ]
 
@@ -10851,6 +10842,7 @@ dependencies = [
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
+ "vmux_macro",
  "vmux_path",
  "vmux_ui",
 ]
@@ -10992,6 +10984,7 @@ dependencies = [
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
+ "vmux_macro",
  "vmux_service",
  "vmux_setting",
  "vmux_space",

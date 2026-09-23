@@ -17,7 +17,8 @@ pub(super) struct FocusPlugin;
 
 impl Plugin for FocusPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PaneHoverIntent>()
+        app.add_message::<PaneRequest>()
+            .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .add_systems(Update, on_pane_select.in_set(LayoutRequestSet::Handle))
             .add_systems(PostUpdate, warp_cursor_to_active_pane);

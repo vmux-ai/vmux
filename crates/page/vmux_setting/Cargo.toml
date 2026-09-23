@@ -31,6 +31,7 @@ vmux_core = { path = "../../vmux_core" }
 vmux_flex = { path = "../../vmux_flex" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_macro = { path = "../../vmux_macro" }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }

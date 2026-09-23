@@ -359,16 +359,15 @@ fn on_file_definition_request(
 
 fn on_file_editor_action(
     trigger: On<BinReceive<FileEditorAction>>,
-    mut app_commands: MessageWriter<vmux_command::host::command::AppCommand>,
+    mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let request = match trigger.event().payload.action {
         EditorAction::CommandPalette => {
-            app_commands.write(vmux_command::host::command::AppCommand::Browser(
-                vmux_command::host::command::BrowserCommand::Bar(
-                    vmux_command::host::command::BrowserBarCommand::OpenCommandBar,
-                ),
+            command_invocations.write(vmux_command::CommandInvocation::new(
+                entity,
+                "browser_open_command_bar",
             ));
             return;
         }

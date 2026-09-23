@@ -34,14 +34,36 @@ use crate::window::spawn_tab_scaffold_in_space;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ReopenClosedPage;
+struct ReopenClosedPage;
+
+impl ReopenClosedPage {
+    fn register(app: &mut App) {
+        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vec![
+            vmux_command::CommandDefinition::new(
+                "stack_reopen",
+                "Reopen Closed Page",
+                "Layout > Stack",
+            )
+            .accelerator("super+shift+t")
+            .direct("Ctrl+Shift+T"),
+        ]
+    }
+
+    fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
+        (invocation.id == "stack_reopen").then_some(Self)
+    }
+}
 
 pub struct ArchivePlugin;
 
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
+        ReopenClosedPage::register(app);
         app.add_message::<PageArchiveRequest>()
-            .add_message::<ReopenClosedPage>()
             .add_systems(Update, (capture_archived_pages, maintain_archive))
             .add_systems(
                 Update,

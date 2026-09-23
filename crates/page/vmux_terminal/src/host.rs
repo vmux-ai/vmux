@@ -1,3 +1,4 @@
+mod command;
 pub mod component;
 pub mod contract;
 pub mod launch;

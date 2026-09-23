@@ -3,7 +3,6 @@ use bevy_cef::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use vmux_agent::AgentRunState;
-use vmux_command::{AppCommand, BrowserCommand, OpenCommand};
 use vmux_core::agent::SessionId;
 use vmux_core::event::team::{ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberRow, TeamRequest};
 use vmux_core::page::PageReady;
@@ -414,8 +413,7 @@ fn parse_member_entity(member_id: &str) -> Option<Entity> {
 
 fn on_team_request(
     trigger: On<BinReceive<TeamRequest>>,
-    mut messages: ResMut<bevy::ecs::message::Messages<AppCommand>>,
-    mut issued: ResMut<bevy::ecs::message::Messages<vmux_command::CommandIssued>>,
+    mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
     user: Query<Entity, With<User>>,
     active_space: Res<ActiveSpaceEntity>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
@@ -513,15 +511,9 @@ fn on_team_request(
         return;
     }
 
-    let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
-    let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+    stack_requests.write(vmux_layout::stack::StackRequest::Open {
         url: Some(TEAM_PAGE_URL.to_string()),
-    }));
-    issued.write(vmux_command::CommandIssued {
-        caller,
-        command: cmd.clone(),
     });
-    messages.write(cmd);
 }
 
 #[cfg(test)]
@@ -643,8 +635,7 @@ mod tests {
 
     fn command_app() -> App {
         let mut app = App::new();
-        app.add_message::<AppCommand>()
-            .add_message::<vmux_command::CommandIssued>()
+        app.add_message::<vmux_layout::stack::StackRequest>()
             .add_message::<ProfileSwitchRequested>()
             .add_observer(on_team_request);
         app

@@ -6,7 +6,6 @@ use bevy_cef::prelude::{
     BinHostEmitEvent, BinReceive, Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin,
     WebviewCommittedNavigationEvent,
 };
-use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::KeyboardOwner;
 use vmux_core::event::{
     EXTENSIONS_PAGE_URL, ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress,
@@ -466,13 +465,11 @@ fn on_pin_request(
 
 fn on_open_manager_request(
     _trigger: On<BinReceive<ExtOpenManagerRequest>>,
-    mut cmd: MessageWriter<AppCommand>,
+    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
 ) {
-    cmd.write(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack {
-            url: Some("vmux://tools/extensions".to_string()),
-        },
-    )));
+    requests.write(vmux_layout::stack::StackRequest::Open {
+        url: Some("vmux://tools/extensions".to_string()),
+    });
 }
 
 const WEB_STORE_URL: &str = "https://chromewebstore.google.com/category/extensions";
@@ -492,7 +489,7 @@ fn encode_query(q: &str) -> String {
 
 fn on_browse_store_request(
     trigger: On<BinReceive<ExtBrowseStoreRequest>>,
-    mut cmd: MessageWriter<AppCommand>,
+    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
 ) {
     let query = trigger.event().payload.query.trim();
     let url = if query.is_empty() {
@@ -503,9 +500,7 @@ fn on_browse_store_request(
             encode_query(query)
         )
     };
-    cmd.write(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack { url: Some(url) },
-    )));
+    requests.write(vmux_layout::stack::StackRequest::Open { url: Some(url) });
 }
 
 fn run_agent_installs(
@@ -735,7 +730,7 @@ fn on_add_extension(
     subs: Res<ExtSubscribers>,
     outbox: Res<ExtOutbox>,
     injectors: Res<WebStoreInjectors>,
-    mut cmd: MessageWriter<AppCommand>,
+    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
 ) {
     let req = &trigger.payload;
     let Some(injector) = injectors.0.get(&trigger.event().webview) else {
@@ -757,11 +752,9 @@ fn on_add_extension(
             );
         }
         MANAGE_CHANNEL => {
-            cmd.write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack {
-                    url: Some("vmux://tools/extensions".to_string()),
-                },
-            )));
+            requests.write(vmux_layout::stack::StackRequest::Open {
+                url: Some("vmux://tools/extensions".to_string()),
+            });
         }
         _ => {}
     }

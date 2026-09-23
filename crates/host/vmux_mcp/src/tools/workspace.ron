@@ -2,39 +2,33 @@
     (
         kind: open_page,
         description: r#"Open a page using vmux auto placement. Omit `direction` so vmux reuses the existing matching bucket first (terminal pages with terminals, browser pages with browsers) and otherwise spirals off the latest non-agent pane. url uses the same rules as browser_navigate (vmux://terminal/ opens a terminal; anything else loads as a browser). direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false."#,
-        input_schema: {
-            "type": "object",
-            "required": ["url"],
-            "additionalProperties": false,
-            "properties": {
-                "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "url": {"type": "string"},
-                "focus": {"type": "boolean"},
+        input_schema: (
+            type: Object,
+            required: ["url"],
+            properties: {
+                "direction": (type: String, values: ["right", "left", "top", "bottom"]),
+                "url": (type: String),
+                "focus": (type: Boolean),
             },
-        },
+        ),
     ),
     (
         kind: open_file,
         description: r#"Open a local file (or directory) in the vmux editor using vmux auto placement. Omit `direction` so vmux focuses an already-open matching file first, then reuses the file pane bucket, and otherwise spirals off the latest non-agent pane. path is an absolute filesystem path, e.g. /Users/me/project/src/main.rs. Files render with syntax highlighting; directories show a listing. direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false. The path must be inside the selected project; call select_project first to request access elsewhere."#,
-        input_schema: {
-            "type": "object",
-            "required": ["path"],
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-                "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "focus": {"type": "boolean"},
+        input_schema: (
+            type: Object,
+            required: ["path"],
+            properties: {
+                "path": (type: String),
+                "direction": (type: String, values: ["right", "left", "top", "bottom"]),
+                "focus": (type: Boolean),
             },
-        },
+        ),
     ),
     (
         kind: resume_in_acp,
         description: r#"Continue the current CLI conversation in its ACP chat runtime. Replaces this CLI page in place while preserving the session id and working directory. Call only when the user asks to switch or continue in ACP."#,
-        input_schema: {
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false,
-        },
+        input_schema: (type: Object),
         availability: outside_acp_session,
     ),
     (
@@ -50,78 +44,69 @@ PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses
 `focus` (default false = keep focus on your own pane) applies when opening a new terminal. The command is typed into an interactive shell, so the terminal stays usable afterwards.
 
 `shell`: hand the command to a named interpreter instead of writing it in the user's shell — `bash`, `sh`, `python3`, `node`, `ruby`, anything on PATH. Name the program ALONE: vmux adds the flag that makes it read a script (`-c`, `-e`, `eval`) and quotes the script for the user's shell, so `command` is the script itself, newlines and all, and never carries `-c` or `-e` of its own. Omit `shell` to write in the user's own shell."#,
-        input_schema: {
-            "type": "object",
-            "required": ["command"],
-            "additionalProperties": false,
-            "properties": {
-                "command": {"type": "string"},
-                "shell": {"type": "string"},
-                "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "focus": {"type": "boolean"},
-                "terminal": {"type": "string"},
-                "beside": {"type": "string"},
-                "mode": {"enum": ["auto", "split", "stack"]},
+        input_schema: (
+            type: Object,
+            required: ["command"],
+            properties: {
+                "command": (type: String),
+                "shell": (type: String),
+                "direction": (type: String, values: ["right", "left", "top", "bottom"]),
+                "focus": (type: Boolean),
+                "terminal": (type: String),
+                "beside": (type: String),
+                "mode": (type: String, values: ["auto", "split", "stack"]),
             },
-        },
+        ),
         availability: without_acp_terminals,
         shell_aware: true,
     ),
     (
         kind: request_user_choice,
         description: r#"Show a native multiple-choice question in the agent conversation. For a new project without a selected project, use it to offer the concrete suggested ~/.vmux/projects path or Choose existing project. Also use it for other user-requested options and ambiguous worktree selection. Keep options concise and actionable. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."#,
-        input_schema: {
-            "type": "object",
-            "required": ["question", "options"],
-            "additionalProperties": false,
-            "properties": {
-                "question": {"type": "string"},
-                "options": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 2,
-                    "maxItems": 9,
-                },
+        input_schema: (
+            type: Object,
+            required: ["question", "options"],
+            properties: {
+                "question": (type: String),
+                "options": (
+                    type: Array,
+                    items: (type: String),
+                    min_items: Some(2),
+                    max_items: Some(9),
+                ),
             },
-        },
+        ),
     ),
     (
         kind: select_project,
         aliases: ["select_workspace", "choose_workspace"],
         description: r#"Select a project before accessing its files or running project commands. Pass a known path or omit it to open the native project picker rooted at ~/.vmux/projects. Paths inside ~/.vmux/projects are selected immediately. Paths outside it require explicit user approval in the native picker. For a new project, first use request_user_choice to offer a concrete suggested location and Choose existing project; do not ask the user to invent a folder. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/projects/local/<project> otherwise. When creation is selected, use run only to create the empty directory, then call this tool with that path. vmux offers Git initialization and uses the new project root directly without a linked worktree. For a previously existing Git project, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory. Do not call for general questions or self-contained terminal demonstrations."#,
-        input_schema: {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "path": {"type": "string"},
-            },
-        },
+        input_schema: (
+            type: Object,
+            properties: {"path": (type: String)},
+        ),
     ),
     (
         kind: create_worktree,
         description: r#"Call immediately before the first edit, write, test, build, or other project mutation, after a Git project is selected. Never call for requests that only read, show, search, or explain existing files. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."#,
-        input_schema: {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "branch": {"type": "string"},
-                "path": {"type": "string"},
-                "task": {"type": "string"},
-                "create": {"type": "boolean"},
+        input_schema: (
+            type: Object,
+            properties: {
+                "branch": (type: String),
+                "path": (type: String),
+                "task": (type: String),
+                "create": (type: Boolean),
             },
-        },
+        ),
     ),
     (
         kind: read_terminal,
         description: r#"Return the current visible scrollback text of a terminal (the same text the user sees). Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."#,
-        input_schema: {
-            "type": "object",
-            "required": ["terminal"],
-            "additionalProperties": false,
-            "properties": {
-                "terminal": {"type": "string"},
-            },
-        },
+        input_schema: (
+            type: Object,
+            required: ["terminal"],
+            properties: {"terminal": (type: String)},
+        ),
         availability: without_acp_terminals,
     ),
 ]

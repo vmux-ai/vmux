@@ -16,7 +16,7 @@ impl Plugin for ScrollPlugin {
             Update,
             run_scrolls
                 .after(crate::snapshot::drive_pending_nav_snapshots)
-                .after(vmux_command::WriteAppCommands),
+                .after(vmux_command::WriteCommandRequests),
         );
     }
 }

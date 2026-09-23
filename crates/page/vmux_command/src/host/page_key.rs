@@ -48,9 +48,7 @@ impl ScopedKeys<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::AppCommand;
     use crate::definition::CommandInvocation;
-    use crate::issued::CommandIssued;
     use crate::shortcut::{Binding, Modifiers, Shortcut, Source, When};
     use bevy::ecs::message::Messages;
     use bevy::input::keyboard::KeyCode;
@@ -89,12 +87,11 @@ mod tests {
                     },
                 ],
             );
+            keymap.register(["command_bar_next", "stack_close"]);
 
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(KeyPlugin)
-                .add_message::<AppCommand>()
-                .add_message::<CommandIssued>()
                 .add_message::<CommandInvocation>()
                 .insert_resource(keymap);
             app

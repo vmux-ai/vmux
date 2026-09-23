@@ -1,7 +1,7 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
-use vmux_command::{AppCommand, BrowserBarCommand, BrowserCommand, ReadAppCommands};
+use vmux_command::{CommandDefinition, CommandInvocation, ReadCommandRequests};
 use vmux_core::page::{HostHistoryDelta, HostHistoryNavigation};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
@@ -22,6 +22,7 @@ pub(crate) struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
+        OpenHistoryRequest::register(app);
         app.add_systems(
             Update,
             (
@@ -30,7 +31,7 @@ impl Plugin for NavigationPlugin {
                 handle_browser_go_back_requests,
                 handle_browser_go_forward_requests,
                 handle_open_in_new_stack_requests,
-                handle_browser_open_history.in_set(ReadAppCommands),
+                handle_browser_open_history.in_set(ReadCommandRequests),
             ),
         )
         .add_systems(
@@ -39,6 +40,27 @@ impl Plugin for NavigationPlugin {
                 .chain()
                 .after(vmux_layout::apply_cef_state_from_webview),
         );
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenHistoryRequest;
+
+impl OpenHistoryRequest {
+    pub fn register(app: &mut App) {
+        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
+    }
+
+    pub fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("browser_open_history", "History", "Browser > Bar")
+                .accelerator("super+y")
+                .expose_to_mcp(),
+        ]
+    }
+
+    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+        (invocation.id == "browser_open_history").then_some(Self)
     }
 }
 
@@ -199,24 +221,19 @@ fn handle_browser_go_forward_requests(
 }
 
 fn handle_browser_open_history(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<OpenHistoryRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     mut writer: MessageWriter<PageOpenRequest>,
 ) {
-    for cmd in reader.read() {
-        if matches!(
-            cmd,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenHistory))
-        ) {
-            let Some(pane) = focus.pane else {
-                continue;
-            };
-            writer.write(PageOpenRequest {
-                target: PageOpenTarget::NewStackInPane(pane),
-                url: "vmux://history/".to_string(),
-                request_id: None,
-            });
-        }
+    for _ in reader.read() {
+        let Some(pane) = focus.pane else {
+            continue;
+        };
+        writer.write(PageOpenRequest {
+            target: PageOpenTarget::NewStackInPane(pane),
+            url: "vmux://history/".to_string(),
+            request_id: None,
+        });
     }
 }
 
@@ -481,5 +498,28 @@ mod committed_navigation_tests {
         app.update();
 
         assert_eq!(app.world().resource::<Collected>().0, [visible]);
+    }
+}
+
+#[cfg(test)]
+mod command_definition_tests {
+    use super::*;
+
+    #[test]
+    fn history_mcp_definition_dispatches_to_the_typed_request() {
+        let definitions = OpenHistoryRequest::definitions();
+        let tools = definitions
+            .iter()
+            .filter_map(CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["browser_open_history"],
+        );
+        let invocation = CommandInvocation::new(Entity::PLACEHOLDER, "browser_open_history");
+        assert!(OpenHistoryRequest::from_invocation(&invocation).is_some());
     }
 }

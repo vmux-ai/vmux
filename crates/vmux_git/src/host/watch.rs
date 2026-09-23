@@ -181,10 +181,12 @@ impl RepoInfoCache {
         path: &Path,
         entry: &mut RepoInfoCacheEntry,
         wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-    ) {
+    ) -> bool {
+        let mut changed = false;
         if let Some(task) = entry.pending.as_mut()
             && let Some(info) = future::block_on(future::poll_once(task))
         {
+            changed = entry.info != info;
             entry.info = info;
             entry.loaded = true;
             entry.watched = false;
@@ -210,13 +212,16 @@ impl RepoInfoCache {
                 info
             }));
         }
+        changed
     }
 
-    fn poll(&mut self) {
+    fn poll(&mut self) -> bool {
         let wake = self.wake.clone();
+        let mut changed = false;
         for (path, entry) in &mut self.entries {
-            Self::poll_and_refresh(path, entry, wake.clone());
+            changed |= Self::poll_and_refresh(path, entry, wake.clone());
         }
+        changed
     }
 
     fn invalidate(&mut self, path: &Path) {
@@ -541,6 +546,7 @@ fn drain_git_watch(
     let Some(watch) = watch else {
         return;
     };
+    let repo_info = repo_info.bypass_change_detection();
     let mut changed = HashSet::new();
     let mut drained = 0;
     while drained < WATCH_DRAIN_BUDGET {
@@ -594,20 +600,24 @@ fn drain_git_watch(
 }
 
 fn poll_repo_info_cache(mut repo_info: ResMut<RepoInfoCache>) {
-    repo_info.poll();
+    let changed = repo_info.bypass_change_detection().poll();
+    if changed {
+        repo_info.set_changed();
+    }
 }
 
 fn sync_repo_info_watches(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: ResMut<RepoInfoCache>,
 ) {
+    let repo_info = repo_info.bypass_change_detection();
     let Some(mut watch) = watch else {
         for path in repo_info.inactive_paths() {
             repo_info.remove(&path);
         }
         return;
     };
-    watch.evict_inactive_repo_info(&mut repo_info);
+    watch.evict_inactive_repo_info(repo_info);
     let paths: Vec<PathBuf> = repo_info
         .entries
         .iter()

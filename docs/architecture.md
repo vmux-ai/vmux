@@ -623,7 +623,14 @@ are components seeded from feature-local RON manifests. Each handwritten feature
 plugin; its private startup system spawns the tool entities and its private update systems consume
 matching tool-call components, validate typed arguments, and produce command or query dispatch.
 Publication and execution query those entities directly; there is no separate runtime registry or
-central function-pointer table.
+central function-pointer table. Page agents install the same tool plugin into the application's
+world and submit tool-call entities there; they do not maintain a nested or thread-local Bevy app.
+
+Application commands follow the same ownership rule. Feature plugins spawn command-definition
+entities beside the parser for their typed Bevy request. Optional MCP metadata lives on that same
+definition. The MCP process asks the running application for its command tools and forwards calls
+back to the runtime catalog, which validates authorization and arguments before emitting the typed
+request. There is no second command enum or MCP-only command catalog.
 
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.
@@ -670,7 +677,6 @@ crates/
 │   └── vmux_mobile
 ├── host/                   runtime with no UI, owns state
 │   ├── vmux_client
-│   ├── vmux_command_mcp
 │   ├── vmux_mcp
 │   ├── vmux_remote
 │   └── vmux_service

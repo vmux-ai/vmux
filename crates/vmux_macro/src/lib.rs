@@ -110,21 +110,12 @@ pub fn derive_variant_names(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(CommandBar, attributes(menu))]
+#[proc_macro_derive(CommandBar, attributes(menu, shortcut, mcp))]
 pub fn derive_command_bar(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match impl_command_bar(input) {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
-    }
-}
-
-#[proc_macro_derive(CommandBarRequest, attributes(command_bar, shortcut))]
-pub fn derive_command_bar_request(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    match impl_command_bar_request(input) {
-        Ok(tokens) => tokens.into(),
-        Err(error) => error.to_compile_error().into(),
     }
 }
 
@@ -1161,62 +1152,49 @@ impl BindProps {
 
 fn impl_command_bar(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = &input.ident;
-    let Data::Enum(data) = &input.data else {
-        return Err(syn::Error::new_spanned(
+    match &input.data {
+        Data::Enum(data) => {
+            let first_variant = data.variants.first();
+            let is_leaf = first_variant
+                .map(|v| matches!(v.fields, Fields::Unit | Fields::Named(_)))
+                .unwrap_or(true);
+
+            if is_leaf {
+                impl_command_bar_leaf(ident, data)
+            } else {
+                impl_command_bar_root(ident, data)
+            }
+        }
+        Data::Struct(data) => impl_inferred_command_bar_request(ident, data, &input.attrs),
+        _ => Err(syn::Error::new_spanned(
             ident,
-            "CommandBar only supports enums",
-        ));
-    };
-
-    let first_variant = data.variants.first();
-    let is_leaf = first_variant
-        .map(|v| matches!(v.fields, Fields::Unit | Fields::Named(_)))
-        .unwrap_or(true);
-
-    if is_leaf {
-        impl_command_bar_leaf(ident, data)
-    } else {
-        impl_command_bar_root(ident, data)
+            "CommandBar supports enums and unit structs",
+        )),
     }
 }
 
-fn impl_command_bar_request(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
-    let ident = &input.ident;
-    let Data::Struct(data) = &input.data else {
-        return Err(syn::Error::new_spanned(
-            ident,
-            "CommandBarRequest only supports structs",
-        ));
-    };
+fn impl_inferred_command_bar_request(
+    ident: &syn::Ident,
+    data: &syn::DataStruct,
+    attrs: &[Attribute],
+) -> syn::Result<proc_macro2::TokenStream> {
     if !matches!(data.fields, Fields::Unit) {
         return Err(syn::Error::new_spanned(
             &data.fields,
-            "CommandBarRequest currently supports unit structs",
+            "CommandBar request structs must be unit structs",
         ));
     }
-
-    let props = CommandBarRequestProps::from_attrs(&input.attrs)?;
-    let bind_props = BindProps::from_attrs(&input.attrs)?;
+    let bind_props = BindProps::from_attrs(attrs)?;
+    let mcp_props = McpProps::from_attrs(attrs)?;
     if bind_props.expand.is_some()
         || !bind_props.extra_chords.is_empty()
         || !bind_props.direction_keys.is_empty()
     {
         return Err(syn::Error::new_spanned(
             ident,
-            "CommandBarRequest does not support expanded shortcuts",
+            "CommandBar request structs do not support expanded shortcuts",
         ));
     }
-
-    let id = props.id;
-    let label = props.label;
-    let group = props.group;
-    let hidden = props.hidden;
-    let accelerator = match props.accel {
-        Some(accel) => {
-            quote! { ::core::option::Option::Some(::std::string::String::from(#accel)) }
-        }
-        None => quote! { ::core::option::Option::None },
-    };
     let mut shortcuts = Vec::new();
     for scoped in bind_props.bindings {
         let shortcut = match scoped.binding {
@@ -1240,81 +1218,62 @@ fn impl_command_bar_request(input: DeriveInput) -> syn::Result<proc_macro2::Toke
             }
         });
     }
+    let mcp = if mcp_props.enabled {
+        let definition = if let Some(description) = mcp_props.description {
+            quote! {
+                definition.mcp(::vmux_command::CommandMcp::new(
+                    #description,
+                    ::vmux_command::InputSchema::object(),
+                ))
+            }
+        } else {
+            quote! { definition.expose_to_mcp() }
+        };
+        let definition = if mcp_props.agent {
+            quote! { #definition.allow_agent() }
+        } else {
+            definition
+        };
+        quote! {
+            definition = #definition;
+        }
+    } else {
+        quote! {}
+    };
 
     Ok(quote! {
-        impl ::vmux_command::RegisteredCommand for #ident {
-            fn definition() -> ::vmux_command::CommandDefinition {
-                ::vmux_command::CommandDefinition {
-                    id: ::std::string::String::from(#id),
-                    label: ::std::string::String::from(#label),
-                    group: ::std::string::String::from(#group),
-                    accelerator: #accelerator,
-                    hidden: #hidden,
-                    native_menu: true,
-                    shortcut_label: ::core::option::Option::None,
-                    shortcuts: ::std::vec![#(#shortcuts),*],
-                }
+        impl ::bevy::ecs::message::Message for #ident {}
+
+        impl #ident {
+            pub fn register(app: &mut ::bevy::app::App) {
+                ::vmux_command::CommandDefinition::register::<Self>(
+                    app,
+                    Self::definitions,
+                    Self::from_invocation,
+                );
             }
 
-            fn from_invocation(
+            pub fn definitions() -> ::std::vec::Vec<::vmux_command::CommandDefinition> {
+                let mut definition = ::vmux_command::CommandDefinition::inferred(
+                    module_path!(),
+                    stringify!(#ident),
+                );
+                definition.shortcuts = ::std::vec![#(#shortcuts),*];
+                #mcp
+                ::std::vec![definition]
+            }
+
+            pub fn from_invocation(
                 invocation: &::vmux_command::CommandInvocation,
             ) -> ::core::option::Option<Self> {
-                (invocation.id == #id).then_some(Self)
+                let definition = ::vmux_command::CommandDefinition::inferred(
+                    module_path!(),
+                    stringify!(#ident),
+                );
+                (invocation.id == definition.id).then_some(Self)
             }
         }
     })
-}
-
-struct CommandBarRequestProps {
-    id: String,
-    label: String,
-    group: String,
-    accel: Option<String>,
-    hidden: bool,
-}
-
-impl CommandBarRequestProps {
-    fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
-        let mut id = None;
-        let mut label = None;
-        let mut group = None;
-        let mut accel = None;
-        let mut hidden = false;
-        for attr in attrs {
-            if !attr.path().is_ident("command_bar") {
-                continue;
-            }
-            attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("id") {
-                    id = Some(meta.value()?.parse::<LitStr>()?.value());
-                } else if meta.path.is_ident("label") {
-                    label = Some(meta.value()?.parse::<LitStr>()?.value());
-                } else if meta.path.is_ident("group") {
-                    group = Some(meta.value()?.parse::<LitStr>()?.value());
-                } else if meta.path.is_ident("accel") {
-                    accel = Some(meta.value()?.parse::<LitStr>()?.value());
-                } else if meta.path.is_ident("hidden") {
-                    hidden = true;
-                } else {
-                    return Err(meta.error("unsupported command_bar property"));
-                }
-                Ok(())
-            })?;
-        }
-        Ok(Self {
-            id: id.ok_or_else(|| {
-                syn::Error::new(proc_macro2::Span::call_site(), "missing command_bar id")
-            })?,
-            label: label.ok_or_else(|| {
-                syn::Error::new(proc_macro2::Span::call_site(), "missing command_bar label")
-            })?,
-            group: group.ok_or_else(|| {
-                syn::Error::new(proc_macro2::Span::call_site(), "missing command_bar group")
-            })?,
-            accel,
-            hidden,
-        })
-    }
 }
 
 fn impl_command_bar_leaf(
@@ -1471,16 +1430,24 @@ fn impl_command_bar_root(
 }
 
 struct McpProps {
+    enabled: bool,
     description: Option<String>,
     skip: bool,
+    agent: bool,
 }
 
 impl McpProps {
     fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
+        let mut enabled = false;
         let mut description = None;
         let mut skip = false;
+        let mut agent = false;
         for attr in attrs {
             if !attr.path().is_ident("mcp") {
+                continue;
+            }
+            enabled = true;
+            if matches!(attr.meta, syn::Meta::Path(_)) {
                 continue;
             }
             attr.parse_nested_meta(|meta| {
@@ -1489,13 +1456,20 @@ impl McpProps {
                     description = Some(v.value());
                 } else if meta.path.is_ident("skip") {
                     skip = true;
+                } else if meta.path.is_ident("agent") {
+                    agent = true;
                 } else if meta.path.is_ident("enum_values") {
                     let _ = meta.value()?;
                 }
                 Ok(())
             })?;
         }
-        Ok(McpProps { description, skip })
+        Ok(McpProps {
+            enabled,
+            description,
+            skip,
+            agent,
+        })
     }
 }
 
@@ -1608,14 +1582,18 @@ fn impl_mcp_tool_leaf_fielded(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut entries = Vec::new();
     let mut call_arms = Vec::new();
+    let mut agent_arms = Vec::new();
 
     for variant in &data.variants {
         let mcp_props = McpProps::from_attrs(&variant.attrs)?;
         if mcp_props.skip {
             continue;
         }
+        let menu_props = MenuProps::from_attrs(&variant.attrs)?;
         let variant_ident = &variant.ident;
-        let tool_name = heck_variant_snake_case(&variant_ident.to_string());
+        let tool_name = menu_props
+            .id
+            .unwrap_or_else(|| heck_variant_snake_case(&variant_ident.to_string()));
         let advertised_name = tool_name.clone();
         let description = mcp_props.description.clone().ok_or_else(|| {
             syn::Error::new_spanned(
@@ -1623,9 +1601,11 @@ fn impl_mcp_tool_leaf_fielded(
                 "fielded McpTool variants require #[mcp(description = \"...\")]",
             )
         })?;
+        let agent = mcp_props.agent;
 
         let mut property_inserts = Vec::new();
         let mut required_strs = Vec::new();
+        let mut field_names = Vec::new();
         let mut field_extracts = Vec::new();
         let mut field_constructs = Vec::new();
 
@@ -1639,6 +1619,7 @@ fn impl_mcp_tool_leaf_fielded(
         for field in &fields.named {
             let field_ident = field.ident.as_ref().expect("named field has ident");
             let field_name = field_ident.to_string();
+            field_names.push(field_name.clone());
             let field_props = McpFieldProps::from_attrs(&field.attrs)?;
 
             let (effective_ty, is_optional) = if let Some(inner) = unwrap_option(&field.ty) {
@@ -1689,111 +1670,74 @@ fn impl_mcp_tool_leaf_fielded(
                 required_strs.push(field_name.clone());
             }
 
-            let extract = match kind {
-                "string" => {
-                    let extract = quote! {
-                        args.get(#field_name).and_then(|v| v.as_str()).map(::std::string::String::from)
-                    };
-                    if is_optional {
-                        quote! { let #field_ident: ::core::option::Option<::std::string::String> = #extract; }
-                    } else {
-                        quote! {
-                            let #field_ident: ::std::string::String = match #extract {
-                                ::core::option::Option::Some(v) => v,
-                                ::core::option::Option::None => {
-                                    return ::core::option::Option::Some(
-                                        ::core::result::Result::Err(format!("{} is required", #field_name))
-                                    );
-                                }
-                            };
-                        }
+            let extract = if kind == "json" {
+                if is_optional {
+                    quote! {
+                        let #field_ident: ::core::option::Option<::serde_json::Value> =
+                            args.get(#field_name).cloned();
+                    }
+                } else {
+                    quote! {
+                        let #field_ident: ::serde_json::Value = match args.get(#field_name) {
+                            ::core::option::Option::Some(value) => value.clone(),
+                            ::core::option::Option::None => {
+                                return ::core::option::Option::Some(
+                                    ::core::result::Result::Err(
+                                        ::std::format!("{} is required", #field_name),
+                                    ),
+                                );
+                            }
+                        };
                     }
                 }
-                "integer" => {
-                    let ty_ident = match &effective_ty {
-                        syn::Type::Path(p) => &p.path.segments.last().unwrap().ident,
-                        _ => unreachable!(),
-                    };
+            } else {
+                let ty = &effective_ty;
+                if is_optional {
+                    quote! {
+                        let #field_ident: ::core::option::Option<#ty> = match args.get(#field_name) {
+                            ::core::option::Option::Some(value) => {
+                                match ::serde_json::from_value::<#ty>(value.clone()) {
+                                    ::core::result::Result::Ok(value) => {
+                                        ::core::option::Option::Some(value)
+                                    }
+                                    ::core::result::Result::Err(error) => {
+                                        return ::core::option::Option::Some(
+                                            ::core::result::Result::Err(
+                                                ::std::format!("{}: {}", #field_name, error),
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                            ::core::option::Option::None => ::core::option::Option::None,
+                        };
+                    }
+                } else {
                     let extract = quote! {
-                        args.get(#field_name)
-                            .and_then(|v| v.as_i64())
-                            .and_then(|n| <#ty_ident as ::core::convert::TryFrom<i64>>::try_from(n).ok())
-                    };
-                    if is_optional {
-                        quote! { let #field_ident: ::core::option::Option<#ty_ident> = #extract; }
-                    } else {
-                        quote! {
-                            let #field_ident: #ty_ident = match #extract {
-                                ::core::option::Option::Some(v) => v,
+                        let #field_ident: #ty = match args.get(#field_name) {
+                            ::core::option::Option::Some(value) => {
+                                match ::serde_json::from_value::<#ty>(value.clone()) {
+                                    ::core::result::Result::Ok(value) => value,
+                                    ::core::result::Result::Err(error) => {
+                                        return ::core::option::Option::Some(
+                                            ::core::result::Result::Err(
+                                                ::std::format!("{}: {}", #field_name, error),
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
                                 ::core::option::Option::None => {
                                     return ::core::option::Option::Some(
-                                        ::core::result::Result::Err(format!("{} is required (integer)", #field_name))
+                                        ::core::result::Result::Err(
+                                            ::std::format!("{} is required", #field_name),
+                                        ),
                                     );
                                 }
-                            };
-                        }
-                    }
-                }
-                "boolean" => {
-                    let extract = quote! {
-                        args.get(#field_name).and_then(|v| v.as_bool())
+                        };
                     };
-                    if is_optional {
-                        quote! { let #field_ident: ::core::option::Option<bool> = #extract; }
-                    } else {
-                        quote! {
-                            let #field_ident: bool = match #extract {
-                                ::core::option::Option::Some(v) => v,
-                                ::core::option::Option::None => {
-                                    return ::core::option::Option::Some(
-                                        ::core::result::Result::Err(format!("{} is required (boolean)", #field_name))
-                                    );
-                                }
-                            };
-                        }
-                    }
+                    extract
                 }
-                "json" => {
-                    let extract = quote! {
-                        args.get(#field_name).cloned()
-                    };
-                    if is_optional {
-                        quote! { let #field_ident: ::core::option::Option<::serde_json::Value> = #extract; }
-                    } else {
-                        quote! {
-                            let #field_ident: ::serde_json::Value = match #extract {
-                                ::core::option::Option::Some(v) => v,
-                                ::core::option::Option::None => {
-                                    return ::core::option::Option::Some(
-                                        ::core::result::Result::Err(format!("{} is required", #field_name))
-                                    );
-                                }
-                            };
-                        }
-                    }
-                }
-                "enum_string" => {
-                    let ty = &effective_ty;
-                    let extract = quote! {
-                        args.get(#field_name)
-                            .and_then(|v| ::serde_json::from_value::<#ty>(v.clone()).ok())
-                    };
-                    if is_optional {
-                        quote! { let #field_ident: ::core::option::Option<#ty> = #extract; }
-                    } else {
-                        quote! {
-                            let #field_ident: #ty = match #extract {
-                                ::core::option::Option::Some(v) => v,
-                                ::core::option::Option::None => {
-                                    return ::core::option::Option::Some(
-                                        ::core::result::Result::Err(format!("{} is required", #field_name))
-                                    );
-                                }
-                            };
-                        }
-                    }
-                }
-                _ => unreachable!(),
             };
 
             field_extracts.push(extract);
@@ -1814,7 +1758,8 @@ fn impl_mcp_tool_leaf_fielded(
                 let schema = ::serde_json::json!({
                     "type": "object",
                     "properties": ::serde_json::Value::Object(properties),
-                    "required": #required_array
+                    "required": #required_array,
+                    "additionalProperties": false
                 });
                 (#advertised_name, #description, schema)
             })
@@ -1822,11 +1767,30 @@ fn impl_mcp_tool_leaf_fielded(
 
         call_arms.push(quote! {
             #tool_name => {
+                let ::serde_json::Value::Object(args) = args else {
+                    return ::core::option::Option::Some(
+                        ::core::result::Result::Err(
+                            ::std::format!("{} arguments must be an object", #tool_name),
+                        ),
+                    );
+                };
+                for field in args.keys() {
+                    if !matches!(field.as_str(), #(#field_names)|*) {
+                        return ::core::option::Option::Some(
+                            ::core::result::Result::Err(
+                                ::std::format!("{} has unknown argument {}", #tool_name, field),
+                            ),
+                        );
+                    }
+                }
                 #(#field_extracts)*
                 ::core::option::Option::Some(::core::result::Result::Ok(
                     #ident::#variant_ident { #(#field_constructs),* }
                 ))
             }
+        });
+        agent_arms.push(quote! {
+            #tool_name => ::core::option::Option::Some(#agent),
         });
     }
 
@@ -1849,6 +1813,13 @@ fn impl_mcp_tool_leaf_fielded(
                     _ => ::core::option::Option::None,
                 }
             }
+
+            pub fn allows_agent(id: &str) -> ::core::option::Option<bool> {
+                match id {
+                    #(#agent_arms)*
+                    _ => ::core::option::Option::None,
+                }
+            }
         }
     })
 }
@@ -1859,6 +1830,7 @@ fn impl_mcp_tool_leaf_unit(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut entries = Vec::new();
     let mut id_arms = Vec::new();
+    let mut agent_arms = Vec::new();
 
     for variant in &data.variants {
         let mcp_props = McpProps::from_attrs(&variant.attrs)?;
@@ -1876,6 +1848,7 @@ fn impl_mcp_tool_leaf_unit(
         let id_lit = id.as_str();
         let advertised_id = id.clone();
         let variant_ident = &variant.ident;
+        let agent = mcp_props.agent;
 
         let description = mcp_props
             .description
@@ -1891,11 +1864,15 @@ fn impl_mcp_tool_leaf_unit(
         entries.push(quote! {
             (#advertised_id, #description, ::serde_json::json!({
                 "type": "object",
-                "properties": {}
+                "properties": {},
+                "additionalProperties": false
             }))
         });
         id_arms.push(quote! {
             #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
+        });
+        agent_arms.push(quote! {
+            #id_lit => ::core::option::Option::Some(#agent),
         });
     }
 
@@ -1914,9 +1891,31 @@ fn impl_mcp_tool_leaf_unit(
 
             pub fn from_mcp_call(
                 name: &str,
-                _args: ::serde_json::Value,
+                args: ::serde_json::Value,
             ) -> ::core::option::Option<::core::result::Result<Self, ::std::string::String>> {
-                Self::from_mcp_id(name).map(::core::result::Result::Ok)
+                let command = Self::from_mcp_id(name)?;
+                let ::serde_json::Value::Object(arguments) = args else {
+                    return ::core::option::Option::Some(
+                        ::core::result::Result::Err(
+                            ::std::format!("{} arguments must be an object", name),
+                        ),
+                    );
+                };
+                if !arguments.is_empty() {
+                    return ::core::option::Option::Some(
+                        ::core::result::Result::Err(
+                            ::std::format!("{} does not accept arguments", name),
+                        ),
+                    );
+                }
+                ::core::option::Option::Some(::core::result::Result::Ok(command))
+            }
+
+            pub fn allows_agent(id: &str) -> ::core::option::Option<bool> {
+                match id {
+                    #(#agent_arms)*
+                    _ => ::core::option::Option::None,
+                }
             }
         }
     })
@@ -1929,6 +1928,7 @@ fn impl_mcp_tool_root(
     let mut extend_calls = Vec::new();
     let mut id_clauses = Vec::new();
     let mut call_clauses = Vec::new();
+    let mut agent_clauses = Vec::new();
 
     for variant in &data.variants {
         let mcp_props = McpProps::from_attrs(&variant.attrs)?;
@@ -1959,6 +1959,9 @@ fn impl_mcp_tool_root(
             <#inner_ty>::from_mcp_call(name, args.clone())
                 .map(|r| r.map(#ident::#variant_ident))
         });
+        agent_clauses.push(quote! {
+            <#inner_ty>::allows_agent(id)
+        });
     }
 
     let from_id_body = if id_clauses.is_empty() {
@@ -1981,6 +1984,17 @@ fn impl_mcp_tool_root(
         quote! { #chained }
     };
 
+    let allows_agent_body = if agent_clauses.is_empty() {
+        quote! { ::core::option::Option::None }
+    } else {
+        let first = &agent_clauses[0];
+        let chained = agent_clauses[1..].iter().fold(
+            quote! { #first },
+            |acc, clause| quote! { #acc.or_else(|| #clause) },
+        );
+        quote! { #chained }
+    };
+
     Ok(quote! {
         impl #ident {
             pub fn mcp_tool_entries() -> ::std::vec::Vec<(&'static str, &'static str, ::serde_json::Value)> {
@@ -1998,6 +2012,10 @@ fn impl_mcp_tool_root(
                 args: ::serde_json::Value,
             ) -> ::core::option::Option<::core::result::Result<Self, ::std::string::String>> {
                 #from_call_body
+            }
+
+            pub fn allows_agent(id: &str) -> ::core::option::Option<bool> {
+                #allows_agent_body
             }
         }
     })
