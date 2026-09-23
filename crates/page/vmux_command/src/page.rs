@@ -23,7 +23,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, McpQuery, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
-use vmux_ui::hooks::{MenuDirection, move_selection, send, use_key_claim, use_listener};
+use vmux_ui::hooks::{MenuDirection, move_selection, send, use_key_handler, use_listener};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::launcher::palette::{
@@ -60,10 +60,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mcp = use_mcp_connections();
     let ime = use_ime_guard();
 
-    let keys = use_key_claim(Unclaimed::Types, move || match surface {
-        PaletteSurface::Modal => vec!["command-bar".to_string()],
-        PaletteSurface::Start => Vec::new(),
-    });
     use_drop(move || {
         let _ = send(&PageKeyContext { keys: Vec::new() });
     });
@@ -180,30 +176,41 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         signals,
         on_dismiss,
     };
-    let _key_listener = use_listener::<CommandBarKey, _>(move |key| {
-        let query = signals.query.peek().clone();
-        if let Some(filter) = McpQuery::read(&query) {
-            let entries = mcp.filtered(filter);
-            match key {
-                CommandBarKey::Next => {
-                    let current = *signals.selected.peek();
-                    signals.highlight(move_selection(current, entries.len(), MenuDirection::Next));
+    let keys = use_key_handler::<CommandBarKey, _>(
+        Unclaimed::Types,
+        move || match surface {
+            PaletteSurface::Modal => vec!["command-bar".to_string()],
+            PaletteSurface::Start => Vec::new(),
+        },
+        move |key| {
+            let query = signals.query.peek().clone();
+            if let Some(filter) = McpQuery::read(&query) {
+                let entries = mcp.filtered(filter);
+                match key {
+                    CommandBarKey::Next => {
+                        let current = *signals.selected.peek();
+                        signals.highlight(move_selection(
+                            current,
+                            entries.len(),
+                            MenuDirection::Next,
+                        ));
+                    }
+                    CommandBarKey::Previous => {
+                        let current = *signals.selected.peek();
+                        signals.highlight(move_selection(
+                            current,
+                            entries.len(),
+                            MenuDirection::Previous,
+                        ));
+                    }
+                    CommandBarKey::Complete => {}
+                    CommandBarKey::Dismiss => signals.retype(String::new()),
                 }
-                CommandBarKey::Previous => {
-                    let current = *signals.selected.peek();
-                    signals.highlight(move_selection(
-                        current,
-                        entries.len(),
-                        MenuDirection::Previous,
-                    ));
-                }
-                CommandBarKey::Complete => {}
-                CommandBarKey::Dismiss => signals.retype(String::new()),
+                return;
             }
-            return;
-        }
-        palette_keys.apply(key);
-    });
+            palette_keys.apply(key);
+        },
+    );
 
     let state_val = state();
     let palette = std::rc::Rc::new(PaletteState::from_rows(
