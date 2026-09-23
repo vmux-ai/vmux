@@ -19,10 +19,7 @@ use crate::{
 
 #[cfg(test)]
 use super::pane::PaneSplitDirection;
-use super::pane::{
-    Pane, PaneSplit, first_leaf_descendant, first_stack_in_pane, leaf_pane_bundle,
-    set_pane_split_direction,
-};
+use super::pane::{Pane, PaneSplit, first_leaf_descendant, first_stack_in_pane, leaf_pane_bundle};
 
 pub(super) struct ClosePlugin;
 
@@ -332,7 +329,7 @@ fn close_panes(
             commands.entity(sibling).remove::<ChildOf>();
             commands.queue(move |world: &mut World| {
                 world.despawn(sibling);
-                set_pane_split_direction(world, parent, direction);
+                PaneSplit::set_direction(world, parent, direction);
             });
         } else {
             new_active_pane = parent;
