@@ -9,9 +9,9 @@ use crate::host::keymap::{EditorKeymap, KeymapConfig};
 use crate::host::note::{NoteRevealLine, NoteSent};
 use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport};
 
-pub(crate) struct EditorStatusPlugin;
+pub(crate) struct StatusPlugin;
 
-impl Plugin for EditorStatusPlugin {
+impl Plugin for StatusPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SharedFileViewMode>()
             .add_message::<vmux_setting::SettingsWriteRequest>()

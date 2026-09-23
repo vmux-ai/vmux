@@ -8,9 +8,9 @@ use vmux_core::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, Explore
 use super::{ExplorerState, ExplorerTreeDirty, ExplorerTrees, OpenEditorsDirty};
 use crate::host::editor::FileView;
 
-pub(super) struct ExplorerMutationPlugin;
+pub(super) struct MutationPlugin;
 
-impl Plugin for ExplorerMutationPlugin {
+impl Plugin for MutationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
             ExplorerCreate,

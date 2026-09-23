@@ -76,7 +76,7 @@ impl Plugin for LayoutPlugin {
                 NativeOpenPlugin,
                 BookmarkPlugin,
                 LayoutCefPlugin,
-                crate::workspace_snapshot_publish::WorkspaceSnapshotPlugin,
+                crate::workspace_snapshot_publish::SnapshotPlugin,
                 crate::overlay_adopt::OverlayAdoptPlugin,
                 crate::pending_stack::PendingStackPlugin,
             ));

@@ -8,9 +8,9 @@ use crate::command_bar::project_files::{MAX_RESULTS, ProjectCompletions, Project
 use crate::event::{PathCompleteRequest, PathEntry};
 use crate::snapshot::{CommandBarUiState, WriteCommandBarSnapshots};
 
-pub(super) struct CommandBarCompletionPlugin;
+pub(super) struct CompletionPlugin;
 
-impl Plugin for CommandBarCompletionPlugin {
+impl Plugin for CompletionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(PathCompleteRequest,)>::default())
             .init_resource::<ProjectIndex>()

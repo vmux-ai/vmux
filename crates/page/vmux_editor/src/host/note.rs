@@ -5,9 +5,9 @@ use vmux_core::event::{FileNoteEvent, FileViewMode, NoteBlock};
 use crate::host::editor::{Editor, FileView};
 use crate::host::status::{FileInitialMetaSent, SharedFileViewMode};
 
-pub(crate) struct EditorNotePlugin;
+pub(crate) struct NotePlugin;
 
-impl Plugin for EditorNotePlugin {
+impl Plugin for NotePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,

@@ -3,9 +3,9 @@ use crate::{AppCommand, CommandIssued, ReadAppCommands};
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 
-pub(crate) struct CommandBarKeyPlugin;
+pub(crate) struct KeyPlugin;
 
-impl Plugin for CommandBarKeyPlugin {
+impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, echo_key_command.in_set(ReadAppCommands));
     }
@@ -49,7 +49,7 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(CommandBarKeyPlugin)
+                .add_plugins(KeyPlugin)
                 .add_message::<CommandIssued>()
                 .init_resource::<Echoed>()
                 .add_observer(Echoed::record);

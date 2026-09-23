@@ -7,9 +7,9 @@ use super::file_lifecycle::{SelfWrites, canon};
 use crate::edit::EditCommand;
 use crate::lsp::workspace_edit::WorkspaceEditPlan;
 
-pub(super) struct EditorWorkspaceEditPlugin;
+pub(super) struct WorkspaceEditPlugin;
 
-impl Plugin for EditorWorkspaceEditPlugin {
+impl Plugin for WorkspaceEditPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<crate::lsp::manager::LspRequestedEdit>()
             .add_systems(
@@ -224,7 +224,7 @@ mod tests {
                 MinimalPlugins,
                 crate::lsp::server_request::ServerRequestPlugin,
                 super::super::editing::EditExecutionPlugin,
-                EditorWorkspaceEditPlugin,
+                WorkspaceEditPlugin,
             ));
             app.world_mut().insert_non_send(ClipboardHandle(None));
             app.world_mut().insert_non_send(SelfWrites::default());

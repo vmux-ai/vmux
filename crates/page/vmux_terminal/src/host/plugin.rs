@@ -57,7 +57,7 @@ impl Plugin for TerminalPlugin {
                 TerminalServicePlugin,
                 TerminalInputPlugin,
                 crate::processes_monitor::ProcessesMonitorPlugin,
-                crate::snapshot_updater::TerminalSnapshotPlugin,
+                crate::snapshot_updater::SnapshotPlugin,
                 TerminalLoadingPlugin,
                 crate::theme::TerminalThemePlugin,
             ));

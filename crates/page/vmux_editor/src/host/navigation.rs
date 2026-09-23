@@ -15,9 +15,9 @@ use crate::host::status::FileInitialMetaSent;
 use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport};
 use crate::media::FileMedia;
 
-pub(crate) struct EditorNavigationPlugin;
+pub(crate) struct NavigationPlugin;
 
-impl Plugin for EditorNavigationPlugin {
+impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<crate::lsp::manager::LspGoto>()
             .add_observer(on_file_open)
@@ -366,7 +366,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<crate::lsp::manager::LspGoto>()
-                .add_plugins(EditorNavigationPlugin)
+                .add_plugins(NavigationPlugin)
                 .init_resource::<Emitted>()
                 .add_observer(
                     |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {

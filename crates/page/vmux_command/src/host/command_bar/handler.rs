@@ -43,9 +43,9 @@ use vmux_flex::prelude::*;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
-pub(crate) struct CommandBarInputPlugin;
+pub(crate) struct InputPlugin;
 
-impl Plugin for CommandBarInputPlugin {
+impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingLaunch>()
             .add_message::<vmux_core::ContributedCommandChosen>()
@@ -1807,7 +1807,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(CommandBarInputPlugin)
+            .add_plugins(InputPlugin)
             .add_message::<TerminalSpawnRequest>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
@@ -1909,7 +1909,7 @@ mod tests {
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(CommandBarInputPlugin);
+            .add_plugins(InputPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let mut update = schedules.remove(Update).unwrap();

@@ -5,9 +5,9 @@ use vmux_core::event::OutlineEvent;
 use super::OutlineDirty;
 use crate::host::editor::{Editor, FileView};
 
-pub(super) struct ExplorerOutlinePlugin;
+pub(super) struct OutlinePlugin;
 
-impl Plugin for ExplorerOutlinePlugin {
+impl Plugin for OutlinePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, (emit_markdown_outline, clear_on_file_change));
     }

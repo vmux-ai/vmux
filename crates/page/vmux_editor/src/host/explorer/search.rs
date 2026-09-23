@@ -11,9 +11,9 @@ use crate::host::editor::FileView;
 use crate::host::navigation::PendingGoto;
 use crate::host::viewport::FileViewport;
 
-pub(super) struct ExplorerSearchPlugin;
+pub(super) struct SearchPlugin;
 
-impl Plugin for ExplorerSearchPlugin {
+impl Plugin for SearchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingGlobalSearch>()
             .add_plugins(UiEventPlugin::<(ExplorerGoto, ExplorerSearchOpen)>::default())
@@ -177,13 +177,13 @@ fn on_explorer_search_open(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::EditorContractPlugin;
+    use crate::contract::ContractPlugin;
     use bevy::ecs::message::Messages;
 
     #[test]
     fn global_search_opens_only_the_target_stack_explorer() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, EditorContractPlugin, ExplorerSearchPlugin))
+        app.add_plugins((MinimalPlugins, ContractPlugin, SearchPlugin))
             .init_resource::<BinIpcEventRawBuffer>()
             .insert_resource(ExplorerPanelDefaults {
                 default_visible: false,
@@ -249,7 +249,7 @@ mod tests {
         use crate::lsp::manager::LspGoto;
 
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, ExplorerSearchPlugin))
+        app.add_plugins((MinimalPlugins, SearchPlugin))
             .add_message::<LspGoto>();
         let entity = app
             .world_mut()

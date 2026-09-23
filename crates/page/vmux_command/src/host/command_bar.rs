@@ -16,11 +16,11 @@ pub struct CommandBarPlugin;
 impl Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            completion::CommandBarCompletionPlugin,
-            handler::CommandBarInputPlugin,
-            key::CommandBarKeyPlugin,
-            panel::CommandBarPanelPlugin,
-            wake::CommandBarWakePlugin,
+            completion::CompletionPlugin,
+            handler::InputPlugin,
+            key::KeyPlugin,
+            panel::PanelPlugin,
+            wake::WakePlugin,
         ));
     }
 }

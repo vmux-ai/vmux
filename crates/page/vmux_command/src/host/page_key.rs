@@ -7,9 +7,9 @@ use crate::command::AppCommand;
 use crate::issued::CommandIssuer;
 use crate::shortcut::{KeyCombo, KeyContext, Keymap};
 
-pub struct PageKeyPlugin;
+pub struct KeyPlugin;
 
-impl Plugin for PageKeyPlugin {
+impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(resolve_page_key);
     }
@@ -92,7 +92,7 @@ mod tests {
 
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(PageKeyPlugin)
+                .add_plugins(KeyPlugin)
                 .add_message::<AppCommand>()
                 .add_message::<CommandIssued>()
                 .insert_resource(keymap);

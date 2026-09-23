@@ -2,9 +2,9 @@ use bevy::prelude::*;
 
 use crate::{FileViewModeRequest, GlobalSearchRequest};
 
-pub struct EditorContractPlugin;
+pub struct ContractPlugin;
 
-impl Plugin for EditorContractPlugin {
+impl Plugin for ContractPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FileViewModeRequest>()
             .add_message::<GlobalSearchRequest>();

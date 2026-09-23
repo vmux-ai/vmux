@@ -7,9 +7,9 @@ use crate::edit::EditCommand;
 use crate::host::editing::EditRequest;
 use crate::host::editor::Editor;
 
-pub(super) struct EditorShapePlugin;
+pub(super) struct ShapePlugin;
 
-impl Plugin for EditorShapePlugin {
+impl Plugin for ShapePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(FileShapeSet,)>::default())
             .add_observer(on_file_shape_set);

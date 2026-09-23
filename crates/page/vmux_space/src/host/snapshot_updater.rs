@@ -6,9 +6,9 @@ use vmux_layout::space::{Space, SpaceId};
 
 use crate::event::SPACES_PAGE_URL;
 
-pub struct SpaceSnapshotPlugin;
+pub struct SnapshotPlugin;
 
-impl Plugin for SpaceSnapshotPlugin {
+impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,

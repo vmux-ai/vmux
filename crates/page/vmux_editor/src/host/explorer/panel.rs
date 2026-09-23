@@ -8,9 +8,9 @@ use super::{
 };
 use crate::host::editor::FileView;
 
-pub(super) struct ExplorerPanelPlugin;
+pub(super) struct PanelPlugin;
 
-impl Plugin for ExplorerPanelPlugin {
+impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ExplorerPanelDefaults {
             default_visible: false,

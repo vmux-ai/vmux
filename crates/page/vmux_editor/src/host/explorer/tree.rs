@@ -114,9 +114,9 @@ struct ExplorerDirLoadTask {
 
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
 
-pub(super) struct ExplorerTreePlugin;
+pub(super) struct TreePlugin;
 
-impl Plugin for ExplorerTreePlugin {
+impl Plugin for TreePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ExplorerTrees>()
             .add_systems(

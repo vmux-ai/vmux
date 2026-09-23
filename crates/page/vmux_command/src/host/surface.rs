@@ -4,9 +4,9 @@ use vmux_core::overlay::WindowOverlay;
 use crate::bundle::CommandBar;
 use vmux_flex::prelude::*;
 
-pub(crate) struct CommandBarSurfacePlugin;
+pub(crate) struct SurfacePlugin;
 
-impl Plugin for CommandBarSurfacePlugin {
+impl Plugin for SurfacePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_command_bar_surface);
     }

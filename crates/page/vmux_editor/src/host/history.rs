@@ -4,9 +4,9 @@ use vmux_core::PageMetadata;
 use crate::host::editor::FileView;
 use crate::host::viewport::FileViewport;
 
-pub(crate) struct EditorHistoryPlugin;
+pub(crate) struct HistoryPlugin;
 
-impl Plugin for EditorHistoryPlugin {
+impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
@@ -72,8 +72,8 @@ mod tests {
     use vmux_core::host::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
     use vmux_core::page_open::PageOpenTask;
 
-    use crate::host::navigation::EditorNavigationPlugin;
-    use crate::host::page_open::EditorPageOpenPlugin;
+    use crate::host::navigation::NavigationPlugin;
+    use crate::host::page_open::PageOpenPlugin;
 
     struct Editor {
         app: App,
@@ -87,9 +87,9 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(vmux_core::CorePlugin)
-                .add_plugins(EditorNavigationPlugin)
-                .add_plugins(EditorHistoryPlugin)
-                .add_plugins(EditorPageOpenPlugin);
+                .add_plugins(NavigationPlugin)
+                .add_plugins(HistoryPlugin)
+                .add_plugins(PageOpenPlugin);
             app.world_mut()
                 .insert_resource(crate::lsp::manager::LspManager::new(
                     crate::lsp::LspOutbox::default(),

@@ -5,9 +5,9 @@ use crate::CommandBar;
 use crate::event::CommandBarPanelRequest;
 use vmux_core::overlay::OverlayShownInline;
 
-pub struct CommandBarPanelPlugin;
+pub struct PanelPlugin;
 
-impl Plugin for CommandBarPanelPlugin {
+impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(CommandBarPanelRequest,)>::default())
             .add_observer(on_command_bar_panel_active)

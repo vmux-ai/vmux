@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use vmux_core::agent::AgentKind;
 use vmux_core::page::PageManifest;
 
-pub struct CommandBarSnapshotPlugin;
+pub struct UiStatePlugin;
 
-impl Plugin for CommandBarSnapshotPlugin {
+impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CommandBarUiState>()
             .add_systems(Startup, update_pages_snapshot);

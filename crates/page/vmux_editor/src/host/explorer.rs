@@ -20,13 +20,13 @@ mod tree;
 #[cfg(test)]
 mod tests;
 
-use mutation::ExplorerMutationPlugin;
-use outline::ExplorerOutlinePlugin;
-use panel::ExplorerPanelPlugin;
+use mutation::MutationPlugin;
+use outline::OutlinePlugin;
+use panel::PanelPlugin;
 pub use panel::StackExplorerVisibility;
-use search::ExplorerSearchPlugin;
 pub use search::GlobalSearchRequest;
-use tree::ExplorerTreePlugin;
+use search::SearchPlugin;
+use tree::TreePlugin;
 
 #[derive(Component)]
 pub(super) struct OutlineDirty;
@@ -92,19 +92,19 @@ impl ExplorerTrees {
     }
 }
 
-pub(super) struct ExplorerTabsPlugin;
+pub(super) struct TabsPlugin;
 
-pub(super) struct EditorExplorerPlugin;
+pub(super) struct ExplorerPlugin;
 
-impl Plugin for EditorExplorerPlugin {
+impl Plugin for ExplorerPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            ExplorerTreePlugin,
-            ExplorerPanelPlugin,
-            ExplorerMutationPlugin,
-            ExplorerOutlinePlugin,
-            ExplorerSearchPlugin,
-            ExplorerTabsPlugin,
+            TreePlugin,
+            PanelPlugin,
+            MutationPlugin,
+            OutlinePlugin,
+            SearchPlugin,
+            TabsPlugin,
         ))
         .add_plugins(UiEventPlugin::<(
             ExplorerTreeToggle,
