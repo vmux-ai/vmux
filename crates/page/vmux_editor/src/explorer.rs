@@ -5,7 +5,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use crate::page_model::merge_tree_motion_rows;
-use crate::ui_state::use_file_ui_events;
+use crate::ui_state::use_file_ui;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
@@ -948,10 +948,18 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
     let mut query = search.query;
     let ime = use_ime_guard();
 
-    use_file_ui_events::<ExplorerSearchEvent, _>(move |event| {
+    let search_event = use_file_ui::<ExplorerSearchEvent>();
+    use_effect(move || {
+        let Some(event) = search_event() else {
+            return;
+        };
         search.arrived(event);
     });
-    use_file_ui_events::<ExplorerFocusEvent, _>(move |event| {
+    let focus_event = use_file_ui::<ExplorerFocusEvent>();
+    use_effect(move || {
+        let Some(event) = focus_event() else {
+            return;
+        };
         search.showing(&event.path);
     });
 
@@ -1308,7 +1316,11 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
         }
     });
 
-    use_file_ui_events::<ExplorerTreeEvent, _>(move |e| {
+    let tree_event = use_file_ui::<ExplorerTreeEvent>();
+    use_effect(move || {
+        let Some(e) = tree_event() else {
+            return;
+        };
         root_name.set(e.root_name);
         root_path.set(e.root_path);
         current_path.set(e.current_path);
@@ -1319,7 +1331,11 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             schedule_tree_focus(e.focus_path, focus_generation, ExplorerReveal::Followed);
         }
     });
-    use_file_ui_events::<ExplorerFocusEvent, _>(move |e| {
+    let focus_event = use_file_ui::<ExplorerFocusEvent>();
+    use_effect(move || {
+        let Some(e) = focus_event() else {
+            return;
+        };
         if current_path() != e.path {
             current_path.set(e.path.clone());
         }
@@ -1328,13 +1344,25 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             schedule_tree_focus(e.path, focus_generation, e.reveal);
         }
     });
-    use_file_ui_events::<OpenEditorsEvent, _>(move |e| {
+    let editors_event = use_file_ui::<OpenEditorsEvent>();
+    use_effect(move || {
+        let Some(e) = editors_event() else {
+            return;
+        };
         open_editors.set(e.items);
     });
-    use_file_ui_events::<OutlineEvent, _>(move |e| {
+    let outline_event = use_file_ui::<OutlineEvent>();
+    use_effect(move || {
+        let Some(e) = outline_event() else {
+            return;
+        };
         outline.set(e.items);
     });
-    use_file_ui_events::<ExplorerFsResult, _>(move |e| {
+    let fs_result = use_file_ui::<ExplorerFsResult>();
+    use_effect(move || {
+        let Some(e) = fs_result() else {
+            return;
+        };
         if e.ok && !e.open_path.is_empty() {
             open_file(e.open_path);
         }
