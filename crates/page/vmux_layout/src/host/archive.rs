@@ -7,7 +7,6 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, StackCommand};
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
@@ -15,12 +14,15 @@ use vmux_core::{
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, now_millis,
 };
 
+use super::command::LayoutRequestSet;
 use crate::event::TERMINAL_PAGE_URL;
 use crate::pane::{
     Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, split_root_bundle,
 };
 use crate::settings::LayoutSettings;
 use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
+#[cfg(test)]
+use crate::stack::StackRequest;
 use crate::stack::{
     ActiveTabParam, CloseStackReason, CloseStackRequest, CloseStackSet, Stack, StackCommandSet,
     stack_bundle,
@@ -31,11 +33,15 @@ use crate::tab::{
 use crate::window::spawn_tab_scaffold_in_space;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReopenClosedPage;
+
 pub struct ArchivePlugin;
 
 impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PageArchiveRequest>()
+            .add_message::<ReopenClosedPage>()
             .add_systems(Update, (capture_archived_pages, maintain_archive))
             .add_systems(
                 Update,
@@ -45,7 +51,7 @@ impl Plugin for ArchivePlugin {
                         .before(CloseStackSet),
                     handle_reopen_closed_page,
                 )
-                    .in_set(ReadAppCommands),
+                    .in_set(LayoutRequestSet::Handle),
             );
     }
 }
@@ -487,7 +493,7 @@ struct ReopenEntry {
 
 #[allow(clippy::too_many_arguments)]
 fn handle_reopen_closed_page(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<ReopenClosedPage>,
     archived: Query<(Entity, &ArchivedPage, Option<&ArchivedTabPage>)>,
     positions: Query<&ArchivedPagePosition>,
     spaces: Query<(Entity, &SpaceId), With<Space>>,
@@ -500,13 +506,8 @@ fn handle_reopen_closed_page(
     mut commands: Commands,
 ) {
     let mut reopen = false;
-    for cmd in reader.read() {
-        if matches!(
-            cmd,
-            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Reopen))
-        ) {
-            reopen = true;
-        }
+    for _ in reader.read() {
+        reopen = true;
     }
     if !reopen {
         return;
@@ -1301,7 +1302,6 @@ mod tests {
     fn archive_app() -> App {
         let mut app = App::new();
         app.add_plugins(ArchivePlugin)
-            .add_message::<AppCommand>()
             .add_message::<CloseStackRequest>()
             .init_resource::<crate::space::ActiveSpaceEntity>()
             .init_resource::<LayoutSettings>();
@@ -1473,7 +1473,6 @@ mod tests {
     fn close_pipeline_app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, crate::stack::StackPlugin, ArchivePlugin))
-            .add_message::<AppCommand>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<crate::pane::PendingCursorWarp>()
@@ -1566,10 +1565,8 @@ mod tests {
         let (_inactive, active) = spawn_inactive_and_active_stacks(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Close);
         app.update();
         app.update();
 
@@ -1782,7 +1779,7 @@ mod tests {
 
     fn reopen_app() -> App {
         let mut app = App::new();
-        app.add_message::<AppCommand>()
+        app.add_message::<ReopenClosedPage>()
             .add_message::<PageOpenRequest>()
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<TerminalSpawnRequest>()
@@ -1796,10 +1793,8 @@ mod tests {
 
     fn dispatch_reopen(app: &mut App) {
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Reopen,
-            )));
+            .resource_mut::<Messages<ReopenClosedPage>>()
+            .write(ReopenClosedPage);
         app.update();
     }
 
@@ -1830,7 +1825,7 @@ mod tests {
     #[test]
     fn reopen_terminal_dispatches_after_target_stack_materializes() {
         let mut app = App::new();
-        app.add_message::<AppCommand>()
+        app.add_message::<ReopenClosedPage>()
             .add_message::<PageOpenRequest>()
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<TerminalSpawnRequest>()

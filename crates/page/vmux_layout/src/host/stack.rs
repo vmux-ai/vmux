@@ -10,14 +10,12 @@ use bevy::{
     window::{ClosingWindow, PrimaryWindow},
 };
 use moonshine_save::prelude::*;
-use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, ReadAppCommands, ServiceCommand,
-    StackCommand,
-};
 pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
+
+use super::{command::LayoutRequestSet, target::SiblingDirection};
 
 pub struct StackPlugin;
 
@@ -25,24 +23,22 @@ impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Stack>()
             .init_resource::<FocusedStack>()
+            .add_message::<StackRequest>()
             .add_message::<CloseStackRequest>()
             .add_systems(
                 Update,
                 (
-                    handle_stack_commands
-                        .in_set(ReadAppCommands)
-                        .in_set(StackCommandSet),
-                    handle_close_stack_requests
-                        .in_set(ReadAppCommands)
-                        .in_set(CloseStackSet),
+                    handle_stack_requests.in_set(StackCommandSet),
+                    handle_close_stack_requests.in_set(CloseStackSet),
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(LayoutRequestSet::Handle),
             )
             .add_systems(
                 Update,
                 compute_focused_stack
                     .in_set(ComputeFocusSet)
-                    .after(ReadAppCommands)
+                    .after(LayoutRequestSet::Handle)
                     .after(crate::active::ensure_active_tab)
                     .after(crate::active::ensure_active_stack)
                     .after(crate::active::ensure_active_branch),
@@ -52,6 +48,15 @@ impl Plugin for StackPlugin {
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CloseStackSet;
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub enum StackRequest {
+    Open { url: Option<String> },
+    OpenServices,
+    Close,
+    Focus(SiblingDirection),
+    Move(SiblingDirection),
+}
 
 #[derive(Resource, Default)]
 pub struct FocusedStack {
@@ -415,8 +420,8 @@ pub fn stack_bundle() -> impl Bundle {
     )
 }
 
-fn handle_stack_commands(
-    mut reader: MessageReader<AppCommand>,
+fn handle_stack_requests(
+    mut reader: MessageReader<StackRequest>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -430,22 +435,7 @@ fn handle_stack_commands(
     mut commands: Commands,
     mut pending_cursor_warp: ResMut<PendingCursorWarp>,
 ) {
-    for cmd in reader.read() {
-        enum Dispatch {
-            Stack(StackCommand),
-            NewStackServices,
-            NewStackUrl(Option<String>),
-        }
-
-        let dispatch = match cmd {
-            AppCommand::Layout(LayoutCommand::Stack(t)) => Dispatch::Stack(*t),
-            AppCommand::Service(ServiceCommand::Open) => Dispatch::NewStackServices,
-            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack { url })) => {
-                Dispatch::NewStackUrl(url.clone())
-            }
-            _ => continue,
-        };
-
+    for request in reader.read() {
         let (active_tab, active_pane, active_stack) = focused_stack(
             active_tab_param.get(),
             &all_children,
@@ -455,8 +445,8 @@ fn handle_stack_commands(
             &stack_ts,
         );
 
-        match dispatch {
-            Dispatch::NewStackServices => {
+        match request {
+            StackRequest::OpenServices => {
                 let Some(pane) = active_pane else {
                     continue;
                 };
@@ -475,11 +465,11 @@ fn handle_stack_commands(
                     request_id: None,
                 });
             }
-            Dispatch::NewStackUrl(override_url) => {
+            StackRequest::Open { url } => {
                 let Some(pane) = active_pane else {
                     continue;
                 };
-                let url = override_url.filter(|u| !u.is_empty()).unwrap_or_else(|| {
+                let url = url.clone().filter(|u| !u.is_empty()).unwrap_or_else(|| {
                     vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref())
                 });
                 let stack = commands
@@ -491,13 +481,13 @@ fn handle_stack_commands(
                     request_id: None,
                 });
             }
-            Dispatch::Stack(StackCommand::Close) => {
+            StackRequest::Close => {
                 let Some(active) = active_stack else {
                     continue;
                 };
                 close_stack_requests.write(CloseStackRequest::by_user(active));
             }
-            Dispatch::Stack(sc @ (StackCommand::Next | StackCommand::Previous)) => {
+            StackRequest::Focus(direction) => {
                 let Some(active_tab_e) = active_tab else {
                     continue;
                 };
@@ -519,7 +509,11 @@ fn handle_stack_commands(
                 let Some(current) = flat.iter().position(|&(_, t)| Some(t) == active_stack) else {
                     continue;
                 };
-                let delta: i32 = if sc == StackCommand::Next { 1 } else { -1 };
+                let delta: i32 = if *direction == SiblingDirection::Next {
+                    1
+                } else {
+                    -1
+                };
                 let n = flat.len() as i32;
                 let idx = (current as i32 + delta).rem_euclid(n) as usize;
                 let (target_pane, target_stack) = flat[idx];
@@ -529,10 +523,7 @@ fn handle_stack_commands(
                     pending_cursor_warp.target = Some(target_pane);
                 }
             }
-            Dispatch::Stack(
-                StackCommand::Reopen | StackCommand::Duplicate | StackCommand::MoveToPane,
-            ) => {}
-            Dispatch::Stack(sc @ (StackCommand::SwapPrev | StackCommand::SwapNext)) => {
+            StackRequest::Move(direction) => {
                 let Some(pane) = active_pane else { continue };
                 let Some(stack) = active_stack else { continue };
                 let Ok(children) = pane_children.get(pane) else {
@@ -547,7 +538,7 @@ fn handle_stack_commands(
                 let Some(active_idx) = find_kind_index(stack, children, &kind_positions) else {
                     continue;
                 };
-                let pair = if sc == StackCommand::SwapPrev {
+                let pair = if *direction == SiblingDirection::Previous {
                     resolve_prev(active_idx)
                 } else {
                     resolve_next(active_idx, kind_positions.len())
@@ -635,7 +626,6 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use bevy::ecs::relationship::Relationship;
-    use vmux_command::{CommandPlugin, WriteAppCommands};
 
     fn test_settings() -> LayoutSettings {
         LayoutSettings {
@@ -885,7 +875,8 @@ mod tests {
     #[test]
     fn closing_last_stack_preloads_fresh_tab_without_workspace_state() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins(MinimalPlugins)
+            .add_message::<StackRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
@@ -898,7 +889,7 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    handle_stack_commands.in_set(WriteAppCommands),
+                    handle_stack_requests,
                     handle_close_stack_requests,
                     crate::archive::handle_close_tab_requests,
                     crate::window::spawn_requested_tab_layouts,
@@ -955,10 +946,8 @@ mod tests {
             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Close);
 
         app.update();
 
@@ -1031,7 +1020,8 @@ mod tests {
     #[test]
     fn closing_last_stack_in_tab_closes_the_tab_when_another_tab_exists() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins(MinimalPlugins)
+            .add_message::<StackRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
@@ -1043,7 +1033,7 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    handle_stack_commands.in_set(WriteAppCommands),
+                    handle_stack_requests,
                     handle_close_stack_requests,
                     crate::archive::handle_close_tab_requests,
                 )
@@ -1080,10 +1070,8 @@ mod tests {
             .id();
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Close);
 
         app.update();
 
@@ -1096,7 +1084,8 @@ mod tests {
     #[test]
     fn closing_last_stack_in_active_rightmost_tab_activates_left_neighbor_not_first() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins(MinimalPlugins)
+            .add_message::<StackRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
@@ -1108,7 +1097,7 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    handle_stack_commands.in_set(WriteAppCommands),
+                    handle_stack_requests,
                     handle_close_stack_requests,
                     crate::archive::handle_close_tab_requests,
                 )
@@ -1135,10 +1124,8 @@ mod tests {
         let active_rightmost = make_tab(&mut app, 3);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Close);
 
         app.update();
 
@@ -1155,7 +1142,8 @@ mod tests {
     #[test]
     fn closing_only_stack_in_split_pane_closes_pane() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins(MinimalPlugins)
+            .add_message::<StackRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
@@ -1164,11 +1152,7 @@ mod tests {
             .insert_resource(test_settings())
             .add_systems(
                 Update,
-                (
-                    handle_stack_commands.in_set(WriteAppCommands),
-                    handle_close_stack_requests,
-                )
-                    .chain(),
+                (handle_stack_requests, handle_close_stack_requests).chain(),
             );
 
         let tab = app
@@ -1200,10 +1184,8 @@ mod tests {
             .id();
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Close);
 
         app.update();
 
@@ -1224,7 +1206,8 @@ mod tests {
     #[test]
     fn closing_stack_in_three_way_split_keeps_split_and_does_not_respawn_startup() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins(MinimalPlugins)
+            .add_message::<StackRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
@@ -1236,11 +1219,7 @@ mod tests {
             ))
             .add_systems(
                 Update,
-                (
-                    handle_stack_commands.in_set(WriteAppCommands),
-                    handle_close_stack_requests,
-                )
-                    .chain(),
+                (handle_stack_requests, handle_close_stack_requests).chain(),
             );
 
         let tab = app
@@ -1280,10 +1259,8 @@ mod tests {
             .id();
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Close);
         app.update();
 
         assert!(
@@ -1451,7 +1428,8 @@ mod tests {
 
     fn build_app_with_collector() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
+        app.add_plugins(MinimalPlugins)
+            .add_message::<StackRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
@@ -1462,7 +1440,7 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    handle_stack_commands.in_set(WriteAppCommands),
+                    handle_stack_requests,
                     handle_close_stack_requests,
                     collect_spawn_requests,
                 )
@@ -1495,10 +1473,8 @@ mod tests {
         let (tab, pane, original_stack) = build_hierarchy(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Close);
 
         app.update();
 
@@ -1528,12 +1504,10 @@ mod tests {
         let (_tab, pane, _stack) = build_hierarchy(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack {
-                    url: Some("https://example.com".into()),
-                },
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Open {
+                url: Some("https://example.com".into()),
+            });
 
         app.update();
 
@@ -1561,10 +1535,8 @@ mod tests {
         let (_tab, pane, _stack) = build_hierarchy(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack { url: None },
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Open { url: None });
 
         app.update();
 
@@ -1597,10 +1569,8 @@ mod tests {
         let (_tab, _pane, _stack) = build_hierarchy(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack { url: None },
-            )));
+            .resource_mut::<Messages<StackRequest>>()
+            .write(StackRequest::Open { url: None });
 
         app.update();
 

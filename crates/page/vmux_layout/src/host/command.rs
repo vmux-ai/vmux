@@ -1,12 +1,15 @@
 use bevy::prelude::*;
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
+    ServiceCommand, StackCommand,
 };
 
 use crate::{
+    archive::ReopenClosedPage,
     pane::{
         PaneArrangement, PaneFocus, PaneOpenRequest, PaneRequest, PaneResize, PaneSplitDirection,
     },
+    stack::StackRequest,
     target::SiblingDirection,
 };
 
@@ -22,6 +25,8 @@ pub(super) struct LayoutCommandPlugin;
 impl Plugin for LayoutCommandPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PaneRequest>()
+            .add_message::<StackRequest>()
+            .add_message::<ReopenClosedPage>()
             .configure_sets(
                 Update,
                 (
@@ -32,10 +37,7 @@ impl Plugin for LayoutCommandPlugin {
                     .chain()
                     .in_set(ReadAppCommands),
             )
-            .add_systems(
-                Update,
-                dispatch_pane_commands.in_set(LayoutRequestSet::Dispatch),
-            );
+            .add_systems(Update, dispatch_commands.in_set(LayoutRequestSet::Dispatch));
     }
 }
 
@@ -91,14 +93,16 @@ impl From<PaneCommand> for PaneRequest {
     }
 }
 
-fn dispatch_pane_commands(
+fn dispatch_commands(
     mut commands: MessageReader<AppCommand>,
-    mut requests: MessageWriter<PaneRequest>,
+    mut pane_requests: MessageWriter<PaneRequest>,
+    mut stack_requests: MessageWriter<StackRequest>,
+    mut reopen_requests: MessageWriter<ReopenClosedPage>,
 ) {
     for command in commands.read() {
         match command {
             AppCommand::Layout(LayoutCommand::Pane(command)) => {
-                requests.write((*command).into());
+                pane_requests.write((*command).into());
             }
             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InPane {
                 direction,
@@ -106,12 +110,36 @@ fn dispatch_pane_commands(
                 mode,
                 url,
             })) => {
-                requests.write(PaneRequest::Open(PaneOpenRequest {
+                pane_requests.write(PaneRequest::Open(PaneOpenRequest {
                     direction: *direction,
                     target: *target,
                     mode: *mode,
                     url: url.clone(),
                 }));
+            }
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)) => {
+                stack_requests.write(StackRequest::Close);
+            }
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Next)) => {
+                stack_requests.write(StackRequest::Focus(SiblingDirection::Next));
+            }
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Previous)) => {
+                stack_requests.write(StackRequest::Focus(SiblingDirection::Previous));
+            }
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::SwapPrev)) => {
+                stack_requests.write(StackRequest::Move(SiblingDirection::Previous));
+            }
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::SwapNext)) => {
+                stack_requests.write(StackRequest::Move(SiblingDirection::Next));
+            }
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Reopen)) => {
+                reopen_requests.write(ReopenClosedPage);
+            }
+            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack { url })) => {
+                stack_requests.write(StackRequest::Open { url: url.clone() });
+            }
+            AppCommand::Service(ServiceCommand::Open) => {
+                stack_requests.write(StackRequest::OpenServices);
             }
             _ => {}
         }
@@ -204,8 +232,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AppCommand>()
-            .add_message::<PaneRequest>()
-            .add_systems(Update, dispatch_pane_commands);
+            .add_plugins(LayoutCommandPlugin);
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
             .write(AppCommand::Browser(BrowserCommand::Open(
@@ -233,5 +260,58 @@ mod tests {
                 url: Some("https://example.com".to_string()),
             })]
         );
+    }
+
+    #[test]
+    fn stack_commands_route_to_owned_requests() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AppCommand>()
+            .add_plugins(LayoutCommandPlugin);
+        let commands = [
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)),
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Next)),
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Previous)),
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::SwapPrev)),
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::SwapNext)),
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Reopen)),
+            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+                url: Some("https://example.com".to_string()),
+            })),
+            AppCommand::Service(ServiceCommand::Open),
+        ];
+        for command in commands {
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(command);
+        }
+
+        app.update();
+
+        let stack_requests: Vec<StackRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<StackRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            stack_requests,
+            [
+                StackRequest::Close,
+                StackRequest::Focus(SiblingDirection::Next),
+                StackRequest::Focus(SiblingDirection::Previous),
+                StackRequest::Move(SiblingDirection::Previous),
+                StackRequest::Move(SiblingDirection::Next),
+                StackRequest::Open {
+                    url: Some("https://example.com".to_string()),
+                },
+                StackRequest::OpenServices,
+            ]
+        );
+        let reopen_requests: Vec<ReopenClosedPage> = app
+            .world_mut()
+            .resource_mut::<Messages<ReopenClosedPage>>()
+            .drain()
+            .collect();
+        assert_eq!(reopen_requests, [ReopenClosedPage]);
     }
 }
