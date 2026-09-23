@@ -55,7 +55,7 @@ fn on_file_encoding_set(
     if !browsers.can_emit_to(&entity) {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_event(
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
         entity,
         &FileEncodingEvent {
             encoding: edit.core.buffer.encoding,

@@ -142,7 +142,9 @@ fn emit_global_search(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &search.0));
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            entity, &search.0,
+        ));
         commands.entity(entity).remove::<GlobalSearchDirty>();
     }
 }

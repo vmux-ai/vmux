@@ -99,7 +99,7 @@ fn send_initial_meta(
             continue;
         }
         if let Some((undecodable, message)) = buffer.load_error() {
-            commands.trigger(BinHostEmitEvent::from_event(
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                 entity,
                 &FileErrorEvent {
                     message: message.to_string(),
@@ -124,7 +124,7 @@ fn send_initial_text_meta(
             continue;
         }
         let shape = crate::shape::BufferShape::detect(&edit.core.buffer.rope);
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileMetaEvent {
                 path: file.display_path(),
@@ -186,7 +186,7 @@ fn send_file_theme(
                 )
             })
             .unwrap_or_else(|| (String::new(), 0.0, 0.0));
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileThemeEvent {
                 font_family,
@@ -210,7 +210,9 @@ fn send_file_view_mode(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &event));
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            entity, &event,
+        ));
         commands.entity(entity).insert(FileViewModeSent);
     }
     if mode.is_changed() {
@@ -218,7 +220,9 @@ fn send_file_view_mode(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                entity, &event,
+            ));
         }
     }
 }
@@ -237,7 +241,9 @@ fn send_file_keymap(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &event));
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+            entity, &event,
+        ));
         commands.entity(entity).insert(FileKeymapSent);
     }
     if settings
@@ -248,7 +254,9 @@ fn send_file_keymap(
             if !browsers.can_emit_to(&entity) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                entity, &event,
+            ));
         }
     }
 }
@@ -272,7 +280,7 @@ fn send_initial_dir(
             continue;
         }
         let (parent_path, parent_entries) = parent_listing(&file.path);
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileDirEvent {
                 path: file.display_path(),

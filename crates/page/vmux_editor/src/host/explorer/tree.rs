@@ -187,7 +187,7 @@ pub(super) fn emit_explorer_focus(
     commands: &mut Commands,
 ) {
     if browsers.can_emit_to(&entity) {
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &ExplorerFocusEvent {
                 path: current.to_string_lossy().into_owned(),
@@ -341,7 +341,7 @@ fn emit_explorer_tree(
         } else {
             String::new()
         };
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &ExplorerTreeEvent {
                 root_name: ExplorerRoot::name(&state.root),

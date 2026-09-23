@@ -429,20 +429,25 @@ impl SentReveals {
     fn watch(app: &mut App, webview: Entity) {
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(webview);
-        app.insert_non_send(browsers)
+        app.add_plugins(crate::host::ui_state::UiStatePlugin)
+            .insert_non_send(browsers)
             .init_resource::<Self>()
             .add_observer(Self::record);
     }
 
     fn record(emit: On<BinHostEmitEvent>, mut sent: ResMut<Self>) {
-        if emit.id() != ExplorerFocusEvent::id() {
+        if emit.id() != FileUiStateEvent::id() {
             return;
         }
-        let decoded = rkyv::from_bytes::<ExplorerFocusEvent, rkyv::rancor::Error>(emit.payload());
+        let decoded = rkyv::from_bytes::<FileUiStateEvent, rkyv::rancor::Error>(emit.payload());
         let Ok(event) = decoded else {
             return;
         };
-        sent.0.push(event.reveal);
+        for patch in event.patches {
+            if let FileUiStatePatch::ExplorerFocus(event) = patch {
+                sent.0.push(event.reveal);
+            }
+        }
     }
 
     fn drain(app: &mut App) -> Vec<ExplorerReveal> {

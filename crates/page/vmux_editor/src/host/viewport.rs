@@ -58,7 +58,7 @@ impl FileViewport {
         if !browsers.can_emit_to(&entity) {
             return;
         }
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileScrollByEvent {
                 lines: top as i32 - previous as i32,
@@ -110,7 +110,7 @@ impl EditorWindow {
         if !browsers.can_emit_to(&entity) {
             return;
         }
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &Self::render(edit, viewport),
         ));
@@ -244,7 +244,7 @@ impl EditorCursor {
         let selections = wrap.selections(raw_selections.iter().copied());
         let search = wrap.selections(raw_search.iter().copied());
         let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileCursorEvent {
                 search_total,

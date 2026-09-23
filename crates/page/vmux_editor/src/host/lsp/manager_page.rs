@@ -341,7 +341,13 @@ fn drain_manager_outbox(
             ManagerMsg::Progress(ev) => {
                 for target in install_targets(entity, &ev.name, &views) {
                     if browsers.can_emit_to(&target) {
-                        commands.trigger(BinHostEmitEvent::from_event(target, &ev));
+                        if views.contains(target) {
+                            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                                target, &ev,
+                            ));
+                        } else {
+                            commands.trigger(BinHostEmitEvent::from_event(target, &ev));
+                        }
                     }
                 }
             }
@@ -362,7 +368,13 @@ fn drain_manager_outbox(
                 }
                 for target in targets {
                     if browsers.can_emit_to(&target) {
-                        commands.trigger(BinHostEmitEvent::from_event(target, &ev));
+                        if views.contains(target) {
+                            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                                target, &ev,
+                            ));
+                        } else {
+                            commands.trigger(BinHostEmitEvent::from_event(target, &ev));
+                        }
                     }
                 }
             }

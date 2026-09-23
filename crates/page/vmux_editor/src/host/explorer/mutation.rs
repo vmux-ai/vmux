@@ -245,7 +245,7 @@ fn emit_explorer_fs_result(
     commands: &mut Commands,
 ) {
     if browsers.can_emit_to(&webview) {
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             webview,
             &ExplorerFsResult {
                 ok,

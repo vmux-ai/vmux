@@ -330,7 +330,7 @@ fn apply_edit_request(
                 Err(unmappable) => {
                     tracing::warn!(path = %path.display(), "editor save refused: {unmappable}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(BinHostEmitEvent::from_event(
+                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: format!("save failed: {unmappable}"),
@@ -359,7 +359,7 @@ fn apply_edit_request(
                 Err(e) => {
                     tracing::warn!(path = %path.display(), "editor save failed: {e}");
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(BinHostEmitEvent::from_event(
+                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: format!("save failed: {e}"),
@@ -453,7 +453,7 @@ fn apply_edit_request(
     if text_changed || dirty_changed {
         diff_source.content = edit.core.buffer.text();
         diff_source.dirty = edit.core.dirty;
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileDirtyEvent {
                 dirty: edit.core.dirty,
@@ -556,7 +556,7 @@ fn on_file_property_edit(
     {
         Ok(updated) => updated,
         Err(message) => {
-            commands.trigger(BinHostEmitEvent::from_event(
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                 entity,
                 &FileErrorEvent {
                     message,

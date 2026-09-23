@@ -82,7 +82,7 @@ fn emit_explorer_panel(
             .map(|state| state.visible)
             .unwrap_or(panel.default_visible);
         let revision = revisions.get(scope).copied().unwrap_or_default();
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &ExplorerPanelEvent {
                 visible,

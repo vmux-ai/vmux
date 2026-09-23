@@ -16,6 +16,7 @@ use crate::media::FileMedia;
 use crate::wrap::WrapView;
 
 #[derive(Component, Clone, Debug)]
+#[require(crate::host::ui_state::FileUiStateUpdates)]
 pub struct FileView {
     pub path: PathBuf,
 }

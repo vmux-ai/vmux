@@ -523,7 +523,7 @@ fn reload_changed_files(
             });
             if ready {
                 let (parent_path, parent_entries) = parent_listing(&file.path);
-                commands.trigger(BinHostEmitEvent::from_event(
+                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                     entity,
                     &FileDirEvent {
                         path: file.display_path(),
@@ -547,7 +547,7 @@ fn reload_changed_files(
                     .map(|duration| duration.as_millis())
                     .unwrap_or(0);
                 let url = format!("{}&v={nonce}", file.raw_media_url());
-                commands.trigger(BinHostEmitEvent::from_event(
+                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                     entity,
                     &FileMediaEvent {
                         kind,
@@ -563,14 +563,6 @@ fn reload_changed_files(
         if let Some(edit) = edit
             && edit.core.dirty
         {
-            if ready {
-                commands.trigger(BinHostEmitEvent::from_event(
-                    entity,
-                    &FileExternalChange {
-                        path: file.display_path(),
-                    },
-                ));
-            }
             continue;
         }
         commands

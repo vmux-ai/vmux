@@ -7,6 +7,7 @@ pub mod agent;
 pub mod archive;
 pub mod browser;
 pub mod extension;
+pub mod file_ui_state;
 pub mod host_spawn;
 pub mod launcher;
 pub mod notify;
@@ -22,6 +23,7 @@ pub mod workspace;
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
+pub use file_ui_state::FileUiStateWrite;
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn, register_scheme_spawn};
 pub use launcher::{
     ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, PendingLaunch,

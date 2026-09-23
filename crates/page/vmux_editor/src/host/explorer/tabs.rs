@@ -74,7 +74,7 @@ fn emit_open_editors(
                 is_dir: path.is_dir(),
             });
         }
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &OpenEditorsEvent { items },
         ));

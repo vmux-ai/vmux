@@ -189,7 +189,7 @@ impl WikiCompletion {
                 kind: "knowledge".to_string(),
             })
             .collect();
-        commands.trigger(BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileCompletionEvent {
                 items,
@@ -250,7 +250,7 @@ fn on_editor_language_request(
             if current.is_empty() || !browsers.can_emit_to(&entity) {
                 return;
             }
-            commands.trigger(BinHostEmitEvent::from_event(
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                 entity,
                 &FileRenameBeginEvent {
                     line: position.line,

@@ -505,7 +505,7 @@ fn tidy_follow_pane(
         .max_by_key(|(stack, _, _)| last_activated.get(*stack).map(|t| t.0).unwrap_or(i64::MIN))
         .map(|(_, page, _)| *page);
     if let Some(page) = active_page {
-        commands.trigger(bevy_cef::prelude::BinHostEmitEvent::from_event(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             page,
             &vmux_core::event::FileTidyPromptEvent { count },
         ));

@@ -129,7 +129,7 @@ fn on_knowledge_link_open(
                 Ok(path) => path,
                 Err(error) => {
                     if browsers.can_emit_to(&entity) {
-                        commands.trigger(BinHostEmitEvent::from_event(
+                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                             entity,
                             &FileErrorEvent {
                                 message: error,
@@ -338,9 +338,10 @@ mod tests {
     use crate::edit::highlight_cache::HighlightCache;
     use crate::keymap::KeymapKindExt;
     use vmux_api::BinEvent;
+    use vmux_core::event::{FileUiStateEvent, FileUiStatePatch};
 
     #[derive(Resource, Default)]
-    struct Emitted(Vec<String>);
+    struct Emitted(Vec<FileUiStatePatch>);
 
     struct GotoSession {
         app: App,
@@ -366,11 +367,18 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<crate::lsp::manager::LspGoto>()
-                .add_plugins(NavigationPlugin)
+                .add_plugins((NavigationPlugin, crate::host::ui_state::UiStatePlugin))
                 .init_resource::<Emitted>()
                 .add_observer(
                     |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {
-                        emitted.0.push(trigger.event().id().to_string());
+                        if trigger.event().id() != FileUiStateEvent::id() {
+                            return;
+                        }
+                        let event = rkyv::from_bytes::<FileUiStateEvent, rkyv::rancor::Error>(
+                            trigger.event().payload(),
+                        )
+                        .unwrap();
+                        emitted.0.extend(event.patches);
                     },
                 );
             app.world_mut()
@@ -463,7 +471,7 @@ mod tests {
                 .resource::<Emitted>()
                 .0
                 .iter()
-                .any(|id| id == vmux_core::event::FileScrollByEvent::id()),
+                .any(|patch| matches!(patch, FileUiStatePatch::ScrollBy(_))),
             "the window was repainted at row {top}, so a page still parked at row 0 \
              would render the band off screen unless the move is announced: {:?}",
             session.app.world().resource::<Emitted>().0
