@@ -37,7 +37,7 @@ use crate::page_model::{
     CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, clamp_selection,
     editor_drag_started, gutter_width, note_cursor_activation, severity_color_class, span_style,
 };
-use crate::ui_state::{use_file_ui, use_file_ui_root};
+use crate::ui_state::use_file_ui;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -50,7 +50,7 @@ use vmux_git::ui::{DiffView, GitFooter, GitStatusFeed};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::diff::DiffTone;
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{PressedKey, send, use_theme};
+use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::sleep_ms;
@@ -58,7 +58,7 @@ use vmux_ui::platform::sleep_ms;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    use_file_ui_root();
+    use_ui_state_root::<FileUiStateEvent>();
     let git_status = use_file_ui::<GitStatusEvent>();
     let mut path = use_signal(String::new);
     let mut total_lines = use_signal(|| 0u32);
@@ -199,629 +199,597 @@ pub fn Page() -> Element {
 
     let explorer_panel = use_file_ui::<ExplorerPanelEvent>();
     use_effect(move || {
-        let Some(event) = explorer_panel() else {
-            return;
-        };
-        explorer.apply_panel(event);
+        explorer_panel.for_each(|event| {
+            explorer.apply_panel(event);
+        })
     });
 
     let tidy_prompt_event = use_file_ui::<FileTidyPromptEvent>();
     use_effect(move || {
-        let Some(e) = tidy_prompt_event() else {
-            return;
-        };
-        tidy_prompt.set(Some(e.count));
+        tidy_prompt_event.for_each(|e| {
+            tidy_prompt.set(Some(e.count));
+        })
     });
 
     let file_meta = use_file_ui::<FileMetaEvent>();
     use_effect(move || {
-        let Some(m) = file_meta() else {
-            return;
-        };
-        let arrival = FileArrival::new(&m.abs_path, &git_path.peek());
-        doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
-        path.set(m.path);
-        git_path.set(m.abs_path);
-        total_lines.set(m.total_lines);
-        language.set(m.language);
-        indent.set(m.indent);
-        line_ending.set(m.line_ending);
-        encoding.set(m.encoding);
-        mode.set(Mode::Text);
-        if !arrival.resets_view() {
-            return;
-        }
-        error.set(String::new());
-        clear_preview(preview, thumbs);
-        media.set(None);
-        viewport.reset();
-        last_scroll_req.set(0);
-        let _ = send(&FileScrollEvent {
-            top_row: 0,
-            needs_rows: true,
-        });
-        diagnostics.set(Vec::new());
-        hover_diag.set(None);
-        lsp_status.set(None);
-        git_has_diff.set(false);
-        git_line_markers.set(HashMap::new());
-        lsp_install_notice.set(None);
-        lsp_install_request.set(None);
-        lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
-        explorer.show_if_room(mode);
-        note_blocks.set(Vec::new());
-        note_properties.set(Vec::new());
-        note_references.set(Vec::new());
-        note_cursor.reset();
-        note_dragging.set(false);
-        editor_dragging.set(false);
-        editor_drag_origin.set(None);
-        git_nonce.set(git_nonce() + 1);
+        file_meta.for_each(|m| {
+            let arrival = FileArrival::new(&m.abs_path, &git_path.peek());
+            doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
+            path.set(m.path);
+            git_path.set(m.abs_path);
+            total_lines.set(m.total_lines);
+            language.set(m.language);
+            indent.set(m.indent);
+            line_ending.set(m.line_ending);
+            encoding.set(m.encoding);
+            mode.set(Mode::Text);
+            if !arrival.resets_view() {
+                return;
+            }
+            error.set(String::new());
+            clear_preview(preview, thumbs);
+            media.set(None);
+            viewport.reset();
+            last_scroll_req.set(0);
+            let _ = send(&FileScrollEvent {
+                top_row: 0,
+                needs_rows: true,
+            });
+            diagnostics.set(Vec::new());
+            hover_diag.set(None);
+            lsp_status.set(None);
+            git_has_diff.set(false);
+            git_line_markers.set(HashMap::new());
+            lsp_install_notice.set(None);
+            lsp_install_request.set(None);
+            lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
+            explorer.show_if_room(mode);
+            note_blocks.set(Vec::new());
+            note_properties.set(Vec::new());
+            note_references.set(Vec::new());
+            note_cursor.reset();
+            note_dragging.set(false);
+            editor_dragging.set(false);
+            editor_drag_origin.set(None);
+            git_nonce.set(git_nonce() + 1);
+        })
     });
 
     let file_shape = use_file_ui::<FileShapeEvent>();
     use_effect(move || {
-        let Some(s) = file_shape() else {
-            return;
-        };
-        indent.set(s.indent);
-        line_ending.set(s.line_ending);
+        file_shape.for_each(|s| {
+            indent.set(s.indent);
+            line_ending.set(s.line_ending);
+        })
     });
 
     let file_encoding = use_file_ui::<FileEncodingEvent>();
     use_effect(move || {
-        let Some(e) = file_encoding() else {
-            return;
-        };
-        encoding.set(e.encoding);
+        file_encoding.for_each(|e| {
+            encoding.set(e.encoding);
+        })
     });
 
     let file_viewport = use_file_ui::<FileViewportPatch>();
     use_effect(move || {
-        let Some(p) = file_viewport() else {
-            return;
-        };
-        first_row.set(p.first_row);
-        total_rows.set(p.total_rows);
-        total_lines.set(p.total_lines);
-        wrap_columns.set(p.wrap_columns);
-        if line_layouts.peek().as_slice() != p.layouts.as_slice() {
-            line_layouts.set(p.layouts);
-        }
-        if lines.peek().as_slice() != p.lines.as_slice() {
-            lines.set(p.lines);
-        }
-        if sticky_lines.peek().as_slice() != p.sticky.as_slice() {
-            sticky_lines.set(p.sticky);
-        }
-        lsp_hover.set(None);
+        file_viewport.for_each(|p| {
+            first_row.set(p.first_row);
+            total_rows.set(p.total_rows);
+            total_lines.set(p.total_lines);
+            wrap_columns.set(p.wrap_columns);
+            if line_layouts.peek().as_slice() != p.layouts.as_slice() {
+                line_layouts.set(p.layouts);
+            }
+            if lines.peek().as_slice() != p.lines.as_slice() {
+                lines.set(p.lines);
+            }
+            if sticky_lines.peek().as_slice() != p.sticky.as_slice() {
+                sticky_lines.set(p.sticky);
+            }
+            lsp_hover.set(None);
+        })
     });
 
     let outline_event = use_file_ui::<OutlineEvent>();
     use_effect(move || {
-        let Some(e) = outline_event() else {
-            return;
-        };
-        outline.set(e.items);
+        outline_event.for_each(|e| {
+            outline.set(e.items);
+        })
     });
 
     let file_cursor = use_file_ui::<FileCursorEvent>();
     use_effect(move || {
-        let Some(c) = file_cursor() else {
-            return;
-        };
-        let moved = cursor.peek().ne(&c.primary);
-        if *ed_mode.peek() != c.mode {
-            ed_mode.set(c.mode);
-        }
-        if ed_label.peek().ne(&c.mode_label) {
-            ed_label.set(c.mode_label.clone());
-        }
-        if moved {
-            cursor.set(c.primary);
-        }
-        if carets.peek().as_slice() != c.carets.as_slice() {
-            carets.set(c.carets.clone());
-        }
-        if sel.peek().as_slice() != c.selections.as_slice() {
-            sel.set(c.selections.clone());
-        }
-        if source_cursor.peek().ne(&c.source_primary) {
-            source_cursor.set(c.source_primary);
-        }
-        if source_sel.peek().as_slice() != c.source_selections.as_slice() {
-            source_sel.set(c.source_selections.clone());
-        }
-        if search_spans.peek().as_slice() != c.search.as_slice() {
-            search_spans.set(c.search.clone());
-        }
-        if word_spans.peek().as_slice() != c.word_highlights.as_slice() {
-            word_spans.set(c.word_highlights.clone());
-        }
-        if *find_total.peek() != c.search_total {
-            find_total.set(c.search_total);
-        }
-        if *find_index.peek() != c.search_index {
-            find_index.set(c.search_index);
-        }
-        let note_mode = *file_view_mode.peek() == FileViewMode::Note
-            && is_markdown_file(git_path.peek().as_str());
-        if note_mode {
-            let active = note_blocks
-                .peek()
-                .as_slice()
-                .block_index_for_line(c.source_primary.line);
-            if *keymap.peek() == vmux_core::KeymapKind::Vim
-                && !note_cursor.editing()
-                && let Some(index) = active
-            {
-                note_cursor.activate(index, c.source_primary.line);
+        file_cursor.for_each(|c| {
+            let moved = cursor.peek().ne(&c.primary);
+            if *ed_mode.peek() != c.mode {
+                ed_mode.set(c.mode);
             }
-            if note_cursor.editing() {
-                let is_list = active.is_some_and(|index| {
-                    matches!(note_blocks.peek()[index].block, MdBlock::List { .. })
-                });
-                let edit_line = is_list.then_some(c.source_primary.line);
-                if note_cursor.edit_line() != edit_line {
-                    note_cursor.set_edit_line(edit_line);
+            if ed_label.peek().ne(&c.mode_label) {
+                ed_label.set(c.mode_label.clone());
+            }
+            if moved {
+                cursor.set(c.primary);
+            }
+            if carets.peek().as_slice() != c.carets.as_slice() {
+                carets.set(c.carets.clone());
+            }
+            if sel.peek().as_slice() != c.selections.as_slice() {
+                sel.set(c.selections.clone());
+            }
+            if source_cursor.peek().ne(&c.source_primary) {
+                source_cursor.set(c.source_primary);
+            }
+            if source_sel.peek().as_slice() != c.source_selections.as_slice() {
+                source_sel.set(c.source_selections.clone());
+            }
+            if search_spans.peek().as_slice() != c.search.as_slice() {
+                search_spans.set(c.search.clone());
+            }
+            if word_spans.peek().as_slice() != c.word_highlights.as_slice() {
+                word_spans.set(c.word_highlights.clone());
+            }
+            if *find_total.peek() != c.search_total {
+                find_total.set(c.search_total);
+            }
+            if *find_index.peek() != c.search_index {
+                find_index.set(c.search_index);
+            }
+            let note_mode = *file_view_mode.peek() == FileViewMode::Note
+                && is_markdown_file(git_path.peek().as_str());
+            if note_mode {
+                let active = note_blocks
+                    .peek()
+                    .as_slice()
+                    .block_index_for_line(c.source_primary.line);
+                if *keymap.peek() == vmux_core::KeymapKind::Vim
+                    && !note_cursor.editing()
+                    && let Some(index) = active
+                {
+                    note_cursor.activate(index, c.source_primary.line);
+                }
+                if note_cursor.editing() {
+                    let is_list = active.is_some_and(|index| {
+                        matches!(note_blocks.peek()[index].block, MdBlock::List { .. })
+                    });
+                    let edit_line = is_list.then_some(c.source_primary.line);
+                    if note_cursor.edit_line() != edit_line {
+                        note_cursor.set_edit_line(edit_line);
+                    }
+                }
+                let active = active.map(|index| index as u32);
+                if note_cursor.active() != active {
+                    note_cursor.set_active(active);
+                }
+                if moved && let Some(index) = active {
+                    note_cursor.reveal(index as usize, c.source_primary.line);
                 }
             }
-            let active = active.map(|index| index as u32);
-            if note_cursor.active() != active {
-                note_cursor.set_active(active);
+            if moved && !note_mode {
+                viewport.reveal_caret();
             }
-            if moved && let Some(index) = active {
-                note_cursor.reveal(index as usize, c.source_primary.line);
-            }
-        }
-        if moved && !note_mode {
-            viewport.reveal_caret();
-        }
+        })
     });
 
     let scroll_by = use_file_ui::<FileScrollByEvent>();
     use_effect(move || {
-        let Some(event) = scroll_by() else {
-            return;
-        };
-        let Some(line_height) =
-            ScrolledLineHeight::resolve(file_view_mode(), &git_path(), cell_dims().height)
-        else {
-            return;
-        };
-        viewport.scroll_by(event.lines, line_height);
+        scroll_by.for_each(|event| {
+            let Some(line_height) =
+                ScrolledLineHeight::resolve(file_view_mode(), &git_path(), cell_dims().height)
+            else {
+                return;
+            };
+            viewport.scroll_by(event.lines, line_height);
+        })
     });
 
     let open_editors_event = use_file_ui::<OpenEditorsEvent>();
     use_effect(move || {
-        let Some(event) = open_editors_event() else {
-            return;
-        };
-        open_editors.set(event.items);
+        open_editors_event.for_each(|event| {
+            open_editors.set(event.items);
+        })
     });
 
     let file_dirty = use_file_ui::<FileDirtyEvent>();
     use_effect(move || {
-        if file_dirty().is_none() {
-            return;
-        }
-        GitRefresh {
-            generation: git_refresh_generation,
-            nonce: git_nonce,
-            settled: git_refresh_settled,
-        }
-        .schedule();
+        file_dirty.for_each(|_| {
+            GitRefresh {
+                generation: git_refresh_generation,
+                nonce: git_nonce,
+                settled: git_refresh_settled,
+            }
+            .schedule();
+        })
     });
 
     use_effect(move || {
-        let Some(status) = git_status() else {
-            return;
-        };
-        git_feed.apply_status(status);
+        git_status.for_each(|status| {
+            git_feed.apply_status(status);
+        })
     });
 
     let git_result_event = use_file_ui::<GitResultEvent>();
     use_effect(move || {
-        let Some(event) = git_result_event() else {
-            return;
-        };
-        git_feed.apply_result(event.clone());
-        git_result.set(Some(event));
+        git_result_event.for_each(|event| {
+            git_feed.apply_result(event.clone());
+            git_result.set(Some(event));
+        })
     });
 
     let git_error = use_file_ui::<GitErrorEvent>();
     use_effect(move || {
-        let Some(event) = git_error() else {
-            return;
-        };
-        git_feed.apply_error(event);
+        git_error.for_each(|event| {
+            git_feed.apply_error(event);
+        })
     });
 
     let git_changed = use_file_ui::<GitChangedEvent>();
     use_effect(move || {
-        if git_changed().is_none() {
-            return;
-        }
-        GitRefresh {
-            generation: git_refresh_generation,
-            nonce: git_nonce,
-            settled: git_refresh_settled,
-        }
-        .schedule();
+        git_changed.for_each(|_| {
+            GitRefresh {
+                generation: git_refresh_generation,
+                nonce: git_nonce,
+                settled: git_refresh_settled,
+            }
+            .schedule();
+        })
     });
 
     let git_diff_viewport_event = use_file_ui::<GitDiffViewportEvent>();
     use_effect(move || {
-        let Some(event) = git_diff_viewport_event() else {
-            return;
-        };
-        git_diff_viewport.set(Some(event));
+        git_diff_viewport_event.for_each(|event| {
+            git_diff_viewport.set(Some(event));
+        })
     });
 
     let view_mode_event = use_file_ui::<FileViewModeEvent>();
     use_effect(move || {
-        let Some(event) = view_mode_event() else {
-            return;
-        };
-        if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
-            note_cursor.set_editing(false);
-        }
-        file_view_mode.set(event.mode);
-        match event.mode {
-            FileViewMode::Note if is_markdown_file(&git_path()) => {
+        view_mode_event.for_each(|event| {
+            if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
+                note_cursor.set_editing(false);
+            }
+            file_view_mode.set(event.mode);
+            match event.mode {
+                FileViewMode::Note if is_markdown_file(&git_path()) => {
+                    let line = source_cursor().line;
+                    if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
+                        note_cursor.activate_centered(index, line);
+                    }
+                }
+                FileViewMode::Editor => {
+                    viewport.center_row(cursor().row, cell_dims().height);
+                }
+                _ => {}
+            }
+        })
+    });
+
+    let keymap_event = use_file_ui::<FileKeymapEvent>();
+    use_effect(move || {
+        keymap_event.for_each(|event| {
+            keymap.set(event.keymap);
+            if event.keymap == vmux_core::KeymapKind::Vim
+                && file_view_mode() == FileViewMode::Note
+                && is_markdown_file(&git_path())
+            {
                 let line = source_cursor().line;
                 if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
                     note_cursor.activate_centered(index, line);
                 }
             }
-            FileViewMode::Editor => {
-                viewport.center_row(cursor().row, cell_dims().height);
-            }
-            _ => {}
-        }
-    });
-
-    let keymap_event = use_file_ui::<FileKeymapEvent>();
-    use_effect(move || {
-        let Some(event) = keymap_event() else {
-            return;
-        };
-        keymap.set(event.keymap);
-        if event.keymap == vmux_core::KeymapKind::Vim
-            && file_view_mode() == FileViewMode::Note
-            && is_markdown_file(&git_path())
-        {
-            let line = source_cursor().line;
-            if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
-                note_cursor.activate_centered(index, line);
-            }
-        }
+        })
     });
 
     let note_event = use_file_ui::<FileNoteEvent>();
     use_effect(move || {
-        let Some(event) = note_event() else {
-            return;
-        };
-        let FileNoteEvent {
-            title,
-            properties,
-            blocks,
-            active,
-            references,
-            reveal_line,
-        } = event;
-        let title = if title.is_empty() {
-            path().rsplit('/').next().unwrap_or_default().to_string()
-        } else {
-            title
-        };
-        doc_title.set(title.clone());
-        let activation = note_cursor_activation(
-            reveal_line,
-            keymap() == vmux_core::KeymapKind::Vim && file_view_mode() == FileViewMode::Note,
-            source_cursor().line,
-        );
-        let activation = activation.and_then(|activation| {
-            let line = match activation {
-                NoteCursorActivation::Center(line)
-                | NoteCursorActivation::PreserveViewport(line) => line,
+        note_event.for_each(|event| {
+            let FileNoteEvent {
+                title,
+                properties,
+                blocks,
+                active,
+                references,
+                reveal_line,
+            } = event;
+            let title = if title.is_empty() {
+                path().rsplit('/').next().unwrap_or_default().to_string()
+            } else {
+                title
             };
-            blocks
-                .as_slice()
-                .block_index_for_line(line)
-                .map(|index| (activation, index, line))
-        });
-        note_blocks.set(blocks);
-        note_properties.set(properties);
-        note_references.set(references);
-        note_cursor.set_active(active);
-        if let Some((activation, index, line)) = activation {
-            match activation {
-                NoteCursorActivation::Center(_) => note_cursor.activate_centered(index, line),
-                NoteCursorActivation::PreserveViewport(_) => note_cursor.activate(index, line),
+            doc_title.set(title.clone());
+            let activation = note_cursor_activation(
+                reveal_line,
+                keymap() == vmux_core::KeymapKind::Vim && file_view_mode() == FileViewMode::Note,
+                source_cursor().line,
+            );
+            let activation = activation.and_then(|activation| {
+                let line = match activation {
+                    NoteCursorActivation::Center(line)
+                    | NoteCursorActivation::PreserveViewport(line) => line,
+                };
+                blocks
+                    .as_slice()
+                    .block_index_for_line(line)
+                    .map(|index| (activation, index, line))
+            });
+            note_blocks.set(blocks);
+            note_properties.set(properties);
+            note_references.set(references);
+            note_cursor.set_active(active);
+            if let Some((activation, index, line)) = activation {
+                match activation {
+                    NoteCursorActivation::Center(_) => note_cursor.activate_centered(index, line),
+                    NoteCursorActivation::PreserveViewport(_) => note_cursor.activate(index, line),
+                }
             }
-        }
+        })
     });
 
     let hover_event = use_file_ui::<FileHoverEvent>();
     use_effect(move || {
-        let Some(h) = hover_event() else {
-            return;
-        };
-        lsp_hover.set(Some(h));
+        hover_event.for_each(|h| {
+            lsp_hover.set(Some(h));
+        })
     });
 
     let references_event = use_file_ui::<FileReferencesEvent>();
     use_effect(move || {
-        let Some(e) = references_event() else {
-            return;
-        };
-        refs.set(e.items);
-        refs_sel.set(0);
-        refs_open.set(true);
-        FocusClaim::new("refs-panel").request();
+        references_event.for_each(|e| {
+            refs.set(e.items);
+            refs_sel.set(0);
+            refs_open.set(true);
+            FocusClaim::new("refs-panel").request();
+        })
     });
 
     let completion_event = use_file_ui::<FileCompletionEvent>();
     use_effect(move || {
-        let Some(e) = completion_event() else {
-            return;
-        };
-        comp_open.set(!e.items.is_empty());
-        comps.set(e.items);
-        comp_sel.set(0);
-        comp_anchor.set((e.line, e.replace_from_col));
+        completion_event.for_each(|e| {
+            comp_open.set(!e.items.is_empty());
+            comps.set(e.items);
+            comp_sel.set(0);
+            comp_anchor.set((e.line, e.replace_from_col));
+        })
     });
 
     let diagnostics_event = use_file_ui::<FileDiagnosticsEvent>();
     use_effect(move || {
-        let Some(d) = diagnostics_event() else {
-            return;
-        };
-        if d.path != git_path() {
-            return;
-        }
-        diagnostics.set(d.diagnostics);
+        diagnostics_event.for_each(|d| {
+            if d.path != git_path() {
+                return;
+            }
+            diagnostics.set(d.diagnostics);
+        })
     });
 
     let lsp_status_event = use_file_ui::<FileLspStatusEvent>();
     use_effect(move || {
-        let Some(s) = lsp_status_event() else {
-            return;
-        };
-        if s.path != git_path() {
-            return;
-        }
-        if s.state == LspServerState::Missing
-            && let Some(package) = s.package.clone()
-        {
-            let request = (s.path.clone(), package.clone());
-            if lsp_install_request() != Some(request.clone()) {
-                lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
-                lsp_install_request.set(Some(request));
-                lsp_install_notice.set(Some(LspInstallProgress {
-                    name: package.clone(),
-                    phase: InstallPhase::Resolving,
-                    pct: None,
-                    message: translate("lsp-status-installing"),
-                }));
-                let _ = send(&LspInstallRequest { name: package });
+        lsp_status_event.for_each(|s| {
+            if s.path != git_path() {
+                return;
             }
-        }
-        lsp_actions.set(s.actions.clone());
-        lsp_status.set(Some(s));
+            if s.state == LspServerState::Missing
+                && let Some(package) = s.package.clone()
+            {
+                let request = (s.path.clone(), package.clone());
+                if lsp_install_request() != Some(request.clone()) {
+                    lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
+                    lsp_install_request.set(Some(request));
+                    lsp_install_notice.set(Some(LspInstallProgress {
+                        name: package.clone(),
+                        phase: InstallPhase::Resolving,
+                        pct: None,
+                        message: translate("lsp-status-installing"),
+                    }));
+                    let _ = send(&LspInstallRequest { name: package });
+                }
+            }
+            lsp_actions.set(s.actions.clone());
+            lsp_status.set(Some(s));
+        })
     });
 
     let install_progress = use_file_ui::<LspInstallProgress>();
     use_effect(move || {
-        let Some(progress) = install_progress() else {
-            return;
-        };
-        let active = lsp_install_request().is_some_and(|(_, package)| package == progress.name);
-        if !active {
-            return;
-        }
-        let delay = match progress.phase {
-            InstallPhase::Done => Some(LSP_NOTICE_DONE_MS),
-            InstallPhase::Failed => Some(LSP_NOTICE_FAILED_MS),
-            _ => None,
-        };
-        lsp_install_notice.set(Some(progress));
-        if let Some(delay) = delay {
-            schedule_lsp_notice_clear(
-                lsp_install_notice,
-                lsp_install_request,
-                lsp_notice_generation,
-                delay,
-            );
-        }
+        install_progress.for_each(|progress| {
+            let active = lsp_install_request().is_some_and(|(_, package)| package == progress.name);
+            if !active {
+                return;
+            }
+            let delay = match progress.phase {
+                InstallPhase::Done => Some(LSP_NOTICE_DONE_MS),
+                InstallPhase::Failed => Some(LSP_NOTICE_FAILED_MS),
+                _ => None,
+            };
+            lsp_install_notice.set(Some(progress));
+            if let Some(delay) = delay {
+                schedule_lsp_notice_clear(
+                    lsp_install_notice,
+                    lsp_install_request,
+                    lsp_notice_generation,
+                    delay,
+                );
+            }
+        })
     });
 
     let package_status = use_file_ui::<LspPkgStatusEvent>();
     use_effect(move || {
-        let Some(status) = package_status() else {
-            return;
-        };
-        if status.status != LspPkgStatus::Installed
-            || lsp_install_request().is_none_or(|(_, package)| package != status.name)
-        {
-            return;
-        }
-        lsp_install_notice.set(Some(LspInstallProgress {
-            name: status.name,
-            phase: InstallPhase::Done,
-            pct: Some(100),
-            message: translate("lsp-status-installed"),
-        }));
-        schedule_lsp_notice_clear(
-            lsp_install_notice,
-            lsp_install_request,
-            lsp_notice_generation,
-            LSP_NOTICE_DONE_MS,
-        );
+        package_status.for_each(|status| {
+            if status.status != LspPkgStatus::Installed
+                || lsp_install_request().is_none_or(|(_, package)| package != status.name)
+            {
+                return;
+            }
+            lsp_install_notice.set(Some(LspInstallProgress {
+                name: status.name,
+                phase: InstallPhase::Done,
+                pct: Some(100),
+                message: translate("lsp-status-installed"),
+            }));
+            schedule_lsp_notice_clear(
+                lsp_install_notice,
+                lsp_install_request,
+                lsp_notice_generation,
+                LSP_NOTICE_DONE_MS,
+            );
+        })
     });
 
     let file_error = use_file_ui::<FileErrorEvent>();
     use_effect(move || {
-        let Some(e) = file_error() else {
-            return;
-        };
-        error_undecodable.set(e.undecodable);
-        error.set(e.message);
+        file_error.for_each(|e| {
+            error_undecodable.set(e.undecodable);
+            error.set(e.message);
+        })
     });
 
     let code_actions_event = use_file_ui::<FileCodeActionsEvent>();
     use_effect(move || {
-        let Some(e) = code_actions_event() else {
-            return;
-        };
-        code_action_sel.set(0);
-        code_actions.set(e.titles);
+        code_actions_event.for_each(|e| {
+            code_action_sel.set(0);
+            code_actions.set(e.titles);
+        })
     });
 
     let rename_event = use_file_ui::<FileRenameBeginEvent>();
     use_effect(move || {
-        let Some(e) = rename_event() else {
-            return;
-        };
-        rename_failed.set(String::new());
-        rename_box.set(Some(RenameBox::new(e.line, e.col, e.current)));
+        rename_event.for_each(|e| {
+            rename_failed.set(String::new());
+            rename_box.set(Some(RenameBox::new(e.line, e.col, e.current)));
+        })
     });
 
     let edit_failed = use_file_ui::<FileEditFailedEvent>();
     use_effect(move || {
-        let Some(e) = edit_failed() else {
-            return;
-        };
-        rename_failed.set(e.reason);
-        let id = rename_failed_generation().wrapping_add(1);
-        rename_failed_generation.set(id);
-        spawn(async move {
-            sleep_ms(RENAME_NOTICE_MS).await;
-            if rename_failed_generation() == id {
-                rename_failed.set(String::new());
-            }
-        });
+        edit_failed.for_each(|e| {
+            rename_failed.set(e.reason);
+            let id = rename_failed_generation().wrapping_add(1);
+            rename_failed_generation.set(id);
+            spawn(async move {
+                sleep_ms(RENAME_NOTICE_MS).await;
+                if rename_failed_generation() == id {
+                    rename_failed.set(String::new());
+                }
+            });
+        })
     });
 
     let directory_event = use_file_ui::<FileDirEvent>();
     use_effect(move || {
-        let Some(d) = directory_event() else {
-            return;
-        };
-        error.set(String::new());
-        clear_preview(preview, thumbs);
-        media.set(None);
-        doc_title.set(
-            d.path
-                .rsplit('/')
-                .find(|s| !s.is_empty())
-                .unwrap_or(&d.path)
-                .to_string(),
-        );
-        parent_path.set(d.parent_path);
-        if git_path() != d.abs_path {
-            git_has_diff.set(false);
-            git_line_markers.set(HashMap::new());
-        }
-        git_path.set(d.abs_path);
-        git_nonce.set(git_nonce() + 1);
-        mode.set(Mode::Dir);
-        comp_open.set(false);
-        comps.set(Vec::new());
-        refs_open.set(false);
-        refs.set(Vec::new());
-        diagnostics.set(Vec::new());
-        hover_diag.set(None);
-        lsp_status.set(None);
-        let came = came_from();
-        came_from.set(String::new());
-        apply_dir(
-            dir_entries,
-            parent_entries,
-            path,
-            selected,
-            preview,
-            thumbs,
-            show_hidden(),
-            d.entries,
-            d.parent_entries,
-            d.path,
-            (!came.is_empty()).then_some(came),
-        );
+        directory_event.for_each(|d| {
+            error.set(String::new());
+            clear_preview(preview, thumbs);
+            media.set(None);
+            doc_title.set(
+                d.path
+                    .rsplit('/')
+                    .find(|s| !s.is_empty())
+                    .unwrap_or(&d.path)
+                    .to_string(),
+            );
+            parent_path.set(d.parent_path);
+            if git_path() != d.abs_path {
+                git_has_diff.set(false);
+                git_line_markers.set(HashMap::new());
+            }
+            git_path.set(d.abs_path);
+            git_nonce.set(git_nonce() + 1);
+            mode.set(Mode::Dir);
+            comp_open.set(false);
+            comps.set(Vec::new());
+            refs_open.set(false);
+            refs.set(Vec::new());
+            diagnostics.set(Vec::new());
+            hover_diag.set(None);
+            lsp_status.set(None);
+            let came = came_from();
+            came_from.set(String::new());
+            apply_dir(
+                dir_entries,
+                parent_entries,
+                path,
+                selected,
+                preview,
+                thumbs,
+                show_hidden(),
+                d.entries,
+                d.parent_entries,
+                d.path,
+                (!came.is_empty()).then_some(came),
+            );
+        })
     });
 
     let media_event = use_file_ui::<FileMediaEvent>();
     use_effect(move || {
-        let Some(e) = media_event() else {
-            return;
-        };
-        error.set(String::new());
-        clear_preview(preview, thumbs);
-        let kind = e.kind;
-        media.set(Some(e));
-        mode.set(Mode::Media(kind));
-        diagnostics.set(Vec::new());
-        hover_diag.set(None);
-        lsp_status.set(None);
+        media_event.for_each(|e| {
+            error.set(String::new());
+            clear_preview(preview, thumbs);
+            let kind = e.kind;
+            media.set(Some(e));
+            mode.set(Mode::Media(kind));
+            diagnostics.set(Vec::new());
+            hover_diag.set(None);
+            lsp_status.set(None);
+        })
     });
 
     let preview_event = use_file_ui::<FilePreviewEvent>();
     use_effect(move || {
-        let Some(ev) = preview_event() else {
-            return;
-        };
-        if ev.thumb {
-            if let PreviewKind::Image { bytes, .. } = ev.kind {
-                let url = image_data_url(&bytes, &ev.path);
-                thumbs.write().insert(ev.path.clone(), url);
+        preview_event.for_each(|ev| {
+            if ev.thumb {
+                if let PreviewKind::Image { bytes, .. } = ev.kind {
+                    let url = image_data_url(&bytes, &ev.path);
+                    thumbs.write().insert(ev.path.clone(), url);
+                }
+                return;
             }
-            return;
-        }
-        let vis = visible_entries(&dir_entries.read(), show_hidden());
-        let sel_path = vis.get(selected()).map(|e| e.path.clone());
-        if sel_path.as_deref() != Some(ev.path.as_str()) {
-            return;
-        }
-        let next = match ev.kind {
-            PreviewKind::Image { bytes, .. } => Preview::Image(image_data_url(&bytes, &ev.path)),
-            PreviewKind::Video { url, path, native } => Preview::Video { url, path, native },
-            PreviewKind::Text(l) => Preview::Text(l),
-            PreviewKind::Dir(e) => Preview::Dir(e),
-            PreviewKind::Info {
-                size,
-                modified,
-                kind,
-            } => Preview::Info {
-                size,
-                modified,
-                kind,
-            },
-            PreviewKind::Error(m) => Preview::Error(m),
-        };
-        preview.set(next);
+            let vis = visible_entries(&dir_entries.read(), show_hidden());
+            let sel_path = vis.get(selected()).map(|e| e.path.clone());
+            if sel_path.as_deref() != Some(ev.path.as_str()) {
+                return;
+            }
+            let next = match ev.kind {
+                PreviewKind::Image { bytes, .. } => {
+                    Preview::Image(image_data_url(&bytes, &ev.path))
+                }
+                PreviewKind::Video { url, path, native } => Preview::Video { url, path, native },
+                PreviewKind::Text(l) => Preview::Text(l),
+                PreviewKind::Dir(e) => Preview::Dir(e),
+                PreviewKind::Info {
+                    size,
+                    modified,
+                    kind,
+                } => Preview::Info {
+                    size,
+                    modified,
+                    kind,
+                },
+                PreviewKind::Error(m) => Preview::Error(m),
+            };
+            preview.set(next);
+        })
     });
 
     let theme_event = use_file_ui::<FileThemeEvent>();
     use_effect(move || {
-        let Some(t) = theme_event() else {
-            return;
-        };
-        let mut s = String::new();
-        if !t.font_family.is_empty() {
-            s.push_str(&format!(
-                "font-family:\"{}\",var(--font-mono);",
-                t.font_family
-            ));
-        }
-        if t.font_size > 0.0 {
-            s.push_str(&format!("font-size:{}px;", t.font_size));
-        }
-        if t.line_height > 0.0 {
-            s.push_str(&format!("line-height:{};", t.line_height));
-        }
-        theme_style.set(s);
+        theme_event.for_each(|t| {
+            let mut s = String::new();
+            if !t.font_family.is_empty() {
+                s.push_str(&format!(
+                    "font-family:\"{}\",var(--font-mono);",
+                    t.font_family
+                ));
+            }
+            if t.font_size > 0.0 {
+                s.push_str(&format!("font-size:{}px;", t.font_size));
+            }
+            if t.line_height > 0.0 {
+                s.push_str(&format!("line-height:{};", t.line_height));
+            }
+            theme_style.set(s);
+        })
     });
 
     use_effect(move || {

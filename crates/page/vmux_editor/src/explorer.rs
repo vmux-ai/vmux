@@ -950,17 +950,15 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
 
     let search_event = use_file_ui::<ExplorerSearchEvent>();
     use_effect(move || {
-        let Some(event) = search_event() else {
-            return;
-        };
-        search.arrived(event);
+        search_event.for_each(|event| {
+            search.arrived(event);
+        })
     });
     let focus_event = use_file_ui::<ExplorerFocusEvent>();
     use_effect(move || {
-        let Some(event) = focus_event() else {
-            return;
-        };
-        search.showing(&event.path);
+        focus_event.for_each(|event| {
+            search.showing(&event.path);
+        })
     });
 
     let active = view().is_search();
@@ -1318,66 +1316,61 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
 
     let tree_event = use_file_ui::<ExplorerTreeEvent>();
     use_effect(move || {
-        let Some(e) = tree_event() else {
-            return;
-        };
-        root_name.set(e.root_name);
-        root_path.set(e.root_path);
-        current_path.set(e.current_path);
-        root_loading.set(e.loading);
-        tree.reconcile(e.rows);
-        if visible() && !e.focus_path.is_empty() {
-            tree_focus.at(e.focus_path.clone());
-            schedule_tree_focus(e.focus_path, focus_generation, ExplorerReveal::Followed);
-        }
+        tree_event.for_each(|e| {
+            root_name.set(e.root_name);
+            root_path.set(e.root_path);
+            current_path.set(e.current_path);
+            root_loading.set(e.loading);
+            tree.reconcile(e.rows);
+            if visible() && !e.focus_path.is_empty() {
+                tree_focus.at(e.focus_path.clone());
+                schedule_tree_focus(e.focus_path, focus_generation, ExplorerReveal::Followed);
+            }
+        })
     });
     let focus_event = use_file_ui::<ExplorerFocusEvent>();
     use_effect(move || {
-        let Some(e) = focus_event() else {
-            return;
-        };
-        if current_path() != e.path {
-            current_path.set(e.path.clone());
-        }
-        if visible() {
-            tree_focus.at(e.path.clone());
-            schedule_tree_focus(e.path, focus_generation, e.reveal);
-        }
+        focus_event.for_each(|e| {
+            if current_path() != e.path {
+                current_path.set(e.path.clone());
+            }
+            if visible() {
+                tree_focus.at(e.path.clone());
+                schedule_tree_focus(e.path, focus_generation, e.reveal);
+            }
+        })
     });
     let editors_event = use_file_ui::<OpenEditorsEvent>();
     use_effect(move || {
-        let Some(e) = editors_event() else {
-            return;
-        };
-        open_editors.set(e.items);
+        editors_event.for_each(|e| {
+            open_editors.set(e.items);
+        })
     });
     let outline_event = use_file_ui::<OutlineEvent>();
     use_effect(move || {
-        let Some(e) = outline_event() else {
-            return;
-        };
-        outline.set(e.items);
+        outline_event.for_each(|e| {
+            outline.set(e.items);
+        })
     });
     let fs_result = use_file_ui::<ExplorerFsResult>();
     use_effect(move || {
-        let Some(e) = fs_result() else {
-            return;
-        };
-        if e.ok && !e.open_path.is_empty() {
-            open_file(e.open_path);
-        }
-        show_notice(
-            notice,
-            notice_generation,
-            ExplorerNotice {
-                ok: e.ok,
-                message: if e.ok {
-                    localize_notice(&e.message)
-                } else {
-                    e.message
+        fs_result.for_each(|e| {
+            if e.ok && !e.open_path.is_empty() {
+                open_file(e.open_path);
+            }
+            show_notice(
+                notice,
+                notice_generation,
+                ExplorerNotice {
+                    ok: e.ok,
+                    message: if e.ok {
+                        localize_notice(&e.message)
+                    } else {
+                        e.message
+                    },
                 },
-            },
-        );
+            );
+        })
     });
 
     let open_body = if show_open() {
