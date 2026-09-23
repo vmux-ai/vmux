@@ -44,7 +44,6 @@ pub(crate) mod tidy;
 pub use self::attach::{
     attach_acp_agent_to_stack, attach_page_agent_to_stack, page_agent_placeholder_url,
 };
-pub use self::command::AgentLookups;
 pub use self::provider::AgentExecutableOverride;
 pub use self::run_terminal::AgentTerminalRegions;
 pub use vmux_space::cwd::valid_cwd;

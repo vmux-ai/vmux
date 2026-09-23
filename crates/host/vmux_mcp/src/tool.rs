@@ -255,7 +255,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-pub(crate) struct ToolRequestSet;
+pub struct ToolRequestSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 struct ToolRequestFlush;
