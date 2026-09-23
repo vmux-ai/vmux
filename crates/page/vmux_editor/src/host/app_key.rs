@@ -2,7 +2,10 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
 use vmux_command::host::FileStatusPicked;
-use vmux_command::{CommandDefinition, CommandInvocation, CommandIssuer, ReadCommandRequests};
+use vmux_command::{
+    CommandDefinition, CommandDispatch, CommandIssuer, CommandRuntimePlugin, CommandSpawner,
+    RegisterCommandDefinitions,
+};
 use vmux_core::event::{
     ExplorerGoto, FileEncoding, FileEncodingAction, FileEncodingSet, FileIndent, FileKey,
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
@@ -15,78 +18,88 @@ pub(crate) struct KeyPlugin;
 
 impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
-        FileKeyRequest::register(app);
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
         app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
-            .add_systems(Update, echo_key_command.in_set(ReadCommandRequests))
+            .add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
             .add_systems(Update, apply_status_picks)
+            .add_observer(echo_key_command)
             .add_observer(open_status_picker);
     }
 }
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-struct FileKeyRequest {
-    caller: Entity,
-    key: FileKey,
-}
+#[derive(Component)]
+struct FileKeyCommand(FileKey);
 
-impl FileKeyRequest {
-    pub fn register(app: &mut App) {
-        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
-    pub fn definitions() -> Vec<CommandDefinition> {
-        vec![
+fn spawn_commands(mut commands: CommandSpawner) {
+    for (definition, key) in [
+        (
             CommandDefinition::new("file_toggle_explorer", "Toggle Explorer", "Editor")
                 .hidden()
                 .direct_when("Super+b", Some("files")),
+            FileKey::ToggleExplorer,
+        ),
+        (
             CommandDefinition::new("file_reveal_in_explorer", "Reveal In Explorer", "Editor")
                 .hidden()
                 .direct_when("Super+Shift+e", Some("files"))
                 .direct_when("Ctrl+Shift+e", Some("files")),
+            FileKey::RevealInExplorer,
+        ),
+        (
             CommandDefinition::new("file_panel_next", "Next Panel Row", "Editor")
                 .hidden()
                 .direct_when("ArrowDown", Some("files.panel")),
+            FileKey::PanelNext,
+        ),
+        (
             CommandDefinition::new("file_panel_previous", "Previous Panel Row", "Editor")
                 .hidden()
                 .direct_when("ArrowUp", Some("files.panel")),
+            FileKey::PanelPrevious,
+        ),
+        (
             CommandDefinition::new("file_panel_choose", "Choose Panel Row", "Editor")
                 .hidden()
                 .direct_when("Enter", Some("files.panel"))
                 .direct_when("Tab", Some("files.panel")),
+            FileKey::PanelChoose,
+        ),
+        (
             CommandDefinition::new("file_panel_dismiss", "Close Panel", "Editor")
                 .hidden()
                 .direct_when("Escape", Some("files.panel")),
+            FileKey::PanelDismiss,
+        ),
+        (
             CommandDefinition::new("file_find", "Find In File", "Editor")
                 .direct_when("Super+f", Some("files")),
+            FileKey::Find { forward: true },
+        ),
+        (
             CommandDefinition::new("file_find_in_files", "Find In Files", "Editor")
                 .direct_when("Super+Shift+f", Some("files"))
                 .direct_when("Ctrl+Shift+f", Some("files")),
-        ]
-    }
-
-    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
-        let key = match invocation.id.as_str() {
-            "file_toggle_explorer" => FileKey::ToggleExplorer,
-            "file_reveal_in_explorer" => FileKey::RevealInExplorer,
-            "file_panel_next" => FileKey::PanelNext,
-            "file_panel_previous" => FileKey::PanelPrevious,
-            "file_panel_choose" => FileKey::PanelChoose,
-            "file_panel_dismiss" => FileKey::PanelDismiss,
-            "file_find" => FileKey::Find { forward: true },
-            "file_find_in_files" => FileKey::FindInFiles,
-            _ => return None,
-        };
-        Some(Self {
-            caller: invocation.caller,
-            key,
-        })
+            FileKey::FindInFiles,
+        ),
+    ] {
+        commands.spawn(definition, FileKeyCommand(key));
     }
 }
 
-fn echo_key_command(mut requests: MessageReader<FileKeyRequest>, mut commands: Commands) {
-    for request in requests.read() {
-        commands.trigger(BinHostEmitEvent::from_event(request.caller, &request.key));
-    }
+fn echo_key_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<&FileKeyCommand>,
+    mut commands: Commands,
+) {
+    let Ok(key) = keys.get(trigger.event().command()) else {
+        return;
+    };
+    commands.trigger(BinHostEmitEvent::from_event(
+        trigger.event().invocation().caller,
+        &key.0,
+    ));
 }
 
 fn open_status_picker(
@@ -192,6 +205,7 @@ fn apply_status_picks(
 mod tests {
     use super::*;
     use vmux_api::BinEvent;
+    use vmux_command::CommandInvocation;
 
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, String)>);
@@ -221,10 +235,10 @@ mod tests {
             app
         }
 
-        fn issue(app: &mut App, caller: Entity, key: FileKey) {
+        fn issue(app: &mut App, caller: Entity, id: &str) {
             app.world_mut()
-                .resource_mut::<bevy::ecs::message::Messages<FileKeyRequest>>()
-                .write(FileKeyRequest { caller, key });
+                .resource_mut::<bevy::ecs::message::Messages<CommandInvocation>>()
+                .write(CommandInvocation::new(caller, id));
             app.update();
         }
     }
@@ -235,7 +249,7 @@ mod tests {
         let pressed = app.world_mut().spawn_empty().id();
         let other = app.world_mut().spawn_empty().id();
 
-        Echo::issue(&mut app, pressed, FileKey::PanelChoose);
+        Echo::issue(&mut app, pressed, "file_panel_choose");
 
         assert_eq!(
             app.world().resource::<Echoed>().0,

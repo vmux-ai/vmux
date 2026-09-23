@@ -1,75 +1,81 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_api::space::SpaceKey;
-use vmux_command::{CommandDefinition, CommandInvocation, ReadCommandRequests};
+use vmux_command::{
+    CommandDefinition, CommandDispatch, CommandRuntimePlugin, CommandSpawner,
+    RegisterCommandDefinitions,
+};
 
 pub(crate) struct SpaceKeyPlugin;
 
 impl Plugin for SpaceKeyPlugin {
     fn build(&self, app: &mut App) {
-        SpaceKeyRequest::register(app);
-        app.add_systems(Update, echo_key_command.in_set(ReadCommandRequests));
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
+        app.add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
+            .add_observer(echo_key_command);
     }
 }
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-struct SpaceKeyRequest {
-    caller: Entity,
-    key: SpaceKey,
-}
+#[derive(Component)]
+struct SpaceKeyCommand(SpaceKey);
 
-impl SpaceKeyRequest {
-    pub fn register(app: &mut App) {
-        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
-    pub fn definitions() -> Vec<CommandDefinition> {
-        vec![
+fn spawn_commands(mut commands: CommandSpawner) {
+    for (definition, key) in [
+        (
             CommandDefinition::new("space_next", "Next Space", "Layout > Space")
                 .hidden()
                 .direct_when("ArrowDown", Some("spaces"))
                 .direct_when("Ctrl+n", Some("spaces"))
                 .direct_when("Ctrl+j", Some("spaces")),
+            SpaceKey::Next,
+        ),
+        (
             CommandDefinition::new("space_previous", "Previous Space", "Layout > Space")
                 .hidden()
                 .direct_when("ArrowUp", Some("spaces"))
                 .direct_when("Ctrl+p", Some("spaces"))
                 .direct_when("Ctrl+k", Some("spaces")),
+            SpaceKey::Previous,
+        ),
+        (
             CommandDefinition::new("space_attach", "Open Selected Space", "Layout > Space")
                 .hidden()
                 .direct_when("Enter", Some("spaces")),
+            SpaceKey::Attach,
+        ),
+        (
             CommandDefinition::new("space_delete", "Delete Selected Space", "Layout > Space")
                 .hidden()
                 .direct_when("Delete", Some("spaces"))
                 .direct_when("Backspace", Some("spaces")),
-        ]
-    }
-
-    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
-        let key = match invocation.id.as_str() {
-            "space_next" => SpaceKey::Next,
-            "space_previous" => SpaceKey::Previous,
-            "space_attach" => SpaceKey::Attach,
-            "space_delete" => SpaceKey::Delete,
-            _ => return None,
-        };
-        Some(Self {
-            caller: invocation.caller,
-            key,
-        })
+            SpaceKey::Delete,
+        ),
+    ] {
+        commands.spawn(definition, SpaceKeyCommand(key));
     }
 }
 
-fn echo_key_command(mut requests: MessageReader<SpaceKeyRequest>, mut commands: Commands) {
-    for request in requests.read() {
-        commands.trigger(BinHostEmitEvent::from_event(request.caller, &request.key));
-    }
+fn echo_key_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<&SpaceKeyCommand>,
+    mut commands: Commands,
+) {
+    let Ok(key) = keys.get(trigger.event().command()) else {
+        return;
+    };
+    commands.trigger(BinHostEmitEvent::from_event(
+        trigger.event().invocation().caller,
+        &key.0,
+    ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use vmux_api::BinEvent;
+    use vmux_command::CommandInvocation;
 
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, String)>);
@@ -97,10 +103,10 @@ mod tests {
             app
         }
 
-        fn issue(app: &mut App, caller: Entity, key: SpaceKey) {
+        fn issue(app: &mut App, caller: Entity, id: &str) {
             app.world_mut()
-                .resource_mut::<bevy::ecs::message::Messages<SpaceKeyRequest>>()
-                .write(SpaceKeyRequest { caller, key });
+                .resource_mut::<bevy::ecs::message::Messages<CommandInvocation>>()
+                .write(CommandInvocation::new(caller, id));
             app.update();
         }
     }
@@ -111,7 +117,7 @@ mod tests {
         let pressed = app.world_mut().spawn_empty().id();
         let other = app.world_mut().spawn_empty().id();
 
-        Echo::issue(&mut app, pressed, SpaceKey::Delete);
+        Echo::issue(&mut app, pressed, "space_delete");
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
