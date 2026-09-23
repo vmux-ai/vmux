@@ -352,15 +352,15 @@ fn append_managed_mcp_args(args: &mut Vec<String>) {
 fn append_managed_mcp_server_args(
     args: &mut Vec<String>,
     name: &str,
-    server: vmux_tools::McpServerManifest,
+    server: vmux_tool::McpServerManifest,
 ) {
-    if server.transport == vmux_tools::McpTransport::Sse {
+    if server.transport == vmux_tool::McpTransport::Sse {
         return;
     }
     let prefix = format!("mcp_servers.{}", quote_toml(name));
     push_config_override(args, format!("{prefix}.enabled=true"));
     match server.transport {
-        vmux_tools::McpTransport::Stdio => {
+        vmux_tool::McpTransport::Stdio => {
             if let Some(command) = server.command {
                 push_config_override(args, format!("{prefix}.command={}", quote_toml(&command)));
             }
@@ -377,7 +377,7 @@ fn append_managed_mcp_server_args(
                 push_config_override(args, format!("{prefix}.cwd={}", quote_toml(&cwd)));
             }
         }
-        vmux_tools::McpTransport::Http => {
+        vmux_tool::McpTransport::Http => {
             if let Some(url) = server.url {
                 push_config_override(args, format!("{prefix}.url={}", quote_toml(&url)));
             }
@@ -406,7 +406,7 @@ fn append_managed_mcp_server_args(
                 );
             }
         }
-        vmux_tools::McpTransport::Sse => unreachable!(),
+        vmux_tool::McpTransport::Sse => unreachable!(),
     }
 }
 
@@ -974,8 +974,8 @@ mod tests {
 
     #[test]
     fn managed_mcp_server_is_enabled_with_auth_environment() {
-        let server = vmux_tools::McpServerManifest {
-            transport: vmux_tools::McpTransport::Http,
+        let server = vmux_tool::McpServerManifest {
+            transport: vmux_tool::McpTransport::Http,
             command: None,
             args: Vec::new(),
             env: std::collections::BTreeMap::new(),
@@ -1005,8 +1005,8 @@ mod tests {
 
     #[test]
     fn sse_managed_mcp_server_is_not_configured_for_codex() {
-        let server = vmux_tools::McpServerManifest {
-            transport: vmux_tools::McpTransport::Sse,
+        let server = vmux_tool::McpServerManifest {
+            transport: vmux_tool::McpTransport::Sse,
             command: None,
             args: Vec::new(),
             env: std::collections::BTreeMap::new(),
@@ -1158,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn build_args_forces_vmux_tools_direct_to_bypass_deferral() {
+    fn build_args_forces_vmux_tool_calls_direct_to_bypass_deferral() {
         let mcp = McpServerConfig {
             command: "/bin/vmux".into(),
             args: vec!["mcp".into()],

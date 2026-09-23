@@ -79,16 +79,7 @@ fn post_native(center: &objc2_user_notifications::UNUserNotificationCenter, even
 
 #[cfg(target_os = "macos")]
 fn osascript_notify(title: &str, body: &str) {
-    fn esc(s: &str) -> String {
-        s.replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', " ")
-    }
-    let script = format!(
-        "display notification \"{}\" with title \"{}\" sound name \"default\"",
-        esc(body),
-        esc(title)
-    );
+    let script = NotificationScript::new(title, body).0;
     if let Ok(mut child) = std::process::Command::new("osascript")
         .arg("-e")
         .arg(script)
@@ -97,6 +88,27 @@ fn osascript_notify(title: &str, body: &str) {
         std::thread::spawn(move || {
             let _ = child.wait();
         });
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct NotificationScript(String);
+
+#[cfg(target_os = "macos")]
+impl NotificationScript {
+    fn new(title: &str, body: &str) -> Self {
+        Self(format!(
+            "display notification \"{}\" with title \"{}\" sound name \"default\"",
+            Self::escape(body),
+            Self::escape(title)
+        ))
+    }
+
+    fn escape(value: &str) -> String {
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', " ")
     }
 }
 

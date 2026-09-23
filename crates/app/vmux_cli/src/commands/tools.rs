@@ -2,7 +2,7 @@ use std::io;
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand, ValueEnum};
-use vmux_tools::{self as tools, DotfileLinkState};
+use vmux_tool::{self as tools, DotfileLinkState};
 
 #[derive(Debug, Args)]
 pub struct ToolsArgs {

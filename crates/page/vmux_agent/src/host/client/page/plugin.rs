@@ -1,13 +1,12 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::UiEventPlugin;
 
 use crate::AgentVariant;
+use crate::approval;
 use crate::events::{AgentApprovalRequest, AgentDelta};
 use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
 use crate::run_state::AgentRunState;
 use crate::run_state_kind::LastRunStateKind;
-use crate::systems::{approval, surface_errors};
-use crate::toast::AgentToast;
+use crate::toast::ToastPlugin;
 use vmux_service::agent_events::{
     PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus,
     PageAgentSnapshot,
@@ -23,15 +22,14 @@ impl Plugin for PageAgentPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<AgentSession>()
             .register_type::<AgentApprovalPolicy>()
-            .add_message::<AgentToast>()
             .add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_plugins(UiEventPlugin::<(AgentToast,)>::default())
             .add_plugins(approval::ApprovalPlugin)
+            .add_plugins(ToastPlugin)
             .add_plugins(crate::tidy::TidyPlugin)
             .add_observer(close_page_session_on_remove)
             .add_systems(
@@ -41,7 +39,6 @@ impl Plugin for PageAgentPlugin {
                     spawn_page_session_on_add,
                     send_page_agent_input,
                     consume_page_agent_stream.after(approval::ApprovalSyncSet),
-                    surface_errors::surface_errors,
                     attach_last_run_state_kind,
                 ),
             );

@@ -67,7 +67,7 @@ pub fn Page() -> Element {
     let mut repository = use_signal(|| "vmux-vault".to_string());
     let mut selected_owner = use_signal(|| None::<String>);
     let selected_repository = use_signal(|| None::<String>);
-    let preferred_provider = requested_provider();
+    let preferred_provider = RequestedProvider::current();
     let selected_provider = use_signal(|| match preferred_provider.as_str() {
         "github" => Some(RemoteProvider::Github),
         "google_drive" | "cloud_folder" => Some(RemoteProvider::GoogleDrive),
@@ -873,7 +873,18 @@ fn recovery_key_complete(value: &str) -> bool {
     normalized_recovery_key(value).len() == 68
 }
 
-fn requested_provider() -> String {
+struct RequestedProvider;
+
+impl RequestedProvider {
+    fn current() -> String {
+        if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
+            && let Some(provider) = Self::from_query(&meta.url)
+        {
+            return provider;
+        }
+        String::new()
+    }
+
     fn from_query(source: &str) -> Option<String> {
         Some(
             source
@@ -884,13 +895,6 @@ fn requested_provider() -> String {
                 .to_string(),
         )
     }
-
-    if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
-        && let Some(provider) = from_query(&meta.url)
-    {
-        return provider;
-    }
-    String::new()
 }
 
 fn copy_recovery_key(value: String, mut copied: Signal<bool>) {

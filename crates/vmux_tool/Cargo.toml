@@ -1,5 +1,5 @@
 [package]
-name = "vmux_tools"
+name = "vmux_tool"
 description = "Tool inventory, manifests, imports, and dotfile management"
 version.workspace = true
 edition.workspace = true

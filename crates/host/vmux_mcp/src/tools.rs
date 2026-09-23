@@ -27,7 +27,10 @@ pub struct ToolPlugin;
 impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NextToolOrder>()
-            .configure_sets(Update, (ToolDispatchSet, ToolDispatchFlush).chain())
+            .configure_sets(
+                Update,
+                (ToolRequestSet, ToolDispatchSet, ToolDispatchFlush).chain(),
+            )
             .configure_sets(
                 Startup,
                 (
@@ -76,18 +79,18 @@ impl ToolPlugin {
     }
 }
 
-pub trait McpToolHandler:
-    Component + serde::de::DeserializeOwned + Serialize + Send + Sync + 'static
-{
-    fn dispatch(&self, request: McpToolRequest<'_>) -> Result<DispatchTarget, String>;
+#[derive(Message)]
+pub struct McpToolRequest<T> {
+    request: Entity,
+    tool: T,
+    call: ToolCall,
 }
 
-#[derive(Clone, Copy)]
-pub struct McpToolRequest<'a> {
-    call: &'a ToolCall,
-}
+impl<T> McpToolRequest<T> {
+    pub fn tool(&self) -> &T {
+        &self.tool
+    }
 
-impl McpToolRequest<'_> {
     pub fn name(&self) -> &str {
         &self.call.name
     }
@@ -104,7 +107,7 @@ impl McpToolRequest<'_> {
         &self.call.host_shell
     }
 
-    pub fn parse<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
+    pub fn parse<A: serde::de::DeserializeOwned>(&self) -> Result<A, String> {
         serde_json::from_value(self.call.arguments.clone())
             .map_err(|error| format!("{}: invalid arguments: {error}", self.call.name))
     }
@@ -116,6 +119,10 @@ impl McpToolRequest<'_> {
                 self.call.name
             )
         })
+    }
+
+    pub fn finish(&self, commands: &mut Commands, result: Result<DispatchTarget, String>) {
+        self.call.finish_dispatch(self.request, commands, result);
     }
 }
 
@@ -133,32 +140,61 @@ impl<T> McpToolPlugin<T> {
     }
 }
 
-impl<T: McpToolHandler> Plugin for McpToolPlugin<T> {
+impl<T> Plugin for McpToolPlugin<T>
+where
+    T: Component + Clone + serde::de::DeserializeOwned + Serialize,
+{
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<ToolPlugin>() {
             app.add_plugins(ToolPlugin);
         }
-        let manifest = self.manifest;
-        app.add_systems(
-            Startup,
-            (move |mut tools: ToolSpawner| {
-                tools.spawn_manifest(ToolManifest::<T>::from_ron(manifest));
-            })
-            .after(ToolRegistrationSet::Bookmark),
-        )
-        .add_systems(Update, dispatch_mcp_tools::<T>.in_set(ToolDispatchSet));
+        app.insert_resource(McpToolManifest::<T>::new(self.manifest))
+            .add_message::<McpToolRequest<T>>()
+            .add_systems(
+                Startup,
+                register_mcp_tools::<T>.after(ToolRegistrationSet::Bookmark),
+            )
+            .add_systems(Update, route_mcp_tools::<T>.in_set(ToolRequestSet));
     }
 }
 
-fn dispatch_mcp_tools<T: McpToolHandler>(mut commands: Commands, calls: ToolCalls<T>) {
-    for (request, call, tool) in calls.iter() {
-        call.finish_dispatch(
-            request,
-            &mut commands,
-            tool.dispatch(McpToolRequest { call }),
-        );
+#[derive(Resource)]
+struct McpToolManifest<T> {
+    source: &'static str,
+    marker: PhantomData<fn() -> T>,
+}
+
+impl<T> McpToolManifest<T> {
+    fn new(source: &'static str) -> Self {
+        Self {
+            source,
+            marker: PhantomData,
+        }
     }
 }
+
+fn register_mcp_tools<T>(manifest: Res<McpToolManifest<T>>, mut tools: ToolSpawner)
+where
+    T: Component + serde::de::DeserializeOwned + Serialize,
+{
+    tools.spawn_manifest(ToolManifest::<T>::from_ron(manifest.source));
+}
+
+fn route_mcp_tools<T>(calls: ToolCalls<T>, mut requests: MessageWriter<McpToolRequest<T>>)
+where
+    T: Component + Clone,
+{
+    for (request, call, tool) in calls.iter() {
+        requests.write(McpToolRequest {
+            request,
+            tool: tool.clone(),
+            call: call.clone(),
+        });
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+pub(crate) struct ToolRequestSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub(super) enum ToolRegistrationSet {
@@ -456,7 +492,7 @@ impl ToolDispatchResult {
 #[derive(Resource, Default)]
 struct NextToolOrder(u32);
 
-#[derive(Component)]
+#[derive(Clone, Component)]
 pub struct ToolCall {
     tool: Option<Entity>,
     pub(crate) name: String,

@@ -247,22 +247,30 @@ fn production_frame() -> TreeSpec {
     ))
 }
 
-fn generated_pane_tree(seed: u64) -> TreeSpec {
-    struct Rng(u64);
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1);
-            self.0 >> 33
-        }
+struct GeneratedPaneRng(u64);
+
+impl GeneratedPaneRng {
+    fn tree(seed: u64) -> TreeSpec {
+        let mut rng = Self(
+            seed.wrapping_mul(2862933555777941757)
+                .wrapping_add(3037000493),
+        );
+        let depth = 1 + (rng.next() % 5) as u32;
+        TreeSpec::new("root", fill()).with(rng.build(depth, "p".to_string(), true))
     }
 
-    fn build(rng: &mut Rng, depth: u32, path: String, row: bool) -> TreeSpec {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1);
+        self.0 >> 33
+    }
+
+    fn build(&mut self, depth: u32, path: String, row: bool) -> TreeSpec {
         const GROWS: [f32; 4] = [0.5, 1.0, 1.7, 3.0];
-        let grow = GROWS[(rng.next() % 4) as usize];
+        let grow = GROWS[(self.next() % 4) as usize];
         if depth == 0 {
             return TreeSpec::new(path, leaf(grow));
         }
-        let count = 2 + (rng.next() % 3) as usize;
+        let count = 2 + (self.next() % 3) as usize;
         let mut split = TreeSpec::new(
             path.clone(),
             FlexNode {
@@ -277,16 +285,10 @@ fn generated_pane_tree(seed: u64) -> TreeSpec {
             },
         );
         for index in 0..count {
-            split = split.with(build(rng, depth - 1, format!("{path}.{index}"), !row));
+            split = split.with(self.build(depth - 1, format!("{path}.{index}"), !row));
         }
         split
     }
-
-    let mut rng = Rng(seed
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(3037000493));
-    let depth = 1 + (rng.next() % 5) as u32;
-    TreeSpec::new("root", fill()).with(build(&mut rng, depth, "p".to_string(), true))
 }
 
 fn edge_cases() -> Vec<(&'static str, TreeSpec, UVec2, f32)> {
@@ -488,7 +490,7 @@ impl Golden {
     fn spec(&self) -> TreeSpec {
         match self.case.split_once('-') {
             Some(("frame", _)) => production_frame(),
-            Some(("panes", seed)) => generated_pane_tree(seed.parse().expect("seed")),
+            Some(("panes", seed)) => GeneratedPaneRng::tree(seed.parse().expect("seed")),
             Some(("edge", index)) => {
                 let index: usize = index.parse().expect("index");
                 edge_cases().swap_remove(index).1

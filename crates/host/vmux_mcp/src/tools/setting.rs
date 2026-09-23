@@ -33,6 +33,19 @@ struct UpdateSettingsArgs {
     value: serde_json::Value,
 }
 
+impl UpdateSettingsArgs {
+    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+        let args: Self = call.parse("update_settings")?;
+        if args.path.trim().is_empty() {
+            return Err("update_settings.path is empty".to_string());
+        }
+        Ok(DispatchTarget::Command(AgentCommand::UpdateSettings {
+            path: args.path,
+            value: JsonValue::from(args.value),
+        }))
+    }
+}
+
 fn register(mut tools: ToolSpawner) {
     let manifest = ToolManifest::<SettingTool>::from_ron(include_str!("setting.ron"));
     tools.spawn_manifest(manifest);
@@ -49,18 +62,7 @@ fn get_settings(mut commands: Commands, calls: ToolCalls<SettingTool>) {
 }
 
 fn update_settings(mut commands: Commands, calls: ToolCalls<SettingTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: UpdateSettingsArgs = call.parse("update_settings")?;
-        if args.path.trim().is_empty() {
-            return Err("update_settings.path is empty".to_string());
-        }
-        Ok(DispatchTarget::Command(AgentCommand::UpdateSettings {
-            path: args.path,
-            value: JsonValue::from(args.value),
-        }))
-    }
-
     for (request, call, _) in calls.matching(SettingTool::UpdateSettings) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        call.finish_dispatch(request, &mut commands, UpdateSettingsArgs::target(call));
     }
 }

@@ -41,10 +41,42 @@ struct RenameSpaceArgs {
     name: String,
 }
 
+impl RenameSpaceArgs {
+    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+        let args: Self = call.parse("rename_space")?;
+        if args.space_id.trim().is_empty() {
+            return Err("rename_space.space_id is empty".to_string());
+        }
+        if args.name.trim().is_empty() {
+            return Err("rename_space.name is empty".to_string());
+        }
+        Ok(DispatchTarget::Command(AgentCommand::SpaceCommand(
+            AgentSpaceCommand::Rename {
+                space_id: args.space_id,
+                name: args.name,
+            },
+        )))
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DeleteSpaceArgs {
     space_id: String,
+}
+
+impl DeleteSpaceArgs {
+    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
+        let args: Self = call.parse("delete_space")?;
+        if args.space_id.trim().is_empty() {
+            return Err("delete_space.space_id is empty".to_string());
+        }
+        Ok(DispatchTarget::Command(AgentCommand::SpaceCommand(
+            AgentSpaceCommand::Delete {
+                space_id: args.space_id,
+            },
+        )))
+    }
 }
 
 fn register(mut tools: ToolSpawner) {
@@ -77,41 +109,13 @@ fn create(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
 }
 
 fn rename(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: RenameSpaceArgs = call.parse("rename_space")?;
-        if args.space_id.trim().is_empty() {
-            return Err("rename_space.space_id is empty".to_string());
-        }
-        if args.name.trim().is_empty() {
-            return Err("rename_space.name is empty".to_string());
-        }
-        Ok(DispatchTarget::Command(AgentCommand::SpaceCommand(
-            AgentSpaceCommand::Rename {
-                space_id: args.space_id,
-                name: args.name,
-            },
-        )))
-    }
-
     for (request, call, _) in calls.matching(SpaceTool::RenameSpace) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        call.finish_dispatch(request, &mut commands, RenameSpaceArgs::target(call));
     }
 }
 
 fn delete(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
-    fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-        let args: DeleteSpaceArgs = call.parse("delete_space")?;
-        if args.space_id.trim().is_empty() {
-            return Err("delete_space.space_id is empty".to_string());
-        }
-        Ok(DispatchTarget::Command(AgentCommand::SpaceCommand(
-            AgentSpaceCommand::Delete {
-                space_id: args.space_id,
-            },
-        )))
-    }
-
     for (request, call, _) in calls.matching(SpaceTool::DeleteSpace) {
-        call.finish_dispatch(request, &mut commands, target(call));
+        call.finish_dispatch(request, &mut commands, DeleteSpaceArgs::target(call));
     }
 }
