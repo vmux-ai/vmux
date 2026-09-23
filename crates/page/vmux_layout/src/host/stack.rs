@@ -231,7 +231,7 @@ impl StackCloser<'_, '_> {
             commands.entity(sibling).remove::<ChildOf>();
             commands.queue(move |world: &mut World| {
                 world.despawn(sibling);
-                crate::pane::set_pane_split_direction(world, parent, sibling_direction);
+                PaneSplit::set_direction(world, parent, sibling_direction);
             });
         } else {
             new_active_pane = parent;

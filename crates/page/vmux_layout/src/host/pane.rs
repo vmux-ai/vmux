@@ -31,24 +31,26 @@ use super::pane_resize::ResizePlugin;
 pub use super::pane_resize::{
     PaneDrag, PaneSize, PaneSplitGaps, apply_pane_split_gaps, pane_split_gaps,
 };
+use super::pane_tree::TreePlugin;
+pub use super::pane_tree::{
+    Pane, PaneSplit, PaneSplitDirection, direction_to_split, first_leaf_descendant,
+    leaf_pane_bundle, split_leaf_into_two, split_or_extend, split_root_bundle,
+};
 
 pub struct PanePlugin;
 
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<Pane>()
-            .register_type::<SideSheetCardCollapsed>()
-            .register_type::<PaneSplit>()
-            .register_type::<PaneSplitDirection>()
-            .add_plugins((
-                IdentityPlugin,
-                ArrangementPlugin,
-                OpenPlugin,
-                PaneZoomPlugin,
-                FocusPlugin,
-                ResizePlugin,
-                ClosePlugin,
-            ));
+        app.register_type::<SideSheetCardCollapsed>().add_plugins((
+            TreePlugin,
+            IdentityPlugin,
+            ArrangementPlugin,
+            OpenPlugin,
+            PaneZoomPlugin,
+            FocusPlugin,
+            ResizePlugin,
+            ClosePlugin,
+        ));
     }
 }
 
@@ -62,112 +64,11 @@ impl Plugin for OpenPlugin {
     }
 }
 
-#[derive(Component, Reflect, Default)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::layout::pane"]
-#[require(Save)]
-pub struct Pane;
-
 #[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::pane"]
 #[require(Save)]
 pub struct SideSheetCardCollapsed;
-
-#[derive(Component, Reflect)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::layout::pane"]
-#[require(Save)]
-pub struct PaneSplit {
-    pub direction: PaneSplitDirection,
-}
-
-#[derive(Reflect, Clone, Copy, PartialEq, Eq, Default, Debug)]
-#[type_path = "vmux_desktop::layout::pane"]
-pub enum PaneSplitDirection {
-    #[default]
-    Row,
-    Column,
-}
-
-pub fn leaf_pane_bundle() -> impl Bundle {
-    (
-        Pane,
-        PaneSize::default(),
-        Transform::default(),
-        Node {
-            flex_grow: 1.0,
-            flex_basis: Val::Px(0.0),
-            align_items: AlignItems::Stretch,
-            justify_content: JustifyContent::Stretch,
-            ..default()
-        },
-    )
-}
-
-pub fn split_root_bundle(direction: PaneSplitDirection) -> impl Bundle {
-    let flex_direction = match direction {
-        PaneSplitDirection::Row => FlexDirection::Row,
-        PaneSplitDirection::Column => FlexDirection::Column,
-    };
-    let gap = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
-    (
-        Pane,
-        PaneSplit { direction },
-        PaneSize::default(),
-        Transform::default(),
-        Visibility::default(),
-        Node {
-            flex_grow: 1.0,
-            flex_direction,
-            column_gap: gap.column_gap,
-            row_gap: gap.row_gap,
-            align_items: AlignItems::Stretch,
-            ..default()
-        },
-    )
-}
-
-pub(crate) fn set_pane_split_direction(
-    world: &mut World,
-    entity: Entity,
-    direction: PaneSplitDirection,
-) {
-    if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
-        split.direction = direction;
-    }
-    if let Some(mut node) = world.get_mut::<Node>(entity) {
-        node.flex_direction = match direction {
-            PaneSplitDirection::Row => FlexDirection::Row,
-            PaneSplitDirection::Column => FlexDirection::Column,
-        };
-        let gaps = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
-        node.column_gap = gaps.column_gap;
-        node.row_gap = gaps.row_gap;
-    }
-}
-
-pub fn first_leaf_descendant(
-    entity: Entity,
-    children_q: &Query<&Children, With<Pane>>,
-    leaf_q: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-) -> Entity {
-    if leaf_q.contains(entity) {
-        return entity;
-    }
-    if let Ok(children) = children_q.get(entity) {
-        for child in children.iter() {
-            if leaf_q.contains(child) {
-                return child;
-            }
-            let found = first_leaf_descendant(child, children_q, leaf_q);
-            if found != child || leaf_q.contains(found) {
-                return found;
-            }
-        }
-    }
-    entity
-}
 
 pub fn first_stack_in_pane(
     pane: Entity,
@@ -176,70 +77,6 @@ pub fn first_stack_in_pane(
 ) -> Option<Entity> {
     let children = pane_children.get(pane).ok()?;
     children.iter().find(|&e| tab_q.contains(e))
-}
-
-pub fn direction_to_split(direction: &PaneDirection) -> PaneSplitDirection {
-    match direction {
-        PaneDirection::Left | PaneDirection::Right => PaneSplitDirection::Row,
-        PaneDirection::Top | PaneDirection::Bottom => PaneSplitDirection::Column,
-    }
-}
-
-pub fn split_leaf_into_two(
-    commands: &mut Commands,
-    active: Entity,
-    split_dir: PaneSplitDirection,
-    existing_tabs: &[Entity],
-    activate_new: bool,
-) -> Entity {
-    split_leaf_into_two_parts(commands, active, split_dir, existing_tabs, activate_new).1
-}
-
-fn split_leaf_into_two_parts(
-    commands: &mut Commands,
-    active: Entity,
-    split_dir: PaneSplitDirection,
-    existing_tabs: &[Entity],
-    activate_new: bool,
-) -> (Entity, Entity) {
-    let new_ts = if activate_new {
-        LastActivatedAt::now()
-    } else {
-        LastActivatedAt(0)
-    };
-    let pane1 = commands
-        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-        .id();
-    let p2 = commands
-        .spawn((leaf_pane_bundle(), new_ts, ChildOf(active)))
-        .id();
-    for tab in existing_tabs {
-        commands.entity(*tab).insert(ChildOf(pane1));
-    }
-    commands.entity(active).insert(split_root_bundle(split_dir));
-    (pane1, p2)
-}
-
-pub fn split_or_extend(
-    commands: &mut Commands,
-    anchor: Entity,
-    split_dir: PaneSplitDirection,
-    existing_tabs: &[Entity],
-    activate_new: bool,
-    already_split: bool,
-) -> Entity {
-    if already_split {
-        let ts = if activate_new {
-            LastActivatedAt::now()
-        } else {
-            LastActivatedAt(0)
-        };
-        commands
-            .spawn((leaf_pane_bundle(), ts, ChildOf(anchor)))
-            .id()
-    } else {
-        split_leaf_into_two(commands, anchor, split_dir, existing_tabs, activate_new)
-    }
 }
 
 #[derive(Message, Clone)]
@@ -548,7 +385,7 @@ fn split_or_extend_for_batch(
     let pending_info = pending_leaf_infos.remove(&anchor);
     pending_leaf_stacks.remove(&anchor);
     let (holder, target) =
-        split_leaf_into_two_parts(commands, anchor, split_dir, existing_tabs, activate_new);
+        PaneSplit::spawn_from_leaf(commands, anchor, split_dir, existing_tabs, activate_new);
     retired_leaf_panes.insert(anchor);
     let target_size = pending_info
         .as_ref()
@@ -3680,139 +3517,6 @@ mod tests {
         );
 
         assert_eq!(result.unwrap(), None);
-    }
-
-    #[test]
-    fn split_leaf_into_two_reparents_tabs_and_splits() {
-        use bevy_ecs::system::RunSystemOnce;
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        let active = app
-            .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now()))
-            .id();
-        let existing = app
-            .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(active)))
-            .id();
-
-        let p2 = app
-            .world_mut()
-            .run_system_once(
-                move |mut commands: Commands,
-                      children: Query<&Children, With<Pane>>,
-                      tabq: Query<Entity, With<Stack>>| {
-                    let existing_tabs: Vec<Entity> = children
-                        .get(active)
-                        .map(|c| c.iter().filter(|&e| tabq.contains(e)).collect())
-                        .unwrap_or_default();
-                    split_leaf_into_two(
-                        &mut commands,
-                        active,
-                        PaneSplitDirection::Row,
-                        &existing_tabs,
-                        true,
-                    )
-                },
-            )
-            .unwrap();
-
-        let world = app.world_mut();
-        assert!(
-            world.get::<PaneSplit>(active).is_some(),
-            "active became a split root"
-        );
-        assert_ne!(
-            world.entity(existing).get::<ChildOf>().unwrap().get(),
-            active,
-            "stack reparented off active"
-        );
-        assert!(world.get::<PaneSplit>(p2).is_none(), "p2 is a leaf");
-    }
-
-    #[test]
-    fn split_or_extend_batched_runs_make_no_empty_panes() {
-        use bevy_ecs::system::RunSystemOnce;
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
-        let anchor = app
-            .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
-            .id();
-        let agent_stack = app
-            .world_mut()
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor)))
-            .id();
-
-        let (p2a, p2b) = app
-            .world_mut()
-            .run_system_once(move |mut commands: Commands| {
-                let existing = [agent_stack];
-                let p2a = split_or_extend(
-                    &mut commands,
-                    anchor,
-                    PaneSplitDirection::Row,
-                    &existing,
-                    false,
-                    false,
-                );
-                let p2b = split_or_extend(
-                    &mut commands,
-                    anchor,
-                    PaneSplitDirection::Row,
-                    &existing,
-                    false,
-                    true,
-                );
-                (p2a, p2b)
-            })
-            .unwrap();
-
-        let children: Vec<Entity> = app
-            .world()
-            .get::<Children>(anchor)
-            .expect("anchor has children")
-            .iter()
-            .collect();
-        assert_eq!(
-            children.len(),
-            3,
-            "anchor holds exactly the stack-holder + two terminal leaves (no orphaned empty pane)"
-        );
-        assert!(
-            children.contains(&p2a) && children.contains(&p2b),
-            "both new terminal leaves are direct children of the split"
-        );
-        let stack_holders = children
-            .iter()
-            .filter(|&&c| {
-                app.world()
-                    .get::<Children>(c)
-                    .is_some_and(|cc| cc.iter().any(|e| app.world().get::<Stack>(e).is_some()))
-            })
-            .count();
-        assert_eq!(
-            stack_holders, 1,
-            "the agent stack lives in exactly one child"
-        );
-        let empty_leaves = children
-            .iter()
-            .filter(|&&c| {
-                app.world()
-                    .get::<Children>(c)
-                    .map(|cc| cc.iter().count())
-                    .unwrap_or(0)
-                    == 0
-            })
-            .count();
-        assert_eq!(
-            empty_leaves, 2,
-            "exactly the two terminal-host leaves are empty; no orphan leftover"
-        );
     }
 
     #[test]
