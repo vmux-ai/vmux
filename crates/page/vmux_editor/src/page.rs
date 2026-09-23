@@ -37,7 +37,7 @@ use crate::page_model::{
     CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, clamp_selection,
     editor_drag_started, gutter_width, note_cursor_activation, severity_color_class, span_style,
 };
-use crate::ui_state::{use_file_ui_state, use_file_ui_state_root};
+use crate::ui_state::{use_file_ui, use_file_ui_events, use_file_ui_root};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -58,7 +58,8 @@ use vmux_ui::platform::sleep_ms;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    use_file_ui_state_root();
+    use_file_ui_root();
+    let git_status = use_file_ui::<GitStatusEvent>();
     let mut path = use_signal(String::new);
     let mut total_lines = use_signal(|| 0u32);
     let mut total_rows = use_signal(|| 0u32);
@@ -196,15 +197,15 @@ pub fn Page() -> Element {
     let keys = use_file_keys(file_page);
     use_context_provider(|| keys);
 
-    use_file_ui_state::<ExplorerPanelEvent, _>(move |event| {
+    use_file_ui_events::<ExplorerPanelEvent, _>(move |event| {
         explorer.apply_panel(event);
     });
 
-    use_file_ui_state::<FileTidyPromptEvent, _>(move |e| {
+    use_file_ui_events::<FileTidyPromptEvent, _>(move |e| {
         tidy_prompt.set(Some(e.count));
     });
 
-    use_file_ui_state::<FileMetaEvent, _>(move |m| {
+    use_file_ui_events::<FileMetaEvent, _>(move |m| {
         let arrival = FileArrival::new(&m.abs_path, &git_path.peek());
         doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
         path.set(m.path);
@@ -246,16 +247,16 @@ pub fn Page() -> Element {
         git_nonce.set(git_nonce() + 1);
     });
 
-    use_file_ui_state::<FileShapeEvent, _>(move |s| {
+    use_file_ui_events::<FileShapeEvent, _>(move |s| {
         indent.set(s.indent);
         line_ending.set(s.line_ending);
     });
 
-    use_file_ui_state::<FileEncodingEvent, _>(move |e| {
+    use_file_ui_events::<FileEncodingEvent, _>(move |e| {
         encoding.set(e.encoding);
     });
 
-    use_file_ui_state::<FileViewportPatch, _>(move |p| {
+    use_file_ui_events::<FileViewportPatch, _>(move |p| {
         first_row.set(p.first_row);
         total_rows.set(p.total_rows);
         total_lines.set(p.total_lines);
@@ -272,11 +273,11 @@ pub fn Page() -> Element {
         lsp_hover.set(None);
     });
 
-    use_file_ui_state::<OutlineEvent, _>(move |e| {
+    use_file_ui_events::<OutlineEvent, _>(move |e| {
         outline.set(e.items);
     });
 
-    use_file_ui_state::<FileCursorEvent, _>(move |c| {
+    use_file_ui_events::<FileCursorEvent, _>(move |c| {
         let moved = cursor.peek().ne(&c.primary);
         if *ed_mode.peek() != c.mode {
             ed_mode.set(c.mode);
@@ -346,7 +347,7 @@ pub fn Page() -> Element {
         }
     });
 
-    use_file_ui_state::<FileScrollByEvent, _>(move |event| {
+    use_file_ui_events::<FileScrollByEvent, _>(move |event| {
         let Some(line_height) =
             ScrolledLineHeight::resolve(file_view_mode(), &git_path(), cell_dims().height)
         else {
@@ -355,11 +356,11 @@ pub fn Page() -> Element {
         viewport.scroll_by(event.lines, line_height);
     });
 
-    use_file_ui_state::<OpenEditorsEvent, _>(move |event| {
+    use_file_ui_events::<OpenEditorsEvent, _>(move |event| {
         open_editors.set(event.items);
     });
 
-    use_file_ui_state::<FileDirtyEvent, _>(move |_| {
+    use_file_ui_events::<FileDirtyEvent, _>(move |_| {
         GitRefresh {
             generation: git_refresh_generation,
             nonce: git_nonce,
@@ -368,20 +369,23 @@ pub fn Page() -> Element {
         .schedule();
     });
 
-    use_file_ui_state::<GitStatusEvent, _>(move |event| {
-        git_feed.apply_status(event);
+    use_effect(move || {
+        let Some(status) = git_status() else {
+            return;
+        };
+        git_feed.apply_status(status);
     });
 
-    use_file_ui_state::<GitResultEvent, _>(move |event| {
+    use_file_ui_events::<GitResultEvent, _>(move |event| {
         git_feed.apply_result(event.clone());
         git_result.set(Some(event));
     });
 
-    use_file_ui_state::<GitErrorEvent, _>(move |event| {
+    use_file_ui_events::<GitErrorEvent, _>(move |event| {
         git_feed.apply_error(event);
     });
 
-    use_file_ui_state::<GitChangedEvent, _>(move |_| {
+    use_file_ui_events::<GitChangedEvent, _>(move |_| {
         GitRefresh {
             generation: git_refresh_generation,
             nonce: git_nonce,
@@ -390,11 +394,11 @@ pub fn Page() -> Element {
         .schedule();
     });
 
-    use_file_ui_state::<GitDiffViewportEvent, _>(move |event| {
+    use_file_ui_events::<GitDiffViewportEvent, _>(move |event| {
         git_diff_viewport.set(Some(event));
     });
 
-    use_file_ui_state::<FileViewModeEvent, _>(move |event| {
+    use_file_ui_events::<FileViewModeEvent, _>(move |event| {
         if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
             note_cursor.set_editing(false);
         }
@@ -413,7 +417,7 @@ pub fn Page() -> Element {
         }
     });
 
-    use_file_ui_state::<FileKeymapEvent, _>(move |event| {
+    use_file_ui_events::<FileKeymapEvent, _>(move |event| {
         keymap.set(event.keymap);
         if event.keymap == vmux_core::KeymapKind::Vim
             && file_view_mode() == FileViewMode::Note
@@ -426,7 +430,7 @@ pub fn Page() -> Element {
         }
     });
 
-    use_file_ui_state::<FileNoteEvent, _>(move |event| {
+    use_file_ui_events::<FileNoteEvent, _>(move |event| {
         let FileNoteEvent {
             title,
             properties,
@@ -468,32 +472,32 @@ pub fn Page() -> Element {
         }
     });
 
-    use_file_ui_state::<FileHoverEvent, _>(move |h| {
+    use_file_ui_events::<FileHoverEvent, _>(move |h| {
         lsp_hover.set(Some(h));
     });
 
-    use_file_ui_state::<FileReferencesEvent, _>(move |e| {
+    use_file_ui_events::<FileReferencesEvent, _>(move |e| {
         refs.set(e.items);
         refs_sel.set(0);
         refs_open.set(true);
         FocusClaim::new("refs-panel").request();
     });
 
-    use_file_ui_state::<FileCompletionEvent, _>(move |e| {
+    use_file_ui_events::<FileCompletionEvent, _>(move |e| {
         comp_open.set(!e.items.is_empty());
         comps.set(e.items);
         comp_sel.set(0);
         comp_anchor.set((e.line, e.replace_from_col));
     });
 
-    use_file_ui_state::<FileDiagnosticsEvent, _>(move |d| {
+    use_file_ui_events::<FileDiagnosticsEvent, _>(move |d| {
         if d.path != git_path() {
             return;
         }
         diagnostics.set(d.diagnostics);
     });
 
-    use_file_ui_state::<FileLspStatusEvent, _>(move |s| {
+    use_file_ui_events::<FileLspStatusEvent, _>(move |s| {
         if s.path != git_path() {
             return;
         }
@@ -517,7 +521,7 @@ pub fn Page() -> Element {
         lsp_status.set(Some(s));
     });
 
-    use_file_ui_state::<LspInstallProgress, _>(move |progress| {
+    use_file_ui_events::<LspInstallProgress, _>(move |progress| {
         let active = lsp_install_request().is_some_and(|(_, package)| package == progress.name);
         if !active {
             return;
@@ -538,7 +542,7 @@ pub fn Page() -> Element {
         }
     });
 
-    use_file_ui_state::<LspPkgStatusEvent, _>(move |status| {
+    use_file_ui_events::<LspPkgStatusEvent, _>(move |status| {
         if status.status != LspPkgStatus::Installed
             || lsp_install_request().is_none_or(|(_, package)| package != status.name)
         {
@@ -558,22 +562,22 @@ pub fn Page() -> Element {
         );
     });
 
-    use_file_ui_state::<FileErrorEvent, _>(move |e| {
+    use_file_ui_events::<FileErrorEvent, _>(move |e| {
         error_undecodable.set(e.undecodable);
         error.set(e.message);
     });
 
-    use_file_ui_state::<FileCodeActionsEvent, _>(move |e| {
+    use_file_ui_events::<FileCodeActionsEvent, _>(move |e| {
         code_action_sel.set(0);
         code_actions.set(e.titles);
     });
 
-    use_file_ui_state::<FileRenameBeginEvent, _>(move |e| {
+    use_file_ui_events::<FileRenameBeginEvent, _>(move |e| {
         rename_failed.set(String::new());
         rename_box.set(Some(RenameBox::new(e.line, e.col, e.current)));
     });
 
-    use_file_ui_state::<FileEditFailedEvent, _>(move |e| {
+    use_file_ui_events::<FileEditFailedEvent, _>(move |e| {
         rename_failed.set(e.reason);
         let id = rename_failed_generation().wrapping_add(1);
         rename_failed_generation.set(id);
@@ -585,7 +589,7 @@ pub fn Page() -> Element {
         });
     });
 
-    use_file_ui_state::<FileDirEvent, _>(move |d| {
+    use_file_ui_events::<FileDirEvent, _>(move |d| {
         error.set(String::new());
         clear_preview(preview, thumbs);
         media.set(None);
@@ -628,7 +632,7 @@ pub fn Page() -> Element {
         );
     });
 
-    use_file_ui_state::<FileMediaEvent, _>(move |e| {
+    use_file_ui_events::<FileMediaEvent, _>(move |e| {
         error.set(String::new());
         clear_preview(preview, thumbs);
         let kind = e.kind;
@@ -639,7 +643,7 @@ pub fn Page() -> Element {
         lsp_status.set(None);
     });
 
-    use_file_ui_state::<FilePreviewEvent, _>(move |ev| {
+    use_file_ui_events::<FilePreviewEvent, _>(move |ev| {
         if ev.thumb {
             if let PreviewKind::Image { bytes, .. } = ev.kind {
                 let url = image_data_url(&bytes, &ev.path);
@@ -671,7 +675,7 @@ pub fn Page() -> Element {
         preview.set(next);
     });
 
-    use_file_ui_state::<FileThemeEvent, _>(move |t| {
+    use_file_ui_events::<FileThemeEvent, _>(move |t| {
         let mut s = String::new();
         if !t.font_family.is_empty() {
             s.push_str(&format!(

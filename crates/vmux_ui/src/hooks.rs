@@ -10,7 +10,7 @@ pub use use_key_claim::{KeyClaim, use_key_claim};
 pub use use_listener::{BevyState, use_listener};
 pub use use_selector::use_selector;
 pub use use_theme::use_theme;
-pub use use_ui_state::{use_ui_state, use_ui_state_patch, use_ui_state_root};
+pub use use_ui_state::{use_ui_state, use_ui_state_events, use_ui_state_patch, use_ui_state_root};
 pub use vmux_api::UiStatePatch;
 
 pub use crate::transport;
