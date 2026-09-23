@@ -1,10 +1,12 @@
+mod application;
 mod bookmark;
+mod browser;
 mod files;
 mod knowledge;
 mod layout;
-mod param;
 mod setting;
 mod space;
+mod terminal;
 mod visual;
 mod workspace;
 
@@ -29,7 +31,9 @@ impl Plugin for ToolPlugin {
             .configure_sets(
                 Startup,
                 (
-                    ToolRegistrationSet::Param,
+                    ToolRegistrationSet::Application,
+                    ToolRegistrationSet::Browser,
+                    ToolRegistrationSet::Terminal,
                     ToolRegistrationSet::Layout,
                     ToolRegistrationSet::Setting,
                     ToolRegistrationSet::Space,
@@ -47,7 +51,9 @@ impl Plugin for ToolPlugin {
                 bevy_ecs::schedule::ApplyDeferred.in_set(ToolDispatchFlush),
             )
             .add_plugins((
-                param::ParamToolPlugin,
+                application::ApplicationToolPlugin,
+                browser::BrowserToolPlugin,
+                terminal::TerminalToolPlugin,
                 layout::LayoutToolPlugin,
                 setting::SettingToolPlugin,
                 space::SpaceToolPlugin,
@@ -156,7 +162,9 @@ fn dispatch_mcp_tools<T: McpToolHandler>(mut commands: Commands, calls: ToolCall
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub(super) enum ToolRegistrationSet {
-    Param,
+    Application,
+    Browser,
+    Terminal,
     Layout,
     Setting,
     Space,
