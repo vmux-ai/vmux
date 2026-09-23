@@ -7,6 +7,7 @@ pub mod bookmark;
 pub mod chat;
 pub mod command_bar;
 pub mod error;
+pub mod git;
 pub mod history;
 pub mod icon;
 pub mod json;

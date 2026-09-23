@@ -1,52 +1,38 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
-use vmux_core::{
-    event::{FileUiStateEvent, FileUiStatePatch},
-    host::FileUiStateWrite,
-};
+use vmux_core::host::{FileUiStateUpdates, FileUiStateWrite};
 
 pub(crate) struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(FileUiStateUpdates::collect)
-            .add_systems(Last, FileUiStateUpdates::emit);
+        app.add_observer(collect).add_systems(Last, emit);
     }
 }
 
-#[derive(Component, Default)]
-pub(crate) struct FileUiStateUpdates {
-    sequence: u64,
-    patches: Vec<FileUiStatePatch>,
+fn collect(trigger: On<FileUiStateWrite>, mut updates: Query<&mut FileUiStateUpdates>) {
+    let Ok(mut updates) = updates.get_mut(trigger.event().webview()) else {
+        return;
+    };
+    updates.push(trigger.event().patch().clone());
 }
 
-impl FileUiStateUpdates {
-    fn collect(trigger: On<FileUiStateWrite>, mut updates: Query<&mut Self>) {
-        let Ok(mut updates) = updates.get_mut(trigger.event().webview) else {
-            return;
-        };
-        updates.patches.push(trigger.event().patch.clone());
-    }
-
-    fn emit(
-        mut updates: Query<(Entity, &mut Self)>,
-        browsers: Option<NonSend<Browsers>>,
-        mut commands: Commands,
-    ) {
-        let Some(browsers) = browsers else {
-            return;
-        };
-        for (entity, mut updates) in &mut updates {
-            if updates.patches.is_empty() || !browsers.can_emit_to(&entity) {
-                continue;
-            }
-            updates.sequence = updates.sequence.wrapping_add(1).max(1);
-            let event = FileUiStateEvent {
-                sequence: updates.sequence,
-                patches: std::mem::take(&mut updates.patches),
-            };
-            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
+fn emit(
+    mut updates: Query<(Entity, &mut FileUiStateUpdates)>,
+    browsers: Option<NonSend<Browsers>>,
+    mut commands: Commands,
+) {
+    let Some(browsers) = browsers else {
+        return;
+    };
+    for (entity, mut updates) in &mut updates {
+        if !browsers.can_emit_to(&entity) {
+            continue;
         }
+        let Some(event) = updates.take() else {
+            continue;
+        };
+        commands.trigger(BinHostEmitEvent::from_event(entity, &event));
     }
 }
 
@@ -54,7 +40,7 @@ impl FileUiStateUpdates {
 mod tests {
     use super::*;
     use vmux_api::BinEvent;
-    use vmux_core::event::{FileDirtyEvent, FileScrollByEvent};
+    use vmux_core::event::{FileDirtyEvent, FileScrollByEvent, FileUiStateEvent, FileUiStatePatch};
 
     #[derive(Resource, Default)]
     struct Emitted(Vec<FileUiStateEvent>);

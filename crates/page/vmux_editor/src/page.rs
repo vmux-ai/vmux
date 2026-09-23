@@ -43,12 +43,14 @@ use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgeReference};
 use vmux_core::media::MediaKind;
-use vmux_git::event::GitChangedEvent;
+use vmux_git::event::{
+    GitChangedEvent, GitDiffViewportEvent, GitErrorEvent, GitResultEvent, GitStatusEvent,
+};
 use vmux_git::ui::{DiffView, GitFooter, GitStatusFeed};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::diff::DiffTone;
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
+use vmux_ui::hooks::{PressedKey, send, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::sleep_ms;
@@ -121,7 +123,9 @@ pub fn Page() -> Element {
     let git_behind = use_signal(|| 0u32);
     let git_staged = use_signal(|| 0u32);
     let git_message = use_signal(String::new);
-    GitStatusFeed {
+    let mut git_result = use_signal(|| None::<GitResultEvent>);
+    let mut git_diff_viewport = use_signal(|| None::<GitDiffViewportEvent>);
+    let git_feed = GitStatusFeed {
         path: git_path.into(),
         nonce: git_nonce,
         repo_root: git_repo_root,
@@ -131,8 +135,8 @@ pub fn Page() -> Element {
         behind: git_behind,
         staged_count: git_staged,
         message: git_message,
-    }
-    .subscribe();
+    };
+    git_feed.request();
     let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
     let mut ed_label = use_signal(String::new);
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
@@ -364,13 +368,30 @@ pub fn Page() -> Element {
         .schedule();
     });
 
-    let _git_changed = use_listener::<GitChangedEvent, _>(move |_| {
+    use_file_ui_state::<GitStatusEvent, _>(move |event| {
+        git_feed.apply_status(event);
+    });
+
+    use_file_ui_state::<GitResultEvent, _>(move |event| {
+        git_feed.apply_result(event.clone());
+        git_result.set(Some(event));
+    });
+
+    use_file_ui_state::<GitErrorEvent, _>(move |event| {
+        git_feed.apply_error(event);
+    });
+
+    use_file_ui_state::<GitChangedEvent, _>(move |_| {
         GitRefresh {
             generation: git_refresh_generation,
             nonce: git_nonce,
             settled: git_refresh_settled,
         }
         .schedule();
+    });
+
+    use_file_ui_state::<GitDiffViewportEvent, _>(move |event| {
+        git_diff_viewport.set(Some(event));
     });
 
     use_file_ui_state::<FileViewModeEvent, _>(move |event| {
@@ -1183,6 +1204,7 @@ pub fn Page() -> Element {
                             repo_root: git_repo_root,
                             path: git_path,
                             nonce: git_nonce,
+                            viewport: git_diff_viewport,
                             visible: file_view_mode() == FileViewMode::Diff,
                             markers: git_line_markers,
                         }
@@ -1803,6 +1825,7 @@ pub fn Page() -> Element {
                 behind: git_behind,
                 staged_count: git_staged,
                 message: git_message,
+                result: git_result,
                 always_visible: mode() == Mode::Text
                     && keymap() == vmux_core::KeymapKind::Vim,
                 leading: rsx! {

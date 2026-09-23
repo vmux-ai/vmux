@@ -69,6 +69,7 @@ pub fn Page() -> Element {
         mut shortcut_help,
         nonce,
         markers,
+        diff_viewport,
     } = use_git_page_state();
 
     use_effect(move || {
@@ -375,6 +376,7 @@ pub fn Page() -> Element {
                     workspace,
                     nonce,
                     markers,
+                    diff_viewport,
                     focused_panel,
                     command_log,
                     branch_log,
@@ -836,7 +838,13 @@ impl GitCommandLogEntry {
     }
 }
 
-impl FileStatus {
+trait FileStatusView {
+    fn label(self) -> String;
+    fn code(self) -> &'static str;
+    fn class(self) -> &'static str;
+}
+
+impl FileStatusView for FileStatus {
     fn label(self) -> String {
         match self {
             Self::Clean => translate("git-status-clean"),
@@ -906,6 +914,7 @@ fn GitDashboard(
     workspace: Signal<String>,
     nonce: Signal<u32>,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    diff_viewport: Signal<Option<GitDiffViewportEvent>>,
     focused_panel: Signal<GitPanel>,
     command_log: Signal<Vec<GitCommandLogEntry>>,
     branch_log: Signal<Option<GitBranchLogEvent>>,
@@ -950,6 +959,7 @@ fn GitDashboard(
                         selected_commit,
                         nonce,
                         markers,
+                        diff_viewport,
                     }
                 } else {
                     DiffCard {
@@ -959,6 +969,7 @@ fn GitDashboard(
                         selected_abs_path,
                         nonce,
                         markers,
+                        diff_viewport,
                     }
                 }
                 CommandLogCard { command_log }
@@ -2362,6 +2373,7 @@ fn CommitDiffCard(
     selected_commit: Signal<String>,
     nonce: Signal<u32>,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    diff_viewport: Signal<Option<GitDiffViewportEvent>>,
 ) -> Element {
     let empty_path = use_signal(String::new);
     let selected = repository
@@ -2392,6 +2404,7 @@ fn CommitDiffCard(
                     path: empty_path,
                     reference: selected_commit(),
                     nonce,
+                    viewport: diff_viewport,
                     visible: true,
                     markers,
                 }
@@ -2408,6 +2421,7 @@ fn DiffCard(
     selected_abs_path: Signal<String>,
     nonce: Signal<u32>,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    diff_viewport: Signal<Option<GitDiffViewportEvent>>,
 ) -> Element {
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-emerald-400/25 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
@@ -2425,7 +2439,7 @@ fn DiffCard(
                     {translate("git-select-file")}
                 }
             } else {
-                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), nonce, visible: true, markers }
+                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), nonce, viewport: diff_viewport, visible: true, markers }
             }
         }
     }
