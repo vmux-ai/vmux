@@ -30,28 +30,44 @@ use super::provider::{AgentExecutableOverride, resolve_agent_executable};
 
 pub(super) struct SpawnPlugin;
 
+pub(super) struct SpawnRequestsPlugin;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct SpawnRequestSet;
+
 impl Plugin for SpawnPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_plugins(SpawnRequestsPlugin)
+            .add_systems(
+                Update,
+                detect_agent_session_process_exit
+                    .in_set(WriteAppCommands)
+                    .after(ServiceMessageSet)
+                    .after(super::query::QuerySet),
+            )
+            .add_systems(
+                Update,
+                (
+                    respond_process_stack_spawn.after(super::command::CommandSet::Commands),
+                    (handle_restart_agent_pty, drain_agent_restarts)
+                        .chain()
+                        .before(ServiceMessageSet),
+                    respond_page_agent_attach,
+                    respond_page_agent_spawn_stack,
+                    respond_page_agent_spawn_default,
+                    respond_page_agent_attach_default,
+                ),
+            );
+    }
+}
+
+impl Plugin for SpawnRequestsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<SpawnAgentInStackRequest>().add_systems(
             Update,
-            detect_agent_session_process_exit
-                .in_set(WriteAppCommands)
-                .after(ServiceMessageSet)
-                .after(super::query::handle_agent_queries),
-        )
-        .add_systems(
-            Update,
-            (
-                (handle_spawn_agent_requests, drain_agent_launches).chain(),
-                respond_process_stack_spawn.after(super::command::handle_agent_commands),
-                (handle_restart_agent_pty, drain_agent_restarts)
-                    .chain()
-                    .before(ServiceMessageSet),
-                respond_page_agent_attach,
-                respond_page_agent_spawn_stack,
-                respond_page_agent_spawn_default,
-                respond_page_agent_attach_default,
-            ),
+            (handle_spawn_agent_requests, drain_agent_launches)
+                .chain()
+                .in_set(SpawnRequestSet),
         );
     }
 }
@@ -204,7 +220,7 @@ type RestartedAgentLaunch = (
     u64,
 );
 
-pub(super) fn handle_spawn_agent_requests(
+fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
     strategies: Option<Res<AgentStrategies>>,

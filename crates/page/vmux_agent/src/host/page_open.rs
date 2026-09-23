@@ -26,7 +26,7 @@ impl Plugin for PageOpenPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            handle_swap_stack_session.before(super::spawn::handle_spawn_agent_requests),
+            handle_swap_stack_session.before(super::spawn::SpawnRequestSet),
         )
         .add_systems(
             Update,
@@ -634,8 +634,7 @@ fn handle_swap_stack_session(
         commands
             .entity(ev.stack)
             .remove::<vmux_session::AcpSession>()
-            .remove::<crate::acp_install::AcpInstallStarted>()
-            .remove::<crate::acp_install::AcpPackageReady>()
+            .remove::<crate::acp_install::AcpLaunchStarted>()
             .remove::<vmux_session::AgentSession>()
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
@@ -995,7 +994,7 @@ mod tests {
     use super::*;
     use crate::client::cli::vibe::VibeStrategy;
     use crate::host::provider::AgentExecutableOverride;
-    use crate::host::spawn::{SpawnPlugin, handle_spawn_agent_requests};
+    use crate::host::spawn::{SpawnPlugin, SpawnRequestSet, SpawnRequestsPlugin};
     use crate::host::test_support::{init_worktree_test_repo, test_settings};
     use crate::session::{AgentSession, SessionId};
     use crate::strategy::AgentStrategies;
@@ -1100,7 +1099,7 @@ mod tests {
         let (stack, _child) = spawn_stack_child(&mut app);
         app.world_mut()
             .entity_mut(stack)
-            .insert(crate::acp_install::AcpInstallStarted);
+            .insert(crate::acp_install::AcpLaunchStarted);
         app.world_mut()
             .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
             .write(vmux_core::agent::SwapStackSession {
@@ -1114,7 +1113,7 @@ mod tests {
 
         assert!(
             app.world()
-                .get::<crate::acp_install::AcpInstallStarted>(stack)
+                .get::<crate::acp_install::AcpLaunchStarted>(stack)
                 .is_none()
         );
         let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
@@ -1156,15 +1155,13 @@ mod tests {
         strategies.register_cli(Box::new(VibeStrategy));
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
+            .add_plugins(SpawnRequestsPlugin)
             .insert_resource(strategies)
             .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
                 (AgentKind::Vibe, false),
             ])))
             .insert_resource(test_settings())
-            .add_systems(
-                Update,
-                (handle_agent_page_open, handle_spawn_agent_requests).chain(),
-            );
+            .add_systems(Update, handle_agent_page_open.before(SpawnRequestSet));
 
         let stack = app
             .world_mut()
@@ -1206,15 +1203,13 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<SpawnAgentInStackRequest>()
+                .add_plugins(SpawnRequestsPlugin)
                 .insert_resource(AgentStrategies::default())
                 .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
                     (kind, false),
                 ])))
                 .insert_resource(settings)
-                .add_systems(
-                    Update,
-                    (handle_agent_page_open, handle_spawn_agent_requests).chain(),
-                );
+                .add_systems(Update, handle_agent_page_open.before(SpawnRequestSet));
 
             let stack = app
                 .world_mut()

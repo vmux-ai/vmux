@@ -22,14 +22,21 @@ use super::valid_cwd;
 
 pub(super) struct CommandPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum CommandSet {
+    History,
+    ToolCalls,
+    Commands,
+}
+
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.configure_sets(
             Update,
             (
-                forward_history_open_intent,
-                handle_agent_tool_calls,
-                handle_agent_commands,
+                CommandSet::History,
+                CommandSet::ToolCalls,
+                CommandSet::Commands,
             )
                 .chain()
                 .in_set(WriteAppCommands)
@@ -37,8 +44,16 @@ impl Plugin for CommandPlugin {
         )
         .add_systems(
             Update,
+            (
+                forward_history_open_intent.in_set(CommandSet::History),
+                handle_agent_tool_calls.in_set(CommandSet::ToolCalls),
+                handle_agent_commands.in_set(CommandSet::Commands),
+            ),
+        )
+        .add_systems(
+            Update,
             (handle_focus_pane_requests, handle_rename_profile_requests)
-                .after(handle_agent_commands),
+                .after(CommandSet::Commands),
         );
     }
 }
@@ -207,7 +222,7 @@ pub(crate) struct AgentSpaceWriters<'w, 's> {
     open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
 }
 
-pub(super) fn handle_agent_tool_calls(
+fn handle_agent_tool_calls(
     mut reader: MessageReader<AgentToolCallRequest>,
     mut command_writer: MessageWriter<AgentCommandRequest>,
     mut query_writer: MessageWriter<AgentQueryRequest>,
@@ -283,7 +298,7 @@ pub(crate) fn remote_agents(
         .collect()
 }
 
-pub(super) fn handle_agent_commands(
+fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
     mut browser_nav_writer: MessageWriter<vmux_layout::BrowserNavigateRequest>,

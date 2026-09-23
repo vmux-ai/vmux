@@ -20,7 +20,7 @@ impl Plugin for WorkspacePlugin {
         app.add_observer(handle_agent_choice_selected).add_systems(
             Update,
             (
-                drain_workspace_picker_tasks.after(super::self_command::handle_agent_self_commands),
+                drain_workspace_picker_tasks.after(super::self_command::SelfCommandSet),
                 send_pending_agent_continuations,
             )
                 .chain()

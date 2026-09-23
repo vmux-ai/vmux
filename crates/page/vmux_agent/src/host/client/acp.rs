@@ -15,6 +15,9 @@ use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
 
 pub struct AcpAgentPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct AcpModelInfoSet;
+
 impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::acp_install::AcpInstallPlugin)
@@ -36,7 +39,7 @@ impl Plugin for AcpAgentPlugin {
                     apply_acp_agent_info,
                     apply_acp_workspace_changed,
                     (
-                        apply_acp_model_info,
+                        apply_acp_model_info.in_set(AcpModelInfoSet),
                         apply_acp_model_selection_result,
                         apply_acp_mode_info,
                         apply_acp_mode_selection_result,
@@ -312,7 +315,7 @@ fn apply_acp_workspace_changed(
     }
 }
 
-pub(crate) fn apply_acp_model_info(
+fn apply_acp_model_info(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentModelInfo>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModelState>)>,
     mut commands: Commands,
@@ -554,7 +557,7 @@ fn send_acp_input(
         &AcpSession,
         &mut AgentRunState,
         &mut PromptQueue,
-        Has<crate::acp_install::AcpInstallStarted>,
+        Has<crate::acp_install::AcpLaunchStarted>,
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
     )>,

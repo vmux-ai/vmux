@@ -22,8 +22,7 @@ use vmux_session::{
 
 impl Plugin for PageAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(approval::AgentApprovalStore::load())
-            .register_type::<AgentSession>()
+        app.register_type::<AgentSession>()
             .register_type::<AgentApprovalPolicy>()
             .add_message::<AgentToast>()
             .add_message::<PageAgentDelta>()
@@ -33,8 +32,8 @@ impl Plugin for PageAgentPlugin {
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_plugins(UiEventPlugin::<(AgentToast,)>::default())
+            .add_plugins(approval::ApprovalPlugin)
             .add_plugins(crate::tidy::TidyPlugin)
-            .add_observer(approval::handle_approval_reply)
             .add_observer(close_page_session_on_remove)
             .add_systems(
                 Update,
@@ -42,8 +41,7 @@ impl Plugin for PageAgentPlugin {
                     ensure_prompt_queue,
                     spawn_page_session_on_add,
                     send_page_agent_input,
-                    approval::sync_persisted_acp_approval_policy.before(consume_page_agent_stream),
-                    consume_page_agent_stream,
+                    consume_page_agent_stream.after(approval::ApprovalSyncSet),
                     surface_errors::surface_errors,
                     attach_last_run_state_kind,
                 ),

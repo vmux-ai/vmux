@@ -21,11 +21,15 @@ use super::browser_pane::AgentBrowserResolve;
 
 pub(super) struct QueryPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct QuerySet;
+
 impl Plugin for QueryPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
             handle_agent_queries
+                .in_set(QuerySet)
                 .in_set(WriteAppCommands)
                 .after(ServiceMessageSet)
                 .after(super::workspace::send_pending_agent_continuations),
@@ -105,7 +109,7 @@ impl ListedSpaces<'_, '_> {
     }
 }
 
-pub(super) fn handle_agent_queries(
+fn handle_agent_queries(
     mut reader: MessageReader<AgentQueryRequest>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,

@@ -32,11 +32,15 @@ use super::workspace::{
 
 pub(super) struct SelfCommandPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct SelfCommandSet;
+
 impl Plugin for SelfCommandPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
             handle_agent_self_commands
+                .in_set(SelfCommandSet)
                 .in_set(WriteAppCommands)
                 .after(ServiceMessageSet)
                 .after(vmux_layout::worktree::TabDirectoryRebindSet)
@@ -190,7 +194,7 @@ pub(crate) struct AgentSelfCommandWriters<'w> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn handle_agent_self_commands(
+fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
@@ -1199,7 +1203,7 @@ pub(super) fn handle_agent_self_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::schedule::{IntoSystemSet, NodeId, Schedules, SystemSet};
+    use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
 
     #[test]
     fn agent_run_spawns_terminal_before_next_agent_command_frame() {
@@ -1212,7 +1216,7 @@ mod tests {
         let graph = update.graph();
 
         let self_commands = graph
-            .systems_in_set(handle_agent_self_commands.into_system_set().intern())
+            .systems_in_set(SelfCommandSet.intern())
             .expect("handle_agent_self_commands is registered")
             .first()
             .copied()
