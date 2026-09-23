@@ -26,6 +26,7 @@ pub mod service;
 pub mod space;
 pub mod team;
 pub mod terminal;
+mod ui_state;
 pub mod vault;
 
 pub use agent::AgentKind;
@@ -39,4 +40,7 @@ pub use terminal::{
     FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine, TermSelectionRange,
     TermSpan,
 };
-pub use vmux_macro::{HostEvent, UiEvent, bidirectional_event, host_event, payload, ui_event};
+pub use ui_state::{UiState, UiStatePatch};
+pub use vmux_macro::{
+    HostEvent, UiEvent, UiState, UiStatePatch, bidirectional_event, host_event, payload, ui_event,
+};

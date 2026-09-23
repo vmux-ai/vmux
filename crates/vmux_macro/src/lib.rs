@@ -4,6 +4,7 @@ mod expand;
 mod named_fields;
 mod payload;
 mod string_id;
+mod ui_state;
 mod variant_names;
 
 use proc_macro::TokenStream;
@@ -68,6 +69,24 @@ pub fn derive_host_event(input: TokenStream) -> TokenStream {
 pub fn derive_ui_event(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match bin_event::derive(input, bin_event::Direction::Ui) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_derive(UiState)]
+pub fn derive_ui_state(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match ui_state::derive_state(input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_derive(UiStatePatch)]
+pub fn derive_ui_state_patch(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match ui_state::derive_patch(input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }
