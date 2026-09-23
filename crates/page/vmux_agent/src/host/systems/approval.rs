@@ -10,19 +10,36 @@ use vmux_service::protocol::{ClientMessage, SharedMessage};
 use vmux_session::AcpSession;
 use vmux_session::{AgentApprovalPolicy, AgentSession, approval_tool_key};
 
+pub(crate) struct ApprovalPlugin;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ApprovalSyncSet;
+
+impl Plugin for ApprovalPlugin {
+    fn build(&self, app: &mut App) {
+        if app.world().get_resource::<AgentApprovalStore>().is_none() {
+            app.insert_resource(AgentApprovalStore::load());
+        }
+        app.add_observer(handle_approval_reply).add_systems(
+            Update,
+            sync_persisted_acp_approval_policy.in_set(ApprovalSyncSet),
+        );
+    }
+}
+
 #[derive(Default, Deserialize, Serialize)]
 struct SavedApprovalGrants {
     by_agent: BTreeMap<String, BTreeMap<String, BTreeSet<String>>>,
 }
 
 #[derive(Resource)]
-pub(crate) struct AgentApprovalStore {
+struct AgentApprovalStore {
     path: PathBuf,
     grants: SavedApprovalGrants,
 }
 
 impl AgentApprovalStore {
-    pub(crate) fn load() -> Self {
+    fn load() -> Self {
         Self::load_from(vmux_core::profile::profile_dir().join("agent-approvals.json"))
     }
 
@@ -95,7 +112,7 @@ fn canonical_agent_id(agent: &str) -> String {
     }
 }
 
-pub(crate) fn sync_persisted_acp_approval_policy(
+fn sync_persisted_acp_approval_policy(
     store: Res<AgentApprovalStore>,
     mut sessions: Query<(&AcpSession, &mut AgentApprovalPolicy), Changed<AcpSession>>,
 ) {
@@ -105,7 +122,7 @@ pub(crate) fn sync_persisted_acp_approval_policy(
 }
 
 #[allow(clippy::type_complexity)]
-pub(crate) fn handle_approval_reply(
+fn handle_approval_reply(
     trigger: On<AgentApprovalReply>,
     mut q: Query<(
         &mut AgentRunState,
@@ -174,7 +191,11 @@ mod tests {
     fn make_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_observer(handle_approval_reply);
+            .insert_resource(AgentApprovalStore::load_from(
+                std::env::temp_dir()
+                    .join(format!("vmux-agent-approval-{}.json", uuid::Uuid::new_v4())),
+            ))
+            .add_plugins(ApprovalPlugin);
         app
     }
 

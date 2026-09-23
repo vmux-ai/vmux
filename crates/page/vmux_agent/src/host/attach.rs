@@ -26,8 +26,8 @@ impl Plugin for AttachPlugin {
             handle_resume_in_acp
                 .in_set(WriteAppCommands)
                 .after(ServiceMessageSet)
-                .after(super::command::handle_agent_tool_calls)
-                .before(super::command::handle_agent_commands),
+                .after(super::command::CommandSet::ToolCalls)
+                .before(super::command::CommandSet::Commands),
         );
     }
 }

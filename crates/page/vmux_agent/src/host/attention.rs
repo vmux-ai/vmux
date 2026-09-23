@@ -6,11 +6,17 @@ use crate::session::SessionId;
 
 pub(super) struct AttentionPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct TurnEndedSet;
+
 impl Plugin for AttentionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (agent_bell_to_attention, handle_agent_turn_ended)
+            (
+                agent_bell_to_attention,
+                handle_agent_turn_ended.in_set(TurnEndedSet),
+            )
                 .chain()
                 .after(vmux_layout::stack::ComputeFocusSet),
         )
@@ -170,7 +176,7 @@ fn clear_agent_done(
     }
 }
 
-pub(super) fn handle_agent_turn_ended(
+fn handle_agent_turn_ended(
     mut reader: MessageReader<AgentCommandRequest>,
     agents: Query<(Entity, &vmux_service::protocol::ProcessId), With<vmux_core::team::Agent>>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,

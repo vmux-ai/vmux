@@ -28,13 +28,13 @@ impl Plugin for FollowPlugin {
                 .chain()
                 .in_set(WriteAppCommands)
                 .after(ServiceMessageSet)
-                .after(super::command::handle_agent_commands),
+                .after(super::command::CommandSet::Commands),
         )
         .add_systems(
             Update,
             tidy_on_agent_attention
                 .after(vmux_layout::stack::ComputeFocusSet)
-                .after(super::attention::handle_agent_turn_ended),
+                .after(super::attention::TurnEndedSet),
         )
         .add_systems(
             Update,

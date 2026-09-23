@@ -54,7 +54,7 @@ impl Plugin for ChatModelPlugin {
                     push_removed_acp_model_state_to_page,
                     push_acp_mode_state_to_page,
                     push_removed_acp_mode_state_to_page,
-                    apply_last_used_acp_model.after(crate::client::acp::apply_acp_model_info),
+                    apply_last_used_acp_model.after(crate::client::acp::AcpModelInfoSet),
                     send_acp_model_requests,
                     send_acp_mode_requests,
                     remember_acp_model_lists,

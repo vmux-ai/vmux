@@ -76,6 +76,7 @@ impl Plugin for AgentSessionPlugin {
                 super::provider::ProviderPlugin,
                 super::query::QueryPlugin,
                 super::self_command::SelfCommandPlugin,
+                super::snapshot_updater::SnapshotPlugin,
                 super::spawn::SpawnPlugin,
                 super::workspace::WorkspacePlugin,
             ))
@@ -147,16 +148,6 @@ impl Plugin for AgentSessionPlugin {
             .add_systems(
                 Update,
                 session::format_agent_url.after(session::track_session_id_inserts),
-            )
-            .add_systems(
-                Update,
-                (
-                    crate::snapshot_updater::update_agents_snapshot,
-                    crate::snapshot_updater::update_recent_agents,
-                    crate::snapshot_updater::update_agent_sessions_snapshot,
-                )
-                    .chain()
-                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
             );
     }
 }
