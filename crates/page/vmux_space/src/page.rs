@@ -16,18 +16,18 @@ use vmux_ui::platform::sleep_ms;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut state = use_signal(SpacesListEvent::default);
+    let state = use_ui_state::<SpacesListEvent>();
     let mut selected = use_signal(|| 0usize);
     let team = use_ui_state::<TeamEvent>();
 
-    let _listener = use_listener::<SpacesListEvent, _>(move |data| {
-        let active = data
+    use_effect(move || {
+        let active = state
+            .read()
             .spaces
             .iter()
             .position(|space| space.is_active)
             .unwrap_or(0);
         selected.set(active);
-        state.set(data);
     });
 
     let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);

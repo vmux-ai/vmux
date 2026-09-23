@@ -1105,7 +1105,7 @@ fn screenshot_dispatches_to_query_with_and_without_pane() {
 }
 
 #[test]
-fn param_manifest_registers_all_param_tools() {
+fn domain_manifests_register_all_typed_tools() {
     let names = tool_definitions()
         .into_iter()
         .map(|definition| definition.name)
@@ -1124,7 +1124,7 @@ fn param_manifest_registers_all_param_tools() {
 }
 
 #[test]
-fn param_manifest_browser_navigate_schema_marks_url_required() {
+fn browser_manifest_marks_url_required() {
     let definition = tool_definitions()
         .into_iter()
         .find(|definition| definition.name == "browser_navigate")
@@ -1138,7 +1138,7 @@ fn param_manifest_browser_navigate_schema_marks_url_required() {
 }
 
 #[test]
-fn param_manifest_dispatches_browser_navigate() {
+fn browser_manifest_dispatches_navigation() {
     let target = dispatch_from_tool_call(
         "browser_navigate",
         serde_json::json!({"url": "https://example.com", "pane": "12345"}),
@@ -1152,13 +1152,13 @@ fn param_manifest_dispatches_browser_navigate() {
 }
 
 #[test]
-fn param_manifest_browser_navigate_missing_url_errors() {
+fn browser_manifest_rejects_missing_url() {
     let result = dispatch_from_tool_call("browser_navigate", serde_json::json!({}));
     assert!(result.is_err());
 }
 
 #[test]
-fn param_manifest_unknown_tool_returns_error() {
+fn unknown_manifest_tool_returns_error() {
     assert!(dispatch_from_tool_call("nope", serde_json::json!({})).is_err());
 }
 

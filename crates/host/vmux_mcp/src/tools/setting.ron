@@ -4,4 +4,16 @@
         description: "Return the full vmux settings as a JSON snapshot.",
         input_schema: (type: Object),
     ),
+    (
+        kind: update_settings,
+        description: "Update one vmux setting by dot path. Use get_settings to discover available paths and current values. Nested arrays use bracket indexing such as terminal.themes[0].font_size.",
+        input_schema: (
+            type: Object,
+            required: ["path", "value"],
+            properties: {
+                "path": (type: String),
+                "value": (description: Some("JSON-compatible setting value.")),
+            },
+        ),
+    ),
 ]

@@ -1,0 +1,32 @@
+[
+    (
+        kind: open_command_bar,
+        description: "Open the Vmux command bar.",
+        input_schema: (
+            type: Object,
+            properties: {
+                "mode": (type: String, values: ["default", "commands", "path"]),
+            },
+        ),
+    ),
+    (
+        kind: rename_profile,
+        description: "Rename the active profile display name without changing its storage.",
+        input_schema: (
+            type: Object,
+            required: ["name"],
+            properties: {"name": (type: String)},
+        ),
+    ),
+    (
+        kind: notify,
+        description: "Notify the user that the agent needs attention. Optional title and body customize the message.",
+        input_schema: (
+            type: Object,
+            properties: {
+                "title": (type: String),
+                "body": (type: String),
+            },
+        ),
+    ),
+]

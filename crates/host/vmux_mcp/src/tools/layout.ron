@@ -122,4 +122,15 @@ Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to 
             },
         ),
     ),
+    (
+        kind: select_tab,
+        description: "Select a tab by index from 1 through 8.",
+        input_schema: (
+            type: Object,
+            required: ["index"],
+            properties: {
+                "index": (type: Integer, minimum: Some(1), maximum: Some(8)),
+            },
+        ),
+    ),
 ]

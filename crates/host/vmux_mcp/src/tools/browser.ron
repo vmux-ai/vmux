@@ -1,0 +1,51 @@
+[
+    (
+        kind: browser_navigate,
+        description: "Navigate the active webview to a URL, or open a URL in a target pane. This is the primary tool for web access. When navigating the focused browser page, it returns the page semantic snapshot after loading. vmux://terminal/ opens a terminal, vmux://spaces/ opens spaces, and vmux://services/ opens the process monitor. Other vmux:// URLs are rejected.",
+        input_schema: (
+            type: Object,
+            required: ["url"],
+            properties: {
+                "url": (type: String),
+                "pane": (type: String),
+            },
+        ),
+    ),
+    (
+        kind: browser_go_back,
+        description: "Navigate the active or specified browser pane back one page in history.",
+        input_schema: (
+            type: Object,
+            properties: {"pane": (type: String)},
+        ),
+    ),
+    (
+        kind: browser_go_forward,
+        description: "Navigate the active or specified browser pane forward one page in history.",
+        input_schema: (
+            type: Object,
+            properties: {"pane": (type: String)},
+        ),
+    ),
+    (
+        kind: browser_history_search,
+        description: "Search vmux browsing history. Returns entries ranked by frecency.",
+        input_schema: (
+            type: Object,
+            required: ["query"],
+            properties: {
+                "query": (type: String),
+                "limit": (type: Integer, minimum: Some(0), maximum: Some(100)),
+            },
+        ),
+    ),
+    (
+        kind: browser_install_extension,
+        description: "Install a browser extension from a supported extension-store URL or a 32-character extension ID. The extension activates after the next vmux relaunch and runs only in windowed browse panes on macOS.",
+        input_schema: (
+            type: Object,
+            required: ["source"],
+            properties: {"source": (type: String)},
+        ),
+    ),
+]
