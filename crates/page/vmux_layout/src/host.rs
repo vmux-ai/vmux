@@ -13,6 +13,7 @@ pub mod overlay;
 pub mod overlay_adopt;
 pub mod page_context;
 pub mod pane;
+mod pane_close;
 pub mod pending_stack;
 pub mod placement;
 pub mod plugin;
