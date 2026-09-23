@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
 use crate::command::{AppCommand, ReadAppCommands, WriteAppCommands};
+use crate::definition::{
+    CommandDefinition, CommandInvocation, DispatchCommandInvocations, RegisterCommandDefinitions,
+};
 use crate::issued::CommandIssued;
 use crate::page_key::KeyPlugin;
 use crate::snapshot::{UiStatePlugin, WriteCommandBarSnapshots};
@@ -13,21 +16,71 @@ impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((KeyPlugin, UiStatePlugin, SurfacePlugin))
             .add_message::<AppCommand>()
+            .add_message::<CommandInvocation>()
             .add_message::<CommandIssued>()
             .add_message::<crate::host::ExLineSubmitted>()
             .add_message::<crate::host::FileStatusPicked>()
+            .add_systems(
+                Startup,
+                spawn_legacy_command_definitions.in_set(RegisterCommandDefinitions),
+            )
             .configure_sets(
                 Update,
-                (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),
+                (
+                    WriteAppCommands,
+                    DispatchCommandInvocations,
+                    WriteCommandBarSnapshots,
+                    ReadAppCommands,
+                )
+                    .chain(),
             )
             .init_resource::<CommandSettle>()
             .add_systems(
                 Update,
-                log_app_commands
-                    .after(WriteAppCommands)
-                    .before(ReadAppCommands),
+                (
+                    dispatch_legacy_commands.in_set(DispatchCommandInvocations),
+                    log_app_commands
+                        .after(WriteAppCommands)
+                        .before(ReadAppCommands),
+                ),
             )
             .add_systems(Last, CommandSettle::keep_frames_coming);
+    }
+}
+
+fn spawn_legacy_command_definitions(mut commands: Commands) {
+    for (id, name, shortcut) in AppCommand::command_bar_entries() {
+        let (group, label) = name
+            .rsplit_once(" > ")
+            .map(|(group, label)| (group.to_string(), label.to_string()))
+            .unwrap_or_else(|| (String::new(), name));
+        commands.spawn(CommandDefinition {
+            id: id.to_string(),
+            label,
+            group,
+            accelerator: None,
+            hidden: false,
+            native_menu: false,
+            shortcut_label: (!shortcut.is_empty()).then(|| shortcut.to_string()),
+            shortcuts: Vec::new(),
+        });
+    }
+}
+
+fn dispatch_legacy_commands(
+    mut invocations: MessageReader<CommandInvocation>,
+    mut commands: MessageWriter<AppCommand>,
+    mut issued: MessageWriter<CommandIssued>,
+) {
+    for invocation in invocations.read() {
+        let Some(command) = AppCommand::from_shortcut_id(&invocation.id) else {
+            continue;
+        };
+        issued.write(CommandIssued {
+            caller: invocation.caller,
+            command: command.clone(),
+        });
+        commands.write(command);
     }
 }
 

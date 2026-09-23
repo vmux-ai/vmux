@@ -23,78 +23,94 @@ pub struct BookmarkPlugin;
 
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ToggleActiveRequest>()
-            .add_message::<PinActiveRequest>()
-            .add_message::<CreateFolderRequest>()
-            .add_message::<BookmarkMutation>()
-            .add_message::<ShowBookmarkMenuRequest>()
-            .add_plugins(UiEventPlugin::<(
-                BookmarkToggleRequest,
-                BookmarkMenuRootRequest,
-                BookmarkMenuPinRequest,
-                BookmarkMenuEntryRequest,
-                BookmarkMenuFolderRequest,
-                BookmarkOpenRequest,
-                BookmarkAddRequest,
-                BookmarkPinUrlRequest,
-                BookmarkRemoveRequest,
-                BookmarkRenameRequest,
-                BookmarkMoveRequest,
-                BookmarkMovePinRequest,
-            )>::default())
-            .add_plugins(UiEventPlugin::<(
-                BookmarkReorderPinRequest,
-                BookmarkPinRequest,
-                BookmarkUnpinRequest,
-                BookmarkFolderToggleRequest,
-                BookmarkFolderCreateRequest,
-                BookmarkFolderMoveRequest,
-                BookmarkFolderRenameRequest,
-                BookmarkFolderRemoveRequest,
-                BookmarkTextInputRequest,
-                BookmarkContextMenuRequest,
-            )>::default())
-            .add_observer(on_bookmark_toggle_request)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuRootRequest>)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuPinRequest>)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuEntryRequest>)
-            .add_observer(on_bookmark_menu_request::<BookmarkMenuFolderRequest>)
-            .add_observer(on_bookmark_open_request)
-            .add_observer(on_bookmark_mutation_request::<BookmarkAddRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkPinUrlRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkRemoveRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkRenameRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkMoveRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkMovePinRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkReorderPinRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkPinRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkUnpinRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkFolderToggleRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkFolderCreateRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkFolderMoveRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkFolderRenameRequest>)
-            .add_observer(on_bookmark_mutation_request::<BookmarkFolderRemoveRequest>)
-            .add_observer(on_bookmark_text_input_request)
-            .add_observer(on_bookmark_context_menu_request)
-            .add_systems(
-                Update,
-                (
-                    handle_bookmark_requests.in_set(LayoutRequestSet::Handle),
-                    apply_bookmark_mutations,
-                    sync_bookmark_metadata,
-                )
-                    .chain(),
-            );
+        app.add_plugins((
+            vmux_command::CommandRequestPlugin::<ToggleActiveRequest>::default(),
+            vmux_command::CommandRequestPlugin::<PinActiveRequest>::default(),
+            vmux_command::CommandRequestPlugin::<CreateFolderRequest>::default(),
+        ))
+        .add_message::<BookmarkMutation>()
+        .add_message::<ShowBookmarkMenuRequest>()
+        .add_plugins(UiEventPlugin::<(
+            BookmarkToggleRequest,
+            BookmarkMenuRootRequest,
+            BookmarkMenuPinRequest,
+            BookmarkMenuEntryRequest,
+            BookmarkMenuFolderRequest,
+            BookmarkOpenRequest,
+            BookmarkAddRequest,
+            BookmarkPinUrlRequest,
+            BookmarkRemoveRequest,
+            BookmarkRenameRequest,
+            BookmarkMoveRequest,
+            BookmarkMovePinRequest,
+        )>::default())
+        .add_plugins(UiEventPlugin::<(
+            BookmarkReorderPinRequest,
+            BookmarkPinRequest,
+            BookmarkUnpinRequest,
+            BookmarkFolderToggleRequest,
+            BookmarkFolderCreateRequest,
+            BookmarkFolderMoveRequest,
+            BookmarkFolderRenameRequest,
+            BookmarkFolderRemoveRequest,
+            BookmarkTextInputRequest,
+            BookmarkContextMenuRequest,
+        )>::default())
+        .add_observer(on_bookmark_toggle_request)
+        .add_observer(on_bookmark_menu_request::<BookmarkMenuRootRequest>)
+        .add_observer(on_bookmark_menu_request::<BookmarkMenuPinRequest>)
+        .add_observer(on_bookmark_menu_request::<BookmarkMenuEntryRequest>)
+        .add_observer(on_bookmark_menu_request::<BookmarkMenuFolderRequest>)
+        .add_observer(on_bookmark_open_request)
+        .add_observer(on_bookmark_mutation_request::<BookmarkAddRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkPinUrlRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkRemoveRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkRenameRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkMoveRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkMovePinRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkReorderPinRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkPinRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkUnpinRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkFolderToggleRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkFolderCreateRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkFolderMoveRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkFolderRenameRequest>)
+        .add_observer(on_bookmark_mutation_request::<BookmarkFolderRemoveRequest>)
+        .add_observer(on_bookmark_text_input_request)
+        .add_observer(on_bookmark_context_menu_request)
+        .add_systems(
+            Update,
+            (
+                handle_bookmark_requests.in_set(LayoutRequestSet::Handle),
+                apply_bookmark_mutations,
+                sync_bookmark_metadata,
+            )
+                .chain(),
+        );
     }
 }
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Message, vmux_macro::CommandBarRequest, Clone, Copy, Debug, PartialEq, Eq)]
+#[command_bar(
+    id = "bookmark_toggle_active",
+    label = "Bookmark Page",
+    group = "Bookmark",
+    accel = "super+d"
+)]
+#[shortcut(direct = "Super+d")]
 pub struct ToggleActiveRequest;
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Message, vmux_macro::CommandBarRequest, Clone, Copy, Debug, PartialEq, Eq)]
+#[command_bar(id = "bookmark_pin_active", label = "Pin Page", group = "Bookmark")]
 pub struct PinActiveRequest;
 
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Message, vmux_macro::CommandBarRequest, Clone, Copy, Debug, PartialEq, Eq)]
+#[command_bar(
+    id = "bookmark_new_folder",
+    label = "New Folder",
+    group = "Bookmark",
+    hidden
+)]
 pub struct CreateFolderRequest;
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
@@ -806,6 +822,29 @@ fn handle_bookmark_requests(
 mod tests {
     use super::*;
     use vmux_core::PageIcon;
+
+    #[test]
+    fn command_id_dispatches_the_typed_bookmark_request() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(vmux_command::CommandRequestPlugin::<ToggleActiveRequest>::default());
+        let caller = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Messages<vmux_command::CommandInvocation>>()
+            .write(vmux_command::CommandInvocation::new(
+                caller,
+                "bookmark_toggle_active",
+            ));
+
+        app.update();
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<ToggleActiveRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests, [ToggleActiveRequest]);
+    }
 
     fn test_app() -> App {
         let mut app = App::new();

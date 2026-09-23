@@ -440,6 +440,7 @@ fn sync_live_start_pages(
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     space_projects: vmux_space::SpaceProjects,
+    definitions: Query<&vmux_command::CommandDefinition>,
     mut commands: Commands,
 ) {
     let (
@@ -501,6 +502,7 @@ fn sync_live_start_pages(
     if git_changed {
         *last_git = (cwd.clone(), git_info.clone());
     }
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
     let payload = build_start_payload(
         &tab_gather,
         &prompt_context.command_bar,
@@ -513,6 +515,7 @@ fn sync_live_start_pages(
         prompt_context.command_bar.agent_models.agents.clone(),
         prompt_context.command_bar.agent_modes.agents.clone(),
         &locale,
+        &definitions,
     );
     let project = vmux_ui::launcher::palette::ActiveProject::resolve(&payload.prompt_context);
     let warm_branches = !project.is_empty() && *prompt_context.warmed_branches_for != project;
@@ -563,6 +566,7 @@ fn on_start_data_request(
     contributed_commands: Query<&ContributedCommand>,
     locale: Option<Res<ResolvedLocale>>,
     space_projects: vmux_space::SpaceProjects,
+    definitions: Query<&vmux_command::CommandDefinition>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut commands: Commands,
 ) {
@@ -577,6 +581,7 @@ fn on_start_data_request(
             })
         })
         .flatten();
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
     let payload = build_start_payload(
         &tab_gather,
         &prompt_context.command_bar,
@@ -592,6 +597,7 @@ fn on_start_data_request(
             .as_deref()
             .map(|locale| locale.0.clone())
             .unwrap_or_else(Locale::preferred),
+        &definitions,
     );
     commands.trigger(BinHostEmitEvent::from_event(webview, &payload));
     if keyboard_targets.contains(webview) {
@@ -611,6 +617,7 @@ fn build_start_payload(
     agent_models: Vec<vmux_api::command_bar::AgentModels>,
     agent_modes: Vec<vmux_api::command_bar::AgentModes>,
     locale: &Locale,
+    definitions: &[vmux_command::CommandDefinition],
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
     let space_name = command_bar.spaces.active_space_name.clone();
@@ -641,6 +648,7 @@ fn build_start_payload(
         active_stack_count,
         tabs,
         Some(OpenTarget::InPlace),
+        definitions,
     );
     payload.prompt_context = prompt_context.context(active_tab, git_info);
     payload.prompt_context.projects = projects;

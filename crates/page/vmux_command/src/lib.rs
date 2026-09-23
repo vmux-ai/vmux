@@ -1,5 +1,7 @@
 #![cfg_attr(ui, allow(non_snake_case))]
 
+extern crate self as vmux_command;
+
 #[cfg(ui)]
 pub mod page;
 #[cfg(ui)]

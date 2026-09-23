@@ -3,7 +3,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::BinReceive;
 use vmux_core::input::KeyStroke;
 
-use crate::command::AppCommand;
 use crate::issued::CommandIssuer;
 use crate::shortcut::{KeyCombo, KeyContext, Keymap};
 
@@ -24,7 +23,7 @@ fn resolve_page_key(
     let Some(command) = keys.command(page, &trigger.payload) else {
         return;
     };
-    issuer.issue(page, command);
+    issuer.issue_id(page, command);
 }
 
 #[derive(SystemParam)]
@@ -34,7 +33,7 @@ pub struct ScopedKeys<'w, 's> {
 }
 
 impl ScopedKeys<'_, '_> {
-    pub fn command(&self, page: Entity, stroke: &KeyStroke) -> Option<AppCommand> {
+    pub fn command(&self, page: Entity, stroke: &KeyStroke) -> Option<String> {
         let keymap = self.keymap.as_ref()?;
         let context = self.contexts.get(page).ok()?;
         let pressed = KeyCombo::from_stroke(stroke)?;
@@ -50,6 +49,7 @@ impl ScopedKeys<'_, '_> {
 mod tests {
     use super::*;
     use crate::command::AppCommand;
+    use crate::definition::CommandInvocation;
     use crate::issued::CommandIssued;
     use crate::shortcut::{Binding, Modifiers, Shortcut, Source, When};
     use bevy::ecs::message::Messages;
@@ -95,6 +95,7 @@ mod tests {
                 .add_plugins(KeyPlugin)
                 .add_message::<AppCommand>()
                 .add_message::<CommandIssued>()
+                .add_message::<CommandInvocation>()
                 .insert_resource(keymap);
             app
         }
@@ -104,7 +105,7 @@ mod tests {
             app.world_mut().spawn(context).id()
         }
 
-        fn press(app: &mut App, page: Entity, code: &str) -> Vec<(Entity, AppCommand)> {
+        fn press(app: &mut App, page: Entity, code: &str) -> Vec<(Entity, String)> {
             app.world_mut().trigger(BinReceive {
                 webview: page,
                 payload: KeyStroke {
@@ -117,9 +118,9 @@ mod tests {
             });
             app.update();
             app.world_mut()
-                .resource_mut::<Messages<CommandIssued>>()
+                .resource_mut::<Messages<CommandInvocation>>()
                 .drain()
-                .map(|issued| (issued.caller, issued.command))
+                .map(|invocation| (invocation.caller, invocation.id))
                 .collect()
         }
     }
@@ -132,10 +133,7 @@ mod tests {
 
         assert_eq!(
             Seam::press(&mut app, bar, "KeyN"),
-            vec![(
-                bar,
-                AppCommand::from_shortcut_id("command_bar_next").expect("command exists")
-            )]
+            vec![(bar, "command_bar_next".to_string())]
         );
         assert_eq!(Seam::press(&mut app, plain, "KeyN"), vec![]);
     }

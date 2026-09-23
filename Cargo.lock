@@ -10640,6 +10640,7 @@ dependencies = [
  "vmux_flex",
  "vmux_git",
  "vmux_history",
+ "vmux_macro",
  "vmux_ui",
 ]
 

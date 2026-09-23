@@ -9,7 +9,6 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::BinHostEmitEvent;
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use parking_lot::Mutex;
-use vmux_command::AppCommand;
 
 use crate::shortcut::{KeyCombo, Keymap, Modifiers};
 
@@ -39,8 +38,7 @@ impl Plugin for NativeKeyboardPlugin {
 static SHORTCUT_MAP: LazyLock<Mutex<Option<Keymap>>> = LazyLock::new(|| Mutex::new(None));
 static PENDING_PREFIX: LazyLock<Mutex<Option<(KeyCombo, Instant)>>> =
     LazyLock::new(|| Mutex::new(None));
-static PENDING_COMMANDS: LazyLock<Mutex<Vec<AppCommand>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
+static PENDING_COMMANDS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static PENDING_SIMULATOR_BUTTONS: LazyLock<Mutex<Vec<vmux_simulator::event::HardwareButton>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 static PENDING_SIMULATOR_CLIPBOARD: LazyLock<
@@ -169,7 +167,7 @@ fn simulator_text_shortcut(combo: &KeyCombo) -> bool {
 }
 
 enum KeyAction {
-    Consume(Option<AppCommand>),
+    Consume(Option<String>),
     PassThrough,
 }
 
@@ -254,7 +252,7 @@ fn classify(combo: KeyCombo) -> KeyAction {
 fn handle_key_action(
     action: KeyAction,
     wake: impl FnOnce(),
-    mut queue: impl FnMut(AppCommand),
+    mut queue: impl FnMut(String),
 ) -> bool {
     match action {
         KeyAction::Consume(cmd) => {
@@ -572,7 +570,7 @@ fn process_monitored_keys(
     }
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     for cmd in commands {
-        issuer.issue(caller, cmd);
+        issuer.issue_id(caller, cmd);
     }
     if let Some(target) = shortcut_capture.as_deref_mut() {
         for token in shortcut_releases {
@@ -612,7 +610,6 @@ fn process_monitored_keys(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_command::{AppCommand, LayoutCommand, PaneCommand};
 
     fn map() -> Keymap {
         Keymap::defaults()
@@ -666,12 +663,10 @@ mod tests {
         assert!(pending.is_some());
 
         let second = decide(&map, &mut pending, combo(KeyCode::KeyH, false), now, false);
-        match second {
-            KeyAction::Consume(Some(AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft,
-            )))) => {}
-            _ => panic!("expected SelectLeft"),
-        }
+        assert!(matches!(
+            second,
+            KeyAction::Consume(Some(id)) if id == "select_pane_left"
+        ));
         assert!(pending.is_none());
     }
 
@@ -695,21 +690,14 @@ mod tests {
         let mut queued = Vec::new();
 
         let consumed = handle_key_action(
-            KeyAction::Consume(Some(AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft,
-            )))),
+            KeyAction::Consume(Some("select_pane_left".to_string())),
             || woke = true,
             |command| queued.push(command),
         );
 
         assert!(consumed);
         assert!(woke);
-        assert!(matches!(
-            queued.as_slice(),
-            [AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft
-            ))]
-        ));
+        assert_eq!(queued, ["select_pane_left"]);
     }
 
     #[test]
@@ -730,31 +718,24 @@ mod tests {
 
     #[test]
     fn native_command_bar_shortcuts_are_consumed_before_cef() {
-        use vmux_command::{BrowserBarCommand, BrowserCommand};
-
         let map = map();
         let mut pending = None;
         let now = Instant::now();
         let shortcuts = [
-            (
-                super_combo(KeyCode::KeyK),
-                BrowserBarCommand::OpenCommandBar,
-            ),
+            (super_combo(KeyCode::KeyK), "browser_open_command_bar"),
             (
                 super_combo(KeyCode::KeyL),
-                BrowserBarCommand::OpenPageInCommandBar,
+                "browser_open_page_in_command_bar",
             ),
-            (super_combo(KeyCode::Slash), BrowserBarCommand::OpenPathBar),
+            (super_combo(KeyCode::Slash), "browser_open_path_bar"),
         ];
 
         for (pressed, expected) in shortcuts {
             let action = decide(&map, &mut pending, pressed, now, false);
-            match action {
-                KeyAction::Consume(Some(AppCommand::Browser(BrowserCommand::Bar(cmd)))) => {
-                    assert_eq!(cmd, expected);
-                }
-                _ => panic!("expected command bar shortcut"),
-            }
+            assert!(matches!(
+                action,
+                KeyAction::Consume(Some(id)) if id == expected
+            ));
         }
     }
 

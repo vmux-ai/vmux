@@ -2195,7 +2195,7 @@ fn term_key_event_to_bytes(event: &KeyStroke) -> Vec<u8> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TerminalWebShortcutAction {
-    Command(AppCommand),
+    Command(String),
     Consume,
     PassThrough,
 }
@@ -2203,14 +2203,15 @@ enum TerminalWebShortcutAction {
 fn resolve_terminal_web_shortcut(
     event: &KeyStroke,
     settings: Option<&AppSettings>,
+    definitions: &[vmux_command::CommandDefinition],
     state: &mut TerminalWebShortcutState,
 ) -> TerminalWebShortcutAction {
     let Some(combo) = term_key_event_to_shortcut_combo(event) else {
         return TerminalWebShortcutAction::PassThrough;
     };
     let map = match settings {
-        Some(settings) => settings.shortcuts.keymap(),
-        None => Keymap::defaults(),
+        Some(settings) => settings.shortcuts.keymap_with(definitions),
+        None => Keymap::defaults_with(definitions),
     };
     let now = Instant::now();
     if let Some((_, started)) = state.pending_prefix.as_ref()
@@ -2635,9 +2636,9 @@ fn on_term_key(
     mode_map: Res<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
     settings: Option<Res<AppSettings>>,
+    definitions: Query<&vmux_command::CommandDefinition>,
     mut web_shortcuts: ResMut<TerminalWebShortcutState>,
-    mut app_commands: MessageWriter<AppCommand>,
-    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut capture_q: Query<&mut PromptCapture, With<Terminal>>,
@@ -2648,14 +2649,16 @@ fn on_term_key(
     if terminals.get(entity).is_err() {
         return;
     }
-    match resolve_terminal_web_shortcut(event, settings.as_deref(), &mut web_shortcuts) {
-        TerminalWebShortcutAction::Command(cmd) => {
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
+    match resolve_terminal_web_shortcut(
+        event,
+        settings.as_deref(),
+        &definitions,
+        &mut web_shortcuts,
+    ) {
+        TerminalWebShortcutAction::Command(id) => {
             let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-            issued.write(vmux_command::CommandIssued {
-                caller,
-                command: cmd.clone(),
-            });
-            app_commands.write(cmd);
+            command_invocations.write(vmux_command::CommandInvocation::new(caller, id));
             if let Some(proxy) = proxy.as_ref() {
                 let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
             }
@@ -4024,7 +4027,7 @@ mod tests {
     }
 
     #[test]
-    fn web_terminal_shortcuts_emit_app_command_before_pty_input() {
+    fn web_terminal_shortcuts_emit_command_before_pty_input() {
         let event = KeyStroke {
             key: "l".to_string(),
             code: "KeyL".to_string(),
@@ -4038,17 +4041,13 @@ mod tests {
         let mut state = TerminalWebShortcutState::default();
 
         assert_eq!(
-            resolve_terminal_web_shortcut(&event, None, &mut state),
-            TerminalWebShortcutAction::Command(AppCommand::Browser(
-                vmux_command::BrowserCommand::Bar(
-                    vmux_command::BrowserBarCommand::OpenPageInCommandBar
-                )
-            ))
+            resolve_terminal_web_shortcut(&event, None, &[], &mut state),
+            TerminalWebShortcutAction::Command("browser_open_page_in_command_bar".to_string())
         );
     }
 
     #[test]
-    fn web_terminal_menu_accel_shortcuts_emit_app_command_before_pty_input() {
+    fn web_terminal_menu_accel_shortcuts_emit_command_before_pty_input() {
         let event = KeyStroke {
             key: "S".to_string(),
             code: "KeyS".to_string(),
@@ -4061,14 +4060,13 @@ mod tests {
             ..Default::default()
         };
         let mut state = TerminalWebShortcutState::default();
+        let definitions = [
+            <vmux_layout::toggle::ToggleRequest as vmux_command::RegisteredCommand>::definition(),
+        ];
 
         assert_eq!(
-            resolve_terminal_web_shortcut(&event, None, &mut state),
-            TerminalWebShortcutAction::Command(AppCommand::Layout(
-                vmux_command::LayoutCommand::ToggleLayout(
-                    vmux_command::ToggleLayoutCommand::Toggle
-                )
-            ))
+            resolve_terminal_web_shortcut(&event, None, &definitions, &mut state),
+            TerminalWebShortcutAction::Command("toggle_layout".to_string())
         );
     }
 

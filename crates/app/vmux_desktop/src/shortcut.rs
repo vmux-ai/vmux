@@ -10,7 +10,12 @@ pub struct ShortcutPlugin;
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::key_claim::KeyClaimPlugin)
-            .add_systems(Startup, init_shortcuts.after(SettingsLoadSet))
+            .add_systems(
+                Startup,
+                init_shortcuts
+                    .after(SettingsLoadSet)
+                    .after(vmux_command::RegisterCommandDefinitions),
+            )
             .add_systems(Update, process_key_input.in_set(WriteAppCommands));
 
         #[cfg(target_os = "macos")]
@@ -18,10 +23,15 @@ impl Plugin for ShortcutPlugin {
     }
 }
 
-pub(crate) fn init_shortcuts(mut commands: Commands, settings: Option<Res<AppSettings>>) {
+pub(crate) fn init_shortcuts(
+    mut commands: Commands,
+    settings: Option<Res<AppSettings>>,
+    definitions: Query<&vmux_command::CommandDefinition>,
+) {
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
     let map = match settings {
-        Some(settings) => settings.shortcuts.keymap(),
-        None => Keymap::defaults(),
+        Some(settings) => settings.shortcuts.keymap_with(&definitions),
+        None => Keymap::defaults_with(&definitions),
     };
 
     #[cfg(target_os = "macos")]
@@ -72,7 +82,7 @@ fn process_key_input(
                 .iter()
                 .find_map(|pressed| bindings.chord(&prefix, pressed))
         {
-            issuer.issue(caller, cmd);
+            issuer.issue_id(caller, cmd);
             chord_state.pending_prefix = None;
             return;
         }
@@ -84,7 +94,7 @@ fn process_key_input(
 
     for (index, pressed) in just_pressed.iter().enumerate() {
         if let Some(cmd) = bindings.direct(pressed) {
-            issuer.issue(caller, cmd);
+            issuer.issue_id(caller, cmd);
             return;
         }
         if bindings.has_chord_prefix(pressed) {
@@ -94,7 +104,7 @@ fn process_key_input(
                     continue;
                 }
                 if let Some(cmd) = bindings.chord(pressed, second) {
-                    issuer.issue(caller, cmd);
+                    issuer.issue_id(caller, cmd);
                     chord_state.pending_prefix = None;
                     return;
                 }
