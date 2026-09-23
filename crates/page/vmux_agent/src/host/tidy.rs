@@ -1,9 +1,59 @@
-use bevy::prelude::*;
 use std::path::PathBuf;
+
+use bevy::ecs::relationship::Relationship;
+use bevy::prelude::*;
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+
+pub(crate) struct TidyPlugin;
+
+impl Plugin for TidyPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(UiEventPlugin::<(vmux_core::event::FileTidyRequest,)>::default())
+            .add_observer(on_tidy_request);
+    }
+}
 
 #[derive(Component)]
 pub(crate) struct PendingTidy {
     pub closable: Vec<Entity>,
+}
+
+fn on_tidy_request(
+    trigger: On<BinReceive<vmux_core::event::FileTidyRequest>>,
+    child_of: Query<&ChildOf>,
+    pending: Query<&PendingTidy>,
+    mut settings: ResMut<vmux_setting::AppSettings>,
+    mut save: MessageWriter<vmux_setting::SettingsSaveRequest>,
+    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(stack) = child_of.get(webview).map(Relationship::get) else {
+        return;
+    };
+    let Ok(pane) = child_of.get(stack).map(Relationship::get) else {
+        return;
+    };
+    let Ok(pending_tidy) = pending.get(pane) else {
+        return;
+    };
+    let closable = pending_tidy.closable.clone();
+    commands.entity(pane).remove::<PendingTidy>();
+    match trigger.event().payload.choice {
+        vmux_core::event::TidyChoice::Dismiss => {}
+        vmux_core::event::TidyChoice::Always => {
+            settings.agent.tidy_files_auto = true;
+            save.write(vmux_setting::SettingsSaveRequest);
+            for stack in closable {
+                close.write(vmux_layout::CloseStackRequest::tidying(stack));
+            }
+        }
+        vmux_core::event::TidyChoice::Tidy => {
+            for stack in closable {
+                close.write(vmux_layout::CloseStackRequest::tidying(stack));
+            }
+        }
+    }
 }
 
 pub(crate) fn path_from_file_url(url: &str) -> Option<PathBuf> {
