@@ -1,10 +1,11 @@
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery};
 
 use super::{
-    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
+    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+    ToolRequestSet, ToolSpawner,
 };
 
 pub(super) struct BrowserToolPlugin;
@@ -12,6 +13,7 @@ pub(super) struct BrowserToolPlugin;
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Browser))
+            .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
                 (
@@ -46,93 +48,45 @@ enum BrowserTool {
     Scroll,
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserNavigateArgs {
     url: String,
     pane: Option<String>,
 }
 
-impl BrowserNavigateArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        if self.url.trim().is_empty() {
-            return Err("browser_navigate.url is empty".to_string());
-        }
-        Ok(AgentCommand::BrowserNavigate {
-            url: self.url,
-            pane: self.pane,
-        })
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BrowserPaneArgs {
+struct BrowserBackArgs {
     pane: Option<String>,
 }
 
-impl BrowserPaneArgs {
-    fn back_command(self) -> AgentCommand {
-        AgentCommand::BrowserGoBack { pane: self.pane }
-    }
-
-    fn forward_command(self) -> AgentCommand {
-        AgentCommand::BrowserGoForward { pane: self.pane }
-    }
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserForwardArgs {
+    pane: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserHistorySearchArgs {
     query: String,
     limit: Option<u32>,
 }
 
-impl BrowserHistorySearchArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        if self.query.trim().is_empty() {
-            return Err("browser_history_search.query is empty".to_string());
-        }
-        Ok(AgentCommand::BrowserHistorySearch {
-            query: self.query,
-            limit: self.limit.unwrap_or(20).min(100),
-        })
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserInstallExtensionArgs {
     source: String,
 }
 
-impl BrowserInstallExtensionArgs {
-    fn command(self) -> Result<AgentCommand, String> {
-        if self.source.trim().is_empty() {
-            return Err("browser_install_extension.source is empty".to_string());
-        }
-        Ok(AgentCommand::BrowserInstallExtension {
-            source: self.source,
-        })
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserSnapshotArgs {
     target: Option<String>,
 }
 
-impl BrowserSnapshotArgs {
-    fn query(self, anchor: Option<vmux_client::protocol::ProcessId>) -> AgentQuery {
-        AgentQuery::BrowserSnapshot {
-            pane: BrowserPane::from(self.target).into(),
-            anchor,
-        }
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum ScrollTarget {
     Top,
@@ -162,26 +116,11 @@ struct BrowserScrollDeltaArgs {
     target: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(untagged)]
 enum BrowserScrollArgs {
     Position(BrowserScrollPositionArgs),
     Delta(BrowserScrollDeltaArgs),
-}
-
-impl BrowserScrollArgs {
-    fn query(self, anchor: Option<vmux_client::protocol::ProcessId>) -> AgentQuery {
-        let (to, delta, target) = match self {
-            Self::Position(args) => (Some(args.to.into()), None, args.target),
-            Self::Delta(args) => (None, Some(args.delta), args.target),
-        };
-        AgentQuery::BrowserScroll {
-            pane: BrowserPane::from(target).into(),
-            to,
-            delta,
-            anchor,
-        }
-    }
 }
 
 struct BrowserPane(Option<String>);
@@ -208,77 +147,180 @@ fn register(mut tools: ToolSpawner) {
     )));
 }
 
-fn navigate(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
-    for (request, call, _) in calls.matching(BrowserTool::Navigate) {
-        let target = call
-            .parse::<BrowserNavigateArgs>("browser_navigate")
-            .and_then(BrowserNavigateArgs::command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
+    for (request, call, tool) in calls.iter() {
+        match tool {
+            BrowserTool::Navigate => call.parse_into::<BrowserNavigateArgs>(request, &mut commands),
+            BrowserTool::GoBack => call.parse_into::<BrowserBackArgs>(request, &mut commands),
+            BrowserTool::GoForward => call.parse_into::<BrowserForwardArgs>(request, &mut commands),
+            BrowserTool::HistorySearch => {
+                call.parse_into::<BrowserHistorySearchArgs>(request, &mut commands)
+            }
+            BrowserTool::InstallExtension => {
+                call.parse_into::<BrowserInstallExtensionArgs>(request, &mut commands)
+            }
+            BrowserTool::Snapshot => {
+                if call
+                    .arguments
+                    .get("target")
+                    .is_some_and(|value| !value.is_null() && !value.is_string())
+                {
+                    call.finish_dispatch(
+                        request,
+                        &mut commands,
+                        Err("browser_snapshot.target must be a string".to_string()),
+                    );
+                } else {
+                    call.parse_into::<BrowserSnapshotArgs>(request, &mut commands);
+                }
+            }
+            BrowserTool::Scroll => call.parse_into::<BrowserScrollArgs>(request, &mut commands),
+        }
     }
 }
 
-fn go_back(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
-    for (request, call, _) in calls.matching(BrowserTool::GoBack) {
-        let target = call
-            .parse::<BrowserPaneArgs>("browser_go_back")
-            .map(BrowserPaneArgs::back_command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
-    }
-}
-
-fn go_forward(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
-    for (request, call, _) in calls.matching(BrowserTool::GoForward) {
-        let target = call
-            .parse::<BrowserPaneArgs>("browser_go_forward")
-            .map(BrowserPaneArgs::forward_command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
-    }
-}
-
-fn history_search(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
-    for (request, call, _) in calls.matching(BrowserTool::HistorySearch) {
-        let target = call
-            .parse::<BrowserHistorySearchArgs>("browser_history_search")
-            .and_then(BrowserHistorySearchArgs::command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
-    }
-}
-
-fn install_extension(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
-    for (request, call, _) in calls.matching(BrowserTool::InstallExtension) {
-        let target = call
-            .parse::<BrowserInstallExtensionArgs>("browser_install_extension")
-            .and_then(BrowserInstallExtensionArgs::command)
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
-    }
-}
-
-fn snapshot(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
-    for (request, call, _) in calls.matching(BrowserTool::Snapshot) {
-        let target = if call
-            .arguments
-            .get("target")
-            .is_some_and(|value| !value.is_null() && !value.is_string())
-        {
-            Err("browser_snapshot.target must be a string".to_string())
+fn navigate(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BrowserNavigateArgs>),
+        Added<ParsedToolCall<BrowserNavigateArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let args = request.args();
+        let target = if args.url.trim().is_empty() {
+            Err("browser_navigate.url is empty".to_string())
         } else {
-            call.parse::<BrowserSnapshotArgs>("browser_snapshot")
-                .map(|args| DispatchTarget::Query(args.query(call.anchor)))
+            Ok(DispatchTarget::Command(AgentCommand::BrowserNavigate {
+                url: args.url.clone(),
+                pane: args.pane.clone(),
+            }))
         };
-        call.finish_dispatch(request, &mut commands, target);
+        request.finish(entity, &mut commands, target);
     }
 }
 
-fn scroll(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
-    for (request, call, _) in calls.matching(BrowserTool::Scroll) {
-        let target = call
-            .parse::<BrowserScrollArgs>("browser_scroll")
-            .map(|args| DispatchTarget::Query(args.query(call.anchor)));
-        call.finish_dispatch(request, &mut commands, target);
+fn go_back(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BrowserBackArgs>),
+        Added<ParsedToolCall<BrowserBackArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Command(AgentCommand::BrowserGoBack {
+                pane: request.args().pane.clone(),
+            })),
+        );
+    }
+}
+
+fn go_forward(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BrowserForwardArgs>),
+        Added<ParsedToolCall<BrowserForwardArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Command(AgentCommand::BrowserGoForward {
+                pane: request.args().pane.clone(),
+            })),
+        );
+    }
+}
+
+fn history_search(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BrowserHistorySearchArgs>),
+        Added<ParsedToolCall<BrowserHistorySearchArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let args = request.args();
+        let target = if args.query.trim().is_empty() {
+            Err("browser_history_search.query is empty".to_string())
+        } else {
+            Ok(DispatchTarget::Command(
+                AgentCommand::BrowserHistorySearch {
+                    query: args.query.clone(),
+                    limit: args.limit.unwrap_or(20).min(100),
+                },
+            ))
+        };
+        request.finish(entity, &mut commands, target);
+    }
+}
+
+fn install_extension(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BrowserInstallExtensionArgs>),
+        Added<ParsedToolCall<BrowserInstallExtensionArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let source = &request.args().source;
+        let target = if source.trim().is_empty() {
+            Err("browser_install_extension.source is empty".to_string())
+        } else {
+            Ok(DispatchTarget::Command(
+                AgentCommand::BrowserInstallExtension {
+                    source: source.clone(),
+                },
+            ))
+        };
+        request.finish(entity, &mut commands, target);
+    }
+}
+
+fn snapshot(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BrowserSnapshotArgs>),
+        Added<ParsedToolCall<BrowserSnapshotArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Query(AgentQuery::BrowserSnapshot {
+                pane: BrowserPane::from(request.args().target.clone()).into(),
+                anchor: request.anchor(),
+            })),
+        );
+    }
+}
+
+fn scroll(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<BrowserScrollArgs>),
+        Added<ParsedToolCall<BrowserScrollArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let (to, delta, target) = match request.args() {
+            BrowserScrollArgs::Position(args) => (Some(args.to.into()), None, args.target.clone()),
+            BrowserScrollArgs::Delta(args) => (None, Some(args.delta), args.target.clone()),
+        };
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Query(AgentQuery::BrowserScroll {
+                pane: BrowserPane::from(target).into(),
+                to,
+                delta,
+                anchor: request.anchor(),
+            })),
+        );
     }
 }

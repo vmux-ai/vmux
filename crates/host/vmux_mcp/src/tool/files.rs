@@ -1,9 +1,9 @@
 use super::{
-    ProtocolTool, ToolCall, ToolCalls, ToolDispatchSet, ToolExecution, ToolManifest,
-    ToolRegistrationSet, ToolSpawner,
+    ParsedToolCall, ProtocolTool, ToolCalls, ToolDispatchSet, ToolExecution, ToolManifest,
+    ToolRegistrationSet, ToolRequestSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub(super) struct FileToolPlugin;
@@ -11,6 +11,7 @@ pub(super) struct FileToolPlugin;
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Files))
+            .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
     }
 }
@@ -27,7 +28,7 @@ fn register(mut tools: ToolSpawner) {
     tools.spawn_manifest(manifest);
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Component, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ReadFileArgs {
     path: String,
@@ -35,37 +36,50 @@ struct ReadFileArgs {
     limit: Option<usize>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Component, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct GrepArgs {
     query: String,
     path: Option<String>,
 }
 
-fn read_file(mut commands: Commands, calls: ToolCalls<FileTool>) {
-    for (request, call, _) in calls.matching(FileTool::ReadFile) {
-        let result = call
-            .parse::<ReadFileArgs>("read_file")
-            .and_then(ToolCall::serialize_arguments)
-            .map(|arguments| ToolExecution::Protocol {
-                tool: ProtocolTool::ReadFile,
-                arguments,
-                anchor: call.anchor,
-            });
-        call.finish(request, &mut commands, result);
+fn parse(mut commands: Commands, calls: ToolCalls<FileTool>) {
+    for (request, call, tool) in calls.iter() {
+        match tool {
+            FileTool::ReadFile => call.parse_into::<ReadFileArgs>(request, &mut commands),
+            FileTool::Grep => call.parse_into::<GrepArgs>(request, &mut commands),
+        }
     }
 }
 
-fn grep(mut commands: Commands, calls: ToolCalls<FileTool>) {
-    for (request, call, _) in calls.matching(FileTool::Grep) {
-        let result = call
-            .parse::<GrepArgs>("grep")
-            .and_then(ToolCall::serialize_arguments)
+fn read_file(
+    mut commands: Commands,
+    requests: Query<(Entity, &ParsedToolCall<ReadFileArgs>), Added<ParsedToolCall<ReadFileArgs>>>,
+) {
+    for (entity, request) in &requests {
+        let result = request
+            .serialized_args()
+            .map(|arguments| ToolExecution::Protocol {
+                tool: ProtocolTool::ReadFile,
+                arguments,
+                anchor: request.anchor(),
+            });
+        request.finish_execution(entity, &mut commands, result);
+    }
+}
+
+fn grep(
+    mut commands: Commands,
+    requests: Query<(Entity, &ParsedToolCall<GrepArgs>), Added<ParsedToolCall<GrepArgs>>>,
+) {
+    for (entity, request) in &requests {
+        let result = request
+            .serialized_args()
             .map(|arguments| ToolExecution::Protocol {
                 tool: ProtocolTool::Grep,
                 arguments,
-                anchor: call.anchor,
+                anchor: request.anchor(),
             });
-        call.finish(request, &mut commands, result);
+        request.finish_execution(entity, &mut commands, result);
     }
 }

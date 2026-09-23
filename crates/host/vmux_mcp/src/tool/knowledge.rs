@@ -1,9 +1,9 @@
 use super::{
-    DispatchTarget, ProtocolTool, ToolCalls, ToolDispatchSet, ToolExecution, ToolManifest,
-    ToolRegistrationSet, ToolSpawner,
+    DispatchTarget, ParsedToolCall, ProtocolTool, ToolCalls, ToolDispatchSet, ToolExecution,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::AgentCommand;
 
@@ -12,6 +12,7 @@ pub(super) struct KnowledgeToolPlugin;
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Knowledge))
+            .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
                 (
@@ -51,67 +52,26 @@ enum VaultProvider {
     CloudFolder,
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenVaultArgs {
     provider: Option<VaultProvider>,
 }
 
-impl OpenVaultArgs {
-    fn command(self, anchor: vmux_client::protocol::ProcessId) -> AgentCommand {
-        let url = match self.provider.unwrap_or(VaultProvider::Overview) {
-            VaultProvider::Overview => "vmux://vault/",
-            VaultProvider::Github => "vmux://vault/?provider=github",
-            VaultProvider::CloudFolder => "vmux://vault/?provider=cloud_folder",
-        };
-        AgentCommand::OpenBeside {
-            anchor,
-            direction: None,
-            url: url.to_string(),
-            focus: true,
-        }
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SetConversationTitleArgs {
     title: String,
 }
 
-impl SetConversationTitleArgs {
-    fn command(self, anchor: vmux_client::protocol::ProcessId) -> Result<AgentCommand, String> {
-        let title = Text::required(self.title, "set_conversation_title.title is empty")?;
-        if title.chars().count() > 120 {
-            return Err("set_conversation_title.title exceeds 120 characters".to_string());
-        }
-        Ok(AgentCommand::SetConversationTitle { anchor, title })
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SearchKnowledgeArgs {
     query: String,
     limit: Option<u64>,
 }
 
-impl SearchKnowledgeArgs {
-    fn command(self, anchor: vmux_client::protocol::ProcessId) -> Result<AgentCommand, String> {
-        let query = Text::required(self.query, "search_knowledge.query is empty")?;
-        let limit = self.limit.unwrap_or(20);
-        if !(1..=100).contains(&limit) {
-            return Err("search_knowledge.limit must be between 1 and 100".to_string());
-        }
-        Ok(AgentCommand::SearchKnowledge {
-            anchor,
-            query,
-            limit: limit as u16,
-        })
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReadKnowledgeArgs {
     path: String,
@@ -119,46 +79,12 @@ struct ReadKnowledgeArgs {
     limit: Option<u64>,
 }
 
-impl ReadKnowledgeArgs {
-    fn command(self, anchor: vmux_client::protocol::ProcessId) -> Result<AgentCommand, String> {
-        let path = Text::required(self.path, "read_knowledge.path is empty")?;
-        let line = self.line.unwrap_or(1);
-        let limit = self.limit.unwrap_or(200);
-        if line == 0 || line > u32::MAX as u64 {
-            return Err("read_knowledge.line must be at least 1".to_string());
-        }
-        if !(1..=2_000).contains(&limit) {
-            return Err("read_knowledge.limit must be between 1 and 2000".to_string());
-        }
-        Ok(AgentCommand::ReadKnowledge {
-            anchor,
-            path,
-            line: line as u32,
-            limit: limit as u32,
-        })
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WriteKnowledgeArgs {
     path: Option<String>,
     title: String,
     content: String,
-}
-
-impl WriteKnowledgeArgs {
-    fn command(self, anchor: vmux_client::protocol::ProcessId) -> Result<AgentCommand, String> {
-        let path = self.path.and_then(Text::trimmed);
-        let title = Text::required(self.title, "write_knowledge.title is empty")?;
-        let content = Text::required(self.content, "write_knowledge.content is empty")?;
-        Ok(AgentCommand::WriteKnowledge {
-            anchor,
-            path,
-            title,
-            content,
-        })
-    }
 }
 
 fn vault_status(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
@@ -175,68 +101,156 @@ fn vault_status(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     }
 }
 
-fn open_vault(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
-    for (request, call, _) in calls.matching(KnowledgeTool::OpenVault) {
-        let target = call
-            .require_anchor("open_vault")
-            .and_then(|anchor| {
-                call.parse::<OpenVaultArgs>("open_vault")
-                    .map(|args| args.command(anchor))
-            })
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn parse(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
+    for (request, call, tool) in calls.iter() {
+        match tool {
+            KnowledgeTool::VaultStatus => {}
+            KnowledgeTool::OpenVault => call.parse_into::<OpenVaultArgs>(request, &mut commands),
+            KnowledgeTool::SetConversationTitle => {
+                call.parse_into::<SetConversationTitleArgs>(request, &mut commands)
+            }
+            KnowledgeTool::SearchKnowledge => {
+                call.parse_into::<SearchKnowledgeArgs>(request, &mut commands)
+            }
+            KnowledgeTool::ReadKnowledge => {
+                call.parse_into::<ReadKnowledgeArgs>(request, &mut commands)
+            }
+            KnowledgeTool::WriteKnowledge => {
+                call.parse_into::<WriteKnowledgeArgs>(request, &mut commands)
+            }
+        }
     }
 }
 
-fn set_conversation_title(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
-    for (request, call, _) in calls.matching(KnowledgeTool::SetConversationTitle) {
-        let target = call
-            .require_anchor("set_conversation_title")
-            .and_then(|anchor| {
-                call.parse::<SetConversationTitleArgs>("set_conversation_title")
-                    .and_then(|args| args.command(anchor))
+fn open_vault(
+    mut commands: Commands,
+    requests: Query<(Entity, &ParsedToolCall<OpenVaultArgs>), Added<ParsedToolCall<OpenVaultArgs>>>,
+) {
+    for (entity, request) in &requests {
+        let target = request.require_anchor().map(|anchor| {
+            let url = match request
+                .args()
+                .provider
+                .as_ref()
+                .unwrap_or(&VaultProvider::Overview)
+            {
+                VaultProvider::Overview => "vmux://vault/",
+                VaultProvider::Github => "vmux://vault/?provider=github",
+                VaultProvider::CloudFolder => "vmux://vault/?provider=cloud_folder",
+            };
+            DispatchTarget::Command(AgentCommand::OpenBeside {
+                anchor,
+                direction: None,
+                url: url.to_string(),
+                focus: true,
             })
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+        });
+        request.finish(entity, &mut commands, target);
     }
 }
 
-fn search(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
-    for (request, call, _) in calls.matching(KnowledgeTool::SearchKnowledge) {
-        let target = call
-            .require_anchor("search_knowledge")
-            .and_then(|anchor| {
-                call.parse::<SearchKnowledgeArgs>("search_knowledge")
-                    .and_then(|args| args.command(anchor))
-            })
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn set_conversation_title(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<SetConversationTitleArgs>),
+        Added<ParsedToolCall<SetConversationTitleArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let target = request.require_anchor().and_then(|anchor| {
+            let title = Text::required(
+                request.args().title.clone(),
+                "set_conversation_title.title is empty",
+            )?;
+            if title.chars().count() > 120 {
+                return Err("set_conversation_title.title exceeds 120 characters".to_string());
+            }
+            Ok(DispatchTarget::Command(
+                AgentCommand::SetConversationTitle { anchor, title },
+            ))
+        });
+        request.finish(entity, &mut commands, target);
     }
 }
 
-fn read(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
-    for (request, call, _) in calls.matching(KnowledgeTool::ReadKnowledge) {
-        let target = call
-            .require_anchor("read_knowledge")
-            .and_then(|anchor| {
-                call.parse::<ReadKnowledgeArgs>("read_knowledge")
-                    .and_then(|args| args.command(anchor))
-            })
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn search(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<SearchKnowledgeArgs>),
+        Added<ParsedToolCall<SearchKnowledgeArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let target = request.require_anchor().and_then(|anchor| {
+            let query = Text::required(
+                request.args().query.clone(),
+                "search_knowledge.query is empty",
+            )?;
+            let limit = request.args().limit.unwrap_or(20);
+            if !(1..=100).contains(&limit) {
+                return Err("search_knowledge.limit must be between 1 and 100".to_string());
+            }
+            Ok(DispatchTarget::Command(AgentCommand::SearchKnowledge {
+                anchor,
+                query,
+                limit: limit as u16,
+            }))
+        });
+        request.finish(entity, &mut commands, target);
     }
 }
 
-fn write(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
-    for (request, call, _) in calls.matching(KnowledgeTool::WriteKnowledge) {
-        let target = call
-            .require_anchor("write_knowledge")
-            .and_then(|anchor| {
-                call.parse::<WriteKnowledgeArgs>("write_knowledge")
-                    .and_then(|args| args.command(anchor))
-            })
-            .map(DispatchTarget::Command);
-        call.finish_dispatch(request, &mut commands, target);
+fn read(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<ReadKnowledgeArgs>),
+        Added<ParsedToolCall<ReadKnowledgeArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let target = request.require_anchor().and_then(|anchor| {
+            let args = request.args();
+            let path = Text::required(args.path.clone(), "read_knowledge.path is empty")?;
+            let line = args.line.unwrap_or(1);
+            let limit = args.limit.unwrap_or(200);
+            if line == 0 || line > u32::MAX as u64 {
+                return Err("read_knowledge.line must be at least 1".to_string());
+            }
+            if !(1..=2_000).contains(&limit) {
+                return Err("read_knowledge.limit must be between 1 and 2000".to_string());
+            }
+            Ok(DispatchTarget::Command(AgentCommand::ReadKnowledge {
+                anchor,
+                path,
+                line: line as u32,
+                limit: limit as u32,
+            }))
+        });
+        request.finish(entity, &mut commands, target);
+    }
+}
+
+fn write(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<WriteKnowledgeArgs>),
+        Added<ParsedToolCall<WriteKnowledgeArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let target = request.require_anchor().and_then(|anchor| {
+            let args = request.args();
+            let path = args.path.clone().and_then(Text::trimmed);
+            let title = Text::required(args.title.clone(), "write_knowledge.title is empty")?;
+            let content = Text::required(args.content.clone(), "write_knowledge.content is empty")?;
+            Ok(DispatchTarget::Command(AgentCommand::WriteKnowledge {
+                anchor,
+                path,
+                title,
+                content,
+            }))
+        });
+        request.finish(entity, &mut commands, target);
     }
 }
 

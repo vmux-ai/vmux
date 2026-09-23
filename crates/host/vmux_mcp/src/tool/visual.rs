@@ -1,8 +1,9 @@
 use super::{
-    DispatchTarget, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet, ToolSpawner,
+    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
+    ToolRequestSet, ToolSpawner,
 };
 use bevy_app::{App, Plugin, Startup, Update};
-use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentQuery, SimulatorAction, SimulatorButton};
 
@@ -11,6 +12,7 @@ pub(super) struct VisualToolPlugin;
 impl Plugin for VisualToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Visual))
+            .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
                 (
@@ -48,39 +50,20 @@ fn register(mut tools: ToolSpawner) {
     tools.spawn_manifest(manifest);
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ScreenshotArgs {
     pane: Option<String>,
 }
 
-impl ScreenshotArgs {
-    fn query(self) -> AgentQuery {
-        AgentQuery::Screenshot {
-            pane: OptionalText::trim(self.pane),
-        }
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SimulatorTapArgs {
     x: u32,
     y: u32,
 }
 
-impl SimulatorTapArgs {
-    fn query(self) -> AgentQuery {
-        AgentQuery::SimulatorControl {
-            action: SimulatorAction::Tap {
-                x: self.x,
-                y: self.y,
-            },
-        }
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SimulatorSwipeArgs {
     start_x: u32,
@@ -90,56 +73,19 @@ struct SimulatorSwipeArgs {
     duration_ms: Option<u32>,
 }
 
-impl SimulatorSwipeArgs {
-    fn query(self) -> Result<AgentQuery, String> {
-        let duration_ms = self.duration_ms.unwrap_or(300);
-        if !(1..=10_000).contains(&duration_ms) {
-            return Err("simulator_swipe.duration_ms must be between 1 and 10000".to_string());
-        }
-        Ok(AgentQuery::SimulatorControl {
-            action: SimulatorAction::Swipe {
-                start_x: self.start_x,
-                start_y: self.start_y,
-                end_x: self.end_x,
-                end_y: self.end_y,
-                duration_ms,
-            },
-        })
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SimulatorTypeArgs {
     text: String,
 }
 
-impl SimulatorTypeArgs {
-    fn query(self) -> Result<AgentQuery, String> {
-        if self.text.is_empty() {
-            return Err("simulator_type.text is empty".to_string());
-        }
-        Ok(AgentQuery::SimulatorControl {
-            action: SimulatorAction::TypeText(self.text),
-        })
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SimulatorKeyArgs {
     keycode: u8,
 }
 
-impl SimulatorKeyArgs {
-    fn query(self) -> AgentQuery {
-        AgentQuery::SimulatorControl {
-            action: SimulatorAction::Key(self.keycode),
-        }
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum SimulatorButtonArg {
     Home,
@@ -157,21 +103,13 @@ impl From<SimulatorButtonArg> for SimulatorButton {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SimulatorButtonArgs {
     button: SimulatorButtonArg,
 }
 
-impl SimulatorButtonArgs {
-    fn query(self) -> AgentQuery {
-        AgentQuery::SimulatorControl {
-            action: SimulatorAction::Button(self.button.into()),
-        }
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordStartArgs {
     #[serde(default)]
@@ -180,39 +118,50 @@ struct RecordStartArgs {
     pane: Option<String>,
 }
 
-impl RecordStartArgs {
-    fn query(self) -> AgentQuery {
-        AgentQuery::RecordStart {
-            gif: self.gif,
-            max_secs: self.max_secs.unwrap_or(600),
-            pane: OptionalText::trim(self.pane),
-        }
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordStopArgs {
     dir: Option<String>,
     name: Option<String>,
 }
 
-impl RecordStopArgs {
-    fn query(self) -> AgentQuery {
-        AgentQuery::RecordStop {
-            dir: OptionalText::trim(self.dir),
-            name: OptionalText::trim(self.name),
+fn parse(mut commands: Commands, calls: ToolCalls<VisualTool>) {
+    for (request, call, tool) in calls.iter() {
+        match tool {
+            VisualTool::Screenshot => call.parse_into::<ScreenshotArgs>(request, &mut commands),
+            VisualTool::SimulatorScreenshot => {}
+            VisualTool::SimulatorTap => call.parse_into::<SimulatorTapArgs>(request, &mut commands),
+            VisualTool::SimulatorSwipe => {
+                call.parse_into::<SimulatorSwipeArgs>(request, &mut commands)
+            }
+            VisualTool::SimulatorType => {
+                call.parse_into::<SimulatorTypeArgs>(request, &mut commands)
+            }
+            VisualTool::SimulatorKey => call.parse_into::<SimulatorKeyArgs>(request, &mut commands),
+            VisualTool::SimulatorButton => {
+                call.parse_into::<SimulatorButtonArgs>(request, &mut commands)
+            }
+            VisualTool::RecordStart => call.parse_into::<RecordStartArgs>(request, &mut commands),
+            VisualTool::RecordStop => call.parse_into::<RecordStopArgs>(request, &mut commands),
         }
     }
 }
 
-fn screenshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, _) in calls.matching(VisualTool::Screenshot) {
-        let target = call
-            .parse::<ScreenshotArgs>("screenshot")
-            .map(ScreenshotArgs::query)
-            .map(DispatchTarget::Query);
-        call.finish_dispatch(request, &mut commands, target);
+fn screenshot(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<ScreenshotArgs>),
+        Added<ParsedToolCall<ScreenshotArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Query(AgentQuery::Screenshot {
+                pane: OptionalText::trim(request.args().pane.clone()),
+            })),
+        );
     }
 }
 
@@ -226,73 +175,148 @@ fn simulator_screenshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     }
 }
 
-fn simulator_tap(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, _) in calls.matching(VisualTool::SimulatorTap) {
-        let target = call
-            .parse::<SimulatorTapArgs>("simulator_tap")
-            .map(SimulatorTapArgs::query)
-            .map(DispatchTarget::Query);
-        call.finish_dispatch(request, &mut commands, target);
+fn simulator_tap(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<SimulatorTapArgs>),
+        Added<ParsedToolCall<SimulatorTapArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let args = request.args();
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
+                action: SimulatorAction::Tap {
+                    x: args.x,
+                    y: args.y,
+                },
+            })),
+        );
     }
 }
 
-fn simulator_swipe(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, _) in calls.matching(VisualTool::SimulatorSwipe) {
-        let target = call
-            .parse::<SimulatorSwipeArgs>("simulator_swipe")
-            .and_then(SimulatorSwipeArgs::query)
-            .map(DispatchTarget::Query);
-        call.finish_dispatch(request, &mut commands, target);
+fn simulator_swipe(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<SimulatorSwipeArgs>),
+        Added<ParsedToolCall<SimulatorSwipeArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let args = request.args();
+        let duration_ms = args.duration_ms.unwrap_or(300);
+        let target = if (1..=10_000).contains(&duration_ms) {
+            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
+                action: SimulatorAction::Swipe {
+                    start_x: args.start_x,
+                    start_y: args.start_y,
+                    end_x: args.end_x,
+                    end_y: args.end_y,
+                    duration_ms,
+                },
+            }))
+        } else {
+            Err("simulator_swipe.duration_ms must be between 1 and 10000".to_string())
+        };
+        request.finish(entity, &mut commands, target);
     }
 }
 
-fn simulator_type(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, _) in calls.matching(VisualTool::SimulatorType) {
-        let target = call
-            .parse::<SimulatorTypeArgs>("simulator_type")
-            .and_then(SimulatorTypeArgs::query)
-            .map(DispatchTarget::Query);
-        call.finish_dispatch(request, &mut commands, target);
+fn simulator_type(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<SimulatorTypeArgs>),
+        Added<ParsedToolCall<SimulatorTypeArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let text = &request.args().text;
+        let target = if text.is_empty() {
+            Err("simulator_type.text is empty".to_string())
+        } else {
+            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
+                action: SimulatorAction::TypeText(text.clone()),
+            }))
+        };
+        request.finish(entity, &mut commands, target);
     }
 }
 
-fn simulator_key(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, _) in calls.matching(VisualTool::SimulatorKey) {
-        let target = call
-            .parse::<SimulatorKeyArgs>("simulator_key")
-            .map(SimulatorKeyArgs::query)
-            .map(DispatchTarget::Query);
-        call.finish_dispatch(request, &mut commands, target);
+fn simulator_key(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<SimulatorKeyArgs>),
+        Added<ParsedToolCall<SimulatorKeyArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
+                action: SimulatorAction::Key(request.args().keycode),
+            })),
+        );
     }
 }
 
-fn simulator_button(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, _) in calls.matching(VisualTool::SimulatorButton) {
-        let target = call
-            .parse::<SimulatorButtonArgs>("simulator_button")
-            .map(SimulatorButtonArgs::query)
-            .map(DispatchTarget::Query);
-        call.finish_dispatch(request, &mut commands, target);
+fn simulator_button(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<SimulatorButtonArgs>),
+        Added<ParsedToolCall<SimulatorButtonArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
+                action: SimulatorAction::Button(request.args().button.into()),
+            })),
+        );
     }
 }
 
-fn record_start(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, _) in calls.matching(VisualTool::RecordStart) {
-        let target = call
-            .parse::<RecordStartArgs>("record_start")
-            .map(RecordStartArgs::query)
-            .map(DispatchTarget::Query);
-        call.finish_dispatch(request, &mut commands, target);
+fn record_start(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<RecordStartArgs>),
+        Added<ParsedToolCall<RecordStartArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        let args = request.args();
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Query(AgentQuery::RecordStart {
+                gif: args.gif,
+                max_secs: args.max_secs.unwrap_or(600),
+                pane: OptionalText::trim(args.pane.clone()),
+            })),
+        );
     }
 }
 
-fn record_stop(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, _) in calls.matching(VisualTool::RecordStop) {
-        let target = call
-            .parse::<RecordStopArgs>("record_stop")
-            .map(RecordStopArgs::query)
-            .map(DispatchTarget::Query);
-        call.finish_dispatch(request, &mut commands, target);
+fn record_stop(
+    mut commands: Commands,
+    requests: Query<
+        (Entity, &ParsedToolCall<RecordStopArgs>),
+        Added<ParsedToolCall<RecordStopArgs>>,
+    >,
+) {
+    for (entity, request) in &requests {
+        request.finish(
+            entity,
+            &mut commands,
+            Ok(DispatchTarget::Query(AgentQuery::RecordStop {
+                dir: OptionalText::trim(request.args().dir.clone()),
+                name: OptionalText::trim(request.args().name.clone()),
+            })),
+        );
     }
 }
 
