@@ -14,6 +14,7 @@ pub mod overlay_adopt;
 pub mod page_context;
 pub mod pane;
 mod pane_close;
+mod pane_focus;
 mod pane_identity;
 pub mod pending_stack;
 pub mod placement;

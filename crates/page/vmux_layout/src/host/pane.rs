@@ -3,10 +3,7 @@ pub use crate::host::zoom::Zoomed;
 use crate::{
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     settings::LayoutSettings,
-    stack::{
-        ActiveTabParam, Stack, active_among, active_pane_in_tab, active_stack_in_pane,
-        focused_stack, stack_bundle,
-    },
+    stack::{ActiveTabParam, Stack, active_stack_in_pane, focused_stack, stack_bundle},
     tab::Tab,
 };
 #[cfg(test)]
@@ -14,9 +11,7 @@ use bevy::ecs::message::Messages;
 #[cfg(test)]
 use bevy::window::PrimaryWindow;
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use bevy_cef::prelude::HostWindow;
 use moonshine_save::prelude::*;
-use std::time::Instant;
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
     open::{PaneDirection, PaneOpenMode, PaneTarget},
@@ -27,6 +22,8 @@ use vmux_history::LastActivatedAt;
 
 use super::pane_close::ClosePlugin;
 pub use super::pane_close::{ForcePaneClose, PendingPaneClose};
+use super::pane_focus::FocusPlugin;
+pub use super::pane_focus::{PaneHoverIntent, PendingCursorWarp, pane_hover_cursor_position};
 use super::pane_identity::IdentityPlugin;
 pub use super::pane_identity::{PaneId, SpawnCounter, SpawnSeq};
 
@@ -39,13 +36,11 @@ impl Plugin for PanePlugin {
             .register_type::<PaneSplit>()
             .register_type::<PaneSplitDirection>()
             .register_type::<PaneSize>()
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
             .add_plugins((
                 IdentityPlugin,
                 PaneOpenPlugin,
                 PaneZoomPlugin,
-                PaneFocusPlugin,
+                FocusPlugin,
                 PaneResizePlugin,
                 ClosePlugin,
             ));
@@ -59,34 +54,15 @@ pub(crate) struct PaneOpenSet;
 
 impl Plugin for PaneOpenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, on_pane_select.in_set(ReadAppCommands))
-            .add_systems(
-                Update,
-                handle_pane_commands
-                    .in_set(ReadAppCommands)
-                    .in_set(PaneOpenSet),
-            )
-            .add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
-            .add_message::<OpenBesideRequest>()
-            .add_systems(Update, handle_open_beside_requests);
-    }
-}
-
-struct PaneFocusPlugin;
-
-impl Plugin for PaneFocusPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(PostUpdate, warp_cursor_to_active_pane);
-        #[cfg(target_os = "macos")]
         app.add_systems(
             Update,
-            apply_pending_hover.before(crate::stack::ComputeFocusSet),
-        );
-        #[cfg(not(target_os = "macos"))]
-        app.add_systems(
-            Update,
-            poll_cursor_pane_focus.before(crate::stack::ComputeFocusSet),
-        );
+            handle_pane_commands
+                .in_set(ReadAppCommands)
+                .in_set(PaneOpenSet),
+        )
+        .add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
+        .add_message::<OpenBesideRequest>()
+        .add_systems(Update, handle_open_beside_requests);
     }
 }
 
@@ -97,20 +73,6 @@ impl Plugin for PaneResizePlugin {
         app.add_systems(Update, pane_gap_drag_resize)
             .add_systems(PostUpdate, sync_pane_split_gaps_to_settings);
     }
-}
-
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-const HOVER_COOLDOWN_MS: u64 = 300;
-
-#[derive(Resource, Default)]
-pub struct PaneHoverIntent {
-    pub target: Option<Entity>,
-    pub last_activation: Option<Instant>,
-}
-
-#[derive(Resource, Default)]
-pub struct PendingCursorWarp {
-    pub target: Option<Entity>,
 }
 
 #[derive(Component, Reflect, Default)]
@@ -1605,277 +1567,6 @@ fn open_stack(
     });
 }
 
-fn on_pane_select(
-    mut reader: MessageReader<AppCommand>,
-    active_tab_param: ActiveTabParam,
-    all_children: Query<&Children>,
-    leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_pos_q: Query<&ComputedNode, With<Pane>>,
-    mut hover_intent: ResMut<PaneHoverIntent>,
-    mut pending_warp: ResMut<PendingCursorWarp>,
-    mut commands: Commands,
-) {
-    for cmd in reader.read() {
-        let direction: Vec2 = match cmd {
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft)) => {
-                Vec2::new(-1.0, 0.0)
-            }
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectRight)) => {
-                Vec2::new(1.0, 0.0)
-            }
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectUp)) => Vec2::new(0.0, -1.0),
-            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectDown)) => Vec2::new(0.0, 1.0),
-            _ => continue,
-        };
-
-        let active_tab = active_tab_param.get();
-        let Some(tab_e) = active_tab else {
-            continue;
-        };
-        let panes = collect_tab_leaf_panes(tab_e, &all_children, &leaf_pane_q);
-        if panes.len() < 2 {
-            continue;
-        }
-        let current = active_pane_in_tab(tab_e, &all_children, &leaf_pane_q, &pane_ts);
-        let Some(current) = current else {
-            continue;
-        };
-        let Ok(&cur) = pane_pos_q.get(current) else {
-            continue;
-        };
-
-        let mut candidates: Vec<Entity> = Vec::new();
-        for &pane in &panes {
-            if pane == current {
-                continue;
-            }
-            let Ok(&tgt) = pane_pos_q.get(pane) else {
-                continue;
-            };
-
-            let along = (tgt.center - cur.center).dot(direction);
-            if along <= 0.0 {
-                continue;
-            }
-
-            let overlaps = if direction.x.abs() > 0.5 {
-                cur.overlaps_rows(tgt)
-            } else {
-                cur.overlaps_columns(tgt)
-            };
-            if !overlaps {
-                continue;
-            }
-
-            candidates.push(pane);
-        }
-        let best = active_among(candidates.iter().filter_map(|&e| pane_ts.get(e).ok()))
-            .map(|e| (e, 0.0_f32));
-
-        if let Some((target, _)) = best {
-            hover_intent.target = None;
-            hover_intent.last_activation = Some(Instant::now());
-            commands.entity(target).insert(LastActivatedAt::now());
-            pending_warp.target = Some(target);
-        }
-    }
-}
-
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-fn poll_cursor_pane_focus(
-    windows: Query<(Entity, &Window)>,
-    focused_window: Res<crate::window::FocusedWindow>,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
-    leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut intent: ResMut<PaneHoverIntent>,
-    mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
-    active_drags: Query<(), With<PaneDrag>>,
-) {
-    if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
-        return;
-    }
-    if !active_drags.is_empty() {
-        return;
-    }
-    if let Some(last) = intent.last_activation
-        && last.elapsed().as_millis() < HOVER_COOLDOWN_MS as u128
-    {
-        return;
-    }
-    let Some(window_entity) = focused_window.0 else {
-        return;
-    };
-    let Ok((_, window)) = windows.get(window_entity) else {
-        return;
-    };
-    let Some(cursor) = pane_hover_cursor_position(window_entity, window) else {
-        return;
-    };
-
-    let mut hovered_pane: Option<Entity> = None;
-    for (entity, node) in &leaf_panes {
-        if crate::window::host_window_of(entity, &child_of, &host_windows) == Some(window_entity)
-            && node.contains(cursor)
-        {
-            hovered_pane = Some(entity);
-            break;
-        }
-    }
-
-    let Some(target) = hovered_pane else {
-        intent.target = None;
-        return;
-    };
-
-    let current_active = active_among(leaf_panes.iter().filter_map(|(e, _)| pane_ts.get(e).ok()));
-    if current_active == Some(target) {
-        intent.target = None;
-        return;
-    }
-
-    commands.entity(target).insert(LastActivatedAt::now());
-    if let Some(target_stack) = active_stack_in_pane(target, &pane_children, &stack_ts) {
-        commands.entity(target_stack).insert(LastActivatedAt::now());
-    }
-    intent.target = None;
-}
-
-pub fn pane_hover_cursor_position(window_entity: Entity, window: &Window) -> Option<Vec2> {
-    #[cfg(target_os = "macos")]
-    {
-        native_window_cursor_position(window_entity, window).or_else(|| {
-            window
-                .physical_cursor_position()
-                .map(|pos| Vec2::new(pos.x, pos.y))
-        })
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = window_entity;
-        window
-            .physical_cursor_position()
-            .map(|pos| Vec2::new(pos.x, pos.y))
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn native_window_cursor_position(window_entity: Entity, window: &Window) -> Option<Vec2> {
-    use bevy::winit::WINIT_WINDOWS;
-    use objc2_app_kit::{NSApplication, NSEvent, NSView};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-    WINIT_WINDOWS.with_borrow(|winit_windows| {
-        let mtm = objc2::MainThreadMarker::new()?;
-        if !NSApplication::sharedApplication(mtm).isActive() {
-            return None;
-        }
-        let winit_window = winit_windows.get_window(window_entity)?;
-        let handle = winit_window.window_handle().ok()?;
-        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
-            return None;
-        };
-        let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
-        let ns_window = view.window()?;
-        let screen_point = NSEvent::mouseLocation();
-        let window_point = ns_window.convertPointFromScreen(screen_point);
-        let point = view.convertPoint_fromView(window_point, None);
-        let bounds = view.bounds();
-        let y = if view.isFlipped() {
-            point.y
-        } else {
-            bounds.size.height - point.y
-        };
-        let scale = window.resolution.scale_factor() as f64;
-        let x = point.x * scale;
-        let y = y * scale;
-        if x.is_finite() && y.is_finite() {
-            Some(Vec2::new(x as f32, y as f32))
-        } else {
-            None
-        }
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn apply_pending_hover(
-    focused_window: Res<crate::window::FocusedWindow>,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
-    leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut commands: Commands,
-    mut last_motion_sequence: Local<u64>,
-) {
-    let Some(pointer) = crate::native_pointer::snapshot() else {
-        return;
-    };
-    if pointer.motion_sequence == 0 || pointer.motion_sequence == *last_motion_sequence {
-        return;
-    }
-    *last_motion_sequence = pointer.motion_sequence;
-    let Some(window_entity) = focused_window.0 else {
-        return;
-    };
-    let mut target = None;
-    for (entity, node) in leaf_panes.iter() {
-        if crate::window::host_window_of(entity, &child_of, &host_windows) == Some(window_entity)
-            && node.contains(pointer.position_px)
-        {
-            target = Some(entity);
-            break;
-        }
-    }
-    let Some(target) = target else {
-        return;
-    };
-    let current = active_among(
-        leaf_panes
-            .iter()
-            .filter_map(|(entity, _)| pane_ts.get(entity).ok()),
-    );
-    if current == Some(target) {
-        return;
-    }
-    commands.entity(target).insert(LastActivatedAt::now());
-    if let Some(stack) = active_stack_in_pane(target, &pane_children, &stack_ts) {
-        commands.entity(stack).insert(LastActivatedAt::now());
-    }
-}
-
-fn warp_cursor_to_active_pane(
-    mut pending: ResMut<PendingCursorWarp>,
-    pane_ui_q: Query<&ComputedNode, (With<Pane>, Without<PaneSplit>)>,
-    child_of: Query<&ChildOf>,
-    host_windows: Query<&HostWindow>,
-    mut windows: Query<&mut Window>,
-) {
-    let Some(target) = pending.target else {
-        return;
-    };
-    let Ok(&rect) = pane_ui_q.get(target) else {
-        return;
-    };
-    if rect.is_empty() {
-        return;
-    }
-    pending.target = None;
-    let Some(window_entity) = crate::window::host_window_of(target, &child_of, &host_windows)
-    else {
-        return;
-    };
-    if let Ok(mut window) = windows.get_mut(window_entity) {
-        window.set_physical_cursor_position(Some(rect.center.as_dvec2()));
-    }
-}
-
 fn pane_gap_drag_resize(
     windows: Query<&Window>,
     focused_window: Res<crate::window::FocusedWindow>,
@@ -2007,26 +1698,6 @@ fn sync_pane_split_gaps_to_settings(
     }
 }
 
-fn collect_tab_leaf_panes(
-    root: Entity,
-    all_children: &Query<&Children>,
-    leaf_q: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-) -> Vec<Entity> {
-    let mut result = Vec::new();
-    let mut stack = vec![root];
-    while let Some(entity) = stack.pop() {
-        if leaf_q.contains(entity) {
-            result.push(entity);
-        }
-        if let Ok(children) = all_children.get(entity) {
-            for child in children.iter() {
-                stack.push(child);
-            }
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2048,26 +1719,6 @@ mod tests {
             side_sheet: SideSheetSettings::default(),
             focus_ring: FocusRingSettings::default(),
         }
-    }
-
-    fn place_pane(app: &mut App, parent: Entity, center: Vec2, size: Vec2) -> Entity {
-        let id = app
-            .world_mut()
-            .spawn((
-                Pane,
-                Node::default(),
-                LastActivatedAt::now(),
-                ChildOf(parent),
-                ComputedNode {
-                    size,
-                    center,
-                    ..default()
-                },
-            ))
-            .id();
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
-        id
     }
 
     #[test]
@@ -3981,236 +3632,6 @@ mod tests {
     }
 
     #[test]
-    fn select_right_picks_most_recently_active_among_overlapping_neighbors() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
-            .init_resource::<PendingLaunch>()
-            .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
-
-        let _window = app.world_mut().spawn(PrimaryWindow).id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
-        let split_v = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Row,
-                },
-                ChildOf(tab),
-            ))
-            .id();
-        let a = place_pane(
-            &mut app,
-            split_v,
-            Vec2::new(399.5, 450.0),
-            Vec2::new(791.0, 892.0),
-        );
-        let split_h = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Column,
-                },
-                ChildOf(split_v),
-            ))
-            .id();
-        let b = place_pane(
-            &mut app,
-            split_h,
-            Vec2::new(1199.5, 225.0),
-            Vec2::new(793.0, 442.0),
-        );
-        let c = place_pane(
-            &mut app,
-            split_h,
-            Vec2::new(1199.5, 675.0),
-            Vec2::new(793.0, 442.0),
-        );
-
-        let _ = app.world().get::<ComputedNode>(b).unwrap();
-
-        app.world_mut().entity_mut(c).insert(LastActivatedAt::now());
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        app.world_mut().entity_mut(b).insert(LastActivatedAt::now());
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        app.world_mut().entity_mut(a).insert(LastActivatedAt::now());
-
-        let prev_b = app.world().get::<LastActivatedAt>(b).unwrap().0;
-        let prev_c = app.world().get::<LastActivatedAt>(c).unwrap().0;
-        assert!(prev_b > prev_c, "B should be more recently active than C");
-
-        app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectRight,
-            )));
-        app.update();
-
-        let new_b = app.world().get::<LastActivatedAt>(b).unwrap().0;
-        let new_c = app.world().get::<LastActivatedAt>(c).unwrap().0;
-        assert!(
-            new_b > prev_b,
-            "B (most recently active) should be re-activated by SelectRight"
-        );
-        assert_eq!(new_c, prev_c, "C should not be re-activated");
-    }
-
-    #[test]
-    fn select_left_picks_full_height_neighbor_from_sub_split_pane() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
-            .init_resource::<PendingLaunch>()
-            .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
-
-        let _window = app.world_mut().spawn(PrimaryWindow).id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
-        let split_v = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Row,
-                },
-                ChildOf(tab),
-            ))
-            .id();
-        let a = place_pane(
-            &mut app,
-            split_v,
-            Vec2::new(399.5, 450.0),
-            Vec2::new(791.0, 892.0),
-        );
-        let split_h = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Column,
-                },
-                ChildOf(split_v),
-            ))
-            .id();
-        let b = place_pane(
-            &mut app,
-            split_h,
-            Vec2::new(1199.5, 225.0),
-            Vec2::new(793.0, 442.0),
-        );
-        let _c = place_pane(
-            &mut app,
-            split_h,
-            Vec2::new(1199.5, 675.0),
-            Vec2::new(793.0, 442.0),
-        );
-
-        let _ = (a, b);
-        let _ = app.world().get::<ComputedNode>(b).unwrap();
-
-        app.world_mut().entity_mut(a).insert(LastActivatedAt(1));
-        app.world_mut().entity_mut(b).insert(LastActivatedAt(10));
-        app.world_mut().entity_mut(_c).insert(LastActivatedAt(0));
-        let prev_a = app.world().get::<LastActivatedAt>(a).unwrap().0;
-
-        app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft,
-            )));
-        app.update();
-
-        let new_a = app.world().get::<LastActivatedAt>(a).unwrap().0;
-        assert!(
-            new_a > prev_a,
-            "SelectLeft from B should navigate to A (full-height left neighbor)"
-        );
-    }
-
-    #[test]
-    fn select_left_picks_left_neighbor_in_horizontal_split() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin))
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
-            .init_resource::<PendingLaunch>()
-            .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
-
-        let _window = app.world_mut().spawn(PrimaryWindow).id();
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
-            .id();
-        let split = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Row,
-                },
-                ChildOf(tab),
-            ))
-            .id();
-        let left = place_pane(
-            &mut app,
-            split,
-            Vec2::new(400.0, 450.0),
-            Vec2::new(800.0, 900.0),
-        );
-        let right = place_pane(
-            &mut app,
-            split,
-            Vec2::new(1200.0, 450.0),
-            Vec2::new(800.0, 900.0),
-        );
-
-        app.world_mut()
-            .entity_mut(right)
-            .insert(LastActivatedAt::now());
-        std::thread::sleep(std::time::Duration::from_millis(2));
-
-        assert_eq!(
-            app.world().get::<ComputedNode>(right).unwrap().size,
-            Vec2::new(800.0, 900.0)
-        );
-        assert_eq!(
-            app.world().get::<ComputedNode>(right).unwrap().center,
-            Vec2::new(1200.0, 450.0)
-        );
-
-        app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft,
-            )));
-        app.update();
-
-        let new_active_left = app
-            .world()
-            .get::<LastActivatedAt>(left)
-            .map(|t| t.0)
-            .expect("left has LastActivatedAt");
-        let prev_active_right = app
-            .world()
-            .get::<LastActivatedAt>(right)
-            .map(|t| t.0)
-            .expect("right has LastActivatedAt");
-        assert!(
-            new_active_left > prev_active_right,
-            "SelectLeft should mark left as more recently activated than right"
-        );
-    }
-
-    #[test]
     fn split_gap_only_applies_on_split_axis() {
         let row = pane_split_gaps(PaneSplitDirection::Row, 8.0);
         let column = pane_split_gaps(PaneSplitDirection::Column, 8.0);
@@ -4403,78 +3824,6 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<Zoomed>(tab).is_none());
-    }
-
-    #[test]
-    fn pane_hover_activates_hovered_pane_in_single_update() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<PaneHoverIntent>()
-            .insert_resource(ButtonInput::<KeyCode>::default())
-            .add_systems(Update, poll_cursor_pane_focus);
-
-        let window = app
-            .world_mut()
-            .spawn((Window::default(), PrimaryWindow))
-            .id();
-        app.insert_resource(crate::window::FocusedWindow(Some(window)));
-        let root = app.world_mut().spawn(HostWindow(window)).id();
-        app.world_mut()
-            .entity_mut(window)
-            .get_mut::<Window>()
-            .unwrap()
-            .set_physical_cursor_position(Some(bevy::math::DVec2::new(400.0, 450.0)));
-        let tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
-            .id();
-        let split = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Row,
-                },
-                ChildOf(tab),
-            ))
-            .id();
-        let left = place_pane(
-            &mut app,
-            split,
-            Vec2::new(400.0, 450.0),
-            Vec2::new(800.0, 900.0),
-        );
-        let right = place_pane(
-            &mut app,
-            split,
-            Vec2::new(1200.0, 450.0),
-            Vec2::new(800.0, 900.0),
-        );
-        app.world_mut().entity_mut(left).insert(LastActivatedAt(1));
-        app.world_mut()
-            .entity_mut(right)
-            .insert(LastActivatedAt(10));
-        let left_stack = app
-            .world()
-            .get::<Children>(left)
-            .unwrap()
-            .iter()
-            .find(|&e| app.world().get::<Stack>(e).is_some())
-            .unwrap();
-        app.world_mut()
-            .entity_mut(left_stack)
-            .insert(LastActivatedAt(1));
-
-        app.update();
-
-        assert!(
-            app.world().get::<LastActivatedAt>(left).unwrap().0 > 10,
-            "hovered pane should activate in the same update"
-        );
-        assert!(
-            app.world().get::<LastActivatedAt>(left_stack).unwrap().0 > 1,
-            "hovered pane active stack should activate in the same update"
-        );
     }
 
     #[test]
