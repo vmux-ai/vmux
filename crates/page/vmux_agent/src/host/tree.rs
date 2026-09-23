@@ -58,8 +58,8 @@ impl Plugin for AgentSessionPlugin {
         strategies.register_cli(Box::new(VibeStrategy));
         strategies.register_cli(Box::new(ClaudeStrategy));
         strategies.register_cli(Box::new(CodexStrategy));
-        if !app.is_plugin_added::<vmux_mcp::tools::ToolsPlugin>() {
-            app.add_plugins(vmux_mcp::tools::ToolsPlugin);
+        if !app.is_plugin_added::<vmux_mcp::tools::ToolPlugin>() {
+            app.add_plugins(vmux_mcp::tools::ToolPlugin);
         }
 
         app.insert_resource(strategies)

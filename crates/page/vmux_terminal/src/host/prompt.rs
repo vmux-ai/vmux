@@ -16,15 +16,15 @@ impl Plugin for PromptPlugin {
 }
 
 #[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct BufferedAgentPrompt {
-    pub(crate) text: String,
-    pub(crate) submit: bool,
+pub struct BufferedAgentPrompt {
+    pub text: String,
+    pub submit: bool,
 }
 
 #[derive(Component, Debug, Clone, Default)]
-pub(crate) struct PromptCapture {
-    pub(crate) draft: String,
-    pub(crate) skipped: bool,
+pub struct PromptCapture {
+    pub draft: String,
+    pub skipped: bool,
 }
 
 impl PromptCapture {

@@ -18,19 +18,18 @@ use serde_json::Value;
 use std::marker::PhantomData;
 use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue, ProcessId};
 
-pub use param::McpParamTool;
 use vmux_api::InputSchema;
 
-pub struct ToolsPlugin;
+pub struct ToolPlugin;
 
-impl Plugin for ToolsPlugin {
+impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NextToolOrder>()
             .configure_sets(Update, (ToolDispatchSet, ToolDispatchFlush).chain())
             .configure_sets(
                 Startup,
                 (
-                    ToolRegistrationSet::Generated,
+                    ToolRegistrationSet::Param,
                     ToolRegistrationSet::Layout,
                     ToolRegistrationSet::Setting,
                     ToolRegistrationSet::Space,
@@ -42,33 +41,27 @@ impl Plugin for ToolsPlugin {
                 )
                     .chain(),
             )
-            .add_systems(
-                Startup,
-                GeneratedTools::register.in_set(ToolRegistrationSet::Generated),
-            )
-            .add_systems(
-                Update,
-                (GeneratedTools::dispatch_param, dispatch_command_calls).in_set(ToolDispatchSet),
-            )
+            .add_systems(Update, dispatch_command_calls.in_set(ToolDispatchSet))
             .add_systems(
                 Update,
                 bevy_ecs::schedule::ApplyDeferred.in_set(ToolDispatchFlush),
             )
             .add_plugins((
-                layout::LayoutToolsPlugin,
+                param::ParamToolPlugin,
+                layout::LayoutToolPlugin,
                 setting::SettingToolPlugin,
                 space::SpaceToolPlugin,
-                workspace::WorkspaceToolsPlugin,
-                files::FileToolsPlugin,
-                knowledge::KnowledgeToolsPlugin,
-                visual::VisualToolsPlugin,
-                bookmark::BookmarkToolsPlugin,
+                workspace::WorkspaceToolPlugin,
+                files::FileToolPlugin,
+                knowledge::KnowledgeToolPlugin,
+                visual::VisualToolPlugin,
+                bookmark::BookmarkToolPlugin,
             ));
     }
 }
 
 #[cfg(test)]
-impl ToolsPlugin {
+impl ToolPlugin {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(Self);
@@ -136,8 +129,8 @@ impl<T> McpToolPlugin<T> {
 
 impl<T: McpToolHandler> Plugin for McpToolPlugin<T> {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ToolsPlugin>() {
-            app.add_plugins(ToolsPlugin);
+        if !app.is_plugin_added::<ToolPlugin>() {
+            app.add_plugins(ToolPlugin);
         }
         let manifest = self.manifest;
         app.add_systems(
@@ -163,7 +156,7 @@ fn dispatch_mcp_tools<T: McpToolHandler>(mut commands: Commands, calls: ToolCall
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub(super) enum ToolRegistrationSet {
-    Generated,
+    Param,
     Layout,
     Setting,
     Space,
@@ -655,24 +648,6 @@ impl<K: Component + Serialize> ToolEntry<K> {
     }
 }
 
-impl ToolSeed {
-    pub(super) fn new(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        input_schema: Value,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            aliases: Vec::new(),
-            description: description.into(),
-            input_schema: InputSchema::try_from(input_schema)
-                .expect("generated MCP tool input schema must be supported"),
-            availability: ToolAvailability::Always,
-            shell_aware: false,
-        }
-    }
-}
-
 pub(super) struct ToolManifest<K>(Vec<ToolEntry<K>>);
 
 impl<K> ToolManifest<K>
@@ -728,33 +703,6 @@ impl ToolSpawner<'_, '_> {
     }
 }
 
-struct GeneratedTools;
-
-#[derive(Component)]
-struct ParamTool;
-
-impl GeneratedTools {
-    fn register(mut tools: ToolSpawner) {
-        for (name, description, schema) in McpParamTool::mcp_tool_entries() {
-            tools.spawn(ToolSeed::new(name, description, schema), ParamTool);
-        }
-    }
-
-    fn dispatch_param(mut commands: Commands, calls: ToolCalls<ParamTool>) {
-        fn target(call: &ToolCall) -> Result<DispatchTarget, String> {
-            let parsed = McpParamTool::from_mcp_call(&call.name, call.arguments.clone())
-                .ok_or_else(|| format!("unknown tool: {}", call.name))?;
-            parsed
-                .and_then(McpParamTool::to_agent_command)
-                .map(DispatchTarget::Command)
-        }
-
-        for (request, call, _) in calls.iter() {
-            call.finish_dispatch(request, &mut commands, target(call));
-        }
-    }
-}
-
 pub(crate) fn canonical_tool_name(name: &str) -> &str {
     name.strip_prefix("vmux_").unwrap_or(name)
 }
@@ -770,7 +718,7 @@ fn tool_definitions_filtered(
     acp_terminals: bool,
     shell: &str,
 ) -> Vec<ToolDefinition> {
-    let mut app = ToolsPlugin::app();
+    let mut app = ToolPlugin::app();
     let shell = shell.to_string();
     app.world_mut()
         .run_system_once(move |tools: ToolCatalog| {
@@ -815,7 +763,7 @@ fn dispatch_in_shell(
     anchor: Option<ProcessId>,
     host_shell: &str,
 ) -> Result<DispatchTarget, String> {
-    let mut app = ToolsPlugin::app();
+    let mut app = ToolPlugin::app();
     match ToolCall::dispatch(&mut app, name, arguments, anchor, host_shell, false, false)? {
         ToolExecution::Dispatch { target, .. } => Ok(target),
         ToolExecution::Protocol { .. }

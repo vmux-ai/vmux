@@ -749,7 +749,7 @@ mod tests {
     #[test]
     fn agent_tools_dispatch_through_the_owning_world() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_mcp::tools::ToolsPlugin))
+        app.add_plugins((MinimalPlugins, vmux_mcp::tools::ToolPlugin))
             .add_message::<AgentToolCallRequest>()
             .add_message::<AgentCommandRequest>()
             .add_message::<AgentQueryRequest>()

@@ -6,9 +6,9 @@ use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::{Commands, Component, IntoScheduleConfigs};
 use serde::{Deserialize, Serialize};
 
-pub(super) struct FileToolsPlugin;
+pub(super) struct FileToolPlugin;
 
-impl Plugin for FileToolsPlugin {
+impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register.in_set(ToolRegistrationSet::Files))
             .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));

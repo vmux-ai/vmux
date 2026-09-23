@@ -25,9 +25,9 @@ use vmux_editor::lsp::package_path::PackageName;
 use vmux_layout::LayoutCef;
 use vmux_tools::{self as manifest_store, ToolsManifest};
 
-pub struct ToolsPlugin;
+pub struct ToolPlugin;
 
-impl Plugin for ToolsPlugin {
+impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
         let vault_root = vmux_core::profile::vault::root_dir();
         let _ = std::fs::create_dir_all(&vault_root);
