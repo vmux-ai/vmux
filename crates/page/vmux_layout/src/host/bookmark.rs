@@ -12,17 +12,21 @@ use vmux_api::bookmark::{
     BookmarkRenameRequest, BookmarkReorderPinRequest, BookmarkTextInputRequest,
     BookmarkToggleRequest, BookmarkUnpinRequest,
 };
-use vmux_command::{AppCommand, BookmarkCommand, BrowserCommand, OpenCommand, ReadAppCommands};
 use vmux_core::host::page::PageManifest;
 use vmux_core::{
     Bookmark, BookmarkOrder, Collapsed, Folder, LastActivatedAt, PageMetadata, Pin, Uuid,
 };
 
+use super::{command::LayoutRequestSet, stack::StackRequest};
+
 pub struct BookmarkPlugin;
 
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<BookmarkMutation>()
+        app.add_message::<ToggleActiveRequest>()
+            .add_message::<PinActiveRequest>()
+            .add_message::<CreateFolderRequest>()
+            .add_message::<BookmarkMutation>()
             .add_message::<ShowBookmarkMenuRequest>()
             .add_plugins(UiEventPlugin::<(
                 BookmarkToggleRequest,
@@ -75,7 +79,7 @@ impl Plugin for BookmarkPlugin {
             .add_systems(
                 Update,
                 (
-                    handle_bookmark_app_commands.in_set(ReadAppCommands),
+                    handle_bookmark_requests.in_set(LayoutRequestSet::Handle),
                     apply_bookmark_mutations,
                     sync_bookmark_metadata,
                 )
@@ -83,6 +87,15 @@ impl Plugin for BookmarkPlugin {
             );
     }
 }
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToggleActiveRequest;
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PinActiveRequest;
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CreateFolderRequest;
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub enum BookmarkMutation {
@@ -561,20 +574,18 @@ fn sync_bookmark_metadata(
 
 fn on_bookmark_toggle_request(
     _trigger: On<BinReceive<BookmarkToggleRequest>>,
-    mut app_cmds: MessageWriter<AppCommand>,
+    mut requests: MessageWriter<ToggleActiveRequest>,
 ) {
-    app_cmds.write(AppCommand::Bookmark(BookmarkCommand::ToggleActive));
+    requests.write(ToggleActiveRequest);
 }
 
 fn on_bookmark_open_request(
     trigger: On<BinReceive<BookmarkOpenRequest>>,
-    mut app_cmds: MessageWriter<AppCommand>,
+    mut requests: MessageWriter<StackRequest>,
 ) {
-    app_cmds.write(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack {
-            url: Some(trigger.event().payload.url.clone()),
-        },
-    )));
+    requests.write(StackRequest::Open {
+        url: Some(trigger.event().payload.url.clone()),
+    });
 }
 
 fn on_bookmark_menu_request<R>(
@@ -740,8 +751,10 @@ impl From<BookmarkFolderRemoveRequest> for BookmarkMutation {
     }
 }
 
-fn handle_bookmark_app_commands(
-    mut reader: MessageReader<AppCommand>,
+fn handle_bookmark_requests(
+    mut toggles: MessageReader<ToggleActiveRequest>,
+    mut pins: MessageReader<PinActiveRequest>,
+    mut create_folders: MessageReader<CreateFolderRequest>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -751,42 +764,41 @@ fn handle_bookmark_app_commands(
     stack_meta: Query<&PageMetadata, With<Stack>>,
     mut ops: MessageWriter<BookmarkMutation>,
 ) {
-    for cmd in reader.read() {
-        let pin = match cmd {
-            AppCommand::Bookmark(BookmarkCommand::ToggleActive) => false,
-            AppCommand::Bookmark(BookmarkCommand::PinActive) => true,
-            AppCommand::Bookmark(BookmarkCommand::NewFolder) => {
-                ops.write(BookmarkMutation::AddFolder {
-                    name: "New Folder".to_string(),
-                });
-                continue;
-            }
-            _ => continue,
-        };
-        let (_, _, stack) = focused_stack(
-            active_tab_param.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
-        let Some(stack) = stack else { continue };
-        let Ok(meta) = stack_meta.get(stack) else {
-            continue;
-        };
-        if meta.url.is_empty() {
-            continue;
-        }
-        if pin {
-            ops.write(BookmarkMutation::PinUrl {
-                metadata: meta.clone(),
-            });
-        } else {
-            ops.write(BookmarkMutation::ToggleForUrl {
-                metadata: meta.clone(),
-            });
-        }
+    for _ in create_folders.read() {
+        ops.write(BookmarkMutation::AddFolder {
+            name: "New Folder".to_string(),
+        });
+    }
+    let toggle_count = toggles.read().count();
+    let pin_count = pins.read().count();
+    if toggle_count == 0 && pin_count == 0 {
+        return;
+    }
+    let (_, _, Some(stack)) = focused_stack(
+        active_tab_param.get(),
+        &all_children,
+        &leaf_panes,
+        &pane_ts,
+        &pane_children,
+        &stack_ts,
+    ) else {
+        return;
+    };
+    let Ok(meta) = stack_meta.get(stack) else {
+        return;
+    };
+    if meta.url.is_empty() {
+        return;
+    }
+    for _ in 0..toggle_count {
+        ops.write(BookmarkMutation::ToggleForUrl {
+            metadata: meta.clone(),
+        });
+    }
+    for _ in 0..pin_count {
+        ops.write(BookmarkMutation::PinUrl {
+            metadata: meta.clone(),
+        });
     }
 }
 
@@ -834,7 +846,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<BookmarkMutation>()
             .add_message::<ShowBookmarkMenuRequest>()
-            .add_message::<AppCommand>()
+            .add_message::<StackRequest>()
             .add_observer(on_bookmark_open_request);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(BinReceive::<BookmarkOpenRequest> {
@@ -843,18 +855,16 @@ mod tests {
                 url: "https://a.test".into(),
             },
         });
-        let commands: Vec<_> = app
+        let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<AppCommand>>()
+            .resource_mut::<Messages<StackRequest>>()
             .drain()
             .collect();
         assert_eq!(
-            commands,
-            vec![AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack {
-                    url: Some("https://a.test".into()),
-                }
-            ))]
+            requests,
+            vec![StackRequest::Open {
+                url: Some("https://a.test".into()),
+            }]
         );
     }
 

@@ -11,11 +11,12 @@ use crate::{
 use bevy::{asset::Asset, prelude::*, window::PrimaryWindow, winit::WINIT_WINDOWS};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_core::page::PageEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
+
+use super::command::LayoutRequestSet;
 
 pub struct WindowLayoutPlugin;
 
@@ -25,6 +26,7 @@ impl Plugin for WindowLayoutPlugin {
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .init_resource::<FocusedWindow>()
+            .add_message::<MinimizeFocusedWindow>()
             .add_systems(
                 Startup,
                 setup_window_shells
@@ -66,12 +68,15 @@ impl Plugin for WindowLayoutPlugin {
                     bevy::ecs::schedule::ApplyDeferred,
                     crate::stack::open_startup_url_if_no_stacks.before(PageOpenSet::ResolveTarget),
                     spawn_requested_tab_layouts
-                        .after(ReadAppCommands)
+                        .after(LayoutRequestSet::Handle)
                         .before(PageOpenSet::ResolveTarget),
                 )
                     .chain(),
             )
-            .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
+            .add_systems(
+                Update,
+                minimize_focused_window.in_set(LayoutRequestSet::Handle),
+            );
 
         app.init_resource::<Assets<WindowMaterial>>()
             .init_resource::<WindowBackground>();
@@ -80,6 +85,9 @@ impl Plugin for WindowLayoutPlugin {
 
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusedWindow(pub Option<Entity>);
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MinimizeFocusedWindow;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WindowFocusSet;
@@ -125,21 +133,19 @@ impl Default for WindowBackground {
     }
 }
 
-fn handle_window_commands(
-    mut reader: MessageReader<AppCommand>,
+fn minimize_focused_window(
+    mut reader: MessageReader<MinimizeFocusedWindow>,
     focused_window: Res<FocusedWindow>,
 ) {
-    for cmd in reader.read() {
-        if let AppCommand::Layout(LayoutCommand::Window(WindowCommand::Minimize)) = cmd {
-            let Some(entity) = focused_window.0 else {
-                continue;
-            };
-            WINIT_WINDOWS.with_borrow(|winit_windows| {
-                if let Some(winit_win) = winit_windows.get_window(entity) {
-                    winit_win.set_minimized(true);
-                }
-            });
-        }
+    for _ in reader.read() {
+        let Some(entity) = focused_window.0 else {
+            continue;
+        };
+        WINIT_WINDOWS.with_borrow(|winit_windows| {
+            if let Some(winit_win) = winit_windows.get_window(entity) {
+                winit_win.set_minimized(true);
+            }
+        });
     }
 }
 

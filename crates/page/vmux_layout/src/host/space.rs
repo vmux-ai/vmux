@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 use moonshine_save::prelude::*;
-use vmux_command::ReadAppCommands;
 use vmux_flex::prelude::*;
+
+use super::command::LayoutRequestSet;
 
 impl Plugin for SpaceLayoutPlugin {
     fn build(&self, app: &mut App) {
@@ -27,7 +28,7 @@ impl Plugin for SpaceLayoutPlugin {
                     crate::active::ensure_active_stack,
                     crate::active::ensure_active_branch,
                 )
-                    .after(ReadAppCommands)
+                    .after(LayoutRequestSet::Handle)
                     .after(crate::window::spawn_requested_tab_layouts),
             )
             .add_systems(
