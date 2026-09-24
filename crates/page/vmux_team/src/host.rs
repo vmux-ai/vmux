@@ -22,6 +22,8 @@ pub struct TeamPlugin;
 
 impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::native_page::TeamPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_message::<ProfileSwitchRequested>()
             .add_systems(Startup, (spawn_user_profile, spawn_profile_labels))

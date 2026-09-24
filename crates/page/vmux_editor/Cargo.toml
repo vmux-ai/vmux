@@ -18,6 +18,7 @@ serde = { workspace = true }
 rkyv = { workspace = true }
 unicode-width = "0.2"
 vmux_core = { path = "../../vmux_core" }
+vmux_native = { path = "../../vmux_native" }
 vmux_git = { path = "../../vmux_git" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]

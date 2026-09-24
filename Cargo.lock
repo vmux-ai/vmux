@@ -10271,7 +10271,6 @@ dependencies = [
  "uuid",
  "vmux_agent",
  "vmux_api",
- "vmux_chat",
  "vmux_command",
  "vmux_core",
  "vmux_editor",
@@ -10282,11 +10281,8 @@ dependencies = [
  "vmux_native",
  "vmux_service",
  "vmux_setting",
- "vmux_shortcut",
- "vmux_simulator",
  "vmux_space",
  "vmux_start",
- "vmux_team",
  "vmux_terminal",
  "vmux_ui",
  "wry",
@@ -10310,6 +10306,7 @@ dependencies = [
  "unicode-segmentation",
  "vmux_api",
  "vmux_core",
+ "vmux_native",
  "vmux_service",
  "vmux_ui",
 ]
@@ -10539,6 +10536,7 @@ dependencies = [
  "vmux_flex",
  "vmux_git",
  "vmux_layout",
+ "vmux_native",
  "vmux_path",
  "vmux_setting",
  "vmux_space",
@@ -10596,6 +10594,7 @@ dependencies = [
  "serde",
  "vmux_api",
  "vmux_core",
+ "vmux_native",
  "vmux_ui",
 ]
 
@@ -10649,6 +10648,7 @@ dependencies = [
  "vmux_git",
  "vmux_history",
  "vmux_macro",
+ "vmux_native",
  "vmux_ui",
 ]
 
@@ -10723,6 +10723,8 @@ name = "vmux_native"
 version = "0.0.35"
 dependencies = [
  "base64 0.22.1",
+ "bevy_app",
+ "bevy_ecs",
  "dioxus",
  "dioxus-core",
  "dioxus-html",
@@ -10737,6 +10739,7 @@ dependencies = [
  "tokio",
  "tracing",
  "vmux_clipboard",
+ "vmux_macro",
  "vmux_ui",
  "wry",
 ]
@@ -10823,6 +10826,7 @@ dependencies = [
  "vmux_client",
  "vmux_core",
  "vmux_git",
+ "vmux_native",
  "vmux_path",
  "vmux_transport",
  "vmux_ui",
@@ -10861,6 +10865,7 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
+ "vmux_native",
  "vmux_path",
  "vmux_ui",
 ]
@@ -10879,6 +10884,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_layout",
+ "vmux_native",
  "vmux_ui",
 ]
 
@@ -10901,6 +10907,7 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_core",
+ "vmux_native",
  "vmux_ui",
 ]
 
@@ -10927,6 +10934,7 @@ dependencies = [
  "vmux_git",
  "vmux_history",
  "vmux_layout",
+ "vmux_native",
  "vmux_setting",
  "vmux_ui",
 ]
@@ -10951,6 +10959,7 @@ dependencies = [
  "vmux_flex",
  "vmux_git",
  "vmux_layout",
+ "vmux_native",
  "vmux_space",
  "vmux_ui",
 ]
@@ -10973,6 +10982,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_layout",
+ "vmux_native",
  "vmux_service",
  "vmux_space",
  "vmux_ui",
@@ -11003,6 +11013,7 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
+ "vmux_native",
  "vmux_service",
  "vmux_setting",
  "vmux_space",

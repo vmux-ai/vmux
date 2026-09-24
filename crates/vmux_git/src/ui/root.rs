@@ -13,15 +13,6 @@ use super::state::GitPageState;
 use super::workspace::GitWorkspace;
 use crate::event::*;
 
-pub static NATIVE_PAGE: vmux_native::NativePage =
-    vmux_native::NativePage::pane(crate::GIT_PAGE_URL, Page)
-        .served_from(crate::GIT_DOCUMENT_URL)
-        .titled("Git")
-        .owning_subtree();
-
-pub static LEGACY_NATIVE_PAGE: vmux_native::NativePage =
-    vmux_native::NativePage::pane(crate::GIT_DOCUMENT_URL, Page).titled("Git");
-
 #[component]
 pub fn Page() -> Element {
     use_theme();

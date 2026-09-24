@@ -8,6 +8,8 @@ pub mod event;
 pub mod render_model;
 
 #[cfg(ui)]
+pub mod native_page;
+#[cfg(ui)]
 mod state;
 #[cfg(ui)]
 pub mod ui;

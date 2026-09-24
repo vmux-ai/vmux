@@ -17,7 +17,7 @@ mod present;
 use crate::page_life::spawn_popup_stacks;
 use present::CommandBarWindowedFrame;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
-mod page_open;
+mod page;
 mod scroll;
 mod snapshot;
 mod state;
@@ -108,41 +108,12 @@ impl Plugin for BrowserPlugin {
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
             vmux_command::command_bar::CommandBarPlugin,
-            native_page::NativePagesPlugin,
+            native_page::NativePageRuntimePlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
             extensions::broker::ExtensionBrokerPlugin,
             extensions::project::ExtensionProjectPlugin,
             extensions::windows::ExtensionWindowsPlugin,
-        ));
-        #[cfg(target_os = "macos")]
-        app.add_plugins((
-            native_page::NativePagePlugin::as_layout(&native_page::LAYOUT_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::START_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::HISTORY_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::TEAM_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::CHAT_PAGE)
-                .takes::<vmux_core::PageMetadata>(),
-            native_page::NativePagePlugin::in_pane(&native_page::LSP_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::FILES_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::PROJECTS_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::KNOWLEDGE_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::TERMINAL_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::SETTINGS_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::SERVICES_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::SPACES_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::TOOLS_PAGE)
-                .takes::<vmux_core::PageMetadata>(),
-        ))
-        .add_plugins((
-            native_page::NativePagePlugin::in_pane(&native_page::SHORTCUTS_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::VAULT_PAGE)
-                .takes::<vmux_core::PageMetadata>(),
-            native_page::NativePagePlugin::in_pane(&native_page::EXTENSIONS_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::ERROR_PAGE)
-                .takes::<vmux_api::error::ErrorPageData>(),
-            native_page::NativePagePlugin::in_pane(&native_page::SIMULATOR_PAGE)
-                .takes::<vmux_core::PageMetadata>(),
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
@@ -200,7 +171,7 @@ impl Plugin for BrowserPlugin {
                 input::InputPlugin,
                 navigation::NavigationPlugin,
                 present::PresentPlugin,
-                page_open::PageOpenPlugin,
+                page::PagePlugin,
                 state::StatePlugin,
                 snapshot::SnapshotPlugin,
                 scroll::ScrollPlugin,
@@ -1034,7 +1005,7 @@ mod tests {
                 app.add_plugins((
                     vmux_layout::LayoutContractPlugin,
                     vmux_terminal::TerminalRequestPlugin,
-                    crate::page_open::PageOpenPlugin,
+                    crate::page::PagePlugin,
                 ))
                 .add_message::<vmux_setting::SettingsWriteRequest>()
                 .add_message::<vmux_space::SpaceRequest>()
@@ -1648,7 +1619,7 @@ mod tests {
         fn deferred_page_open_is_not_claimed_by_fallback() {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(crate::page_open::PageOpenPlugin)
+                .add_plugins(crate::page::PagePlugin)
                 .insert_resource(FocusedStack::default())
                 .init_resource::<crate::PendingNavSnapshots>();
             let stack = app.world_mut().spawn_empty().id();

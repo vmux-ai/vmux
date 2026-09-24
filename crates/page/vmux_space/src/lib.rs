@@ -6,6 +6,8 @@
 
 pub mod model;
 #[cfg(ui)]
+pub mod native_page;
+#[cfg(ui)]
 pub mod ui;
 
 pub use vmux_api::space as event;

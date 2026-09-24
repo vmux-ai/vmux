@@ -34,6 +34,11 @@ pub struct GitPlugin;
 
 impl Plugin for GitPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins((
+            crate::native_page::GitPage::plugin(),
+            crate::native_page::LegacyGitPage::plugin(),
+        ));
         app.world_mut().spawn((
             PAGE_MANIFEST,
             NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"),

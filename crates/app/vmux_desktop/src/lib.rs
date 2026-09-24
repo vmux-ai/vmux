@@ -75,14 +75,6 @@ impl Plugin for VmuxPlugin {
             vmux_app::VmuxPlugin::builder().desktop().build(),
             DesktopPlugins,
         ));
-
-        #[cfg(target_os = "macos")]
-        app.add_plugins(vmux_browser::native_page::NativePagePlugin::in_pane(
-            &vmux_git::ui::NATIVE_PAGE,
-        ))
-        .add_plugins(vmux_browser::native_page::NativePagePlugin::in_pane(
-            &vmux_git::ui::LEGACY_NATIVE_PAGE,
-        ));
     }
 }
 

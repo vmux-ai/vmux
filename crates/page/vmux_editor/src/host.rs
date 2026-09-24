@@ -4,6 +4,13 @@ pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins((
+            crate::native_page::LspPage::plugin(),
+            crate::native_page::FilePage::plugin(),
+            crate::native_page::ProjectsPage::plugin(),
+            crate::native_page::KnowledgePage::plugin(),
+        ));
         app.world_mut().spawn(FILES_PAGE_MANIFEST);
         app.world_mut().spawn(PROJECTS_PAGE_MANIFEST);
         app.world_mut()

@@ -14,6 +14,8 @@ pub struct ChatRoomPlugin;
 
 impl Plugin for ChatRoomPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::native_page::ChatPage::plugin());
         app.add_message::<Reported>()
             .add_message::<Submitted>()
             .add_message::<PageEmit>()
