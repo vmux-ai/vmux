@@ -20,9 +20,9 @@ mod display;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
 mod key_claim;
-mod log_forward;
 #[cfg(target_os = "macos")]
-mod native_keyboard;
+mod keyboard;
+mod log_forward;
 #[cfg(feature = "native-notifications")]
 mod notify;
 mod os_menu;

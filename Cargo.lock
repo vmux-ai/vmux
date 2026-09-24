@@ -10592,17 +10592,13 @@ name = "vmux_knowledge"
 version = "0.0.34"
 dependencies = [
  "bevy",
- "bevy_cef",
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",
  "notify",
- "rkyv",
- "serde",
  "tempfile",
  "vmux_core",
  "vmux_git",
- "vmux_layout",
 ]
 
 [[package]]

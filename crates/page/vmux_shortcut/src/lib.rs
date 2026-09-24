@@ -12,39 +12,10 @@ impl ShortcutUrl {
 }
 
 #[cfg(host)]
-static CAPTURE_TARGET: std::sync::Mutex<Option<ShortcutCaptureToken>> = std::sync::Mutex::new(None);
-
-#[cfg(host)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShortcutCaptureToken {
     pub target: bevy::prelude::Entity,
     pub generation: u64,
-}
-
-#[cfg(host)]
-pub fn capture_target() -> Option<ShortcutCaptureToken> {
-    *CAPTURE_TARGET
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-#[cfg(host)]
-pub fn release_capture(token: ShortcutCaptureToken) -> bool {
-    let mut current = CAPTURE_TARGET
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if *current != Some(token) {
-        return false;
-    }
-    *current = None;
-    true
-}
-
-#[cfg(host)]
-fn set_capture_target(target: Option<ShortcutCaptureToken>) {
-    *CAPTURE_TARGET
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = target;
 }
 
 #[vmux_api::ui_event(Copy, Default, Eq, target = "shortcuts")]
@@ -187,7 +158,7 @@ impl ShortcutStroke {
 #[cfg(host)]
 mod host;
 #[cfg(host)]
-pub use host::{ShortcutCaptureTarget, ShortcutPlugin};
+pub use host::{ShortcutCaptureSet, ShortcutCaptureTarget, ShortcutPlugin};
 
 #[cfg(ui)]
 pub mod native_page;

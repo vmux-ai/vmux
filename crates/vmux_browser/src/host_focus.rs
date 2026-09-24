@@ -23,7 +23,8 @@ pub(crate) struct HostFocusPlugin;
 impl Plugin for HostFocusPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HostFocusIntent>()
-            .add_systems(Update, publish_native_page_owns_escape)
+            .init_resource::<KeyboardContext>()
+            .add_systems(Update, sync_keyboard_context.in_set(KeyboardContextSet))
             .add_systems(
                 PostUpdate,
                 (compute_host_focus_intent, apply_windowed_host_focus)
@@ -40,17 +41,26 @@ fn page_owns_escape(terminal_focused: bool, overlay_open: bool) -> bool {
     terminal_focused || overlay_open
 }
 
-fn publish_native_page_owns_escape(
+fn sync_keyboard_context(
     terminal_focus_q: Query<(), (With<Terminal>, With<KeyboardOwner>)>,
     overlay_q: OverlayStateQuery,
+    mut context: ResMut<KeyboardContext>,
 ) {
     let overlay_owns_input = OverlayState::from_query(&overlay_q).owns_input();
-    crate::set_native_page_owns_escape(page_owns_escape(
-        !terminal_focus_q.is_empty(),
-        overlay_owns_input,
-    ));
-    crate::set_native_text_entry_owns_keys(overlay_owns_input);
+    *context = KeyboardContext {
+        page_owns_escape: page_owns_escape(!terminal_focus_q.is_empty(), overlay_owns_input),
+        text_entry_owns_keys: overlay_owns_input,
+    };
 }
+
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyboardContext {
+    pub page_owns_escape: bool,
+    pub text_entry_owns_keys: bool,
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct KeyboardContextSet;
 
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostFocusIntent {
@@ -199,8 +209,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<HostFocusIntent>()
+            .init_resource::<KeyboardContext>()
             .insert_resource(FocusedStack::default())
-            .add_systems(Update, compute_host_focus_intent);
+            .add_systems(Update, (sync_keyboard_context, compute_host_focus_intent));
         app
     }
 
@@ -247,6 +258,45 @@ mod tests {
         let mut app = app();
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    #[test]
+    fn overlay_publishes_keyboard_ownership_through_ecs() {
+        let mut app = app();
+        app.world_mut().spawn((
+            WindowOverlay,
+            Node {
+                display: Display::Flex,
+                ..default()
+            },
+            KeyboardOwner,
+        ));
+
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<KeyboardContext>(),
+            KeyboardContext {
+                page_owns_escape: true,
+                text_entry_owns_keys: true,
+            }
+        );
+    }
+
+    #[test]
+    fn focused_terminal_keeps_escape_without_claiming_text_entry() {
+        let mut app = app();
+        app.world_mut().spawn((Terminal, KeyboardOwner));
+
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<KeyboardContext>(),
+            KeyboardContext {
+                page_owns_escape: true,
+                text_entry_owns_keys: false,
+            }
+        );
     }
 
     #[test]

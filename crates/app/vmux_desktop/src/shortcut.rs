@@ -23,7 +23,7 @@ impl Plugin for ShortcutPlugin {
             .add_systems(Update, process_key_input.in_set(WriteCommandRequests));
 
         #[cfg(target_os = "macos")]
-        app.add_plugins(crate::native_keyboard::NativeKeyboardPlugin);
+        app.add_plugins(crate::keyboard::KeyboardPlugin);
     }
 }
 
@@ -37,9 +37,6 @@ fn init_shortcuts(
         Some(settings) => settings.shortcuts.keymap_with(&definitions),
         None => Keymap::defaults_with(&definitions),
     };
-
-    #[cfg(target_os = "macos")]
-    crate::native_keyboard::set_shortcut_map(map.clone());
 
     commands.insert_resource(map);
     commands.insert_resource(ChordState::default());
