@@ -302,9 +302,9 @@ fn on_pin_request(trigger: On<BinReceive<ExtPinRequest>>, outbox: Res<ExtOutbox>
 
 fn on_open_manager_request(
     _trigger: On<BinReceive<ExtOpenManagerRequest>>,
-    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
-    requests.write(vmux_layout::stack::StackRequest::Open {
+    requests.write(vmux_layout::stack::OpenRequest {
         url: Some("vmux://tools/extensions".to_string()),
     });
 }

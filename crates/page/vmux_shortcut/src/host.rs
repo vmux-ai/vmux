@@ -709,11 +709,12 @@ mod tests {
 
     #[test]
     fn event_lists_hidden_and_visible_shortcuts() {
-        let definitions = [
-            vmux_layout::pane::PaneRequest::definitions(),
-            vmux_layout::tab::TabRequest::definitions(),
-        ]
-        .concat();
+        let mut definitions = vmux_layout::pane::PaneRequest::definitions();
+        definitions.extend(vmux_layout::tab::OpenRequest::definitions());
+        definitions.extend(vmux_layout::tab::CreateRequest::definitions());
+        definitions.extend(vmux_layout::tab::CloseRequest::definitions());
+        definitions.extend(vmux_layout::tab::FocusRequest::definitions());
+        definitions.extend(vmux_layout::tab::MoveRequest::definitions());
         let event = ShortcutCatalog::build(
             &Keymap::defaults_with(&definitions),
             KeyContext::NONE,

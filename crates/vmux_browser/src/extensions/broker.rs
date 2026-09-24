@@ -133,7 +133,7 @@ pub fn drain_bridge_requests(
     mut response_cache: ResMut<BridgeResponseCache>,
     mut extension_windows: ResMut<ExtensionWindows>,
     mut seen: Local<SeenBridgeRequests>,
-    mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     popups: Query<(Entity, &ExtensionPopup)>,
     mut commands: Commands,
     mut close_window_requests: MessageWriter<CloseExtensionWindowRequest>,
@@ -257,8 +257,7 @@ pub fn drain_bridge_requests(
                                 });
                             }
                             for url in urls {
-                                stack_requests
-                                    .write(vmux_layout::stack::StackRequest::Open { url });
+                                stack_requests.write(vmux_layout::stack::OpenRequest { url });
                             }
                         }
                         WindowEffect::Close { tab_ids, urls } => {
@@ -794,7 +793,7 @@ pub fn fire_conformance_wake_timer(
 
 struct DispatchedApiRequest {
     response: BridgeServerMessage,
-    requests: Vec<vmux_layout::stack::StackRequest>,
+    requests: Vec<vmux_layout::stack::OpenRequest>,
     effects: Vec<WindowEffect>,
     events: Vec<ChromeModelEvent>,
 }
@@ -810,7 +809,7 @@ fn dispatched_response(response: BridgeServerMessage) -> DispatchedApiRequest {
 
 fn create_page_request(
     request: &ApiRequest,
-) -> Result<vmux_layout::stack::StackRequest, ChromeError> {
+) -> Result<vmux_layout::stack::OpenRequest, ChromeError> {
     let create_info = request
         .arguments
         .as_array()
@@ -825,7 +824,7 @@ fn create_page_request(
         })
         .filter(|url| !url.is_empty());
     let Some(url) = url else {
-        return Ok(vmux_layout::stack::StackRequest::Open { url: None });
+        return Ok(vmux_layout::stack::OpenRequest { url: None });
     };
     let parsed = url::Url::parse(url)
         .map_err(|_| ChromeError::new("invalid_url", "extension page URL is invalid"))?;
@@ -839,7 +838,7 @@ fn create_page_request(
             ));
         }
     }
-    Ok(vmux_layout::stack::StackRequest::Open {
+    Ok(vmux_layout::stack::OpenRequest {
         url: Some(url.to_string()),
     })
 }
@@ -1270,7 +1269,7 @@ mod tests {
             .init_resource::<PendingBridgeEvents>()
             .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
-            .add_message::<vmux_layout::stack::StackRequest>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1525,7 +1524,7 @@ mod tests {
             .init_resource::<ChromeModel>()
             .init_resource::<ConformanceWakeTimer>()
             .init_resource::<ExtensionWindows>()
-            .add_message::<vmux_layout::stack::StackRequest>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1594,7 +1593,7 @@ mod tests {
             .init_resource::<PendingBridgeEvents>()
             .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
-            .add_message::<vmux_layout::stack::StackRequest>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1649,7 +1648,7 @@ mod tests {
                 ..Default::default()
             })
             .init_resource::<ExtensionWindows>()
-            .add_message::<vmux_layout::stack::StackRequest>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()

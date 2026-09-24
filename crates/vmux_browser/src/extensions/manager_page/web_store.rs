@@ -65,7 +65,7 @@ const INJECTOR_JS: &str = include_str!("../add_to_vmux.js");
 
 fn on_browse_request(
     trigger: On<BinReceive<ExtBrowseStoreRequest>>,
-    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     let query = trigger.event().payload.query.trim();
     let url = if query.is_empty() {
@@ -76,7 +76,7 @@ fn on_browse_request(
             EncodedQuery::from(query)
         )
     };
-    requests.write(vmux_layout::stack::StackRequest::Open { url: Some(url) });
+    requests.write(vmux_layout::stack::OpenRequest { url: Some(url) });
 }
 
 struct EncodedQuery(String);
@@ -178,7 +178,7 @@ fn on_add_extension(
     trigger: On<Receive<AddExtensionRequest>>,
     injectors: Res<WebStoreInjectors>,
     mut installs: MessageWriter<InstallRequest>,
-    mut pages: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut pages: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     let request = &trigger.payload;
     let Some(injector) = injectors.0.get(&trigger.event().webview) else {
@@ -195,7 +195,7 @@ fn on_add_extension(
             installs.write(InstallRequest::web_store(id, trigger.event().webview));
         }
         MANAGE_CHANNEL => {
-            pages.write(vmux_layout::stack::StackRequest::Open {
+            pages.write(vmux_layout::stack::OpenRequest {
                 url: Some("vmux://tools/extensions".to_string()),
             });
         }

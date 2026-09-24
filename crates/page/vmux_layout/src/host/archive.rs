@@ -22,7 +22,7 @@ use crate::pane::{
 use crate::settings::LayoutSettings;
 use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
 #[cfg(test)]
-use crate::stack::StackRequest;
+use crate::stack::CloseRequest;
 use crate::stack::{
     ActiveTabParam, CloseStackReason, CloseStackRequest, CloseStackSet, Stack, StackCommandSet,
     stack_bundle,
@@ -1599,8 +1599,8 @@ mod tests {
         let (_inactive, active) = spawn_inactive_and_active_stacks(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<StackRequest>>()
-            .write(StackRequest::Close);
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
         app.update();
         app.update();
 

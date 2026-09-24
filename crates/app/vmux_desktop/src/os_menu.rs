@@ -17,7 +17,7 @@ use vmux_browser::HostFocusIntent;
 #[cfg(target_os = "macos")]
 use vmux_command::ReadCommandRequests;
 use vmux_command::{CommandDefinition, CommandInvocation, WriteCommandRequests};
-use vmux_layout::stack::StackRequest;
+use vmux_layout::stack::CloseRequest;
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
 pub struct OsMenuPlugin;
@@ -26,7 +26,7 @@ impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::bookmark_menu::BookmarkMenuPlugin)
             .add_message::<crate::window_manager::CloseVmuxWindow>()
-            .add_message::<StackRequest>()
+            .add_message::<CloseRequest>()
             .add_message::<vmux_browser::OpenRequest>()
             .init_resource::<LastMenuCommandAt>()
             .init_resource::<LastStackCloseAt>()
@@ -433,13 +433,11 @@ fn handle_quit_request(world: &mut World) {
 }
 
 fn remember_stack_close_commands(
-    mut reader: MessageReader<StackRequest>,
+    mut reader: MessageReader<CloseRequest>,
     mut last_stack_close: ResMut<LastStackCloseAt>,
 ) {
-    for request in reader.read() {
-        if matches!(request, StackRequest::Close) {
-            last_stack_close.0 = Some(std::time::Instant::now());
-        }
+    for _ in reader.read() {
+        last_stack_close.0 = Some(std::time::Instant::now());
     }
 }
 
@@ -595,7 +593,7 @@ mod tests {
     fn unsuppressed_window_close_hides_window() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
-            .add_message::<StackRequest>()
+            .add_message::<CloseRequest>()
             .add_message::<vmux_browser::OpenRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
@@ -614,14 +612,14 @@ mod tests {
     fn window_close_request_after_stack_close_command_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
-            .add_message::<StackRequest>()
+            .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
-            .resource_mut::<Messages<StackRequest>>()
-            .write(StackRequest::Close);
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });
@@ -635,7 +633,7 @@ mod tests {
     fn window_close_request_after_native_page_open_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
-            .add_message::<StackRequest>()
+            .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
@@ -658,7 +656,7 @@ mod tests {
     fn delayed_window_close_request_after_native_page_open_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
-            .add_message::<StackRequest>()
+            .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
@@ -678,7 +676,7 @@ mod tests {
     fn close_menu_item_disabled_when_all_windows_hidden() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
-            .add_message::<StackRequest>()
+            .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 

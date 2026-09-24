@@ -606,7 +606,7 @@ fn on_side_sheet_stack_close(
 fn on_side_sheet_stack_create(
     trigger: On<BinReceive<SideSheetStackCreateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     mut commands: Commands,
 ) {
     let Some(target_pane) = leaf_panes
@@ -616,7 +616,7 @@ fn on_side_sheet_stack_create(
         return;
     };
     commands.entity(target_pane).insert(LastActivatedAt::now());
-    requests.write(vmux_layout::stack::StackRequest::Open { url: None });
+    requests.write(vmux_layout::stack::OpenRequest { url: None });
 }
 
 fn on_side_sheet_project_open(
@@ -896,7 +896,7 @@ mod tests {
     fn the_side_sheet_close_button_names_the_stack_it_sits_on() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
-            .add_message::<vmux_layout::stack::StackRequest>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PaneHoverIntent>()
             .add_observer(on_side_sheet_stack_close);
@@ -1023,7 +1023,7 @@ mod tests {
         fn start() -> Self {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
-                .add_message::<vmux_layout::stack::StackRequest>()
+                .add_message::<vmux_layout::stack::OpenRequest>()
                 .add_message::<PageOpenRequest>()
                 .init_resource::<PaneHoverIntent>()
                 .add_observer(on_side_sheet_section);

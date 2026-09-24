@@ -24,7 +24,7 @@ use vmux_core::{
     Bookmark, BookmarkOrder, Collapsed, Folder, LastActivatedAt, PageMetadata, Pin, Uuid,
 };
 
-use super::{command::LayoutRequestSet, stack::StackRequest};
+use super::{command::LayoutRequestSet, stack::OpenRequest};
 
 pub struct BookmarkPlugin;
 
@@ -791,9 +791,9 @@ fn on_bookmark_toggle_request(
 
 fn on_bookmark_open_request(
     trigger: On<BinReceive<BookmarkOpenRequest>>,
-    mut requests: MessageWriter<StackRequest>,
+    mut requests: MessageWriter<OpenRequest>,
 ) {
-    requests.write(StackRequest::Open {
+    requests.write(OpenRequest {
         url: Some(trigger.event().payload.url.clone()),
     });
 }
@@ -1103,7 +1103,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<ShowBookmarkMenuRequest>()
-            .add_message::<StackRequest>()
+            .add_message::<OpenRequest>()
             .add_observer(on_bookmark_open_request);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(BinReceive::<BookmarkOpenRequest> {
@@ -1114,12 +1114,12 @@ mod tests {
         });
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<StackRequest>>()
+            .resource_mut::<Messages<OpenRequest>>()
             .drain()
             .collect();
         assert_eq!(
             requests,
-            vec![StackRequest::Open {
+            vec![OpenRequest {
                 url: Some("https://a.test".into()),
             }]
         );

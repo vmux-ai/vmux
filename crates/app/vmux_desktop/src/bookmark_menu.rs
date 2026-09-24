@@ -50,7 +50,7 @@ mod macos {
         RemoveFolderRequest, RemoveRequest, ShowBookmarkMenuRequest, ToggleFolderRequest,
         UnpinRequest,
     };
-    use vmux_layout::stack::StackRequest;
+    use vmux_layout::stack::OpenRequest;
     use vmux_ui::i18n::{Locale, TranslationValue};
 
     thread_local! {
@@ -580,8 +580,8 @@ mod macos {
         match selection.choice {
             BookmarkMenuChoice::Open(url) => {
                 world
-                    .resource_mut::<Messages<StackRequest>>()
-                    .write(StackRequest::Open { url: Some(url) });
+                    .resource_mut::<Messages<OpenRequest>>()
+                    .write(OpenRequest { url: Some(url) });
             }
             BookmarkMenuChoice::Add { metadata, folder } => {
                 world
