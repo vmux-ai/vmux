@@ -30,7 +30,6 @@ pub(super) fn GitDashboard() -> Element {
         pending_commit_message,
         focused_panel,
         shortcut_help,
-        markers,
         ..
     } = use_context::<GitPageState>();
     let ui = snapshot();
@@ -78,8 +77,8 @@ pub(super) fn GitDashboard() -> Element {
                         repo_root,
                         selected_commit,
                         nonce,
-                        markers,
                         diff_viewport,
+                        loading: ui.diff_loading,
                     }
                 } else {
                     DiffCard {
@@ -88,8 +87,8 @@ pub(super) fn GitDashboard() -> Element {
                         selected_path_bytes,
                         selected_abs_path,
                         nonce,
-                        markers,
                         diff_viewport,
+                        loading: ui.diff_loading,
                     }
                 }
                 CommandLogCard { command_log: ui.command_log }

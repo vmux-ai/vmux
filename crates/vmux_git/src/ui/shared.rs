@@ -1,7 +1,5 @@
 #![allow(non_snake_case)]
 
-use std::collections::HashMap;
-
 use dioxus::prelude::*;
 use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::skeleton::Skeleton;
@@ -10,10 +8,8 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-use super::diff_projection::{DiffViewRow, EditorDiffMarker, diff_view_rows, editor_diff_markers};
+use super::diff_projection::{DiffViewRow, diff_view_rows};
 use crate::event::*;
-
-const DIFF_WINDOW_ROWS: u32 = 200_000;
 
 fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;
@@ -177,76 +173,33 @@ pub fn DiffView(
     repo_root: ReadSignal<String>,
     path: ReadSignal<String>,
     #[props(default)] path_bytes: Vec<u8>,
-    #[props(default)] reference: String,
-    nonce: ReadSignal<u32>,
     viewport: ReadSignal<Option<GitDiffViewportEvent>>,
+    loading: bool,
     visible: bool,
-    markers: Signal<HashMap<u32, EditorDiffMarker>>,
 ) -> Element {
-    let initial_path_bytes = path_bytes.clone();
-    let initial_reference = reference.clone();
-    let mut observed_path_bytes = use_signal(move || initial_path_bytes);
-    let mut observed_reference = use_signal(move || initial_reference);
-    let mut lines = use_signal(Vec::<DiffLine>::new);
     let mut expanded = use_signal(Vec::<(usize, usize)>::new);
-    let mut loading = use_signal(|| true);
-    let mut error = use_signal(String::new);
-    let mut requested_path = use_signal(String::new);
-    let mut request_generation = use_signal(|| 0u64);
+    let viewport_generation = use_memo(move || {
+        viewport()
+            .as_ref()
+            .map(|viewport| viewport.generation)
+            .unwrap_or_default()
+    });
 
     use_effect(move || {
-        let Some(p) = viewport() else {
-            return;
-        };
-        if p.generation != request_generation() {
-            return;
-        }
-        markers.set(editor_diff_markers(&p.lines));
-        lines.set(p.lines);
+        let _ = viewport_generation();
         expanded.set(Vec::new());
-        loading.set(false);
-        error.set(p.error);
     });
 
-    use_effect(use_reactive!(|(path_bytes, reference)| {
-        observed_path_bytes.set(path_bytes);
-        observed_reference.set(reference);
-    }));
-
-    use_effect(move || {
-        let root = repo_root();
-        let p = path();
-        let raw_path = observed_path_bytes();
-        let reference = observed_reference();
-        let _ = nonce();
-        if !root.is_empty() && (!p.is_empty() || !reference.is_empty()) {
-            let request_key = format!("{root}\0{p}\0{raw_path:?}\0{reference}");
-            let path_changed = *requested_path.peek() != request_key;
-            requested_path.set(request_key);
-            let generation = request_generation.peek().wrapping_add(1);
-            request_generation.set(generation);
-            if path_changed || lines.peek().is_empty() {
-                loading.set(true);
-            }
-            error.set(String::new());
-            if path_changed {
-                lines.set(Vec::new());
-                expanded.set(Vec::new());
-            }
-            let _ = send(&GitDiffRequest {
-                repo_root: root,
-                path: p,
-                path_bytes: raw_path,
-                reference,
-                generation,
-                top_line: 0,
-                rows: DIFF_WINDOW_ROWS,
-            });
-        }
-    });
-
-    let rows = lines();
-    let display_rows = diff_view_rows(&rows, &expanded());
+    let viewport = viewport();
+    let rows = viewport
+        .as_ref()
+        .map(|viewport| viewport.lines.as_slice())
+        .unwrap_or_default();
+    let error = viewport
+        .as_ref()
+        .map(|viewport| viewport.error.as_str())
+        .unwrap_or_default();
+    let display_rows = diff_view_rows(rows, &expanded());
     let maxno = rows
         .iter()
         .flat_map(|l| [l.old_no, l.new_no])
@@ -267,13 +220,13 @@ pub fn DiffView(
         div {
             class: if visible { "min-h-0 flex-1 overflow-auto bg-background/35 font-mono text-xs leading-5" } else { "hidden" },
 
-            if loading() {
+            if loading {
                 div { class: "flex flex-col gap-2 p-3",
                     for width in ["w-10/12", "w-full", "w-8/12", "w-11/12", "w-7/12"] {
                         Skeleton { class: "h-4 {width} bg-foreground/[0.045]" }
                     }
                 }
-            } else if !error().is_empty() {
+            } else if !error.is_empty() {
                 div { class: "p-3 font-sans text-xs text-ansi-1", "{error}" }
             } else if rows.is_empty() {
                 div { class: "p-3 text-xs text-muted-foreground", {translate("git-no-changes")} }
@@ -309,37 +262,43 @@ pub fn DiffView(
                                     }
                                 }
                                 if let Some(h) = ends[i] {
-                                    div {
-                                        class: "flex min-w-full items-center justify-end gap-1.5 border-y border-foreground/[0.06] bg-background/70 px-3 py-1 font-sans text-[11px] select-none backdrop-blur-sm",
-                                        Button {
-                                            variant: ButtonVariant::Ghost,
-                                            class: "h-6 gap-1 rounded-md border border-ansi-2/15 bg-ansi-2/[0.045] px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/10 hover:text-ansi-2",
-                                            onclick: move |_| {
-                                                let _ = send(&GitHunkRequest {
-                                                    repo_root: repo_root(),
-                                                    path: path(),
-                                                    path_bytes: observed_path_bytes(),
-                                                    hunk: h,
-                                                    accept: true,
-                                                });
-                                            },
-                                            LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
-                                            {translate("git-stage-hunk")}
-                                        }
-                                        Button {
-                                            variant: ButtonVariant::Ghost,
-                                            class: "h-6 gap-1 rounded-md border border-foreground/[0.08] bg-foreground/[0.025] px-2 text-[11px] text-muted-foreground hover:bg-ansi-1/10 hover:text-ansi-1",
-                                            onclick: move |_| {
-                                                let _ = send(&GitHunkRequest {
-                                                    repo_root: repo_root(),
-                                                    path: path(),
-                                                    path_bytes: observed_path_bytes(),
-                                                    hunk: h,
-                                                    accept: false,
-                                                });
-                                            },
-                                            LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
-                                            {translate("git-revert-hunk")}
+                                    {
+                                        let accept_path_bytes = path_bytes.clone();
+                                        let reject_path_bytes = path_bytes.clone();
+                                        rsx! {
+                                            div {
+                                                class: "flex min-w-full items-center justify-end gap-1.5 border-y border-foreground/[0.06] bg-background/70 px-3 py-1 font-sans text-[11px] select-none backdrop-blur-sm",
+                                                Button {
+                                                    variant: ButtonVariant::Ghost,
+                                                    class: "h-6 gap-1 rounded-md border border-ansi-2/15 bg-ansi-2/[0.045] px-2 text-[11px] text-ansi-2 hover:bg-ansi-2/10 hover:text-ansi-2",
+                                                    onclick: move |_| {
+                                                        let _ = send(&GitHunkRequest {
+                                                            repo_root: repo_root(),
+                                                            path: path(),
+                                                            path_bytes: accept_path_bytes.clone(),
+                                                            hunk: h,
+                                                            accept: true,
+                                                        });
+                                                    },
+                                                    LineIconView { icon: LineIcon::Plus, class: "h-3 w-3" }
+                                                    {translate("git-stage-hunk")}
+                                                }
+                                                Button {
+                                                    variant: ButtonVariant::Ghost,
+                                                    class: "h-6 gap-1 rounded-md border border-foreground/[0.08] bg-foreground/[0.025] px-2 text-[11px] text-muted-foreground hover:bg-ansi-1/10 hover:text-ansi-1",
+                                                    onclick: move |_| {
+                                                        let _ = send(&GitHunkRequest {
+                                                            repo_root: repo_root(),
+                                                            path: path(),
+                                                            path_bytes: reject_path_bytes.clone(),
+                                                            hunk: h,
+                                                            accept: false,
+                                                        });
+                                                    },
+                                                    LineIconView { icon: LineIcon::RotateCcw, class: "h-3 w-3" }
+                                                    {translate("git-revert-hunk")}
+                                                }
+                                            }
                                         }
                                     }
                                 }

@@ -1,5 +1,6 @@
 mod app;
 mod changes;
+mod diff;
 mod directory;
 mod job;
 mod job_runner;
@@ -18,12 +19,13 @@ use bevy::prelude::*;
 use vmux_core::host::page::NativelyHosted;
 
 pub use app::GitCheckForUpdatesRequest;
-pub use changes::GitDiffSource;
+pub use diff::GitDiffSource;
 pub use status::FileGit;
 pub use watch::RepoInfoCache;
 
 use crate::host::app::AppPlugin;
 use crate::host::changes::ChangesPlugin;
+use crate::host::diff::DiffPlugin;
 use crate::host::directory::DirectoryPlugin;
 use crate::host::job_runner::JobPlugin;
 use crate::host::repository::RepositoryPlugin;
@@ -51,6 +53,7 @@ impl Plugin for GitPlugin {
             (
                 GitUpdateSet::Watch,
                 GitUpdateSet::Status,
+                GitUpdateSet::Diff,
                 GitUpdateSet::Jobs,
             )
                 .chain(),
@@ -62,6 +65,7 @@ impl Plugin for GitPlugin {
             JobPlugin,
             AppPlugin,
             ChangesPlugin,
+            DiffPlugin,
             DirectoryPlugin,
             RepositoryPlugin,
             RepositoryPickerPlugin,
@@ -73,6 +77,7 @@ impl Plugin for GitPlugin {
 enum GitUpdateSet {
     Watch,
     Status,
+    Diff,
     Jobs,
 }
 

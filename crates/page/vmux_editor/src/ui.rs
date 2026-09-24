@@ -43,8 +43,7 @@ use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgeReference};
 use vmux_core::media::MediaKind;
-use vmux_git::event::{FileGitState, GitDiffViewportEvent};
-use vmux_git::ui::EditorDiffMarker;
+use vmux_git::event::{FileGitState, GitLineStatus};
 use vmux_git::ui::{DiffView, GitFooter};
 use vmux_ui::diff::DiffTone;
 use vmux_ui::focus::FocusClaim;
@@ -132,7 +131,6 @@ pub fn Page() -> Element {
     let last_resize = use_signal(FileResizeEvent::default);
     let mut git_path = use_signal(String::new);
     let mut git_state = use_signal(FileGitState::default);
-    let mut git_diff_refresh = use_signal(|| 0u32);
     let git_repo_root = use_memo(move || {
         let state = git_state();
         if state.path == git_path() {
@@ -145,9 +143,23 @@ pub fn Page() -> Element {
         let state = git_state();
         state.path == git_path() && state.has_diff
     });
-    let git_nonce =
-        use_memo(move || (git_state().refresh_revision as u32).wrapping_add(git_diff_refresh()));
-    let mut git_line_markers = use_signal(HashMap::<u32, EditorDiffMarker>::new);
+    let git_diff_viewport = use_memo(move || {
+        let state = git_state();
+        (state.path == git_path())
+            .then_some(state.diff_viewport)
+            .flatten()
+    });
+    let git_line_markers = use_memo(move || {
+        git_diff_viewport()
+            .map(|viewport| {
+                viewport
+                    .markers
+                    .into_iter()
+                    .map(|marker| (marker.line, marker.status))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default()
+    });
     let mut file_view_mode = use_signal(|| FileViewMode::Note);
     let mut note_blocks = use_signal(Vec::<NoteBlock>::new);
     let mut note_properties = use_signal(Vec::<KnowledgeProperty>::new);
@@ -156,7 +168,6 @@ pub fn Page() -> Element {
     let mut note_dragging = use_signal(|| false);
     let mut editor_dragging = use_signal(|| false);
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
-    let mut git_diff_viewport = use_signal(|| None::<GitDiffViewportEvent>);
     let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
     let mut ed_label = use_signal(String::new);
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
@@ -261,7 +272,6 @@ pub fn Page() -> Element {
             diagnostics.set(Vec::new());
             hover_diag.set(None);
             lsp_status.set(None);
-            git_line_markers.set(HashMap::new());
             lsp_install_notice.set(None);
             lsp_install_request.set(None);
             lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
@@ -413,13 +423,6 @@ pub fn Page() -> Element {
     use_effect(move || {
         file_git_state.for_each(|state| {
             git_state.set(state);
-        })
-    });
-
-    let git_diff_viewport_event = use_file_ui::<GitDiffViewportEvent>();
-    use_effect(move || {
-        git_diff_viewport_event.for_each(|event| {
-            git_diff_viewport.set(Some(event));
         })
     });
 
@@ -670,9 +673,6 @@ pub fn Page() -> Element {
                     .to_string(),
             );
             parent_path.set(d.parent_path);
-            if git_path() != d.abs_path {
-                git_line_markers.set(HashMap::new());
-            }
             git_path.set(d.abs_path);
             mode.set(Mode::Dir);
             comp_open.set(false);
@@ -1094,7 +1094,6 @@ pub fn Page() -> Element {
                                     title: translate("editor-git-diff"),
                                     onclick: move |_| {
                                         file_view_mode.set(FileViewMode::Diff);
-                                        git_diff_refresh.set(git_diff_refresh().wrapping_add(1));
                                         let _ = send(&FileViewModeSet { mode: FileViewMode::Diff });
                                     },
                                     {translate("editor-diff")}
@@ -1281,10 +1280,9 @@ pub fn Page() -> Element {
                         DiffView {
                             repo_root: git_repo_root,
                             path: git_path,
-                            nonce: git_nonce,
                             viewport: git_diff_viewport,
+                            loading: git_state().diff_loading,
                             visible: file_view_mode() == FileViewMode::Diff,
-                            markers: git_line_markers,
                         }
                     }
                     if file_view_mode() == FileViewMode::Note && is_markdown() {
@@ -1983,24 +1981,24 @@ pub enum Mode {
     Media(MediaKind),
 }
 
-fn diff_marker_sign(marker: EditorDiffMarker) -> &'static str {
+fn diff_marker_sign(marker: GitLineStatus) -> &'static str {
     diff_tone(marker).sign()
 }
 
-fn diff_marker_text_class(marker: EditorDiffMarker) -> &'static str {
+fn diff_marker_text_class(marker: GitLineStatus) -> &'static str {
     diff_tone(marker).text_class()
 }
 
-fn diff_marker_row_class(marker: EditorDiffMarker) -> &'static str {
+fn diff_marker_row_class(marker: GitLineStatus) -> &'static str {
     diff_tone(marker).row_class()
 }
 
-pub(super) fn diff_tone(marker: EditorDiffMarker) -> DiffTone {
+pub(super) fn diff_tone(marker: GitLineStatus) -> DiffTone {
     match marker {
-        EditorDiffMarker::Added => DiffTone::Added,
-        EditorDiffMarker::Modified => DiffTone::Modified,
-        EditorDiffMarker::Deleted => DiffTone::Deleted,
-        EditorDiffMarker::Staged => DiffTone::Staged,
+        GitLineStatus::Added => DiffTone::Added,
+        GitLineStatus::Modified => DiffTone::Modified,
+        GitLineStatus::Deleted => DiffTone::Deleted,
+        GitLineStatus::Staged => DiffTone::Staged,
     }
 }
 

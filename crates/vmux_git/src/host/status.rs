@@ -8,7 +8,9 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use vmux_core::host::FileUiStateUpdates;
 
-use crate::event::{FileGitState, FileStatus, GitResultEvent, GitStatusEvent};
+use crate::event::{
+    FileGitState, FileStatus, GitDiffViewportEvent, GitResultEvent, GitStatusEvent,
+};
 
 use super::GitDiffSource;
 use super::GitUpdateSet;
@@ -81,6 +83,9 @@ impl FileGit {
         self.state.behind = event.behind;
         self.state.staged_count = event.staged_count;
         self.state.message.clear();
+        if !self.state.has_diff {
+            self.clear_diff();
+        }
     }
 
     pub(super) fn apply_result(
@@ -102,6 +107,31 @@ impl FileGit {
         self.state.message = message;
     }
 
+    pub(super) fn path(&self) -> &Path {
+        Path::new(&self.state.path)
+    }
+
+    pub(super) fn repo_root(&self) -> Option<PathBuf> {
+        (!self.state.repo_root.is_empty()).then(|| PathBuf::from(&self.state.repo_root))
+    }
+
+    pub(super) fn start_diff(&mut self, target_changed: bool) {
+        self.state.diff_loading = target_changed || self.state.diff_viewport.is_none();
+        if target_changed {
+            self.state.diff_viewport = None;
+        }
+    }
+
+    pub(super) fn apply_diff(&mut self, event: GitDiffViewportEvent) {
+        self.state.diff_loading = false;
+        self.state.diff_viewport = Some(event);
+    }
+
+    fn clear_diff(&mut self) {
+        self.state.diff_loading = false;
+        self.state.diff_viewport = None;
+    }
+
     pub(super) fn changed(
         &mut self,
         wake: Option<EventLoopProxy<WinitUserEvent>>,
@@ -109,7 +139,11 @@ impl FileGit {
         self.refresh(STATUS_DEBOUNCE, wake)
     }
 
-    fn accepts(&self, document: u64, revision: u64) -> bool {
+    pub(super) fn identity(&self) -> (u64, u64) {
+        (self.document, self.generation)
+    }
+
+    pub(super) fn accepts(&self, document: u64, revision: u64) -> bool {
         self.document == document && self.generation == revision
     }
 
@@ -241,6 +275,7 @@ fn poll_status_refreshes(
         };
         match repo_root {
             Ok(repo_root) => {
+                file.state.repo_root = repo_root.to_string_lossy().into_owned();
                 commands.entity(entity).insert(PendingGitStatus {
                     repo_root,
                     path,
@@ -248,6 +283,7 @@ fn poll_status_refreshes(
                     revision: refresh.revision,
                     dirty: source.is_some_and(|source| source.dirty),
                 });
+                commands.trigger(super::diff::FileDiffRefresh { entity });
             }
             Err(error) => {
                 commands.entity(entity).remove::<PendingGitStatus>();

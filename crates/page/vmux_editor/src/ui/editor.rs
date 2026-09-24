@@ -5,7 +5,7 @@ use vmux_core::event::{
     DiagSeverity, FileDefinitionRequest, FileDiagnostic, FileFoldToggle, FileHoverEvent,
     FileHoverRequest, FileLine, FileLineLayout, FilePointerEvent, FoldGutter,
 };
-use vmux_git::ui::EditorDiffMarker;
+use vmux_git::event::GitLineStatus;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
@@ -25,7 +25,7 @@ pub(super) fn EditorLines(
     line_layouts: Signal<Vec<FileLineLayout>>,
     first_row: Signal<u32>,
     diagnostics: Signal<Vec<FileDiagnostic>>,
-    git_line_markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    git_line_markers: ReadSignal<HashMap<u32, GitLineStatus>>,
     wrap_columns: Signal<u16>,
     cell_height: f64,
     gutter_chars: usize,
@@ -106,7 +106,7 @@ impl LineChunk {
 fn EditorLineChunk(
     rows: Vec<(FileLine, FileLineLayout)>,
     diagnostics: Vec<FileDiagnostic>,
-    markers: HashMap<u32, EditorDiffMarker>,
+    markers: HashMap<u32, GitLineStatus>,
     wrap_cols: u16,
     cell_height: f64,
     gutter_chars: usize,
@@ -162,7 +162,7 @@ fn EditorLineRow(
     line: FileLine,
     layout: FileLineLayout,
     severity: Option<DiagSeverity>,
-    diff_marker: Option<EditorDiffMarker>,
+    diff_marker: Option<GitLineStatus>,
     diagnostics: Vec<FileDiagnostic>,
     cell_height: f64,
     gutter_chars: usize,
