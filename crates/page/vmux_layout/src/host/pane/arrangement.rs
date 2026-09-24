@@ -3,7 +3,7 @@ use vmux_history::LastActivatedAt;
 
 use crate::host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings};
 
-use super::{ArrangementSet, Pane, PaneArrangement, PaneRequest, PaneSplit, PaneSplitDirection};
+use super::{ArrangeRequest, ArrangementSet, Pane, PaneArrangement, PaneSplit, PaneSplitDirection};
 use crate::{
     host::command::LayoutRequestSet,
     stack::{ActiveTabParam, Stack, focused_stack},
@@ -14,7 +14,7 @@ pub(super) struct ArrangementPlugin;
 
 impl Plugin for ArrangementPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PaneRequest>().add_systems(
+        app.add_message::<ArrangeRequest>().add_systems(
             Update,
             arrange_from_commands
                 .in_set(LayoutRequestSet::Handle)
@@ -24,7 +24,7 @@ impl Plugin for ArrangementPlugin {
 }
 
 fn arrange_from_commands(
-    mut reader: MessageReader<PaneRequest>,
+    mut reader: MessageReader<ArrangeRequest>,
     active_tab: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -36,9 +36,7 @@ fn arrange_from_commands(
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let PaneRequest::Arrange(arrangement) = *request else {
-            continue;
-        };
+        let arrangement = request.0;
         let tab = active_tab.get();
         let (_, Some(active), _) = focused_stack(
             tab,

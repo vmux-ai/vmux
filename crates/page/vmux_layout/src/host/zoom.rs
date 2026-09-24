@@ -6,7 +6,7 @@ use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use crate::{
-    pane::{Pane, PaneRequest, PaneSplit},
+    pane::{FocusRequest, OpenRequest, Pane, PaneSplit, ToggleZoomRequest},
     stack::{ActiveTabParam, Stack, focused_stack},
     tab::Tab,
 };
@@ -17,7 +17,9 @@ pub(crate) struct PaneZoomPlugin;
 
 impl Plugin for PaneZoomPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PaneRequest>()
+        app.add_message::<FocusRequest>()
+            .add_message::<OpenRequest>()
+            .add_message::<ToggleZoomRequest>()
             .add_systems(
                 Update,
                 handle_zoom_command
@@ -117,7 +119,9 @@ fn siblings_to_hide(
 }
 
 fn handle_zoom_command(
-    mut reader: MessageReader<PaneRequest>,
+    mut focus_requests: MessageReader<FocusRequest>,
+    mut open_requests: MessageReader<OpenRequest>,
+    mut toggle_requests: MessageReader<ToggleZoomRequest>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab: ActiveTabParam,
     children: Query<&Children>,
@@ -130,34 +134,34 @@ fn handle_zoom_command(
     zoomed: Query<(), With<Zoomed>>,
     mut commands: Commands,
 ) {
-    for request in reader.read() {
-        let unzoom_only = match request {
-            PaneRequest::Focus(_) | PaneRequest::Open(_) => true,
-            PaneRequest::ToggleZoom => false,
-            _ => continue,
-        };
-        let (_, active_pane, _) = focused_stack(
-            active_tab.get(),
-            &children,
-            &leaf_panes,
-            &panes,
-            &pane_children,
-            &stacks,
-        );
-        let Some(active_pane) = active_pane else {
-            continue;
-        };
-        let Some(tab) = tab_of(active_pane, &parents, &tabs) else {
-            continue;
-        };
+    let unzoom_only = focus_requests.read().count() > 0 || open_requests.read().count() > 0;
+    let toggle_count = toggle_requests.read().count();
+    if !unzoom_only && toggle_count == 0 {
+        return;
+    }
+    let (_, active_pane, _) = focused_stack(
+        active_tab.get(),
+        &children,
+        &leaf_panes,
+        &panes,
+        &pane_children,
+        &stacks,
+    );
+    let Some(active_pane) = active_pane else {
+        return;
+    };
+    let Some(tab) = tab_of(active_pane, &parents, &tabs) else {
+        return;
+    };
 
-        if unzoom_only {
-            if zoomed.get(tab).is_ok() {
-                commands.entity(tab).remove::<Zoomed>();
-            }
-            continue;
+    if unzoom_only {
+        if zoomed.get(tab).is_ok() {
+            commands.entity(tab).remove::<Zoomed>();
         }
+        return;
+    }
 
+    for _ in 0..toggle_count {
         if zoomed.get(tab).is_ok() {
             commands.entity(tab).remove::<Zoomed>();
             continue;

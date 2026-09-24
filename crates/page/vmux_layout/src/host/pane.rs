@@ -71,34 +71,118 @@ pub enum PaneResize {
     Direction(PaneDirection),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PaneOpenRequest {
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct OpenRequest {
     pub direction: PaneDirection,
     pub target: PaneTarget,
     pub mode: PaneOpenMode,
     pub url: Option<String>,
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
-pub enum PaneRequest {
-    Open(PaneOpenRequest),
-    Close,
-    Focus(PaneFocus),
-    Arrange(PaneArrangement),
-    Resize(PaneResize),
-    ToggleZoom,
+impl CommandRequest for OpenRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("open_in_pane_top", "Open in Pane Top", "Browser > Open")
+                .direct("Super+Shift+K"),
+            CommandDefinition::new("open_in_pane_right", "Open in Pane Right", "Browser > Open")
+                .alias("split_v")
+                .direct("Super+Shift+L")
+                .chord("Ctrl+b, %"),
+            CommandDefinition::new(
+                "open_in_pane_bottom",
+                "Open in Pane Bottom",
+                "Browser > Open",
+            )
+            .alias("split_h")
+            .direct("Super+Shift+J")
+            .chord("Ctrl+b, \""),
+            CommandDefinition::new("open_in_pane_left", "Open in Pane Left", "Browser > Open")
+                .direct("Super+Shift+H"),
+        ]
+    }
 }
 
-impl CommandRequest for PaneRequest {
+impl TryFrom<&CommandInvocation> for OpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        match invocation.id.as_str() {
+            "open_in_pane_top" => Ok(Self {
+                direction: PaneDirection::Top,
+                target: invocation
+                    .argument("target")
+                    .unwrap_or(PaneTarget::NewSplit),
+                mode: invocation
+                    .argument("mode")
+                    .unwrap_or(PaneOpenMode::NewStack),
+                url: invocation.argument("url"),
+            }),
+            "open_in_pane_right" => Ok(Self {
+                direction: PaneDirection::Right,
+                target: invocation
+                    .argument("target")
+                    .unwrap_or(PaneTarget::NewSplit),
+                mode: invocation
+                    .argument("mode")
+                    .unwrap_or(PaneOpenMode::NewStack),
+                url: invocation.argument("url"),
+            }),
+            "open_in_pane_bottom" => Ok(Self {
+                direction: PaneDirection::Bottom,
+                target: invocation
+                    .argument("target")
+                    .unwrap_or(PaneTarget::NewSplit),
+                mode: invocation
+                    .argument("mode")
+                    .unwrap_or(PaneOpenMode::NewStack),
+                url: invocation.argument("url"),
+            }),
+            "open_in_pane_left" => Ok(Self {
+                direction: PaneDirection::Left,
+                target: invocation
+                    .argument("target")
+                    .unwrap_or(PaneTarget::NewSplit),
+                mode: invocation
+                    .argument("mode")
+                    .unwrap_or(PaneOpenMode::NewStack),
+                url: invocation.argument("url"),
+            }),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CloseRequest;
+
+impl CommandRequest for CloseRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![CommandDefinition::new(
+            "close_pane",
+            "Close Pane",
+            "Layout > Pane",
+        )
+        .chord("Ctrl+b, x")]
+    }
+}
+
+impl TryFrom<&CommandInvocation> for CloseRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "close_pane").then_some(Self).ok_or(())
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FocusRequest(pub PaneFocus);
+
+impl CommandRequest for FocusRequest {
     fn definitions() -> Vec<CommandDefinition> {
         vec![
             CommandDefinition::new("toggle_pane", "Next Pane", "Layout > Pane")
                 .hidden()
                 .chord("Ctrl+b, o"),
-            CommandDefinition::new("close_pane", "Close Pane", "Layout > Pane").chord("Ctrl+b, x"),
-            CommandDefinition::new("zoom_pane", "Zoom Pane", "Layout > Pane")
-                .hidden()
-                .chord("Ctrl+b, z"),
             CommandDefinition::new("select_pane_left", "Select Left Pane", "Layout > Pane")
                 .chord("Ctrl+b, h")
                 .chord("Ctrl+b, ArrowLeft"),
@@ -111,6 +195,31 @@ impl CommandRequest for PaneRequest {
             CommandDefinition::new("select_pane_down", "Select Down Pane", "Layout > Pane")
                 .chord("Ctrl+b, j")
                 .chord("Ctrl+b, ArrowDown"),
+        ]
+    }
+}
+
+impl TryFrom<&CommandInvocation> for FocusRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        match invocation.id.as_str() {
+            "toggle_pane" => Ok(Self(PaneFocus::Next)),
+            "select_pane_left" => Ok(Self(PaneFocus::Direction(PaneDirection::Left))),
+            "select_pane_right" => Ok(Self(PaneFocus::Direction(PaneDirection::Right))),
+            "select_pane_up" => Ok(Self(PaneFocus::Direction(PaneDirection::Top))),
+            "select_pane_down" => Ok(Self(PaneFocus::Direction(PaneDirection::Bottom))),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArrangeRequest(pub PaneArrangement);
+
+impl CommandRequest for ArrangeRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![
             CommandDefinition::new("swap_pane_prev", "Swap Pane Previous", "Layout > Pane")
                 .chord("Ctrl+b, {"),
             CommandDefinition::new("swap_pane_next", "Swap Pane Next", "Layout > Pane")
@@ -137,6 +246,37 @@ impl CommandRequest for PaneRequest {
                 "Layout > Pane",
             )
             .chord("Ctrl+b, Alt+v"),
+        ]
+    }
+}
+
+impl TryFrom<&CommandInvocation> for ArrangeRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        match invocation.id.as_str() {
+            "swap_pane_prev" => Ok(Self(PaneArrangement::Swap(SiblingDirection::Previous))),
+            "swap_pane_next" => Ok(Self(PaneArrangement::Swap(SiblingDirection::Next))),
+            "rotate_forward" => Ok(Self(PaneArrangement::Rotate(SiblingDirection::Next))),
+            "rotate_backward" => Ok(Self(PaneArrangement::Rotate(SiblingDirection::Previous))),
+            "mirror_panes" => Ok(Self(PaneArrangement::Mirror(None))),
+            "mirror_panes_horizontal" => Ok(Self(PaneArrangement::Mirror(Some(
+                PaneSplitDirection::Row,
+            )))),
+            "mirror_panes_vertical" => Ok(Self(PaneArrangement::Mirror(Some(
+                PaneSplitDirection::Column,
+            )))),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResizeRequest(pub PaneResize);
+
+impl CommandRequest for ResizeRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![
             CommandDefinition::new("equalize_pane_size", "Equalize Pane Size", "Layout > Pane")
                 .chord("Ctrl+b, Shift+e")
                 .chord("Ctrl+b, ="),
@@ -152,97 +292,43 @@ impl CommandRequest for PaneRequest {
             CommandDefinition::new("resize_pane_down", "Resize Pane Down", "Layout > Pane")
                 .chord("Ctrl+b, Ctrl+ArrowDown")
                 .chord("Ctrl+b, Alt+ArrowDown"),
-            CommandDefinition::new("open_in_pane_top", "Open in Pane Top", "Browser > Open")
-                .direct("Super+Shift+K"),
-            CommandDefinition::new("open_in_pane_right", "Open in Pane Right", "Browser > Open")
-                .alias("split_v")
-                .direct("Super+Shift+L")
-                .chord("Ctrl+b, %"),
-            CommandDefinition::new(
-                "open_in_pane_bottom",
-                "Open in Pane Bottom",
-                "Browser > Open",
-            )
-            .alias("split_h")
-            .direct("Super+Shift+J")
-            .chord("Ctrl+b, \""),
-            CommandDefinition::new("open_in_pane_left", "Open in Pane Left", "Browser > Open")
-                .direct("Super+Shift+H"),
         ]
     }
 }
 
-impl TryFrom<&CommandInvocation> for PaneRequest {
+impl TryFrom<&CommandInvocation> for ResizeRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        let request = match invocation.id.as_str() {
-            "toggle_pane" => Self::Focus(PaneFocus::Next),
-            "close_pane" => Self::Close,
-            "zoom_pane" => Self::ToggleZoom,
-            "select_pane_left" => Self::Focus(PaneFocus::Direction(PaneDirection::Left)),
-            "select_pane_right" => Self::Focus(PaneFocus::Direction(PaneDirection::Right)),
-            "select_pane_up" => Self::Focus(PaneFocus::Direction(PaneDirection::Top)),
-            "select_pane_down" => Self::Focus(PaneFocus::Direction(PaneDirection::Bottom)),
-            "swap_pane_prev" => Self::Arrange(PaneArrangement::Swap(SiblingDirection::Previous)),
-            "swap_pane_next" => Self::Arrange(PaneArrangement::Swap(SiblingDirection::Next)),
-            "rotate_forward" => Self::Arrange(PaneArrangement::Rotate(SiblingDirection::Next)),
-            "rotate_backward" => Self::Arrange(PaneArrangement::Rotate(SiblingDirection::Previous)),
-            "mirror_panes" => Self::Arrange(PaneArrangement::Mirror(None)),
-            "mirror_panes_horizontal" => {
-                Self::Arrange(PaneArrangement::Mirror(Some(PaneSplitDirection::Row)))
-            }
-            "mirror_panes_vertical" => {
-                Self::Arrange(PaneArrangement::Mirror(Some(PaneSplitDirection::Column)))
-            }
-            "equalize_pane_size" => Self::Resize(PaneResize::Equalize),
-            "resize_pane_left" => Self::Resize(PaneResize::Direction(PaneDirection::Left)),
-            "resize_pane_right" => Self::Resize(PaneResize::Direction(PaneDirection::Right)),
-            "resize_pane_up" => Self::Resize(PaneResize::Direction(PaneDirection::Top)),
-            "resize_pane_down" => Self::Resize(PaneResize::Direction(PaneDirection::Bottom)),
-            "open_in_pane_top" => Self::Open(PaneOpenRequest {
-                direction: PaneDirection::Top,
-                target: invocation
-                    .argument("target")
-                    .unwrap_or(PaneTarget::NewSplit),
-                mode: invocation
-                    .argument("mode")
-                    .unwrap_or(PaneOpenMode::NewStack),
-                url: invocation.argument("url"),
-            }),
-            "open_in_pane_right" => Self::Open(PaneOpenRequest {
-                direction: PaneDirection::Right,
-                target: invocation
-                    .argument("target")
-                    .unwrap_or(PaneTarget::NewSplit),
-                mode: invocation
-                    .argument("mode")
-                    .unwrap_or(PaneOpenMode::NewStack),
-                url: invocation.argument("url"),
-            }),
-            "open_in_pane_bottom" => Self::Open(PaneOpenRequest {
-                direction: PaneDirection::Bottom,
-                target: invocation
-                    .argument("target")
-                    .unwrap_or(PaneTarget::NewSplit),
-                mode: invocation
-                    .argument("mode")
-                    .unwrap_or(PaneOpenMode::NewStack),
-                url: invocation.argument("url"),
-            }),
-            "open_in_pane_left" => Self::Open(PaneOpenRequest {
-                direction: PaneDirection::Left,
-                target: invocation
-                    .argument("target")
-                    .unwrap_or(PaneTarget::NewSplit),
-                mode: invocation
-                    .argument("mode")
-                    .unwrap_or(PaneOpenMode::NewStack),
-                url: invocation.argument("url"),
-            }),
-            _ => return Err(()),
-        };
-        Ok(request)
+        match invocation.id.as_str() {
+            "equalize_pane_size" => Ok(Self(PaneResize::Equalize)),
+            "resize_pane_left" => Ok(Self(PaneResize::Direction(PaneDirection::Left))),
+            "resize_pane_right" => Ok(Self(PaneResize::Direction(PaneDirection::Right))),
+            "resize_pane_up" => Ok(Self(PaneResize::Direction(PaneDirection::Top))),
+            "resize_pane_down" => Ok(Self(PaneResize::Direction(PaneDirection::Bottom))),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToggleZoomRequest;
+
+impl CommandRequest for ToggleZoomRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("zoom_pane", "Zoom Pane", "Layout > Pane")
+                .hidden()
+                .chord("Ctrl+b, z"),
+        ]
+    }
+}
+
+impl TryFrom<&CommandInvocation> for ToggleZoomRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "zoom_pane").then_some(Self).ok_or(())
     }
 }
 
@@ -250,7 +336,14 @@ pub struct PanePlugin;
 
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CommandTypePlugin::<PaneRequest>::default())
+        app.add_plugins((
+            CommandTypePlugin::<OpenRequest>::default(),
+            CommandTypePlugin::<CloseRequest>::default(),
+            CommandTypePlugin::<FocusRequest>::default(),
+            CommandTypePlugin::<ArrangeRequest>::default(),
+            CommandTypePlugin::<ResizeRequest>::default(),
+            CommandTypePlugin::<ToggleZoomRequest>::default(),
+        ))
             .register_type::<SideSheetCardCollapsed>()
             .add_plugins((
                 TreePlugin,
@@ -2162,8 +2255,8 @@ mod tests {
             .insert(LastActivatedAt::now());
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::ToggleZoom);
+            .resource_mut::<Messages<ToggleZoomRequest>>()
+            .write(ToggleZoomRequest);
 
         app.update();
 
@@ -2228,14 +2321,14 @@ mod tests {
             .insert(LastActivatedAt::now());
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::ToggleZoom);
+            .resource_mut::<Messages<ToggleZoomRequest>>()
+            .write(ToggleZoomRequest);
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_some());
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::ToggleZoom);
+            .resource_mut::<Messages<ToggleZoomRequest>>()
+            .write(ToggleZoomRequest);
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_none());
     }
@@ -2264,8 +2357,8 @@ mod tests {
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(only)));
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::ToggleZoom);
+            .resource_mut::<Messages<ToggleZoomRequest>>()
+            .write(ToggleZoomRequest);
         app.update();
 
         assert!(app.world().get::<Zoomed>(tab).is_none());
@@ -2358,19 +2451,19 @@ mod tests {
             .insert(LastActivatedAt::now());
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::ToggleZoom);
+            .resource_mut::<Messages<ToggleZoomRequest>>()
+            .write(ToggleZoomRequest);
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_some());
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Open(PaneOpenRequest {
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
                 direction: PaneDirection::Bottom,
                 target: PaneTarget::NewSplit,
                 mode: PaneOpenMode::NewStack,
                 url: None,
-            }));
+            });
         app.update();
 
         assert!(
@@ -2432,14 +2525,14 @@ mod tests {
             .insert(LastActivatedAt::now());
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::ToggleZoom);
+            .resource_mut::<Messages<ToggleZoomRequest>>()
+            .write(ToggleZoomRequest);
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_some());
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Focus(PaneFocus::Direction(
+            .resource_mut::<Messages<FocusRequest>>()
+            .write(FocusRequest(PaneFocus::Direction(
                 PaneDirection::Left,
             )));
         app.update();
@@ -2602,8 +2695,8 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt(3), ChildOf(right_bot)));
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::ToggleZoom);
+            .resource_mut::<Messages<ToggleZoomRequest>>()
+            .write(ToggleZoomRequest);
 
         app.update();
 
@@ -2830,13 +2923,13 @@ mod tests {
         let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Open(PaneOpenRequest {
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
                 direction: PaneDirection::Right,
                 target: PaneTarget::NewSplit,
                 mode: PaneOpenMode::NewStack,
                 url: Some("https://x".into()),
-            }));
+            });
         app.update();
 
         assert!(
@@ -2880,13 +2973,13 @@ mod tests {
         let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Open(PaneOpenRequest {
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
                 direction: PaneDirection::Right,
                 target: PaneTarget::NewSplit,
                 mode: PaneOpenMode::NewStack,
                 url: Some("https://x".into()),
-            }));
+            });
         app.update();
 
         let children: Vec<Entity> = app
@@ -2910,13 +3003,13 @@ mod tests {
         let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Open(PaneOpenRequest {
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
                 direction: PaneDirection::Right,
                 target: PaneTarget::NewSplit,
                 mode: PaneOpenMode::NewStack,
                 url: None,
-            }));
+            });
         app.update();
 
         assert!(app.world().get::<PaneSplit>(pane).is_some());
@@ -2937,13 +3030,13 @@ mod tests {
         let (_tab, _split, _left, right) = build_pre_split(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Open(PaneOpenRequest {
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
                 direction: PaneDirection::Right,
                 target: PaneTarget::Existing,
                 mode: PaneOpenMode::InPlace,
                 url: Some("https://new".into()),
-            }));
+            });
         app.update();
 
         let collected = app.world().resource::<InPaneCollectedSpawns>();
@@ -2971,13 +3064,13 @@ mod tests {
         let (_tab, _split, _left, right) = build_pre_split(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Open(PaneOpenRequest {
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
                 direction: PaneDirection::Right,
                 target: PaneTarget::Existing,
                 mode: PaneOpenMode::NewStack,
                 url: Some("https://x".into()),
-            }));
+            });
         app.update();
 
         let collected = app.world().resource::<InPaneCollectedSpawns>();
@@ -3017,13 +3110,13 @@ mod tests {
         let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Open(PaneOpenRequest {
+            .resource_mut::<Messages<OpenRequest>>()
+            .write(OpenRequest {
                 direction: PaneDirection::Right,
                 target: PaneTarget::Existing,
                 mode: PaneOpenMode::InPlace,
                 url: Some("https://x".into()),
-            }));
+            });
         app.update();
 
         assert!(

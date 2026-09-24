@@ -709,7 +709,12 @@ mod tests {
 
     #[test]
     fn event_lists_hidden_and_visible_shortcuts() {
-        let mut definitions = vmux_layout::pane::PaneRequest::definitions();
+        let mut definitions = vmux_layout::pane::OpenRequest::definitions();
+        definitions.extend(vmux_layout::pane::CloseRequest::definitions());
+        definitions.extend(vmux_layout::pane::FocusRequest::definitions());
+        definitions.extend(vmux_layout::pane::ArrangeRequest::definitions());
+        definitions.extend(vmux_layout::pane::ResizeRequest::definitions());
+        definitions.extend(vmux_layout::pane::ToggleZoomRequest::definitions());
         definitions.extend(vmux_layout::tab::OpenRequest::definitions());
         definitions.extend(vmux_layout::tab::CreateRequest::definitions());
         definitions.extend(vmux_layout::tab::CloseRequest::definitions());
@@ -738,7 +743,12 @@ mod tests {
 
     #[test]
     fn event_exposes_chords_as_individual_strokes() {
-        let definitions = vmux_layout::pane::PaneRequest::definitions();
+        let mut definitions = vmux_layout::pane::OpenRequest::definitions();
+        definitions.extend(vmux_layout::pane::CloseRequest::definitions());
+        definitions.extend(vmux_layout::pane::FocusRequest::definitions());
+        definitions.extend(vmux_layout::pane::ArrangeRequest::definitions());
+        definitions.extend(vmux_layout::pane::ResizeRequest::definitions());
+        definitions.extend(vmux_layout::pane::ToggleZoomRequest::definitions());
         let event = ShortcutCatalog::build(
             &Keymap::defaults_with(&definitions),
             KeyContext::NONE,

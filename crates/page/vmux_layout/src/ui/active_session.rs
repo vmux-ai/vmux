@@ -257,7 +257,7 @@ fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandle
             title: "{project.display_path}",
             onclick: move |_| {
                 on_pick.call(());
-                let _ = send(&vmux_core::event::space::ProjectRequest::Activate {
+                let _ = send(&vmux_core::event::space::ProjectActivateRequest {
                     path: path.clone(),
                     branch: String::new(),
                     checkout: String::new(),

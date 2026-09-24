@@ -72,11 +72,6 @@ pub struct GitPushRequest {
 pub struct GitStageAllRequest {
     pub path: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
-pub struct GitOperationRequest {
-    pub repo_root: String,
-    pub operation: GitOperation,
-}
 #[vmux_api::ui_event(Eq, targets = ["git", "files"])]
 pub struct GitHunkRequest {
     pub repo_root: String,
@@ -167,7 +162,7 @@ pub struct GitDirectorySnapshot {
     pub repo_root: String,
     pub preview: bool,
 }
-#[vmux_api::contract(Eq)]
+#[vmux_api::ui_event_variants(Eq, target = "git", shared(repo_root: String))]
 pub enum GitOperation {
     Amend,
     CheckoutCommit { commit: String },

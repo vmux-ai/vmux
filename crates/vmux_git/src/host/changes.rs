@@ -4,8 +4,11 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
 use crate::event::{
-    GitCommitRequest, GitDiscardRequest, GitFetchRequest, GitHunkRequest, GitOperationRequest,
-    GitPullRequest, GitPushRequest, GitStageAllRequest, GitStageRequest, GitUnstageRequest,
+    GitAmendRequest, GitCheckoutCommitRequest, GitCherryPickRequest, GitCommitRequest,
+    GitCreateBranchRequest, GitDeleteBranchRequest, GitDiscardRequest, GitFastForwardRequest,
+    GitFetchRequest, GitHunkRequest, GitMergeRequest, GitOperationRequests, GitPullRequest,
+    GitPushRequest, GitRebaseRequest, GitRevertRequest, GitStageAllRequest, GitStageRequest,
+    GitStashDropRequest, GitStashPopRequest, GitStashPushRequest, GitUnstageRequest,
 };
 
 use super::job::JobKind;
@@ -21,18 +24,29 @@ impl Plugin for ChangesPlugin {
             GitDiscardRequest,
             GitCommitRequest,
             GitFetchRequest,
-            GitOperationRequest,
             GitPullRequest,
             GitPushRequest,
             GitStageAllRequest,
             GitHunkRequest,
         )>::default())
+            .add_plugins(UiEventPlugin::<GitOperationRequests>::default())
             .add_observer(on_stage_request)
             .add_observer(on_unstage_request)
             .add_observer(on_discard_request)
             .add_observer(on_commit_request)
             .add_observer(on_fetch_request)
-            .add_observer(on_operation_request)
+            .add_observer(on_amend_request)
+            .add_observer(on_checkout_commit_request)
+            .add_observer(on_cherry_pick_request)
+            .add_observer(on_create_branch_request)
+            .add_observer(on_delete_branch_request)
+            .add_observer(on_fast_forward_request)
+            .add_observer(on_merge_request)
+            .add_observer(on_rebase_request)
+            .add_observer(on_revert_request)
+            .add_observer(on_stash_drop_request)
+            .add_observer(on_stash_pop_request)
+            .add_observer(on_stash_push_request)
             .add_observer(on_pull_request)
             .add_observer(on_push_request)
             .add_observer(on_stage_all_request)
@@ -105,14 +119,170 @@ fn on_fetch_request(
     );
 }
 
-fn on_operation_request(trigger: On<BinReceive<GitOperationRequest>>, mut commands: Commands) {
+fn on_amend_request(trigger: On<BinReceive<GitAmendRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
         trigger.event().webview,
         JobKind::Operation {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation.clone(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_checkout_commit_request(
+    trigger: On<BinReceive<GitCheckoutCommitRequest>>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_cherry_pick_request(
+    trigger: On<BinReceive<GitCherryPickRequest>>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_create_branch_request(
+    trigger: On<BinReceive<GitCreateBranchRequest>>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_delete_branch_request(
+    trigger: On<BinReceive<GitDeleteBranchRequest>>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_fast_forward_request(
+    trigger: On<BinReceive<GitFastForwardRequest>>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_merge_request(trigger: On<BinReceive<GitMergeRequest>>, mut commands: Commands) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_rebase_request(trigger: On<BinReceive<GitRebaseRequest>>, mut commands: Commands) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_revert_request(trigger: On<BinReceive<GitRevertRequest>>, mut commands: Commands) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_stash_drop_request(
+    trigger: On<BinReceive<GitStashDropRequest>>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_stash_pop_request(
+    trigger: On<BinReceive<GitStashPopRequest>>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
+        },
+    );
+}
+
+fn on_stash_push_request(
+    trigger: On<BinReceive<GitStashPushRequest>>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    GitJob::enqueue(
+        &mut commands,
+        trigger.event().webview,
+        JobKind::Operation {
+            repo_root: request.repo_root.clone().into(),
+            operation: request.operation(),
         },
     );
 }

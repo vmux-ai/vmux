@@ -4,7 +4,7 @@ use std::time::Instant;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
-use super::{Pane, PaneDrag, PaneFocus, PaneRequest, PaneSplit};
+use super::{FocusRequest, Pane, PaneDrag, PaneFocus, PaneSplit};
 use crate::{
     host::command::LayoutRequestSet,
     stack::{ActiveTabParam, Stack, active_among, active_pane_in_tab, active_stack_in_pane},
@@ -17,7 +17,7 @@ pub(super) struct FocusPlugin;
 
 impl Plugin for FocusPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PaneRequest>()
+        app.add_message::<FocusRequest>()
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .add_systems(Update, on_pane_select.in_set(LayoutRequestSet::Handle))
@@ -47,7 +47,7 @@ pub struct PendingCursorWarp {
 }
 
 fn on_pane_select(
-    mut reader: MessageReader<PaneRequest>,
+    mut reader: MessageReader<FocusRequest>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -58,9 +58,7 @@ fn on_pane_select(
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let PaneRequest::Focus(focus) = request else {
-            continue;
-        };
+        let focus = &request.0;
 
         let Some(tab) = active_tab_param.get() else {
             continue;
@@ -359,7 +357,7 @@ mod tests {
         fn selection() -> Self {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_message::<PaneRequest>()
+                .add_message::<FocusRequest>()
                 .init_resource::<PaneHoverIntent>()
                 .init_resource::<PendingCursorWarp>()
                 .add_systems(Update, on_pane_select);
@@ -401,8 +399,8 @@ mod tests {
         fn select(&mut self, direction: PaneDirection) {
             self.app
                 .world_mut()
-                .resource_mut::<Messages<PaneRequest>>()
-                .write(PaneRequest::Focus(PaneFocus::Direction(direction)));
+                .resource_mut::<Messages<FocusRequest>>()
+                .write(FocusRequest(PaneFocus::Direction(direction)));
             self.app.update();
         }
     }

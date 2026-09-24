@@ -190,7 +190,11 @@ mod tests {
     use bevy::ecs::message::Messages;
     use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
     use vmux_command::{CommandInvocation, CommandPlugin};
-    use vmux_layout::pane::{PaneArrangement, PaneFocus, PaneOpenRequest, PaneRequest};
+    use vmux_layout::pane::{
+        ArrangeRequest as PaneArrangeRequest, CloseRequest as PaneCloseRequest,
+        FocusRequest as PaneFocusRequest, OpenRequest as PaneOpenRequest, PaneArrangement,
+        PaneFocus, ResizeRequest as PaneResizeRequest, ToggleZoomRequest,
+    };
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -207,7 +211,12 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_plugins(ShortcutPlugin)
             .add_plugins((
-                vmux_command::CommandTypePlugin::<PaneRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneOpenRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneCloseRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneFocusRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneArrangeRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneResizeRequest>::default(),
+                vmux_command::CommandTypePlugin::<ToggleZoomRequest>::default(),
                 vmux_command::CommandTypePlugin::<TabFocusRequest>::default(),
                 vmux_command::CommandTypePlugin::<TabOpenRequest>::default(),
             ))
@@ -225,7 +234,12 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_plugins(ShortcutPlugin)
             .add_plugins((
-                vmux_command::CommandTypePlugin::<PaneRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneOpenRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneCloseRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneFocusRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneArrangeRequest>::default(),
+                vmux_command::CommandTypePlugin::<PaneResizeRequest>::default(),
+                vmux_command::CommandTypePlugin::<ToggleZoomRequest>::default(),
                 vmux_command::CommandTypePlugin::<TabFocusRequest>::default(),
                 vmux_command::CommandTypePlugin::<TabOpenRequest>::default(),
             ))
@@ -384,13 +398,13 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
+            .resource_mut::<Messages<PaneFocusRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
             requests,
-            vec![PaneRequest::Focus(PaneFocus::Direction(
+            vec![PaneFocusRequest(PaneFocus::Direction(
                 PaneDirection::Left
             ))]
         );
@@ -412,13 +426,13 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
+            .resource_mut::<Messages<PaneFocusRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
             requests,
-            vec![PaneRequest::Focus(PaneFocus::Direction(
+            vec![PaneFocusRequest(PaneFocus::Direction(
                 PaneDirection::Right
             ))]
         );
@@ -440,13 +454,13 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
+            .resource_mut::<Messages<PaneFocusRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
             requests,
-            vec![PaneRequest::Focus(PaneFocus::Direction(
+            vec![PaneFocusRequest(PaneFocus::Direction(
                 PaneDirection::Bottom
             ))]
         );
@@ -468,13 +482,13 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
+            .resource_mut::<Messages<PaneFocusRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
             requests,
-            vec![PaneRequest::Focus(PaneFocus::Direction(PaneDirection::Top))]
+            vec![PaneFocusRequest(PaneFocus::Direction(PaneDirection::Top))]
         );
     }
 
@@ -544,11 +558,11 @@ mod tests {
         for (key, expected) in [
             (
                 KeyCode::KeyR,
-                PaneRequest::Arrange(PaneArrangement::Rotate(SiblingDirection::Next)),
+                PaneArrangeRequest(PaneArrangement::Rotate(SiblingDirection::Next)),
             ),
             (
                 KeyCode::KeyM,
-                PaneRequest::Arrange(PaneArrangement::Mirror(None)),
+                PaneArrangeRequest(PaneArrangement::Mirror(None)),
             ),
         ] {
             let mut app = test_app();
@@ -564,7 +578,7 @@ mod tests {
 
             let requests: Vec<_> = app
                 .world_mut()
-                .resource_mut::<Messages<PaneRequest>>()
+                .resource_mut::<Messages<PaneArrangeRequest>>()
                 .drain()
                 .collect();
 
@@ -618,18 +632,18 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
+            .resource_mut::<Messages<PaneOpenRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
             requests,
-            vec![PaneRequest::Open(PaneOpenRequest {
+            vec![PaneOpenRequest {
                 direction: PaneDirection::Right,
                 target: PaneTarget::NewSplit,
                 mode: PaneOpenMode::NewStack,
                 url: None,
-            })]
+            }]
         );
     }
 
@@ -652,11 +666,11 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
+            .resource_mut::<Messages<PaneCloseRequest>>()
             .drain()
             .collect();
 
-        assert_eq!(requests, vec![PaneRequest::Close]);
+        assert_eq!(requests, vec![PaneCloseRequest]);
     }
 
     #[test]
@@ -679,18 +693,18 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
+            .resource_mut::<Messages<PaneOpenRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
             requests,
-            vec![PaneRequest::Open(PaneOpenRequest {
+            vec![PaneOpenRequest {
                 direction: PaneDirection::Bottom,
                 target: PaneTarget::NewSplit,
                 mode: PaneOpenMode::NewStack,
                 url: None,
-            })]
+            }]
         );
     }
 

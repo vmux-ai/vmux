@@ -6,7 +6,7 @@ use vmux_history::LastActivatedAt;
 
 use crate::settings::LayoutSettings;
 
-use super::{Pane, PaneRequest, PaneResize, PaneSplit, PaneSplitDirection};
+use super::{Pane, PaneResize, PaneSplit, PaneSplitDirection, ResizeRequest};
 use crate::{
     host::command::LayoutRequestSet,
     stack::{ActiveTabParam, Stack, focused_stack},
@@ -19,7 +19,7 @@ pub(super) struct ResizePlugin;
 
 impl Plugin for ResizePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PaneRequest>()
+        app.add_message::<ResizeRequest>()
             .register_type::<PaneSize>()
             .add_systems(
                 Update,
@@ -79,7 +79,7 @@ pub fn apply_pane_split_gaps(split: &PaneSplit, node: &mut Node, gap: f32) {
 }
 
 fn resize_from_commands(
-    mut reader: MessageReader<PaneRequest>,
+    mut reader: MessageReader<ResizeRequest>,
     active_tab: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -91,9 +91,7 @@ fn resize_from_commands(
     mut sizes: ParamSet<(Query<&mut Node>, Query<&mut PaneSize>, Query<&ComputedNode>)>,
 ) {
     for request in reader.read() {
-        let PaneRequest::Resize(resize) = *request else {
-            continue;
-        };
+        let resize = request.0;
         let (_, Some(active), _) = focused_stack(
             active_tab.get(),
             &all_children,
@@ -406,7 +404,7 @@ mod tests {
         fn new(left_grow: f32, right_grow: f32) -> Self {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_message::<PaneRequest>()
+                .add_message::<ResizeRequest>()
                 .add_systems(Update, resize_from_commands);
             let tab = app
                 .world_mut()
@@ -456,8 +454,8 @@ mod tests {
         fn send(&mut self, resize: PaneResize) {
             self.app
                 .world_mut()
-                .resource_mut::<Messages<PaneRequest>>()
-                .write(PaneRequest::Resize(resize));
+                .resource_mut::<Messages<ResizeRequest>>()
+                .write(ResizeRequest(resize));
             self.app.update();
         }
 

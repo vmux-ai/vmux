@@ -10,7 +10,8 @@ use vmux_layout::{LayoutUiStateUpdates, TabLayoutSpawnContent, TabLayoutSpawnReq
 
 use super::SpacesUiStateUpdates;
 use crate::event::{
-    ProjectRequest, SPACES_PAGE_URL, SpaceRequest, SpaceRow, SpacesListEvent, SpacesUiState,
+    ProjectActivateRequest, ProjectForgetRequest, SPACES_PAGE_URL, SpaceRequest, SpaceRow,
+    SpacesListEvent, SpacesUiState,
 };
 use crate::spaces::{ActiveSpace, Spaces};
 
@@ -64,10 +65,16 @@ impl Plugin for SpacePlugin {
                 super::key::SpaceKeyPlugin,
                 super::project::SpaceProjectPlugin,
                 crate::snapshot_updater::SnapshotPlugin,
-                UiEventPlugin::<(SpaceRequest, vmux_core::event::ProjectTreeToggle)>::default(),
+                UiEventPlugin::<(
+                    SpaceRequest,
+                    ProjectActivateRequest,
+                    ProjectForgetRequest,
+                    vmux_core::event::ProjectTreeToggle,
+                )>::default(),
             ))
             .add_observer(on_space_request)
-            .add_observer(on_project_request)
+            .add_observer(on_project_activate)
+            .add_observer(on_project_forget)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(
                 Update,
@@ -359,25 +366,38 @@ fn broadcast_spaces_to_views(
     }
 }
 
-fn on_project_request(
-    trigger: On<BinReceive<ProjectRequest>>,
+fn on_project_activate(
+    trigger: On<BinReceive<ProjectActivateRequest>>,
     active: Option<Res<ActiveSpace>>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
 ) {
-    let evt = &trigger.event().payload;
     let (Some(active), Some(mut settings)) = (active, settings) else {
         return;
     };
     let space_id = active.record.id.clone();
-    let changed = match evt {
-        ProjectRequest::Activate { path, .. } => settings
-            .bypass_change_detection()
-            .activate_space_project(&space_id, path.trim()),
-        ProjectRequest::Forget { path } => settings
-            .bypass_change_detection()
-            .forget_space_project(&space_id, path.trim()),
+    let changed = settings
+        .bypass_change_detection()
+        .activate_space_project(&space_id, trigger.event().payload.path.trim());
+    if changed {
+        settings.set_changed();
+        saves.write(vmux_setting::SettingsSaveRequest);
+    }
+}
+
+fn on_project_forget(
+    trigger: On<BinReceive<ProjectForgetRequest>>,
+    active: Option<Res<ActiveSpace>>,
+    settings: Option<ResMut<vmux_setting::AppSettings>>,
+    mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
+) {
+    let (Some(active), Some(mut settings)) = (active, settings) else {
+        return;
     };
+    let space_id = active.record.id.clone();
+    let changed = settings
+        .bypass_change_detection()
+        .forget_space_project(&space_id, trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
         saves.write(vmux_setting::SettingsSaveRequest);
@@ -1312,11 +1332,12 @@ mod tests {
                     profile: bootstrap_profile_name(),
                 },
             })
-            .add_observer(on_project_request);
+            .add_observer(on_project_activate)
+            .add_observer(on_project_forget);
         app
     }
 
-    fn run_project_request(app: &mut App, request: ProjectRequest) {
+    fn run_project_request<T: Send + Sync + 'static>(app: &mut App, request: T) {
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(BinReceive {
             webview,
@@ -1368,7 +1389,7 @@ mod tests {
 
         run_project_request(
             &mut app,
-            ProjectRequest::Activate {
+            ProjectActivateRequest {
                 path: "/repo/beta".into(),
                 branch: String::new(),
                 checkout: String::new(),
@@ -1403,7 +1424,7 @@ mod tests {
 
         run_project_request(
             &mut app,
-            ProjectRequest::Forget {
+            ProjectForgetRequest {
                 path: "/repo/beta".into(),
             },
         );
@@ -1423,7 +1444,7 @@ mod tests {
 
         run_project_request(
             &mut app,
-            ProjectRequest::Activate {
+            ProjectActivateRequest {
                 path: "/repo/elsewhere".into(),
                 branch: String::new(),
                 checkout: String::new(),

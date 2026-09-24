@@ -49,7 +49,7 @@ pub(super) fn ChangesCard(
                 danger: false,
                 onpress: {
                     let repo_root = repository.repo_root.clone();
-                    move |_| GitWorkspace::operate(&repo_root, GitOperation::StashPush)
+                    move |_| GitOperation::StashPush.send(repo_root.clone())
                 },
             }
             HeaderActionButton {
@@ -60,7 +60,7 @@ pub(super) fn ChangesCard(
                 danger: false,
                 onpress: {
                     let repo_root = repository.repo_root.clone();
-                    move |_| GitWorkspace::operate(&repo_root, GitOperation::Amend)
+                    move |_| GitOperation::Amend.send(repo_root.clone())
                 },
             }
         }

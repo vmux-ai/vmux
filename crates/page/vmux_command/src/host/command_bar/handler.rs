@@ -2,7 +2,11 @@ use crate::CommandBar;
 use crate::build_command_bar_open_payload;
 use crate::host::payload::CommandBarPicks;
 use std::time::{Duration, Instant};
-use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPick, CommandBarPicker};
+use vmux_api::command_bar::{
+    CommandBarOpenEvent, CommandBarPick, CommandBarPicker, DismissRequest, ExRequest,
+    InvokeRequest, OpenRequest as CommandBarPageOpenRequest, PickRequest, PromptRequest,
+    SwitchSpaceRequest, SwitchTabRequest, TerminalRequest,
+};
 pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
     HostsLauncher, InlineTransitionRequested, RendersLauncherPanel, RestoreKeyboardToStack,
@@ -13,8 +17,8 @@ use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::event::{
-    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarRequest, CommandBarSizeEvent, OpenId,
-    SearchEngine, SearchEngineSetting,
+    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent, OpenId, SearchEngine,
+    SearchEngineSetting,
 };
 use crate::open_target::{OpenTarget, PaneDirection};
 use crate::snapshot::{
@@ -58,12 +62,29 @@ impl Plugin for InputPlugin {
         .add_message::<SettingsPageSpawnRequest>()
         .add_message::<SpacesPageSpawnRequest>()
         .add_plugins(UiEventPlugin::<(
-            CommandBarRequest,
+            PromptRequest,
+            CommandBarPageOpenRequest,
+            TerminalRequest,
+            InvokeRequest,
+            SwitchSpaceRequest,
+            SwitchTabRequest,
+            ExRequest,
+            PickRequest,
+            DismissRequest,
             CommandBarReadyEvent,
             CommandBarRenderedEvent,
             CommandBarSizeEvent,
         )>::default())
-        .add_observer(on_command_bar_request)
+        .add_observer(on_prompt_request)
+        .add_observer(on_page_open_request)
+        .add_observer(on_terminal_request)
+        .add_observer(on_invoke_request)
+        .add_observer(on_switch_space_request)
+        .add_observer(on_switch_tab_request)
+        .add_observer(on_ex_request)
+        .add_observer(on_pick_request)
+        .add_observer(on_dismiss_request)
+        .add_observer(close_command_bar)
         .add_observer(on_command_bar_ready)
         .add_observer(on_command_bar_rendered)
         .add_observer(on_command_bar_size)
@@ -739,9 +760,345 @@ fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     }
 }
 
-fn on_command_bar_request(
-    trigger: On<BinReceive<CommandBarRequest>>,
+#[derive(EntityEvent)]
+struct CloseCommandBar {
+    #[event_target]
+    webview: Entity,
+    restore_keyboard: bool,
+}
+
+impl CloseCommandBar {
+    fn after(webview: Entity, custom_keyboard_restore: bool) -> Self {
+        Self {
+            webview,
+            restore_keyboard: !custom_keyboard_restore,
+        }
+    }
+}
+
+fn on_prompt_request(
+    trigger: On<BinReceive<PromptRequest>>,
+    launcher_hosts: Query<(), With<HostsLauncher>>,
+    child_of: Query<&ChildOf>,
+    contributed_pages: Query<&ContributedPage>,
+    command_bar: Res<CommandBarProjection>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut inline_transition: MessageWriter<InlineTransitionRequested>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let prompt = request.text.trim();
+    let attachments = request
+        .attachments
+        .iter()
+        .filter(|attachment| !attachment.path.is_empty())
+        .map(|attachment| vmux_api::protocol::AgentAttachment {
+            path: attachment.path.clone(),
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
+            size: attachment.size,
+        })
+        .collect::<Vec<_>>();
+    let inline_stack = launcher_hosts
+        .contains(webview)
+        .then(|| child_of.get(webview).ok().map(|parent| parent.0))
+        .flatten();
+    let mut custom_keyboard_restore = false;
+    if (!prompt.is_empty() || !attachments.is_empty())
+        && let Some(stack) = command_bar.workspace.stack
+        && let Some(url) =
+            ContributedPage::prompt_url(&contributed_pages, request.target_url.as_deref())
+    {
+        if inline_stack == Some(stack) && vmux_api::agent::supports_inline_agent_transition(&url) {
+            inline_transition.write(InlineTransitionRequested { stack, webview });
+            if let Some(proxy) = proxy.as_deref() {
+                let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+        }
+        commands
+            .entity(stack)
+            .insert(PendingPrompt(prompt.to_string()));
+        if attachments.is_empty() {
+            commands.entity(stack).remove::<PendingPromptAttachments>();
+        } else {
+            commands
+                .entity(stack)
+                .insert(PendingPromptAttachments(attachments));
+        }
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id: None,
+        });
+        custom_keyboard_restore = true;
+    }
+    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
+}
+
+fn on_page_open_request(
+    trigger: On<BinReceive<CommandBarPageOpenRequest>>,
     search_engine: Option<Res<SearchEngineSetting>>,
+    child_of: Query<&ChildOf>,
+    launcher_hosts: Query<(), With<HostsLauncher>>,
+    claimed_urls: Query<&ClaimedUrl>,
+    command_bar: Res<CommandBarProjection>,
+    locale: Option<Res<ResolvedLocale>>,
+    mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
+    mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
+    mut inline_transition: MessageWriter<InlineTransitionRequested>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let focus = &command_bar.workspace;
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+    let mut custom_keyboard_restore = false;
+    let inline_stack = launcher_hosts
+        .contains(webview)
+        .then(|| child_of.get(webview).ok().map(|parent| parent.0))
+        .flatten();
+    let locale = locale
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(Locale::preferred);
+    let value = Home::expanded_file_url(&request.value);
+    let expanded = Home::resolve(&value);
+    if expanded.exists() {
+        let directory = if expanded.is_dir() {
+            &expanded
+        } else {
+            expanded.parent().unwrap_or(&expanded)
+        };
+        if let Some(pane) = focus.pane {
+            terminal_spawn_requests.write(TerminalSpawnRequest {
+                cwd: Some(directory.to_path_buf()),
+                target: TerminalSpawnTarget::NewStackInPane(pane),
+                metadata: Some(PageMetadata {
+                    url: command_bar.terminals.terminal_page_url.clone(),
+                    title: locale.translate_with(
+                        "command-terminal-path",
+                        &[(
+                            "path",
+                            TranslationValue::String(&directory.display().to_string()),
+                        )],
+                    ),
+                    ..default()
+                }),
+            });
+            custom_keyboard_restore = true;
+        }
+    } else {
+        let url = normalize_url(
+            &value,
+            search_engine.map(|setting| setting.0).unwrap_or_default(),
+        );
+        let inline_transitioned = if matches!(request.open, None | Some(OpenTarget::InPlace))
+            && vmux_api::agent::supports_inline_agent_transition(&url)
+            && let Some(stack) = inline_stack
+        {
+            inline_transition.write(InlineTransitionRequested { stack, webview });
+            if let Some(proxy) = proxy.as_deref() {
+                let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            true
+        } else {
+            false
+        };
+        if !inline_transitioned && ClaimedUrl::contains(&claimed_urls, &url) {
+            if let Some(pane) = focus.pane {
+                chosen_writer.write(vmux_core::ContributedCommandChosen {
+                    id: url,
+                    stack: None,
+                    pane: Some(pane),
+                });
+                custom_keyboard_restore = true;
+            }
+        } else {
+            command_invocations.write(open_invocation(caller, request.open, url));
+        }
+    }
+    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
+}
+
+fn on_terminal_request(
+    trigger: On<BinReceive<TerminalRequest>>,
+    child_of: Query<&ChildOf>,
+    command_bar: Res<CommandBarProjection>,
+    locale: Option<Res<ResolvedLocale>>,
+    mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let value = &trigger.event().payload.value;
+    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+    let focus = &command_bar.workspace;
+    let locale = locale
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(Locale::preferred);
+    let mut custom_keyboard_restore = false;
+    if let Some(entity) = command_bar.terminals.running.get(value).copied() {
+        focus_pane_entity(entity, &mut commands, &child_of);
+        custom_keyboard_restore = true;
+    } else {
+        if value.starts_with(&command_bar.terminals.terminal_page_url) {
+            bevy::log::warn!("no terminal pane for {}; spawning new", value);
+        }
+        let cwd = if value.is_empty() || value.contains("://") {
+            None
+        } else {
+            let expanded = if value.starts_with("~/") {
+                std::env::var("HOME")
+                    .map(|home| std::path::PathBuf::from(home).join(&value[2..]))
+                    .unwrap_or_else(|_| std::path::PathBuf::from(value))
+            } else if value.starts_with('/') {
+                std::path::PathBuf::from(value)
+            } else {
+                std::env::var("HOME")
+                    .map(|home| std::path::PathBuf::from(home).join(value))
+                    .unwrap_or_else(|_| std::path::PathBuf::from(value))
+            };
+            Some(expanded)
+        };
+        if let Some(pane) = focus.pane {
+            terminal_spawn_requests.write(TerminalSpawnRequest {
+                cwd,
+                target: TerminalSpawnTarget::NewStackInPane(pane),
+                metadata: Some(PageMetadata {
+                    url: command_bar.terminals.terminal_page_url.clone(),
+                    title: locale.translate("command-terminal"),
+                    ..default()
+                }),
+            });
+        } else {
+            command_invocations.write(open_invocation(
+                caller,
+                Some(OpenTarget::InNewStack),
+                "vmux://terminal/".into(),
+            ));
+        }
+    }
+    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
+}
+
+fn on_invoke_request(
+    trigger: On<BinReceive<InvokeRequest>>,
+    contributed_pages: Query<&ContributedPage>,
+    contributed_commands: Query<&ContributedCommand>,
+    command_bar: Res<CommandBarProjection>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut chosen: MessageWriter<vmux_core::ContributedCommandChosen>,
+    mut invocations: MessageWriter<CommandInvocation>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+    let mut custom_keyboard_restore = false;
+    if contributed_commands
+        .iter()
+        .any(|command| command.id == request.id)
+    {
+        if let Some(pane) = command_bar.workspace.pane {
+            chosen.write(vmux_core::ContributedCommandChosen {
+                id: request.id.clone(),
+                stack: None,
+                pane: Some(pane),
+            });
+            custom_keyboard_restore = true;
+        }
+    } else if let Some(url) = ContributedPage::page_url(&contributed_pages, &request.id) {
+        invocations.write(open_invocation(caller, request.open, url));
+        custom_keyboard_restore = true;
+    } else {
+        invocations.write(CommandInvocation::new(caller, &request.id));
+    }
+    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
+}
+
+fn on_switch_space_request(
+    trigger: On<BinReceive<SwitchSpaceRequest>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let id = &trigger.event().payload.id;
+    if !id.is_empty() {
+        commands.trigger(BinReceive {
+            webview,
+            payload: SpaceRequest::Attach {
+                space_id: id.clone(),
+            }
+        });
+    }
+    commands.trigger(CloseCommandBar::after(webview, true));
+}
+
+fn on_switch_tab_request(
+    trigger: On<BinReceive<SwitchTabRequest>>,
+    mut chosen: MessageWriter<StackInPaneChosen>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    chosen.write(StackInPaneChosen {
+        pane_bits: request.pane,
+        index: request.index,
+    });
+    commands.trigger(CloseCommandBar::after(webview, false));
+}
+
+fn on_ex_request(
+    trigger: On<BinReceive<ExRequest>>,
+    command_bar: Res<CommandBarProjection>,
+    mut lines: MessageWriter<crate::host::ExLineSubmitted>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    lines.write(crate::host::ExLineSubmitted {
+        stack: command_bar.workspace.stack,
+        line: trigger.event().payload.line.clone(),
+    });
+    commands.trigger(CloseCommandBar::after(webview, false));
+}
+
+fn on_pick_request(
+    trigger: On<BinReceive<PickRequest>>,
+    command_bar: Res<CommandBarProjection>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut picked: MessageWriter<crate::host::FileStatusPicked>,
+    mut invocations: MessageWriter<CommandInvocation>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let pick = &trigger.event().payload.pick;
+    if let CommandBarPick::Picker(next) = pick {
+        if let Some(id) = CommandBarOpenState::picker_id(*next) {
+            let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+            invocations.write(CommandInvocation::new(caller, id));
+        }
+    } else {
+        picked.write(crate::host::FileStatusPicked {
+            stack: command_bar.workspace.stack,
+            pick: pick.clone(),
+        });
+    }
+    commands.trigger(CloseCommandBar::after(webview, false));
+}
+
+fn on_dismiss_request(trigger: On<BinReceive<DismissRequest>>, mut commands: Commands) {
+    commands.trigger(CloseCommandBar::after(trigger.event().webview, false));
+}
+
+fn close_command_bar(
+    trigger: On<CloseCommandBar>,
+    command_bar: Res<CommandBarProjection>,
     mut modal_q: Query<
         (
             Entity,
@@ -751,256 +1108,9 @@ fn on_command_bar_request(
         ),
         With<CommandBar>,
     >,
-    queries: (
-        Query<&ChildOf>,
-        Query<(), With<HostsLauncher>>,
-        Query<&ContributedPage>,
-        Query<&ContributedCommand>,
-        Query<&ClaimedUrl>,
-    ),
-    resources: (Res<CommandBarProjection>, Option<Res<ResolvedLocale>>),
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
-    mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
-    mut inline_transition: MessageWriter<InlineTransitionRequested>,
-    mut stack_chosen: MessageWriter<StackInPaneChosen>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
-    mut ex_lines: MessageWriter<crate::host::ExLineSubmitted>,
-    mut picked: MessageWriter<crate::host::FileStatusPicked>,
-    mut command_invocations: MessageWriter<CommandInvocation>,
-    user_q: Query<Entity, With<vmux_core::team::User>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let (child_of_q, launcher_hosts, contributed_pages, contributed_commands, claimed_urls) =
-        queries;
-    let (command_bar, locale) = resources;
-    let focus = &command_bar.workspace;
-    let webview = trigger.event().webview;
-    let evt = &trigger.event().payload;
-    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-    let terminals_snapshot = &command_bar.terminals;
-    let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
-    let running_terminals = terminals_snapshot.running.clone();
-    let mut custom_keyboard_restore = false;
-    let inline_transition_stack = launcher_hosts
-        .contains(webview)
-        .then(|| child_of_q.get(webview).ok().map(|parent| parent.0))
-        .flatten();
-    let locale = locale
-        .as_deref()
-        .map(|locale| locale.0.clone())
-        .unwrap_or_else(Locale::preferred);
-    match evt {
-        CommandBarRequest::Prompt {
-            text,
-            target_url,
-            attachments: submitted,
-        } => {
-            let prompt = text.trim();
-            let attachments = submitted
-                .iter()
-                .filter(|attachment| !attachment.path.is_empty())
-                .map(|attachment| vmux_api::protocol::AgentAttachment {
-                    path: attachment.path.clone(),
-                    name: attachment.name.clone(),
-                    mime_type: attachment.mime_type.clone(),
-                    size: attachment.size,
-                })
-                .collect::<Vec<_>>();
-            if !prompt.is_empty() || !attachments.is_empty() {
-                let focused = focus.stack;
-                if let Some(stack) = focused
-                    && let Some(url) =
-                        ContributedPage::prompt_url(&contributed_pages, target_url.as_deref())
-                {
-                    if inline_transition_stack == Some(stack)
-                        && vmux_api::agent::supports_inline_agent_transition(&url)
-                    {
-                        inline_transition.write(InlineTransitionRequested { stack, webview });
-                        if let Some(proxy) = proxy.as_deref() {
-                            let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
-                        }
-                    }
-                    commands
-                        .entity(stack)
-                        .insert(PendingPrompt(prompt.to_string()));
-                    if !attachments.is_empty() {
-                        commands
-                            .entity(stack)
-                            .insert(PendingPromptAttachments(attachments));
-                    } else {
-                        commands.entity(stack).remove::<PendingPromptAttachments>();
-                    }
-                    page_open_requests.write(PageOpenRequest {
-                        target: PageOpenTarget::Stack(stack),
-                        url,
-                        request_id: None,
-                    });
-                    custom_keyboard_restore = true;
-                }
-            }
-        }
-        CommandBarRequest::Open { value, open } => {
-            let value = &Home::expanded_file_url(value);
-            let expanded = Home::resolve(value);
-            let is_path = expanded.exists();
-
-            if is_path {
-                let dir = if expanded.is_dir() {
-                    &expanded
-                } else {
-                    expanded.parent().unwrap_or(&expanded)
-                };
-                if let Some(pane_e) = focus.pane {
-                    terminal_spawn_requests.write(TerminalSpawnRequest {
-                        cwd: Some(dir.to_path_buf()),
-                        target: TerminalSpawnTarget::NewStackInPane(pane_e),
-                        metadata: Some(PageMetadata {
-                            url: terminal_page_url.clone(),
-                            title: locale.translate_with(
-                                "command-terminal-path",
-                                &[("path", TranslationValue::String(&dir.display().to_string()))],
-                            ),
-                            ..default()
-                        }),
-                    });
-                    custom_keyboard_restore = true;
-                }
-            } else {
-                let url = normalize_url(
-                    value,
-                    search_engine.map(|setting| setting.0).unwrap_or_default(),
-                );
-                let inline_transition = if matches!(open, None | Some(OpenTarget::InPlace))
-                    && vmux_api::agent::supports_inline_agent_transition(&url)
-                    && let Some(stack) = inline_transition_stack
-                {
-                    inline_transition.write(InlineTransitionRequested { stack, webview });
-                    if let Some(proxy) = proxy.as_deref() {
-                        let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
-                    }
-                    true
-                } else {
-                    false
-                };
-                if !inline_transition && ClaimedUrl::contains(&claimed_urls, &url) {
-                    if let Some(pane_e) = focus.pane {
-                        chosen_writer.write(vmux_core::ContributedCommandChosen {
-                            id: url.clone(),
-                            stack: None,
-                            pane: Some(pane_e),
-                        });
-                        custom_keyboard_restore = true;
-                    }
-                } else {
-                    command_invocations.write(open_invocation(caller, *open, url));
-                }
-            }
-        }
-        CommandBarRequest::Terminal { value } => {
-            let known_terminal = running_terminals.get(value).copied();
-            if let Some(entity) = known_terminal {
-                focus_pane_entity(entity, &mut commands, &child_of_q);
-                custom_keyboard_restore = true;
-            } else {
-                if value.starts_with(&terminal_page_url) {
-                    bevy::log::warn!("no terminal pane for {}; spawning new", value);
-                }
-                let cwd = if value.is_empty() || value.contains("://") {
-                    None
-                } else {
-                    let expanded = if value.starts_with("~/") {
-                        std::env::var("HOME")
-                            .map(|h| std::path::PathBuf::from(h).join(&value[2..]))
-                            .unwrap_or_else(|_| std::path::PathBuf::from(&value))
-                    } else if value.starts_with('/') {
-                        std::path::PathBuf::from(&value)
-                    } else {
-                        std::env::var("HOME")
-                            .map(|h| std::path::PathBuf::from(h).join(value))
-                            .unwrap_or_else(|_| std::path::PathBuf::from(&value))
-                    };
-                    Some(expanded)
-                };
-                {
-                    let active_pane_opt = focus.pane;
-                    if let Some(pane_e) = active_pane_opt {
-                        terminal_spawn_requests.write(TerminalSpawnRequest {
-                            cwd: cwd.clone(),
-                            target: TerminalSpawnTarget::NewStackInPane(pane_e),
-                            metadata: Some(PageMetadata {
-                                url: terminal_page_url.clone(),
-                                title: locale.translate("command-terminal"),
-                                ..default()
-                            }),
-                        });
-                    } else {
-                        command_invocations.write(open_invocation(
-                            caller,
-                            Some(OpenTarget::InNewStack),
-                            "vmux://terminal/".into(),
-                        ));
-                    }
-                }
-            }
-        }
-        CommandBarRequest::Command { id, open } => {
-            let is_contributed = contributed_commands.iter().any(|command| &command.id == id);
-            if is_contributed {
-                if let Some(pane) = focus.pane {
-                    chosen_writer.write(vmux_core::ContributedCommandChosen {
-                        id: id.clone(),
-                        stack: None,
-                        pane: Some(pane),
-                    });
-                    custom_keyboard_restore = true;
-                }
-            } else if let Some(url) = ContributedPage::page_url(&contributed_pages, id) {
-                command_invocations.write(open_invocation(caller, *open, url));
-                custom_keyboard_restore = true;
-            } else {
-                command_invocations.write(CommandInvocation::new(caller, id));
-            }
-        }
-        CommandBarRequest::Space { id } => {
-            custom_keyboard_restore = true;
-            if !id.is_empty() {
-                commands.trigger(BinReceive {
-                    webview,
-                    payload: SpaceRequest::Attach {
-                        space_id: id.clone(),
-                    },
-                });
-            }
-        }
-        CommandBarRequest::SwitchTab { pane, index } => {
-            stack_chosen.write(StackInPaneChosen {
-                pane_bits: *pane,
-                index: *index,
-            });
-        }
-        CommandBarRequest::Ex { line } => {
-            ex_lines.write(crate::host::ExLineSubmitted {
-                stack: focus.stack,
-                line: line.clone(),
-            });
-        }
-        CommandBarRequest::Pick { pick } => {
-            if let CommandBarPick::Picker(next) = pick {
-                if let Some(id) = CommandBarOpenState::picker_id(*next) {
-                    command_invocations.write(CommandInvocation::new(caller, id));
-                }
-            } else {
-                picked.write(crate::host::FileStatusPicked {
-                    stack: focus.stack,
-                    pick: pick.clone(),
-                });
-            }
-        }
-        CommandBarRequest::Dismiss => {}
-    }
-
     if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut() {
         close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
         commands
@@ -1010,7 +1120,7 @@ fn on_command_bar_request(
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
     }
-    if !custom_keyboard_restore && let Some(stack) = focus.stack {
+    if trigger.event().restore_keyboard && let Some(stack) = command_bar.workspace.stack {
         restore_keyboard.write(RestoreKeyboardToStack { stack });
     }
 }
@@ -1081,9 +1191,9 @@ fn reveal_command_bar(
             native_size.is_some(),
         ) {
             commands.entity(entity).remove::<PendingCommandBarReveal>();
-            commands.trigger(BinReceive::<CommandBarRequest> {
+            commands.trigger(BinReceive::<DismissRequest> {
                 webview: entity,
-                payload: CommandBarRequest::Dismiss,
+                payload: DismissRequest,
             });
             continue;
         }
@@ -1958,9 +2068,9 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive::<CommandBarRequest> {
+        app.world_mut().trigger(BinReceive::<DismissRequest> {
             webview: modal,
-            payload: CommandBarRequest::Dismiss,
+            payload: DismissRequest,
         });
         app.world_mut().flush();
 

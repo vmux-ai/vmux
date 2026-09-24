@@ -19,7 +19,7 @@ use crate::{
 #[cfg(test)]
 use super::PaneSplitDirection;
 use super::{
-    Pane, PaneRequest, PaneSplit, first_leaf_descendant, first_stack_in_pane, leaf_pane_bundle,
+    CloseRequest, Pane, PaneSplit, first_leaf_descendant, first_stack_in_pane, leaf_pane_bundle,
 };
 use crate::host::command::LayoutRequestSet;
 
@@ -27,7 +27,7 @@ pub(super) struct ClosePlugin;
 
 impl Plugin for ClosePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PaneRequest>()
+        app.add_message::<CloseRequest>()
             .init_resource::<CloseDialog>()
             .add_message::<PaneCloseRequest>()
             .add_systems(
@@ -86,8 +86,8 @@ impl CloseTarget {
                     }
                 }
                 world
-                    .resource_mut::<Messages<PaneRequest>>()
-                    .write(PaneRequest::Close);
+                    .resource_mut::<Messages<CloseRequest>>()
+                    .write(CloseRequest);
             }
             Self::Stack(stack) => {
                 let Some(parent_pane) = world.get::<ChildOf>(stack).map(|child| child.get()) else {
@@ -205,7 +205,7 @@ impl CloseDialog {
 }
 
 fn request_pane_close(
-    mut reader: MessageReader<PaneRequest>,
+    mut reader: MessageReader<CloseRequest>,
     active_tab: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -219,10 +219,7 @@ fn request_pane_close(
     mut requests: MessageWriter<PaneCloseRequest>,
     mut commands: Commands,
 ) {
-    for request in reader.read() {
-        if !matches!(request, PaneRequest::Close) {
-            continue;
-        }
+    for _ in reader.read() {
         let (_, Some(active), _) = focused_stack(
             active_tab.get(),
             &all_children,
@@ -462,8 +459,8 @@ fn process_force_pane_closes(world: &mut World) {
             }
         }
         world
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Close);
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
     }
 }
 
@@ -495,7 +492,7 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, ClosePlugin))
-            .add_message::<PaneRequest>()
+            .add_message::<CloseRequest>()
             .init_resource::<ConfirmCloseSettings>()
             .add_message::<PageOpenRequest>();
         app
@@ -504,7 +501,7 @@ mod tests {
     #[test]
     fn force_pane_close_dispatches_pane_close_without_dialog() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_message::<PaneRequest>();
+        app.add_plugins(MinimalPlugins).add_message::<CloseRequest>();
         let tab = app
             .world_mut()
             .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
@@ -520,9 +517,9 @@ mod tests {
         assert!(app.world().get::<CloseConfirmed>(pane).is_some());
         let closes: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
+            .resource_mut::<Messages<CloseRequest>>()
             .drain()
-            .filter(|request| matches!(request, PaneRequest::Close))
+            .filter(|request| matches!(request, CloseRequest))
             .collect();
         assert_eq!(closes.len(), 1);
     }
@@ -530,7 +527,7 @@ mod tests {
     #[test]
     fn confirmed_close_dialog_dispatches_pane_close() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_message::<PaneRequest>();
+        app.add_plugins(MinimalPlugins).add_message::<CloseRequest>();
         let tab = app
             .world_mut()
             .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
@@ -547,9 +544,9 @@ mod tests {
         assert!(app.world().get::<CloseConfirmed>(pane).is_some());
         let closes: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
+            .resource_mut::<Messages<CloseRequest>>()
             .drain()
-            .filter(|request| matches!(request, PaneRequest::Close))
+            .filter(|request| matches!(request, CloseRequest))
             .collect();
         assert_eq!(closes.len(), 1);
     }
@@ -569,8 +566,8 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Close);
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
 
         app.update();
 
@@ -641,8 +638,8 @@ mod tests {
             .entity_mut(right)
             .insert(LastActivatedAt::now());
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Close);
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
 
         app.update();
 
@@ -702,8 +699,8 @@ mod tests {
         app.world_mut().entity_mut(c).insert(LastActivatedAt(20));
         app.world_mut().entity_mut(b).insert(LastActivatedAt(30));
         app.world_mut()
-            .resource_mut::<Messages<PaneRequest>>()
-            .write(PaneRequest::Close);
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
 
         app.update();
 

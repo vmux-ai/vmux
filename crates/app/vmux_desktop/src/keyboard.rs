@@ -626,9 +626,14 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin))
             .add_plugins(vmux_command::command_bar::CommandBarPlugin)
-            .add_plugins(vmux_command::CommandTypePlugin::<
-                vmux_layout::pane::PaneRequest,
-            >::default());
+            .add_plugins((
+                vmux_command::CommandTypePlugin::<vmux_layout::pane::OpenRequest>::default(),
+                vmux_command::CommandTypePlugin::<vmux_layout::pane::CloseRequest>::default(),
+                vmux_command::CommandTypePlugin::<vmux_layout::pane::FocusRequest>::default(),
+                vmux_command::CommandTypePlugin::<vmux_layout::pane::ArrangeRequest>::default(),
+                vmux_command::CommandTypePlugin::<vmux_layout::pane::ResizeRequest>::default(),
+                vmux_command::CommandTypePlugin::<vmux_layout::pane::ToggleZoomRequest>::default(),
+            ));
         app.world_mut().run_schedule(Startup);
         let mut query = app.world_mut().query::<&vmux_command::CommandDefinition>();
         let definitions = query.iter(app.world()).cloned().collect::<Vec<_>>();
