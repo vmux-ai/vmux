@@ -13,8 +13,8 @@ use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_api::mcp::{
-    McpServerAction, McpServerEntry, McpServerRequest, McpServerResult, McpServerStatus,
-    McpServers, McpServersRequest,
+    McpServerAction, McpServerConnectRequest, McpServerDisconnectRequest, McpServerEntry,
+    McpServerResult, McpServerStatus, McpServers, McpServersRequest,
 };
 use vmux_core::host::{UiState, UiStatePlugin};
 use vmux_core::profile::mcp_credentials::{
@@ -28,11 +28,16 @@ impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(McpRuntime);
         app.add_plugins((
-            UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
+            UiEventPlugin::<(
+                McpServersRequest,
+                McpServerConnectRequest,
+                McpServerDisconnectRequest,
+            )>::default(),
             UiStatePlugin::<McpServers>::default(),
         ))
         .add_observer(McpConnections::request)
-        .add_observer(McpConnections::act)
+        .add_observer(McpConnections::connect)
+        .add_observer(McpConnections::disconnect)
         .add_systems(
             Update,
             (
@@ -59,8 +64,8 @@ impl McpConnections {
         Self::spawn_snapshot(target, None, proxy.as_deref(), &mut commands);
     }
 
-    fn act(
-        trigger: On<BinReceive<McpServerRequest>>,
+    fn connect(
+        trigger: On<BinReceive<McpServerConnectRequest>>,
         runtime: Single<Entity, With<McpRuntime>>,
         mut commands: Commands,
     ) {
@@ -68,7 +73,22 @@ impl McpConnections {
             &mut commands,
             *runtime,
             trigger.event().webview,
-            trigger.event().payload.clone(),
+            trigger.event().payload.id.clone(),
+            McpServerAction::Connect,
+        );
+    }
+
+    fn disconnect(
+        trigger: On<BinReceive<McpServerDisconnectRequest>>,
+        runtime: Single<Entity, With<McpRuntime>>,
+        mut commands: Commands,
+    ) {
+        McpAction::enqueue(
+            &mut commands,
+            *runtime,
+            trigger.event().webview,
+            trigger.event().payload.id.clone(),
+            McpServerAction::Disconnect,
         );
     }
 
@@ -92,21 +112,22 @@ impl McpConnections {
             return;
         };
         let target = pending.target;
-        let request = pending.request.clone();
-        let task_request = request.clone();
+        let id = pending.id.clone();
+        let action = pending.action;
+        let task_id = id.clone();
         let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let progress_wake = completion_wake.clone();
         let (progress_sender, progress_receiver) = mpsc::channel();
         let task = IoTaskPool::get().spawn(async move {
-            let result = match task_request.action {
-                McpServerAction::Connect => McpConnection::connect(&task_request.id, |url| {
+            let result = match action {
+                McpServerAction::Connect => McpConnection::connect(&task_id, |url| {
                     if progress_sender.send(url).is_ok()
                         && let Some(wake) = &progress_wake
                     {
                         let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
                     }
                 }),
-                McpServerAction::Disconnect => McpConnection::disconnect(&task_request.id),
+                McpServerAction::Disconnect => McpConnection::disconnect(&task_id),
             };
             if let Some(wake) = completion_wake {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -118,7 +139,8 @@ impl McpConnections {
             .remove::<PendingMcpAction>()
             .insert(McpActionTask {
                 target,
-                request,
+                id,
+                action,
                 task,
                 progress: Mutex::new(progress_receiver),
             });
@@ -149,8 +171,8 @@ impl McpConnections {
                 continue;
             }
             let result = McpServerResult {
-                id: task.request.id.clone(),
-                action: task.request.action,
+                id: task.id.clone(),
+                action: task.action,
                 success,
                 message,
             };
@@ -214,22 +236,25 @@ impl McpAction {
         commands: &mut Commands,
         runtime: Entity,
         target: Entity,
-        request: McpServerRequest,
+        id: String,
+        action: McpServerAction,
     ) {
-        commands.spawn((Self { runtime }, PendingMcpAction { target, request }));
+        commands.spawn((Self { runtime }, PendingMcpAction { target, id, action }));
     }
 }
 
 #[derive(Component)]
 struct PendingMcpAction {
     target: Entity,
-    request: McpServerRequest,
+    id: String,
+    action: McpServerAction,
 }
 
 #[derive(Component)]
 struct McpActionTask {
     target: Entity,
-    request: McpServerRequest,
+    id: String,
+    action: McpServerAction,
     task: Task<Result<(), String>>,
     progress: Mutex<mpsc::Receiver<String>>,
 }
