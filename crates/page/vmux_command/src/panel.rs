@@ -1,11 +1,10 @@
 use crate::event::{
-    CommandBarOpenEvent, CommandBarPanelCloseEvent, CommandBarPanelRequest, PanelPlacement,
-    clamp_panel_placement,
+    CommandBarOpenEvent, CommandBarPanelRequest, PanelPlacement, clamp_panel_placement,
 };
 use crate::ui::CommandPalette;
 use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
-use vmux_ui::hooks::{send, use_listener};
+use vmux_ui::hooks::{send, use_ui_state};
 use vmux_ui::launcher::palette::PaletteSurface;
 
 fn set_command_bar_panel_active(active: bool) {
@@ -130,7 +129,7 @@ fn panel_viewport() -> Option<(f64, f64)> {
 
 #[component]
 pub fn CommandBarPanel() -> Element {
-    let mut state = use_signal(CommandBarOpenEvent::default);
+    let state = use_ui_state::<CommandBarOpenEvent>();
     let mut open = use_signal(|| false);
     let mut drag = use_panel_drag();
 
@@ -139,11 +138,9 @@ pub fn CommandBarPanel() -> Element {
         set_command_bar_panel_active(showing);
     };
 
-    let _open_listener = use_listener::<CommandBarOpenEvent, _>(move |data| {
-        state.set(data);
-        set_open(true);
+    use_effect(move || {
+        set_open(state().open_id.is_open());
     });
-    let _close_listener = use_listener::<CommandBarPanelCloseEvent, _>(move |_| set_open(false));
     use_drop(move || set_command_bar_panel_active(false));
 
     if !open() {
