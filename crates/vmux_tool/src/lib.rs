@@ -4,11 +4,142 @@ mod manifest;
 mod mcp;
 mod npm;
 
+use std::marker::PhantomData;
+
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::prelude::*;
+use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
+
 pub use dotfiles::*;
 pub use homebrew::*;
 pub use manifest::*;
 pub use mcp::*;
 pub use npm::*;
+
+pub struct ToolPlugin;
+
+impl Plugin for ToolPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            ToolOperationPlugin::<ImportNpmManifest>::default(),
+            ToolOperationPlugin::<ImportBrewfile>::default(),
+            ToolOperationPlugin::<DiscoverMcpServers>::default(),
+            ToolOperationPlugin::<ImportMcpConfig>::default(),
+            ToolOperationPlugin::<ImportMcpServer>::default(),
+            ToolOperationPlugin::<ForgetMcpServer>::default(),
+            ToolOperationPlugin::<DiscoverDotfilePackages>::default(),
+            ToolOperationPlugin::<PlanDotfilePackage>::default(),
+            ToolOperationPlugin::<ImportDotfiles>::default(),
+            ToolOperationPlugin::<ImportAvailableDotfiles>::default(),
+            ToolOperationPlugin::<LinkDotfilePackage>::default(),
+        ))
+        .add_plugins((
+            ToolOperationPlugin::<DisableDotfilePackage>::default(),
+            ToolOperationPlugin::<UnlinkDotfilePackage>::default(),
+            ToolOperationPlugin::<ApplyEnabledDotfiles>::default(),
+            ToolOperationPlugin::<AdoptDotfile>::default(),
+        ));
+    }
+}
+
+pub trait ToolOperation: Component + Clone {
+    type Output: Send + Sync + 'static;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String>;
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolStoreTarget(Entity);
+
+impl ToolStoreTarget {
+    pub const fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
+    pub const fn entity(self) -> Entity {
+        self.0
+    }
+}
+
+#[derive(Component)]
+pub struct ToolOperationResult<T: Send + Sync + 'static>(Result<T, String>);
+
+impl<T: Send + Sync + 'static> ToolOperationResult<T> {
+    pub fn value(&self) -> &Result<T, String> {
+        &self.0
+    }
+}
+
+#[derive(Component)]
+struct ToolOperationTask<T: Send + Sync + 'static>(Task<Result<T, String>>);
+
+struct ToolOperationPlugin<O>(PhantomData<fn() -> O>);
+
+impl<O> Default for ToolOperationPlugin<O> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<O> Plugin for ToolOperationPlugin<O>
+where
+    O: ToolOperation,
+{
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (start_operation::<O>, finish_operation::<O>).chain(),
+        );
+    }
+}
+
+fn start_operation<O>(
+    operations: Query<
+        (Entity, &O, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<O::Output>>,
+            Without<ToolOperationResult<O::Output>>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) where
+    O: ToolOperation,
+{
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()) else {
+            commands
+                .entity(entity)
+                .insert(ToolOperationResult::<O::Output>(Err(
+                    "tool store entity is unavailable".to_string(),
+                )));
+            continue;
+        };
+        let operation = operation.clone();
+        let store = store.clone();
+        let task = IoTaskPool::get().spawn(async move { operation.execute(&store) });
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::<O::Output>(task));
+    }
+}
+
+fn finish_operation<O>(
+    mut operations: Query<(Entity, &mut ToolOperationTask<O::Output>)>,
+    mut commands: Commands,
+) where
+    O: ToolOperation,
+{
+    for (entity, mut operation) in &mut operations {
+        let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
+            continue;
+        };
+        commands
+            .entity(entity)
+            .remove::<ToolOperationTask<O::Output>>()
+            .insert(ToolOperationResult(result));
+    }
+}
 
 #[cfg(test)]
 use dotfiles::{apply_enabled_dotfiles_in, disable_and_unlink_dotfile_package_in};
@@ -146,6 +277,43 @@ brew "ripgrep"
         .unwrap();
 
         assert_eq!(imported, ["eslint", "prettier", "typescript"]);
+    }
+
+    #[test]
+    fn npm_import_operation_updates_the_target_store() {
+        let temp = tempfile::tempdir().unwrap();
+        let package_json = temp.path().join("package.json");
+        std::fs::write(&package_json, r#"{"dependencies":{"typescript":"^5"}}"#).unwrap();
+        let store = ToolStore::new(temp.path(), temp.path());
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolPlugin));
+        let store_entity = app.world_mut().spawn(store.clone()).id();
+        let operation = app
+            .world_mut()
+            .spawn((
+                ImportNpmManifest::new(package_json),
+                ToolStoreTarget::new(store_entity),
+            ))
+            .id();
+
+        for _ in 0..100 {
+            app.update();
+            if app
+                .world()
+                .get::<ToolOperationResult<ImportedNpmManifest>>(operation)
+                .is_some()
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        let result = app
+            .world()
+            .get::<ToolOperationResult<ImportedNpmManifest>>(operation)
+            .unwrap();
+        assert_eq!(result.value(), &Ok(ImportedNpmManifest { packages: 1 }));
+        assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
     }
 
     #[test]

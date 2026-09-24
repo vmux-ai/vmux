@@ -1,9 +1,119 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
 
+use crate::ToolOperation;
 use crate::manifest::{ToolStore, expand_user_path, load_manifest_from, write_manifest_to};
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DiscoverMcpServers;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiscoveredMcpServers {
+    pub servers: BTreeMap<String, DiscoveredMcpServer>,
+    pub errors: Vec<String>,
+}
+
+impl ToolOperation for DiscoverMcpServers {
+    type Output = DiscoveredMcpServers;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let (servers, errors) = store.discover_mcp_servers();
+        Ok(DiscoveredMcpServers { servers, errors })
+    }
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ImportMcpConfig {
+    path: Option<PathBuf>,
+}
+
+impl ImportMcpConfig {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: Some(path.into()),
+        }
+    }
+
+    pub const fn discovered() -> Self {
+        Self { path: None }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportedMcpConfig {
+    pub servers: usize,
+}
+
+impl ToolOperation for ImportMcpConfig {
+    type Output = ImportedMcpConfig;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let servers = match &self.path {
+            Some(path) => store.import_mcp_config(path)?,
+            None => store.import_default_mcp_configs()?,
+        };
+        Ok(ImportedMcpConfig { servers })
+    }
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ImportMcpServer {
+    name: String,
+}
+
+impl ImportMcpServer {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedMcpServer {
+    pub name: String,
+}
+
+impl ToolOperation for ImportMcpServer {
+    type Output = ImportedMcpServer;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        store.import_discovered_mcp_server(&self.name)?;
+        Ok(ImportedMcpServer {
+            name: self.name.clone(),
+        })
+    }
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ForgetMcpServer {
+    name: String,
+}
+
+impl ForgetMcpServer {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForgottenMcpServer {
+    pub name: String,
+}
+
+impl ToolOperation for ForgetMcpServer {
+    type Output = ForgottenMcpServer;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let mut manifest = store.load()?;
+        manifest.mcp.servers.remove(&self.name);
+        store.save(&manifest)?;
+        Ok(ForgottenMcpServer {
+            name: self.name.clone(),
+        })
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpManifest {

@@ -6,7 +6,9 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
+bevy_tasks = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }

@@ -1,9 +1,37 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use bevy_ecs::prelude::Component;
+
+use crate::ToolOperation;
 use crate::manifest::{
     ToolStore, add_packages, expand_user_path, load_manifest_from, normalize_names,
     write_manifest_to,
 };
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ImportNpmManifest {
+    path: PathBuf,
+}
+
+impl ImportNpmManifest {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportedNpmManifest {
+    pub packages: usize,
+}
+
+impl ToolOperation for ImportNpmManifest {
+    type Output = ImportedNpmManifest;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let packages = store.import_npm_manifest(&self.path)?;
+        Ok(ImportedNpmManifest { packages })
+    }
+}
 
 pub fn import_npm_manifest(path: &Path) -> Result<usize, String> {
     ToolStore::current().import_npm_manifest(path)

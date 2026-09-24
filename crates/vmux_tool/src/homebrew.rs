@@ -1,10 +1,39 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use bevy_ecs::prelude::Component;
+
+use crate::ToolOperation;
 use crate::manifest::{
     ToolStore, ToolsManifest, add_packages, expand_user_path, load_manifest_from, normalize_names,
     write_manifest_to,
 };
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ImportBrewfile {
+    path: PathBuf,
+}
+
+impl ImportBrewfile {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportedBrewfile {
+    pub formulae: usize,
+    pub casks: usize,
+}
+
+impl ToolOperation for ImportBrewfile {
+    type Output = ImportedBrewfile;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let (formulae, casks) = store.import_brewfile(&self.path)?;
+        Ok(ImportedBrewfile { formulae, casks })
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BrewfileImport {
