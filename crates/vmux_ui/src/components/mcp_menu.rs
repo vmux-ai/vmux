@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
 use vmux_api::mcp::{
-    McpServerAction, McpServerEntry, McpServerRequest, McpServerResult, McpServerStatus,
-    McpServers, McpServersRequest,
+    McpServerAction, McpServerEntry, McpServerRequest, McpServerStatus, McpServers,
+    McpServersRequest,
 };
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
-use crate::hooks::{send, use_listener, use_ui_state};
+use crate::hooks::{send, use_ui_state};
 use crate::i18n::translate;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -28,6 +28,8 @@ pub fn use_mcp_connections() -> McpConnections {
     let mut servers = connections.servers;
     let mut loaded = connections.loaded;
     let mut loading = connections.loading;
+    let mut pending = connections.pending;
+    let mut error = connections.error;
     let snapshot = use_ui_state::<McpServers>();
     use_effect(move || {
         let incoming = snapshot();
@@ -36,17 +38,15 @@ pub fn use_mcp_connections() -> McpConnections {
         if incoming.loaded {
             loading.set(false);
         }
-    });
-    let mut pending = connections.pending;
-    let mut error = connections.error;
-    let _result = use_listener::<McpServerResult, _>(move |result| {
-        if *pending.peek() == result.id {
-            pending.set(String::new());
-        }
-        if result.success {
-            error.set(String::new());
-        } else {
-            error.set(result.message);
+        if let Some(result) = incoming.result {
+            if *pending.peek() == result.id {
+                pending.set(String::new());
+            }
+            if result.success {
+                error.set(String::new());
+            } else {
+                error.set(result.message);
+            }
         }
     });
     connections

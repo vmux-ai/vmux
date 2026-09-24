@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
@@ -25,8 +25,8 @@ pub struct McpConnectionPlugin;
 
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<McpActionQueue>()
-            .add_plugins(UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default())
+        app.world_mut().spawn(McpRuntime);
+        app.add_plugins(UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default())
             .add_observer(McpConnections::request)
             .add_observer(McpConnections::act)
             .add_systems(
@@ -52,27 +52,43 @@ impl McpConnections {
         if !browsers.can_emit_to(&target) {
             return;
         }
-        Self::spawn_snapshot(target, proxy.as_deref(), &mut commands);
+        Self::spawn_snapshot(target, None, proxy.as_deref(), &mut commands);
     }
 
-    fn act(trigger: On<BinReceive<McpServerRequest>>, mut queue: ResMut<McpActionQueue>) {
-        queue
-            .0
-            .push_back((trigger.event().webview, trigger.event().payload.clone()));
+    fn act(
+        trigger: On<BinReceive<McpServerRequest>>,
+        runtime: Single<Entity, With<McpRuntime>>,
+        mut commands: Commands,
+    ) {
+        McpAction::enqueue(
+            &mut commands,
+            *runtime,
+            trigger.event().webview,
+            trigger.event().payload.clone(),
+        );
     }
 
     fn start(
-        mut queue: ResMut<McpActionQueue>,
-        tasks: Query<(), With<McpActionTask>>,
+        runtime: Query<&McpActions, With<McpRuntime>>,
+        pending: Query<&PendingMcpAction>,
+        running: Query<(), With<McpActionTask>>,
         proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
         mut commands: Commands,
     ) {
-        if !tasks.is_empty() {
-            return;
-        }
-        let Some((target, request)) = queue.0.pop_front() else {
+        let Ok(runtime) = runtime.single() else {
             return;
         };
+        let Some(entity) = runtime.iter().next() else {
+            return;
+        };
+        if running.contains(entity) {
+            return;
+        }
+        let Ok(pending) = pending.get(entity) else {
+            return;
+        };
+        let target = pending.target;
+        let request = pending.request.clone();
         let task_request = request.clone();
         let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let progress_wake = completion_wake.clone();
@@ -93,12 +109,15 @@ impl McpConnections {
             }
             result
         });
-        commands.spawn(McpActionTask {
-            target,
-            request,
-            task,
-            progress: Mutex::new(progress_receiver),
-        });
+        commands
+            .entity(entity)
+            .remove::<PendingMcpAction>()
+            .insert(McpActionTask {
+                target,
+                request,
+                task,
+                progress: Mutex::new(progress_receiver),
+            });
     }
 
     fn drain(
@@ -125,21 +144,19 @@ impl McpConnections {
             if !browsers.can_emit_to(&task.target) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_event(
-                task.target,
-                &McpServerResult {
-                    id: task.request.id.clone(),
-                    action: task.request.action,
-                    success,
-                    message,
-                },
-            ));
-            Self::spawn_snapshot(task.target, proxy.as_deref(), &mut commands);
+            let result = McpServerResult {
+                id: task.request.id.clone(),
+                action: task.request.action,
+                success,
+                message,
+            };
+            Self::spawn_snapshot(task.target, Some(result), proxy.as_deref(), &mut commands);
         }
     }
 
     fn spawn_snapshot(
         target: Entity,
+        result: Option<McpServerResult>,
         proxy: Option<&bevy::winit::EventLoopProxyWrapper>,
         commands: &mut Commands,
     ) {
@@ -147,7 +164,7 @@ impl McpConnections {
         commands.spawn(McpSnapshotTask {
             target,
             task: IoTaskPool::get().spawn(async move {
-                let snapshot = McpCatalog::snapshot();
+                let snapshot = McpCatalog::snapshot(result);
                 if let Some(wake) = wake {
                     let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
                 }
@@ -174,8 +191,36 @@ impl McpConnections {
     }
 }
 
-#[derive(Resource, Default)]
-struct McpActionQueue(VecDeque<(Entity, McpServerRequest)>);
+#[derive(Component)]
+struct McpRuntime;
+
+#[derive(Component)]
+#[relationship(relationship_target = McpActions)]
+struct McpAction {
+    #[relationship]
+    runtime: Entity,
+}
+
+#[derive(Component)]
+#[relationship_target(relationship = McpAction)]
+struct McpActions(Vec<Entity>);
+
+impl McpAction {
+    fn enqueue(
+        commands: &mut Commands,
+        runtime: Entity,
+        target: Entity,
+        request: McpServerRequest,
+    ) {
+        commands.spawn((Self { runtime }, PendingMcpAction { target, request }));
+    }
+}
+
+#[derive(Component)]
+struct PendingMcpAction {
+    target: Entity,
+    request: McpServerRequest,
+}
 
 #[derive(Component)]
 struct McpActionTask {
@@ -233,7 +278,7 @@ impl McpCatalog {
         Self::ENTRIES.iter().copied().find(|entry| entry.id == id)
     }
 
-    fn snapshot() -> McpServers {
+    fn snapshot(result: Option<McpServerResult>) -> McpServers {
         let manifest = load_manifest().unwrap_or_default();
         let mut servers = Vec::new();
         let mut catalog_ids = BTreeSet::new();
@@ -281,6 +326,7 @@ impl McpCatalog {
         McpServers {
             loaded: true,
             servers,
+            result,
         }
     }
 }
@@ -677,7 +723,8 @@ fn base64_url(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{McpCallback, McpConnection, base64_url};
+    use super::{McpAction, McpActions, McpCallback, McpConnection, McpRuntime, base64_url};
+    use bevy::prelude::*;
 
     #[test]
     fn pkce_uses_unpadded_url_safe_base64() {
@@ -711,5 +758,16 @@ mod tests {
             .as_str(),
             "https://auth.example.com/.well-known/oauth-authorization-server/tenant"
         );
+    }
+
+    #[test]
+    fn mcp_actions_keep_entity_insertion_order() {
+        let mut world = World::new();
+        let runtime = world.spawn(McpRuntime).id();
+        let first = world.spawn(McpAction { runtime }).id();
+        let second = world.spawn(McpAction { runtime }).id();
+
+        let actions = world.get::<McpActions>(runtime).unwrap();
+        assert_eq!(actions.0, [first, second]);
     }
 }
