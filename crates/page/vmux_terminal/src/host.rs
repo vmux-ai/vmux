@@ -7,6 +7,7 @@ mod loading;
 mod mouse;
 pub mod pid;
 pub mod plugin;
+mod process_control;
 pub(crate) mod process_index;
 pub mod processes_monitor;
 mod prompt;
@@ -16,7 +17,6 @@ pub mod shell_input;
 pub mod snapshot_updater;
 pub mod target;
 pub mod theme;
-mod view;
 
 pub(crate) mod link;
 
@@ -26,10 +26,10 @@ pub use component::{
 };
 pub use contract::TerminalContractPlugin;
 pub use plugin::*;
+pub use process_control::TerminalGridSize;
 pub use prompt::{BufferedAgentPrompt, PromptCapture};
 pub use request::{RunShellRequest, ShellMode, TerminalRequestPlugin, TerminalSendRequest};
 pub use theme::{TerminalFontSizeCommand, TerminalThemePlugin};
-pub use view::TerminalGridSize;
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "terminal",
