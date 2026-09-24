@@ -1,8 +1,9 @@
-pub trait UiState: Clone + 'static {
-    type Patch: 'static;
+pub trait UiState: Clone + Send + Sync + 'static {
+    type Patch: Clone + Send + Sync + 'static;
 
     fn sequence(&self) -> u64;
     fn patches(&self) -> &[Self::Patch];
+    fn from_parts(sequence: u64, patches: Vec<Self::Patch>) -> Self;
 }
 
 pub trait UiStatePatch<T>: 'static {
@@ -33,6 +34,7 @@ mod tests {
         };
         assert_eq!(state.sequence(), 7);
         assert_eq!(state.patches().len(), 2);
+        assert_eq!(TestState::from_parts(8, vec![9u32.into()]).sequence, 8);
         assert_eq!(
             <TestPatch as UiStatePatch<u32>>::payload(&state.patches()[0]),
             Some(&5),

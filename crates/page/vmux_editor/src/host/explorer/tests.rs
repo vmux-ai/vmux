@@ -429,7 +429,9 @@ impl SentReveals {
     fn watch(app: &mut App, webview: Entity) {
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(webview);
-        app.add_plugins(crate::host::ui_state::UiStatePlugin)
+        app.add_plugins(vmux_core::host::UiStatePlugin::<
+            vmux_core::event::FileUiStateEvent,
+        >::default())
             .insert_non_send(browsers)
             .init_resource::<Self>()
             .add_observer(Self::record);

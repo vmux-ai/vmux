@@ -27,7 +27,7 @@ impl Plugin for EditorPlugin {
             navigation::NavigationPlugin,
             history::HistoryPlugin,
             explorer::ExplorerPlugin,
-            ui_state::UiStatePlugin,
+            vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiStateEvent>::default(),
         ));
     }
 }
@@ -80,7 +80,6 @@ pub(crate) mod page_open;
 pub(crate) mod preview;
 pub(crate) mod search;
 pub(crate) mod status;
-pub(crate) mod ui_state;
 pub(crate) mod viewport;
 pub(crate) mod workspace_edit;
 pub(crate) mod wrap;

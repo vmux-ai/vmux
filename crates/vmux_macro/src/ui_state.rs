@@ -40,6 +40,10 @@ pub(crate) fn derive_state(input: DeriveInput) -> syn::Result<TokenStream> {
             fn patches(&self) -> &[Self::Patch] {
                 &self.patches
             }
+
+            fn from_parts(sequence: u64, patches: ::std::vec::Vec<Self::Patch>) -> Self {
+                Self { sequence, patches }
+            }
         }
     })
 }
