@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::{ShortcutBinding, ShortcutPressedEvent, ShortcutStroke, ShortcutsEvent};
 use dioxus::prelude::*;
-use vmux_ui::hooks::{use_listener, use_theme};
+use vmux_ui::hooks::{use_listener, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::BuiltinIconView;
 use vmux_ui::platform::{now_millis, sleep_ms};
@@ -12,17 +12,14 @@ use vmux_ui::platform::{now_millis, sleep_ms};
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut state = use_signal(|| Rc::new(ShortcutCatalog::default()));
+    let state = use_ui_state::<ShortcutsEvent>();
     let mut probe = use_signal(ShortcutProbe::default);
-    let _listener = use_listener::<ShortcutsEvent, _>(move |event| {
-        state.set(Rc::new(ShortcutCatalog::from(event)));
-    });
     let _pressed = use_listener::<ShortcutPressedEvent, _>(move |event| {
         record_stroke(probe, state, event.stroke, event.pressed_at_ms);
     });
 
     let probe_value = probe();
-    let catalog = state();
+    let catalog = Rc::new(ShortcutCatalog::from(state()));
     let groups = catalog.filtered(&probe_value);
     let status = probe_value.status(&catalog.shortcuts);
     let status_tone = status.tone_class();
@@ -350,13 +347,13 @@ impl ShortcutProbe {
 
 fn record_stroke(
     mut probe: Signal<ShortcutProbe>,
-    state: Signal<Rc<ShortcutCatalog>>,
+    state: Signal<ShortcutsEvent>,
     stroke: ShortcutStroke,
     pressed_at_ms: i64,
 ) {
-    let timeout_ms = state.read().shortcuts.chord_timeout_ms.min(u32::MAX as u64) as u32;
+    let timeout_ms = state.read().chord_timeout_ms.min(u32::MAX as u64) as u32;
     let mut next = probe();
-    next.capture(stroke, &state.read().shortcuts, pressed_at_ms);
+    next.capture(stroke, &state.read(), pressed_at_ms);
     let generation = next.generation;
     let pending = next.pending;
     let elapsed_ms = next
