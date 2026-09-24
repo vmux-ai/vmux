@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::{Command, Output};
 use std::sync::Arc;
@@ -122,8 +122,9 @@ impl Plugin for ToolPlugin {
         ));
         vmux_core::register_host_spawn(app, "tools");
         vmux_core::register_host_spawn(app, "vault");
-        app.init_resource::<ToolsState>()
-            .init_resource::<ActionRequestSequence>()
+        app.world_mut()
+            .spawn((Name::new("Tool registry"), ToolRegistry::default()));
+        app.init_resource::<ActionRequestSequence>()
             .init_resource::<VaultAutoSync>()
             .init_resource::<VaultRecoveryState>()
             .add_plugins(crate::mcp_connection::McpConnectionPlugin)
@@ -152,6 +153,7 @@ impl Plugin for ToolPlugin {
                     drain_tool_actions,
                     start_vault_action,
                     drain_vault_actions,
+                    register_layout_subscribers,
                     emit_tools_snapshot,
                 )
                     .chain(),
@@ -187,8 +189,8 @@ const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
 const VAULT_AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
 const VAULT_REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
 
-#[derive(Resource)]
-struct ToolsState {
+#[derive(Component)]
+struct ToolRegistry {
     dirty: bool,
     full_scan: bool,
     refresh_catalogs: bool,
@@ -197,10 +199,9 @@ struct ToolsState {
     revision: u64,
     loaded: bool,
     snapshot: ToolsSnapshot,
-    subscribers: HashMap<Entity, u64>,
 }
 
-impl Default for ToolsState {
+impl Default for ToolRegistry {
     fn default() -> Self {
         Self {
             dirty: true,
@@ -211,9 +212,13 @@ impl Default for ToolsState {
             revision: 0,
             loaded: false,
             snapshot: ToolsSnapshot::default(),
-            subscribers: HashMap::new(),
         }
     }
+}
+
+#[derive(Component, Default)]
+struct ToolSubscriber {
+    revision: u64,
 }
 
 #[derive(Component)]
@@ -385,9 +390,18 @@ fn on_navigate_request(
     }
 }
 
-fn on_refresh_request(trigger: On<BinReceive<ToolsRefreshRequest>>, mut state: ResMut<ToolsState>) {
+fn on_refresh_request(
+    trigger: On<BinReceive<ToolsRefreshRequest>>,
+    mut registry: Query<&mut ToolRegistry>,
+    mut commands: Commands,
+) {
+    let Ok(mut state) = registry.single_mut() else {
+        return;
+    };
     let request = &trigger.event().payload;
-    state.subscribers.insert(trigger.event().webview, 0);
+    commands
+        .entity(trigger.event().webview)
+        .insert(ToolSubscriber::default());
     if request.refresh || !state.loaded {
         state.dirty = true;
         state.full_scan = true;
@@ -398,13 +412,12 @@ fn on_refresh_request(trigger: On<BinReceive<ToolsRefreshRequest>>, mut state: R
 
 fn on_action_request(
     trigger: On<BinReceive<ToolRequest>>,
-    mut state: ResMut<ToolsState>,
     mut sequence: ResMut<ActionRequestSequence>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
     let request = trigger.event().payload.clone();
-    state.subscribers.insert(target, 0);
+    commands.entity(target).insert(ToolSubscriber::default());
     commands.spawn(PendingToolAction {
         order: sequence.next(),
         target,
@@ -414,7 +427,6 @@ fn on_action_request(
 
 fn on_vault_action_request(
     trigger: On<BinReceive<VaultRequest>>,
-    mut state: ResMut<ToolsState>,
     mut sequence: ResMut<ActionRequestSequence>,
     pending: Query<(Entity, &PendingVaultAction)>,
     tasks: Query<&VaultActionTask>,
@@ -422,7 +434,7 @@ fn on_vault_action_request(
 ) {
     let target = trigger.event().webview;
     let request = trigger.event().payload.clone();
-    state.subscribers.insert(target, 0);
+    commands.entity(target).insert(ToolSubscriber::default());
     let mut connecting = false;
     for task in &tasks {
         if task.request.action != VaultAction::ConnectGithub {
@@ -451,9 +463,15 @@ fn on_vault_action_request(
 
 fn on_vault_refresh_request(
     trigger: On<BinReceive<VaultRefreshRequest>>,
-    mut state: ResMut<ToolsState>,
+    mut registry: Query<&mut ToolRegistry>,
+    mut commands: Commands,
 ) {
-    state.subscribers.insert(trigger.event().webview, 0);
+    let Ok(mut state) = registry.single_mut() else {
+        return;
+    };
+    commands
+        .entity(trigger.event().webview)
+        .insert(ToolSubscriber::default());
     state.dirty = true;
     state.full_scan |= !state.loaded;
     state.load_vault_repositories |= trigger.event().payload.load_repositories;
@@ -463,9 +481,12 @@ fn on_vault_refresh_request(
 fn drain_vault_watch(
     watcher: Option<NonSendMut<VaultWatch>>,
     mut auto_sync: ResMut<VaultAutoSync>,
-    mut state: ResMut<ToolsState>,
+    mut registry: Query<&mut ToolRegistry>,
 ) {
     let Some(watcher) = watcher else {
+        return;
+    };
+    let Ok(mut state) = registry.single_mut() else {
         return;
     };
     if watcher.remote_rx.try_iter().next().is_some() {
@@ -492,13 +513,16 @@ fn drain_vault_watch(
 
 fn queue_vault_auto_sync(
     mut auto_sync: ResMut<VaultAutoSync>,
-    state: Res<ToolsState>,
+    registry: Query<&ToolRegistry>,
     scans: Query<(), With<ToolsScanTask>>,
     tasks: Query<&VaultActionTask>,
     pending: Query<&PendingVaultAction>,
     mut sequence: ResMut<ActionRequestSequence>,
     mut commands: Commands,
 ) {
+    let Ok(state) = registry.single() else {
+        return;
+    };
     if !auto_sync.requested || state.dirty || !state.loaded || !scans.is_empty() {
         return;
     }
@@ -650,7 +674,7 @@ fn start_vault_action(
 }
 
 fn start_tools_scan(
-    mut state: ResMut<ToolsState>,
+    mut registry: Query<&mut ToolRegistry>,
     tasks: Query<(), With<ToolsScanTask>>,
     action_tasks: Query<(), With<ToolActionTask>>,
     vault_tasks: Query<(), With<VaultActionTask>>,
@@ -658,6 +682,9 @@ fn start_tools_scan(
     pending_vault_actions: Query<(), With<PendingVaultAction>>,
     mut commands: Commands,
 ) {
+    let Ok(mut state) = registry.single_mut() else {
+        return;
+    };
     if !state.dirty
         || !tasks.is_empty()
         || !action_tasks.is_empty()
@@ -694,10 +721,13 @@ fn start_tools_scan(
 
 fn drain_tools_scan(
     mut tasks: Query<(Entity, &mut ToolsScanTask)>,
-    mut state: ResMut<ToolsState>,
+    mut registry: Query<&mut ToolRegistry>,
     mut auto_sync: ResMut<VaultAutoSync>,
     mut commands: Commands,
 ) {
+    let Ok(mut state) = registry.single_mut() else {
+        return;
+    };
     for (entity, mut task) in &mut tasks {
         let Some(snapshot) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
@@ -723,10 +753,13 @@ fn drain_tools_scan(
 
 fn drain_tool_actions(
     mut tasks: Query<(Entity, &mut ToolActionTask)>,
-    mut state: ResMut<ToolsState>,
+    mut registry: Query<&mut ToolRegistry>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
+    let Ok(mut state) = registry.single_mut() else {
+        return;
+    };
     for (entity, mut task) in &mut tasks {
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
@@ -756,12 +789,15 @@ fn drain_tool_actions(
 
 fn drain_vault_actions(
     mut tasks: Query<(Entity, &mut VaultActionTask)>,
-    mut state: ResMut<ToolsState>,
+    mut registry: Query<&mut ToolRegistry>,
     mut recovery: ResMut<VaultRecoveryState>,
     browsers: NonSend<Browsers>,
     mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
     mut commands: Commands,
 ) {
+    let Ok(mut state) = registry.single_mut() else {
+        return;
+    };
     for (entity, mut task) in &mut tasks {
         let target = task.target.webview();
         while let Ok(progress) = task.progress.get_mut().try_recv() {
@@ -818,39 +854,37 @@ fn drain_vault_actions(
     }
 }
 
-fn emit_tools_snapshot(
-    mut state: ResMut<ToolsState>,
-    browsers: NonSend<Browsers>,
-    layout: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    entities: &bevy::ecs::entity::Entities,
-    mut layout_revisions: Local<HashMap<Entity, u64>>,
+fn register_layout_subscribers(
+    layouts: Query<Entity, (With<LayoutCef>, Changed<PageReady>)>,
     mut commands: Commands,
 ) {
+    for entity in &layouts {
+        commands.entity(entity).insert(ToolSubscriber::default());
+    }
+}
+
+fn emit_tools_snapshot(
+    registry: Query<&ToolRegistry>,
+    browsers: NonSend<Browsers>,
+    mut subscribers: Query<(Entity, &mut ToolSubscriber)>,
+    mut commands: Commands,
+) {
+    let Ok(state) = registry.single() else {
+        return;
+    };
     if !state.loaded {
         return;
     }
-    for (entity, page_ready) in &layout {
-        if layout_revisions.get(&entity) == Some(&state.revision) && !page_ready.is_changed() {
+    for (entity, mut subscriber) in &mut subscribers {
+        if subscriber.revision == state.revision {
             continue;
         }
         if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_event(entity, &state.snapshot));
-        layout_revisions.insert(entity, state.revision);
+        subscriber.revision = state.revision;
     }
-    let revision = state.revision;
-    let snapshot = state.snapshot.clone();
-    state.subscribers.retain(|entity, sent_revision| {
-        if !entities.contains(*entity) {
-            return false;
-        }
-        if *sent_revision != revision && browsers.can_emit_to(entity) {
-            commands.trigger(BinHostEmitEvent::from_event(*entity, &snapshot));
-            *sent_revision = revision;
-        }
-        true
-    });
 }
 
 fn scan_tools(
@@ -1904,12 +1938,12 @@ mod tests {
     impl VaultAutoSyncScenario {
         fn pending_targets(vault: VaultSnapshot, remote_check: bool) -> Vec<VaultActionTarget> {
             let mut app = App::new();
-            app.init_resource::<ToolsState>()
-                .init_resource::<VaultAutoSync>()
+            app.init_resource::<VaultAutoSync>()
                 .init_resource::<ActionRequestSequence>()
                 .add_systems(Update, queue_vault_auto_sync);
+            let registry = app.world_mut().spawn(ToolRegistry::default()).id();
             {
-                let mut state = app.world_mut().resource_mut::<ToolsState>();
+                let mut state = app.world_mut().get_mut::<ToolRegistry>(registry).unwrap();
                 state.loaded = true;
                 state.dirty = false;
                 state.snapshot.vault = vault;
