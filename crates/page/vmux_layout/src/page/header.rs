@@ -15,9 +15,10 @@ use vmux_ui::platform::sleep_ms;
 use vmux_ui::util::cn;
 
 use super::side_sheet::{
-    BookmarkIdCommand, BookmarkPageCommand, LayoutContextMenu, StackIcon, add_to_bookmarks,
-    bookmark_cmd, bookmark_nodes_contain_url, dir_truncate_class,
+    BookmarkIdCommand, BookmarkPageCommand, LayoutContextMenu, add_to_bookmarks, bookmark_cmd,
+    bookmark_nodes_contain_url,
 };
+use super::stack::{StackIcon, dir_truncate_class};
 use super::tab_drag::TabDrag;
 use super::window_drag::WindowDragRegion;
 use crate::event::{
