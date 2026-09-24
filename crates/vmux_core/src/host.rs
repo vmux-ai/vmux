@@ -17,6 +17,7 @@ pub mod page_open;
 pub mod profile;
 pub mod team;
 pub mod terminal;
+pub mod ui_state;
 pub mod wake;
 pub mod workspace;
 
@@ -36,4 +37,5 @@ pub use page_open::{
     PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask, PendingPrompt,
     PendingPromptAttachments,
 };
+pub use ui_state::{UiStatePlugin, UiStateUpdates, UiStateWrite};
 pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};

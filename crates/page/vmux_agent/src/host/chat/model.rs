@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
 
-use super::ui_state::ChatUiStateUpdates;
+use super::ChatUiStateUpdates;
 
 use crate::client::acp::{AcpModeState, AcpModelState};
 use crate::events::AgentCommandRequest;

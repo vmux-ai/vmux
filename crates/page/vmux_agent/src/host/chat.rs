@@ -5,7 +5,6 @@ mod prompt;
 mod resume;
 mod tab;
 mod transcript;
-mod ui_state;
 mod workspace;
 
 use bevy::prelude::*;
@@ -26,7 +25,7 @@ impl Plugin for AgentChatPagePlugin {
             resume::ChatResumePlugin,
             tab::ChatTabPlugin,
             transcript::ChatTranscriptPlugin,
-            ui_state::ChatUiStatePlugin,
+            vmux_core::host::UiStatePlugin::<vmux_chat::ui_state::ChatUiStateEvent>::default(),
             workspace::ChatWorkspacePlugin,
         ))
         .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
@@ -45,8 +44,10 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 };
 
 #[derive(Component)]
-#[require(ui_state::ChatUiStateUpdates)]
+#[require(ChatUiStateUpdates)]
 pub struct AgentChatView;
+
+type ChatUiStateUpdates = vmux_core::host::UiStateUpdates<vmux_chat::ui_state::ChatUiStateEvent>;
 
 #[derive(Component)]
 pub(crate) struct ChatSynced;

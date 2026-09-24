@@ -343,7 +343,10 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<crate::lsp::manager::LspGoto>()
-                .add_plugins((NavigationPlugin, crate::host::ui_state::UiStatePlugin))
+                .add_plugins((
+                    NavigationPlugin,
+                    vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiStateEvent>::default(),
+                ))
                 .init_resource::<Emitted>()
                 .add_observer(
                     |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {

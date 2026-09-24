@@ -2,8 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use super::model::{ModeProjection, ModelProjection};
-use super::ui_state::ChatUiStateUpdates;
-use super::{AgentChatView, ChatSynced};
+use super::{AgentChatView, ChatSynced, ChatUiStateUpdates};
 use crate::client::acp::{AcpModeState, AcpModelState};
 use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
