@@ -6,8 +6,8 @@ use bevy_cef::prelude::{BinReceive, Browsers};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::page::PageReady;
 use vmux_layout::event::{
-    RemoteCopyEvent, RemoteDevice, RemotePhase, RemoteRequest, RemoteRevokeRequest,
-    RemoteStateEvent,
+    RemoteCopyEvent, RemoteDevice, RemotePairingRequest, RemotePhase, RemoteRequest,
+    RemoteRevokeRequest, RemoteStateEvent,
 };
 use vmux_layout::{LayoutCef, LayoutUiStateUpdates};
 use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
@@ -16,8 +16,10 @@ pub(crate) struct RemotePlugin;
 
 impl Plugin for RemotePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RemoteState>()
-            .add_observer(on_remote_request)
+        app.world_mut()
+            .spawn((Name::new("Remote runtime"), RemoteState::default()));
+        app.add_observer(on_remote_request)
+            .add_observer(on_remote_pairing_request)
             .add_observer(on_remote_copy)
             .add_observer(on_remote_revoke)
             .add_systems(Startup, reconcile_remote_on_startup)
@@ -26,6 +28,7 @@ impl Plugin for RemotePlugin {
                 (
                     poll_remote_worker,
                     poll_remote_authorizations,
+                    expire_remote_pairing,
                     push_remote_state_emit,
                 )
                     .chain(),
@@ -33,13 +36,22 @@ impl Plugin for RemotePlugin {
     }
 }
 
-fn on_remote_copy(_trigger: On<BinReceive<RemoteCopyEvent>>, state: Res<RemoteState>) {
+fn on_remote_copy(_trigger: On<BinReceive<RemoteCopyEvent>>, state: Query<&RemoteState>) {
+    let Ok(state) = state.single() else {
+        return;
+    };
     if state.phase == RemotePhase::Enabled && !state.pairing_url.is_empty() {
         vmux_clipboard::write(state.pairing_url.clone());
     }
 }
 
-fn on_remote_revoke(trigger: On<BinReceive<RemoteRevokeRequest>>, mut state: ResMut<RemoteState>) {
+fn on_remote_revoke(
+    trigger: On<BinReceive<RemoteRevokeRequest>>,
+    mut states: Query<&mut RemoteState>,
+) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
     let client_id = vmux_service::DeviceId::new(&trigger.event().payload.client_id);
     match RemoteAuthorizationStore::current().revoke(&client_id) {
         Ok(true) => {
@@ -118,7 +130,32 @@ struct RemoteWorkerResult {
     result: Result<Option<RemotePairingInfo>, String>,
 }
 
-#[derive(Resource)]
+#[derive(Default)]
+struct PairingVisibility(Option<Instant>);
+
+impl PairingVisibility {
+    const DURATION: Duration = Duration::from_secs(120);
+
+    fn show(&mut self, now: Instant) {
+        self.0 = Some(now + Self::DURATION);
+    }
+
+    fn dismiss(&mut self) {
+        self.0 = None;
+    }
+
+    fn visible(&self, now: Instant) -> bool {
+        self.0.is_some_and(|deadline| deadline > now)
+    }
+
+    fn expire(&mut self, now: Instant) {
+        if !self.visible(now) {
+            self.dismiss();
+        }
+    }
+}
+
+#[derive(Component)]
 struct RemoteState {
     enabled: bool,
     phase: RemotePhase,
@@ -127,6 +164,7 @@ struct RemoteState {
     relay_token: String,
     pairing_token: String,
     paired: bool,
+    pairing_visibility: PairingVisibility,
     devices: Vec<vmux_service::AuthorizedDevice>,
     error: String,
     command_tx: Sender<bool>,
@@ -161,6 +199,7 @@ impl Default for RemoteState {
             relay_token: String::new(),
             pairing_token: String::new(),
             paired: !devices.is_empty(),
+            pairing_visibility: PairingVisibility::default(),
             devices,
             error: String::new(),
             command_tx,
@@ -171,13 +210,39 @@ impl Default for RemoteState {
     }
 }
 
-fn reconcile_remote_on_startup(state: Res<RemoteState>) {
+impl RemoteState {
+    fn show_pairing(&mut self, now: Instant) {
+        if self.phase == RemotePhase::Enabled && !self.pairing_deep_link.is_empty() {
+            self.pairing_visibility.show(now);
+        }
+    }
+
+    fn dismiss_pairing(&mut self) {
+        self.pairing_visibility.dismiss();
+    }
+
+    fn pairing_visible(&self, now: Instant) -> bool {
+        self.pairing_visibility.visible(now)
+    }
+
+    fn expire_pairing(&mut self, now: Instant) {
+        self.pairing_visibility.expire(now);
+    }
+}
+
+fn reconcile_remote_on_startup(state: Query<&RemoteState>) {
+    let Ok(state) = state.single() else {
+        return;
+    };
     if state.reconcile_on_startup {
         let _ = state.command_tx.send(state.enabled);
     }
 }
 
-fn on_remote_request(trigger: On<BinReceive<RemoteRequest>>, mut state: ResMut<RemoteState>) {
+fn on_remote_request(trigger: On<BinReceive<RemoteRequest>>, mut states: Query<&mut RemoteState>) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
     let enabled = trigger.event().payload.enabled;
     if enabled == state.enabled && state.phase != RemotePhase::Error {
         return;
@@ -185,6 +250,9 @@ fn on_remote_request(trigger: On<BinReceive<RemoteRequest>>, mut state: ResMut<R
     state.enabled = enabled;
     state.phase = RemotePhase::Starting;
     state.error.clear();
+    if !enabled {
+        state.dismiss_pairing();
+    }
     if let Err(error) = persist_enabled(enabled) {
         state.error = error.to_string();
         if enabled {
@@ -198,7 +266,23 @@ fn on_remote_request(trigger: On<BinReceive<RemoteRequest>>, mut state: ResMut<R
     }
 }
 
-fn poll_remote_worker(mut state: ResMut<RemoteState>) {
+fn on_remote_pairing_request(
+    trigger: On<BinReceive<RemotePairingRequest>>,
+    mut states: Query<&mut RemoteState>,
+) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
+    match trigger.event().payload {
+        RemotePairingRequest::Show => state.show_pairing(Instant::now()),
+        RemotePairingRequest::Dismiss => state.dismiss_pairing(),
+    }
+}
+
+fn poll_remote_worker(mut states: Query<&mut RemoteState>) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
     while let Ok(message) = state.result_rx.try_recv() {
         if message.enabled != state.enabled {
             continue;
@@ -211,12 +295,16 @@ fn poll_remote_worker(mut state: ResMut<RemoteState>) {
                 state.relay_token = pairing.relay_token;
                 state.pairing_token = pairing.pairing_token;
                 state.error.clear();
+                if !state.paired {
+                    state.show_pairing(Instant::now());
+                }
             }
             Ok(None) => {
                 state.pairing_url.clear();
                 state.pairing_deep_link.clear();
                 state.relay_token.clear();
                 state.pairing_token.clear();
+                state.dismiss_pairing();
                 if let Err(error) = remove_if_exists(&RemotePaths::current().state()) {
                     state.phase = RemotePhase::Error;
                     state.error =
@@ -234,7 +322,10 @@ fn poll_remote_worker(mut state: ResMut<RemoteState>) {
     }
 }
 
-fn poll_remote_authorizations(mut state: ResMut<RemoteState>) {
+fn poll_remote_authorizations(mut states: Query<&mut RemoteState>) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
     if state.authorization_checked_at.elapsed() < Duration::from_secs(1) {
         return;
     }
@@ -247,8 +338,12 @@ fn poll_remote_authorizations(mut state: ResMut<RemoteState>) {
     let Ok(pairing_token) = store.pairing_token() else {
         return;
     };
+    let became_paired = !state.paired && paired;
     if state.paired != paired {
         state.paired = paired;
+    }
+    if became_paired {
+        state.dismiss_pairing();
     }
     if state.devices != devices {
         state.devices = devices;
@@ -264,21 +359,36 @@ fn poll_remote_authorizations(mut state: ResMut<RemoteState>) {
     state.pairing_url = pairing.pairing_url;
     state.pairing_deep_link = pairing.pairing_deep_link;
     state.pairing_token = pairing.pairing_token;
+    if !state.paired {
+        state.show_pairing(Instant::now());
+    }
+}
+
+fn expire_remote_pairing(mut states: Query<&mut RemoteState>) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
+    state.expire_pairing(Instant::now());
 }
 
 fn push_remote_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    state: Res<RemoteState>,
+    states: Query<&RemoteState>,
     mut last: Local<std::collections::HashMap<Entity, RemoteStateEvent>>,
 ) {
+    let Ok(state) = states.single() else {
+        return;
+    };
+    let now = Instant::now();
     let payload = RemoteStateEvent {
         enabled: state.enabled,
         phase: state.phase,
         pairing_url: state.pairing_url.clone(),
         pairing_deep_link: state.pairing_deep_link.clone(),
         paired: state.paired,
+        pairing_visible: state.pairing_visible(now),
         devices: state
             .devices
             .iter()
@@ -371,5 +481,26 @@ fn remove_if_exists(path: &Path) -> std::io::Result<()> {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pairing_visibility_expires_and_can_be_dismissed() {
+        let now = Instant::now();
+        let mut visibility = PairingVisibility::default();
+
+        visibility.show(now);
+        assert!(visibility.visible(now + Duration::from_secs(119)));
+
+        visibility.expire(now + Duration::from_secs(120));
+        assert!(!visibility.visible(now + Duration::from_secs(120)));
+
+        visibility.show(now);
+        visibility.dismiss();
+        assert!(!visibility.visible(now));
     }
 }

@@ -5,11 +5,10 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::platform::sleep_ms;
 
 use crate::event::{
-    LayoutOverlayEvent, RemoteCopyEvent, RemotePhase, RemoteRequest, RemoteRevokeRequest,
-    RemoteStateEvent,
+    LayoutOverlayEvent, RemoteCopyEvent, RemotePairingRequest, RemotePhase, RemoteRequest,
+    RemoteRevokeRequest, RemoteStateEvent,
 };
 
 #[component]
@@ -86,29 +85,16 @@ pub(crate) fn RemoteControl(remote: RemoteStateEvent) -> Element {
 
 #[component]
 fn RemotePanel(remote: RemoteStateEvent) -> Element {
-    let mut show_pairing = use_signal(|| false);
-    let mut pairing_generation = use_signal(|| 0_u64);
-    let mut pairing_started_paired = use_signal(|| false);
     let mut copied = use_signal(|| false);
-    let mut dismissed_pairing_link = use_signal(String::new);
     let active = remote.phase == RemotePhase::Enabled;
     let transitioning = remote.phase == RemotePhase::Starting;
-    let pairing_visible = show_pairing()
-        || (active
-            && !remote.paired
-            && !remote.pairing_deep_link.is_empty()
-            && dismissed_pairing_link() != remote.pairing_deep_link);
     let status = match remote.phase {
         RemotePhase::Disabled | RemotePhase::Enabled => None,
         RemotePhase::Starting if remote.enabled => Some("Starting…"),
         RemotePhase::Starting => Some("Stopping…"),
         RemotePhase::Error => Some("Needs attention"),
     };
-    let qr = if active
-        && pairing_visible
-        && (!remote.paired || pairing_started_paired())
-        && !remote.pairing_deep_link.is_empty()
-    {
+    let qr = if active && remote.pairing_visible && !remote.pairing_deep_link.is_empty() {
         PairingCode::svg(&remote.pairing_deep_link)
     } else {
         None
@@ -151,11 +137,6 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     aria_label: "Toggle Live",
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
-                        dismissed_pairing_link.set(String::new());
-                        if remote.enabled {
-                            pairing_generation.set(pairing_generation().wrapping_add(1));
-                            show_pairing.set(false);
-                        }
                         let _ = send(&RemoteRequest {
                             enabled: !remote.enabled,
                         });
@@ -199,9 +180,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                             r#type: "button",
                             class: "rounded px-1.5 py-1 text-[9px] font-semibold text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                             onclick: move |_| {
-                                pairing_generation.set(pairing_generation().wrapping_add(1));
-                                dismissed_pairing_link.set(remote.pairing_deep_link.clone());
-                                show_pairing.set(false);
+                                let _ = send(&RemotePairingRequest::Dismiss);
                             },
                             "Close"
                         }
@@ -244,16 +223,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                             class: "text-[10px] font-semibold text-foreground hover:opacity-70",
                             onclick: move |_| {
                                 copied.set(false);
-                                pairing_started_paired.set(remote.paired);
-                                let generation = pairing_generation().wrapping_add(1);
-                                pairing_generation.set(generation);
-                                show_pairing.set(true);
-                                spawn(async move {
-                                    sleep_ms(120_000).await;
-                                    if pairing_generation() == generation {
-                                        show_pairing.set(false);
-                                    }
-                                });
+                                let _ = send(&RemotePairingRequest::Show);
                             },
                             if remote.paired { "Show QR" } else { "Connect device" }
                         }

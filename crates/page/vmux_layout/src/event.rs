@@ -566,6 +566,8 @@ pub struct RemoteStateEvent {
     pub pairing_url: String,
     pub pairing_deep_link: String,
     pub paired: bool,
+    #[serde(default)]
+    pub pairing_visible: bool,
     pub devices: Vec<RemoteDevice>,
     pub error: String,
 }
@@ -578,6 +580,12 @@ pub struct RemoteDevice {
 #[vmux_api::ui_event(Copy, Default, Eq, target = "layout")]
 pub struct RemoteRequest {
     pub enabled: bool,
+}
+
+#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+pub enum RemotePairingRequest {
+    Show,
+    Dismiss,
 }
 
 #[vmux_api::ui_event(Default, Eq, target = "layout")]

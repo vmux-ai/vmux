@@ -17,8 +17,6 @@ pub enum LayoutUiStatePatch {
     PaneTree(PaneTreeEvent),
     Spaces(SpacesListEvent),
     Projects(TabBoundaryEvent),
-    ActiveSession(Box<ActiveSessionEvent>),
-    HeaderPage(HeaderPageEvent),
     Team(TeamEvent),
     Remote(RemoteStateEvent),
     Extensions(ExtensionsEvent),
@@ -29,9 +27,11 @@ pub enum LayoutUiStatePatch {
     UpdateCleared(UpdateClearedEvent),
     BookmarkMenuAction(BookmarkMenuActionEvent),
     Reload(ReloadEvent),
+    ActiveSession(Box<ActiveSessionEvent>),
+    HeaderPage(HeaderPageEvent),
 }
 
-#[vmux_api::ui_state(Default, target = "layout")]
+#[vmux_api::ui_state(Default, version = 2, target = "layout")]
 pub struct LayoutUiState {
     pub sequence: u64,
     pub patches: Vec<LayoutUiStatePatch>,
