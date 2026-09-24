@@ -18,7 +18,7 @@ pub(crate) struct LspPage;
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();
-    let state = use_ui_state::<LspManagerStateEvent>();
+    let state = use_ui_state::<LspManagerUiState>();
     let mut query = use_signal(String::new);
 
     use_effect(move || {

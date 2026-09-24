@@ -5,8 +5,8 @@ use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::event::{
-    InstallPhase, LspCatalogEvent, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
-    LspManagerStateEvent, LspPackage, LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest,
+    InstallPhase, LspCatalog, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
+    LspManagerUiState, LspPackage, LspPackageStatus, LspPkgStatus, LspUninstallRequest,
     LspUpdateRequest,
 };
 use vmux_core::host::{UiState, UiStatePlugin};
@@ -21,7 +21,7 @@ impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.add_plugins(vmux_layout::native_open::HostedPagePlugin::<LspManagerPage>::default())
-            .add_plugins(UiStatePlugin::<LspManagerStateEvent>::default())
+            .add_plugins(UiStatePlugin::<LspManagerUiState>::default())
             .add_plugins(UiEventPlugin::<(
                 LspCatalogRequest,
                 LspInstallRequest,
@@ -51,7 +51,7 @@ const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManife
 };
 
 #[derive(Component, Default)]
-#[require(ManagerState, UiState<LspManagerStateEvent>)]
+#[require(ManagerState, UiState<LspManagerUiState>)]
 struct LspManagerPage;
 
 impl HostedPage for LspManagerPage {
@@ -82,7 +82,7 @@ impl ManagerState {
         self.loading = true;
     }
 
-    fn apply_catalog(&mut self, event: LspCatalogEvent) {
+    fn apply_catalog(&mut self, event: LspCatalog) {
         self.packages = event.packages;
         self.loading = false;
     }
@@ -108,7 +108,7 @@ impl ManagerState {
         };
     }
 
-    fn apply_status(&mut self, event: LspPkgStatusEvent) {
+    fn apply_status(&mut self, event: LspPackageStatus) {
         let name = event.name;
         if let Some(package) = self
             .packages
@@ -121,8 +121,8 @@ impl ManagerState {
         self.progress.retain(|item| item.name != name);
     }
 
-    fn event(&self) -> LspManagerStateEvent {
-        LspManagerStateEvent {
+    fn event(&self) -> LspManagerUiState {
+        LspManagerUiState {
             packages: self.packages.clone(),
             progress: self.progress.clone(),
             loading: self.loading,
@@ -131,9 +131,9 @@ impl ManagerState {
 }
 
 enum ManagerMsg {
-    Catalog(LspCatalogEvent),
+    Catalog(LspCatalog),
     Progress(LspInstallProgress),
-    Status(LspPkgStatusEvent),
+    Status(LspPackageStatus),
 }
 
 #[derive(Component)]
@@ -166,7 +166,7 @@ impl ManagerOutput {
 #[derive(Component)]
 struct CatalogJob {
     target: Entity,
-    task: Task<LspCatalogEvent>,
+    task: Task<LspCatalog>,
 }
 
 impl CatalogJob {
@@ -191,7 +191,7 @@ impl CatalogJob {
                     )
                 });
             }
-            LspCatalogEvent { packages }
+            LspCatalog { packages }
         });
         Self { target, task }
     }
@@ -237,7 +237,7 @@ impl PackageOperation {
             });
         });
         match result {
-            Ok(receipt) => ManagerMsg::Status(LspPkgStatusEvent {
+            Ok(receipt) => ManagerMsg::Status(LspPackageStatus {
                 name,
                 status: LspPkgStatus::Installed,
                 version: receipt.version,
@@ -277,7 +277,7 @@ impl PackageOperation {
         } else {
             LspPkgStatus::Available
         };
-        ManagerMsg::Status(LspPkgStatusEvent {
+        ManagerMsg::Status(LspPackageStatus {
             name,
             status,
             version: None,
@@ -537,7 +537,7 @@ fn publish_manager_state(
         if !state.is_changed() {
             continue;
         }
-        UiState::<LspManagerStateEvent>::write(&mut commands, entity, &state.event());
+        UiState::<LspManagerUiState>::write(&mut commands, entity, &state.event());
     }
 }
 
@@ -630,7 +630,7 @@ mod tests {
         assert_eq!(state.packages[0].status, LspPkgStatus::Installing);
         assert_eq!(state.progress.len(), 1);
 
-        state.apply_status(LspPkgStatusEvent {
+        state.apply_status(LspPackageStatus {
             name: "rust-analyzer".into(),
             status: LspPkgStatus::Installed,
             version: Some("1.0".into()),

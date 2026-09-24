@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_core::event::{
-    DiagSeverity, FileDefinitionRequest, FileDiagnostic, FileFoldToggle, FileHoverEvent,
+    DiagSeverity, FileDefinitionRequest, FileDiagnostic, FileFoldToggle, FileHover,
     FileHoverRequest, FileLine, FileLineLayout, FilePointerEvent, FoldGutter,
 };
 use vmux_git::event::GitLineStatus;
@@ -36,7 +36,7 @@ pub(super) fn EditorLines(
     editor_drag_origin: Signal<Option<(i32, i32)>>,
     gutter_hover: Signal<bool>,
     hover_pos: Signal<Option<(u32, u32)>>,
-    lsp_hover: Signal<Option<FileHoverEvent>>,
+    lsp_hover: Signal<Option<FileHover>>,
     hover_diag: Signal<Option<FileDiagnostic>>,
 ) -> Element {
     let chunks = LineChunk::split(&lines(), &line_layouts(), first_row());
@@ -117,7 +117,7 @@ fn EditorLineChunk(
     editor_drag_origin: Signal<Option<(i32, i32)>>,
     gutter_hover: Signal<bool>,
     hover_pos: Signal<Option<(u32, u32)>>,
-    lsp_hover: Signal<Option<FileHoverEvent>>,
+    lsp_hover: Signal<Option<FileHover>>,
     hover_diag: Signal<Option<FileDiagnostic>>,
 ) -> Element {
     rsx! {
@@ -174,7 +174,7 @@ fn EditorLineRow(
     editor_drag_origin: Signal<Option<(i32, i32)>>,
     gutter_hover: Signal<bool>,
     hover_pos: Signal<Option<(u32, u32)>>,
-    lsp_hover: Signal<Option<FileHoverEvent>>,
+    lsp_hover: Signal<Option<FileHover>>,
     hover_diag: Signal<Option<FileDiagnostic>>,
 ) -> Element {
     let mut ctx_menu = ctx_menu;

@@ -65,7 +65,7 @@ fn apply_lsp_workspace_edit(
         if browsers.can_emit_to(&rename.entity) {
             commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                 rename.entity,
-                &vmux_core::event::FileEditFailedEvent { reason },
+                &vmux_core::event::FileEditFailure { reason },
             ));
         }
     }

@@ -166,7 +166,7 @@ mod file_event_tests {
 
     #[test]
     fn file_diagnostics_event_rkyv_roundtrip() {
-        let ev = FileDiagnosticsEvent {
+        let ev = FileDiagnostics {
             path: "/src/main.rs".into(),
             diagnostics: vec![FileDiagnostic {
                 line: 3,
@@ -178,8 +178,7 @@ mod file_event_tests {
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).expect("ser");
-        let back =
-            rkyv::from_bytes::<FileDiagnosticsEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        let back = rkyv::from_bytes::<FileDiagnostics, rkyv::rancor::Error>(&bytes).expect("de");
         assert_eq!(back.path, "/src/main.rs");
         assert_eq!(back.diagnostics.len(), 1);
         assert_eq!(back.diagnostics[0].line, 3);
@@ -190,7 +189,7 @@ mod file_event_tests {
 
     #[test]
     fn lsp_catalog_event_rkyv_roundtrip() {
-        let ev = LspCatalogEvent {
+        let ev = LspCatalog {
             packages: vec![LspPackage {
                 name: "rust-analyzer".into(),
                 description: "Rust LSP".into(),
@@ -203,7 +202,7 @@ mod file_event_tests {
             }],
         };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).unwrap();
-        let d = rkyv::from_bytes::<LspCatalogEvent, rkyv::rancor::Error>(&b).unwrap();
+        let d = rkyv::from_bytes::<LspCatalog, rkyv::rancor::Error>(&b).unwrap();
         assert_eq!(d.packages[0].name, "rust-analyzer");
         assert_eq!(d.packages[0].status, LspPkgStatus::Available);
         assert!(d.packages[0].installable);
@@ -211,7 +210,7 @@ mod file_event_tests {
 
     #[test]
     fn lsp_status_event_rkyv_roundtrip() {
-        let ev = FileLspStatusEvent {
+        let ev = FileLspStatus {
             path: "/x.rs".into(),
             server: "rust-analyzer".into(),
             package: Some("rust-analyzer".into()),
@@ -219,7 +218,7 @@ mod file_event_tests {
             actions: vec![EditorAction::Rename, EditorAction::FormatDocument],
         };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).unwrap();
-        let d = rkyv::from_bytes::<FileLspStatusEvent, rkyv::rancor::Error>(&b).unwrap();
+        let d = rkyv::from_bytes::<FileLspStatus, rkyv::rancor::Error>(&b).unwrap();
         assert_eq!(d.path, "/x.rs");
         assert_eq!(d.server, "rust-analyzer");
         assert_eq!(d.package.as_deref(), Some("rust-analyzer"));
