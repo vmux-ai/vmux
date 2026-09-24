@@ -8,7 +8,7 @@ use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use crate::event::GitRepositoryPickerRequest;
 use crate::state::{GitRepositoryPicked, GitUiState};
 
-type GitUiStateUpdates = vmux_core::host::UiStateUpdates<GitUiState>;
+type GitUiStateUpdates = vmux_core::host::UiState<GitUiState>;
 
 pub(super) struct RepositoryPickerPlugin;
 

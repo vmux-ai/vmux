@@ -5,7 +5,7 @@ use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
 use rkyv::api::high::HighSerializer;
 use rkyv::ser::allocator::ArenaHandle;
 use rkyv::util::AlignedVec;
-use vmux_api::{BatchedUiState, HostEvent, UiState};
+use vmux_api::{BatchedUiState, HostEvent, UiState as UiStateContract};
 
 pub struct UiStatePlugin<S>(PhantomData<fn() -> S>);
 
@@ -17,19 +17,19 @@ impl<S> Default for UiStatePlugin<S> {
 
 impl<S> Plugin for UiStatePlugin<S>
 where
-    S: UiState
+    S: UiStateContract
         + HostEvent
         + for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>>,
 {
     fn build(&self, app: &mut App) {
-        app.add_observer(UiStateUpdates::<S>::collect)
-            .add_observer(UiStateUpdates::<S>::replay)
-            .add_systems(Last, UiStateUpdates::<S>::emit);
+        app.add_observer(UiState::<S>::collect)
+            .add_observer(UiState::<S>::replay)
+            .add_systems(Last, UiState::<S>::emit);
     }
 }
 
 #[derive(Component)]
-pub struct UiStateUpdates<S: UiState> {
+pub struct UiState<S: UiStateContract> {
     sequence: u64,
     updates: Vec<S::Update>,
     retained: Option<S>,
@@ -37,7 +37,7 @@ pub struct UiStateUpdates<S: UiState> {
     state: PhantomData<fn() -> S>,
 }
 
-impl<S: UiState> Default for UiStateUpdates<S> {
+impl<S: UiStateContract> Default for UiState<S> {
     fn default() -> Self {
         Self {
             sequence: 0,
@@ -49,7 +49,7 @@ impl<S: UiState> Default for UiStateUpdates<S> {
     }
 }
 
-impl<S: UiState> UiStateUpdates<S> {
+impl<S: UiStateContract> UiState<S> {
     pub fn current(&self) -> Option<&S> {
         self.retained.as_ref()
     }
@@ -144,13 +144,13 @@ impl<S: UiState> UiStateUpdates<S> {
 }
 
 #[derive(Clone, EntityEvent)]
-pub struct UiStateWrite<S: UiState> {
+pub struct UiStateWrite<S: UiStateContract> {
     #[event_target]
     webview: Entity,
     update: S::Update,
 }
 
-impl<S: UiState> UiStateWrite<S> {
+impl<S: UiStateContract> UiStateWrite<S> {
     pub fn from_event<T>(webview: Entity, event: &T) -> Self
     where
         T: Clone + Into<S::Update>,
@@ -238,21 +238,11 @@ mod tests {
 
     fn deliver(
         targets: Res<Targets>,
-        pages: Query<(), With<UiStateUpdates<FileUiState>>>,
+        pages: Query<(), With<UiState<FileUiState>>>,
         mut commands: Commands,
     ) {
-        UiStateUpdates::<FileUiState>::deliver(
-            &pages,
-            &mut commands,
-            targets.file,
-            &GitChangedEvent {},
-        );
-        UiStateUpdates::<FileUiState>::deliver(
-            &pages,
-            &mut commands,
-            targets.direct,
-            &GitChangedEvent {},
-        );
+        UiState::<FileUiState>::deliver(&pages, &mut commands, targets.file, &GitChangedEvent {});
+        UiState::<FileUiState>::deliver(&pages, &mut commands, targets.direct, &GitChangedEvent {});
     }
 
     #[test]
@@ -263,7 +253,7 @@ mod tests {
             .add_observer(Emitted::record);
         let entity = app
             .world_mut()
-            .spawn(UiStateUpdates::<FileUiState>::default())
+            .spawn(UiState::<FileUiState>::default())
             .id();
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(entity);
@@ -330,7 +320,7 @@ mod tests {
         let mut app = App::new();
         let file = app
             .world_mut()
-            .spawn(UiStateUpdates::<FileUiState>::default())
+            .spawn(UiState::<FileUiState>::default())
             .id();
         let direct = app.world_mut().spawn_empty().id();
         app.insert_resource(Targets { file, direct })

@@ -11,7 +11,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
-use vmux_core::host::{UiStatePlugin, UiStateUpdates};
+use vmux_core::host::{UiState, UiStatePlugin};
 use vmux_core::page::PageManifest;
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tool::{
@@ -228,7 +228,7 @@ impl Default for ToolRegistry {
 }
 
 #[derive(Component, Default)]
-#[require(UiStateUpdates<ToolsUiState>)]
+#[require(UiState<ToolsUiState>)]
 struct ToolSubscriber {
     snapshot_revision: u64,
     revision: u64,
@@ -298,7 +298,7 @@ impl ToolSubscriber {
 }
 
 #[derive(Component, Default)]
-#[require(UiStateUpdates<VaultUiState>)]
+#[require(UiState<VaultUiState>)]
 struct VaultSubscriber {
     snapshot_revision: u64,
     revision: u64,
@@ -1149,7 +1149,7 @@ fn emit_tools_state(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        UiStateUpdates::<ToolsUiState>::write(&mut commands, entity, &subscriber.state);
+        UiState::<ToolsUiState>::write(&mut commands, entity, &subscriber.state);
         subscriber.emitted_revision = subscriber.revision;
     }
 }
@@ -1167,7 +1167,7 @@ fn emit_vault_state(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        UiStateUpdates::<VaultUiState>::write(&mut commands, entity, &subscriber.state);
+        UiState::<VaultUiState>::write(&mut commands, entity, &subscriber.state);
         subscriber.emitted_revision = subscriber.revision;
     }
 }

@@ -9,7 +9,7 @@ use vmux_core::event::{
     LspManagerStateEvent, LspPackage, LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest,
     LspUpdateRequest,
 };
-use vmux_core::host::{UiStatePlugin, UiStateUpdates};
+use vmux_core::host::{UiState, UiStatePlugin};
 use vmux_layout::native_open::HostedPage;
 
 use crate::lsp::catalog::{self, Package};
@@ -51,7 +51,7 @@ const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManife
 };
 
 #[derive(Component, Default)]
-#[require(ManagerState, UiStateUpdates<LspManagerStateEvent>)]
+#[require(ManagerState, UiState<LspManagerStateEvent>)]
 struct LspManagerPage;
 
 impl HostedPage for LspManagerPage {
@@ -537,7 +537,7 @@ fn publish_manager_state(
         if !state.is_changed() {
             continue;
         }
-        UiStateUpdates::<LspManagerStateEvent>::write(&mut commands, entity, &state.event());
+        UiState::<LspManagerStateEvent>::write(&mut commands, entity, &state.event());
     }
 }
 

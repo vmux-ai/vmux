@@ -9,7 +9,7 @@ use crate::settings::EffectiveStartupDir;
 use crate::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use crate::worktree::{ManagedWorktreeRoot, TabWorktreeReady};
 
-type GitUiStateUpdates = vmux_core::host::UiStateUpdates<GitUiState>;
+type GitUiStateUpdates = vmux_core::host::UiState<GitUiState>;
 
 pub struct PageContextPlugin;
 

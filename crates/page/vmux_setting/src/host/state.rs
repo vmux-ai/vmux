@@ -59,7 +59,7 @@ impl Plugin for StatePlugin {
 #[require(SettingsUiStateUpdates)]
 pub struct Settings;
 
-type SettingsUiStateUpdates = vmux_core::host::UiStateUpdates<SettingsUiState>;
+type SettingsUiStateUpdates = vmux_core::host::UiState<SettingsUiState>;
 
 #[derive(Message)]
 struct OpenSettingsRequest;
