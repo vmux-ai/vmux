@@ -8,21 +8,17 @@ use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerTone,
 };
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut state = use_signal(|| ProcessesListEvent {
-        connected: false,
-        processes: Vec::new(),
-    });
+    let state = use_ui_state::<ProcessesUiState>();
     let mut history = use_signal(ServiceHistory::default);
-    let _processes = use_listener::<ProcessesListEvent, _>(move |event| {
-        history.write().push(&event);
-        state.set(event);
+    use_effect(move || {
+        history.write().push(&state.read());
     });
     let mut search = use_signal(String::new);
 
@@ -111,7 +107,7 @@ struct ServiceHistory {
 impl ServiceHistory {
     const LIMIT: usize = 72;
 
-    fn push(&mut self, event: &ProcessesListEvent) {
+    fn push(&mut self, event: &ProcessesUiState) {
         let cpu = event
             .processes
             .iter()

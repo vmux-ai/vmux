@@ -23,9 +23,6 @@ pub(crate) fn derive_state(input: &DeriveInput) -> syn::Result<TokenStream> {
         .find(|field| field.ident.as_ref().is_some_and(|name| name == "patches"));
     let generics = &input.generics;
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
-    let state = quote! {
-        impl #impl_generics ::vmux_api::UiState for #ident #type_generics #where_clause {}
-    };
     let (Some(_), Some(patches)) = (sequence, patches) else {
         if sequence.is_some() || patches.is_some() {
             return Err(syn::Error::new_spanned(
@@ -33,14 +30,39 @@ pub(crate) fn derive_state(input: &DeriveInput) -> syn::Result<TokenStream> {
                 "batched UiState requires both sequence and patches fields",
             ));
         }
-        return Ok(state);
+        return Ok(quote! {
+            impl #impl_generics ::vmux_api::UiState for #ident #type_generics #where_clause {
+                type Update = Self;
+
+                fn from_updates(
+                    _sequence: u64,
+                    mut updates: ::std::vec::Vec<Self::Update>,
+                ) -> Self {
+                    updates.pop().expect("UI state update is never empty")
+                }
+
+                fn retained(&self) -> ::core::option::Option<Self> {
+                    ::core::option::Option::Some(self.clone())
+                }
+            }
+        });
     };
     let patch = vec_element(&patches.ty).ok_or_else(|| {
         syn::Error::new_spanned(&patches.ty, "UiState patches must have type Vec<Patch>")
     })?;
 
     Ok(quote! {
-        #state
+        impl #impl_generics ::vmux_api::UiState for #ident #type_generics #where_clause {
+            type Update = #patch;
+
+            fn from_updates(sequence: u64, updates: ::std::vec::Vec<Self::Update>) -> Self {
+                Self { sequence, patches: updates }
+            }
+
+            fn retained(&self) -> ::core::option::Option<Self> {
+                ::core::option::Option::None
+            }
+        }
 
         impl #impl_generics ::vmux_api::BatchedUiState for #ident #type_generics #where_clause {
             type Patch = #patch;
@@ -179,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_state_only_implements_the_marker() {
+    fn snapshot_state_implements_update_reduction() {
         let input = parse_quote! {
             pub struct ToolState {
                 pub loaded: bool,

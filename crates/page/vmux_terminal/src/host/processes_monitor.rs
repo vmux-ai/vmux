@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
+use vmux_core::host::{UiStatePlugin, UiStateUpdates};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
 use vmux_service::event::*;
@@ -39,6 +40,7 @@ impl Plugin for ProcessesMonitorPlugin {
                 ProcessKillEvent,
                 ProcessKillAllEvent,
             )>::default())
+            .add_plugins(UiStatePlugin::<ProcessesUiState>::default())
             .add_systems(
                 Update,
                 (
@@ -56,7 +58,10 @@ impl Plugin for ProcessesMonitorPlugin {
 }
 
 #[derive(Component, Default)]
+#[require(ProcessesUiStateUpdates)]
 pub struct ProcessesMonitor;
+
+type ProcessesUiStateUpdates = UiStateUpdates<ProcessesUiState>;
 
 impl ProcessesMonitor {}
 
@@ -302,7 +307,6 @@ fn broadcast_to_monitors(
     service: Option<Res<ServiceClient>>,
     monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
-    browsers: NonSend<Browsers>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
     mut commands: Commands,
 ) {
@@ -327,15 +331,13 @@ fn broadcast_to_monitors(
         &vmux_processes.0,
     );
 
-    let event = ProcessesListEvent {
+    let state = ProcessesUiState {
         connected,
         processes,
     };
 
     for entity in &monitors {
-        if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
-        }
+        ProcessesUiStateUpdates::write(&mut commands, entity, &state);
     }
 }
 

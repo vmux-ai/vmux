@@ -1,6 +1,11 @@
-pub trait UiState: crate::HostEvent + Clone + Send + Sync + 'static {}
+pub trait UiState: crate::HostEvent + Clone + Send + Sync + 'static {
+    type Update: Clone + Send + Sync + 'static;
 
-pub trait BatchedUiState: UiState {
+    fn from_updates(sequence: u64, updates: Vec<Self::Update>) -> Self;
+    fn retained(&self) -> Option<Self>;
+}
+
+pub trait BatchedUiState: UiState<Update = Self::Patch> {
     type Patch: Clone + Send + Sync + 'static;
 
     fn sequence(&self) -> u64;
@@ -55,5 +60,8 @@ mod tests {
         fn assert_state<T: UiState>() {}
         assert_state::<TestSnapshot>();
         assert_eq!(TestSnapshot::default().value, 0);
+        let state = TestSnapshot::from_updates(7, vec![TestSnapshot { value: 9 }]);
+        assert_eq!(state.value, 9);
+        assert_eq!(state.retained().map(|state| state.value), Some(9));
     }
 }

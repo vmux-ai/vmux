@@ -5,7 +5,7 @@ use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
 use rkyv::api::high::HighSerializer;
 use rkyv::ser::allocator::ArenaHandle;
 use rkyv::util::AlignedVec;
-use vmux_api::{BatchedUiState, HostEvent};
+use vmux_api::{BatchedUiState, HostEvent, UiState};
 
 pub struct UiStatePlugin<S>(PhantomData<fn() -> S>);
 
@@ -17,37 +17,46 @@ impl<S> Default for UiStatePlugin<S> {
 
 impl<S> Plugin for UiStatePlugin<S>
 where
-    S: BatchedUiState
+    S: UiState
         + HostEvent
         + for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>>,
 {
     fn build(&self, app: &mut App) {
         app.add_observer(UiStateUpdates::<S>::collect)
+            .add_observer(UiStateUpdates::<S>::replay)
             .add_systems(Last, UiStateUpdates::<S>::emit);
     }
 }
 
 #[derive(Component)]
-pub struct UiStateUpdates<S: BatchedUiState> {
+pub struct UiStateUpdates<S: UiState> {
     sequence: u64,
-    patches: Vec<S::Patch>,
+    updates: Vec<S::Update>,
+    retained: Option<S>,
+    replay: bool,
     state: PhantomData<fn() -> S>,
 }
 
-impl<S: BatchedUiState> Default for UiStateUpdates<S> {
+impl<S: UiState> Default for UiStateUpdates<S> {
     fn default() -> Self {
         Self {
             sequence: 0,
-            patches: Vec::new(),
+            updates: Vec::new(),
+            retained: None,
+            replay: false,
             state: PhantomData,
         }
     }
 }
 
-impl<S: BatchedUiState> UiStateUpdates<S> {
+impl<S: UiState> UiStateUpdates<S> {
+    pub fn current(&self) -> Option<&S> {
+        self.retained.as_ref()
+    }
+
     pub fn write<T>(commands: &mut Commands, webview: Entity, event: &T)
     where
-        T: Clone + Into<S::Patch>,
+        T: Clone + Into<S::Update>,
     {
         commands.trigger(UiStateWrite::<S>::from_event(webview, event));
     }
@@ -58,33 +67,55 @@ impl<S: BatchedUiState> UiStateUpdates<S> {
         webview: Entity,
         event: &T,
     ) where
-        T: Clone + Into<S::Patch>,
+        T: Clone + Into<S::Update>,
     {
         if pages.contains(webview) {
             Self::write(commands, webview, event);
         }
     }
 
-    fn push(&mut self, patch: S::Patch) {
-        self.patches.push(patch);
+    fn push(&mut self, update: S::Update) {
+        self.updates.push(update);
     }
 
     fn take(&mut self) -> Option<S> {
-        if self.patches.is_empty() {
+        if !self.updates.is_empty() {
+            self.sequence = self.sequence.wrapping_add(1).max(1);
+            let state = S::from_updates(self.sequence, std::mem::take(&mut self.updates));
+            self.retained = state.retained();
+            self.replay = false;
+            return Some(state);
+        }
+        if !self.replay {
             return None;
         }
-        self.sequence = self.sequence.wrapping_add(1).max(1);
-        Some(S::from_parts(
-            self.sequence,
-            std::mem::take(&mut self.patches),
-        ))
+        self.replay = false;
+        self.retained.clone()
     }
 
-    fn collect(trigger: On<UiStateWrite<S>>, mut updates: Query<&mut Self>) {
+    fn collect(
+        trigger: On<UiStateWrite<S>>,
+        mut updates: Query<&mut Self>,
+        mut commands: Commands,
+    ) {
+        match updates.get_mut(trigger.event().webview) {
+            Ok(mut updates) => updates.push(trigger.event().update.clone()),
+            Err(_) => {
+                let mut updates = Self::default();
+                updates.push(trigger.event().update.clone());
+                commands.entity(trigger.event().webview).insert(updates);
+            }
+        }
+    }
+
+    fn replay(
+        trigger: On<bevy_cef::prelude::BinReceive<vmux_api::PageReady>>,
+        mut updates: Query<&mut Self>,
+    ) {
         let Ok(mut updates) = updates.get_mut(trigger.event().webview) else {
             return;
         };
-        updates.push(trigger.event().patch.clone());
+        updates.replay = true;
     }
 
     fn emit(
@@ -113,20 +144,20 @@ impl<S: BatchedUiState> UiStateUpdates<S> {
 }
 
 #[derive(Clone, EntityEvent)]
-pub struct UiStateWrite<S: BatchedUiState> {
+pub struct UiStateWrite<S: UiState> {
     #[event_target]
     webview: Entity,
-    patch: S::Patch,
+    update: S::Update,
 }
 
-impl<S: BatchedUiState> UiStateWrite<S> {
+impl<S: UiState> UiStateWrite<S> {
     pub fn from_event<T>(webview: Entity, event: &T) -> Self
     where
-        T: Clone + Into<S::Patch>,
+        T: Clone + Into<S::Update>,
     {
         Self {
             webview,
-            patch: event.clone().into(),
+            update: event.clone().into(),
         }
     }
 
@@ -134,8 +165,14 @@ impl<S: BatchedUiState> UiStateWrite<S> {
         self.webview
     }
 
+    pub fn update(&self) -> &S::Update {
+        &self.update
+    }
+}
+
+impl<S: BatchedUiState> UiStateWrite<S> {
     pub fn patch(&self) -> &S::Patch {
-        &self.patch
+        &self.update
     }
 }
 
@@ -143,6 +180,7 @@ impl<S: BatchedUiState> UiStateWrite<S> {
 mod tests {
     use super::*;
     use crate::event::{FileDirtyEvent, FileUiState, FileUiStatePatch};
+    use bevy_cef::prelude::BinReceive;
     use vmux_api::BinEvent;
     use vmux_api::git::GitChangedEvent;
 
@@ -160,6 +198,14 @@ mod tests {
         writes: Vec<Entity>,
     }
 
+    #[vmux_api::ui_state(Default, Eq, target = any)]
+    struct SnapshotState {
+        value: u32,
+    }
+
+    #[derive(Resource, Default)]
+    struct SnapshotEmitted(Vec<SnapshotState>);
+
     impl Emitted {
         fn record(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Self>) {
             if trigger.event().id() != FileUiState::id() {
@@ -175,6 +221,18 @@ mod tests {
     impl Delivered {
         fn write(trigger: On<UiStateWrite<FileUiState>>, mut delivered: ResMut<Self>) {
             delivered.writes.push(trigger.event().webview());
+        }
+    }
+
+    impl SnapshotEmitted {
+        fn record(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Self>) {
+            if trigger.event().id() != SnapshotState::id() {
+                return;
+            }
+            let state =
+                rkyv::from_bytes::<SnapshotState, rkyv::rancor::Error>(trigger.event().payload())
+                    .unwrap();
+            emitted.0.push(state);
         }
     }
 
@@ -233,6 +291,38 @@ mod tests {
                 FileUiStatePatch::Dirty(FileDirtyEvent { dirty: false })
             ]
         ));
+    }
+
+    #[test]
+    fn snapshot_updates_retry_and_replay_the_latest_value() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
+            .init_resource::<SnapshotEmitted>()
+            .add_observer(SnapshotEmitted::record);
+        let entity = app.world_mut().spawn_empty().id();
+
+        app.world_mut()
+            .trigger(UiStateWrite::<SnapshotState>::from_event(
+                entity,
+                &SnapshotState { value: 7 },
+            ));
+        app.update();
+        assert!(app.world().resource::<SnapshotEmitted>().0.is_empty());
+
+        let mut browsers = Browsers::default();
+        browsers.set_externally_hosted(entity);
+        app.world_mut().insert_non_send(browsers);
+        app.update();
+
+        app.world_mut().trigger(BinReceive {
+            webview: entity,
+            payload: vmux_api::PageReady {},
+        });
+        app.update();
+
+        let emitted = &app.world().resource::<SnapshotEmitted>().0;
+        assert_eq!(emitted.len(), 2);
+        assert!(emitted.iter().all(|state| state.value == 7));
     }
 
     #[test]

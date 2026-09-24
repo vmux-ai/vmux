@@ -10,12 +10,12 @@ use crate::url::{PAGE_HOST, PAGE_URL, SimulatorRoute};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::*;
 use hid::HidBroker;
 use stream::StreamServer;
 use vmux_api::protocol::SimulatorAction;
 use vmux_core::PageMetadata;
 use vmux_core::host::page::{NativelyHosted, PageReady};
+use vmux_core::host::{UiStatePlugin, UiStateUpdates};
 
 pub use device::{Axe, SimulatorDevice};
 
@@ -30,6 +30,7 @@ impl Plugin for SimulatorPlugin {
             NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title),
         ));
         app.init_resource::<ActiveSimulatorView>()
+            .add_plugins(UiStatePlugin::<SimulatorReady>::default())
             .configure_sets(Update, (SimulatorFocusSet, SimulatorInputSet).chain())
             .add_message::<HardwareButtonRequest>()
             .add_message::<SimulatorClipboardRequest>()
@@ -58,8 +59,7 @@ impl Plugin for SimulatorPlugin {
                 Update,
                 Self::handle_screenshot_requests.in_set(SimulatorInputSet),
             )
-            .add_plugins(input::SimulatorInputPlugin)
-            .add_observer(Self::forget_on_reload);
+            .add_plugins(input::SimulatorInputPlugin);
 
         #[cfg(target_os = "macos")]
         app.add_plugins(core_simulator::CoreSimulatorPlugin);
@@ -139,9 +139,6 @@ struct DevicePoints(f32, f32);
 #[derive(Component)]
 struct DevicePixels(u32, u32);
 
-#[derive(Component, Clone, PartialEq)]
-struct SimulatorAnnouncement(SimulatorReady);
-
 type SimulatorViews<'w, 's> = Query<
     'w,
     's,
@@ -149,7 +146,7 @@ type SimulatorViews<'w, 's> = Query<
         Entity,
         &'static PageMetadata,
         Option<&'static ChildOf>,
-        Option<&'static SimulatorAnnouncement>,
+        Option<&'static UiStateUpdates<SimulatorReady>>,
     ),
     With<PageReady>,
 >;
@@ -222,7 +219,7 @@ impl SimulatorPlugin {
                 DevicePoints,
                 DevicePixels,
                 StreamServer,
-                SimulatorAnnouncement,
+                UiStateUpdates<SimulatorReady>,
                 input::DeviceTouchSession,
             )>();
             let wake = wake.as_ref().map(|wrapper| (**wrapper).clone());
@@ -293,7 +290,6 @@ impl SimulatorPlugin {
     }
 
     fn announce(
-        browsers: NonSend<Browsers>,
         views: SimulatorViews,
         attachments: Query<(&StreamServer, &SimulatorDevice)>,
         mut commands: Commands,
@@ -329,16 +325,10 @@ impl SimulatorPlugin {
                     commands.entity(child_of.parent()).insert(canonical);
                 }
             }
-            if announced.is_some_and(|announced| announced.0 == payload) {
+            if announced.is_some_and(|announced| announced.current() == Some(&payload)) {
                 continue;
             }
-            if !browsers.can_emit_to(&entity) {
-                continue;
-            }
-            commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
-            commands
-                .entity(entity)
-                .insert(SimulatorAnnouncement(payload.clone()));
+            UiStateUpdates::<SimulatorReady>::write(&mut commands, entity, &payload);
         }
     }
 
@@ -349,12 +339,6 @@ impl SimulatorPlugin {
         for (entity, stream) in &streams {
             stream.set_active(active.0 == Some(entity));
         }
-    }
-
-    fn forget_on_reload(trigger: On<BinReceive<PageReady>>, mut commands: Commands) {
-        commands
-            .entity(trigger.event().webview)
-            .remove::<SimulatorAnnouncement>();
     }
 
     fn handle_screenshot_requests(

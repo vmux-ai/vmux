@@ -2,14 +2,14 @@ use std::path::Path;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::event::{
     InstallPhase, LspCatalogEvent, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
     LspManagerStateEvent, LspPackage, LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest,
     LspUpdateRequest,
 };
-use vmux_core::host::page::PageReady;
+use vmux_core::host::{UiStatePlugin, UiStateUpdates};
 use vmux_layout::native_open::HostedPage;
 
 use crate::lsp::catalog::{self, Package};
@@ -21,6 +21,7 @@ impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.add_plugins(vmux_layout::native_open::HostedPagePlugin::<LspManagerPage>::default())
+            .add_plugins(UiStatePlugin::<LspManagerStateEvent>::default())
             .add_plugins(UiEventPlugin::<(
                 LspCatalogRequest,
                 LspInstallRequest,
@@ -31,7 +32,6 @@ impl Plugin for ManagerPlugin {
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_update_request)
-            .add_observer(reset_state_on_page_ready)
             .add_systems(Update, (poll_catalog_jobs, poll_package_jobs))
             .add_systems(
                 PostUpdate,
@@ -51,7 +51,7 @@ const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManife
 };
 
 #[derive(Component, Default)]
-#[require(ManagerState)]
+#[require(ManagerState, UiStateUpdates<LspManagerStateEvent>)]
 struct LspManagerPage;
 
 impl HostedPage for LspManagerPage {
@@ -129,9 +129,6 @@ impl ManagerState {
         }
     }
 }
-
-#[derive(Component)]
-struct ManagerStateSent;
 
 enum ManagerMsg {
     Catalog(LspCatalogEvent),
@@ -532,39 +529,15 @@ fn deliver_manager_outputs(
     }
 }
 
-fn reset_state_on_page_ready(
-    trigger: On<BinReceive<PageReady>>,
-    pages: Query<(), With<LspManagerPage>>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    if pages.contains(entity) {
-        commands.entity(entity).remove::<ManagerStateSent>();
-    }
-}
-
 fn publish_manager_state(
     pages: Query<(Entity, Ref<ManagerState>), With<LspManagerPage>>,
-    ready: Query<(), With<PageReady>>,
-    sent: Query<(), With<ManagerStateSent>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for (entity, state) in &pages {
-        if !ready.contains(entity) {
+        if !state.is_changed() {
             continue;
         }
-        let already_sent = sent.contains(entity);
-        if already_sent && !state.is_changed() {
-            continue;
-        }
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &state.event()));
-        if !already_sent {
-            commands.entity(entity).insert(ManagerStateSent);
-        }
+        UiStateUpdates::<LspManagerStateEvent>::write(&mut commands, entity, &state.event());
     }
 }
 
