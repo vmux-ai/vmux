@@ -78,6 +78,11 @@ pub struct DecodedText {
 }
 
 impl DecodedText {
+    pub fn read(path: &std::path::Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        Self::decode(&bytes)
+    }
+
     pub fn decode(bytes: &[u8]) -> Option<Self> {
         if let Some(encoding) = Bom::detect(bytes) {
             return Some(Self::forced(bytes, encoding));

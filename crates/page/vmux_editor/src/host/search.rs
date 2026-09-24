@@ -76,7 +76,7 @@ struct SearchOutcome {
 struct ProjectSearch {
     root: PathBuf,
     query: String,
-    pattern: Regex,
+    pattern: SearchPattern,
 }
 
 impl ProjectSearch {
@@ -133,7 +133,7 @@ impl ProjectSearch {
     }
 
     fn scan(&self, path: &Path, budget: usize) -> Option<ExplorerSearchFile> {
-        let text = FileText::read(path)?;
+        let text = crate::encoding::DecodedText::read(path)?.text;
         let limit = budget.min(MAX_MATCHES_PER_FILE);
         let mut matches = Vec::new();
         let mut capped = false;
@@ -147,9 +147,9 @@ impl ProjectSearch {
             }
             matches.push(ExplorerSearchMatch {
                 line: index as u32 + 1,
-                col: Utf16Col::at(line, found.start()),
-                end_col: Utf16Col::at(line, found.end()),
-                preview: LinePreview::truncate(line),
+                col: SearchPattern::utf16_col(line, found.start()),
+                end_col: SearchPattern::utf16_col(line, found.end()),
+                preview: line.trim_end().chars().take(MAX_PREVIEW_CHARS).collect(),
             });
         }
         if matches.is_empty() {
@@ -163,10 +163,10 @@ impl ProjectSearch {
     }
 }
 
-struct SearchPattern;
+struct SearchPattern(Regex);
 
 impl SearchPattern {
-    fn compile(request: &ExplorerSearchRequest) -> Option<Regex> {
+    fn compile(request: &ExplorerSearchRequest) -> Option<Self> {
         if request.query.trim().is_empty() {
             return None;
         }
@@ -179,25 +179,26 @@ impl SearchPattern {
                 true => None,
                 false => Some(request.query.as_str()),
             };
-            source = WholeWord::around(&source, literal);
+            source = Self::whole_word(&source, literal);
         }
         RegexBuilder::new(&source)
             .case_insensitive(!request.case_sensitive)
             .size_limit(1 << 20)
             .build()
+            .map(Self)
             .ok()
     }
-}
 
-struct WholeWord;
+    fn find<'a>(&self, line: &'a str) -> Option<regex::Match<'a>> {
+        self.0.find(line)
+    }
 
-impl WholeWord {
-    fn around(source: &str, literal: Option<&str>) -> String {
+    fn whole_word(source: &str, literal: Option<&str>) -> String {
         let (lead, trail) = match literal {
             None => (true, true),
             Some(query) => (
-                Self::is_word(query.chars().next()),
-                Self::is_word(query.chars().next_back()),
+                Self::word_edge(query.chars().next()),
+                Self::word_edge(query.chars().next_back()),
             ),
         };
         let mut pattern = String::with_capacity(source.len() + 8);
@@ -213,32 +214,11 @@ impl WholeWord {
         pattern
     }
 
-    fn is_word(edge: Option<char>) -> bool {
+    fn word_edge(edge: Option<char>) -> bool {
         matches!(edge, Some(c) if c.is_alphanumeric() || c == '_')
     }
-}
 
-struct FileText;
-
-impl FileText {
-    fn read(path: &Path) -> Option<String> {
-        let bytes = std::fs::read(path).ok()?;
-        Some(crate::encoding::DecodedText::decode(&bytes)?.text)
-    }
-}
-
-struct LinePreview;
-
-impl LinePreview {
-    fn truncate(line: &str) -> String {
-        line.trim_end().chars().take(MAX_PREVIEW_CHARS).collect()
-    }
-}
-
-struct Utf16Col;
-
-impl Utf16Col {
-    fn at(line: &str, byte: usize) -> u32 {
+    fn utf16_col(line: &str, byte: usize) -> u32 {
         let mut index = byte.min(line.len());
         while index > 0 && !line.is_char_boundary(index) {
             index -= 1;

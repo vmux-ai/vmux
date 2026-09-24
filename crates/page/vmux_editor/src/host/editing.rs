@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_command::ScopedKeys;
+use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap};
 use vmux_core::event::*;
 use vmux_core::input::KeyStroke;
 
@@ -14,7 +14,7 @@ use crate::host::keymap::{EditorKeymap, KeymapConfig};
 use crate::host::language::{EditorLanguageRequest, LspEditDirty, WikiCompletionRequest};
 use crate::host::note::NoteSent;
 use crate::host::status::SharedFileViewMode;
-use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport, FoldsDirty};
+use crate::host::viewport::{CursorRenderRequest, FileViewport, FoldsDirty, ViewportRenderRequest};
 use crate::keymap::{KeyInput, Mods};
 use vmux_core::scroll::clamp_top_line;
 
@@ -160,7 +160,6 @@ fn reapply_keymap_on_change(
         &mut EditorKeymap,
         Option<&FileViewport>,
     )>,
-    browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
     let next = KeymapConfig::resolve(settings.as_deref());
@@ -183,15 +182,8 @@ fn reapply_keymap_on_change(
         if kind_changed {
             edit.core.mode = config.initial_mode();
         }
-        if let (Some(viewport), Some(browsers)) = (viewport, browsers.as_deref()) {
-            EditorCursor::emit(
-                entity,
-                &mut edit,
-                keymap.0.as_ref(),
-                viewport,
-                browsers,
-                &mut commands,
-            );
+        if viewport.is_some() {
+            commands.trigger(CursorRenderRequest::new(entity));
         }
     }
 }
@@ -199,12 +191,7 @@ fn reapply_keymap_on_change(
 #[allow(clippy::too_many_arguments)]
 fn apply_edit_request(
     trigger: On<EditRequest>,
-    mut views: Query<(
-        &mut Editor,
-        &EditorKeymap,
-        &mut FileViewport,
-        &mut vmux_git::GitDiffSource,
-    )>,
+    mut views: Query<(&mut Editor, &mut FileViewport, &mut vmux_git::GitDiffSource)>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
     browsers: NonSend<Browsers>,
@@ -213,7 +200,7 @@ fn apply_edit_request(
     let request = trigger.event();
     let entity = request.entity;
     let cmds = request.commands.clone();
-    let Ok((mut edit, keymap, mut vp, mut diff_source)) = views.get_mut(entity) else {
+    let Ok((mut edit, mut vp, mut diff_source)) = views.get_mut(entity) else {
         return;
     };
     let top_before = vp.top_row;
@@ -277,19 +264,19 @@ fn apply_edit_request(
         }
         match &cmd {
             EditCommand::Hover => {
-                commands.trigger(EditorLanguageRequest::Hover(entity));
+                commands.trigger(EditorLanguageRequest::hover(entity));
                 continue;
             }
             EditCommand::GotoDefinition => {
-                commands.trigger(EditorLanguageRequest::Definition(entity));
+                commands.trigger(EditorLanguageRequest::definition(entity));
                 continue;
             }
             EditCommand::FindReferences => {
-                commands.trigger(EditorLanguageRequest::References(entity));
+                commands.trigger(EditorLanguageRequest::references(entity));
                 continue;
             }
             EditCommand::BeginRename => {
-                commands.trigger(EditorLanguageRequest::BeginRename(entity));
+                commands.trigger(EditorLanguageRequest::begin_rename(entity));
                 continue;
             }
             EditCommand::ClearSearchHighlight => {
@@ -314,7 +301,7 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::TriggerCompletion => {
-                commands.trigger(EditorLanguageRequest::Completion(entity));
+                commands.trigger(EditorLanguageRequest::completion(entity));
                 continue;
             }
             EditCommand::ScrollViewport(_) => unreachable!(),
@@ -431,17 +418,10 @@ fn apply_edit_request(
     }
     let vpc = *vp;
     if text_changed || fold_changed || vpc.left_render_band(top_before) {
-        EditorWindow::emit(entity, &mut edit, &vpc, &browsers, &mut commands);
+        commands.trigger(ViewportRenderRequest::new(entity));
     }
     if text_changed || cursor_stale || fold_changed {
-        EditorCursor::emit(
-            entity,
-            &mut edit,
-            keymap.0.as_ref(),
-            &vpc,
-            &browsers,
-            &mut commands,
-        );
+        commands.trigger(CursorRenderRequest::new(entity));
     }
     if fold_changed {
         commands.entity(entity).insert(FoldsDirty);
@@ -475,13 +455,19 @@ fn apply_edit_request(
 fn on_file_key(
     trigger: On<BinReceive<KeyStroke>>,
     mut q: Query<(&Editor, &mut EditorKeymap)>,
-    app_keys: ScopedKeys,
+    app_keymap: Option<Res<Keymap>>,
+    app_contexts: Query<&KeyContext>,
     view_mode: Res<SharedFileViewMode>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    if app_keys.answered(entity, evt) {
+    if let (Some(keymap), Ok(context), Some(pressed)) = (
+        app_keymap.as_deref(),
+        app_contexts.get(entity),
+        KeyCombo::from_stroke(evt),
+    ) && keymap.in_context(context).scoped(&pressed).is_some()
+    {
         return;
     }
     let Ok((edit, mut keymap)) = q.get_mut(entity) else {
@@ -600,13 +586,12 @@ fn run_submitted_ex_lines(
 
 fn on_file_find_request(
     trigger: On<BinReceive<FileFindRequest>>,
-    mut q: Query<(&mut Editor, &EditorKeymap, &FileViewport)>,
-    browsers: NonSend<Browsers>,
+    mut q: Query<&mut Editor>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let request = trigger.event().payload.clone();
-    let Ok((mut edit, keymap, vp)) = q.get_mut(entity) else {
+    let Ok(mut edit) = q.get_mut(entity) else {
         return;
     };
     if request.done || request.query.is_empty() {
@@ -625,25 +610,17 @@ fn on_file_find_request(
             forward: request.forward,
         });
     }
-    EditorCursor::emit(
-        entity,
-        &mut edit,
-        keymap.0.as_ref(),
-        vp,
-        &browsers,
-        &mut commands,
-    );
+    commands.trigger(CursorRenderRequest::new(entity));
 }
 
 fn on_file_pointer(
     trigger: On<BinReceive<FilePointerEvent>>,
-    mut q: Query<(&mut Editor, &mut EditorKeymap, &FileViewport)>,
-    browsers: NonSend<Browsers>,
+    mut q: Query<(&mut Editor, &mut EditorKeymap)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let p = trigger.event().payload;
-    let Ok((mut edit, mut keymap, vp)) = q.get_mut(entity) else {
+    let Ok((mut edit, mut keymap)) = q.get_mut(entity) else {
         return;
     };
     let col = edit.core.char_at_cell(p.line as usize, p.col);
@@ -660,14 +637,7 @@ fn on_file_pointer(
     if let Some(command) = keymap.0.pointer_selection_mode(p.extend) {
         edit.core.apply(command);
     }
-    EditorCursor::emit(
-        entity,
-        &mut edit,
-        keymap.0.as_ref(),
-        vp,
-        &browsers,
-        &mut commands,
-    );
+    commands.trigger(CursorRenderRequest::new(entity));
 }
 
 #[cfg(test)]

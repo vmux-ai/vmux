@@ -42,8 +42,9 @@ impl Plugin for LanguagePlugin {
 #[derive(Component)]
 pub(super) struct LspEditDirty;
 
-#[derive(Event)]
+#[derive(EntityEvent)]
 pub(super) struct WikiCompletionRequest {
+    #[event_target]
     entity: Entity,
 }
 
@@ -53,19 +54,76 @@ impl WikiCompletionRequest {
     }
 }
 
-#[derive(Event, Clone, Copy)]
-pub(super) enum EditorLanguageRequest {
-    Hover(Entity),
-    Definition(Entity),
-    References(Entity),
-    BeginRename(Entity),
-    Completion(Entity),
-    Declaration(Entity),
-    TypeDefinition(Entity),
-    Implementation(Entity),
-    FormatDocument(Entity),
-    FormatSelection(Entity),
-    CodeAction(Entity),
+#[derive(Clone, Copy)]
+enum LanguageOperation {
+    Hover,
+    Definition,
+    References,
+    BeginRename,
+    Completion,
+    Declaration,
+    TypeDefinition,
+    Implementation,
+    FormatDocument,
+    FormatSelection,
+    CodeAction,
+}
+
+#[derive(EntityEvent)]
+pub(super) struct EditorLanguageRequest {
+    #[event_target]
+    entity: Entity,
+    operation: LanguageOperation,
+}
+
+impl EditorLanguageRequest {
+    pub(super) fn hover(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::Hover)
+    }
+
+    pub(super) fn definition(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::Definition)
+    }
+
+    pub(super) fn references(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::References)
+    }
+
+    pub(super) fn begin_rename(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::BeginRename)
+    }
+
+    pub(super) fn completion(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::Completion)
+    }
+
+    fn declaration(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::Declaration)
+    }
+
+    fn type_definition(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::TypeDefinition)
+    }
+
+    fn implementation(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::Implementation)
+    }
+
+    fn format_document(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::FormatDocument)
+    }
+
+    fn format_selection(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::FormatSelection)
+    }
+
+    fn code_action(entity: Entity) -> Self {
+        Self::new(entity, LanguageOperation::CodeAction)
+    }
+
+    fn new(entity: Entity, operation: LanguageOperation) -> Self {
+        Self { entity, operation }
+    }
 }
 
 struct LspPosition {
@@ -208,25 +266,13 @@ fn on_editor_language_request(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    let entity = match trigger.event() {
-        EditorLanguageRequest::Hover(entity)
-        | EditorLanguageRequest::Definition(entity)
-        | EditorLanguageRequest::References(entity)
-        | EditorLanguageRequest::BeginRename(entity)
-        | EditorLanguageRequest::Completion(entity)
-        | EditorLanguageRequest::Declaration(entity)
-        | EditorLanguageRequest::TypeDefinition(entity)
-        | EditorLanguageRequest::Implementation(entity)
-        | EditorLanguageRequest::FormatDocument(entity)
-        | EditorLanguageRequest::FormatSelection(entity)
-        | EditorLanguageRequest::CodeAction(entity) => *entity,
-    };
+    let entity = trigger.entity;
     let Ok(edit) = views.get(entity) else {
         return;
     };
     let path = edit.core.buffer.path.clone();
-    match trigger.event() {
-        EditorLanguageRequest::Hover(_) => {
+    match trigger.operation {
+        LanguageOperation::Hover => {
             let position = edit.caret_lsp_position();
             manager.hover(
                 entity,
@@ -236,15 +282,15 @@ fn on_editor_language_request(
                 position.char_col as u32,
             );
         }
-        EditorLanguageRequest::Definition(_) => {
+        LanguageOperation::Definition => {
             let position = edit.caret_lsp_position();
             manager.definition(entity, &path, position.line, position.utf16_col);
         }
-        EditorLanguageRequest::References(_) => {
+        LanguageOperation::References => {
             let position = edit.caret_lsp_position();
             manager.references(entity, &path, position.line, position.utf16_col);
         }
-        EditorLanguageRequest::BeginRename(_) => {
+        LanguageOperation::BeginRename => {
             let position = edit.caret_lsp_position();
             let current = position.word();
             if current.is_empty() || !browsers.can_emit_to(&entity) {
@@ -259,7 +305,7 @@ fn on_editor_language_request(
                 },
             ));
         }
-        EditorLanguageRequest::Completion(_) => {
+        LanguageOperation::Completion => {
             let position = edit.caret_lsp_position();
             manager.completion(
                 entity,
@@ -269,24 +315,24 @@ fn on_editor_language_request(
                 position.word_start_col(),
             );
         }
-        EditorLanguageRequest::Declaration(_) => {
+        LanguageOperation::Declaration => {
             let position = edit.caret_lsp_position();
             manager.declaration(entity, &path, position.line, position.utf16_col);
         }
-        EditorLanguageRequest::TypeDefinition(_) => {
+        LanguageOperation::TypeDefinition => {
             let position = edit.caret_lsp_position();
             manager.type_definition(entity, &path, position.line, position.utf16_col);
         }
-        EditorLanguageRequest::Implementation(_) => {
+        LanguageOperation::Implementation => {
             let position = edit.caret_lsp_position();
             manager.implementation(entity, &path, position.line, position.utf16_col);
         }
-        EditorLanguageRequest::FormatDocument(_) => manager.format_document(entity, &path),
-        EditorLanguageRequest::FormatSelection(_) => {
+        LanguageOperation::FormatDocument => manager.format_document(entity, &path),
+        LanguageOperation::FormatSelection => {
             let (from, to) = edit.core.selected_lines();
             manager.format_range(entity, &path, from, to);
         }
-        EditorLanguageRequest::CodeAction(_) => {
+        LanguageOperation::CodeAction => {
             let (from_line, to_line) = edit.core.selected_lines();
             code_actions.write(crate::lsp::manager::LspCodeActionRequest {
                 entity,
@@ -308,7 +354,7 @@ fn on_wiki_completion_request(
     let Some(index) = index.as_deref() else {
         return;
     };
-    let entity = trigger.event().entity;
+    let entity = trigger.entity;
     let Ok(edit) = views.get(entity) else {
         return;
     };
@@ -371,13 +417,13 @@ fn on_file_editor_action(
             ));
             return;
         }
-        EditorAction::CodeAction => EditorLanguageRequest::CodeAction(entity),
-        EditorAction::GotoDeclaration => EditorLanguageRequest::Declaration(entity),
-        EditorAction::GotoTypeDefinition => EditorLanguageRequest::TypeDefinition(entity),
-        EditorAction::GotoImplementation => EditorLanguageRequest::Implementation(entity),
-        EditorAction::FormatDocument => EditorLanguageRequest::FormatDocument(entity),
-        EditorAction::FormatSelection => EditorLanguageRequest::FormatSelection(entity),
-        EditorAction::Rename => EditorLanguageRequest::BeginRename(entity),
+        EditorAction::CodeAction => EditorLanguageRequest::code_action(entity),
+        EditorAction::GotoDeclaration => EditorLanguageRequest::declaration(entity),
+        EditorAction::GotoTypeDefinition => EditorLanguageRequest::type_definition(entity),
+        EditorAction::GotoImplementation => EditorLanguageRequest::implementation(entity),
+        EditorAction::FormatDocument => EditorLanguageRequest::format_document(entity),
+        EditorAction::FormatSelection => EditorLanguageRequest::format_selection(entity),
+        EditorAction::Rename => EditorLanguageRequest::begin_rename(entity),
         EditorAction::Copy => {
             commands.trigger(EditRequest::new(
                 entity,

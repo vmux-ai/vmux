@@ -5,9 +5,9 @@ use vmux_core::event::*;
 use crate::host::dir::parent_listing;
 use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer, FileDir};
-use crate::host::keymap::{EditorKeymap, KeymapConfig};
+use crate::host::keymap::KeymapConfig;
 use crate::host::note::{NoteRevealLine, NoteSent};
-use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport};
+use crate::host::viewport::{CursorRenderRequest, FileViewport, ViewportRenderRequest};
 
 pub(crate) struct StatusPlugin;
 
@@ -112,14 +112,11 @@ fn send_initial_meta(
 }
 
 fn send_initial_text_meta(
-    mut files: Query<
-        (Entity, &FileView, &mut Editor, &EditorKeymap, &FileViewport),
-        ReadyUnsentMeta,
-    >,
+    mut files: Query<(Entity, &FileView, &Editor, &FileViewport), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, file, mut edit, keymap, viewport) in &mut files {
+    for (entity, file, edit, viewport) in &mut files {
         if !browsers.can_emit_to(&entity) {
             continue;
         }
@@ -137,16 +134,9 @@ fn send_initial_text_meta(
             },
         ));
         if viewport.rows > 0 {
-            EditorWindow::emit(entity, &mut edit, viewport, &browsers, &mut commands);
+            commands.trigger(ViewportRenderRequest::new(entity));
         }
-        EditorCursor::emit(
-            entity,
-            &mut edit,
-            keymap.0.as_ref(),
-            viewport,
-            &browsers,
-            &mut commands,
-        );
+        commands.trigger(CursorRenderRequest::new(entity));
         commands.entity(entity).insert(FileInitialMetaSent);
     }
 }

@@ -49,7 +49,7 @@ fn process_key_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     bindings: Res<Keymap>,
     mut chord_state: ResMut<ChordState>,
-    mut issuer: vmux_command::CommandIssuer,
+    mut invocations: MessageWriter<vmux_command::CommandInvocation>,
     user: Query<Entity, With<vmux_core::team::User>>,
     capture: Option<Res<vmux_shortcut::ShortcutCaptureTarget>>,
 ) {
@@ -86,7 +86,7 @@ fn process_key_input(
                 .iter()
                 .find_map(|pressed| bindings.chord(&prefix, pressed))
         {
-            issuer.issue_id(caller, cmd);
+            invocations.write(vmux_command::CommandInvocation::new(caller, cmd));
             chord_state.pending_prefix = None;
             return;
         }
@@ -98,7 +98,7 @@ fn process_key_input(
 
     for (index, pressed) in just_pressed.iter().enumerate() {
         if let Some(cmd) = bindings.direct(pressed) {
-            issuer.issue_id(caller, cmd);
+            invocations.write(vmux_command::CommandInvocation::new(caller, cmd));
             return;
         }
         if bindings.has_chord_prefix(pressed) {
@@ -108,7 +108,7 @@ fn process_key_input(
                     continue;
                 }
                 if let Some(cmd) = bindings.chord(pressed, second) {
-                    issuer.issue_id(caller, cmd);
+                    invocations.write(vmux_command::CommandInvocation::new(caller, cmd));
                     chord_state.pending_prefix = None;
                     return;
                 }

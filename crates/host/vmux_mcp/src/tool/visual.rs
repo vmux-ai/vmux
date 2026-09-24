@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolRequestSet, ToolSpawner,
+    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
+    ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -45,9 +45,9 @@ enum VisualTool {
     RecordStop,
 }
 
-fn register(mut tools: ToolSpawner) {
-    let manifest = ToolManifest::<VisualTool>::from_ron(include_str!("visual.ron"));
-    tools.spawn_manifest(manifest);
+fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
+    ToolManifest::<VisualTool>::from_ron(include_str!("visual.ron"))
+        .spawn(&mut commands, &mut next_order);
 }
 
 #[derive(Component, Deserialize)]

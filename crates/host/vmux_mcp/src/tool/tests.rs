@@ -98,7 +98,7 @@ fn owning_world_dispatches_tool_entities() {
 
     let call = app
         .world_mut()
-        .run_system_once(|tools: ToolCatalog| {
+        .run_system_once(|tools: Res<ToolCatalog>| {
             tools.call(
                 "notify",
                 serde_json::json!({"body": "hello"}),

@@ -1,9 +1,8 @@
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::BinReceive;
 use vmux_core::input::KeyStroke;
 
-use crate::issued::CommandIssuer;
+use crate::definition::CommandInvocation;
 use crate::shortcut::{KeyCombo, KeyContext, Keymap};
 
 pub struct KeyPlugin;
@@ -16,33 +15,22 @@ impl Plugin for KeyPlugin {
 
 fn resolve_page_key(
     trigger: On<BinReceive<KeyStroke>>,
-    keys: ScopedKeys,
-    mut issuer: CommandIssuer,
+    keymap: Option<Res<Keymap>>,
+    contexts: Query<&KeyContext>,
+    mut invocations: MessageWriter<CommandInvocation>,
 ) {
     let page = trigger.event_target();
-    let Some(command) = keys.command(page, &trigger.payload) else {
+    let (Some(keymap), Ok(context), Some(pressed)) = (
+        keymap.as_deref(),
+        contexts.get(page),
+        KeyCombo::from_stroke(&trigger.payload),
+    ) else {
         return;
     };
-    issuer.issue_id(page, command);
-}
-
-#[derive(SystemParam)]
-pub struct ScopedKeys<'w, 's> {
-    keymap: Option<Res<'w, Keymap>>,
-    contexts: Query<'w, 's, &'static KeyContext>,
-}
-
-impl ScopedKeys<'_, '_> {
-    pub fn command(&self, page: Entity, stroke: &KeyStroke) -> Option<String> {
-        let keymap = self.keymap.as_ref()?;
-        let context = self.contexts.get(page).ok()?;
-        let pressed = KeyCombo::from_stroke(stroke)?;
-        keymap.in_context(context).scoped(&pressed)
-    }
-
-    pub fn answered(&self, page: Entity, stroke: &KeyStroke) -> bool {
-        self.command(page, stroke).is_some()
-    }
+    let Some(command) = keymap.in_context(context).scoped(&pressed) else {
+        return;
+    };
+    invocations.write(CommandInvocation::new(page, command));
 }
 
 #[cfg(test)]
@@ -149,12 +137,19 @@ mod tests {
     impl Answered {
         fn record(
             trigger: On<BinReceive<KeyStroke>>,
-            keys: ScopedKeys,
+            keymap: Res<Keymap>,
+            contexts: Query<&KeyContext>,
             mut answered: ResMut<Self>,
         ) {
-            answered
-                .0
-                .push(keys.answered(trigger.event_target(), &trigger.payload));
+            let is_answered = contexts
+                .get(trigger.event_target())
+                .ok()
+                .and_then(|context| {
+                    KeyCombo::from_stroke(&trigger.payload).map(|key| (context, key))
+                })
+                .and_then(|(context, key)| keymap.in_context(context).scoped(&key))
+                .is_some();
+            answered.0.push(is_answered);
         }
     }
 

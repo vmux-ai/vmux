@@ -79,7 +79,7 @@ fn attach_last_run_state_kind(
 fn spawn_page_session_on_add(
     q: Query<(&AgentSession, Option<&AgentApprovalPolicy>), Added<AgentSession>>,
     service: Option<Res<ServiceClient>>,
-    tools: vmux_mcp::tool::ToolCatalog,
+    tools: Res<vmux_mcp::tool::ToolCatalog>,
     commands: Query<&vmux_command::CommandDefinition>,
 ) {
     let Some(service) = service else {

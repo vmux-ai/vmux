@@ -1,6 +1,6 @@
 use super::{
-    ParsedToolCall, ProtocolTool, ToolCalls, ToolDispatchSet, ToolExecution, ToolManifest,
-    ToolRegistrationSet, ToolRequestSet, ToolSpawner,
+    NextToolOrder, ParsedToolCall, ProtocolTool, ToolCalls, ToolDispatchSet, ToolExecution,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -23,9 +23,9 @@ enum FileTool {
     Grep,
 }
 
-fn register(mut tools: ToolSpawner) {
-    let manifest = ToolManifest::<FileTool>::from_ron(include_str!("files.ron"));
-    tools.spawn_manifest(manifest);
+fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
+    ToolManifest::<FileTool>::from_ron(include_str!("files.ron"))
+        .spawn(&mut commands, &mut next_order);
 }
 
 #[derive(Component, Deserialize, Serialize)]

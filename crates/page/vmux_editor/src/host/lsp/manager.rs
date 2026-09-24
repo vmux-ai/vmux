@@ -948,7 +948,7 @@ fn ref_display(path: &Path, line: u32) -> String {
 pub struct LspOpened;
 
 use crate::host::editor::{Editor, FileView};
-use crate::host::viewport::{EditorWindow, FileViewport};
+use crate::host::viewport::ViewportRenderRequest;
 
 fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
     settings
@@ -1181,12 +1181,11 @@ pub struct LspSemantic {
 
 fn apply_semantic_tokens(
     mut reader: MessageReader<LspSemantic>,
-    mut views: Query<(&mut Editor, &FileView, &FileViewport)>,
-    browsers: NonSend<Browsers>,
+    mut views: Query<(&mut Editor, &FileView)>,
     mut commands: Commands,
 ) {
     for message in reader.read() {
-        let Ok((mut edit, view, vp)) = views.get_mut(message.entity) else {
+        let Ok((mut edit, view)) = views.get_mut(message.entity) else {
             continue;
         };
         if crate::host::file_lifecycle::canon(&view.path)
@@ -1198,7 +1197,7 @@ fn apply_semantic_tokens(
             .set_semantic(crate::lsp::semantic::SemanticHighlight::from(
                 message.tokens.clone(),
             ));
-        EditorWindow::emit(message.entity, &mut edit, vp, &browsers, &mut commands);
+        commands.trigger(ViewportRenderRequest::new(message.entity));
     }
 }
 

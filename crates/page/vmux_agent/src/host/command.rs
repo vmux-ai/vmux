@@ -172,7 +172,7 @@ fn command_arguments(input: &vmux_api::json::JsonValue) -> Result<serde_json::Va
 fn handle_agent_tool_calls(
     mut commands: Commands,
     mut reader: MessageReader<AgentToolCallRequest>,
-    tools: vmux_mcp::tool::ToolCatalog,
+    tools: Res<vmux_mcp::tool::ToolCatalog>,
     service: Option<Res<ServiceClient>>,
 ) {
     for req in reader.read() {

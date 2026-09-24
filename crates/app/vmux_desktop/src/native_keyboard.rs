@@ -528,7 +528,7 @@ fn sync_simulator_shortcuts(
 }
 
 fn process_monitored_keys(
-    mut issuer: vmux_command::CommandIssuer,
+    mut invocations: MessageWriter<vmux_command::CommandInvocation>,
     mut simulator_buttons: Option<ResMut<Messages<vmux_simulator::HardwareButtonRequest>>>,
     mut simulator_clipboard: Option<ResMut<Messages<vmux_simulator::SimulatorClipboardRequest>>>,
     mut simulator_keyboard: Option<
@@ -570,7 +570,7 @@ fn process_monitored_keys(
     }
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     for cmd in commands {
-        issuer.issue_id(caller, cmd);
+        invocations.write(vmux_command::CommandInvocation::new(caller, cmd));
     }
     if let Some(target) = shortcut_capture.as_deref_mut() {
         for token in shortcut_releases {

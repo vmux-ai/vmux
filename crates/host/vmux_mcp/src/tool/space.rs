@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolRequestSet, ToolSpawner,
+    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
+    ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -48,9 +48,9 @@ struct DeleteSpaceArgs {
     space_id: String,
 }
 
-fn register(mut tools: ToolSpawner) {
-    let manifest = ToolManifest::<SpaceTool>::from_ron(include_str!("space.ron"));
-    tools.spawn_manifest(manifest);
+fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
+    ToolManifest::<SpaceTool>::from_ron(include_str!("space.ron"))
+        .spawn(&mut commands, &mut next_order);
 }
 
 fn parse(mut commands: Commands, calls: ToolCalls<SpaceTool>) {

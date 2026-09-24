@@ -20,8 +20,8 @@ pub use definition::{
     CommandManifest, CommandMcp, CommandRuntimePlugin, CommandShortcut, DispatchCommandInvocations,
     ReadCommandRequests, RegisterCommandDefinitions, ShortcutDefinition, WriteCommandRequests,
 };
-pub use issued::{CommandIssuer, ExLineSubmitted, FileStatusPicked};
-pub use page_key::{KeyPlugin, ScopedKeys};
+pub use issued::{ExLineSubmitted, FileStatusPicked};
+pub use page_key::KeyPlugin;
 pub use payload::{
     CommandBarEntry, CommandBarPicks, build_command_bar_open_payload, command_bar_open_payload,
     command_list, localized_command_name,
