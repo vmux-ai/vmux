@@ -32,7 +32,7 @@ use toolbar::{EditorTabStrip, FindBar, VimStatus};
 
 use crate::breadcrumb::EditorBreadcrumbs;
 use crate::explorer::{EditorTabCommand, SidebarView};
-use crate::page_key::{Completions, FilePage, use_file_keys};
+use crate::page_key::{Completions, FilePage as FilePageState, use_file_keys};
 use crate::page_model::{
     CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, clamp_selection,
     editor_drag_started, gutter_width, note_cursor_activation, severity_color_class, span_style,
@@ -54,6 +54,33 @@ use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::sleep_ms;
+
+#[vmux_native::page(
+    url = "file://",
+    title = "Files",
+    component = Page,
+    dom_group = "editor",
+    subtree
+)]
+pub(crate) struct FilePage;
+
+#[vmux_native::page(
+    url = vmux_api::space::PROJECTS_PAGE_URL,
+    title = "Projects",
+    component = Page,
+    dom_group = "editor",
+    subtree
+)]
+pub(crate) struct ProjectsPage;
+
+#[vmux_native::page(
+    url = vmux_core::knowledge::KNOWLEDGE_PAGE_URL,
+    title = "Knowledge",
+    component = Page,
+    dom_group = "editor",
+    subtree
+)]
+pub(crate) struct KnowledgePage;
 
 #[component]
 pub fn Page() -> Element {
@@ -183,7 +210,7 @@ pub fn Page() -> Element {
         cursor,
     };
     let comp_filtered = use_memo(move || completions.matching());
-    let file_page = FilePage {
+    let file_page = FilePageState {
         mode,
         explorer,
         completion_open: comp_open,

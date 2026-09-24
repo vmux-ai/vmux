@@ -7,8 +7,6 @@ pub mod explorer;
 #[cfg(ui)]
 pub mod lsp_page;
 #[cfg(ui)]
-pub mod native_page;
-#[cfg(ui)]
 pub mod page_key;
 #[cfg(ui)]
 mod state;

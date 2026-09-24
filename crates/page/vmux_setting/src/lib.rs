@@ -10,8 +10,6 @@ pub mod state;
 pub mod themes;
 
 #[cfg(ui)]
-pub mod native_page;
-#[cfg(ui)]
 pub mod ui;
 
 #[cfg(host)]

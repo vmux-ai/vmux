@@ -17,6 +17,13 @@ use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{send, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
+#[vmux_native::page(
+    url = crate::event::SETTINGS_PAGE_URL,
+    title = "Settings",
+    component = Page
+)]
+pub(crate) struct SettingsPage;
+
 #[component]
 pub fn Page() -> Element {
     use_theme();

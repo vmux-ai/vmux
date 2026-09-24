@@ -24,7 +24,7 @@ pub struct StartPlugin;
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
-        app.add_plugins(crate::native_page::StartPage::plugin());
+        app.add_plugins(crate::ui::StartPage::plugin());
         app.world_mut().spawn((
             crate::PAGE_MANIFEST,
             vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),

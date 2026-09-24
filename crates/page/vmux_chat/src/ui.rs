@@ -9,6 +9,17 @@ use self::transcript::ChatTranscript;
 use crate::transcript::MD_CSS;
 use dioxus::prelude::*;
 
+#[vmux_native::page(
+    url = "vmux://sessions/",
+    title = "Sessions",
+    component = Page,
+    subtree,
+    preserve_title,
+    no_favicon,
+    takes = vmux_core::PageMetadata
+)]
+pub(crate) struct ChatPage;
+
 #[component]
 pub fn Page() -> Element {
     let chat = use_chat();

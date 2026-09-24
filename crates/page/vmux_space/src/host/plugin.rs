@@ -19,7 +19,7 @@ pub struct SpacePlugin;
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
-        app.add_plugins(crate::native_page::SpacesPage::plugin());
+        app.add_plugins(crate::ui::SpacesPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins(vmux_command::CommandTypePlugin::<OpenRequest>::default())
             .add_plugins(vmux_layout::LayoutContractPlugin)

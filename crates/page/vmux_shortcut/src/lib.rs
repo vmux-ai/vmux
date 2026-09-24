@@ -161,8 +161,6 @@ mod host;
 pub use host::{ShortcutCaptureSet, ShortcutCaptureTarget, ShortcutPlugin};
 
 #[cfg(ui)]
-pub mod native_page;
-#[cfg(ui)]
 pub mod ui;
 
 #[cfg(test)]
