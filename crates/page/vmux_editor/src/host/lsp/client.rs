@@ -117,9 +117,18 @@ impl ServerClient {
             .stderr(Stdio::piped())
             .spawn()?;
 
-        let stdin = child.stdin.take().expect("piped stdin");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stderr = child.stderr.take().expect("piped stderr");
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("language server stdin is unavailable"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| std::io::Error::other("language server stdout is unavailable"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| std::io::Error::other("language server stderr is unavailable"))?;
 
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
 
