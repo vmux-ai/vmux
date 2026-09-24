@@ -10,7 +10,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
     ManagerSelectItem, ManagerSelectItemKind, ManagerSpinner,
 };
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,8 +52,7 @@ impl RemoteProvider {
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();
-    let mut snapshot = use_signal(ToolsSnapshot::default);
-    let mut loaded = use_signal(|| false);
+    let snapshot = use_ui_state::<ToolsSnapshot>();
     let mut pending = use_signal(|| None::<VaultAction>);
     let mut notice = use_signal(|| None::<VaultResult>);
     let mut generated_recovery_key = use_signal(String::new);
@@ -63,7 +62,6 @@ pub fn Page() -> Element {
     let mut recovery_upload_pending = use_signal(|| false);
     let mut github_device_code = use_signal(String::new);
     let mut github_device_code_copied = use_signal(|| false);
-    let mut repositories_requested = use_signal(|| false);
     let mut repository = use_signal(|| "vmux-vault".to_string());
     let mut selected_owner = use_signal(|| None::<String>);
     let selected_repository = use_signal(|| None::<String>);
@@ -78,20 +76,12 @@ pub fn Page() -> Element {
     let mut cloud_root = use_signal(String::new);
     let private = use_signal(|| true);
 
-    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(move |event| {
+    use_effect(move || {
+        let event = snapshot();
         if pending() == Some(VaultAction::ConnectGithub)
             && (event.vault.repositories_loaded || !event.vault.error.is_empty())
         {
             pending.set(None);
-        }
-        let needs_repositories = !event.vault.github_owner.is_empty()
-            && (!event.vault.initialized || event.vault.remote.is_empty())
-            && !event.vault.repositories_loaded;
-        if needs_repositories && !repositories_requested() {
-            repositories_requested.set(true);
-            request_snapshot(true);
-        } else if !needs_repositories {
-            repositories_requested.set(false);
         }
         if !event.vault.github_owner.is_empty()
             && selected_owner()
@@ -104,8 +94,6 @@ pub fn Page() -> Element {
             let owner = selected_owner().unwrap_or_else(|| event.vault.github_owner.clone());
             repository.set(suggested_repository_name(&owner, &event.vault.repositories));
         }
-        snapshot.set(event);
-        loaded.set(true);
     });
     let _result_listener = use_listener::<VaultResult, _>(move |mut result| {
         if result.action == VaultAction::ConnectGithub {
@@ -151,13 +139,6 @@ pub fn Page() -> Element {
             pending.set(None);
             notice.set(None);
         } else if result.action == VaultAction::ConnectGithub && result.success {
-            let mut current = snapshot();
-            current.vault.github_owner = result.message.clone();
-            current.vault.github_owners = vec![result.message.clone()];
-            current.vault.repositories.clear();
-            current.vault.repositories_loaded = false;
-            current.vault.error.clear();
-            snapshot.set(current);
             notice.set(None);
         } else {
             pending.set(None);
@@ -184,7 +165,6 @@ pub fn Page() -> Element {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         onclick: move |_| {
-                            loaded.set(false);
                             request_snapshot(false);
                         },
                         {translate("common-refresh")}
@@ -192,7 +172,7 @@ pub fn Page() -> Element {
                 }
             }
             ManagerList {
-                if !loaded() {
+                if !current.loaded {
                     ManagerSpinner { detail: translate("common-loading") }
                 } else {
                     if let Some(result) = notice().filter(|result| result.success || !result.message.is_empty()) {
@@ -215,7 +195,6 @@ pub fn Page() -> Element {
                         selected_owner,
                         selected_repository,
                         selected_provider,
-                        repositories_requested,
                         github_device_code,
                         github_device_code_copied,
                         cloud_root,
@@ -241,7 +220,6 @@ fn VaultPanel(
     selected_owner: Signal<Option<String>>,
     selected_repository: Signal<Option<String>>,
     selected_provider: Signal<Option<RemoteProvider>>,
-    repositories_requested: Signal<bool>,
     github_device_code: Signal<String>,
     github_device_code_copied: Signal<bool>,
     cloud_root: Signal<String>,
@@ -311,8 +289,9 @@ fn VaultPanel(
         .collect::<Vec<_>>();
     let connecting = pending().is_some_and(|action| {
         action == VaultAction::ConnectGithub || action == VaultAction::ConnectCloud
-    }) || provider
-        .is_some_and(|provider| provider.is_github() && repositories_requested());
+    }) || provider.is_some_and(|provider| {
+        provider.is_github() && github_connected && !github_repositories_loaded
+    });
     rsx! {
         div { class: "relative overflow-hidden rounded-[28px] bg-foreground/[0.03] p-6 shadow-2xl shadow-black/[0.06] ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl",
             div { class: "pointer-events-none absolute -right-24 -top-28 h-64 w-64 rounded-full bg-primary/[0.08] blur-3xl motion-safe:animate-pulse [animation-duration:7s]" }
@@ -392,18 +371,12 @@ fn VaultPanel(
                                     notice.set(None);
                                     if option.is_github() {
                                         if !github_connected {
-                                            repositories_requested.set(false);
                                             send_action(
                                                 pending,
                                                 VaultAction::ConnectGithub,
                                                 String::new(),
                                                 true,
                                             );
-                                        } else if !github_repositories_loaded
-                                            && !repositories_requested()
-                                        {
-                                            repositories_requested.set(true);
-                                            request_snapshot(true);
                                         }
                                     } else {
                                         repository.set("vmux-vault".to_string());
