@@ -37,12 +37,15 @@ impl Plugin for RemotePlugin {
     }
 }
 
-fn on_remote_copy(_trigger: On<BinReceive<RemoteCopyEvent>>, state: Query<&RemoteState>) {
-    let Ok(state) = state.single() else {
+fn on_remote_copy(
+    _trigger: On<BinReceive<RemoteCopyEvent>>,
+    state: Query<(&RemoteState, &RemotePairingInfo)>,
+) {
+    let Ok((state, pairing)) = state.single() else {
         return;
     };
-    if state.phase == RemotePhase::Enabled && !state.pairing_url.is_empty() {
-        vmux_clipboard::write(state.pairing_url.clone());
+    if state.phase == RemotePhase::Enabled {
+        vmux_clipboard::write(pairing.pairing_url.clone());
     }
 }
 
@@ -67,7 +70,7 @@ fn on_remote_revoke(
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Component, Clone, Debug)]
 struct RemotePairingInfo {
     pairing_url: String,
     pairing_deep_link: String,
@@ -160,10 +163,6 @@ impl PairingVisibility {
 struct RemoteState {
     enabled: bool,
     phase: RemotePhase,
-    pairing_url: String,
-    pairing_deep_link: String,
-    relay_token: String,
-    pairing_token: String,
     paired: bool,
     pairing_visibility: PairingVisibility,
     devices: Vec<vmux_service::AuthorizedDevice>,
@@ -195,10 +194,6 @@ impl Default for RemoteState {
             } else {
                 RemotePhase::Disabled
             },
-            pairing_url: String::new(),
-            pairing_deep_link: String::new(),
-            relay_token: String::new(),
-            pairing_token: String::new(),
             paired: !devices.is_empty(),
             pairing_visibility: PairingVisibility::default(),
             devices,
@@ -213,7 +208,7 @@ impl Default for RemoteState {
 
 impl RemoteState {
     fn show_pairing(&mut self, now: Instant) {
-        if self.phase == RemotePhase::Enabled && !self.pairing_deep_link.is_empty() {
+        if self.phase == RemotePhase::Enabled {
             self.pairing_visibility.show(now);
         }
     }
@@ -269,12 +264,14 @@ fn on_remote_request(trigger: On<BinReceive<RemoteRequest>>, mut states: Query<&
 
 fn show_remote_pairing(
     _trigger: On<BinReceive<RemotePairingShowRequest>>,
-    mut states: Query<&mut RemoteState>,
+    mut states: Query<(&mut RemoteState, Option<&RemotePairingInfo>)>,
 ) {
-    let Ok(mut state) = states.single_mut() else {
+    let Ok((mut state, pairing)) = states.single_mut() else {
         return;
     };
-    state.show_pairing(Instant::now());
+    if pairing.is_some() {
+        state.show_pairing(Instant::now());
+    }
 }
 
 fn dismiss_remote_pairing(
@@ -287,8 +284,11 @@ fn dismiss_remote_pairing(
     state.dismiss_pairing();
 }
 
-fn poll_remote_worker(mut states: Query<&mut RemoteState>) {
-    let Ok(mut state) = states.single_mut() else {
+fn poll_remote_worker(
+    mut states: Query<(Entity, &mut RemoteState)>,
+    mut commands: Commands,
+) {
+    let Ok((entity, mut state)) = states.single_mut() else {
         return;
     };
     while let Ok(message) = state.result_rx.try_recv() {
@@ -298,20 +298,14 @@ fn poll_remote_worker(mut states: Query<&mut RemoteState>) {
         match message.result {
             Ok(Some(pairing)) => {
                 state.phase = RemotePhase::Enabled;
-                state.pairing_url = pairing.pairing_url;
-                state.pairing_deep_link = pairing.pairing_deep_link;
-                state.relay_token = pairing.relay_token;
-                state.pairing_token = pairing.pairing_token;
+                commands.entity(entity).insert(pairing);
                 state.error.clear();
                 if !state.paired {
                     state.show_pairing(Instant::now());
                 }
             }
             Ok(None) => {
-                state.pairing_url.clear();
-                state.pairing_deep_link.clear();
-                state.relay_token.clear();
-                state.pairing_token.clear();
+                commands.entity(entity).remove::<RemotePairingInfo>();
                 state.dismiss_pairing();
                 if let Err(error) = remove_if_exists(&RemotePaths::current().state()) {
                     state.phase = RemotePhase::Error;
@@ -323,6 +317,7 @@ fn poll_remote_worker(mut states: Query<&mut RemoteState>) {
                 }
             }
             Err(error) => {
+                commands.entity(entity).remove::<RemotePairingInfo>();
                 state.phase = RemotePhase::Error;
                 state.error = error;
             }
@@ -330,8 +325,11 @@ fn poll_remote_worker(mut states: Query<&mut RemoteState>) {
     }
 }
 
-fn poll_remote_authorizations(mut states: Query<&mut RemoteState>) {
-    let Ok(mut state) = states.single_mut() else {
+fn poll_remote_authorizations(
+    mut states: Query<(Entity, &mut RemoteState, Option<&RemotePairingInfo>)>,
+    mut commands: Commands,
+) {
+    let Ok((entity, mut state, pairing)) = states.single_mut() else {
         return;
     };
     if state.authorization_checked_at.elapsed() < Duration::from_secs(1) {
@@ -356,17 +354,18 @@ fn poll_remote_authorizations(mut states: Query<&mut RemoteState>) {
     if state.devices != devices {
         state.devices = devices;
     }
-    if state.phase != RemotePhase::Enabled || state.pairing_token == pairing_token {
+    let Some(pairing) = pairing else {
+        return;
+    };
+    if state.phase != RemotePhase::Enabled || pairing.pairing_token == pairing_token {
         return;
     }
     let relay = vmux_service::pairing::Relay::configured();
-    let Ok(Some(pairing)) = RemotePairingInfo::ready(&relay, &state.relay_token, &pairing_token)
+    let Ok(Some(pairing)) = RemotePairingInfo::ready(&relay, &pairing.relay_token, &pairing_token)
     else {
         return;
     };
-    state.pairing_url = pairing.pairing_url;
-    state.pairing_deep_link = pairing.pairing_deep_link;
-    state.pairing_token = pairing.pairing_token;
+    commands.entity(entity).insert(pairing);
     if !state.paired {
         state.show_pairing(Instant::now());
     }
@@ -383,18 +382,22 @@ fn push_remote_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    states: Query<&RemoteState>,
+    states: Query<(&RemoteState, Option<&RemotePairingInfo>)>,
     mut last: Local<std::collections::HashMap<Entity, RemoteUiState>>,
 ) {
-    let Ok(state) = states.single() else {
+    let Ok((state, pairing)) = states.single() else {
         return;
     };
     let now = Instant::now();
     let payload = RemoteUiState {
         enabled: state.enabled,
         phase: state.phase,
-        pairing_url: state.pairing_url.clone(),
-        pairing_deep_link: state.pairing_deep_link.clone(),
+        pairing_url: pairing
+            .map(|pairing| pairing.pairing_url.clone())
+            .unwrap_or_default(),
+        pairing_deep_link: pairing
+            .map(|pairing| pairing.pairing_deep_link.clone())
+            .unwrap_or_default(),
         paired: state.paired,
         pairing_visible: state.pairing_visible(now),
         devices: state
