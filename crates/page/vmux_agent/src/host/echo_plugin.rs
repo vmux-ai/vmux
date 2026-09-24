@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 use vmux_setting::SettingsLoadSet;
 
-use crate::client::provider::index::ProviderStrategyIndex;
-use crate::client::provider::strategy::{
+use crate::echo;
+use crate::runtime::provider::index::ProviderStrategyIndex;
+use crate::runtime::provider::strategy::{
     BuildRequestFn, Endpoint, EnvVarName, ParseSseFn, Strategy, StrategyKey, StrategyKind,
     StrategyVariant,
 };
-use crate::echo;
 use crate::{AgentKind, AgentVariant};
 
 pub struct EchoPlugin;
@@ -46,7 +46,7 @@ fn register_echo_strategy(mut commands: Commands, idx: Option<Res<ProviderStrate
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::provider::indexer::{on_strategy_added, on_strategy_removed};
+    use crate::runtime::provider::indexer::{on_strategy_added, on_strategy_removed};
 
     fn test_app() -> App {
         let mut app = App::new();

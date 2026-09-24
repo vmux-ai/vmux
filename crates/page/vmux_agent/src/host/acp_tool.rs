@@ -582,8 +582,9 @@ impl AcpEnvironment {
             *namespaces = serde_json::json!([]);
         }
         let namespaces = namespaces.as_array_mut().unwrap();
-        let vmux =
-            serde_json::Value::String(crate::client::cli::codex::DIRECT_ONLY_NAMESPACE.to_string());
+        let vmux = serde_json::Value::String(
+            crate::runtime::cli::codex::DIRECT_ONLY_NAMESPACE.to_string(),
+        );
         if !namespaces.contains(&vmux) {
             namespaces.push(vmux);
         }
@@ -734,7 +735,7 @@ impl AcpEnvironment {
         }
         code_mode.as_object_mut().unwrap().insert(
             "direct_only_tool_namespaces".to_string(),
-            serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE]),
+            serde_json::json!([crate::runtime::cli::codex::DIRECT_ONLY_NAMESPACE]),
         );
         let tools = config
             .entry("tools")
@@ -748,7 +749,7 @@ impl AcpEnvironment {
             .insert("web_search".to_string(), serde_json::Value::Bool(false));
         Self::disable_codex_skills(
             &mut config,
-            &crate::client::cli::codex::codex_disabled_skill_files(),
+            &crate::runtime::cli::codex::codex_disabled_skill_files(),
         );
         let mcp_servers = config
             .entry("mcp_servers")
@@ -775,11 +776,11 @@ impl AcpEnvironment {
         let instructions = if instructions.contains("mcp__vmux__run") {
             instructions.to_string()
         } else if instructions.is_empty() {
-            crate::client::cli::codex::RUN_STEER_PROMPT.to_string()
+            crate::runtime::cli::codex::RUN_STEER_PROMPT.to_string()
         } else {
             format!(
                 "{instructions}\n\n{}",
-                crate::client::cli::codex::RUN_STEER_PROMPT
+                crate::runtime::cli::codex::RUN_STEER_PROMPT
             )
         };
         let instructions =
@@ -1844,7 +1845,7 @@ mod tests {
             );
             assert_eq!(
                 config["features"]["code_mode"]["direct_only_tool_namespaces"],
-                serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE])
+                serde_json::json!([crate::runtime::cli::codex::DIRECT_ONLY_NAMESPACE])
             );
             let instructions = config["developer_instructions"].as_str().unwrap();
             assert!(instructions.contains("mcp__vmux__run"));

@@ -8,14 +8,14 @@ use vmux_core::browser::{
 };
 use vmux_terminal::TerminalStackSpawnRequest;
 
-use crate::client::cli::claude::ClaudeStrategy;
-use crate::client::cli::codex::CodexStrategy;
-use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, RecordStartRequest,
     RecordStartResponse, RecordStopRequest, RecordStopResponse, ScreenshotRequest,
     ScreenshotResponse,
 };
+use crate::runtime::cli::claude::ClaudeStrategy;
+use crate::runtime::cli::codex::CodexStrategy;
+use crate::runtime::cli::vibe::VibeStrategy;
 use crate::session::{
     self, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
     agent_session_dirty_run_condition,
@@ -32,7 +32,7 @@ impl Plugin for AgentPlugin {
         app.add_plugins((
             AgentSessionPlugin,
             AgentPagesPlugin,
-            crate::client::AgentClientPlugin,
+            crate::runtime::AgentRuntimePlugin,
         ));
     }
 }

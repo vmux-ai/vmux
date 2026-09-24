@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use std::sync::{OnceLock, mpsc};
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::client::cli::strategy::{
+use crate::runtime::cli::strategy::{
     CliAgentStrategy, CliModelCatalog, PromptHistory, ResumableSession, lines_skipping_invalid_utf8,
 };
 use crate::strategy::AgentStrategy;
@@ -725,7 +725,7 @@ fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
 }
 
 fn codex_latest_message(path: &Path) -> String {
-    for line in crate::client::cli::strategy::SessionTail::lines_of(path)
+    for line in crate::runtime::cli::strategy::SessionTail::lines_of(path)
         .iter()
         .rev()
     {

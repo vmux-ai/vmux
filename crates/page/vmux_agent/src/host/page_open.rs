@@ -484,13 +484,13 @@ fn handle_agent_page_open(
     acp_sessions: Query<&vmux_session::AcpSession>,
     child_of_q: Query<&ChildOf>,
     agent_to_entity: Option<Res<AgentSessionToEntity>>,
-    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
-    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     transitions: Query<&vmux_start::StartInlineTransition>,
 ) {
     let tasks: Vec<(Entity, PageOpenTask)> = open_q
@@ -585,7 +585,7 @@ fn handle_agent_page_open(
 fn handle_swap_stack_session(
     mut reader: MessageReader<vmux_core::agent::SwapStackSession>,
     settings: Res<AppSettings>,
-    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     children_q: Query<&Children>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
@@ -696,13 +696,13 @@ fn handle_agent_page_open_task(
     acp_sessions: &Query<&vmux_session::AcpSession>,
     child_of_q: &Query<&ChildOf>,
     agent_to_entity: Option<&AgentSessionToEntity>,
-    idx: Option<&crate::client::provider::index::ProviderStrategyIndex>,
-    kind_q: &Query<&crate::client::provider::strategy::StrategyKind>,
+    idx: Option<&crate::runtime::provider::index::ProviderStrategyIndex>,
+    kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
     commands: &mut Commands,
     default_cwd: &std::path::Path,
     acp_configs: &[vmux_setting::AcpAgentConfig],
-    catalog: Option<&crate::client::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::acp::AcpCatalog>,
 ) -> Result<(), String> {
     if let Some(kind) = AgentKind::all()
         .into_iter()
@@ -992,10 +992,10 @@ fn data_url_for_html(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::cli::vibe::VibeStrategy;
     use crate::host::provider::AgentExecutableOverride;
     use crate::host::spawn::{SpawnPlugin, SpawnRequestSet, SpawnRequestsPlugin};
     use crate::host::test_support::{init_worktree_test_repo, test_settings};
+    use crate::runtime::cli::vibe::VibeStrategy;
     use crate::session::{AgentSession, SessionId};
     use crate::strategy::AgentStrategies;
     use vmux_terminal::Terminal;
@@ -1244,7 +1244,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .insert_resource(crate::client::acp::AcpCatalog {
+            .insert_resource(crate::runtime::acp::AcpCatalog {
                 agents: vec![RegistryAgent {
                     id: "custom-acp".to_string(),
                     name: "Custom ACP".to_string(),
@@ -2221,7 +2221,7 @@ mod tests {
     #[test]
     pub(crate) fn cli_initial_prompt_waits_for_terminal_readiness() {
         let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(crate::client::cli::codex::CodexStrategy));
+        strategies.register_cli(Box::new(crate::runtime::cli::codex::CodexStrategy));
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SpawnPlugin))
             .add_message::<SpawnAgentInStackRequest>()

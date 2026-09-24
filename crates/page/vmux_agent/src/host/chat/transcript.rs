@@ -3,9 +3,9 @@ use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use super::model::{ModeProjection, ModelProjection};
 use super::{AgentChatView, ChatSynced, ChatUiStateUpdates};
-use crate::client::acp::{AcpModeState, AcpModelState};
 use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
+use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_chat::event::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_INITIAL_ITEM_LIMIT, ChatHistoryPage, ChatHistoryRequest,

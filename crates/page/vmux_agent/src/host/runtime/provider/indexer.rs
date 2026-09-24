@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
-use crate::client::provider::index::ProviderStrategyIndex;
-use crate::client::provider::strategy::StrategyKey;
+use crate::runtime::provider::index::ProviderStrategyIndex;
+use crate::runtime::provider::strategy::StrategyKey;
 
 pub fn on_strategy_added(
     trigger: On<Add, StrategyKey>,
@@ -30,7 +30,7 @@ pub fn on_strategy_removed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::provider::strategy::{EnvVarName, Strategy, StrategyKind, StrategyVariant};
+    use crate::runtime::provider::strategy::{EnvVarName, Strategy, StrategyKind, StrategyVariant};
     use crate::{AgentKind, AgentVariant};
 
     fn test_app() -> App {

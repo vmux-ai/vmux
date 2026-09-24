@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::client::cli::strategy::{
+use crate::runtime::cli::strategy::{
     CliAgentStrategy, CliModelCatalog, ResumableSession, lines_skipping_invalid_utf8,
 };
 use crate::strategy::AgentStrategy;
@@ -515,7 +515,7 @@ fn load_vibe_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, S
 }
 
 fn vibe_latest_message(path: &Path) -> String {
-    for line in crate::client::cli::strategy::SessionTail::lines_of(path)
+    for line in crate::runtime::cli::strategy::SessionTail::lines_of(path)
         .iter()
         .rev()
     {
