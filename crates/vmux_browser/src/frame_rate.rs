@@ -16,7 +16,7 @@ use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::{
     Header, LayoutCef,
-    event::{StacksHostEvent, TabsHostEvent},
+    ui_state::LayoutUiStateEvent,
     side_sheet::SideSheet,
 };
 
@@ -250,9 +250,7 @@ fn request_layout_frame_burst(
     mut burst: ResMut<LayoutFrameRateBurst>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    if trigger.id() != TabsHostEvent::id()
-        && trigger.id() != StacksHostEvent::id()
-        && trigger.id() != CommandBarOpenEvent::id()
+    if trigger.id() != LayoutUiStateEvent::id() && trigger.id() != CommandBarOpenEvent::id()
     {
         return;
     }
@@ -347,7 +345,7 @@ fn sync_layout_cef_frame_rate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_layout::event::PaneTreeEvent;
+    use vmux_layout::event::{PaneTreeEvent, TabsHostEvent};
 
     #[derive(rkyv::Archive, rkyv::Serialize)]
     #[vmux_api::host_event(target = any)]
@@ -406,6 +404,16 @@ mod tests {
         app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
             &TabsHostEvent::default(),
+        ));
+        assert!(
+            app.world()
+                .resource::<LayoutFrameRateBurst>()
+                .last_emit
+                .is_none()
+        );
+        app.world_mut().trigger(BinHostEmitEvent::from_event(
+            layout,
+            &LayoutUiStateEvent::default(),
         ));
         assert!(
             app.world()

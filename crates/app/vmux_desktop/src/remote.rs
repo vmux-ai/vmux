@@ -2,14 +2,14 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{BinReceive, Browsers};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::page::PageReady;
-use vmux_layout::LayoutCef;
 use vmux_layout::event::{
     RemoteCopyEvent, RemoteDevice, RemotePhase, RemoteRequest, RemoteRevokeRequest,
     RemoteStateEvent,
 };
+use vmux_layout::{LayoutCef, LayoutUiStateUpdates};
 use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
 
 pub(crate) struct RemotePlugin;
@@ -295,7 +295,7 @@ fn push_remote_state_emit(
         if last.get(&cef_e) == Some(&payload) && !page_ready.is_changed() {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(cef_e, &payload));
+        LayoutUiStateUpdates::write(&mut commands, cef_e, &payload);
         last.insert(cef_e, payload.clone());
     }
 }

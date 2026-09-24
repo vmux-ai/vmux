@@ -6,7 +6,7 @@ use vmux_core::page::PageReady;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::native_open::HostedPagePlugin;
 use vmux_layout::stack::Stack;
-use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
+use vmux_layout::{LayoutUiStateUpdates, TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
 use crate::event::{ProjectRequest, SPACES_PAGE_URL, SpaceRequest, SpaceRow, SpacesListEvent};
 use crate::spaces::{ActiveSpace, Spaces};
@@ -318,6 +318,7 @@ fn broadcast_spaces_to_views(
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
+    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     mut last_body: Local<std::collections::HashMap<Entity, SpacesListEvent>>,
     mut commands: Commands,
 ) {
@@ -348,7 +349,7 @@ fn broadcast_spaces_to_views(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
+        LayoutUiStateUpdates::deliver(&layout_ui, &mut commands, entity, &payload);
         commands.entity(entity).insert(SpacesListSent);
         last_body.insert(entity, payload);
     }

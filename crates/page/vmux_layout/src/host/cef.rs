@@ -16,6 +16,7 @@ impl Plugin for LayoutCefPlugin {
 pub struct Browser;
 
 #[derive(Component)]
+#[require(crate::LayoutUiStateUpdates)]
 pub struct LayoutCef;
 
 #[derive(Component)]
