@@ -1,9 +1,10 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use vmux_api::{VmuxRoute, error::ErrorPageData};
 
+use vmux_command::ReadCommandRequests;
 use vmux_core::{
-    CefPageAttachRequest, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenId,
-    PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
+    CefPageAttachRequest, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
+    PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -14,26 +15,71 @@ use vmux_layout::{
 
 use crate::{
     NavPending, PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavSnapshots,
-    attach_cef_page_to_stack, attach_error_page_to_stack, send_page_open_response,
+    send_page_open_response,
 };
 
 pub(crate) struct PageOpenPlugin;
 
 impl Plugin for PageOpenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
+        app.add_message::<PageOpenRequest>()
+            .add_message::<CefPageAttachRequest>()
+            .configure_sets(
+                Update,
+                (
+                    PageOpenSet::ResolveTarget,
+                    PageOpenSet::HandleKnownPages,
+                    PageOpenSet::Fallback,
+                    PageOpenSet::Respond,
+                )
+                    .chain()
+                    .after(ReadCommandRequests),
+            )
+            .add_systems(
+                Update,
                 handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
-                attach_cef_page_requests.in_set(PageOpenSet::Fallback),
-                handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
-                respond_page_open_tasks.in_set(PageOpenSet::Respond),
-            ),
-        );
+            )
+            .add_systems(
+                Update,
+                (
+                    queue_cef_page_attach_requests,
+                    classify_unclaimed_page_open_tasks,
+                    attach_cef_pages,
+                    attach_error_pages,
+                )
+                    .chain()
+                    .in_set(PageOpenSet::Fallback),
+            )
+            .add_systems(Update, respond_page_open_tasks.in_set(PageOpenSet::Respond));
     }
 }
 
-pub(crate) fn handle_page_open_requests(
+#[derive(Component)]
+struct CefPageAttachment {
+    stack: Entity,
+    url: String,
+    title: String,
+    bg_color: Option<String>,
+}
+
+impl From<&CefPageAttachRequest> for CefPageAttachment {
+    fn from(request: &CefPageAttachRequest) -> Self {
+        Self {
+            stack: request.stack,
+            url: request.url.clone(),
+            title: request.title.clone(),
+            bg_color: request.bg_color.clone(),
+        }
+    }
+}
+
+#[derive(Component)]
+struct ErrorPageAttachment {
+    stack: Entity,
+    failure: ErrorPageData,
+}
+
+fn handle_page_open_requests(
     mut reader: MessageReader<PageOpenRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -131,85 +177,128 @@ fn resolve_page_open_target(
     }
 }
 
-pub(crate) fn attach_cef_page_requests(
+fn queue_cef_page_attach_requests(
     mut reader: MessageReader<CefPageAttachRequest>,
-    children_q: Query<&Children>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        attach_cef_page_to_stack(
-            request.stack,
-            &request.url,
-            &request.title,
-            request.bg_color.clone(),
-            &children_q,
-            &mut commands,
-        );
+        commands.spawn(CefPageAttachment::from(request));
     }
 }
 
-pub(crate) fn handle_unclaimed_page_open_tasks(
-    mut tasks: Query<
+fn classify_unclaimed_page_open_tasks(
+    tasks: Query<
         (
             Entity,
             &PageOpenTask,
             Option<&PageOpenError>,
             Option<&PageOpenFallbackDeferred>,
         ),
-        (Without<PageOpenHandled>, Without<PageOpenDeferred>),
+        (
+            Without<PageOpenHandled>,
+            Without<PageOpenDeferred>,
+            Without<CefPageAttachment>,
+            Without<ErrorPageAttachment>,
+        ),
     >,
-    children_q: Query<&Children>,
     mut commands: Commands,
 ) {
-    for (entity, task, error, deferred_once) in &mut tasks {
+    for (entity, task, error, deferred_once) in &tasks {
         if let Some(error) = error {
-            attach_error_page_to_stack(
-                task.stack,
-                ErrorPageData::failed_to_load(&task.url, &error.message),
-                &children_q,
-                &mut commands,
-            );
-            commands.entity(entity).insert(PageOpenHandled);
+            commands.entity(entity).insert(ErrorPageAttachment {
+                stack: task.stack,
+                failure: ErrorPageData::failed_to_load(&task.url, &error.message),
+            });
         } else if VmuxRoute::parse(&task.url).is_some_and(|route| route.is_host("error")) {
-            attach_error_page_to_stack(
-                task.stack,
-                ErrorPageData::failed_to_load(&task.url, &task.url),
-                &children_q,
-                &mut commands,
-            );
-            commands.entity(entity).insert(PageOpenHandled);
+            commands.entity(entity).insert(ErrorPageAttachment {
+                stack: task.stack,
+                failure: ErrorPageData::failed_to_load(&task.url, &task.url),
+            });
         } else if VmuxRoute::parse(&task.url).is_some() {
             if deferred_once.is_none() {
                 commands.entity(entity).insert(PageOpenFallbackDeferred);
                 continue;
             }
-            attach_error_page_to_stack(
-                task.stack,
-                ErrorPageData::not_found(&task.url),
-                &children_q,
-                &mut commands,
-            );
             commands.entity(entity).insert((
-                PageOpenHandled,
+                ErrorPageAttachment {
+                    stack: task.stack,
+                    failure: ErrorPageData::not_found(&task.url),
+                },
                 PageOpenError {
                     message: format!("unknown vmux URL '{}'", task.url),
                 },
             ));
         } else {
-            attach_cef_page_to_stack(
-                task.stack,
-                &task.url,
-                &task.url,
-                None,
-                &children_q,
-                &mut commands,
-            );
-            commands.entity(entity).insert(PageOpenHandled);
+            commands.entity(entity).insert(CefPageAttachment {
+                stack: task.stack,
+                url: task.url.clone(),
+                title: task.url.clone(),
+                bg_color: None,
+            });
         }
     }
 }
 
-pub(crate) fn respond_page_open_tasks(
+fn attach_cef_pages(
+    attachments: Query<(Entity, &CefPageAttachment, Option<&PageOpenTask>)>,
+    children: Query<&Children>,
+    mut commands: Commands,
+) {
+    for (entity, attachment, task) in &attachments {
+        vmux_layout::stack::Stack::clear_children(attachment.stack, &children, &mut commands);
+        commands.entity(attachment.stack).insert(PageMetadata {
+            url: attachment.url.clone(),
+            title: attachment.title.clone(),
+            bg_color: attachment.bg_color.clone(),
+            ..default()
+        });
+        let browser = commands
+            .spawn((
+                Browser::new_with_title(&attachment.url, &attachment.title),
+                ChildOf(attachment.stack),
+            ))
+            .id();
+        commands.entity(browser).insert(vmux_core::KeyboardOwner);
+        if task.is_some() {
+            commands
+                .entity(entity)
+                .remove::<CefPageAttachment>()
+                .insert(PageOpenHandled);
+        } else {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn attach_error_pages(
+    attachments: Query<(Entity, &ErrorPageAttachment, Option<&PageOpenTask>)>,
+    children: Query<&Children>,
+    mut commands: Commands,
+) {
+    for (entity, attachment, task) in &attachments {
+        vmux_layout::stack::Stack::clear_children(attachment.stack, &children, &mut commands);
+        commands.entity(attachment.stack).insert(PageMetadata {
+            url: attachment.failure.url.clone(),
+            title: attachment.failure.title.clone(),
+            ..default()
+        });
+        commands.spawn((
+            Browser::native_page(vmux_api::error::ERROR_PAGE_URL, &attachment.failure.title),
+            attachment.failure.clone(),
+            ChildOf(attachment.stack),
+        ));
+        if task.is_some() {
+            commands
+                .entity(entity)
+                .remove::<ErrorPageAttachment>()
+                .insert(PageOpenHandled);
+        } else {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn respond_page_open_tasks(
     tasks: Query<
         (
             Entity,
