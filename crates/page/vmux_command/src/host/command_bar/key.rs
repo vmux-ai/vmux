@@ -1,7 +1,7 @@
 use crate::event::CommandBarKey;
+use crate::snapshot::CommandBarUiStateUpdates;
 use crate::{CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions};
 use bevy::prelude::*;
-use bevy_cef::prelude::BinHostEmitEvent;
 
 pub(crate) struct KeyPlugin;
 
@@ -62,29 +62,25 @@ fn echo_key_command(
     let Ok(key) = keys.get(trigger.event().command()) else {
         return;
     };
-    commands.trigger(BinHostEmitEvent::from_event(
-        trigger.event().invocation().caller,
-        &key.0,
-    ));
+    CommandBarUiStateUpdates::write(&mut commands, trigger.event().invocation().caller, &key.0);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::CommandInvocation;
-    use vmux_api::BinEvent;
+    use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
+    use vmux_core::host::UiStateWrite;
 
     #[derive(Resource, Default)]
-    struct Echoed(Vec<(Entity, String)>);
+    struct Echoed(Vec<(Entity, CommandBarKey)>);
 
     impl Echoed {
-        fn record(trigger: On<BinHostEmitEvent>, mut echoed: ResMut<Self>) {
-            let decoded = rkyv::from_bytes::<CommandBarKey, rkyv::rancor::Error>(trigger.payload())
-                .map(|key| format!("{key:?}"))
-                .unwrap_or_else(|_| "undecodable".to_string());
-            echoed
-                .0
-                .push((trigger.webview(), format!("{}:{decoded}", trigger.id())));
+        fn record(trigger: On<UiStateWrite<CommandBarUiState>>, mut echoed: ResMut<Self>) {
+            let CommandBarUiStatePatch::Key(key) = trigger.event().patch() else {
+                return;
+            };
+            echoed.0.push((trigger.event().webview(), *key));
         }
     }
 
@@ -118,7 +114,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
-            vec![(pressed, format!("{}:Next", CommandBarKey::id()))]
+            vec![(pressed, CommandBarKey::Next)]
         );
         assert!(
             !app.world()

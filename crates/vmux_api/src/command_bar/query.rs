@@ -41,6 +41,7 @@ impl CommandBarQuery<'_> {
 
 #[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
 pub struct PathCompleteRequest {
+    pub request_id: u64,
     pub query: String,
 }
 
@@ -52,8 +53,9 @@ pub struct PathEntry {
     pub project: String,
 }
 
-#[vmux_api::host_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
+#[vmux_api::contract(Default, Eq)]
 pub struct PathCompleteResponse {
+    pub request_id: u64,
     pub completions: Vec<PathEntry>,
     pub truncated: bool,
     pub total: u32,

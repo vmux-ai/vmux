@@ -1,13 +1,13 @@
 use crate::event::{
-    HistoryEntry, HistorySuggestionsRequest, HistorySuggestionsResponse, PathCompleteRequest,
-    PathCompleteResponse, PathEntry,
+    CommandBarUiState, HistoryEntry, HistorySuggestionsRequest, HistorySuggestionsResponse,
+    PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
 use crate::ui::signals::PaletteSignals;
 use dioxus::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use vmux_api::chat::ResumableSessionEntry;
-use vmux_ui::hooks::{send, use_listener};
+use vmux_ui::hooks::{send, use_ui_state_patch};
 use vmux_ui::launcher::palette::{CompletionQuery, PaletteDraft, PaletteSurface};
 use vmux_ui::platform::sleep_ms;
 
@@ -134,7 +134,14 @@ impl PaletteFeeds {
         let mut partial = self.completions_partial;
         let mut total = self.completions_total;
         let mut request_id = self.completion_id;
-        let _response = use_listener::<PathCompleteResponse, _>(move |data| {
+        let responses = use_ui_state_patch::<CommandBarUiState, PathCompleteResponse>();
+        use_effect(move || {
+            let Some(data) = responses.take().into_iter().last() else {
+                return;
+            };
+            if data.request_id != *request_id.read() {
+                return;
+            }
             completions.set(data.completions);
             partial.set(data.truncated);
             total.set(data.total as usize);
@@ -156,7 +163,10 @@ impl PaletteFeeds {
                 if *request_id.peek() != id {
                     return;
                 }
-                let _ = send(&PathCompleteRequest { query: path_query });
+                let _ = send(&PathCompleteRequest {
+                    request_id: id,
+                    query: path_query,
+                });
             });
         });
     }
@@ -169,7 +179,11 @@ impl PaletteFeeds {
     ) {
         let mut suggestions = self.suggestions;
         let mut request_id = self.suggestion_id;
-        let _response = use_listener::<HistorySuggestionsResponse, _>(move |response| {
+        let responses = use_ui_state_patch::<CommandBarUiState, HistorySuggestionsResponse>();
+        use_effect(move || {
+            let Some(response) = responses.take().into_iter().last() else {
+                return;
+            };
             if response.request_id != *request_id.read() {
                 return;
             }

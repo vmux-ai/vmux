@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use vmux_command::snapshot::{
-    AgentPromptTarget, AgentProviderSummary, AgentStrategySummary, CommandBarUiState,
+    AgentPromptTarget, AgentProviderSummary, AgentStrategySummary, CommandBarProjection,
 };
 
 use vmux_core::agent::AgentProviderTargetKind;
@@ -18,7 +18,7 @@ pub(crate) enum SnapshotSet {
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<crate::acp_tool::AcpPackageChanged>()
-            .init_resource::<CommandBarUiState>()
+            .init_resource::<CommandBarProjection>()
             .add_systems(
                 Update,
                 (
@@ -45,7 +45,7 @@ fn update_agents_snapshot(
     provider_idx: Option<Res<ProviderStrategyIndex>>,
     catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
-    mut state: ResMut<CommandBarUiState>,
+    mut state: ResMut<CommandBarProjection>,
 ) {
     let providers_changed = !changed_q.is_empty();
     let idx_changed = provider_idx
@@ -134,7 +134,7 @@ fn update_recent_agents(
     cli_sessions: Query<(&vmux_core::agent::AgentSession, &ChildOf)>,
     stack_times: Query<&LastActivatedAt>,
     archived_pages: Query<&ArchivedPage>,
-    mut state: ResMut<CommandBarUiState>,
+    mut state: ResMut<CommandBarProjection>,
     mut remembered: Local<std::collections::HashMap<AgentPromptTarget, i64>>,
 ) {
     let mut consider = |timestamp: i64, target: AgentPromptTarget| {
@@ -205,7 +205,7 @@ use crate::session::AgentSessionToEntity;
 
 fn update_agent_sessions_snapshot(
     sessions: Option<Res<AgentSessionToEntity>>,
-    mut state: ResMut<CommandBarUiState>,
+    mut state: ResMut<CommandBarProjection>,
 ) {
     let changed = sessions
         .as_ref()
@@ -241,7 +241,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(SnapshotPlugin);
         app.update();
-        let snap = &app.world().resource::<CommandBarUiState>().agents;
+        let snap = &app.world().resource::<CommandBarProjection>().agents;
         assert!(snap.providers.is_empty());
         assert!(snap.strategies.is_empty());
     }
@@ -251,7 +251,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(SnapshotPlugin);
         app.update();
-        let snap = &app.world().resource::<CommandBarUiState>().terminals;
+        let snap = &app.world().resource::<CommandBarProjection>().terminals;
         assert!(snap.agent_session_to_entity.is_empty());
     }
 
@@ -271,7 +271,11 @@ mod tests {
 
         app.update();
 
-        let providers = &app.world().resource::<CommandBarUiState>().agents.providers;
+        let providers = &app
+            .world()
+            .resource::<CommandBarProjection>()
+            .agents
+            .providers;
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, "codex");
     }
@@ -335,7 +339,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<CommandBarUiState>().agents.recent,
+            app.world().resource::<CommandBarProjection>().agents.recent,
             vec![
                 AgentPromptTarget::Acp {
                     id: "claude".to_string(),
@@ -354,7 +358,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<CommandBarUiState>().agents.recent,
+            app.world().resource::<CommandBarProjection>().agents.recent,
             vec![
                 AgentPromptTarget::Acp {
                     id: "claude".to_string(),
@@ -384,7 +388,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<CommandBarUiState>().agents.recent,
+            app.world().resource::<CommandBarProjection>().agents.recent,
             vec![
                 AgentPromptTarget::Acp {
                     id: "codex".to_string(),
@@ -419,7 +423,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<CommandBarUiState>().agents.recent,
+            app.world().resource::<CommandBarProjection>().agents.recent,
             vec![
                 AgentPromptTarget::Acp {
                     id: "claude".to_string(),

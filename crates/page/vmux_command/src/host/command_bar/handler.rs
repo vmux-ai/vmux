@@ -18,7 +18,7 @@ use crate::event::{
 };
 use crate::open_target::{OpenTarget, PaneDirection};
 use crate::snapshot::{
-    ClaimedUrl, CommandBarUiState, ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
+    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
 use crate::{
     CommandDefinition, CommandInvocation, CommandRequest, CommandTypePlugin, ReadCommandRequests,
@@ -557,7 +557,7 @@ fn handle_open_command_bar(
     windows: Query<&Window>,
     all_children: Query<&Children>,
     browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
-    state: Res<CommandBarUiState>,
+    state: Res<CommandBarProjection>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     contributed_pages: Query<&ContributedPage>,
     contributed_commands: Query<&ContributedCommand>,
@@ -757,7 +757,7 @@ fn on_command_bar_request(
         Query<&ContributedCommand>,
         Query<&ClaimedUrl>,
     ),
-    resources: (Res<CommandBarUiState>, Option<Res<ResolvedLocale>>),
+    resources: (Res<CommandBarProjection>, Option<Res<ResolvedLocale>>),
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
     mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
@@ -1146,7 +1146,7 @@ fn retry_pending_command_bar_open(
     }
 }
 
-fn mirror_project_roots(mut state: ResMut<CommandBarUiState>) {
+fn mirror_project_roots(mut state: ResMut<CommandBarProjection>) {
     if !state.is_changed() || state.work.projects == state.projects.roots {
         return;
     }
@@ -1784,7 +1784,7 @@ mod tests {
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
-            .init_resource::<CommandBarUiState>()
+            .init_resource::<CommandBarProjection>()
             .init_resource::<PendingLaunch>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
@@ -1856,7 +1856,7 @@ mod tests {
             ChildOf(stack),
         ));
         app.world_mut()
-            .resource_mut::<CommandBarUiState>()
+            .resource_mut::<CommandBarProjection>()
             .workspace
             .stack = Some(stack);
 

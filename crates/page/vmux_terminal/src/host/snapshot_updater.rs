@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
-use vmux_command::snapshot::CommandBarUiState;
+use vmux_command::snapshot::CommandBarProjection;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 
 use crate::pid::{Pid, PidToEntity};
@@ -18,7 +18,7 @@ impl Plugin for SnapshotPlugin {
 
 fn update_terminals_snapshot(
     pid_map: Option<Res<PidToEntity>>,
-    mut state: ResMut<CommandBarUiState>,
+    mut state: ResMut<CommandBarProjection>,
 ) {
     let changed = pid_map
         .as_ref()
@@ -44,10 +44,10 @@ mod tests {
     #[test]
     fn writes_url_and_no_running_terminals() {
         let mut app = App::new();
-        app.init_resource::<CommandBarUiState>()
+        app.init_resource::<CommandBarProjection>()
             .add_systems(Update, update_terminals_snapshot);
         app.update();
-        let snap = &app.world().resource::<CommandBarUiState>().terminals;
+        let snap = &app.world().resource::<CommandBarProjection>().terminals;
         assert_eq!(snap.terminal_page_url, TERMINAL_PAGE_URL);
         assert!(snap.running.is_empty());
     }
@@ -55,7 +55,7 @@ mod tests {
     #[test]
     fn running_terminals_are_keyed_by_the_url_the_row_carries() {
         let mut app = App::new();
-        app.init_resource::<CommandBarUiState>()
+        app.init_resource::<CommandBarProjection>()
             .add_systems(Update, update_terminals_snapshot);
         let pane = app.world_mut().spawn_empty().id();
         app.world_mut()
@@ -63,7 +63,7 @@ mod tests {
 
         app.update();
 
-        let snap = &app.world().resource::<CommandBarUiState>().terminals;
+        let snap = &app.world().resource::<CommandBarProjection>().terminals;
         assert_eq!(snap.running.get("vmux://terminal/4321"), Some(&pane));
     }
 }

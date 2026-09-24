@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::snapshot::{CommandBarSpacesSnapshot, CommandBarUiState, SpaceSummary};
+use vmux_command::snapshot::{CommandBarProjection, CommandBarSpacesSnapshot, SpaceSummary};
 use vmux_core::Order;
 use vmux_layout::space::{Space, SpaceId};
 
@@ -31,7 +31,7 @@ fn update_spaces_snapshot(
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
-    mut state: ResMut<CommandBarUiState>,
+    mut state: ResMut<CommandBarProjection>,
 ) {
     let profile = crate::model::bootstrap_profile_name();
     let mut rows: Vec<(u32, SpaceSummary)> = Vec::new();
@@ -83,7 +83,7 @@ mod tests {
     impl Spaces {
         fn one() -> Self {
             let mut app = App::new();
-            app.init_resource::<CommandBarUiState>()
+            app.init_resource::<CommandBarProjection>()
                 .add_systems(Update, update_spaces_snapshot);
             let window = app.world_mut().spawn_empty().id();
             app.insert_resource(vmux_layout::window::FocusedWindow(Some(window)));
@@ -110,14 +110,14 @@ mod tests {
 
         fn changed_tick(app: &App) -> u32 {
             app.world()
-                .get_resource_change_ticks::<CommandBarUiState>()
+                .get_resource_change_ticks::<CommandBarProjection>()
                 .expect("the snapshot")
                 .changed
                 .get()
         }
 
         fn snapshot(&self) -> &CommandBarSpacesSnapshot {
-            &self.app.world().resource::<CommandBarUiState>().spaces
+            &self.app.world().resource::<CommandBarProjection>().spaces
         }
 
         fn rename(&mut self, to: &str) {
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn publishes_global_spaces_with_the_focused_windows_active_space() {
         let mut app = App::new();
-        app.init_resource::<CommandBarUiState>()
+        app.init_resource::<CommandBarProjection>()
             .add_systems(Update, update_spaces_snapshot);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
@@ -186,7 +186,7 @@ mod tests {
 
         app.update();
 
-        let snapshot = &app.world().resource::<CommandBarUiState>().spaces;
+        let snapshot = &app.world().resource::<CommandBarProjection>().spaces;
         assert_eq!(snapshot.active_space_id, "first");
         assert_eq!(snapshot.spaces.len(), 2);
         assert_eq!(snapshot.spaces[0].id, "first");
@@ -197,7 +197,7 @@ mod tests {
             .0 = Some(second_window);
         app.update();
 
-        let snapshot = &app.world().resource::<CommandBarUiState>().spaces;
+        let snapshot = &app.world().resource::<CommandBarProjection>().spaces;
         assert_eq!(snapshot.active_space_id, "second");
         assert_eq!(snapshot.spaces.len(), 2);
     }

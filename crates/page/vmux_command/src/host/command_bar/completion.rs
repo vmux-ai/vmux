@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
 
 use crate::command_bar::project_files::{MAX_RESULTS, ProjectCompletions, ProjectIndex, RankBias};
 use crate::event::{PathCompleteRequest, PathEntry};
-use crate::snapshot::{CommandBarUiState, WriteCommandBarSnapshots};
+use crate::snapshot::{CommandBarProjection, CommandBarUiStateUpdates, WriteCommandBarSnapshots};
 
 pub(super) struct CompletionPlugin;
 
@@ -29,7 +29,7 @@ impl Plugin for CompletionPlugin {
 
 fn on_path_complete_request(
     trigger: On<BinReceive<PathCompleteRequest>>,
-    state: Res<CommandBarUiState>,
+    state: Res<CommandBarProjection>,
     browsers: NonSend<Browsers>,
     mut index: ResMut<ProjectIndex>,
     mut paths: ResMut<PathCompletions>,
@@ -43,10 +43,11 @@ fn on_path_complete_request(
         return;
     }
     let query = &trigger.event().payload.query;
+    let request_id = trigger.event().payload.request_id;
     let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
     if roots.is_empty() {
         index.forget(asking);
-        paths.start(asking, query);
+        paths.start(asking, request_id, query);
         return;
     }
     let bias = RankBias::new(
@@ -56,18 +57,15 @@ fn on_path_complete_request(
         ),
         &work.recent_files,
     );
-    let Some(completions) = index.matches(&roots, &bias, query, asking) else {
-        paths.start(asking, query);
+    let Some(completions) = index.matches(&roots, &bias, request_id, query, asking) else {
+        paths.start(asking, request_id, query);
         return;
     };
     paths.cancel(asking);
-    commands.trigger(BinHostEmitEvent::from_event(
-        asking,
-        &completions.response(),
-    ));
+    CommandBarUiStateUpdates::write(&mut commands, asking, &completions.response(request_id));
 }
 
-fn warm_project_index(state: Res<CommandBarUiState>, mut index: ResMut<ProjectIndex>) {
+fn warm_project_index(state: Res<CommandBarProjection>, mut index: ResMut<ProjectIndex>) {
     if !state.is_changed() {
         return;
     }
@@ -81,7 +79,7 @@ fn warm_project_index(state: Res<CommandBarUiState>, mut index: ResMut<ProjectIn
 }
 
 fn answer_settled_project_index(
-    state: Res<CommandBarUiState>,
+    state: Res<CommandBarProjection>,
     browsers: NonSend<Browsers>,
     mut index: ResMut<ProjectIndex>,
     mut paths: ResMut<PathCompletions>,
@@ -119,10 +117,11 @@ fn answer_settled_project_index(
             continue;
         };
         paths.cancel(asked.webview);
-        commands.trigger(BinHostEmitEvent::from_event(
+        CommandBarUiStateUpdates::write(
+            &mut commands,
             asked.webview,
-            &completions.response(),
-        ));
+            &completions.response(asked.request_id),
+        );
     }
 }
 
@@ -131,12 +130,13 @@ fn answer_path_completions(
     mut paths: ResMut<PathCompletions>,
     mut commands: Commands,
 ) {
-    for (webview, completions) in paths.settled() {
+    for (webview, request_id, completions) in paths.settled() {
         if browsers.can_emit_to(&webview) {
-            commands.trigger(BinHostEmitEvent::from_event(
+            CommandBarUiStateUpdates::write(
+                &mut commands,
                 webview,
-                &completions.response(),
-            ));
+                &completions.response(request_id),
+            );
         }
     }
 }
@@ -189,18 +189,22 @@ impl ProjectQuery {
 struct PathCompletions(Vec<PendingPathCompletion>);
 
 impl PathCompletions {
-    fn start(&mut self, webview: Entity, query: &str) {
+    fn start(&mut self, webview: Entity, request_id: u64, query: &str) {
         self.cancel(webview);
         let query = PathQuery(query.to_string());
         let task = IoTaskPool::get().spawn(async move { query.complete() });
-        self.0.push(PendingPathCompletion { webview, task });
+        self.0.push(PendingPathCompletion {
+            webview,
+            request_id,
+            task,
+        });
     }
 
     fn cancel(&mut self, webview: Entity) {
         self.0.retain(|pending| pending.webview != webview);
     }
 
-    fn settled(&mut self) -> Vec<(Entity, ProjectCompletions)> {
+    fn settled(&mut self) -> Vec<(Entity, u64, ProjectCompletions)> {
         let mut settled = Vec::new();
         let mut at = 0;
         while at < self.0.len() {
@@ -210,7 +214,7 @@ impl PathCompletions {
                 continue;
             };
             let pending = self.0.swap_remove(at);
-            settled.push((pending.webview, completion));
+            settled.push((pending.webview, pending.request_id, completion));
         }
         settled
     }
@@ -218,6 +222,7 @@ impl PathCompletions {
 
 struct PendingPathCompletion {
     webview: Entity,
+    request_id: u64,
     task: Task<ProjectCompletions>,
 }
 

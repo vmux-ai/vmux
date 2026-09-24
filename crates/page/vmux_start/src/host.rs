@@ -4,7 +4,9 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
-use vmux_command::snapshot::{ClaimedUrl, CommandBarUiState, ContributedCommand, ContributedPage};
+use vmux_command::snapshot::{
+    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage,
+};
 use vmux_core::KeyboardOwner;
 use vmux_core::PageMetadata;
 use vmux_ui::i18n::Locale;
@@ -27,7 +29,7 @@ impl Plugin for StartPlugin {
             crate::PAGE_MANIFEST,
             vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
         ));
-        app.init_resource::<CommandBarUiState>()
+        app.init_resource::<CommandBarProjection>()
             .add_message::<InlineTransitionRequested>()
             .add_systems(
                 Update,
@@ -77,7 +79,7 @@ struct StartPromptContextParams<'w, 's> {
             Option<Ref<'static, TabWorktree>>,
         ),
     >,
-    command_bar: Res<'w, CommandBarUiState>,
+    command_bar: Res<'w, CommandBarProjection>,
     proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
     warmed_branches_for: Local<'s, String>,
 }
@@ -608,7 +610,7 @@ fn on_start_data_request(
 
 fn build_start_payload(
     tab_gather: &TabGatherParams,
-    command_bar: &CommandBarUiState,
+    command_bar: &CommandBarProjection,
     contributed_pages: &Query<&ContributedPage>,
     contributed_commands: &Query<&ContributedCommand>,
     prompt_context: &StartPromptContextParams,
@@ -664,7 +666,10 @@ fn mark_start_pages_as_launcher_hosts(
 ) {
     for (entity, meta) in starts.iter() {
         if meta.url.starts_with(START_PAGE_URL) {
-            commands.entity(entity).try_insert(HostsLauncher);
+            commands.entity(entity).try_insert((
+                HostsLauncher,
+                vmux_command::snapshot::CommandBarUiStateUpdates::default(),
+            ));
         }
     }
 }
@@ -707,7 +712,7 @@ mod tests {
 
     fn start_ready_app() -> App {
         let mut app = App::new();
-        app.init_resource::<CommandBarUiState>()
+        app.init_resource::<CommandBarProjection>()
             .init_resource::<EmittedIds>()
             .add_observer(on_start_data_request)
             .add_observer(capture_emit);
