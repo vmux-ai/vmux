@@ -1,147 +1,63 @@
-use crate::prompt_media::{
-    ChatAttachPaths, ChatAttachment, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
-    inline_media_query, replace_inline_media_query,
-};
-use crate::ui::search::{HostSearch, HostSearchTimer};
-use crate::ui::signals::PaletteSignals;
-use dioxus::prelude::*;
 use std::collections::HashMap;
+
+use crate::event::{CommandPaletteRemoveAttachmentRequest, CommandPaletteState, OpenId};
+use crate::prompt_media::{
+    ChatAttachPaths, ChatAttachment, ChatMediaEntry, inline_media_query, replace_inline_media_query,
+};
+use dioxus::prelude::*;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposerAttachment, focus_prompt_end};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
 use vmux_ui::hooks::send;
-use vmux_ui::launcher::palette::PaletteSurface;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub struct PromptMedia {
-    pub attachments: Signal<Vec<ChatAttachment>>,
-    pub previews: Signal<HashMap<String, ChatAttachment>>,
-    pub entries: Signal<Vec<ChatMediaEntry>>,
-    pub request_id: Signal<u64>,
-    pub requested_query: Signal<Option<String>>,
-    pub loading: Signal<bool>,
+    state: Signal<CommandPaletteState>,
+    open_id: OpenId,
     pub selected: Signal<usize>,
+    selected_query: Signal<Option<String>>,
 }
 
-pub fn use_prompt_media() -> PromptMedia {
+pub fn use_prompt_media(state: Signal<CommandPaletteState>, open_id: OpenId) -> PromptMedia {
     PromptMedia {
-        attachments: use_signal(Vec::<ChatAttachment>::new),
-        previews: use_signal(HashMap::<String, ChatAttachment>::new),
-        entries: use_signal(Vec::<ChatMediaEntry>::new),
-        request_id: use_signal(|| 0u64),
-        requested_query: use_signal(|| None::<String>),
-        loading: use_signal(|| false),
+        state,
+        open_id,
         selected: use_signal(|| 0usize),
+        selected_query: use_signal(|| None::<String>),
     }
 }
 
 impl PromptMedia {
-    pub fn listen(self, signals: PaletteSignals, search: &HostSearch, surface: PaletteSurface) {
-        self.search(signals, search.media.clone(), surface);
+    pub fn sync_query(&mut self, value: &str) {
+        let query = inline_media_query(value).map(|query| query.query.to_string());
+        if *self.selected_query.peek() == query {
+            return;
+        }
+        self.selected_query.set(query);
+        self.selected.set(0);
     }
 
-    fn search(mut self, signals: PaletteSignals, timer: HostSearchTimer, surface: PaletteSurface) {
-        let query = signals.query;
-        let is_start = surface.is_start();
-        use_effect(move || {
-            if !is_start {
-                return;
-            }
-            let value = query();
-            let Some(media_query) = inline_media_query(&value).map(|found| found.query.to_string())
-            else {
-                self.request_id.set(self.next_request_id());
-                timer.cancel();
-                self.forget_matches();
-                return;
-            };
-            if self.requested_query.peek().as_deref() == Some(media_query.as_str()) {
-                return;
-            }
-            let request_id = self.next_request_id();
-            self.request_id.set(request_id);
-            self.requested_query.set(Some(media_query.clone()));
-            self.entries.set(Vec::new());
-            self.loading.set(true);
-            self.selected.set(0);
-            timer.schedule(crate::ui::search::HOST_SEARCH_DEBOUNCE_MS, move || {
-                if *self.request_id.peek() != request_id
-                    || self.requested_query.peek().as_deref() != Some(media_query.as_str())
-                {
-                    return;
-                }
-                if send(&ChatMediaListRequest {
-                    request_id,
-                    query: media_query,
-                })
-                .is_err()
-                {
-                    self.loading.set(false);
-                }
-            });
+    pub fn remove_attachment(&self, index: usize) {
+        let state = self.state.read();
+        if state.open_id != self.open_id {
+            return;
+        }
+        let Some(attachment) = state.attachments.get(index) else {
+            return;
+        };
+        let _ = send(&CommandPaletteRemoveAttachmentRequest {
+            open_id: self.open_id,
+            path: attachment.path.clone(),
         });
     }
 
-    fn next_request_id(&self) -> u64 {
-        (*self.request_id.peek()).wrapping_add(1).max(1)
+    pub fn highlighted(&self, entries: usize) -> usize {
+        (self.selected)().min(entries.saturating_sub(1))
     }
 
-    pub fn reset(&mut self) {
-        self.attachments.set(Vec::new());
-        self.forget_matches();
-    }
-
-    fn forget_matches(&mut self) {
-        self.entries.set(Vec::new());
-        self.requested_query.set(None);
-        self.loading.set(false);
-        self.selected.set(0);
-    }
-
-    pub fn receive(&mut self, response: ChatMediaEntries) {
-        if response.request_id != (self.request_id)() {
-            return;
-        }
-        self.entries.set(response.entries.clone());
-        self.loading.set(false);
-        self.selected.set(0);
-    }
-
-    pub fn remember_previews(&mut self, loaded: &[ChatAttachment]) {
-        let mut previews = self.previews.peek().clone();
-        for attachment in loaded {
-            previews.insert(attachment.path.clone(), attachment.clone());
-        }
-        self.previews.set(previews);
-        let mut current = self.attachments.peek().clone();
-        for preview in loaded {
-            let Some(attachment) = current
-                .iter_mut()
-                .find(|attachment| attachment.path == preview.path)
-            else {
-                continue;
-            };
-            attachment.preview_data_url = preview.preview_data_url.clone();
-        }
-        self.attachments.set(current);
-    }
-
-    pub fn remove_attachment(&mut self, index: usize) {
-        let mut next = self.attachments.peek().clone();
-        if index >= next.len() {
-            return;
-        }
-        next.remove(index);
-        self.attachments.set(next);
-    }
-
-    pub fn highlighted(&self) -> usize {
-        (self.selected)().min(self.entries.read().len().saturating_sub(1))
-    }
-
-    pub fn options(&self) -> Vec<PromptMediaOption> {
-        let mut options = Vec::new();
-        for entry in self.entries.read().iter() {
+    pub fn options(entries: &[ChatMediaEntry]) -> Vec<PromptMediaOption> {
+        let mut options = Vec::with_capacity(entries.len());
+        for entry in entries {
             options.push(PromptMediaOption {
                 key: format!("media-{}", entry.path),
                 name: entry.name.clone(),
@@ -154,8 +70,19 @@ impl PromptMedia {
         options
     }
 
-    pub fn composer_attachments(&self) -> Vec<PromptComposerAttachment> {
-        PromptComposerAttachment::removable(&self.attachments.read(), &self.previews.read())
+    pub fn loading(&self, query: &str) -> bool {
+        let Some(query) = inline_media_query(query).map(|query| query.query) else {
+            return false;
+        };
+        let state = self.state.read();
+        if state.open_id != self.open_id || state.media_query.as_deref() != Some(query) {
+            return true;
+        }
+        state.media_loading
+    }
+
+    pub fn composer_attachments(attachments: &[ChatAttachment]) -> Vec<PromptComposerAttachment> {
+        PromptComposerAttachment::removable(attachments, &HashMap::new())
     }
 
     pub fn handle_key(
@@ -165,10 +92,12 @@ impl PromptMedia {
         go_up: bool,
         query: Signal<String>,
     ) -> bool {
-        let highlighted = self.highlighted();
+        let value = query.peek().clone();
+        let entries = self.entries(&value);
+        let highlighted = (self.selected)().min(entries.len().saturating_sub(1));
         if go_down {
             event.prevent_default();
-            let last = self.entries.read().len().saturating_sub(1);
+            let last = entries.len().saturating_sub(1);
             self.selected.set((highlighted + 1).min(last));
             return true;
         }
@@ -179,12 +108,11 @@ impl PromptMedia {
         }
         if event.key() == Key::Enter && !event.modifiers().shift() {
             event.prevent_default();
-            self.pick_at(highlighted, query);
+            self.pick(entries.get(highlighted), query);
             return true;
         }
         if event.key() == Key::Escape {
             event.prevent_default();
-            let value = query.peek().clone();
             if let Some(found) = inline_media_query(&value) {
                 let mut query = query;
                 query.set(replace_inline_media_query(&value, found, ""));
@@ -196,13 +124,26 @@ impl PromptMedia {
     }
 
     pub fn pick_at(&mut self, index: usize, query: Signal<String>) {
-        let Some(entry) = self.entries.peek().get(index).cloned() else {
-            return;
-        };
-        self.pick(&entry, query);
+        let value = query.peek().clone();
+        let entries = self.entries(&value);
+        self.pick(entries.get(index), query);
     }
 
-    fn pick(&mut self, entry: &ChatMediaEntry, mut query: Signal<String>) {
+    pub fn entries(&self, query: &str) -> Vec<ChatMediaEntry> {
+        let Some(query) = inline_media_query(query).map(|query| query.query) else {
+            return Vec::new();
+        };
+        let state = self.state.read();
+        if state.open_id != self.open_id || state.media_query.as_deref() != Some(query) {
+            return Vec::new();
+        }
+        state.media_entries.clone()
+    }
+
+    fn pick(&mut self, entry: Option<&ChatMediaEntry>, mut query: Signal<String>) {
+        let Some(entry) = entry else {
+            return;
+        };
         let value = query.peek().clone();
         let Some(media_query) = inline_media_query(&value) else {
             return;

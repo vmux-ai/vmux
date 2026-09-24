@@ -1,135 +1,120 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
-use bevy_app::{App, PluginsState};
-use bevy_ecs::change_detection::DetectChangesMut;
-use bevy_ecs::component::Mutable;
-use bevy_ecs::message::{Message, Messages};
-use bevy_ecs::resource::Resource;
+use bevy_app::{App, Plugin, PluginsState};
+use bevy_ecs::message::MessageReader;
+use bevy_ecs::schedule::ScheduleLabel;
+use bevy_ecs::system::NonSendMut;
 use bevy_window::AppLifecycle;
 use vmux_api::page::PageEmit;
 use vmux_ui::hooks::transport::BytesListener;
 
-thread_local! {
-    static REPORTED: RefCell<Vec<AppLifecycle>> = const { RefCell::new(Vec::new()) };
+pub(crate) type RuntimeHandle = Rc<RefCell<MobileRuntime>>;
 
-    static INSTALLED: RefCell<Option<World>> = const { RefCell::new(None) };
+thread_local! {
+    static UI_RUNTIME: RefCell<Option<RuntimeHandle>> = const { RefCell::new(None) };
 }
 
-pub struct World {
-    app: App,
+pub(crate) struct MobileRuntime {
+    pub(crate) app: App,
     lifecycle: AppLifecycle,
-    listeners: HashMap<String, BytesListener>,
     finished: bool,
 }
 
-impl World {
-    pub fn new(plugins: impl FnOnce(&mut App)) -> Self {
-        let mut app = App::new();
-        app.add_message::<AppLifecycle>().add_message::<PageEmit>();
-        plugins(&mut app);
-        while app.plugins_state() == PluginsState::Adding {
-            bevy_tasks::tick_global_task_pools_on_main_thread();
-        }
-        app.finish();
-        app.cleanup();
-        Self {
-            app,
-            lifecycle: AppLifecycle::Idle,
-            listeners: HashMap::new(),
-            finished: false,
-        }
-    }
+#[derive(Default)]
+pub(crate) struct PageListeners(pub(crate) HashMap<String, BytesListener>);
 
-    pub fn install(self) {
-        INSTALLED.with_borrow_mut(|slot| *slot = Some(self));
-    }
+struct MobileRuntimePlugin;
 
-    pub fn with<R>(act: impl FnOnce(&mut World) -> R) -> Option<R> {
-        INSTALLED
-            .try_with(|slot| match slot.try_borrow_mut() {
-                Ok(mut slot) => slot.as_mut().map(act),
-                Err(_) => {
-                    tracing::error!("world: re-entered while running, this turn is dropped");
-                    None
-                }
-            })
-            .ok()
-            .flatten()
-    }
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct DeliverPageEmits;
 
-    pub fn insert<R: Resource + PartialEq>(&mut self, resource: R) {
-        if self.app.world().get_resource::<R>() == Some(&resource) {
+impl Plugin for MobileRuntimePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<AppLifecycle>()
+            .add_message::<PageEmit>()
+            .insert_non_send(PageListeners::default())
+            .init_schedule(DeliverPageEmits)
+            .add_systems(DeliverPageEmits, deliver_page_emits);
+    }
+}
+
+pub(crate) fn create(plugins: impl FnOnce(&mut App)) -> RuntimeHandle {
+    let mut app = App::new();
+    app.add_plugins(MobileRuntimePlugin);
+    plugins(&mut app);
+    while app.plugins_state() == PluginsState::Adding {
+        bevy_tasks::tick_global_task_pools_on_main_thread();
+    }
+    app.finish();
+    app.cleanup();
+    Rc::new(RefCell::new(MobileRuntime {
+        app,
+        lifecycle: AppLifecycle::Idle,
+        finished: false,
+    }))
+}
+
+pub(crate) fn install_ui(runtime: RuntimeHandle) {
+    UI_RUNTIME.with_borrow_mut(|installed| *installed = Some(runtime));
+}
+
+pub(crate) fn ui() -> RuntimeHandle {
+    UI_RUNTIME.with_borrow(|installed| {
+        installed
+            .as_ref()
+            .expect("mobile runtime must be installed before Dioxus starts")
+            .clone()
+    })
+}
+
+pub(crate) fn report_lifecycle(runtime: &RuntimeHandle, lifecycle: AppLifecycle) {
+    let mut runtime = match runtime.try_borrow_mut() {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            tracing::error!("runtime: lifecycle changed while ECS was running; event dropped");
             return;
         }
-        self.app.insert_resource(resource);
-    }
+    };
+    runtime.lifecycle = lifecycle;
+    runtime.app.world_mut().write_message(lifecycle);
+}
 
-    pub fn send<M: Message>(&mut self, message: M) {
-        self.app.world_mut().write_message(message);
+pub(crate) fn update(runtime: &RuntimeHandle) {
+    let Ok(mut runtime) = runtime.try_borrow_mut() else {
+        tracing::error!("runtime: re-entered while ECS was running; turn dropped");
+        return;
+    };
+    if runtime.finished {
+        return;
     }
-
-    pub fn refresh<R: Resource<Mutability = Mutable>>(&mut self) {
-        if let Some(mut resource) = self.app.world_mut().get_resource_mut::<R>() {
-            resource.set_changed();
-        }
+    if !matches!(
+        runtime.lifecycle,
+        AppLifecycle::Running | AppLifecycle::WillSuspend | AppLifecycle::WillResume
+    ) {
+        return;
     }
-
-    pub fn listen(&mut self, id: impl Into<String>, on_bytes: BytesListener) {
-        self.listeners.insert(id.into(), on_bytes);
+    runtime.app.update();
+    runtime.app.world_mut().run_schedule(DeliverPageEmits);
+    if runtime.lifecycle == AppLifecycle::WillSuspend {
+        runtime.lifecycle = AppLifecycle::Suspended;
     }
-
-    pub fn report(lifecycle: AppLifecycle) {
-        REPORTED.with_borrow_mut(|reported| reported.push(lifecycle));
+    if runtime.app.should_exit().is_some() {
+        runtime.finished = true;
     }
+}
 
-    pub fn tick(&mut self) {
-        if self.finished {
-            return;
-        }
-        self.drain_reported();
-        if !self.is_active() {
-            return;
-        }
-        self.app.update();
-        self.deliver();
-        if self.lifecycle == AppLifecycle::WillSuspend {
-            self.lifecycle = AppLifecycle::Suspended;
-        }
-        if self.app.should_exit().is_some() {
-            self.finished = true;
-        }
-    }
-
-    fn deliver(&mut self) {
-        let emitted = self
-            .app
-            .world_mut()
-            .resource_mut::<Messages<PageEmit>>()
-            .drain()
-            .collect::<Vec<_>>();
-        for emit in emitted {
-            let Some(listener) = self.listeners.get_mut(&emit.id) else {
-                tracing::debug!(id = emit.id, "page emit had no listener");
-                continue;
-            };
-            listener(&emit.bytes);
-        }
-    }
-
-    fn is_active(&self) -> bool {
-        matches!(
-            self.lifecycle,
-            AppLifecycle::Running | AppLifecycle::WillSuspend | AppLifecycle::WillResume
-        )
-    }
-
-    fn drain_reported(&mut self) {
-        let reported = REPORTED.with_borrow_mut(std::mem::take);
-        for lifecycle in reported {
-            self.lifecycle = lifecycle;
-            self.app.world_mut().write_message(lifecycle);
-        }
+fn deliver_page_emits(
+    mut emitted: MessageReader<PageEmit>,
+    mut listeners: NonSendMut<PageListeners>,
+) {
+    for emit in emitted.read() {
+        let Some(listener) = listeners.0.get_mut(&emit.id) else {
+            tracing::debug!(id = emit.id, "page emit had no listener");
+            continue;
+        };
+        listener(&emit.bytes);
     }
 }
 
@@ -143,72 +128,81 @@ mod tests {
     #[derive(Resource, Default)]
     struct Turns(usize);
 
-    impl World {
-        fn counting() -> Self {
-            REPORTED.with_borrow_mut(Vec::clear);
-            Self::new(|app| {
-                app.init_resource::<Turns>()
-                    .add_systems(Update, |mut turns: ResMut<Turns>| turns.0 += 1);
-            })
-        }
+    fn counting_runtime() -> RuntimeHandle {
+        create(|app| {
+            app.init_resource::<Turns>()
+                .add_systems(Update, |mut turns: ResMut<Turns>| turns.0 += 1);
+        })
+    }
 
-        fn turns(&self) -> usize {
-            self.app.world().resource::<Turns>().0
-        }
+    fn turns(runtime: &RuntimeHandle) -> usize {
+        runtime.borrow().app.world().resource::<Turns>().0
     }
 
     #[test]
     fn an_idle_world_does_not_run_until_it_is_told_the_app_is_running() {
-        let mut world = World::counting();
-        world.tick();
-        assert_eq!(world.turns(), 0, "a world nobody has resumed must not run");
+        let runtime = counting_runtime();
+        update(&runtime);
+        assert_eq!(
+            turns(&runtime),
+            0,
+            "a world nobody has resumed must not run"
+        );
 
-        World::report(AppLifecycle::Running);
-        world.tick();
-        assert_eq!(world.turns(), 1);
+        report_lifecycle(&runtime, AppLifecycle::Running);
+        update(&runtime);
+        assert_eq!(turns(&runtime), 1);
     }
 
     #[test]
     fn suspending_owes_exactly_one_more_turn_and_then_stops() {
-        let mut world = World::counting();
-        World::report(AppLifecycle::Running);
-        world.tick();
+        let runtime = counting_runtime();
+        report_lifecycle(&runtime, AppLifecycle::Running);
+        update(&runtime);
 
-        World::report(AppLifecycle::WillSuspend);
-        world.tick();
-        let owed = world.turns();
+        report_lifecycle(&runtime, AppLifecycle::WillSuspend);
+        update(&runtime);
+        let owed = turns(&runtime);
         assert_eq!(owed, 2, "WillSuspend is owed the frame a plugin saves from");
 
         for _ in 0..5 {
-            world.tick();
+            update(&runtime);
         }
-        assert_eq!(owed, world.turns(), "a suspended world must not run");
+        assert_eq!(owed, turns(&runtime), "a suspended world must not run");
     }
 
     #[test]
     fn a_resumed_world_runs_again() {
-        let mut world = World::counting();
-        World::report(AppLifecycle::Running);
-        World::report(AppLifecycle::WillSuspend);
-        world.tick();
-        world.tick();
-        let suspended = world.turns();
+        let runtime = counting_runtime();
+        report_lifecycle(&runtime, AppLifecycle::Running);
+        report_lifecycle(&runtime, AppLifecycle::WillSuspend);
+        update(&runtime);
+        update(&runtime);
+        let suspended = turns(&runtime);
 
-        World::report(AppLifecycle::Running);
-        world.tick();
-        assert_eq!(world.turns(), suspended + 1);
+        report_lifecycle(&runtime, AppLifecycle::Running);
+        update(&runtime);
+        assert_eq!(turns(&runtime), suspended + 1);
     }
 
     #[test]
     fn a_world_that_has_exited_stops_running_systems() {
-        let mut world = World::counting();
-        World::report(AppLifecycle::Running);
-        world.tick();
-        world.app.world_mut().write_message(AppExit::Success);
-        world.tick();
-        let exited = world.turns();
+        let runtime = counting_runtime();
+        report_lifecycle(&runtime, AppLifecycle::Running);
+        update(&runtime);
+        runtime
+            .borrow_mut()
+            .app
+            .world_mut()
+            .write_message(AppExit::Success);
+        update(&runtime);
+        let exited = turns(&runtime);
 
-        world.tick();
-        assert_eq!(exited, world.turns(), "an exited world must not run again");
+        update(&runtime);
+        assert_eq!(
+            exited,
+            turns(&runtime),
+            "an exited world must not run again"
+        );
     }
 }

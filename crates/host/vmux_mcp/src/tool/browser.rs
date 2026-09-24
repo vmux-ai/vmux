@@ -1,32 +1,34 @@
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery};
 
 use super::{
-    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolManifest, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolRequestSet,
 };
 
 pub(super) struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(
-                Update,
-                (
-                    navigate,
-                    go_back,
-                    go_forward,
-                    history_search,
-                    install_extension,
-                    snapshot,
-                    scroll,
-                )
-                    .in_set(ToolDispatchSet),
-            );
+        app.add_plugins(McpToolPlugin::<BrowserTool>::new(include_str!(
+            "browser.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(
+            Update,
+            (
+                navigate,
+                go_back,
+                go_forward,
+                history_search,
+                install_extension,
+                snapshot,
+                scroll,
+            )
+                .in_set(ToolDispatchSet),
+        );
     }
 }
 
@@ -141,22 +143,25 @@ impl From<BrowserPane> for Option<String> {
     }
 }
 
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<BrowserTool>::from_ron(include_str!("browser.ron"))
-        .spawn(&mut commands, &mut next_order);
-}
-
 fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
     for (request, call, tool) in calls.iter() {
-        match tool {
-            BrowserTool::Navigate => call.parse_into::<BrowserNavigateArgs>(request, &mut commands),
-            BrowserTool::GoBack => call.parse_into::<BrowserBackArgs>(request, &mut commands),
-            BrowserTool::GoForward => call.parse_into::<BrowserForwardArgs>(request, &mut commands),
-            BrowserTool::HistorySearch => {
-                call.parse_into::<BrowserHistorySearchArgs>(request, &mut commands)
-            }
+        let parsed = match tool {
+            BrowserTool::Navigate => call.parse::<BrowserNavigateArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            BrowserTool::GoBack => call.parse::<BrowserBackArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            BrowserTool::GoForward => call.parse::<BrowserForwardArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            BrowserTool::HistorySearch => call.parse::<BrowserHistorySearchArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
             BrowserTool::InstallExtension => {
-                call.parse_into::<BrowserInstallExtensionArgs>(request, &mut commands)
+                call.parse::<BrowserInstallExtensionArgs>().map(|args| {
+                    commands.entity(request).insert(args);
+                })
             }
             BrowserTool::Snapshot => {
                 if call
@@ -164,14 +169,21 @@ fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
                     .get("target")
                     .is_some_and(|value| !value.is_null() && !value.is_string())
                 {
-                    commands.entity(request).insert(ToolDispatchResult(Err(
-                        "browser_snapshot.target must be a string".to_string(),
-                    )));
+                    Err("browser_snapshot.target must be a string".to_string())
                 } else {
-                    call.parse_into::<BrowserSnapshotArgs>(request, &mut commands);
+                    call.parse::<BrowserSnapshotArgs>().map(|args| {
+                        commands.entity(request).insert(args);
+                    })
                 }
             }
-            BrowserTool::Scroll => call.parse_into::<BrowserScrollArgs>(request, &mut commands),
+            BrowserTool::Scroll => call.parse::<BrowserScrollArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+        };
+        if let Err(message) = parsed {
+            commands
+                .entity(request)
+                .insert(ToolDispatchResult(Err(message)));
         }
     }
 }

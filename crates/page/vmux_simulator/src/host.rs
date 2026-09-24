@@ -15,7 +15,7 @@ use stream::StreamServer;
 use vmux_api::protocol::SimulatorAction;
 use vmux_core::PageMetadata;
 use vmux_core::host::page::{NativelyHosted, PageReady};
-use vmux_core::host::{UiState, UiStatePlugin};
+use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 
 pub use device::{Axe, SimulatorDevice};
 
@@ -328,7 +328,7 @@ impl SimulatorPlugin {
             if announced.is_some_and(|announced| announced.current() == Some(&payload)) {
                 continue;
             }
-            UiState::<SimulatorReady>::write(&mut commands, entity, &payload);
+            commands.trigger(UiStateWrite::<SimulatorReady>::from_event(entity, &payload));
         }
     }
 

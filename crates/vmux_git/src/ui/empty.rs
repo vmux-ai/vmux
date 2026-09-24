@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::directory::{DirectoryNavigator, DirectoryNavigatorAction, visible_directory_entries};
+use vmux_ui::directory::{DirectoryNavigator, DirectoryNavigatorEvent, visible_directory_entries};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
@@ -72,8 +72,8 @@ pub(super) fn EmptyRepository() -> Element {
                 thumbs: HashMap::new(),
                 show_hidden: show_hidden(),
                 preview: rsx! { div { class: "text-xs text-muted-foreground opacity-60", "" } },
-                on_action: move |action| match action {
-                    DirectoryNavigatorAction::Select { index, entry } => {
+                on_event: move |event| match event {
+                    DirectoryNavigatorEvent::Select { index, entry } => {
                         selected.set(index);
                         preview_path.set(String::new());
                         if entry.is_dir {
@@ -81,14 +81,14 @@ pub(super) fn EmptyRepository() -> Element {
                             GitWorkspace::browse(&entry.path, true);
                         }
                     }
-                    DirectoryNavigatorAction::Ascend { target } => {
+                    DirectoryNavigatorEvent::Ascend { target } => {
                         if action_directory.parent_path.is_empty() {
                             return;
                         }
                         came_from.set(target);
                         GitWorkspace::browse(&action_directory.parent_path, false);
                     }
-                    DirectoryNavigatorAction::Descend { target } => {
+                    DirectoryNavigatorEvent::Descend { target } => {
                         let Some(entry) = action_directory.entries.get(selected()) else {
                             return;
                         };
@@ -98,13 +98,13 @@ pub(super) fn EmptyRepository() -> Element {
                         came_from.set(target);
                         GitWorkspace::browse(&entry.path, false);
                     }
-                    DirectoryNavigatorAction::Open { entry } => {
+                    DirectoryNavigatorEvent::Open { entry } => {
                         if entry.is_dir {
                             came_from.set(String::new());
                             GitWorkspace::browse(&entry.path, false);
                         }
                     }
-                    DirectoryNavigatorAction::ToggleHidden => {
+                    DirectoryNavigatorEvent::ToggleHidden => {
                         let next = !show_hidden();
                         show_hidden.set(next);
                         let entries = visible_directory_entries(&action_directory.entries, next);

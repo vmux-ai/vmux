@@ -60,10 +60,11 @@ fn on_agent_setup_prereq_request(
     let segment = &trigger.event().payload.agent;
     let brew_present = crate::exec::find_executable("brew").is_some();
     let needs_homebrew = prereq_needs_homebrew(segment, brew_present);
-    AgentSetupUiStateUpdates::write(
-        &mut commands,
-        webview,
-        &AgentSetupPrereqStatus { needs_homebrew },
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<AgentSetupUiState>::from_event(
+            webview,
+            &AgentSetupPrereqStatus { needs_homebrew },
+        ),
     );
 }
 
@@ -101,13 +102,14 @@ fn detect_agent_install_outcome(
                 CommandLifecycleKind::Ended { .. } => {
                     let installed = crate::exec::find_executable(pane.agent.executable()).is_some();
                     if let Some(ok) = install_outcome(pane.armed, installed) {
-                        AgentSetupUiStateUpdates::write(
-                            &mut commands,
-                            pane.setup_webview,
-                            &AgentSetupResult {
-                                agent: pane.agent.as_url_segment().to_string(),
-                                ok,
-                            },
+                        commands.trigger(
+                            vmux_core::host::UiStateWrite::<AgentSetupUiState>::from_event(
+                                pane.setup_webview,
+                                &AgentSetupResult {
+                                    agent: pane.agent.as_url_segment().to_string(),
+                                    ok,
+                                },
+                            ),
                         );
                         if ok
                             && setup_stacks

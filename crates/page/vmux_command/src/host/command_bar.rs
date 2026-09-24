@@ -5,6 +5,7 @@ use bevy::prelude::*;
 mod completion;
 pub mod handler;
 pub mod key;
+mod palette;
 pub mod panel;
 pub mod project_files;
 pub mod state;
@@ -19,6 +20,7 @@ impl Plugin for CommandBarPlugin {
             completion::CompletionPlugin,
             handler::InputPlugin,
             key::KeyPlugin,
+            palette::PalettePlugin,
             panel::PanelPlugin,
             wake::WakePlugin,
         ));

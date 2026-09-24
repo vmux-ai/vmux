@@ -8,7 +8,7 @@ use crate::event::{DiffKind, DiffLine, GitDiffRequest, GitLineMarker, GitLineSta
 
 use super::GitUpdateSet;
 use super::job::JobKind;
-use super::job_runner::GitJob;
+use super::job_runner::GitJobRequest;
 
 const DIFF_WINDOW_ROWS: u32 = 200_000;
 
@@ -162,10 +162,9 @@ fn start_diff_requests(
                 generation,
                 file: pending.file,
             });
-        GitJob::enqueue(
-            &mut commands,
-            entity,
-            JobKind::Diff {
+        commands.trigger(GitJobRequest {
+            webview: entity,
+            job: JobKind::Diff {
                 repo_root: target.repo_root,
                 path: target.path,
                 reference: target.reference,
@@ -174,7 +173,7 @@ fn start_diff_requests(
                 rows: DIFF_WINDOW_ROWS,
                 content,
             },
-        );
+        });
     }
 }
 

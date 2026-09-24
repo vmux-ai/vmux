@@ -1,8 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use super::ChatUiStateUpdates;
-
 use crate::events::AgentCommandRequest;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
@@ -412,8 +410,18 @@ impl ModelProjection {
     }
 
     pub(super) fn write(self, webview: Entity, commands: &mut Commands) {
-        ChatUiStateUpdates::write(commands, webview, &self.state);
-        ChatUiStateUpdates::write(commands, webview, &self.slash_commands);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview,
+                &self.state,
+            ),
+        );
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview,
+                &self.slash_commands,
+            ),
+        );
     }
 
     fn options(model: &AcpModelState) -> Vec<ModelOptionEntry> {
@@ -445,7 +453,11 @@ impl From<Option<&AcpModeState>> for ModeProjection {
 
 impl ModeProjection {
     pub(super) fn write(self, webview: Entity, commands: &mut Commands) {
-        ChatUiStateUpdates::write(commands, webview, &self.0);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview, &self.0,
+            ),
+        );
     }
 }
 

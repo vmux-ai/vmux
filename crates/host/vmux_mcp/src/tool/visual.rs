@@ -1,8 +1,8 @@
 use super::{
-    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolManifest, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentQuery, SimulatorAction, SimulatorButton};
@@ -11,7 +11,7 @@ pub(super) struct VisualToolPlugin;
 
 impl Plugin for VisualToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
+        app.add_plugins(McpToolPlugin::<VisualTool>::new(include_str!("visual.ron")))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
@@ -43,11 +43,6 @@ enum VisualTool {
     SimulatorButton,
     RecordStart,
     RecordStop,
-}
-
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<VisualTool>::from_ron(include_str!("visual.ron"))
-        .spawn(&mut commands, &mut next_order);
 }
 
 #[derive(Component, Deserialize)]
@@ -127,22 +122,37 @@ struct RecordStopArgs {
 
 fn parse(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     for (request, call, tool) in calls.iter() {
-        match tool {
-            VisualTool::Screenshot => call.parse_into::<ScreenshotArgs>(request, &mut commands),
-            VisualTool::SimulatorScreenshot => {}
-            VisualTool::SimulatorTap => call.parse_into::<SimulatorTapArgs>(request, &mut commands),
-            VisualTool::SimulatorSwipe => {
-                call.parse_into::<SimulatorSwipeArgs>(request, &mut commands)
-            }
-            VisualTool::SimulatorType => {
-                call.parse_into::<SimulatorTypeArgs>(request, &mut commands)
-            }
-            VisualTool::SimulatorKey => call.parse_into::<SimulatorKeyArgs>(request, &mut commands),
-            VisualTool::SimulatorButton => {
-                call.parse_into::<SimulatorButtonArgs>(request, &mut commands)
-            }
-            VisualTool::RecordStart => call.parse_into::<RecordStartArgs>(request, &mut commands),
-            VisualTool::RecordStop => call.parse_into::<RecordStopArgs>(request, &mut commands),
+        let parsed = match tool {
+            VisualTool::Screenshot => call.parse::<ScreenshotArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            VisualTool::SimulatorScreenshot => continue,
+            VisualTool::SimulatorTap => call.parse::<SimulatorTapArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            VisualTool::SimulatorSwipe => call.parse::<SimulatorSwipeArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            VisualTool::SimulatorType => call.parse::<SimulatorTypeArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            VisualTool::SimulatorKey => call.parse::<SimulatorKeyArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            VisualTool::SimulatorButton => call.parse::<SimulatorButtonArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            VisualTool::RecordStart => call.parse::<RecordStartArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            VisualTool::RecordStop => call.parse::<RecordStopArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+        };
+        if let Err(message) = parsed {
+            commands
+                .entity(request)
+                .insert(ToolDispatchResult(Err(message)));
         }
     }
 }

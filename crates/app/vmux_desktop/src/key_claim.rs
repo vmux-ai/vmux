@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiInput, WebviewSource};
 use vmux_command::shortcut::{KeyContext, Keymap};
 use vmux_core::host::page::HostsPage;
-use vmux_core::host::{UiState, UiStatePlugin};
+use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::input::{KeyClaims, PageKeyContext};
 
 pub struct KeyClaimPlugin;
@@ -55,7 +55,7 @@ fn push_key_claims(
             continue;
         }
         let claims: KeyClaims = keymap.in_context(&context).claims();
-        UiState::<KeyClaims>::write(&mut commands, entity, &claims);
+        commands.trigger(UiStateWrite::<KeyClaims>::from_event(entity, &claims));
     }
 }
 

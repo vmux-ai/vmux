@@ -1,8 +1,8 @@
 use super::{
-    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolManifest, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery, AgentSpaceCommand};
@@ -11,7 +11,7 @@ pub(super) struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
+        app.add_plugins(McpToolPlugin::<SpaceTool>::new(include_str!("space.ron")))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
@@ -48,18 +48,24 @@ struct DeleteSpaceArgs {
     space_id: String,
 }
 
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<SpaceTool>::from_ron(include_str!("space.ron"))
-        .spawn(&mut commands, &mut next_order);
-}
-
 fn parse(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
     for (request, call, tool) in calls.iter() {
-        match tool {
-            SpaceTool::ListSpaces => {}
-            SpaceTool::CreateSpace => call.parse_into::<CreateSpaceArgs>(request, &mut commands),
-            SpaceTool::RenameSpace => call.parse_into::<RenameSpaceArgs>(request, &mut commands),
-            SpaceTool::DeleteSpace => call.parse_into::<DeleteSpaceArgs>(request, &mut commands),
+        let parsed = match tool {
+            SpaceTool::ListSpaces => continue,
+            SpaceTool::CreateSpace => call.parse::<CreateSpaceArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            SpaceTool::RenameSpace => call.parse::<RenameSpaceArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            SpaceTool::DeleteSpace => call.parse::<DeleteSpaceArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+        };
+        if let Err(message) = parsed {
+            commands
+                .entity(request)
+                .insert(ToolDispatchResult(Err(message)));
         }
     }
 }

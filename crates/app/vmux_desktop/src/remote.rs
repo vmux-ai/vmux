@@ -4,12 +4,13 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiInput};
 use crossbeam_channel::{Receiver, Sender};
+use vmux_core::host::UiStateWrite;
 use vmux_core::page::PageReady;
 use vmux_layout::event::{
     RemoteCopyEvent, RemoteDevice, RemotePairingDismissRequest, RemotePairingShowRequest,
     RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteUiState,
 };
-use vmux_layout::{LayoutCef, LayoutUiStateUpdates};
+use vmux_layout::{LayoutCef, state::LayoutUiState};
 use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
 
 pub(crate) struct RemotePlugin;
@@ -413,7 +414,7 @@ fn push_remote_state_emit(
         if last.get(&cef_e) == Some(&payload) && !page_ready.is_changed() {
             continue;
         }
-        LayoutUiStateUpdates::write(&mut commands, cef_e, &payload);
+        commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
         last.insert(cef_e, payload.clone());
     }
 }

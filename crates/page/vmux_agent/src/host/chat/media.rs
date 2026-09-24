@@ -3,8 +3,6 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use super::ChatUiStateUpdates;
-
 use vmux_chat::event::{
     ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachmentPreviews,
     ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
@@ -488,21 +486,27 @@ fn drain_chat_attachment_tasks(
         match pending.delivery {
             ChatAttachmentDelivery::Selected => {
                 let selected = ChatAttachments { attachments };
-                ChatUiStateUpdates::write(&mut commands, pending.webview, &selected);
-                vmux_command::snapshot::CommandBarUiStateUpdates::write(
-                    &mut commands,
-                    pending.webview,
-                    &selected,
+                commands.trigger(
+                    vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                        pending.webview,
+                        &selected,
+                    ),
                 );
+                commands.trigger(vmux_core::host::UiStateWrite::<
+                    vmux_api::command_bar::CommandBarUiState,
+                >::from_event(pending.webview, &selected));
             }
             ChatAttachmentDelivery::Previews => {
                 let previews = ChatAttachmentPreviews { attachments };
-                ChatUiStateUpdates::write(&mut commands, pending.webview, &previews);
-                vmux_command::snapshot::CommandBarUiStateUpdates::write(
-                    &mut commands,
-                    pending.webview,
-                    &previews,
+                commands.trigger(
+                    vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                        pending.webview,
+                        &previews,
+                    ),
                 );
+                commands.trigger(vmux_core::host::UiStateWrite::<
+                    vmux_api::command_bar::CommandBarUiState,
+                >::from_event(pending.webview, &previews));
             }
         }
         if let Some(paths) = preview_paths {
@@ -527,12 +531,15 @@ fn drain_chat_media_list_tasks(
         let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        ChatUiStateUpdates::write(&mut commands, pending.webview, &entries);
-        vmux_command::snapshot::CommandBarUiStateUpdates::write(
-            &mut commands,
-            pending.webview,
-            &entries,
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                pending.webview,
+                &entries,
+            ),
         );
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(pending.webview, &entries));
         if entries
             .entries
             .iter()
@@ -560,12 +567,15 @@ fn drain_chat_media_preview_tasks(
         let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        ChatUiStateUpdates::write(&mut commands, pending.webview, &entries);
-        vmux_command::snapshot::CommandBarUiStateUpdates::write(
-            &mut commands,
-            pending.webview,
-            &entries,
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                pending.webview,
+                &entries,
+            ),
         );
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(pending.webview, &entries));
         commands.entity(entity).despawn();
     }
 }

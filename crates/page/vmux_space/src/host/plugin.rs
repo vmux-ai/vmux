@@ -381,8 +381,16 @@ fn broadcast_spaces_to_views(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        LayoutUiStateUpdates::deliver(&layout_ui, &mut commands, entity, &payload);
-        SpacesUiStateUpdates::deliver(&spaces_ui, &mut commands, entity, &payload);
+        if layout_ui.contains(entity) {
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_layout::state::LayoutUiState,
+            >::from_event(entity, &payload));
+        }
+        if spaces_ui.contains(entity) {
+            commands.trigger(vmux_core::host::UiStateWrite::<SpacesUiState>::from_event(
+                entity, &payload,
+            ));
+        }
         commands.entity(entity).insert(SpacesListSent);
         last_body.insert(entity, payload);
     }

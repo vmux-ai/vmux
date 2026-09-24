@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use super::ChatUiStateUpdates;
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
@@ -280,11 +279,9 @@ fn drain_prompt_history_tasks(
             continue;
         };
         commands.entity(entity).despawn();
-        vmux_command::snapshot::CommandBarUiStateUpdates::write(
-            &mut commands,
-            task.webview,
-            &history,
-        );
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(task.webview, &history));
     }
 }
 
@@ -357,12 +354,15 @@ fn drain_resume_list_tasks(
             scan.sessions = scanned;
             scan.read_at = Some(std::time::Instant::now());
         }
-        ChatUiStateUpdates::write(&mut commands, task.webview, &answer.sessions);
-        vmux_command::snapshot::CommandBarUiStateUpdates::write(
-            &mut commands,
-            task.webview,
-            &answer.sessions,
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                task.webview,
+                &answer.sessions,
+            ),
         );
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(task.webview, &answer.sessions));
     }
 }
 

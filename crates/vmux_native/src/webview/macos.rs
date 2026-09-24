@@ -139,9 +139,9 @@ mod tests {
     }
 }
 
-pub struct ImmediateAction;
+pub struct LinkPreviewPolicy;
 
-impl ImmediateAction {
+impl LinkPreviewPolicy {
     pub fn forbid(webview: &wry::WebView) {
         use wry::WebViewExtMacOS;
 

@@ -1,11 +1,9 @@
 use crate::event::{
-    StartBranchesRequest, StartGoToBranch, StartSelectMode, StartSelectModel, StartSelectWorkspace,
+    CommandPaletteState, StartGoToBranch, StartSelectMode, StartSelectModel, StartSelectWorkspace,
 };
 use crate::ui::signals::PaletteSignals;
 use dioxus::prelude::*;
-use vmux_api::chat::PromptHistoryRequest;
 use vmux_api::room::ModelOptionEntry;
-use vmux_api::space::ProjectBranch;
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::{
     AgentMenuData, BranchMenuData, ComposerChip, ComposerMenu, ComposerMenuKind, ModelMenuData,
@@ -26,11 +24,7 @@ pub struct ComposerChips {
 }
 
 impl ComposerChips {
-    pub fn build(
-        composer: &ComposerState,
-        menu: ComposerMenu,
-        mut picking: ProjectPicking,
-    ) -> Self {
+    pub fn build(composer: &ComposerState, menu: ComposerMenu) -> Self {
         if composer.loading {
             return Self {
                 agent: ComposerChip::loading(),
@@ -73,20 +67,12 @@ impl ComposerChips {
         }));
         let branch = match composer.is_git_repo {
             false => None,
-            true => {
-                let owner = composer.project.clone();
-                Some(
-                    ComposerChip::ready(
-                        composer.branch_label.clone(),
-                        composer.branch_title.clone(),
-                    )
+            true => Some(
+                ComposerChip::ready(composer.branch_label.clone(), composer.branch_title.clone())
                     .opens(EventHandler::new(move |()| {
-                        if menu.toggle(ComposerMenuKind::Branch) {
-                            picking.read_ahead(&owner);
-                        }
+                        menu.toggle(ComposerMenuKind::Branch);
                     })),
-                )
-            }
+            ),
         };
         let permission = if composer.permission_modes.is_empty() {
             None
@@ -127,43 +113,20 @@ impl ComposerChips {
 
 #[derive(Clone, Copy)]
 pub struct PromptRecall {
-    history: Signal<Vec<String>>,
     cursor: Signal<Option<usize>>,
     scratch: Signal<String>,
     handed: Signal<String>,
-    asked_for: Signal<String>,
 }
 
 pub fn use_prompt_recall() -> PromptRecall {
     PromptRecall {
-        history: use_signal(Vec::<String>::new),
         cursor: use_signal(|| None),
         scratch: use_signal(String::new),
         handed: use_signal(String::new),
-        asked_for: use_signal(String::new),
     }
 }
 
 impl PromptRecall {
-    pub fn remember(&mut self, prompts: Vec<String>) {
-        self.history.set(prompts);
-    }
-
-    pub fn read_ahead(&mut self, agent: &str, cwd: &str) {
-        if agent.is_empty() || cwd.is_empty() {
-            return;
-        }
-        let asked = format!("{agent}\u{0}{cwd}");
-        if *self.asked_for.peek() == asked {
-            return;
-        }
-        self.asked_for.set(asked);
-        let _ = send(&PromptHistoryRequest {
-            agent: agent.to_string(),
-            cwd: cwd.to_string(),
-        });
-    }
-
     pub fn recalling(&self, current: &str) -> bool {
         self.place_in(current).is_some()
     }
@@ -173,13 +136,17 @@ impl PromptRecall {
         (self.handed.peek().as_str() == current).then_some(cursor)
     }
 
-    pub fn walk(&mut self, direction: PromptHistoryDirection, current: &str) -> Option<String> {
-        let history = self.history.peek().clone();
+    pub fn walk(
+        &mut self,
+        history: &[String],
+        direction: PromptHistoryDirection,
+        current: &str,
+    ) -> Option<String> {
         if history.is_empty() {
             return None;
         }
         let (value, next, scratch) = move_prompt_history(
-            &history,
+            history,
             self.place_in(current),
             &self.scratch.peek().clone(),
             current,
@@ -192,37 +159,9 @@ impl PromptRecall {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct ProjectPicking {
-    pub branches: Signal<Vec<ProjectBranch>>,
-    pub branches_for: Signal<String>,
-    asked_for: Signal<String>,
-}
+struct ProjectSelection;
 
-pub fn use_project_picking() -> ProjectPicking {
-    ProjectPicking {
-        branches: use_signal(Vec::<ProjectBranch>::new),
-        branches_for: use_signal(String::new),
-        asked_for: use_signal(String::new),
-    }
-}
-
-impl ProjectPicking {
-    pub fn remember(&mut self, project: String, branches: Vec<ProjectBranch>) {
-        self.branches.set(branches);
-        self.branches_for.set(project);
-    }
-
-    pub fn read_ahead(&mut self, project: &str) {
-        if project.is_empty() || *self.asked_for.peek() == project {
-            return;
-        }
-        self.asked_for.set(project.to_string());
-        let _ = send(&StartBranchesRequest {
-            project: project.to_string(),
-        });
-    }
-
+impl ProjectSelection {
     fn go_to(pick: ProjectPick) {
         let _ = send(&StartGoToBranch {
             project: pick.project,
@@ -246,7 +185,7 @@ impl ComposerMenuSet {
     pub fn build(
         composer: &ComposerState,
         mut signals: PaletteSignals,
-        picking: ProjectPicking,
+        palette: &CommandPaletteState,
     ) -> Self {
         let agent = AgentMenuData {
             options: composer.agents.clone(),
@@ -284,7 +223,7 @@ impl ComposerMenuSet {
         let project = ProjectMenuData {
             projects: composer.projects.clone(),
             loaded: !composer.projects.is_empty(),
-            on_pick: EventHandler::new(ProjectPicking::go_to),
+            on_pick: EventHandler::new(ProjectSelection::go_to),
             on_choose_another: EventHandler::new(move |()| {
                 let _ = send(&StartSelectWorkspace {
                     current_dir: cwd.clone(),
@@ -294,9 +233,9 @@ impl ComposerMenuSet {
         };
         let branch = BranchMenuData {
             project: composer.project.clone(),
-            branches: (picking.branches)(),
-            loaded: (picking.branches_for)() == composer.project,
-            on_pick: EventHandler::new(ProjectPicking::go_to),
+            branches: palette.branches.clone(),
+            loaded: palette.branch_project == composer.project,
+            on_pick: EventHandler::new(ProjectSelection::go_to),
         };
 
         Self {

@@ -11,10 +11,10 @@ mod terminal;
 mod visual;
 mod workspace;
 
+use runtime::ToolCalls;
 pub use runtime::{
     BuiltinToolPlugin, DispatchTarget, McpToolPlugin, RegisterTools, ShellNote, ToolCall,
     ToolCallPolicy, ToolCatalog, ToolDefinition, ToolDispatchError, ToolDispatchFlush,
     ToolDispatchResult, ToolDispatchSet, ToolRequestSet, ToolRuntimePlugin,
 };
-use runtime::{NextToolOrder, ToolCalls, ToolManifest};
 pub(crate) use runtime::{ProtocolTool, ToolExecution, ToolOutcome, canonical_tool_name};

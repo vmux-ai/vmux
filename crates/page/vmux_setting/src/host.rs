@@ -1,5 +1,7 @@
 mod appearance;
+mod projection;
 mod runtime;
+mod schema;
 mod state;
 
 use bevy::{ecs::message::MessageReader, prelude::*};
@@ -27,6 +29,7 @@ impl Plugin for SettingsPlugin {
         app.add_plugins((
             SettingsRuntimePlugin,
             state::StatePlugin,
+            projection::ProjectionPlugin,
             appearance::AppearancePlugin,
             vmux_layout::LayoutContractPlugin,
         ))

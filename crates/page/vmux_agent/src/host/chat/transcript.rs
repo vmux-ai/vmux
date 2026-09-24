@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::model::{ModeProjection, ModelProjection};
-use super::{AgentChatView, ChatSynced, ChatUiStateUpdates};
+use super::{AgentChatView, ChatSynced};
 use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::runtime::acp::{AcpModeState, AcpModelState};
@@ -151,7 +151,11 @@ fn push_chat_to_page(
                 "chat snapshot pushed"
             );
         }
-        ChatUiStateUpdates::write(&mut commands, webview, &snapshot);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview, &snapshot,
+            ),
+        );
         last_push.insert(stack, now);
     }
 }
@@ -322,21 +326,22 @@ fn sync_chat_to_ready_views(
         if !browsers.can_emit_to(&webview) {
             continue;
         }
-        ChatUiStateUpdates::write(
-            &mut commands,
-            webview,
-            &snapshot_of(
-                messages,
-                message_times,
-                state,
-                turn_meta,
-                profile,
-                user_profile,
-                meta,
-                queue,
-                imported,
-                title,
-                choices.get(webview).ok(),
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview,
+                &snapshot_of(
+                    messages,
+                    message_times,
+                    state,
+                    turn_meta,
+                    profile,
+                    user_profile,
+                    meta,
+                    queue,
+                    imported,
+                    title,
+                    choices.get(webview).ok(),
+                ),
             ),
         );
         let (cross, model_state, mode_state, agent_key) = acp_sessions
@@ -414,15 +419,16 @@ fn on_chat_history_request(
         request.before as usize,
         request.limit.clamp(1, CHAT_HISTORY_MAX_PAGE_SIZE) as usize,
     );
-    ChatUiStateUpdates::write(
-        &mut commands,
-        webview,
-        &ChatHistoryPage {
-            items: page.items,
-            start: u32::try_from(page.start).unwrap_or(u32::MAX),
-            end: u32::try_from(page.end).unwrap_or(u32::MAX),
-            total: u32::try_from(page.total).unwrap_or(u32::MAX),
-        },
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &ChatHistoryPage {
+                items: page.items,
+                start: u32::try_from(page.start).unwrap_or(u32::MAX),
+                end: u32::try_from(page.end).unwrap_or(u32::MAX),
+                total: u32::try_from(page.total).unwrap_or(u32::MAX),
+            },
+        ),
     );
 }
 

@@ -1,5 +1,4 @@
 use crate::event::CommandBarKey;
-use crate::snapshot::CommandBarUiStateUpdates;
 use crate::{CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions};
 use bevy::prelude::*;
 
@@ -62,7 +61,11 @@ fn echo_key_command(
     let Ok(key) = keys.get(trigger.event().command()) else {
         return;
     };
-    CommandBarUiStateUpdates::write(&mut commands, trigger.event().invocation().caller, &key.0);
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(
+        trigger.event().invocation().caller, &key.0
+    ));
 }
 
 #[cfg(test)]

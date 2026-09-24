@@ -8,8 +8,6 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use crate::event::GitRepositoryPickerRequest;
 use crate::state::{GitRepositoryPicked, GitUiState};
 
-type GitUiStateUpdates = vmux_core::host::UiState<GitUiState>;
-
 pub(super) struct RepositoryPickerPlugin;
 
 impl Plugin for RepositoryPickerPlugin {
@@ -88,13 +86,12 @@ fn poll_repository_pickers(
             continue;
         };
         if let Some(path) = selected {
-            GitUiStateUpdates::write(
-                &mut commands,
+            commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
                 picker.webview,
                 &GitRepositoryPicked {
                     path: path.to_string_lossy().into_owned(),
                 },
-            );
+            ));
         }
         commands.entity(entity).despawn();
     }

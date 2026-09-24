@@ -324,14 +324,15 @@ fn drain_start_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        vmux_command::snapshot::CommandBarUiStateUpdates::write(
-            &mut commands,
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(
             read.webview,
             &vmux_api::command_bar::StartProjectBranches {
                 project: read.project.clone(),
                 branches,
             },
-        );
+        ));
     }
 }
 
@@ -536,13 +537,15 @@ fn sync_live_start_pages(
         {
             commands.spawn(read);
         }
-        vmux_command::snapshot::CommandBarUiStateUpdates::write(&mut commands, e, &payload);
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(e, &payload));
         if focus_requested {
-            vmux_command::snapshot::CommandBarUiStateUpdates::write(
-                &mut commands,
-                e,
-                &vmux_api::command_bar::CommandBarFocusInput,
-            );
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::from_event(
+                e, &vmux_api::command_bar::CommandBarFocusInput
+            ));
         }
         commands.entity(e).try_insert(StartWorkSynced);
     }
@@ -607,13 +610,15 @@ fn on_start_data_request(
             .unwrap_or_else(Locale::preferred),
         &definitions,
     );
-    vmux_command::snapshot::CommandBarUiStateUpdates::write(&mut commands, webview, &payload);
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(webview, &payload));
     if keyboard_targets.contains(webview) {
-        vmux_command::snapshot::CommandBarUiStateUpdates::write(
-            &mut commands,
-            webview,
-            &vmux_api::command_bar::CommandBarFocusInput,
-        );
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(
+            webview, &vmux_api::command_bar::CommandBarFocusInput
+        ));
     }
 }
 

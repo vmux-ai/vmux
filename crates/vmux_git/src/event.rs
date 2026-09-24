@@ -2,6 +2,112 @@ pub use vmux_api::git::{
     DiffKind, DiffLine, FileGitState, FileStatus, GitDiffViewport, GitFileStatus, GitLineMarker,
     GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
 };
+use vmux_core::input::KeyModifiers;
+
+use crate::state::{GitBranchCollection, GitPageControllerState, GitPanel};
+
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitKeyRequest {
+    pub key: String,
+    pub code: String,
+    pub modifiers: KeyModifiers,
+    pub repeat: bool,
+}
+
+impl GitKeyRequest {
+    pub fn captures_browser_default(
+        &self,
+        controller: &GitPageControllerState,
+        repository_loaded: bool,
+    ) -> bool {
+        if self.navigation_key() {
+            return match controller.focused_panel {
+                GitPanel::Status => false,
+                GitPanel::Files => !controller.selected_path_bytes.is_empty(),
+                GitPanel::Branches => !controller.selected_branch.is_empty(),
+                GitPanel::Commits => !controller.selected_commit.is_empty(),
+                GitPanel::Stash => !controller.selected_stash.is_empty(),
+            };
+        }
+        if self.repeat || self.modifiers.ctrl || self.modifiers.alt || self.modifiers.super_key {
+            return false;
+        }
+        if self.key == "?" || self.key == "Tab" || GitPanel::from_key(&self.key).is_some() {
+            return true;
+        }
+        if !repository_loaded {
+            return false;
+        }
+        let operations = &controller.operations;
+        match (controller.focused_panel, self.key.as_str()) {
+            (GitPanel::Status, "e" | "u" | "Enter") => true,
+            (GitPanel::Files, "a") => operations.stage_all,
+            (GitPanel::Files, "s") => operations.stash,
+            (GitPanel::Files, "A") => operations.amend,
+            (GitPanel::Files, " " | "Space") => operations.toggle_stage,
+            (GitPanel::Files, "x") => operations.discard,
+            (GitPanel::Branches, "Enter" | " " | "Space" | "c") => operations.checkout_branch,
+            (GitPanel::Branches, "r") => operations.rebase,
+            (GitPanel::Branches, "M") => operations.merge,
+            (GitPanel::Branches, "f") => operations.fast_forward,
+            (GitPanel::Branches, "n") => operations.create_branch,
+            (GitPanel::Branches, "d") => operations.delete_branch,
+            (GitPanel::Commits, " " | "Space") => operations.checkout_commit,
+            (GitPanel::Commits, "C" | "V") => operations.cherry_pick,
+            (GitPanel::Commits, "t") => operations.revert_commit,
+            (GitPanel::Stash, "g") => operations.stash_pop,
+            (GitPanel::Stash, "d") => operations.stash_drop,
+            _ => false,
+        }
+    }
+
+    fn navigation_key(&self) -> bool {
+        if self.modifiers.alt || self.modifiers.super_key || self.modifiers.shift {
+            return false;
+        }
+        if self.modifiers.ctrl {
+            return matches!(self.code.as_str(), "KeyN" | "KeyJ" | "KeyP" | "KeyK");
+        }
+        matches!(self.code.as_str(), "ArrowDown" | "ArrowUp")
+            || matches!(self.key.as_str(), "j" | "k")
+    }
+}
+
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitPanelSelectRequest {
+    pub panel: GitPanel,
+}
+
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitFileSelectRequest {
+    pub path_bytes: Vec<u8>,
+}
+
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitBranchCollectionSelectRequest {
+    pub collection: GitBranchCollection,
+}
+
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitBranchSelectRequest {
+    pub reference: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitCommitSelectRequest {
+    pub commit: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitStashSelectRequest {
+    pub reference: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitDiscardFileRequest {
+    pub path_bytes: Vec<u8>,
+}
+
 #[vmux_api::ui_event(Eq, target = "git")]
 pub struct GitRepositoryRequest {
     pub path: String,
@@ -90,6 +196,12 @@ pub struct GitFileEntry {
     pub status: FileStatus,
     pub staged: bool,
     pub unstaged: bool,
+}
+
+impl GitFileEntry {
+    pub fn can_discard(&self) -> bool {
+        self.unstaged && self.status != FileStatus::Untracked
+    }
 }
 
 #[vmux_api::contract(Eq)]

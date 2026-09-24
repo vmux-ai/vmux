@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::Entity;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
+use bevy::winit::EventLoopProxyWrapper;
 use ignore::WalkBuilder;
 
 use crate::event::{CommandBarRecentFile, PathCompleteResponse, PathEntry};
@@ -65,9 +66,10 @@ impl ProjectIndex {
         request_id: u64,
         query: &str,
         webview: Entity,
+        proxy: Option<&EventLoopProxyWrapper>,
     ) -> Option<ProjectCompletions> {
         self.remember(webview, request_id, query, roots);
-        self.sync(roots);
+        self.sync(roots, proxy);
         self.rank(roots, query, bias)
     }
 
@@ -91,8 +93,8 @@ impl ProjectIndex {
         self.asked.push(asked);
     }
 
-    pub fn warm(&mut self, roots: &[PathBuf]) {
-        self.sync(roots);
+    pub fn warm(&mut self, roots: &[PathBuf], proxy: Option<&EventLoopProxyWrapper>) {
+        self.sync(roots, proxy);
     }
 
     pub fn pending(&self) -> Vec<Asked> {
@@ -104,10 +106,11 @@ impl ProjectIndex {
         webview: Entity,
         roots: &[PathBuf],
         bias: &RankBias,
+        proxy: Option<&EventLoopProxyWrapper>,
     ) -> Option<ProjectCompletions> {
         let at = self.asked.iter().position(|ask| ask.webview == webview)?;
         let query = self.asked[at].query.clone();
-        self.sync(roots);
+        self.sync(roots, proxy);
         if self.asked[at].answered_with == self.generation {
             self.forget_once_complete(webview);
             return None;
@@ -167,7 +170,7 @@ impl ProjectIndex {
         wanted
     }
 
-    fn sync(&mut self, roots: &[PathBuf]) {
+    fn sync(&mut self, roots: &[PathBuf], proxy: Option<&EventLoopProxyWrapper>) {
         let roots = &self.wanted(roots);
         let held = self.roots.len();
         self.roots.retain(|index| roots.contains(&index.root));
@@ -176,10 +179,10 @@ impl ProjectIndex {
         }
         for root in roots {
             let Some(at) = self.roots.iter().position(|index| &index.root == root) else {
-                self.roots.push(RootIndex::start(root));
+                self.roots.push(RootIndex::start(root, proxy));
                 continue;
             };
-            if self.roots[at].advance() {
+            if self.roots[at].advance(proxy) {
                 self.generation += 1;
             }
         }
@@ -194,20 +197,23 @@ struct RootIndex {
 }
 
 impl RootIndex {
-    fn start(root: &Path) -> Self {
+    fn start(root: &Path, proxy: Option<&EventLoopProxyWrapper>) -> Self {
         let mut started = Self {
             root: root.to_path_buf(),
             walk: None,
             built_at: None,
             walking: None,
         };
-        started.rewalk();
+        started.rewalk(vmux_core::host::wake::Wake::beside(proxy));
         started
     }
 
-    fn rewalk(&mut self) {
+    fn rewalk(&mut self, wake: vmux_core::host::wake::Wake) {
         let walked = self.root.clone();
-        self.walking = Some(IoTaskPool::get().spawn(async move { ProjectWalk::scan(&walked) }));
+        self.walking = Some(IoTaskPool::get().spawn(async move {
+            let _wake = wake;
+            ProjectWalk::scan(&walked)
+        }));
     }
 
     fn walking(&self) -> bool {
@@ -218,7 +224,7 @@ impl RootIndex {
         self.walk.as_ref()
     }
 
-    fn advance(&mut self) -> bool {
+    fn advance(&mut self, proxy: Option<&EventLoopProxyWrapper>) -> bool {
         if let Some(task) = &mut self.walking {
             let Some(walk) = block_on(future::poll_once(task)) else {
                 return false;
@@ -229,7 +235,7 @@ impl RootIndex {
             return true;
         }
         if self.built_at.is_some_and(|at| at.elapsed() > INDEX_TTL) {
-            self.rewalk();
+            self.rewalk(vmux_core::host::wake::Wake::beside(proxy));
         }
         false
     }
@@ -1046,7 +1052,7 @@ mod tests {
         fn answer(&mut self, webview: Entity, roots: &[PathBuf]) -> ProjectCompletions {
             let bias = RankBias::after_visiting(&[]);
             for _ in 0..500 {
-                if let Some(answered) = self.settled_for(webview, roots, &bias) {
+                if let Some(answered) = self.settled_for(webview, roots, &bias, None) {
                     return answered;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1071,8 +1077,8 @@ mod tests {
 
         let mut index = ProjectIndex::default();
         let bias = RankBias::after_visiting(&[]);
-        index.matches(&roots_one, &bias, 1, "marker", first);
-        index.matches(&roots_two, &bias, 2, "marker", second);
+        index.matches(&roots_one, &bias, 1, "marker", first, None);
+        index.matches(&roots_two, &bias, 2, "marker", second, None);
 
         let answered_one = index.answer(first, &roots_one);
         let answered_two = index.answer(second, &roots_two);

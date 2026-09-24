@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::process::{Command, Output};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,27 +13,27 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
-use vmux_core::host::{UiState, UiStatePlugin};
+use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageManifest;
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tool::{
-    ToolAction, ToolAdoptRequest, ToolApplyRequest, ToolCategory, ToolForgetRequest,
-    ToolImportRequest, ToolInstallRequest, ToolItem, ToolLinkRequest, ToolOpenRequest,
-    ToolOperationKey, ToolOperationNotice, ToolProvider, ToolRequest, ToolStatus,
-    ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest, ToolsNavigateRequest,
-    ToolsRefreshRequest, ToolsSnapshot, ToolsUiState,
+    ToolAdoptRequest, ToolApplyRequest, ToolCategory, ToolForgetRequest, ToolImportRequest,
+    ToolInstallRequest, ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey,
+    ToolOperationKind, ToolOperationNotice, ToolProvider, ToolStatus, ToolUninstallRequest,
+    ToolUnlinkRequest, ToolUpdateRequest, ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
+    ToolsUiState,
 };
 use vmux_core::vault::{
-    VaultAction, VaultAuthorization, VaultChooseCloudFolderRequest, VaultCompletion,
-    VaultConnectCloudRequest, VaultConnectFolderRequest, VaultConnectGithubRequest,
-    VaultConnectRequest, VaultCreateCloudFolderRequest, VaultCreateRecoveryKeyRequest,
-    VaultCreateRequest, VaultGenerateRecoveryKeyRequest, VaultOperation, VaultOperationState,
-    VaultRefreshRequest, VaultRepository, VaultRequest, VaultSnapshot, VaultSyncRequest,
-    VaultUiState, VaultUnlockRecoveryKeyRequest,
+    VaultAuthorization, VaultChooseCloudFolderRequest, VaultCompletion, VaultConnectCloudRequest,
+    VaultConnectFolderRequest, VaultConnectGithubRequest, VaultConnectRequest,
+    VaultCreateCloudFolderRequest, VaultCreateRecoveryKeyRequest, VaultCreateRequest,
+    VaultGenerateRecoveryKeyRequest, VaultOperation, VaultOperationKind, VaultOperationState,
+    VaultRefreshRequest, VaultRepository, VaultSnapshot, VaultSyncRequest, VaultUiState,
+    VaultUnlockRecoveryKeyRequest,
 };
 use vmux_tool::{
-    ExternalToolAction, ToolActionCompletion, ToolActionRequest, ToolStore, ToolStoreAction,
-    ToolStoreTarget, ToolsManifest,
+    ExternalToolOperation, ToolOperationCompletion, ToolOperationRequest, ToolStore,
+    ToolStoreOperation, ToolStoreTarget, ToolsManifest,
 };
 
 pub struct ToolPlugin;
@@ -136,7 +138,7 @@ impl Plugin for ToolPlugin {
             ToolStore::current(),
             ToolsManifest::default(),
         ));
-        app.init_resource::<ActionRequestSequence>()
+        app.init_resource::<OperationRequestSequence>()
             .init_resource::<VaultAutoSync>()
             .init_resource::<VaultRecoveryState>()
             .add_plugins((
@@ -206,17 +208,61 @@ impl Plugin for ToolPlugin {
                     start_tools_scan,
                     drain_tools_scan,
                     queue_vault_auto_sync,
-                    start_tool_action,
-                    start_external_tool_action,
-                    drain_tool_actions,
-                    start_vault_action,
-                    drain_vault_actions,
+                    start_tool_operation,
+                    drain_tool_operations,
+                    start_vault_operation,
                     emit_tools_state,
                     emit_vault_state,
                 )
                     .chain(),
             )
-            .add_systems(Update, drain_tool_store_actions.before(emit_tools_state));
+            .add_systems(
+                Update,
+                (
+                    start_external_tool_operation::<ToolInstallRequest>,
+                    start_external_tool_operation::<ToolUpdateRequest>,
+                    start_external_tool_operation::<ToolUninstallRequest>,
+                    start_external_tool_operation::<ToolForgetRequest>,
+                    start_external_tool_operation::<ToolAdoptRequest>,
+                    start_external_tool_operation::<ToolLinkRequest>,
+                    start_external_tool_operation::<ToolUnlinkRequest>,
+                    start_external_tool_operation::<ToolApplyRequest>,
+                    start_external_tool_operation::<ToolImportRequest>,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    launch_vault_operation::<VaultCreateRequest>,
+                    launch_vault_operation::<VaultConnectRequest>,
+                    launch_vault_operation::<VaultSyncRequest>,
+                    launch_vault_operation::<VaultConnectGithubRequest>,
+                    launch_vault_operation::<VaultConnectFolderRequest>,
+                    launch_vault_operation::<VaultGenerateRecoveryKeyRequest>,
+                    launch_vault_operation::<VaultCreateRecoveryKeyRequest>,
+                    launch_vault_operation::<VaultUnlockRecoveryKeyRequest>,
+                    launch_vault_operation::<VaultConnectCloudRequest>,
+                    launch_vault_operation::<VaultCreateCloudFolderRequest>,
+                    launch_vault_operation::<VaultChooseCloudFolderRequest>,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    drain_vault_operation::<VaultCreateRequest>,
+                    drain_vault_operation::<VaultConnectRequest>,
+                    drain_vault_operation::<VaultSyncRequest>,
+                    drain_vault_operation::<VaultConnectGithubRequest>,
+                    drain_vault_operation::<VaultConnectFolderRequest>,
+                    drain_vault_operation::<VaultGenerateRecoveryKeyRequest>,
+                    drain_vault_operation::<VaultCreateRecoveryKeyRequest>,
+                    drain_vault_operation::<VaultUnlockRecoveryKeyRequest>,
+                    drain_vault_operation::<VaultConnectCloudRequest>,
+                    drain_vault_operation::<VaultCreateCloudFolderRequest>,
+                    drain_vault_operation::<VaultChooseCloudFolderRequest>,
+                ),
+            )
+            .add_systems(Update, drain_tool_store_operations.before(emit_tools_state));
     }
 }
 
@@ -284,17 +330,14 @@ struct ToolSubscriber {
 }
 
 impl ToolSubscriber {
-    fn pending(operation_id: u64, request: &ToolRequest) -> Self {
+    fn pending(operation_id: u64, operation: ToolOperationKey) -> Self {
         let mut subscriber = Self::default();
-        subscriber.begin(operation_id, request);
+        subscriber.begin(operation_id, operation);
         subscriber
     }
 
-    fn begin(&mut self, operation_id: u64, request: &ToolRequest) {
-        self.pending.insert(
-            operation_id,
-            ToolOperationKey::new(request.provider, request.action, request.id.clone()),
-        );
+    fn begin(&mut self, operation_id: u64, operation: ToolOperationKey) {
+        self.pending.insert(operation_id, operation);
         self.state.pending = self.pending.values().cloned().collect();
         self.state.notice = None;
         self.touch();
@@ -303,13 +346,11 @@ impl ToolSubscriber {
     fn complete(
         &mut self,
         operation_id: u64,
-        request: &ToolRequest,
+        fallback: ToolOperationKey,
         success: bool,
         message: String,
     ) {
-        let operation = self.pending.remove(&operation_id).unwrap_or_else(|| {
-            ToolOperationKey::new(request.provider, request.action, request.id.clone())
-        });
+        let operation = self.pending.remove(&operation_id).unwrap_or(fallback);
         self.state.pending = self.pending.values().cloned().collect();
         self.state.notice = Some(ToolOperationNotice {
             operation,
@@ -343,19 +384,14 @@ struct VaultSubscriber {
 }
 
 impl VaultSubscriber {
-    fn pending(operation_id: u64, action: VaultAction) -> Self {
+    fn pending(operation_id: u64, kind: VaultOperationKind) -> Self {
         let mut subscriber = Self::default();
-        subscriber.begin(operation_id, action);
+        subscriber.begin(operation_id, kind);
         subscriber
     }
 
-    fn begin(&mut self, operation_id: u64, action: VaultAction) {
-        match action {
-            VaultAction::ConnectCloud => self.state.cloud_root.clear(),
-            VaultAction::GenerateRecoveryKey => self.state.generated_recovery_key.clear(),
-            _ => {}
-        }
-        self.state.operation = Some(VaultOperation::pending(operation_id, action));
+    fn begin(&mut self, operation_id: u64, kind: VaultOperationKind) {
+        self.state.operation = Some(VaultOperation::pending(operation_id, kind));
         self.touch();
     }
 
@@ -376,24 +412,6 @@ impl VaultSubscriber {
         };
         if operation.operation_id != operation_id {
             return;
-        }
-        if completion.success {
-            match operation.action {
-                VaultAction::GenerateRecoveryKey => {
-                    self.state.generated_recovery_key = completion.message.clone();
-                }
-                VaultAction::CreateRecoveryKey => {
-                    self.state.generated_recovery_key.clear();
-                    self.state.recovery_upload_pending = completion.pending_upload;
-                }
-                VaultAction::Sync => {
-                    self.state.recovery_upload_pending = false;
-                }
-                VaultAction::ConnectCloud => {
-                    self.state.cloud_root = completion.message.clone();
-                }
-                _ => {}
-            }
         }
         operation.state = VaultOperationState::Completed(completion);
         self.touch();
@@ -425,14 +443,14 @@ struct ToolsScanOutput {
 }
 
 #[derive(Component)]
-struct ToolActionTask {
+struct ToolOperationTask {
     task: Task<Result<String, String>>,
 }
 
 #[derive(Resource, Default)]
-struct ActionRequestSequence(u64);
+struct OperationRequestSequence(u64);
 
-impl ActionRequestSequence {
+impl OperationRequestSequence {
     fn next(&mut self) -> u64 {
         let order = self.0;
         self.0 = self.0.wrapping_add(1);
@@ -441,22 +459,22 @@ impl ActionRequestSequence {
 }
 
 #[derive(Component)]
-struct PendingToolAction {
-    order: u64,
+struct ToolOperationContext {
+    operation_id: u64,
     target: Entity,
-    request: ToolRequest,
+    operation: ToolOperationKey,
 }
 
-#[derive(Component)]
-struct ToolOperationId(u64);
+#[derive(Component, Default)]
+struct PendingToolOperation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VaultActionTarget {
+enum VaultOperationTarget {
     Webview(Entity),
     Automatic,
 }
 
-impl VaultActionTarget {
+impl VaultOperationTarget {
     fn webview(self) -> Option<Entity> {
         match self {
             Self::Webview(entity) => Some(entity),
@@ -466,23 +484,38 @@ impl VaultActionTarget {
 }
 
 #[derive(Component)]
-struct PendingVaultAction {
-    order: u64,
-    target: VaultActionTarget,
-    request: VaultRequest,
+struct VaultOperationContext {
+    operation_id: u64,
+    target: VaultOperationTarget,
+}
+
+#[derive(Component, Default)]
+struct PendingVaultOperation;
+
+#[derive(Component, Default)]
+struct ReadyVaultOperation;
+
+#[derive(Component, Clone)]
+struct VaultOperationRequest<R: Send + Sync + 'static>(R);
+
+impl<R: Send + Sync + 'static> VaultOperationRequest<R> {
+    fn new(request: R) -> Self {
+        Self(request)
+    }
+
+    fn request(&self) -> &R {
+        &self.0
+    }
 }
 
 #[derive(Component)]
-struct VaultActionTask {
-    operation_id: u64,
-    target: VaultActionTarget,
-    request: VaultRequest,
-    task: Task<Result<VaultActionOutput, String>>,
+struct VaultOperationTask {
+    task: Task<Result<VaultOperationOutput, String>>,
     progress: Mutex<mpsc::Receiver<VaultAuthorization>>,
     canceled: Arc<AtomicBool>,
 }
 
-struct VaultActionOutput {
+struct VaultOperationOutput {
     message: String,
     pending_upload: bool,
     generated_recovery_key: Option<GeneratedRecoveryKey>,
@@ -519,13 +552,12 @@ impl Default for VaultRecoveryState {
 }
 
 impl VaultRecoveryState {
-    fn begin(&mut self, action: VaultAction) -> (VaultRecovery, Option<GeneratedRecoveryKey>) {
-        let key = if action == VaultAction::CreateRecoveryKey {
-            self.pending_key.take()
-        } else {
-            None
-        };
-        (self.service.clone(), key)
+    fn service(&self) -> VaultRecovery {
+        self.service.clone()
+    }
+
+    fn take_pending_key(&mut self) -> Option<GeneratedRecoveryKey> {
+        self.pending_key.take()
     }
 
     fn retain(&mut self, key: GeneratedRecoveryKey) {
@@ -542,6 +574,532 @@ struct InventoryItem {
     detail: String,
     status: ToolStatus,
     removable: bool,
+}
+
+trait DesktopToolRequest: Clone + Send + Sync + 'static {
+    fn operation(&self) -> ToolOperationKey;
+
+    fn execute(self, store: &ToolStore) -> Result<String, String>;
+}
+
+impl DesktopToolRequest for ToolInstallRequest {
+    fn operation(&self) -> ToolOperationKey {
+        ToolOperationKey::new(self.provider, ToolOperationKind::Install, self.id.clone())
+    }
+
+    fn execute(self, store: &ToolStore) -> Result<String, String> {
+        if self.id.trim().is_empty() {
+            return Err("package name is required".to_string());
+        }
+        set_manifest_entry(store, self.provider, &self.id, true)?;
+        install_provider(store, self.provider, &self.id)?;
+        Ok(format!("{} installed", self.id))
+    }
+}
+
+impl DesktopToolRequest for ToolUpdateRequest {
+    fn operation(&self) -> ToolOperationKey {
+        ToolOperationKey::new(self.provider, ToolOperationKind::Update, self.id.clone())
+    }
+
+    fn execute(self, store: &ToolStore) -> Result<String, String> {
+        if self.id.trim().is_empty() {
+            return Err("package name is required".to_string());
+        }
+        set_manifest_entry(store, self.provider, &self.id, true)?;
+        update_provider(store, self.provider, &self.id)?;
+        Ok(format!("{} updated", self.id))
+    }
+}
+
+impl DesktopToolRequest for ToolUninstallRequest {
+    fn operation(&self) -> ToolOperationKey {
+        ToolOperationKey::new(self.provider, ToolOperationKind::Uninstall, self.id.clone())
+    }
+
+    fn execute(self, store: &ToolStore) -> Result<String, String> {
+        if self.id.trim().is_empty() {
+            return Err("package name is required".to_string());
+        }
+        uninstall_provider(store, self.provider, &self.id)?;
+        set_manifest_entry(store, self.provider, &self.id, false)?;
+        Ok(format!("{} removed", self.id))
+    }
+}
+
+impl DesktopToolRequest for ToolForgetRequest {
+    fn operation(&self) -> ToolOperationKey {
+        ToolOperationKey::new(self.provider, ToolOperationKind::Forget, self.id.clone())
+    }
+
+    fn execute(self, store: &ToolStore) -> Result<String, String> {
+        if self.id.trim().is_empty() {
+            return Err("package name is required".to_string());
+        }
+        set_manifest_entry(store, self.provider, &self.id, false)?;
+        Ok(format!("{} removed from tools.toml", self.id))
+    }
+}
+
+impl DesktopToolRequest for ToolAdoptRequest {
+    fn operation(&self) -> ToolOperationKey {
+        ToolOperationKey::new(self.provider, ToolOperationKind::Adopt, self.id.clone())
+    }
+
+    fn execute(self, store: &ToolStore) -> Result<String, String> {
+        if self.id.trim().is_empty() {
+            return Err("package name is required".to_string());
+        }
+        if self.provider == ToolProvider::Dotfiles {
+            if self.value.trim().is_empty() {
+                return Err("dotfile path is required".to_string());
+            }
+            let destination = store.adopt_dotfile(Path::new(self.value.trim()), self.id.trim())?;
+            return Ok(format!("adopted {}", destination.display()));
+        }
+        if self.provider == ToolProvider::Mcp {
+            store.import_discovered_mcp_server(&self.id)?;
+        } else {
+            set_manifest_entry(store, self.provider, &self.id, true)?;
+        }
+        Ok(format!("{} is now managed", self.id))
+    }
+}
+
+impl DesktopToolRequest for ToolLinkRequest {
+    fn operation(&self) -> ToolOperationKey {
+        ToolOperationKey::new(self.provider, ToolOperationKind::Link, self.id.clone())
+    }
+
+    fn execute(self, store: &ToolStore) -> Result<String, String> {
+        if self.id.trim().is_empty() {
+            return Err("package name is required".to_string());
+        }
+        if self.provider != ToolProvider::Dotfiles {
+            return Err("link is only valid for dotfiles".to_string());
+        }
+        set_manifest_entry(store, self.provider, &self.id, true)?;
+        let linked = store.apply_dotfile_package(&self.id)?;
+        Ok(format!("linked {linked} file(s)"))
+    }
+}
+
+impl DesktopToolRequest for ToolUnlinkRequest {
+    fn operation(&self) -> ToolOperationKey {
+        ToolOperationKey::new(self.provider, ToolOperationKind::Unlink, self.id.clone())
+    }
+
+    fn execute(self, store: &ToolStore) -> Result<String, String> {
+        if self.id.trim().is_empty() {
+            return Err("package name is required".to_string());
+        }
+        if self.provider != ToolProvider::Dotfiles {
+            return Err("unlink is only valid for dotfiles".to_string());
+        }
+        let removed = store.disable_and_unlink_dotfile_package(&self.id)?;
+        Ok(format!("unlinked {removed} file(s)"))
+    }
+}
+
+impl DesktopToolRequest for ToolApplyRequest {
+    fn operation(&self) -> ToolOperationKey {
+        ToolOperationKey::new(ToolProvider::Dotfiles, ToolOperationKind::Apply, "")
+    }
+
+    fn execute(self, store: &ToolStore) -> Result<String, String> {
+        apply_manifest(store)
+    }
+}
+
+impl DesktopToolRequest for ToolImportRequest {
+    fn operation(&self) -> ToolOperationKey {
+        ToolOperationKey::new(self.provider, ToolOperationKind::Import, "")
+    }
+
+    fn execute(self, store: &ToolStore) -> Result<String, String> {
+        import_provider(store, self.provider, self.value.trim())
+    }
+}
+
+type VaultOperationFuture =
+    Pin<Box<dyn Future<Output = Result<VaultOperationOutput, String>> + Send>>;
+type VaultProgress = Box<dyn Fn(VaultAuthorization) + Send>;
+type VaultCancellation = Box<dyn Fn() -> bool + Send>;
+
+trait DesktopVaultRequest: Clone + Send + Sync + 'static {
+    const CONNECTS_GITHUB: bool = false;
+    const SYNCHRONIZES: bool = false;
+    const LOADS_REPOSITORIES: bool = false;
+
+    fn kind(&self) -> VaultOperationKind;
+
+    fn begin(&self, subscriber: &mut VaultSubscriber, operation_id: u64) {
+        subscriber.begin(operation_id, self.kind());
+    }
+
+    fn complete(
+        &self,
+        subscriber: &mut VaultSubscriber,
+        operation_id: u64,
+        completion: VaultCompletion,
+    ) {
+        subscriber.complete(operation_id, completion);
+    }
+
+    fn take_pending_key(&self, _recovery: &mut VaultRecoveryState) -> Option<GeneratedRecoveryKey> {
+        None
+    }
+
+    fn execute(
+        self,
+        recovery: VaultRecovery,
+        generated_recovery_key: Option<GeneratedRecoveryKey>,
+        progress: VaultProgress,
+        canceled: VaultCancellation,
+    ) -> VaultOperationFuture;
+}
+
+impl VaultOperationOutput {
+    fn message(message: String) -> Self {
+        Self {
+            message,
+            pending_upload: false,
+            generated_recovery_key: None,
+        }
+    }
+}
+
+impl DesktopVaultRequest for VaultCreateRequest {
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::Create
+    }
+
+    fn execute(
+        self,
+        _recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let visibility = if self.private {
+                vmux_core::profile::vault::RepositoryVisibility::Private
+            } else {
+                vmux_core::profile::vault::RepositoryVisibility::Public
+            };
+            let message = vmux_core::profile::vault::create_remote(&self.repository, visibility)?;
+            Ok(VaultOperationOutput::message(message))
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultConnectRequest {
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::Connect
+    }
+
+    fn execute(
+        self,
+        _recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let message = vmux_core::profile::vault::connect_remote(&self.repository)?;
+            Ok(VaultOperationOutput::message(message))
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultSyncRequest {
+    const SYNCHRONIZES: bool = true;
+
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::Sync
+    }
+
+    fn complete(
+        &self,
+        subscriber: &mut VaultSubscriber,
+        operation_id: u64,
+        completion: VaultCompletion,
+    ) {
+        if completion.success {
+            subscriber.state.recovery_upload_pending = false;
+        }
+        subscriber.complete(operation_id, completion);
+    }
+
+    fn execute(
+        self,
+        _recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let message = vmux_core::profile::vault::sync()?;
+            Ok(VaultOperationOutput::message(message))
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultConnectGithubRequest {
+    const CONNECTS_GITHUB: bool = true;
+    const LOADS_REPOSITORIES: bool = true;
+
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::ConnectGithub
+    }
+
+    fn execute(
+        self,
+        _recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        progress: VaultProgress,
+        canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let message = vmux_core::profile::vault::connect_github_with_progress(
+                |code| {
+                    progress(VaultAuthorization {
+                        code,
+                        url: "https://github.com/login/device".to_string(),
+                    });
+                },
+                canceled,
+            )?;
+            Ok(VaultOperationOutput::message(message))
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultConnectFolderRequest {
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::ConnectFolder
+    }
+
+    fn execute(
+        self,
+        _recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let initial_dir = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .map(|home| home.join("Library/CloudStorage"))
+                .filter(|path| path.is_dir())
+                .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from));
+            let mut dialog = rfd::AsyncFileDialog::new();
+            if let Some(initial_dir) = initial_dir {
+                dialog = dialog.set_directory(initial_dir);
+            }
+            let Some(folder) = dialog.pick_folder().await else {
+                return Err(String::new());
+            };
+            let message = vmux_core::profile::vault::connect_folder(folder.path())?;
+            Ok(VaultOperationOutput::message(message))
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultGenerateRecoveryKeyRequest {
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::GenerateRecoveryKey
+    }
+
+    fn begin(&self, subscriber: &mut VaultSubscriber, operation_id: u64) {
+        subscriber.state.generated_recovery_key.clear();
+        subscriber.begin(operation_id, self.kind());
+    }
+
+    fn complete(
+        &self,
+        subscriber: &mut VaultSubscriber,
+        operation_id: u64,
+        completion: VaultCompletion,
+    ) {
+        if completion.success {
+            subscriber.state.generated_recovery_key = completion.message.clone();
+        }
+        subscriber.complete(operation_id, completion);
+    }
+
+    fn execute(
+        self,
+        _recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let key = GeneratedRecoveryKey::generate()?;
+            Ok(VaultOperationOutput {
+                message: key.display().to_string(),
+                pending_upload: false,
+                generated_recovery_key: Some(key),
+            })
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultCreateRecoveryKeyRequest {
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::CreateRecoveryKey
+    }
+
+    fn complete(
+        &self,
+        subscriber: &mut VaultSubscriber,
+        operation_id: u64,
+        completion: VaultCompletion,
+    ) {
+        if completion.success {
+            subscriber.state.generated_recovery_key.clear();
+            subscriber.state.recovery_upload_pending = completion.pending_upload;
+        }
+        subscriber.complete(operation_id, completion);
+    }
+
+    fn take_pending_key(&self, recovery: &mut VaultRecoveryState) -> Option<GeneratedRecoveryKey> {
+        recovery.take_pending_key()
+    }
+
+    fn execute(
+        self,
+        recovery: VaultRecovery,
+        generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let key = generated_recovery_key
+                .ok_or_else(|| "No Recovery Key has been generated for this Vault".to_string())?;
+            let result = recovery.create(key)?;
+            Ok(VaultOperationOutput {
+                message: String::new(),
+                pending_upload: result.pending_upload,
+                generated_recovery_key: None,
+            })
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultUnlockRecoveryKeyRequest {
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::UnlockRecoveryKey
+    }
+
+    fn execute(
+        self,
+        recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let message = recovery.unlock(&self.recovery_key)?;
+            Ok(VaultOperationOutput::message(message))
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultConnectCloudRequest {
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::ConnectCloud
+    }
+
+    fn begin(&self, subscriber: &mut VaultSubscriber, operation_id: u64) {
+        subscriber.state.cloud_root.clear();
+        subscriber.begin(operation_id, self.kind());
+    }
+
+    fn complete(
+        &self,
+        subscriber: &mut VaultSubscriber,
+        operation_id: u64,
+        completion: VaultCompletion,
+    ) {
+        if completion.success {
+            subscriber.state.cloud_root = completion.message.clone();
+        }
+        subscriber.complete(operation_id, completion);
+    }
+
+    fn execute(
+        self,
+        _recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let message = connect_cloud_storage(&self.provider).await?;
+            Ok(VaultOperationOutput::message(message))
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultCreateCloudFolderRequest {
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::CreateCloudFolder
+    }
+
+    fn execute(
+        self,
+        _recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let folder = Path::new(&self.root).join(&self.folder_name);
+            let message = vmux_core::profile::vault::connect_folder(&folder)?;
+            Ok(VaultOperationOutput::message(message))
+        })
+    }
+}
+
+impl DesktopVaultRequest for VaultChooseCloudFolderRequest {
+    fn kind(&self) -> VaultOperationKind {
+        VaultOperationKind::ChooseCloudFolder
+    }
+
+    fn execute(
+        self,
+        _recovery: VaultRecovery,
+        _generated_recovery_key: Option<GeneratedRecoveryKey>,
+        _progress: VaultProgress,
+        _canceled: VaultCancellation,
+    ) -> VaultOperationFuture {
+        Box::pin(async move {
+            let mut dialog = rfd::AsyncFileDialog::new();
+            let root = Path::new(&self.root);
+            if root.is_dir() {
+                dialog = dialog.set_directory(root);
+            }
+            let Some(folder) = dialog.pick_folder().await else {
+                return Err(String::new());
+            };
+            let remote = if folder
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "git")
+            {
+                folder.path().to_path_buf()
+            } else {
+                folder.path().join("vmux-vault.git")
+            };
+            if !remote.exists() {
+                return Err("selected folder does not contain a Vault".to_string());
+            }
+            let message = vmux_core::profile::vault::connect_folder(folder.path())?;
+            Ok(VaultOperationOutput::message(message))
+        })
+    }
 }
 
 fn on_open_request(
@@ -620,39 +1178,44 @@ fn on_refresh_request(
     }
 }
 
-fn queue_tool_action(
+fn queue_tool_operation<R: DesktopToolRequest>(
     target: Entity,
-    request: ToolRequest,
-    mut sequence: ResMut<ActionRequestSequence>,
+    request: R,
+    mut sequence: ResMut<OperationRequestSequence>,
     mut subscribers: Query<&mut ToolSubscriber>,
     mut commands: Commands,
 ) {
     let operation_id = sequence.next();
+    let operation = request.operation();
     if let Ok(mut subscriber) = subscribers.get_mut(target) {
-        subscriber.begin(operation_id, &request);
+        subscriber.begin(operation_id, operation.clone());
     } else {
         commands
             .entity(target)
-            .insert(ToolSubscriber::pending(operation_id, &request));
+            .insert(ToolSubscriber::pending(operation_id, operation.clone()));
     }
-    commands.spawn(PendingToolAction {
-        order: operation_id,
-        target,
-        request,
-    });
+    commands.spawn((
+        PendingToolOperation,
+        ToolOperationContext {
+            operation_id,
+            target,
+            operation,
+        },
+        ToolOperationRequest::new(request),
+    ));
 }
 
-macro_rules! tool_action_observer {
+macro_rules! tool_operation_observer {
     ($name:ident, $request:ty) => {
         fn $name(
             trigger: On<UiInput<$request>>,
-            sequence: ResMut<ActionRequestSequence>,
+            sequence: ResMut<OperationRequestSequence>,
             subscribers: Query<&mut ToolSubscriber>,
             commands: Commands,
         ) {
-            queue_tool_action(
+            queue_tool_operation(
                 trigger.event().webview,
-                trigger.event().payload.clone().into(),
+                trigger.event().payload.clone(),
                 sequence,
                 subscribers,
                 commands,
@@ -661,75 +1224,104 @@ macro_rules! tool_action_observer {
     };
 }
 
-tool_action_observer!(on_install_request, ToolInstallRequest);
-tool_action_observer!(on_update_request, ToolUpdateRequest);
-tool_action_observer!(on_uninstall_request, ToolUninstallRequest);
-tool_action_observer!(on_forget_request, ToolForgetRequest);
-tool_action_observer!(on_adopt_request, ToolAdoptRequest);
-tool_action_observer!(on_link_request, ToolLinkRequest);
-tool_action_observer!(on_unlink_request, ToolUnlinkRequest);
-tool_action_observer!(on_apply_request, ToolApplyRequest);
-tool_action_observer!(on_import_request, ToolImportRequest);
+tool_operation_observer!(on_install_request, ToolInstallRequest);
+tool_operation_observer!(on_update_request, ToolUpdateRequest);
+tool_operation_observer!(on_uninstall_request, ToolUninstallRequest);
+tool_operation_observer!(on_forget_request, ToolForgetRequest);
+tool_operation_observer!(on_adopt_request, ToolAdoptRequest);
+tool_operation_observer!(on_link_request, ToolLinkRequest);
+tool_operation_observer!(on_unlink_request, ToolUnlinkRequest);
+tool_operation_observer!(on_apply_request, ToolApplyRequest);
+tool_operation_observer!(on_import_request, ToolImportRequest);
 
-fn queue_vault_action(
+fn queue_vault_operation<R: DesktopVaultRequest>(
     target: Entity,
-    request: VaultRequest,
-    mut sequence: ResMut<ActionRequestSequence>,
-    pending: Query<(Entity, &PendingVaultAction)>,
-    tasks: Query<&VaultActionTask>,
+    request: R,
+    mut sequence: ResMut<OperationRequestSequence>,
+    pending: Query<Entity, With<PendingVaultOperation>>,
+    pending_github: Query<
+        Entity,
+        (
+            With<PendingVaultOperation>,
+            With<VaultOperationRequest<VaultConnectGithubRequest>>,
+        ),
+    >,
+    active_github: Query<
+        (Entity, Option<&VaultOperationTask>),
+        (
+            With<VaultOperationRequest<VaultConnectGithubRequest>>,
+            Without<PendingVaultOperation>,
+        ),
+    >,
     mut subscribers: Query<&mut VaultSubscriber>,
     mut commands: Commands,
 ) {
     let operation_id = sequence.next();
     if let Ok(mut subscriber) = subscribers.get_mut(target) {
-        subscriber.begin(operation_id, request.action);
+        request.begin(&mut subscriber, operation_id);
     } else {
         commands
             .entity(target)
-            .insert(VaultSubscriber::pending(operation_id, request.action));
+            .insert(VaultSubscriber::pending(operation_id, request.kind()));
     }
     let mut connecting = false;
-    for task in &tasks {
-        if task.request.action != VaultAction::ConnectGithub {
-            continue;
-        }
+    for (entity, task) in &active_github {
         connecting = true;
-        task.canceled.store(true, Ordering::Relaxed);
-    }
-    if connecting {
-        for (entity, _) in &pending {
+        if let Some(task) = task {
+            task.canceled.store(true, Ordering::Relaxed);
+        } else {
             commands.entity(entity).despawn();
         }
-    } else if request.action == VaultAction::ConnectGithub {
-        for (entity, pending) in &pending {
-            if pending.request.action == VaultAction::ConnectGithub {
-                commands.entity(entity).despawn();
-            }
+    }
+    if connecting {
+        for entity in &pending {
+            commands.entity(entity).despawn();
+        }
+    } else if R::CONNECTS_GITHUB {
+        for entity in &pending_github {
+            commands.entity(entity).despawn();
         }
     }
-    commands.spawn(PendingVaultAction {
-        order: operation_id,
-        target: VaultActionTarget::Webview(target),
-        request,
-    });
+    commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id,
+            target: VaultOperationTarget::Webview(target),
+        },
+        VaultOperationRequest::new(request),
+    ));
 }
 
-macro_rules! vault_action_observer {
+macro_rules! vault_operation_observer {
     ($name:ident, $request:ty) => {
         fn $name(
             trigger: On<UiInput<$request>>,
-            sequence: ResMut<ActionRequestSequence>,
-            pending: Query<(Entity, &PendingVaultAction)>,
-            tasks: Query<&VaultActionTask>,
+            sequence: ResMut<OperationRequestSequence>,
+            pending: Query<Entity, With<PendingVaultOperation>>,
+            pending_github: Query<
+                Entity,
+                (
+                    With<PendingVaultOperation>,
+                    With<VaultOperationRequest<VaultConnectGithubRequest>>,
+                ),
+            >,
+            active_github: Query<
+                (Entity, Option<&VaultOperationTask>),
+                (
+                    With<VaultOperationRequest<VaultConnectGithubRequest>>,
+                    Without<PendingVaultOperation>,
+                ),
+            >,
             subscribers: Query<&mut VaultSubscriber>,
             commands: Commands,
         ) {
-            queue_vault_action(
+            queue_vault_operation(
                 trigger.event().webview,
-                trigger.event().payload.clone().into(),
+                trigger.event().payload.clone(),
                 sequence,
                 pending,
-                tasks,
+                pending_github,
+                active_github,
                 subscribers,
                 commands,
             );
@@ -737,29 +1329,29 @@ macro_rules! vault_action_observer {
     };
 }
 
-vault_action_observer!(on_vault_create_request, VaultCreateRequest);
-vault_action_observer!(on_vault_connect_request, VaultConnectRequest);
-vault_action_observer!(on_vault_sync_request, VaultSyncRequest);
-vault_action_observer!(on_vault_connect_github_request, VaultConnectGithubRequest);
-vault_action_observer!(on_vault_connect_folder_request, VaultConnectFolderRequest);
-vault_action_observer!(
+vault_operation_observer!(on_vault_create_request, VaultCreateRequest);
+vault_operation_observer!(on_vault_connect_request, VaultConnectRequest);
+vault_operation_observer!(on_vault_sync_request, VaultSyncRequest);
+vault_operation_observer!(on_vault_connect_github_request, VaultConnectGithubRequest);
+vault_operation_observer!(on_vault_connect_folder_request, VaultConnectFolderRequest);
+vault_operation_observer!(
     on_vault_generate_recovery_key_request,
     VaultGenerateRecoveryKeyRequest
 );
-vault_action_observer!(
+vault_operation_observer!(
     on_vault_create_recovery_key_request,
     VaultCreateRecoveryKeyRequest
 );
-vault_action_observer!(
+vault_operation_observer!(
     on_vault_unlock_recovery_key_request,
     VaultUnlockRecoveryKeyRequest
 );
-vault_action_observer!(on_vault_connect_cloud_request, VaultConnectCloudRequest);
-vault_action_observer!(
+vault_operation_observer!(on_vault_connect_cloud_request, VaultConnectCloudRequest);
+vault_operation_observer!(
     on_vault_create_cloud_folder_request,
     VaultCreateCloudFolderRequest
 );
-vault_action_observer!(
+vault_operation_observer!(
     on_vault_choose_cloud_folder_request,
     VaultChooseCloudFolderRequest
 );
@@ -825,9 +1417,28 @@ fn queue_vault_auto_sync(
     mut auto_sync: ResMut<VaultAutoSync>,
     registry: Query<&ToolRegistry>,
     scans: Query<(), With<ToolsScanTask>>,
-    tasks: Query<&VaultActionTask>,
-    pending: Query<&PendingVaultAction>,
-    mut sequence: ResMut<ActionRequestSequence>,
+    tasks: Query<
+        (),
+        (
+            With<VaultOperationTask>,
+            With<VaultOperationRequest<VaultSyncRequest>>,
+        ),
+    >,
+    ready: Query<
+        (),
+        (
+            With<ReadyVaultOperation>,
+            With<VaultOperationRequest<VaultSyncRequest>>,
+        ),
+    >,
+    pending: Query<
+        (),
+        (
+            With<PendingVaultOperation>,
+            With<VaultOperationRequest<VaultSyncRequest>>,
+        ),
+    >,
+    mut sequence: ResMut<OperationRequestSequence>,
     mut commands: Commands,
 ) {
     let Ok(state) = registry.single() else {
@@ -844,28 +1455,19 @@ fn queue_vault_auto_sync(
         auto_sync.remote_check = false;
         return;
     }
-    if tasks
-        .iter()
-        .any(|task| task.request.action == VaultAction::Sync)
-        || pending
-            .iter()
-            .any(|request| request.request.action == VaultAction::Sync)
-    {
+    if !tasks.is_empty() || !ready.is_empty() || !pending.is_empty() {
         auto_sync.requested = false;
         auto_sync.remote_check = false;
         return;
     }
-    commands.spawn(PendingVaultAction {
-        order: sequence.next(),
-        target: VaultActionTarget::Automatic,
-        request: VaultRequest {
-            action: VaultAction::Sync,
-            repository: String::new(),
-            private: true,
-            folder_name: String::new(),
-            recovery_key: String::new(),
+    commands.spawn((
+        PendingVaultOperation,
+        VaultOperationContext {
+            operation_id: sequence.next(),
+            target: VaultOperationTarget::Automatic,
         },
-    });
+        VaultOperationRequest::new(VaultSyncRequest),
+    ));
     auto_sync.requested = false;
     auto_sync.remote_check = false;
 }
@@ -880,35 +1482,27 @@ fn vault_event_requests_sync(result: &notify::Result<notify::Event>) -> bool {
     })
 }
 
-fn start_tool_action(
-    pending: Query<(Entity, &PendingToolAction)>,
-    requests: Query<(), With<ToolActionRequest>>,
-    tasks: Query<(), With<ToolActionTask>>,
-    store_actions: Query<(), With<ToolStoreAction>>,
-    vault_tasks: Query<(), With<VaultActionTask>>,
+fn start_tool_operation(
+    pending: Query<(Entity, &ToolOperationContext), With<PendingToolOperation>>,
+    active: Query<(), With<ToolStoreTarget>>,
+    vault_tasks: Query<(), With<VaultOperationTask>>,
+    vault_ready: Query<(), With<ReadyVaultOperation>>,
     scans: Query<(), With<ToolsScanTask>>,
     stores: Query<Entity, (With<ToolStore>, With<ToolRegistry>)>,
     mut commands: Commands,
 ) {
-    if !requests.is_empty()
-        || !tasks.is_empty()
-        || !store_actions.is_empty()
-        || !vault_tasks.is_empty()
-        || !scans.is_empty()
+    if !active.is_empty() || !vault_tasks.is_empty() || !vault_ready.is_empty() || !scans.is_empty()
     {
         return;
     }
     let mut next = None;
-    for (entity, request) in &pending {
+    for (entity, operation) in &pending {
         match next {
-            Some((_, order)) if order <= request.order => {}
-            _ => next = Some((entity, request.order)),
+            Some((_, operation_id)) if operation_id <= operation.operation_id => {}
+            _ => next = Some((entity, operation.operation_id)),
         }
     }
     let Some((entity, _)) = next else {
-        return;
-    };
-    let Ok((_, pending_action)) = pending.get(entity) else {
         return;
     };
     let Ok(store) = stores.single() else {
@@ -916,117 +1510,109 @@ fn start_tool_action(
     };
     commands
         .entity(entity)
-        .remove::<PendingToolAction>()
-        .insert((
-            ToolOperationId(pending_action.order),
-            ToolActionRequest::new(pending_action.target, pending_action.request.clone()),
-            ToolStoreTarget::new(store),
-        ));
+        .remove::<PendingToolOperation>()
+        .insert(ToolStoreTarget::new(store));
 }
 
-fn start_external_tool_action(
-    actions: Query<(Entity, &ToolActionRequest, &ToolStoreTarget), Added<ExternalToolAction>>,
+fn start_external_tool_operation<R: DesktopToolRequest>(
+    operations: Query<
+        (Entity, &ToolOperationRequest<R>, &ToolStoreTarget),
+        Added<ExternalToolOperation>,
+    >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
-    for (entity, action, store) in &actions {
+    for (entity, operation, store) in &operations {
         let Ok(store) = stores.get(store.entity()) else {
             continue;
         };
-        let request = action.request().clone();
-        let task_request = request.clone();
+        let request = operation.request().clone();
         let store = store.clone();
-        let task = IoTaskPool::get().spawn(async move { perform_action(&store, &task_request) });
+        let task = IoTaskPool::get().spawn(async move { request.execute(&store) });
         commands
             .entity(entity)
-            .remove::<ExternalToolAction>()
-            .insert(ToolActionTask { task });
+            .remove::<ExternalToolOperation>()
+            .insert(ToolOperationTask { task });
     }
 }
 
-fn start_vault_action(
-    pending: Query<(Entity, &PendingVaultAction)>,
-    mut recovery: ResMut<VaultRecoveryState>,
-    tasks: Query<(), With<VaultActionTask>>,
-    tool_requests: Query<(), With<ToolActionRequest>>,
-    tool_tasks: Query<(), With<ToolActionTask>>,
-    store_actions: Query<(), With<ToolStoreAction>>,
+fn start_vault_operation(
+    pending: Query<(Entity, &VaultOperationContext), With<PendingVaultOperation>>,
+    tasks: Query<(), With<VaultOperationTask>>,
+    ready: Query<(), With<ReadyVaultOperation>>,
+    tool_operations: Query<(), With<ToolStoreTarget>>,
     scans: Query<(), With<ToolsScanTask>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    if !tasks.is_empty()
-        || !tool_requests.is_empty()
-        || !tool_tasks.is_empty()
-        || !store_actions.is_empty()
-        || !scans.is_empty()
-    {
+    if !tasks.is_empty() || !ready.is_empty() || !tool_operations.is_empty() || !scans.is_empty() {
         return;
     }
     let mut next = None;
-    for (entity, request) in &pending {
+    for (entity, operation) in &pending {
         match next {
-            Some((_, order)) if order <= request.order => {}
-            _ => next = Some((entity, request.order)),
+            Some((_, operation_id)) if operation_id <= operation.operation_id => {}
+            _ => next = Some((entity, operation.operation_id)),
         }
     }
     let Some((entity, _)) = next else {
         return;
     };
-    let Ok((_, pending_action)) = pending.get(entity) else {
-        return;
-    };
-    let target = pending_action.target;
-    let request = pending_action.request.clone();
-    let (recovery, generated_recovery_key) = recovery.begin(request.action);
-    let task_request = request.clone();
-    let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let progress_wake = completion_wake.clone();
-    let (progress_sender, progress_receiver) = mpsc::channel();
-    let canceled = Arc::new(AtomicBool::new(false));
-    let task_canceled = canceled.clone();
-    let task = IoTaskPool::get().spawn(async move {
-        let result = perform_vault_action(
-            &task_request,
-            recovery,
-            generated_recovery_key,
-            move |progress| {
-                if progress_sender.send(progress).is_ok()
-                    && let Some(wake) = &progress_wake
-                {
-                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                }
-            },
-            move || task_canceled.load(Ordering::Relaxed),
-        )
-        .await;
-        if let Some(wake) = completion_wake {
-            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-        }
-        result
-    });
     commands
         .entity(entity)
-        .remove::<PendingVaultAction>()
-        .insert(VaultActionTask {
-            operation_id: pending_action.order,
-            target,
-            request,
-            task,
-            progress: Mutex::new(progress_receiver),
-            canceled,
+        .remove::<PendingVaultOperation>()
+        .insert(ReadyVaultOperation);
+}
+
+fn launch_vault_operation<R: DesktopVaultRequest>(
+    operations: Query<(Entity, &VaultOperationRequest<R>), Added<ReadyVaultOperation>>,
+    mut recovery: ResMut<VaultRecoveryState>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, operation) in &operations {
+        let request = operation.request().clone();
+        let service = recovery.service();
+        let generated_recovery_key = request.take_pending_key(&mut recovery);
+        let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let progress_wake = completion_wake.clone();
+        let (progress_sender, progress_receiver) = mpsc::channel();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let task_canceled = canceled.clone();
+        let progress = Box::new(move |authorization| {
+            if progress_sender.send(authorization).is_ok()
+                && let Some(wake) = &progress_wake
+            {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
         });
+        let cancellation = Box::new(move || task_canceled.load(Ordering::Relaxed));
+        let operation = request.execute(service, generated_recovery_key, progress, cancellation);
+        let task = IoTaskPool::get().spawn(async move {
+            let result = operation.await;
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(entity)
+            .remove::<ReadyVaultOperation>()
+            .insert(VaultOperationTask {
+                task,
+                progress: Mutex::new(progress_receiver),
+                canceled,
+            });
+    }
 }
 
 fn start_tools_scan(
     mut registry: Query<(&mut ToolRegistry, &ToolStore)>,
     tasks: Query<(), With<ToolsScanTask>>,
-    action_tasks: Query<(), With<ToolActionTask>>,
-    action_requests: Query<(), With<ToolActionRequest>>,
-    store_actions: Query<(), With<ToolStoreAction>>,
-    vault_tasks: Query<(), With<VaultActionTask>>,
-    pending_actions: Query<(), With<PendingToolAction>>,
-    pending_vault_actions: Query<(), With<PendingVaultAction>>,
+    tool_operations: Query<(), With<ToolStoreTarget>>,
+    vault_tasks: Query<(), With<VaultOperationTask>>,
+    vault_ready: Query<(), With<ReadyVaultOperation>>,
+    pending_tool_operations: Query<(), With<PendingToolOperation>>,
+    pending_vault_operations: Query<(), With<PendingVaultOperation>>,
     mut commands: Commands,
 ) {
     let Ok((mut state, store)) = registry.single_mut() else {
@@ -1034,12 +1620,11 @@ fn start_tools_scan(
     };
     if !state.dirty
         || !tasks.is_empty()
-        || !action_tasks.is_empty()
-        || !action_requests.is_empty()
-        || !store_actions.is_empty()
+        || !tool_operations.is_empty()
         || !vault_tasks.is_empty()
-        || !pending_actions.is_empty()
-        || !pending_vault_actions.is_empty()
+        || !vault_ready.is_empty()
+        || !pending_tool_operations.is_empty()
+        || !pending_vault_operations.is_empty()
     {
         return;
     }
@@ -1112,13 +1697,8 @@ fn drain_tools_scan(
     }
 }
 
-fn drain_tool_actions(
-    mut tasks: Query<(
-        Entity,
-        &ToolOperationId,
-        &ToolActionRequest,
-        &mut ToolActionTask,
-    )>,
+fn drain_tool_operations(
+    mut tasks: Query<(Entity, &ToolOperationContext, &mut ToolOperationTask)>,
     mut registry: Query<&mut ToolRegistry>,
     mut subscribers: Query<&mut ToolSubscriber>,
     mut commands: Commands,
@@ -1126,7 +1706,7 @@ fn drain_tool_actions(
     let Ok(mut state) = registry.single_mut() else {
         return;
     };
-    for (entity, operation_id, action, mut task) in &mut tasks {
+    for (entity, operation, mut task) in &mut tasks {
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
@@ -1135,9 +1715,13 @@ fn drain_tool_actions(
             Ok(message) => (true, message),
             Err(message) => (false, message),
         };
-        let request = action.request();
-        if let Ok(mut subscriber) = subscribers.get_mut(action.target()) {
-            subscriber.complete(operation_id.0, request, success, message);
+        if let Ok(mut subscriber) = subscribers.get_mut(operation.target) {
+            subscriber.complete(
+                operation.operation_id,
+                operation.operation.clone(),
+                success,
+                message,
+            );
         }
         if success {
             state.dirty = true;
@@ -1147,15 +1731,10 @@ fn drain_tool_actions(
     }
 }
 
-fn drain_tool_store_actions(
-    actions: Query<
-        (
-            Entity,
-            &ToolOperationId,
-            &ToolActionRequest,
-            &ToolActionCompletion,
-        ),
-        With<ToolStoreAction>,
+fn drain_tool_store_operations(
+    operations: Query<
+        (Entity, &ToolOperationContext, &ToolOperationCompletion),
+        With<ToolStoreOperation>,
     >,
     mut registry: Query<&mut ToolRegistry>,
     mut subscribers: Query<&mut ToolSubscriber>,
@@ -1164,12 +1743,11 @@ fn drain_tool_store_actions(
     let Ok(mut state) = registry.single_mut() else {
         return;
     };
-    for (entity, operation_id, action, completion) in &actions {
-        let request = action.request();
-        if let Ok(mut subscriber) = subscribers.get_mut(action.target()) {
+    for (entity, operation, completion) in &operations {
+        if let Ok(mut subscriber) = subscribers.get_mut(operation.target) {
             subscriber.complete(
-                operation_id.0,
-                request,
+                operation.operation_id,
+                operation.operation.clone(),
                 completion.success(),
                 completion.message().to_string(),
             );
@@ -1183,8 +1761,13 @@ fn drain_tool_store_actions(
     }
 }
 
-fn drain_vault_actions(
-    mut tasks: Query<(Entity, &mut VaultActionTask)>,
+fn drain_vault_operation<R: DesktopVaultRequest>(
+    mut operations: Query<(
+        Entity,
+        &VaultOperationContext,
+        &VaultOperationRequest<R>,
+        &mut VaultOperationTask,
+    )>,
     mut registry: Query<&mut ToolRegistry>,
     mut recovery: ResMut<VaultRecoveryState>,
     mut subscribers: Query<&mut VaultSubscriber>,
@@ -1194,15 +1777,15 @@ fn drain_vault_actions(
     let Ok(mut state) = registry.single_mut() else {
         return;
     };
-    for (entity, mut task) in &mut tasks {
-        let target = task.target.webview();
+    for (entity, context, operation, mut task) in &mut operations {
+        let target = context.target.webview();
         while let Ok(progress) = task.progress.get_mut().try_recv() {
             if let Some(target) = target {
                 stack_requests.write(vmux_layout::stack::OpenRequest {
                     url: Some(progress.url.clone()),
                 });
                 if let Ok(mut subscriber) = subscribers.get_mut(target) {
-                    subscriber.authorize(task.operation_id, progress);
+                    subscriber.authorize(context.operation_id, progress);
                 }
             }
         }
@@ -1230,21 +1813,23 @@ fn drain_vault_actions(
             message,
             pending_upload,
         };
-        if task.request.action == VaultAction::Sync {
+        if R::SYNCHRONIZES {
             state.snapshot.vault.sync_failed = !success;
             state.revision = state.revision.wrapping_add(1);
-            if task.target == VaultActionTarget::Automatic && !success {
+            if context.target == VaultOperationTarget::Automatic && !success {
                 continue;
             }
         }
         if let Some(target) = target
             && let Ok(mut subscriber) = subscribers.get_mut(target)
         {
-            subscriber.complete(task.operation_id, completion);
+            operation
+                .request()
+                .complete(&mut subscriber, context.operation_id, completion);
         }
         state.dirty = true;
         state.full_scan |= !state.snapshot.loaded;
-        state.load_vault_repositories |= task.request.action == VaultAction::ConnectGithub;
+        state.load_vault_repositories |= R::LOADS_REPOSITORIES;
         state.generation = state.generation.wrapping_add(1);
     }
 }
@@ -1262,7 +1847,10 @@ fn emit_tools_state(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        UiState::<ToolsUiState>::write(&mut commands, entity, &subscriber.state);
+        commands.trigger(UiStateWrite::<ToolsUiState>::from_event(
+            entity,
+            &subscriber.state,
+        ));
         subscriber.emitted_revision = subscriber.revision;
     }
 }
@@ -1280,7 +1868,10 @@ fn emit_vault_state(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        UiState::<VaultUiState>::write(&mut commands, entity, &subscriber.state);
+        commands.trigger(UiStateWrite::<VaultUiState>::from_event(
+            entity,
+            &subscriber.state,
+        ));
         subscriber.emitted_revision = subscriber.revision;
     }
 }
@@ -1422,7 +2013,7 @@ fn build_category(
             let managed = manifest.contains(provider.id(), &item.id);
             ToolItem {
                 provider,
-                actions: package_actions(item.status, managed, item.removable),
+                operations: package_operations(item.status, managed, item.removable),
                 id: item.id,
                 name: item.name,
                 icon: item.icon,
@@ -1448,7 +2039,7 @@ fn build_category(
                 detail: "Declared in tools.toml".to_string(),
                 status: ToolStatus::Missing,
                 managed: true,
-                actions: vec![ToolAction::Install, ToolAction::Forget],
+                operations: vec![ToolOperationKind::Install, ToolOperationKind::Forget],
             });
         }
     }
@@ -1461,21 +2052,25 @@ fn build_category(
     ToolCategory { provider, items }
 }
 
-fn package_actions(status: ToolStatus, managed: bool, removable: bool) -> Vec<ToolAction> {
-    let mut actions = Vec::new();
+fn package_operations(
+    status: ToolStatus,
+    managed: bool,
+    removable: bool,
+) -> Vec<ToolOperationKind> {
+    let mut operations = Vec::new();
     if !managed && matches!(status, ToolStatus::Installed | ToolStatus::Outdated) {
-        actions.push(ToolAction::Adopt);
+        operations.push(ToolOperationKind::Adopt);
     }
     if status == ToolStatus::Outdated {
-        actions.push(ToolAction::Update);
+        operations.push(ToolOperationKind::Update);
     }
     if status == ToolStatus::Missing {
-        actions.push(ToolAction::Install);
+        operations.push(ToolOperationKind::Install);
     }
     if removable {
-        actions.push(ToolAction::Uninstall);
+        operations.push(ToolOperationKind::Uninstall);
     }
-    actions
+    operations
 }
 
 fn scan_homebrew(cask: bool, refresh: bool) -> Result<Vec<InventoryItem>, String> {
@@ -1780,10 +2375,10 @@ fn scan_mcp(
             } else {
                 format!("{transport} · configured in {sources}")
             };
-            let actions = if managed {
-                vec![ToolAction::Forget]
+            let operations = if managed {
+                vec![ToolOperationKind::Forget]
             } else if status == ToolStatus::Available {
-                vec![ToolAction::Adopt]
+                vec![ToolOperationKind::Adopt]
             } else {
                 Vec::new()
             };
@@ -1796,7 +2391,7 @@ fn scan_mcp(
                 detail,
                 status,
                 managed,
-                actions,
+                operations,
             }
         })
         .collect();
@@ -1816,7 +2411,7 @@ fn scan_dotfiles(store: &ToolStore, manifest: &mut ToolsManifest) -> ToolCategor
     let mut items = Vec::new();
     for package in package_names {
         let managed = manifest.dotfiles.packages.contains(&package);
-        let (status, detail, actions) = match store.plan_dotfile_package(&package) {
+        let (status, detail, operations) = match store.plan_dotfile_package(&package) {
             Ok(plan) => {
                 let detail = format!(
                     "{} linked · {} missing · {} conflicts",
@@ -1835,18 +2430,18 @@ fn scan_dotfiles(store: &ToolStore, manifest: &mut ToolsManifest) -> ToolCategor
                 } else {
                     ToolStatus::Installed
                 };
-                let actions = if managed {
-                    vec![ToolAction::Link, ToolAction::Unlink]
+                let operations = if managed {
+                    vec![ToolOperationKind::Link, ToolOperationKind::Unlink]
                 } else {
-                    vec![ToolAction::Link]
+                    vec![ToolOperationKind::Link]
                 };
-                (status, detail, actions)
+                (status, detail, operations)
             }
             Err(error) => (
                 ToolStatus::Missing,
                 error,
                 if managed {
-                    vec![ToolAction::Unlink]
+                    vec![ToolOperationKind::Unlink]
                 } else {
                     Vec::new()
                 },
@@ -1861,181 +2456,13 @@ fn scan_dotfiles(store: &ToolStore, manifest: &mut ToolsManifest) -> ToolCategor
             detail,
             status,
             managed,
-            actions,
+            operations,
         });
     }
     ToolCategory {
         provider: ToolProvider::Dotfiles,
         items,
     }
-}
-
-fn perform_action(store: &ToolStore, request: &ToolRequest) -> Result<String, String> {
-    if request.action == ToolAction::Apply {
-        return apply_manifest(store);
-    }
-    if request.action == ToolAction::Import {
-        return import_provider(store, request.provider, request.value.trim());
-    }
-    if request.id.trim().is_empty() {
-        return Err("package name is required".to_string());
-    }
-    match request.action {
-        ToolAction::Install => {
-            set_manifest_entry(store, request.provider, &request.id, true)?;
-            install_provider(store, request.provider, &request.id)?;
-            Ok(format!("{} installed", request.id))
-        }
-        ToolAction::Update => {
-            set_manifest_entry(store, request.provider, &request.id, true)?;
-            update_provider(store, request.provider, &request.id)?;
-            Ok(format!("{} updated", request.id))
-        }
-        ToolAction::Uninstall => {
-            uninstall_provider(store, request.provider, &request.id)?;
-            set_manifest_entry(store, request.provider, &request.id, false)?;
-            Ok(format!("{} removed", request.id))
-        }
-        ToolAction::Forget => {
-            set_manifest_entry(store, request.provider, &request.id, false)?;
-            Ok(format!("{} removed from tools.toml", request.id))
-        }
-        ToolAction::Adopt => {
-            if request.provider == ToolProvider::Dotfiles {
-                if request.value.trim().is_empty() {
-                    return Err("dotfile path is required".to_string());
-                }
-                let destination =
-                    store.adopt_dotfile(Path::new(request.value.trim()), request.id.trim())?;
-                Ok(format!("adopted {}", destination.display()))
-            } else if request.provider == ToolProvider::Mcp {
-                store.import_discovered_mcp_server(&request.id)?;
-                Ok(format!("{} is now managed", request.id))
-            } else {
-                set_manifest_entry(store, request.provider, &request.id, true)?;
-                Ok(format!("{} is now managed", request.id))
-            }
-        }
-        ToolAction::Link => {
-            if request.provider != ToolProvider::Dotfiles {
-                return Err("link is only valid for dotfiles".to_string());
-            }
-            set_manifest_entry(store, request.provider, &request.id, true)?;
-            let linked = store.apply_dotfile_package(&request.id)?;
-            Ok(format!("linked {linked} file(s)"))
-        }
-        ToolAction::Unlink => {
-            if request.provider != ToolProvider::Dotfiles {
-                return Err("unlink is only valid for dotfiles".to_string());
-            }
-            let removed = store.disable_and_unlink_dotfile_package(&request.id)?;
-            Ok(format!("unlinked {removed} file(s)"))
-        }
-        ToolAction::Apply | ToolAction::Import => unreachable!(),
-    }
-}
-
-async fn perform_vault_action<F, C>(
-    request: &VaultRequest,
-    recovery: VaultRecovery,
-    generated_recovery_key: Option<GeneratedRecoveryKey>,
-    progress: F,
-    canceled: C,
-) -> Result<VaultActionOutput, String>
-where
-    F: Fn(VaultAuthorization),
-    C: Fn() -> bool,
-{
-    if request.action == VaultAction::CreateRecoveryKey {
-        let key = generated_recovery_key
-            .ok_or_else(|| "No Recovery Key has been generated for this Vault".to_string())?;
-        let result = recovery.create(key)?;
-        return Ok(VaultActionOutput {
-            message: String::new(),
-            pending_upload: result.pending_upload,
-            generated_recovery_key: None,
-        });
-    }
-    let message = match request.action {
-        VaultAction::Create => vmux_core::profile::vault::create_remote(
-            &request.repository,
-            if request.private {
-                vmux_core::profile::vault::RepositoryVisibility::Private
-            } else {
-                vmux_core::profile::vault::RepositoryVisibility::Public
-            },
-        ),
-        VaultAction::Connect => vmux_core::profile::vault::connect_remote(&request.repository),
-        VaultAction::Sync => vmux_core::profile::vault::sync(),
-        VaultAction::ConnectGithub => vmux_core::profile::vault::connect_github_with_progress(
-            |code| {
-                progress(VaultAuthorization {
-                    code,
-                    url: "https://github.com/login/device".to_string(),
-                });
-            },
-            canceled,
-        ),
-        VaultAction::ConnectFolder => {
-            let initial_dir = std::env::var_os("HOME")
-                .map(std::path::PathBuf::from)
-                .map(|home| home.join("Library/CloudStorage"))
-                .filter(|path| path.is_dir())
-                .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from));
-            let mut dialog = rfd::AsyncFileDialog::new();
-            if let Some(initial_dir) = initial_dir {
-                dialog = dialog.set_directory(initial_dir);
-            }
-            let Some(folder) = dialog.pick_folder().await else {
-                return Err(String::new());
-            };
-            vmux_core::profile::vault::connect_folder(folder.path())
-        }
-        VaultAction::GenerateRecoveryKey => {
-            let key = GeneratedRecoveryKey::generate()?;
-            let message = key.display().to_string();
-            return Ok(VaultActionOutput {
-                message,
-                pending_upload: false,
-                generated_recovery_key: Some(key),
-            });
-        }
-        VaultAction::CreateRecoveryKey => unreachable!(),
-        VaultAction::UnlockRecoveryKey => recovery.unlock(&request.recovery_key),
-        VaultAction::ConnectCloud => connect_cloud_storage(&request.repository).await,
-        VaultAction::CreateCloudFolder => {
-            let folder = Path::new(&request.repository).join(&request.folder_name);
-            vmux_core::profile::vault::connect_folder(&folder)
-        }
-        VaultAction::ChooseCloudFolder => {
-            let mut dialog = rfd::AsyncFileDialog::new();
-            let root = Path::new(&request.repository);
-            if root.is_dir() {
-                dialog = dialog.set_directory(root);
-            }
-            let Some(folder) = dialog.pick_folder().await else {
-                return Err(String::new());
-            };
-            let remote = if folder
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "git")
-            {
-                folder.path().to_path_buf()
-            } else {
-                folder.path().join("vmux-vault.git")
-            };
-            if !remote.exists() {
-                return Err("selected folder does not contain a Vault".to_string());
-            }
-            vmux_core::profile::vault::connect_folder(folder.path())
-        }
-    }?;
-    Ok(VaultActionOutput {
-        message,
-        pending_upload: false,
-        generated_recovery_key: None,
-    })
 }
 
 async fn connect_cloud_storage(provider: &str) -> Result<String, String> {
@@ -2351,10 +2778,10 @@ mod tests {
     struct VaultAutoSyncScenario;
 
     impl VaultAutoSyncScenario {
-        fn pending_targets(vault: VaultSnapshot, remote_check: bool) -> Vec<VaultActionTarget> {
+        fn pending_targets(vault: VaultSnapshot, remote_check: bool) -> Vec<VaultOperationTarget> {
             let mut app = App::new();
             app.init_resource::<VaultAutoSync>()
-                .init_resource::<ActionRequestSequence>()
+                .init_resource::<OperationRequestSequence>()
                 .add_systems(Update, queue_vault_auto_sync);
             let registry = app.world_mut().spawn(ToolRegistry::default()).id();
             {
@@ -2370,8 +2797,12 @@ mod tests {
             app.update();
 
             let world = app.world_mut();
-            let mut query = world.query::<&PendingVaultAction>();
-            query.iter(world).map(|pending| pending.target).collect()
+            let mut query =
+                world.query_filtered::<&VaultOperationContext, With<PendingVaultOperation>>();
+            query
+                .iter(world)
+                .map(|operation| operation.target)
+                .collect()
         }
     }
 
@@ -2387,31 +2818,35 @@ mod tests {
         let mut recovery = VaultRecoveryState::default();
         recovery.retain(GeneratedRecoveryKey::generate().unwrap());
 
-        assert!(recovery.begin(VaultAction::Sync).1.is_none());
-        assert!(recovery.begin(VaultAction::CreateRecoveryKey).1.is_some());
-        assert!(recovery.begin(VaultAction::CreateRecoveryKey).1.is_none());
+        assert!(VaultSyncRequest.take_pending_key(&mut recovery).is_none());
+        assert!(
+            VaultCreateRecoveryKeyRequest
+                .take_pending_key(&mut recovery)
+                .is_some()
+        );
+        assert!(
+            VaultCreateRecoveryKeyRequest
+                .take_pending_key(&mut recovery)
+                .is_none()
+        );
     }
 
     #[test]
     fn tool_operation_state_tracks_pending_and_completion() {
-        let request = ToolRequest {
-            provider: ToolProvider::Npm,
-            action: ToolAction::Install,
-            id: "typescript".to_string(),
-            value: String::new(),
-        };
-        let mut subscriber = ToolSubscriber::pending(7, &request);
+        let operation =
+            ToolOperationKey::new(ToolProvider::Npm, ToolOperationKind::Install, "typescript");
+        let mut subscriber = ToolSubscriber::pending(7, operation.clone());
 
         assert_eq!(
             subscriber.state.pending,
             vec![ToolOperationKey::new(
                 ToolProvider::Npm,
-                ToolAction::Install,
+                ToolOperationKind::Install,
                 "typescript",
             )]
         );
 
-        subscriber.complete(7, &request, true, "installed".to_string());
+        subscriber.complete(7, operation, true, "installed".to_string());
 
         assert!(subscriber.state.pending.is_empty());
         let notice = subscriber.state.notice.as_ref().unwrap();
@@ -2421,8 +2856,10 @@ mod tests {
 
     #[test]
     fn vault_operation_state_preserves_recovery_workflow() {
-        let mut subscriber = VaultSubscriber::pending(3, VaultAction::GenerateRecoveryKey);
-        subscriber.complete(
+        let generate = VaultGenerateRecoveryKeyRequest;
+        let mut subscriber = VaultSubscriber::pending(3, generate.kind());
+        generate.complete(
+            &mut subscriber,
             3,
             VaultCompletion {
                 success: true,
@@ -2432,8 +2869,10 @@ mod tests {
         );
         assert_eq!(subscriber.state.generated_recovery_key, "recovery-key");
 
-        subscriber.begin(4, VaultAction::CreateRecoveryKey);
-        subscriber.complete(
+        let create = VaultCreateRecoveryKeyRequest;
+        create.begin(&mut subscriber, 4);
+        create.complete(
+            &mut subscriber,
             4,
             VaultCompletion {
                 success: true,
@@ -2497,8 +2936,8 @@ mod tests {
         assert_eq!(category.items[0].status, ToolStatus::Missing);
         assert!(category.items[0].managed);
         assert_eq!(
-            category.items[0].actions,
-            [ToolAction::Install, ToolAction::Forget]
+            category.items[0].operations,
+            [ToolOperationKind::Install, ToolOperationKind::Forget]
         );
     }
 
@@ -2576,12 +3015,12 @@ mod tests {
     #[test]
     fn unmanaged_installed_packages_can_be_adopted() {
         assert_eq!(
-            package_actions(ToolStatus::Installed, false, true),
-            [ToolAction::Adopt, ToolAction::Uninstall]
+            package_operations(ToolStatus::Installed, false, true),
+            [ToolOperationKind::Adopt, ToolOperationKind::Uninstall]
         );
         assert_eq!(
-            package_actions(ToolStatus::Outdated, true, true),
-            [ToolAction::Update, ToolAction::Uninstall]
+            package_operations(ToolStatus::Outdated, true, true),
+            [ToolOperationKind::Update, ToolOperationKind::Uninstall]
         );
     }
 
@@ -2602,7 +3041,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_backup_creates_only_needed_pending_actions() {
+    fn automatic_backup_creates_only_needed_pending_operations() {
         let connected = VaultSnapshot {
             initialized: true,
             unlocked: true,
@@ -2612,7 +3051,7 @@ mod tests {
         };
         assert_eq!(
             VaultAutoSyncScenario::pending_targets(connected.clone(), false),
-            [VaultActionTarget::Automatic]
+            [VaultOperationTarget::Automatic]
         );
         assert_eq!(
             VaultAutoSyncScenario::pending_targets(
@@ -2633,7 +3072,7 @@ mod tests {
                 },
                 false
             ),
-            [VaultActionTarget::Automatic]
+            [VaultOperationTarget::Automatic]
         );
         assert_eq!(
             VaultAutoSyncScenario::pending_targets(
@@ -2653,7 +3092,7 @@ mod tests {
                 },
                 true,
             ),
-            [VaultActionTarget::Automatic]
+            [VaultOperationTarget::Automatic]
         );
     }
 }

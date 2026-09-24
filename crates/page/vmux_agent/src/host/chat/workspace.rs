@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::AgentChatView;
-use super::ChatUiStateUpdates;
 use crate::events::{AgentCommandRequest, CommandOrigin};
 use vmux_chat::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatProjectBranches, ChatSelectWorkspace,
@@ -96,7 +95,11 @@ fn push_composer_context_to_page(
             .get(&webview)
             .is_none_or(|entry| entry.input != input || entry.context != context);
         if changed || ready.is_changed() {
-            ChatUiStateUpdates::write(&mut commands, webview, &context);
+            commands.trigger(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                    webview, &context,
+                ),
+            );
         }
         cache
             .entries
@@ -249,13 +252,14 @@ fn drain_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        ChatUiStateUpdates::write(
-            &mut commands,
-            read.webview,
-            &ChatProjectBranches {
-                project: read.project.clone(),
-                branches,
-            },
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                read.webview,
+                &ChatProjectBranches {
+                    project: read.project.clone(),
+                    branches,
+                },
+            ),
         );
     }
 }

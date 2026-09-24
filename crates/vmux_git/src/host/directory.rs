@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_core::event::space::ProjectActivateRequest;
 
-use crate::event::{GitDirectoryRequest, GitDirectorySnapshot};
+use crate::event::{GitDirectoryRequest, GitDirectorySnapshot, GitRepositoryRequest};
 
 pub(super) struct DirectoryPlugin;
 
@@ -87,6 +88,7 @@ fn on_directory_request(
     trigger: On<UiInput<GitDirectoryRequest>>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
     mut views: Query<&mut super::state::GitState>,
+    mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
     let Ok(mut view) = views.get_mut(trigger.event().webview) else {
@@ -106,6 +108,22 @@ fn on_directory_request(
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "Git".to_string());
         page.title = format!("{name} · Git");
+    }
+    if !event.preview && !event.repo_root.is_empty() {
+        let repo_root = event.repo_root.clone();
+        commands.trigger(UiInput {
+            webview: trigger.event().webview,
+            payload: ProjectActivateRequest {
+                path: repo_root.clone(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: None,
+            },
+        });
+        commands.trigger(UiInput {
+            webview: trigger.event().webview,
+            payload: GitRepositoryRequest { path: repo_root },
+        });
     }
     view.set_directory(event);
 }

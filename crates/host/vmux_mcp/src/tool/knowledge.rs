@@ -1,8 +1,8 @@
 use super::{
-    DispatchTarget, NextToolOrder, ProtocolTool, RegisterTools, ToolCall, ToolCalls,
-    ToolDispatchResult, ToolDispatchSet, ToolExecution, ToolManifest, ToolOutcome, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ProtocolTool, ToolCall, ToolCalls, ToolDispatchResult,
+    ToolDispatchSet, ToolExecution, ToolOutcome, ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::AgentCommand;
@@ -11,20 +11,22 @@ pub(super) struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(
-                Update,
-                (
-                    vault_status,
-                    open_vault,
-                    set_conversation_title,
-                    search,
-                    read,
-                    write,
-                )
-                    .in_set(ToolDispatchSet),
-            );
+        app.add_plugins(McpToolPlugin::<KnowledgeTool>::new(include_str!(
+            "knowledge.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(
+            Update,
+            (
+                vault_status,
+                open_vault,
+                set_conversation_title,
+                search,
+                read,
+                write,
+            )
+                .in_set(ToolDispatchSet),
+        );
     }
 }
 
@@ -37,11 +39,6 @@ enum KnowledgeTool {
     SearchKnowledge,
     ReadKnowledge,
     WriteKnowledge,
-}
-
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<KnowledgeTool>::from_ron(include_str!("knowledge.ron"))
-        .spawn(&mut commands, &mut next_order);
 }
 
 #[derive(Deserialize)]
@@ -101,21 +98,30 @@ fn vault_status(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
 
 fn parse(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     for (request, call, tool) in calls.iter() {
-        match tool {
-            KnowledgeTool::VaultStatus => {}
-            KnowledgeTool::OpenVault => call.parse_into::<OpenVaultArgs>(request, &mut commands),
+        let parsed = match tool {
+            KnowledgeTool::VaultStatus => continue,
+            KnowledgeTool::OpenVault => call.parse::<OpenVaultArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
             KnowledgeTool::SetConversationTitle => {
-                call.parse_into::<SetConversationTitleArgs>(request, &mut commands)
+                call.parse::<SetConversationTitleArgs>().map(|args| {
+                    commands.entity(request).insert(args);
+                })
             }
-            KnowledgeTool::SearchKnowledge => {
-                call.parse_into::<SearchKnowledgeArgs>(request, &mut commands)
-            }
-            KnowledgeTool::ReadKnowledge => {
-                call.parse_into::<ReadKnowledgeArgs>(request, &mut commands)
-            }
-            KnowledgeTool::WriteKnowledge => {
-                call.parse_into::<WriteKnowledgeArgs>(request, &mut commands)
-            }
+            KnowledgeTool::SearchKnowledge => call.parse::<SearchKnowledgeArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            KnowledgeTool::ReadKnowledge => call.parse::<ReadKnowledgeArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            KnowledgeTool::WriteKnowledge => call.parse::<WriteKnowledgeArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+        };
+        if let Err(message) = parsed {
+            commands
+                .entity(request)
+                .insert(ToolDispatchResult(Err(message)));
         }
     }
 }

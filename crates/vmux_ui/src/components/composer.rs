@@ -68,7 +68,7 @@ impl PromptComposerAttachment {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PromptComposerAction {
+pub enum PromptComposerMode {
     #[default]
     Send,
     Stop,
@@ -91,7 +91,7 @@ pub fn PromptComposer(
     #[props(default = PROMPT_INPUT_ID.to_string())] input_id: String,
     #[props(default = translate("composer-attach-files"))] attach_title: String,
     #[props(default = translate("composer-remove-attachment"))] remove_attachment_title: String,
-    #[props(default)] action: PromptComposerAction,
+    #[props(default)] mode: PromptComposerMode,
     action_title: String,
     action_enabled: bool,
     on_input: EventHandler<String>,
@@ -110,13 +110,13 @@ pub fn PromptComposer(
     let has_ghost = ghost.is_some();
     let overlaid = !overlay.is_empty();
     let typed_text_class = if overlaid { "text-transparent" } else { "" };
-    let action_class = if action_enabled {
-        match action {
-            PromptComposerAction::Send => cn([
+    let mode_class = if action_enabled {
+        match mode {
+            PromptComposerMode::Send => cn([
                 "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition active:scale-95 hover:brightness-110 sm:h-8 sm:w-8 sm:rounded-lg",
                 accent_gradient.as_str(),
             ]),
-            PromptComposerAction::Stop => "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-white/10 text-foreground/70 shadow-sm ring-1 ring-inset ring-white/10 transition active:scale-95 hover:bg-white/60 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/40 sm:ring-black/10 dark:sm:bg-white/[0.08] dark:sm:ring-white/10 dark:hover:bg-white/[0.14]".to_string(),
+            PromptComposerMode::Stop => "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-white/10 text-foreground/70 shadow-sm ring-1 ring-inset ring-white/10 transition active:scale-95 hover:bg-white/60 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/40 sm:ring-black/10 dark:sm:bg-white/[0.08] dark:sm:ring-white/10 dark:hover:bg-white/[0.14]".to_string(),
         }
     } else {
         "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 cursor-default self-center items-center justify-center rounded-xl bg-white/[0.055] text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-white/[0.08] sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/25 sm:ring-black/[0.06] dark:sm:bg-white/[0.055] dark:sm:ring-white/[0.08]".to_string()
@@ -254,9 +254,9 @@ pub fn PromptComposer(
                     }
                 }
             }
-            if action == PromptComposerAction::Stop || show_send_button {
+            if mode == PromptComposerMode::Stop || show_send_button {
                 button {
-                    class: "{action_class}",
+                    class: "{mode_class}",
                     r#type: "button",
                     disabled: !action_enabled,
                     title: "{action_title}",
@@ -266,7 +266,7 @@ pub fn PromptComposer(
                             on_action.call(());
                         }
                     },
-                    if action == PromptComposerAction::Stop {
+                    if mode == PromptComposerMode::Stop {
                         svg {
                             class: "h-4 w-4",
                             view_box: "0 0 24 24",

@@ -21,9 +21,9 @@ where
         + for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>>,
 {
     fn build(&self, app: &mut App) {
-        app.add_observer(UiState::<S>::collect)
-            .add_observer(UiState::<S>::replay)
-            .add_systems(Last, UiState::<S>::emit);
+        app.add_observer(collect_ui_state::<S>)
+            .add_observer(replay_ui_state::<S>)
+            .add_systems(Last, emit_ui_state::<S>);
     }
 }
 
@@ -53,26 +53,6 @@ impl<S: UiStateContract> UiState<S> {
         self.retained.as_ref()
     }
 
-    pub fn write<T>(commands: &mut Commands, webview: Entity, event: &T)
-    where
-        T: Clone + Into<S::Update>,
-    {
-        commands.trigger(UiStateWrite::<S>::from_event(webview, event));
-    }
-
-    pub fn deliver<T>(
-        pages: &Query<(), With<Self>>,
-        commands: &mut Commands,
-        webview: Entity,
-        event: &T,
-    ) where
-        T: Clone + Into<S::Update>,
-    {
-        if pages.contains(webview) {
-            Self::write(commands, webview, event);
-        }
-    }
-
     fn push(&mut self, update: S::Update) {
         self.updates.push(update);
     }
@@ -91,53 +71,52 @@ impl<S: UiStateContract> UiState<S> {
         self.replay = false;
         self.retained.clone()
     }
+}
 
-    fn collect(
-        trigger: On<UiStateWrite<S>>,
-        mut updates: Query<&mut Self>,
-        mut commands: Commands,
-    ) {
-        match updates.get_mut(trigger.event().webview) {
-            Ok(mut updates) => updates.push(trigger.event().update.clone()),
-            Err(_) => {
-                let mut updates = Self::default();
-                updates.push(trigger.event().update.clone());
-                commands.entity(trigger.event().webview).insert(updates);
-            }
+fn collect_ui_state<S: UiStateContract>(
+    trigger: On<UiStateWrite<S>>,
+    mut updates: Query<&mut UiState<S>>,
+    mut commands: Commands,
+) {
+    match updates.get_mut(trigger.event().webview) {
+        Ok(mut updates) => updates.push(trigger.event().update.clone()),
+        Err(_) => {
+            let mut updates = UiState::<S>::default();
+            updates.push(trigger.event().update.clone());
+            commands.entity(trigger.event().webview).insert(updates);
         }
     }
+}
 
-    fn replay(
-        trigger: On<bevy_cef::prelude::UiInput<vmux_api::PageReady>>,
-        mut updates: Query<&mut Self>,
-    ) {
-        let Ok(mut updates) = updates.get_mut(trigger.event().webview) else {
-            return;
-        };
-        updates.replay = true;
-    }
+fn replay_ui_state<S: UiStateContract>(
+    trigger: On<bevy_cef::prelude::UiInput<vmux_api::PageReady>>,
+    mut updates: Query<&mut UiState<S>>,
+) {
+    let Ok(mut updates) = updates.get_mut(trigger.event().webview) else {
+        return;
+    };
+    updates.replay = true;
+}
 
-    fn emit(
-        mut updates: Query<(Entity, &mut Self)>,
-        browsers: Option<NonSend<Browsers>>,
-        mut commands: Commands,
-    ) where
-        S: for<'a> rkyv::Serialize<
-                HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>,
-            >,
-    {
-        let Some(browsers) = browsers else {
-            return;
-        };
-        for (entity, mut updates) in &mut updates {
-            if !browsers.can_emit_to(&entity) {
-                continue;
-            }
-            let Some(event) = updates.take() else {
-                continue;
-            };
-            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
+fn emit_ui_state<S>(
+    mut updates: Query<(Entity, &mut UiState<S>)>,
+    browsers: Option<NonSend<Browsers>>,
+    mut commands: Commands,
+) where
+    S: UiStateContract
+        + for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>>,
+{
+    let Some(browsers) = browsers else {
+        return;
+    };
+    for (entity, mut updates) in &mut updates {
+        if !browsers.can_emit_to(&entity) {
+            continue;
         }
+        let Some(event) = updates.take() else {
+            continue;
+        };
+        commands.trigger(BinHostEmitEvent::from_event(entity, &event));
     }
 }
 
@@ -204,34 +183,27 @@ mod tests {
     #[derive(Resource, Default)]
     struct SnapshotEmitted(Vec<SnapshotState>);
 
-    impl Emitted {
-        fn record(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Self>) {
-            if trigger.event().id() != FileUiState::id() {
-                return;
-            }
-            let event =
-                rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(trigger.event().payload())
-                    .unwrap();
-            emitted.0.push(event);
+    fn record_file_state(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>) {
+        if trigger.event().id() != FileUiState::id() {
+            return;
         }
+        let event = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(trigger.event().payload())
+            .unwrap();
+        emitted.0.push(event);
     }
 
-    impl Delivered {
-        fn write(trigger: On<UiStateWrite<FileUiState>>, mut delivered: ResMut<Self>) {
-            delivered.writes.push(trigger.event().webview());
-        }
+    fn record_write(trigger: On<UiStateWrite<FileUiState>>, mut delivered: ResMut<Delivered>) {
+        delivered.writes.push(trigger.event().webview());
     }
 
-    impl SnapshotEmitted {
-        fn record(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Self>) {
-            if trigger.event().id() != SnapshotState::id() {
-                return;
-            }
-            let state =
-                rkyv::from_bytes::<SnapshotState, rkyv::rancor::Error>(trigger.event().payload())
-                    .unwrap();
-            emitted.0.push(state);
+    fn record_snapshot(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<SnapshotEmitted>) {
+        if trigger.event().id() != SnapshotState::id() {
+            return;
         }
+        let state =
+            rkyv::from_bytes::<SnapshotState, rkyv::rancor::Error>(trigger.event().payload())
+                .unwrap();
+        emitted.0.push(state);
     }
 
     fn deliver(
@@ -239,18 +211,14 @@ mod tests {
         pages: Query<(), With<UiState<FileUiState>>>,
         mut commands: Commands,
     ) {
-        UiState::<FileUiState>::deliver(
-            &pages,
-            &mut commands,
-            targets.file,
-            &FileGitState::default(),
-        );
-        UiState::<FileUiState>::deliver(
-            &pages,
-            &mut commands,
-            targets.direct,
-            &FileGitState::default(),
-        );
+        for target in [targets.file, targets.direct] {
+            if pages.contains(target) {
+                commands.trigger(UiStateWrite::<FileUiState>::from_event(
+                    target,
+                    &FileGitState::default(),
+                ));
+            }
+        }
     }
 
     #[test]
@@ -258,7 +226,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, UiStatePlugin::<FileUiState>::default()))
             .init_resource::<Emitted>()
-            .add_observer(Emitted::record);
+            .add_observer(record_file_state);
         let entity = app
             .world_mut()
             .spawn(UiState::<FileUiState>::default())
@@ -296,7 +264,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, UiStatePlugin::<SnapshotState>::default()))
             .init_resource::<SnapshotEmitted>()
-            .add_observer(SnapshotEmitted::record);
+            .add_observer(record_snapshot);
         let entity = app.world_mut().spawn_empty().id();
 
         app.world_mut()
@@ -333,7 +301,7 @@ mod tests {
         let direct = app.world_mut().spawn_empty().id();
         app.insert_resource(Targets { file, direct })
             .init_resource::<Delivered>()
-            .add_observer(Delivered::write)
+            .add_observer(record_write)
             .add_systems(Update, deliver);
 
         app.update();

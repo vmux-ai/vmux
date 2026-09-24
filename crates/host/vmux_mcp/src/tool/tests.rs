@@ -61,7 +61,7 @@ fn extension_plugin_registers_and_dispatches_its_manifest() {
     app.add_plugins(ExtensionToolPlugin);
     app.update();
 
-    let definitions = ToolDefinition::all(app.world_mut(), false, false, "");
+    let definitions = tool_definitions_in(app.world_mut(), false, false, "");
     assert_eq!(
         definitions
             .iter()
@@ -70,7 +70,7 @@ fn extension_plugin_registers_and_dispatches_its_manifest() {
         ["echo"],
     );
 
-    let execution = ToolCall::dispatch(
+    let execution = dispatch_tool_call(
         &mut app,
         "echo",
         serde_json::json!({"text": "hello"}),
@@ -266,9 +266,9 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
     assert_eq!(definitions, expected);
 
     let anchor = Some(vmux_client::protocol::ProcessId::new());
-    let mut app = BuiltinToolPlugin::app();
+    let mut app = builtin_tool_app();
     for name in expected {
-        match ToolCall::dispatch(
+        match dispatch_tool_call(
             &mut app,
             name,
             serde_json::json!({}),
@@ -288,21 +288,17 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
 
 #[test]
 fn aliases_resolve_to_the_same_tool_entity() {
-    let mut app = BuiltinToolPlugin::app();
-    let select = ToolCall::find(app.world_mut(), "select_project").unwrap().0;
+    let mut app = builtin_tool_app();
+    let select = find_tool(app.world_mut(), "select_project").unwrap().0;
     assert_eq!(
-        ToolCall::find(app.world_mut(), "select_workspace")
-            .unwrap()
-            .0,
+        find_tool(app.world_mut(), "select_workspace").unwrap().0,
         select
     );
     assert_eq!(
-        ToolCall::find(app.world_mut(), "choose_workspace")
-            .unwrap()
-            .0,
+        find_tool(app.world_mut(), "choose_workspace").unwrap().0,
         select
     );
-    let execution = ToolCall::dispatch(
+    let execution = dispatch_tool_call(
         &mut app,
         "vmux_read_file",
         serde_json::json!({"path": "/tmp/example"}),

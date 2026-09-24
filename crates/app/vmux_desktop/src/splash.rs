@@ -18,23 +18,23 @@ impl Plugin for SplashPlugin {
 const SPLASH_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SplashAction {
+enum SplashDismissDecision {
     None,
     Fade,
     Force,
 }
 
-fn splash_decision(visible: bool, dismissed: bool, elapsed: Duration) -> SplashAction {
+fn splash_decision(visible: bool, dismissed: bool, elapsed: Duration) -> SplashDismissDecision {
     if dismissed {
-        return SplashAction::None;
+        return SplashDismissDecision::None;
     }
     if visible {
-        return SplashAction::Fade;
+        return SplashDismissDecision::Fade;
     }
     if elapsed >= SPLASH_TIMEOUT {
-        return SplashAction::Force;
+        return SplashDismissDecision::Force;
     }
-    SplashAction::None
+    SplashDismissDecision::None
 }
 
 #[derive(Default)]
@@ -183,10 +183,10 @@ fn dismiss_splash(
     }
     let visible = window_q.single().map(|w| w.visible).unwrap_or(false);
     let elapsed = state.created_at.map(|t| t.elapsed()).unwrap_or_default();
-    let action = splash_decision(visible, state.dismissed, elapsed);
+    let decision = splash_decision(visible, state.dismissed, elapsed);
 
-    match action {
-        SplashAction::None => {
+    match decision {
+        SplashDismissDecision::None => {
             let close = state
                 .fade_started
                 .is_some_and(|t| t.elapsed() >= std::time::Duration::from_millis(280));
@@ -195,8 +195,8 @@ fn dismiss_splash(
                 window.close();
             }
         }
-        SplashAction::Fade | SplashAction::Force => {
-            if action == SplashAction::Force {
+        SplashDismissDecision::Fade | SplashDismissDecision::Force => {
+            if decision == SplashDismissDecision::Force {
                 warn!("splash: window did not reveal within timeout; dismissing splash");
             }
             if let Some(panel) = state.window.as_ref() {
@@ -224,7 +224,7 @@ mod tests {
     fn hidden_within_timeout_does_nothing() {
         assert_eq!(
             splash_decision(false, false, Duration::from_secs(1)),
-            SplashAction::None
+            SplashDismissDecision::None
         );
     }
 
@@ -232,7 +232,7 @@ mod tests {
     fn visible_triggers_fade() {
         assert_eq!(
             splash_decision(true, false, Duration::from_secs(1)),
-            SplashAction::Fade
+            SplashDismissDecision::Fade
         );
     }
 
@@ -240,7 +240,7 @@ mod tests {
     fn hidden_past_timeout_forces_dismiss() {
         assert_eq!(
             splash_decision(false, false, Duration::from_secs(20)),
-            SplashAction::Force
+            SplashDismissDecision::Force
         );
     }
 
@@ -248,11 +248,11 @@ mod tests {
     fn dismissed_is_idempotent() {
         assert_eq!(
             splash_decision(true, true, Duration::from_secs(1)),
-            SplashAction::None
+            SplashDismissDecision::None
         );
         assert_eq!(
             splash_decision(false, true, Duration::from_secs(99)),
-            SplashAction::None
+            SplashDismissDecision::None
         );
     }
 

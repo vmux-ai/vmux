@@ -5,14 +5,17 @@ use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::{Added, Commands, Component as EcsComponent, Entity, Query, With, Without};
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use serde::{Deserialize, Serialize};
-use vmux_core::tool::{ToolAction, ToolProvider};
+use vmux_core::tool::{
+    ToolAdoptRequest, ToolImportRequest, ToolInstallRequest, ToolLinkRequest, ToolProvider,
+    ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
+};
 
 use crate::manifest::{
     ToolStore, ToolsManifest, expand_user_path, load_manifest_from, write_manifest_to,
 };
 use crate::{
-    ToolActionCompletion, ToolActionRequest, ToolActionRouteSet, ToolOperation,
-    ToolOperationPlugin, ToolStoreAction, ToolStoreTarget,
+    ToolOperation, ToolOperationCompletion, ToolOperationPlugin, ToolOperationRequest,
+    ToolOperationRouteSet, ToolStoreOperation, ToolStoreTarget,
 };
 
 pub(crate) struct DotfileToolPlugin;
@@ -32,7 +35,19 @@ impl Plugin for DotfileToolPlugin {
             ToolOperationPlugin::<ApplyEnabledDotfiles>::default(),
             ToolOperationPlugin::<AdoptDotfile>::default(),
         ))
-        .add_systems(Update, route.in_set(ToolActionRouteSet))
+        .add_systems(
+            Update,
+            (
+                route_import,
+                route_adopt,
+                route_install,
+                route_update,
+                route_link,
+                route_uninstall,
+                route_unlink,
+            )
+                .in_set(ToolOperationRouteSet),
+        )
         .add_systems(
             Update,
             (
@@ -46,53 +61,102 @@ impl Plugin for DotfileToolPlugin {
     }
 }
 
-fn route(
-    requests: Query<
-        (Entity, &ToolActionRequest),
-        (Added<ToolActionRequest>, With<ToolStoreTarget>),
-    >,
+fn route_import(
+    requests: Query<(Entity, &ToolOperationRequest<ToolImportRequest>), Added<ToolStoreTarget>>,
     mut commands: Commands,
 ) {
-    for (entity, action) in &requests {
-        let request = action.request();
+    for (entity, operation) in &requests {
+        let request = operation.request();
         if request.provider != ToolProvider::Dotfiles {
             continue;
         }
-        let id = request.id.trim();
         let value = request.value.trim();
         let mut entity = commands.entity(entity);
-        match request.action {
-            ToolAction::Import if value.is_empty() => {
-                entity.insert((ToolStoreAction, ImportAvailableDotfiles));
-            }
-            ToolAction::Import => {
-                entity.insert((ToolStoreAction, ImportDotfiles::new(value)));
-            }
-            ToolAction::Adopt if !id.is_empty() && !value.is_empty() => {
-                entity.insert((ToolStoreAction, AdoptDotfile::new(value, id)));
-            }
-            ToolAction::Install | ToolAction::Update | ToolAction::Link if !id.is_empty() => {
-                entity.insert((ToolStoreAction, LinkDotfilePackage::new(id)));
-            }
-            ToolAction::Uninstall | ToolAction::Unlink if !id.is_empty() => {
-                entity.insert((ToolStoreAction, DisableDotfilePackage::new(id)));
-            }
-            _ => {}
+        if value.is_empty() {
+            entity.insert((ToolStoreOperation, ImportAvailableDotfiles));
+        } else {
+            entity.insert((ToolStoreOperation, ImportDotfiles::new(value)));
         }
     }
 }
 
+fn route_adopt(
+    requests: Query<(Entity, &ToolOperationRequest<ToolAdoptRequest>), Added<ToolStoreTarget>>,
+    mut commands: Commands,
+) {
+    for (entity, operation) in &requests {
+        let request = operation.request();
+        if request.provider != ToolProvider::Dotfiles
+            || request.id.trim().is_empty()
+            || request.value.trim().is_empty()
+        {
+            continue;
+        }
+        commands.entity(entity).insert((
+            ToolStoreOperation,
+            AdoptDotfile::new(request.value.trim(), request.id.trim()),
+        ));
+    }
+}
+
+macro_rules! route_link_request {
+    ($name:ident, $request:ty) => {
+        fn $name(
+            requests: Query<(Entity, &ToolOperationRequest<$request>), Added<ToolStoreTarget>>,
+            mut commands: Commands,
+        ) {
+            for (entity, operation) in &requests {
+                let request = operation.request();
+                if request.provider != ToolProvider::Dotfiles || request.id.trim().is_empty() {
+                    continue;
+                }
+                commands.entity(entity).insert((
+                    ToolStoreOperation,
+                    LinkDotfilePackage::new(request.id.trim()),
+                ));
+            }
+        }
+    };
+}
+
+route_link_request!(route_install, ToolInstallRequest);
+route_link_request!(route_update, ToolUpdateRequest);
+route_link_request!(route_link, ToolLinkRequest);
+
+macro_rules! route_disable_request {
+    ($name:ident, $request:ty) => {
+        fn $name(
+            requests: Query<(Entity, &ToolOperationRequest<$request>), Added<ToolStoreTarget>>,
+            mut commands: Commands,
+        ) {
+            for (entity, operation) in &requests {
+                let request = operation.request();
+                if request.provider != ToolProvider::Dotfiles || request.id.trim().is_empty() {
+                    continue;
+                }
+                commands.entity(entity).insert((
+                    ToolStoreOperation,
+                    DisableDotfilePackage::new(request.id.trim()),
+                ));
+            }
+        }
+    };
+}
+
+route_disable_request!(route_uninstall, ToolUninstallRequest);
+route_disable_request!(route_unlink, ToolUnlinkRequest);
+
 fn complete_import(
-    actions: Query<
+    operations: Query<
         (Entity, &ImportedDotfiles),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, output) in &actions {
+    for (entity, output) in &operations {
         commands
             .entity(entity)
-            .insert(ToolActionCompletion::succeeded(format!(
+            .insert(ToolOperationCompletion::succeeded(format!(
                 "imported {} dotfile package(s)",
                 output.packages
             )));
@@ -100,16 +164,16 @@ fn complete_import(
 }
 
 fn complete_available_import(
-    actions: Query<
+    operations: Query<
         (Entity, &ImportedAvailableDotfiles),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, output) in &actions {
+    for (entity, output) in &operations {
         commands
             .entity(entity)
-            .insert(ToolActionCompletion::succeeded(format!(
+            .insert(ToolOperationCompletion::succeeded(format!(
                 "imported {} dotfile package(s)",
                 output.packages
             )));
@@ -117,16 +181,16 @@ fn complete_available_import(
 }
 
 fn complete_link(
-    actions: Query<
+    operations: Query<
         (Entity, &LinkedDotfilePackage),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, output) in &actions {
+    for (entity, output) in &operations {
         commands
             .entity(entity)
-            .insert(ToolActionCompletion::succeeded(format!(
+            .insert(ToolOperationCompletion::succeeded(format!(
                 "linked {} file(s)",
                 output.files
             )));
@@ -134,16 +198,16 @@ fn complete_link(
 }
 
 fn complete_disable(
-    actions: Query<
+    operations: Query<
         (Entity, &DisabledDotfilePackage),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, output) in &actions {
+    for (entity, output) in &operations {
         commands
             .entity(entity)
-            .insert(ToolActionCompletion::succeeded(format!(
+            .insert(ToolOperationCompletion::succeeded(format!(
                 "unlinked {} file(s)",
                 output.files
             )));
@@ -151,16 +215,16 @@ fn complete_disable(
 }
 
 fn complete_adoption(
-    actions: Query<
+    operations: Query<
         (Entity, &AdoptedDotfile),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, output) in &actions {
+    for (entity, output) in &operations {
         commands
             .entity(entity)
-            .insert(ToolActionCompletion::succeeded(format!(
+            .insert(ToolOperationCompletion::succeeded(format!(
                 "adopted {}",
                 output.path.display()
             )));

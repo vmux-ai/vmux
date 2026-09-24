@@ -138,7 +138,9 @@ fn sync_terminal_theme(
 
     for entity in targets {
         if browsers.can_emit_to(&entity) {
-            crate::TerminalUiStateUpdates::write(&mut commands, entity, &event);
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_core::event::TerminalUiState,
+            >::from_event(entity, &event));
         }
     }
 }

@@ -378,7 +378,11 @@ fn emit_extensions_snapshot(
         if subscriber.revision == catalog.revision || !browsers.can_emit_to(&entity) {
             continue;
         }
-        LayoutUiStateUpdates::deliver(&layout_ui, &mut commands, entity, &catalog.snapshot);
+        if layout_ui.contains(entity) {
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_layout::state::LayoutUiState,
+            >::from_event(entity, &catalog.snapshot));
+        }
         subscriber.revision = catalog.revision;
     }
 }

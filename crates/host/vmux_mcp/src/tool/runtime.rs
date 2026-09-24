@@ -70,16 +70,6 @@ impl Plugin for ToolRuntimePlugin {
     }
 }
 
-#[cfg(test)]
-impl BuiltinToolPlugin {
-    fn app() -> App {
-        let mut app = App::new();
-        app.add_plugins(Self);
-        app.update();
-        app
-    }
-}
-
 pub struct McpToolPlugin<T> {
     manifest: &'static str,
     marker: PhantomData<fn() -> T>,
@@ -130,7 +120,25 @@ fn register_mcp_tools<T>(
 ) where
     T: Component + serde::de::DeserializeOwned + Serialize,
 {
-    ToolManifest::<T>::from_ron(manifest.source).spawn(&mut commands, &mut next_order);
+    let manifest = ToolManifest::<T>::from_ron(manifest.source);
+    for entry in manifest.0 {
+        let (seed, kind) = entry.into_seed();
+        let order = next_order.0;
+        next_order.0 += 1;
+        let mut entity = commands.spawn((
+            McpTool,
+            Name::new(seed.name),
+            ToolAliases(seed.aliases),
+            ToolDescription(seed.description),
+            ToolInputSchema(seed.input_schema),
+            ToolAccess(seed.availability),
+            ToolOrder(order),
+            kind,
+        ));
+        if seed.shell_aware {
+            entity.insert(ShellAware);
+        }
+    }
 }
 
 fn route_mcp_tools<T>(mut commands: Commands, calls: ToolCalls<T>)
@@ -312,16 +320,6 @@ impl ToolCatalog {
 }
 
 impl ToolDefinition {
-    #[cfg(test)]
-    fn all(world: &mut World, acp_session: bool, acp_terminals: bool, shell: &str) -> Vec<Self> {
-        let shell = shell.to_string();
-        world
-            .run_system_once(move |tools: Res<ToolCatalog>| {
-                tools.definitions(acp_session, acp_terminals, &shell)
-            })
-            .expect("tool catalog system must run")
-    }
-
     pub fn merge_commands(
         mut definitions: Vec<Self>,
         commands: Vec<vmux_client::protocol::AgentCommandTool>,
@@ -353,30 +351,6 @@ pub enum DispatchTarget {
 
 #[derive(Component)]
 pub struct ToolDispatchResult(pub Result<DispatchTarget, String>);
-
-impl DispatchTarget {
-    fn from_execution(
-        call: &ToolCall,
-        outcome: &Result<ToolExecution, String>,
-    ) -> Result<Self, String> {
-        match outcome {
-            Ok(ToolExecution::Dispatch { target, .. }) => Ok(target.clone()),
-            Ok(ToolExecution::Command {
-                name, arguments, ..
-            }) => Ok(Self::Command(AgentCommand::InvokeCommand {
-                id: name.clone(),
-                args: JsonValue::from(arguments.clone()),
-            })),
-            Ok(ToolExecution::Protocol { .. }) => {
-                Err(format!("tool {} requires MCP protocol context", call.name))
-            }
-            Ok(ToolExecution::List { .. }) => {
-                Err("tool listing is not a dispatchable tool".to_string())
-            }
-            Err(message) => Err(message.clone()),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -478,22 +452,6 @@ impl ToolCall {
             .map_err(|error| format!("{}: invalid arguments: {error}", self.name))
     }
 
-    pub(super) fn parse_into<T>(&self, request: Entity, commands: &mut Commands)
-    where
-        T: Component + serde::de::DeserializeOwned,
-    {
-        match self.parse::<T>() {
-            Ok(args) => {
-                commands.entity(request).insert(args);
-            }
-            Err(message) => {
-                commands
-                    .entity(request)
-                    .insert(ToolDispatchResult(Err(message)));
-            }
-        }
-    }
-
     pub fn require_anchor(&self) -> Result<ProcessId, String> {
         self.anchor.ok_or_else(|| {
             format!(
@@ -501,65 +459,6 @@ impl ToolCall {
                 self.name
             )
         })
-    }
-
-    #[cfg(test)]
-    fn dispatch(
-        app: &mut App,
-        name: &str,
-        arguments: Value,
-        anchor: Option<ProcessId>,
-        host_shell: &str,
-        acp_session: bool,
-        acp_terminals: bool,
-    ) -> Result<ToolExecution, String> {
-        let normalized = canonical_tool_name(name).to_string();
-        let name = name.to_string();
-        let host_shell = host_shell.to_string();
-        let call = app
-            .world_mut()
-            .run_system_once(move |tools: Res<ToolCatalog>| {
-                tools.call(
-                    &name,
-                    arguments.clone(),
-                    anchor,
-                    &host_shell,
-                    ToolCallPolicy::strict(acp_session, acp_terminals),
-                )
-            })
-            .map_err(|error| error.to_string())??;
-        let request = app.world_mut().spawn(call).id();
-        app.update();
-        let outcome = app
-            .world_mut()
-            .entity_mut(request)
-            .take::<ToolOutcome>()
-            .ok_or_else(|| format!("tool {normalized} did not produce an execution"))?;
-        app.world_mut().despawn(request);
-        outcome.0
-    }
-
-    #[cfg(test)]
-    fn find(world: &mut World, name: &str) -> Option<(Entity, String, ToolAvailability)> {
-        let name = name.to_string();
-        world
-            .run_system_once(move |tools: Res<ToolCatalog>| {
-                tools
-                    .call(
-                        &name,
-                        Value::Null,
-                        None,
-                        "",
-                        ToolCallPolicy::strict(false, false),
-                    )
-                    .ok()
-                    .and_then(|call| {
-                        call.tool
-                            .map(|tool| (tool, call.name, ToolAvailability::Always))
-                    })
-            })
-            .ok()
-            .flatten()
     }
 }
 
@@ -604,7 +503,22 @@ fn project_tool_outcomes(
     mut commands: Commands,
 ) {
     for (entity, call, outcome) in &outcomes {
-        let dispatch = DispatchTarget::from_execution(call, &outcome.0);
+        let dispatch = match &outcome.0 {
+            Ok(ToolExecution::Dispatch { target, .. }) => Ok(target.clone()),
+            Ok(ToolExecution::Command {
+                name, arguments, ..
+            }) => Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
+                id: name.clone(),
+                args: JsonValue::from(arguments.clone()),
+            })),
+            Ok(ToolExecution::Protocol { .. }) => {
+                Err(format!("tool {} requires MCP protocol context", call.name))
+            }
+            Ok(ToolExecution::List { .. }) => {
+                Err("tool listing is not a dispatchable tool".to_string())
+            }
+            Err(message) => Err(message.clone()),
+        };
         let mut request = commands.entity(entity);
         request.remove::<ToolCall>();
         match dispatch {
@@ -703,35 +617,6 @@ where
     }
 }
 
-impl<K> ToolManifest<K>
-where
-    K: Component + Serialize,
-{
-    pub(super) fn spawn(self, commands: &mut Commands, next_order: &mut NextToolOrder)
-    where
-        K: Component,
-    {
-        for entry in self.0 {
-            let (seed, kind) = entry.into_seed();
-            let order = next_order.0;
-            next_order.0 += 1;
-            let mut entity = commands.spawn((
-                McpTool,
-                Name::new(seed.name),
-                ToolAliases(seed.aliases),
-                ToolDescription(seed.description),
-                ToolInputSchema(seed.input_schema),
-                ToolAccess(seed.availability),
-                ToolOrder(order),
-                kind,
-            ));
-            if seed.shell_aware {
-                entity.insert(ShellAware);
-            }
-        }
-    }
-}
-
 pub(crate) fn canonical_tool_name(name: &str) -> &str {
     name.strip_prefix("vmux_").unwrap_or(name)
 }
@@ -742,18 +627,95 @@ pub(super) fn tool_definitions() -> Vec<ToolDefinition> {
 }
 
 #[cfg(test)]
+fn builtin_tool_app() -> App {
+    let mut app = App::new();
+    app.add_plugins(BuiltinToolPlugin);
+    app.update();
+    app
+}
+
+#[cfg(test)]
+fn tool_definitions_in(
+    world: &mut World,
+    acp_session: bool,
+    acp_terminals: bool,
+    shell: &str,
+) -> Vec<ToolDefinition> {
+    let shell = shell.to_string();
+    world
+        .run_system_once(move |tools: Res<ToolCatalog>| {
+            tools.definitions(acp_session, acp_terminals, &shell)
+        })
+        .expect("tool catalog system must run")
+}
+
+#[cfg(test)]
+fn dispatch_tool_call(
+    app: &mut App,
+    name: &str,
+    arguments: Value,
+    anchor: Option<ProcessId>,
+    host_shell: &str,
+    acp_session: bool,
+    acp_terminals: bool,
+) -> Result<ToolExecution, String> {
+    let normalized = canonical_tool_name(name).to_string();
+    let name = name.to_string();
+    let host_shell = host_shell.to_string();
+    let call = app
+        .world_mut()
+        .run_system_once(move |tools: Res<ToolCatalog>| {
+            tools.call(
+                &name,
+                arguments.clone(),
+                anchor,
+                &host_shell,
+                ToolCallPolicy::strict(acp_session, acp_terminals),
+            )
+        })
+        .map_err(|error| error.to_string())??;
+    let request = app.world_mut().spawn(call).id();
+    app.update();
+    let outcome = app
+        .world_mut()
+        .entity_mut(request)
+        .take::<ToolOutcome>()
+        .ok_or_else(|| format!("tool {normalized} did not produce an execution"))?;
+    app.world_mut().despawn(request);
+    outcome.0
+}
+
+#[cfg(test)]
+fn find_tool(world: &mut World, name: &str) -> Option<(Entity, String, ToolAvailability)> {
+    let name = name.to_string();
+    world
+        .run_system_once(move |tools: Res<ToolCatalog>| {
+            tools
+                .call(
+                    &name,
+                    Value::Null,
+                    None,
+                    "",
+                    ToolCallPolicy::strict(false, false),
+                )
+                .ok()
+                .and_then(|call| {
+                    call.tool
+                        .map(|tool| (tool, call.name, ToolAvailability::Always))
+                })
+        })
+        .ok()
+        .flatten()
+}
+
+#[cfg(test)]
 fn tool_definitions_filtered(
     acp_session: bool,
     acp_terminals: bool,
     shell: &str,
 ) -> Vec<ToolDefinition> {
-    let mut app = BuiltinToolPlugin::app();
-    let shell = shell.to_string();
-    app.world_mut()
-        .run_system_once(move |tools: Res<ToolCatalog>| {
-            tools.definitions(acp_session, acp_terminals, &shell)
-        })
-        .expect("tool catalog system must run")
+    let mut app = builtin_tool_app();
+    tool_definitions_in(app.world_mut(), acp_session, acp_terminals, shell)
 }
 
 #[cfg(test)]
@@ -798,8 +760,8 @@ fn dispatch_in_shell(
     anchor: Option<ProcessId>,
     host_shell: &str,
 ) -> Result<DispatchTarget, String> {
-    let mut app = BuiltinToolPlugin::app();
-    match ToolCall::dispatch(&mut app, name, arguments, anchor, host_shell, false, false)? {
+    let mut app = builtin_tool_app();
+    match dispatch_tool_call(&mut app, name, arguments, anchor, host_shell, false, false)? {
         ToolExecution::Dispatch { target, .. } => Ok(target),
         ToolExecution::Protocol { .. }
         | ToolExecution::List { .. }

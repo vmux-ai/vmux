@@ -90,7 +90,7 @@ impl WebView {
             .with_bounds(bounds)
             .build_as_child(window)?;
         #[cfg(target_os = "macos")]
-        macos::ImmediateAction::forbid(&webview);
+        macos::LinkPreviewPolicy::forbid(&webview);
         Ok(Self {
             webview,
             dom,

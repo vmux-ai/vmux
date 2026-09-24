@@ -1,17 +1,16 @@
-use crate::event::{CommandBarKey, CommandBarOpenEvent, CommandBarUiState, StartProjectBranches};
-use crate::prompt_media::{
-    ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries, ChatPasteMedia, ChatPickFiles,
-    inline_media_query, merge_chat_attachments,
+use crate::event::{
+    CommandBarFocusInput, CommandBarKey, CommandBarOpenEvent, CommandBarUiState,
+    CommandBarUiStatePatch, CommandPaletteBranchesRequest, CommandPaletteDraftRequest,
+    CommandPalettePromptHistoryRequest, CommandPaletteSelectionRequest, CommandPaletteState,
 };
-use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_project_picking, use_prompt_recall};
-use crate::ui::media::use_prompt_media;
-use crate::ui::search::{use_host_search, use_palette_feeds};
+use crate::prompt_media::{ChatPasteMedia, ChatPickFiles, inline_media_query};
+use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_prompt_recall};
+use crate::ui::media::{PromptMedia, use_prompt_media};
+use crate::ui::search::PaletteFeeds;
 use crate::ui::signals::{
     COMMAND_BAR_INPUT_ID, CommandBarField, PaletteKeys, Readline, TypedDigit, use_palette_signals,
 };
 use dioxus::prelude::*;
-use vmux_api::chat::{PromptHistory, ResumableSessions, ResumeListRequest};
-use vmux_api::command_bar::CommandBarQuery;
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
@@ -21,7 +20,9 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, McpQuery, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
-use vmux_ui::hooks::{MenuDirection, move_selection, send, use_key_claim, use_ui_state_patch};
+use vmux_ui::hooks::{
+    MenuDirection, move_selection, send, use_key_claim, use_ui_state, use_ui_state_patch,
+};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::launcher::palette::{
@@ -51,14 +52,19 @@ pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
         }
         handled_sequence.set(event.sequence);
         for patch in &event.patches {
-            match patch {
-                vmux_api::command_bar::CommandBarUiStatePatch::Snapshot(snapshot) => {
-                    state.set(*snapshot.clone());
-                }
-                vmux_api::command_bar::CommandBarUiStatePatch::FocusInput(_) => {
-                    focus_prompt_input();
-                }
-                _ => {}
+            if let Some(snapshot) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
+                CommandBarOpenEvent,
+            >>::payload(patch)
+            {
+                state.set(snapshot.clone());
+                continue;
+            }
+            if <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarFocusInput>>::payload(
+                patch,
+            )
+            .is_some()
+            {
+                focus_prompt_input();
             }
         }
     });
@@ -76,9 +82,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let on_start_inline_transition = props.on_start_inline_transition;
 
     let mut signals = use_palette_signals();
-    let feeds = use_palette_feeds();
-    let mut media = use_prompt_media();
-    let search = use_host_search();
+    let host_state = use_ui_state::<CommandPaletteState>();
+    let open_id = state().open_id;
+    let feeds = PaletteFeeds::new(host_state, open_id);
+    let mut media = use_prompt_media(host_state, open_id);
     let menu = use_composer_menu();
     let mcp = use_mcp_connections();
     let ime = use_ime_guard();
@@ -91,18 +98,31 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let opened = state();
         if signals.reopened(opened.open_id) {
             signals.restart(&opened);
-            feeds.clear();
-            if is_start {
-                media.reset();
-            }
         }
     });
 
-    feeds.listen(signals, &search, surface);
-    media.listen(signals, &search, surface);
-    use_drop({
-        let search = search.clone();
-        move || search.cancel_all()
+    use_effect(move || {
+        let opened = state();
+        let query = (signals.query)();
+        let _ = send(&CommandPaletteDraftRequest {
+            open_id: opened.open_id,
+            query,
+            start: is_start,
+        });
+    });
+
+    use_effect(move || {
+        let opened = state();
+        let selected = (signals.selected)() as u32;
+        let _ = send(&CommandPaletteSelectionRequest {
+            open_id: opened.open_id,
+            selected,
+        });
+    });
+
+    use_effect(move || {
+        let query = (signals.query)();
+        media.sync_query(&query);
     });
 
     use_effect(move || {
@@ -123,83 +143,28 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let mut recall = use_prompt_recall();
-    let prompt_history = use_ui_state_patch::<CommandBarUiState, PromptHistory>();
+    let mut handled_attachment = use_signal(|| None);
     use_effect(move || {
-        for incoming in prompt_history.take() {
-            recall.remember(incoming.prompts);
-        }
-    });
-
-    let mut picking = use_project_picking();
-    let project_branches = use_ui_state_patch::<CommandBarUiState, StartProjectBranches>();
-    use_effect(move || {
-        for incoming in project_branches.take() {
-            picking.remember(incoming.project, incoming.branches);
-        }
-    });
-
-    use_effect(move || {
-        picking.read_ahead(&vmux_ui::launcher::palette::ActiveProject::resolve(
-            &state().prompt_context,
-        ));
-    });
-
-    let session_updates = use_ui_state_patch::<CommandBarUiState, ResumableSessions>();
-    use_effect(move || {
-        for incoming in session_updates.take() {
-            let mut sessions = feeds.sessions;
-            let mut total = feeds.sessions_total;
-            let mut loading = feeds.sessions_loading;
-            total.set(incoming.total);
-            loading.set(false);
-            if incoming.offset == 0 {
-                sessions.set(incoming.sessions);
-                continue;
+        let opened = state();
+        let revision = {
+            let snapshot = host_state.read();
+            if snapshot.open_id != opened.open_id || snapshot.attachment_sequence == 0 {
+                return;
             }
-            let mut held = sessions.peek().clone();
-            held.extend(incoming.sessions);
-            sessions.set(held);
-        }
-    });
-    use_effect(move || {
-        let query = (signals.query)();
-        let wants = CommandBarQuery(&query)
-            .slash_token()
-            .is_some_and(|(name, _)| "resume".starts_with(&name.to_lowercase()));
-        let mut asked = feeds.sessions_asked;
-        if !wants {
-            asked.set(false);
+            (snapshot.open_id, snapshot.attachment_sequence)
+        };
+        if Some(revision) == *handled_attachment.peek() {
             return;
         }
-        if *asked.peek() {
-            return;
-        }
-        asked.set(true);
-        let mut sessions = feeds.sessions;
-        let mut loading = feeds.sessions_loading;
-        sessions.set(Vec::new());
-        loading.set(true);
-        let _ = send(&ResumeListRequest { offset: 0 });
+        handled_attachment.set(Some(revision));
+        focus_prompt_end(PROMPT_INPUT_ID);
     });
+
     use_effect(move || {
         let query = (signals.query)();
         if McpQuery::read(&query).is_some() {
             mcp.request();
         }
-    });
-    use_effect(move || {
-        let selected = (signals.selected)() as u32;
-        let loaded = feeds.sessions.read().len() as u32;
-        let total = (feeds.sessions_total)();
-        if loaded == 0 || loaded >= total || *feeds.sessions_loading.peek() {
-            return;
-        }
-        if selected + 10 < loaded {
-            return;
-        }
-        let mut loading = feeds.sessions_loading;
-        loading.set(true);
-        let _ = send(&ResumeListRequest { offset: loaded });
     });
 
     let rows = use_memo(move || PaletteRows::build(&state(), &feeds.draft(signals), surface));
@@ -245,6 +210,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let state_val = state();
+    let host_snapshot = host_state();
+    let palette_data = if host_snapshot.open_id == state_val.open_id {
+        host_snapshot
+    } else {
+        CommandPaletteState::default()
+    };
     let palette = std::rc::Rc::new(PaletteState::from_rows(
         &rows(),
         &state_val,
@@ -252,7 +223,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         surface,
     ));
     let query = signals.query;
-    let mut attachments = media.attachments;
+    let attachments = std::rc::Rc::new(palette_data.attachments.clone());
     let q = palette.query.clone();
     let ghost_text = palette.ghost.clone();
     let mcp_query = McpQuery::read(&q).map(str::to_string);
@@ -265,18 +236,21 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     );
     let mcp_selected = (*signals.selected.peek()).min(mcp_entries.len().saturating_sub(1));
     let media_menu_open = is_start && inline_media_query(&q).is_some();
-    let media_sel = media.highlighted();
+    let media_entries = media.entries(&q);
+    let media_sel = media.highlighted(media_entries.len());
+    let media_options = PromptMedia::options(&media_entries);
 
     use_effect(move || {
         ScrollIntoView::nearest(&format!("command-bar-item-{}", (signals.selected)()));
     });
 
     use_effect(move || {
-        let _ = media.entries.read().len();
+        let _ = host_state.read().media_entries.len();
         ScrollIntoView::nearest(&format!("prompt-media-item-{}", (media.selected)()));
     });
 
-    let apply = move |submission: Submission| {
+    let apply_attachments = attachments.clone();
+    let apply = std::rc::Rc::new(move |submission: Submission| {
         if let Some(typed) = submission.retype {
             let mut signals = signals;
             signals.retype(typed);
@@ -297,40 +271,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         handler.call(StartInlineTransition {
             target_url,
             prompt: query.peek().trim().to_string(),
-            attachments: attachments.peek().clone(),
+            attachments: apply_attachments.as_ref().clone(),
         });
-    };
-
-    let attachment_updates = use_ui_state_patch::<CommandBarUiState, ChatAttachments>();
-    use_effect(move || {
-        for selected in attachment_updates.take() {
-            if !is_start {
-                continue;
-            }
-            let current = attachments.peek().clone();
-            attachments.set(merge_chat_attachments(&current, &selected.attachments));
-            focus_prompt_end(PROMPT_INPUT_ID);
-        }
-    });
-
-    let preview_updates = use_ui_state_patch::<CommandBarUiState, ChatAttachmentPreviews>();
-    use_effect(move || {
-        for loaded in preview_updates.take() {
-            if !is_start {
-                continue;
-            }
-            media.remember_previews(&loaded.attachments);
-        }
-    });
-
-    let media_updates = use_ui_state_patch::<CommandBarUiState, ChatMediaEntries>();
-    use_effect(move || {
-        for response in media_updates.take() {
-            if !is_start {
-                continue;
-            }
-            media.receive(response);
-        }
     });
 
     let composer = palette.composer.clone();
@@ -338,14 +280,40 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let agent = vmux_ui::launcher::palette::AgentSegment::in_url(&composer.agent_url)
             .unwrap_or_default();
         let cwd = composer.cwd.clone();
-        use_effect(move || recall.read_ahead(&agent, &cwd));
+        let open_id = state_val.open_id;
+        use_effect(move || {
+            let _ = state();
+            let _ = (signals.target_url)();
+            let _ = (signals.selected)();
+            let _ = (signals.nav_mode)();
+            let _ = send(&CommandPalettePromptHistoryRequest {
+                open_id,
+                agent: agent.clone(),
+                cwd: cwd.clone(),
+            });
+        });
+    }
+    {
+        let project = composer.project.clone();
+        let open_id = state_val.open_id;
+        use_effect(move || {
+            let _ = state();
+            let _ = (signals.target_url)();
+            let _ = (signals.selected)();
+            let _ = (signals.nav_mode)();
+            let _ = send(&CommandPaletteBranchesRequest {
+                open_id,
+                project: project.clone(),
+            });
+        });
     }
     let accent = palette.accent_agent.as_deref().map(agent_accent);
     let start_accent = accent.unwrap_or_else(|| agent_accent("vibe"));
-    let start_prompt_attachments = media.composer_attachments();
-    let start_action_enabled = !q.trim().is_empty() || !attachments.read().is_empty();
-    let chips = ComposerChips::build(&composer, menu, picking);
-    let menus = ComposerMenuSet::build(&composer, signals, picking);
+    let start_prompt_attachments = PromptMedia::composer_attachments(attachments.as_ref());
+    let start_submission_enabled = !q.trim().is_empty() || !attachments.is_empty();
+    let prompt_history = std::rc::Rc::new(palette_data.prompt_history.clone());
+    let chips = ComposerChips::build(&composer, menu);
+    let menus = ComposerMenuSet::build(&composer, signals, &palette_data);
     let start_composer_footer = rsx! {
         ComposerBar {
             menu,
@@ -373,9 +341,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
 
     let start_keydown = {
+        let apply = apply.clone();
+        let attachments = attachments.clone();
         let palette = palette.clone();
         let menus = menus.clone();
         let entries = mcp_entries.clone();
+        let prompt_history = prompt_history.clone();
         move |e: KeyboardEvent| {
             if Readline::chord(&e, signals.query, &palette.ghost, PROMPT_INPUT_ID) {
                 return;
@@ -471,7 +442,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             };
             if let Some(wanted) = wanted
-                && let Some(value) = recall.walk(wanted, &palette.query)
+                && let Some(value) = recall.walk(prompt_history.as_ref(), wanted, &palette.query)
             {
                 e.prevent_default();
                 signals.retype(value);
@@ -489,11 +460,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 on_dismiss.call(());
             } else if e.key() == Key::Enter && !e.modifiers().shift() {
                 e.prevent_default();
-                apply(palette.submit_start(&attachments.peek()));
+                apply(palette.submit_start(attachments.as_ref()));
             }
         }
     };
     let modal_keydown = {
+        let apply = apply.clone();
+        let attachments = attachments.clone();
         let palette = palette.clone();
         let entries = mcp_entries.clone();
         move |e: KeyboardEvent| {
@@ -522,13 +495,15 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                     return;
                 }
-                apply(palette.submit_modal(&attachments.peek()));
+                apply(palette.submit_modal(attachments.as_ref()));
                 return;
             }
             keys.on_keydown(&e, |_| false);
         }
     };
     let on_send = {
+        let apply = apply.clone();
+        let attachments = attachments.clone();
         let palette = palette.clone();
         let entries = mcp_entries.clone();
         move |_| {
@@ -538,7 +513,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
                 return;
             }
-            apply(palette.submit_action(&attachments.peek()));
+            apply(palette.submit_current(attachments.as_ref()));
         }
     };
 
@@ -563,7 +538,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     accent_gradient: start_accent.grad.to_string(),
                     footer: Some(start_composer_footer),
                     action_title: translate("command-send"),
-                    action_enabled: start_action_enabled,
+                    action_enabled: start_submission_enabled,
                     on_input: move |value| {
                         menu.close();
                         signals.retype(value);
@@ -646,9 +621,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     placement: PromptPopupPlacement::Downward,
                     id: "command-bar-results",
                     PromptMediaOptions {
-                        items: media.options(),
+                        items: media_options,
                         selected: media_sel,
-                        loading: (media.loading)(),
+                        loading: media.loading(&q),
                         loading_label: translate("agent-loading-media"),
                         empty_label: translate("agent-no-matching-media"),
                         on_hover: move |index| media.selected.set(index),
@@ -668,9 +643,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         item: item.clone(),
                         selected: i == palette.selected,
                         on_activate: {
+                            let apply = apply.clone();
+                            let attachments = attachments.clone();
                             let palette = palette.clone();
                             let item = item.clone();
-                            move |_| apply(palette.activate(&item, &attachments.peek()))
+                            move |_| apply(palette.activate(&item, attachments.as_ref()))
                         },
                         space_switch: palette.space_switch,
                         start_prompt_mode: palette.start_prompt_mode,

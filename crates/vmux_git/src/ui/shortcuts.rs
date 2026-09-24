@@ -5,18 +5,18 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 use crate::event::GitRepositoryPickerRequest;
+use crate::state::{GitBranchCollection, GitPanel};
 
-use super::model::{BranchCollection, GitPanel};
 use super::workspace::GitWorkspace;
 
 #[component]
 pub(super) fn GitShortcutBar(
     repo_root: String,
-    focused_panel: Signal<GitPanel>,
-    branch_collection: Signal<BranchCollection>,
+    focused_panel: GitPanel,
+    branch_collection: GitBranchCollection,
     mut shortcut_help: Signal<bool>,
 ) -> Element {
-    let panel_shortcuts = match focused_panel() {
+    let panel_shortcuts = match focused_panel {
         GitPanel::Status => Vec::new(),
         GitPanel::Files => vec![
             ("space", translate("git-toggle-stage")),
@@ -25,7 +25,7 @@ pub(super) fn GitShortcutBar(
             ("A", translate("git-amend")),
             ("x", translate("git-discard")),
         ],
-        GitPanel::Branches if branch_collection() == BranchCollection::Local => vec![
+        GitPanel::Branches if branch_collection == GitBranchCollection::Local => vec![
             ("space", translate("git-checkout")),
             ("n", translate("git-new-branch")),
             ("d", translate("git-delete-branch")),
@@ -47,7 +47,7 @@ pub(super) fn GitShortcutBar(
 
     rsx! {
         footer { class: "flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-t border-foreground/[0.08] bg-card/92 px-2 text-[10px] text-muted-foreground backdrop-blur-xl",
-            if focused_panel() == GitPanel::Status {
+            if focused_panel == GitPanel::Status {
                 ShortcutButton {
                     keycap: "e",
                     label: translate("git-edit-config"),
