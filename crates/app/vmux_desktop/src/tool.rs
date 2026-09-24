@@ -21,7 +21,6 @@ use vmux_core::vault::{
     VaultAction, VaultAuthProgress, VaultRefreshRequest, VaultRepository, VaultRequest,
     VaultResult, VaultSnapshot,
 };
-use vmux_editor::lsp::package_path::PackageName;
 use vmux_layout::LayoutCef;
 use vmux_tool::{self as manifest_store, ToolsManifest};
 
@@ -1184,13 +1183,13 @@ fn scan_acp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
         .into_values()
         .filter(|receipt| receipt.source_id.starts_with("acp:"))
         .map(|receipt| {
-            let agent = catalog.get(&receipt.name);
+            let agent = catalog.get(receipt.name.as_str());
             let latest = agent.and_then(|agent| agent.version.clone());
             InventoryItem {
-                id: receipt.name.clone(),
+                id: receipt.name.as_str().to_string(),
                 name: agent
                     .map(|agent| agent.name.clone())
-                    .unwrap_or_else(|| receipt.name.clone()),
+                    .unwrap_or_else(|| receipt.name.as_str().to_string()),
                 icon: agent.and_then(|agent| agent.icon.clone()),
                 version: receipt.version.clone(),
                 detail: agent
@@ -1229,15 +1228,13 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
     let mut inventory = receipts
         .into_values()
         .map(|receipt| {
-            let package = PackageName::parse(&receipt.name)
-                .ok()
-                .and_then(|name| catalog_by_name.get(&name).copied());
+            let package = catalog_by_name.get(&receipt.name).copied();
             let latest = package
                 .and_then(|package| vmux_editor::lsp::purl::parse(&package.source_id))
                 .and_then(|purl| purl.version);
             InventoryItem {
-                id: receipt.name.clone(),
-                name: receipt.name.clone(),
+                id: receipt.name.as_str().to_string(),
+                name: receipt.name.as_str().to_string(),
                 icon: None,
                 version: receipt.version.clone(),
                 detail: package

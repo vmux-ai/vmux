@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::lsp::package_path::{PackageName, PackagePath};
+
+const RECEIPT_MAX_BYTES: u64 = 1024 * 1024;
 
 pub fn default_root() -> PathBuf {
     vmux_core::profile::lsp_dir()
@@ -28,10 +30,10 @@ pub fn registries_dir(root: &Path) -> PathBuf {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
-    pub name: String,
+    pub name: PackageName,
     pub version: Option<String>,
     pub source_id: String,
-    pub bin: BTreeMap<String, String>,
+    pub bin: BTreeMap<PackageName, PackagePath>,
 }
 
 pub fn package_dir(root: &Path, name: &PackageName) -> PathBuf {
@@ -76,11 +78,19 @@ pub fn activate_package(root: &Path, name: &PackageName, staged: &Path) -> io::R
 }
 
 pub fn read_receipt(root: &Path, name: &PackageName) -> Option<Receipt> {
-    let bytes = std::fs::read(receipt_path(root, name)).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    let file = std::fs::File::open(receipt_path(root, name)).ok()?;
+    let mut bytes = Vec::new();
+    file.take(RECEIPT_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > RECEIPT_MAX_BYTES {
+        return None;
+    }
+    let receipt: Receipt = serde_json::from_slice(&bytes).ok()?;
+    (receipt.name == *name).then_some(receipt)
 }
 
-pub fn installed(root: &Path) -> BTreeMap<String, Receipt> {
+pub fn installed(root: &Path) -> BTreeMap<PackageName, Receipt> {
     let mut out = BTreeMap::new();
     if let Ok(entries) = std::fs::read_dir(packages_dir(root)) {
         for e in entries.flatten() {
@@ -88,7 +98,7 @@ pub fn installed(root: &Path) -> BTreeMap<String, Receipt> {
                 && let Ok(name) = PackageName::parse(name)
                 && let Some(r) = read_receipt(root, &name)
             {
-                out.insert(name.as_str().to_string(), r);
+                out.insert(name, r);
             }
         }
     }
@@ -136,16 +146,14 @@ pub fn link_bin(
 pub fn bin_path(root: &Path, name: &PackageName) -> Option<PathBuf> {
     let r = read_receipt(root, name)?;
     let link_name = r.bin.keys().next()?;
-    let p = bin_dir(root).join(link_name);
+    let p = bin_dir(root).join(link_name.as_str());
     p.exists().then_some(p)
 }
 
 pub fn remove(root: &Path, name: &PackageName) -> io::Result<()> {
     if let Some(r) = read_receipt(root, name) {
         for link_name in r.bin.keys() {
-            if let Ok(link_name) = PackageName::parse(link_name) {
-                let _ = std::fs::remove_file(bin_dir(root).join(link_name.as_str()));
-            }
+            let _ = std::fs::remove_file(bin_dir(root).join(link_name.as_str()));
         }
     }
     let dir = package_dir(root, name);
@@ -187,9 +195,12 @@ mod tests {
 
     fn receipt(name: &str) -> Receipt {
         let mut bin = BTreeMap::new();
-        bin.insert(name.to_string(), format!("{name}-bin"));
+        bin.insert(
+            PackageName::parse(name).unwrap(),
+            PackagePath::parse(&format!("{name}-bin")).unwrap(),
+        );
         Receipt {
-            name: name.to_string(),
+            name: PackageName::parse(name).unwrap(),
             version: Some("1.0".into()),
             source_id: "pkg:github/x/y@1.0".into(),
             bin,
@@ -268,5 +279,28 @@ mod tests {
         let missing = staging_dir(root).join("missing");
         assert!(activate_package(root, &name, &missing).is_err());
         assert_eq!(std::fs::read(target.join("old")).unwrap(), b"old");
+    }
+
+    #[test]
+    fn invalid_or_mismatched_receipts_are_ignored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let name = PackageName::parse("foo").unwrap();
+        let dir = package_dir(root, &name);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(
+            dir.join("vmux-receipt.json"),
+            r#"{"name":"foo","version":null,"source_id":"x","bin":{"../../escape":"bin"}}"#,
+        )
+        .unwrap();
+        assert!(read_receipt(root, &name).is_none());
+
+        std::fs::write(
+            dir.join("vmux-receipt.json"),
+            r#"{"name":"bar","version":null,"source_id":"x","bin":{}}"#,
+        )
+        .unwrap();
+        assert!(read_receipt(root, &name).is_none());
     }
 }

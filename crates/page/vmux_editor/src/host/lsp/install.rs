@@ -95,13 +95,10 @@ pub fn install_from_url(
     }
 
     let receipt = store::Receipt {
-        name: pkg.name.as_str().to_string(),
+        name: pkg.name.clone(),
         version: purl::parse(&pkg.source_id).and_then(|p| p.version),
         source_id: pkg.source_id.clone(),
-        bin: links
-            .iter()
-            .map(|(name, path)| (name.as_str().to_string(), path.as_str().to_string()))
-            .collect(),
+        bin: links.clone(),
     };
     store::write_receipt_in(&pkgdir, &receipt).map_err(|e| e.to_string())?;
     store::activate_package(store_root, &pkg.name, &pkgdir).map_err(|e| e.to_string())?;
@@ -272,13 +269,10 @@ fn finalize_links(
         }
     }
     let receipt = store::Receipt {
-        name: pkg.name.as_str().to_string(),
+        name: pkg.name.clone(),
         version: p.version.clone(),
         source_id: pkg.source_id.clone(),
-        bin: links
-            .iter()
-            .map(|(name, path)| (name.as_str().to_string(), path.as_str().to_string()))
-            .collect(),
+        bin: links.clone(),
     };
     store::write_receipt_in(staged_package, &receipt).map_err(|e| e.to_string())?;
     store::activate_package(store_root, &pkg.name, staged_package).map_err(|e| e.to_string())?;
@@ -449,7 +443,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(receipt.name, "myserver");
+        assert_eq!(receipt.name.as_str(), "myserver");
         assert_eq!(receipt.version.as_deref(), Some("1.2.3"));
         assert!(store::is_installed(root, &pkg.name));
         let binp = store::bin_path(root, &pkg.name).unwrap();

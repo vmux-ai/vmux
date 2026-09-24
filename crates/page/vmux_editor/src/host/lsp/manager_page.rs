@@ -424,13 +424,16 @@ mod tests {
         let root = tmp.path();
         std::fs::create_dir_all(store::packages_dir(root).join("foo")).unwrap();
         let mut bin = std::collections::BTreeMap::new();
-        bin.insert("foo".to_string(), "foo-bin".to_string());
         let name = crate::lsp::package_path::PackageName::parse("foo").unwrap();
+        bin.insert(
+            name.clone(),
+            crate::lsp::package_path::PackagePath::parse("foo-bin").unwrap(),
+        );
         store::write_receipt(
             root,
             &name,
             &store::Receipt {
-                name: "foo".into(),
+                name: name.clone(),
                 version: Some("1.0".into()),
                 source_id: "pkg:github/x/foo@1.0".into(),
                 bin,
