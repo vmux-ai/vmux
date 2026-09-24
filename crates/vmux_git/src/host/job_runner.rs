@@ -3,7 +3,6 @@ use std::thread::JoinHandle;
 
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_core::host::FileUiStateUpdates;
 
 use super::GitUpdateSet;
@@ -112,18 +111,16 @@ impl Emit {
                         false => format!("{} · {}", event.repo_name, event.branch),
                     };
                 }
-                if let Ok(mut view) = views.get_mut(webview) {
-                    view.set_repository(event);
-                } else {
-                    commands.trigger(BinHostEmitEvent::from_event(webview, &event));
-                }
+                let Ok(mut view) = views.get_mut(webview) else {
+                    return;
+                };
+                view.set_repository(event);
             }
             Self::BranchLog(event) => {
-                if let Ok(mut view) = views.get_mut(webview) {
-                    view.set_branch_log(event);
-                } else {
-                    commands.trigger(BinHostEmitEvent::from_event(webview, &event));
-                }
+                let Ok(mut view) = views.get_mut(webview) else {
+                    return;
+                };
+                view.set_branch_log(event);
             }
             Self::Status(event) => {
                 FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
