@@ -1,7 +1,5 @@
 #![allow(non_snake_case)]
 
-use std::collections::HashMap;
-
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::components::manager::{
@@ -9,7 +7,7 @@ use vmux_ui::components::manager::{
     ManagerPage, ManagerRow, ManagerSpinner, ManagerTone,
 };
 use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::page_model::{PkgAction, pkg_action, pkg_status_class};
@@ -17,50 +15,16 @@ use crate::page_model::{PkgAction, pkg_action, pkg_status_class};
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();
-    let mut packages = use_signal(Vec::<LspPackage>::new);
+    let state = use_ui_state::<LspManagerStateEvent>();
     let mut query = use_signal(String::new);
-    let mut progress = use_signal(HashMap::<String, LspInstallProgress>::new);
-    let mut loading = use_signal(|| true);
-
-    let _catalog = use_listener::<LspCatalogEvent, _>(move |event| {
-        packages.set(event.packages);
-        loading.set(false);
-    });
-    let _progress = use_listener::<LspInstallProgress, _>(move |item| {
-        let name = item.name.clone();
-        let phase = item.phase;
-        progress.write().insert(name.clone(), item);
-        if let Some(package) = packages
-            .write()
-            .iter_mut()
-            .find(|package| package.name == name)
-        {
-            package.status = match phase {
-                InstallPhase::Failed => LspPkgStatus::Failed,
-                InstallPhase::Done => LspPkgStatus::Installed,
-                _ => LspPkgStatus::Installing,
-            };
-        }
-    });
-    let _status = use_listener::<LspPkgStatusEvent, _>(move |status| {
-        let name = status.name.clone();
-        if let Some(package) = packages
-            .write()
-            .iter_mut()
-            .find(|package| package.name == name)
-        {
-            package.status = status.status;
-            package.version = status.version;
-        }
-        progress.write().remove(&name);
-    });
 
     use_effect(move || {
         locale();
         let _ = send(&LspCatalogRequest::for_query("", false));
     });
 
-    let visible = packages();
+    let state = state();
+    let visible = &state.packages;
     rsx! {
         ManagerPage {
             ManagerHeader {
@@ -78,7 +42,6 @@ pub fn Page() -> Element {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         onclick: move |_| {
-                            loading.set(true);
                             let _ = send(&LspCatalogRequest::for_query(query(), true));
                         },
                         {translate("common-refresh")}
@@ -86,7 +49,7 @@ pub fn Page() -> Element {
                 },
             }
             ManagerList {
-                if loading() && visible.is_empty() {
+                if state.loading && visible.is_empty() {
                     ManagerSpinner { detail: translate("lsp-loading") }
                 } else if visible.is_empty() {
                     ManagerEmpty {
@@ -95,7 +58,10 @@ pub fn Page() -> Element {
                     }
                 }
                 for package in visible.iter() {
-                    PackageRow { package: package.clone(), progress }
+                    PackageRow {
+                        package: package.clone(),
+                        progress: state.progress.iter().find(|item| item.name == package.name).cloned(),
+                    }
                 }
             }
         }
@@ -103,12 +69,9 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn PackageRow(
-    package: LspPackage,
-    progress: Signal<HashMap<String, LspInstallProgress>>,
-) -> Element {
+fn PackageRow(package: LspPackage, progress: Option<LspInstallProgress>) -> Element {
     let item = package.clone();
-    let install_progress = progress().get(&item.name).cloned();
+    let install_progress = progress;
     let action = pkg_action(item.status, item.installable);
     let action_name = item.name.clone();
     let mut subtitle = item.version.clone().unwrap_or_default();

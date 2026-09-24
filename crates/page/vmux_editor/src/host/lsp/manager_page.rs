@@ -6,9 +6,11 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 use vmux_core::event::{
     InstallPhase, LspCatalogEvent, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
-    LspPackage, LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest, LspUpdateRequest,
+    LspManagerStateEvent, LspPackage, LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest,
+    LspUpdateRequest,
 };
-use vmux_core::host::page::NativelyHosted;
+use vmux_core::host::page::PageReady;
+use vmux_layout::native_open::HostedPage;
 
 use crate::lsp::catalog::{self, Package};
 use crate::lsp::{install, purl, store, target};
@@ -17,13 +19,10 @@ pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            PAGE_MANIFEST,
-            NativelyHosted::page("vmux://lsp/", "Language Servers"),
-        ));
-        vmux_core::register_host_spawn(app, "lsp");
+        app.world_mut().spawn(PAGE_MANIFEST);
         app.init_resource::<ManagerOutbox>()
             .init_resource::<ActiveInstalls>()
+            .add_plugins(vmux_layout::native_open::HostedPagePlugin::<LspManagerPage>::default())
             .add_plugins(UiEventPlugin::<(
                 LspCatalogRequest,
                 LspInstallRequest,
@@ -34,7 +33,14 @@ impl Plugin for ManagerPlugin {
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_update_request)
-            .add_systems(Update, drain_manager_outbox);
+            .add_observer(reset_state_on_page_ready)
+            .add_systems(
+                Update,
+                (
+                    drain_manager_outbox,
+                    publish_manager_state.after(drain_manager_outbox),
+                ),
+            );
     }
 }
 
@@ -47,6 +53,89 @@ const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManife
     icon: Some(vmux_core::BuiltinIcon::Server),
     command_bar: true,
 };
+
+#[derive(Component, Default)]
+#[require(ManagerState)]
+struct LspManagerPage;
+
+impl HostedPage for LspManagerPage {
+    const HOST: &'static str = "lsp";
+    const URL: &'static str = "vmux://lsp/";
+    const TITLE: &'static str = "Language Servers";
+}
+
+#[derive(Component)]
+struct ManagerState {
+    packages: Vec<LspPackage>,
+    progress: Vec<LspInstallProgress>,
+    loading: bool,
+}
+
+impl Default for ManagerState {
+    fn default() -> Self {
+        Self {
+            packages: Vec::new(),
+            progress: Vec::new(),
+            loading: true,
+        }
+    }
+}
+
+impl ManagerState {
+    fn start_loading(&mut self) {
+        self.loading = true;
+    }
+
+    fn apply_catalog(&mut self, event: LspCatalogEvent) {
+        self.packages = event.packages;
+        self.loading = false;
+    }
+
+    fn apply_progress(&mut self, event: LspInstallProgress) {
+        let name = event.name.clone();
+        let phase = event.phase;
+        match self.progress.iter_mut().find(|item| item.name == name) {
+            Some(current) => *current = event,
+            None => self.progress.push(event),
+        }
+        let Some(package) = self
+            .packages
+            .iter_mut()
+            .find(|package| package.name == name)
+        else {
+            return;
+        };
+        package.status = match phase {
+            InstallPhase::Failed => LspPkgStatus::Failed,
+            InstallPhase::Done => LspPkgStatus::Installed,
+            _ => LspPkgStatus::Installing,
+        };
+    }
+
+    fn apply_status(&mut self, event: LspPkgStatusEvent) {
+        let name = event.name;
+        if let Some(package) = self
+            .packages
+            .iter_mut()
+            .find(|package| package.name == name)
+        {
+            package.status = event.status;
+            package.version = event.version;
+        }
+        self.progress.retain(|item| item.name != name);
+    }
+
+    fn event(&self) -> LspManagerStateEvent {
+        LspManagerStateEvent {
+            packages: self.packages.clone(),
+            progress: self.progress.clone(),
+            loading: self.loading,
+        }
+    }
+}
+
+#[derive(Component)]
+struct ManagerStateSent;
 
 pub enum ManagerMsg {
     Catalog(LspCatalogEvent),
@@ -119,8 +208,15 @@ fn push(outbox: &ManagerOutbox, entity: Entity, msg: ManagerMsg) {
         .push((entity, msg));
 }
 
-fn on_catalog_request(trigger: On<BinReceive<LspCatalogRequest>>, outbox: Res<ManagerOutbox>) {
+fn on_catalog_request(
+    trigger: On<BinReceive<LspCatalogRequest>>,
+    outbox: Res<ManagerOutbox>,
+    mut states: Query<&mut ManagerState>,
+) {
     let entity = trigger.event().webview;
+    if let Ok(mut state) = states.get_mut(entity) {
+        state.start_loading();
+    }
     let req = trigger.event().payload.clone();
     let sink = outbox.clone();
     std::thread::spawn(move || {
@@ -325,6 +421,7 @@ fn drain_manager_outbox(
     outbox: Res<ManagerOutbox>,
     browsers: NonSend<Browsers>,
     views: Query<(Entity, &crate::host::editor::FileView)>,
+    mut managers: Query<&mut ManagerState>,
     mut commands: Commands,
 ) {
     let drained: Vec<(Entity, ManagerMsg)> = {
@@ -334,24 +431,32 @@ fn drain_manager_outbox(
     for (entity, msg) in drained {
         match msg {
             ManagerMsg::Catalog(ev) => {
-                if browsers.can_emit_to(&entity) {
+                if let Ok(mut state) = managers.get_mut(entity) {
+                    state.apply_catalog(ev);
+                } else if browsers.can_emit_to(&entity) {
                     commands.trigger(BinHostEmitEvent::from_event(entity, &ev));
                 }
             }
             ManagerMsg::Progress(ev) => {
+                if let Ok(mut state) = managers.get_mut(entity) {
+                    state.apply_progress(ev.clone());
+                }
                 for target in install_targets(entity, &ev.name, &views) {
                     if browsers.can_emit_to(&target) {
                         if views.contains(target) {
                             commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                                 target, &ev,
                             ));
-                        } else {
+                        } else if !managers.contains(target) {
                             commands.trigger(BinHostEmitEvent::from_event(target, &ev));
                         }
                     }
                 }
             }
             ManagerMsg::Status(ev) => {
+                if let Ok(mut state) = managers.get_mut(entity) {
+                    state.apply_status(ev.clone());
+                }
                 let targets = install_targets(entity, &ev.name, &views);
                 if ev.status == LspPkgStatus::Installed {
                     for target in targets.iter().copied() {
@@ -372,12 +477,48 @@ fn drain_manager_outbox(
                             commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                                 target, &ev,
                             ));
-                        } else {
+                        } else if !managers.contains(target) {
                             commands.trigger(BinHostEmitEvent::from_event(target, &ev));
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+fn reset_state_on_page_ready(
+    trigger: On<BinReceive<PageReady>>,
+    pages: Query<(), With<LspManagerPage>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    if pages.contains(entity) {
+        commands.entity(entity).remove::<ManagerStateSent>();
+    }
+}
+
+fn publish_manager_state(
+    pages: Query<(Entity, Ref<ManagerState>), With<LspManagerPage>>,
+    ready: Query<(), With<PageReady>>,
+    sent: Query<(), With<ManagerStateSent>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, state) in &pages {
+        if !ready.contains(entity) {
+            continue;
+        }
+        let already_sent = sent.contains(entity);
+        if already_sent && !state.is_changed() {
+            continue;
+        }
+        if !browsers.can_emit_to(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_event(entity, &state.event()));
+        if !already_sent {
+            commands.entity(entity).insert(ManagerStateSent);
         }
     }
 }
@@ -464,5 +605,42 @@ mod tests {
         });
         app.update();
         assert!(outbox.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn manager_state_applies_progress_and_final_status() {
+        let mut state = ManagerState {
+            packages: vec![LspPackage {
+                name: "rust-analyzer".into(),
+                description: String::new(),
+                languages: vec!["Rust".into()],
+                categories: Vec::new(),
+                status: LspPkgStatus::Available,
+                version: None,
+                installable: true,
+                requires: None,
+            }],
+            ..Default::default()
+        };
+
+        state.apply_progress(LspInstallProgress {
+            name: "rust-analyzer".into(),
+            phase: InstallPhase::Downloading,
+            pct: Some(50),
+            message: "Downloading".into(),
+        });
+
+        assert_eq!(state.packages[0].status, LspPkgStatus::Installing);
+        assert_eq!(state.progress.len(), 1);
+
+        state.apply_status(LspPkgStatusEvent {
+            name: "rust-analyzer".into(),
+            status: LspPkgStatus::Installed,
+            version: Some("1.0".into()),
+        });
+
+        assert_eq!(state.packages[0].status, LspPkgStatus::Installed);
+        assert_eq!(state.packages[0].version.as_deref(), Some("1.0"));
+        assert!(state.progress.is_empty());
     }
 }
