@@ -25,13 +25,7 @@ use vmux_ui::hooks::use_theme;
     placement = layout,
     document_url = crate::event::LAYOUT_PAGE_URL,
     transparent,
-    head = r#"<base href="/"/>
-<style>
-html, body { height: 100%; margin: 0; min-height: 0; }
-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: transparent; }
-</style>
-<link rel="stylesheet" href="./assets/index.css"/>
-<link rel="stylesheet" href="./assets/theme.css"/>"#,
+    stylesheet = "./assets/index.css",
     body_class = "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 text-foreground antialiased"
 )]
 pub struct LayoutPage;

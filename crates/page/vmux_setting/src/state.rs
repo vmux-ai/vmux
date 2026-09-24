@@ -1,7 +1,7 @@
 use crate::event::UpdateCheckStatus;
 use crate::schema::SettingsSchema;
 
-#[vmux_api::ui_state(Default, version = 2, target = "settings")]
+#[vmux_api::ui_state(Default, target = "settings")]
 pub struct SettingsUiState {
     pub settings: vmux_api::json::JsonValue,
     pub schema: SettingsSchema,

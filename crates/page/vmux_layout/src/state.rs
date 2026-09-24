@@ -31,7 +31,7 @@ pub enum LayoutUiStatePatch {
     HeaderPage(HeaderPageEvent),
 }
 
-#[vmux_api::ui_state(Default, version = 2, target = "layout")]
+#[vmux_api::ui_state(Default, target = "layout")]
 pub struct LayoutUiState {
     pub sequence: u64,
     pub patches: Vec<LayoutUiStatePatch>,
