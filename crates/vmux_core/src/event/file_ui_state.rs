@@ -2,7 +2,7 @@ use super::{
     ExplorerFocusEvent, ExplorerFsResult, ExplorerPanelEvent, ExplorerSearchEvent,
     ExplorerTreeEvent, FileCodeActionsEvent, FileCompletionEvent, FileCursorEvent,
     FileDiagnosticsEvent, FileDirEvent, FileDirtyEvent, FileEditFailedEvent, FileEncodingEvent,
-    FileErrorEvent, FileHoverEvent, FileKeymapEvent, FileLspStatusEvent, FileMediaEvent,
+    FileErrorEvent, FileHoverEvent, FileKey, FileKeymapEvent, FileLspStatusEvent, FileMediaEvent,
     FileMetaEvent, FileNoteEvent, FilePreviewEvent, FileReferencesEvent, FileRenameBeginEvent,
     FileScrollByEvent, FileShapeEvent, FileThemeEvent, FileTidyPromptEvent, FileViewModeEvent,
     FileViewportPatch, LspInstallProgress, LspPkgStatusEvent, OpenEditorsEvent, OutlineEvent,
@@ -53,6 +53,7 @@ pub enum FileUiStatePatch {
     GitResult(GitResultEvent),
     GitError(GitErrorEvent),
     GitChanged(GitChangedEvent),
+    Key(FileKey),
 }
 
 #[vmux_api::ui_state(Default, target = "files")]

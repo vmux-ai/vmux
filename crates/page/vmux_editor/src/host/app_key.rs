@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
 use vmux_command::host::FileStatusPicked;
 use vmux_command::{
@@ -96,10 +96,11 @@ fn echo_key_command(
     let Ok(key) = keys.get(trigger.event().command()) else {
         return;
     };
-    commands.trigger(BinHostEmitEvent::from_event(
+    vmux_core::host::FileUiStateUpdates::write(
+        &mut commands,
         trigger.event().invocation().caller,
         &key.0,
-    ));
+    );
 }
 
 fn open_status_picker(
@@ -204,20 +205,19 @@ fn apply_status_picks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::BinEvent;
     use vmux_command::CommandInvocation;
+    use vmux_core::event::FileUiStatePatch;
+    use vmux_core::host::FileUiStateWrite;
 
     #[derive(Resource, Default)]
-    struct Echoed(Vec<(Entity, String)>);
+    struct Echoed(Vec<(Entity, FileKey)>);
 
     impl Echoed {
-        fn record(trigger: On<BinHostEmitEvent>, mut echoed: ResMut<Self>) {
-            let decoded = rkyv::from_bytes::<FileKey, rkyv::rancor::Error>(trigger.payload())
-                .map(|key| format!("{key:?}"))
-                .unwrap_or_else(|_| "undecodable".to_string());
-            echoed
-                .0
-                .push((trigger.webview(), format!("{}:{decoded}", trigger.id())));
+        fn record(trigger: On<FileUiStateWrite>, mut echoed: ResMut<Self>) {
+            let FileUiStatePatch::Key(key) = trigger.event().patch() else {
+                return;
+            };
+            echoed.0.push((trigger.event().webview(), *key));
         }
     }
 
@@ -253,7 +253,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
-            vec![(pressed, format!("{}:PanelChoose", FileKey::id()))]
+            vec![(pressed, FileKey::PanelChoose)]
         );
         assert!(
             !app.world()
