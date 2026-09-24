@@ -40,10 +40,15 @@ impl Plugin for StackPlugin {
                 handle_close_requests,
                 handle_focus_requests,
                 handle_move_requests,
-                handle_close_stack_requests.in_set(CloseStackSet),
             )
                 .chain()
                 .in_set(StackCommandSet)
+                .in_set(LayoutRequestSet::Handle),
+        )
+        .add_systems(
+            Update,
+            handle_close_stack_requests
+                .in_set(CloseStackSet)
                 .in_set(LayoutRequestSet::Handle),
         )
         .add_systems(

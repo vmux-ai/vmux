@@ -972,11 +972,7 @@ impl PaletteState {
         if let Some(item) = self.default_target.as_ref() {
             return self.activate(item, attachments);
         }
-        Submission::closing(SubmissionKind::prompt(
-            self.query.trim(),
-            "",
-            attachments,
-        ))
+        Submission::closing(SubmissionKind::prompt(self.query.trim(), "", attachments))
     }
 
     pub fn submit_action(&self, attachments: &[ChatAttachment]) -> Submission {
@@ -995,11 +991,7 @@ impl PaletteState {
         if let Some(item) = self.effective_target.as_ref() {
             return self.activate(item, attachments);
         }
-        Submission::closing(SubmissionKind::prompt(
-            self.query.trim(),
-            "",
-            attachments,
-        ))
+        Submission::closing(SubmissionKind::prompt(self.query.trim(), "", attachments))
     }
 
     fn submit_typed(&self, attachments: &[ChatAttachment]) -> Submission {

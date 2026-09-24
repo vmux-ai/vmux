@@ -501,7 +501,8 @@ mod tests {
     #[test]
     fn force_pane_close_dispatches_pane_close_without_dialog() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_message::<CloseRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<CloseRequest>();
         let tab = app
             .world_mut()
             .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))
@@ -527,7 +528,8 @@ mod tests {
     #[test]
     fn confirmed_close_dialog_dispatches_pane_close() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_message::<CloseRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<CloseRequest>();
         let tab = app
             .world_mut()
             .spawn((crate::tab::Tab::default(), LastActivatedAt::now()))

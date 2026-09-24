@@ -10,7 +10,6 @@ use crate::event::*;
 
 use super::model::GitPanel;
 use super::panel::{HeaderActionButton, PanelHeader, PanelIcon};
-use super::workspace::GitWorkspace;
 
 #[component]
 pub(super) fn HistoryCard(

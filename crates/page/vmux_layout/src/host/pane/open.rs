@@ -879,7 +879,7 @@ fn handle_open_in_pane(
             target,
             mode,
             url,
-        };
+        } = request;
 
         let (_, active_pane_opt, _) = focused_stack(
             active_tab_param.get(),

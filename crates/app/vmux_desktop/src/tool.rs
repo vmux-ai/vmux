@@ -740,14 +740,8 @@ macro_rules! vault_action_observer {
 vault_action_observer!(on_vault_create_request, VaultCreateRequest);
 vault_action_observer!(on_vault_connect_request, VaultConnectRequest);
 vault_action_observer!(on_vault_sync_request, VaultSyncRequest);
-vault_action_observer!(
-    on_vault_connect_github_request,
-    VaultConnectGithubRequest
-);
-vault_action_observer!(
-    on_vault_connect_folder_request,
-    VaultConnectFolderRequest
-);
+vault_action_observer!(on_vault_connect_github_request, VaultConnectGithubRequest);
+vault_action_observer!(on_vault_connect_folder_request, VaultConnectFolderRequest);
 vault_action_observer!(
     on_vault_generate_recovery_key_request,
     VaultGenerateRecoveryKeyRequest

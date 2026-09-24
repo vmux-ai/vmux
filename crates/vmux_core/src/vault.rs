@@ -197,7 +197,10 @@ empty_vault_request!(
     VaultGenerateRecoveryKeyRequest,
     VaultAction::GenerateRecoveryKey
 );
-empty_vault_request!(VaultCreateRecoveryKeyRequest, VaultAction::CreateRecoveryKey);
+empty_vault_request!(
+    VaultCreateRecoveryKeyRequest,
+    VaultAction::CreateRecoveryKey
+);
 
 impl From<VaultCreateRequest> for VaultRequest {
     fn from(request: VaultCreateRequest) -> Self {

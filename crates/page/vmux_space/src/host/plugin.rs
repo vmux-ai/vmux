@@ -426,10 +426,7 @@ fn on_project_forget(
     }
 }
 
-fn relay_space_requests<T: Message + Clone>(
-    mut reader: MessageReader<T>,
-    mut commands: Commands,
-) {
+fn relay_space_requests<T: Message + Clone>(mut reader: MessageReader<T>, mut commands: Commands) {
     for request in reader.read() {
         commands.trigger(BinReceive {
             webview: Entity::PLACEHOLDER,
@@ -853,10 +850,8 @@ fn on_space_create(
     } else {
         requested_name.to_string()
     };
-    let existing: std::collections::HashSet<String> = spaces
-        .iter()
-        .map(|(_, id, _, _, _)| id.0.clone())
-        .collect();
+    let existing: std::collections::HashSet<String> =
+        spaces.iter().map(|(_, id, _, _, _)| id.0.clone()).collect();
     let id = crate::model::unique_space_id_among(&existing, &name);
     let order = spaces
         .iter()

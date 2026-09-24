@@ -284,10 +284,7 @@ fn dismiss_remote_pairing(
     state.dismiss_pairing();
 }
 
-fn poll_remote_worker(
-    mut states: Query<(Entity, &mut RemoteState)>,
-    mut commands: Commands,
-) {
+fn poll_remote_worker(mut states: Query<(Entity, &mut RemoteState)>, mut commands: Commands) {
     let Ok((entity, mut state)) = states.single_mut() else {
         return;
     };

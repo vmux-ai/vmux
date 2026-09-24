@@ -79,7 +79,6 @@ pub struct PickRequest {
 
 #[vmux_api::ui_event(Copy, Default, Eq, targets = ["command-bar", "start", "layout"])]
 pub struct DismissRequest;
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExCommandName {
