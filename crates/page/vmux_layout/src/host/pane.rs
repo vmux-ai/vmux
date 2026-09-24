@@ -2629,7 +2629,7 @@ mod tests {
     fn build_in_pane_app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()

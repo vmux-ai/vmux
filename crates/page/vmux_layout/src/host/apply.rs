@@ -12,7 +12,7 @@ use crate::protocol as proto;
 use crate::protocol::format_id;
 use crate::stack::{Stack, stack_bundle};
 use crate::tab::Tab as LayoutTab;
-use crate::{LayoutSpawnRequest, event::PANE_GAP_PX};
+use crate::{TerminalLayoutSpawnRequest, event::PANE_GAP_PX};
 use bevy::ecs::message::{MessageReader, MessageWriter, Messages};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
@@ -326,8 +326,8 @@ fn materialize_descendants(
                     match t.kind.as_str() {
                         "terminal" => {
                             world
-                                .resource_mut::<Messages<LayoutSpawnRequest>>()
-                                .write(LayoutSpawnRequest::Terminal { stack });
+                                .resource_mut::<Messages<TerminalLayoutSpawnRequest>>()
+                                .write(TerminalLayoutSpawnRequest { stack });
                         }
                         _ => {
                             world.resource_mut::<Messages<PageOpenRequest>>().write(
@@ -1047,7 +1047,7 @@ mod tests {
     fn moves_stack_to_new_tab_reparents_it() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
         let tab = app
             .world_mut()
@@ -1117,7 +1117,7 @@ mod tests {
     fn snapshot_active_tab_becomes_most_recently_activated() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
         let active_tab = app
             .world_mut()
@@ -1195,7 +1195,7 @@ mod tests {
     fn new_tab_parented_as_sibling_of_existing() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
         let main = app.world_mut().spawn_empty().id();
         let tab = app
@@ -1327,7 +1327,7 @@ mod tests {
     fn apply_returns_error_for_stale_tab_id_does_not_panic() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
         let tab = app
@@ -1372,7 +1372,7 @@ mod tests {
     fn submitting_new_tab_id_none_spawns_stack_entity() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
         let tab = app
@@ -1417,7 +1417,7 @@ mod tests {
     fn malformed_pane_id_skips_subtree_no_orphan_spawn() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
         let tab = app
@@ -1469,7 +1469,7 @@ mod tests {
     fn malformed_split_id_skips_subtree_no_orphan_spawn() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
         let tab = app
@@ -1641,7 +1641,7 @@ mod tests {
     fn apply_focus_preserves_existing_when_dto_fields_omitted() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .insert_resource(crate::stack::FocusedStack::default());
 
@@ -1693,7 +1693,7 @@ mod tests {
     fn new_split_inserts_node_with_flex_direction() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
         let tab = app
             .world_mut()
@@ -1753,7 +1753,7 @@ mod tests {
     fn new_split_wraps_existing_pane_without_converting_it() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
         let tab = app
@@ -1856,7 +1856,7 @@ mod tests {
     fn new_root_split_id_none_reuses_existing_root_split_of_tab() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
         let tab = app
@@ -2000,7 +2000,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<LayoutApplyRequest>()
             .add_message::<LayoutApplyResponse>()
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .insert_resource(crate::stack::FocusedStack::default())
             .add_systems(Update, super::apply_layout_requests);
@@ -2053,7 +2053,7 @@ mod tests {
     fn new_split_preserves_submitted_children_order_with_new_pane_first() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>();
 
         let tab = app

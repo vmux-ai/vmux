@@ -111,8 +111,8 @@ pub enum UpdateState {
 }
 
 #[derive(Message, Clone, Debug)]
-pub enum LayoutSpawnRequest {
-    Terminal { stack: Entity },
+pub struct TerminalLayoutSpawnRequest {
+    pub stack: Entity,
 }
 
 #[derive(Clone, Debug)]
