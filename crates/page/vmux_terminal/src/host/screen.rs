@@ -11,9 +11,9 @@ use crate::event::{TermLinkOpenRequest, TermResizeEvent, TermScrollEvent};
 
 use super::plugin::ServiceMessageSet;
 
-pub(super) struct ViewPlugin;
+pub(super) struct ScreenPlugin;
 
-impl Plugin for ViewPlugin {
+impl Plugin for ScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
             TermResizeEvent,
@@ -22,7 +22,7 @@ impl Plugin for ViewPlugin {
         )>::default())
             .add_systems(
                 Update,
-                resend_the_screen_a_page_missed.after(ServiceMessageSet),
+                request_pending_screen_snapshot.after(ServiceMessageSet),
             )
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
@@ -44,7 +44,7 @@ impl Default for TerminalGridSize {
 }
 
 #[derive(Component)]
-pub(super) struct OwedSnapshot;
+pub(super) struct PendingScreenSnapshot;
 
 fn on_term_ready(
     trigger: On<BinReceive<PageReady>>,
@@ -57,7 +57,7 @@ fn on_term_ready(
         return;
     };
     let Some(service) = service else {
-        commands.entity(entity).insert(OwedSnapshot);
+        commands.entity(entity).insert(PendingScreenSnapshot);
         return;
     };
     service
@@ -65,21 +65,21 @@ fn on_term_ready(
         .send(ClientMessage::RequestSnapshot { process_id });
 }
 
-fn resend_the_screen_a_page_missed(
-    owed: Query<(Entity, &ProcessId), (With<Terminal>, With<OwedSnapshot>)>,
+fn request_pending_screen_snapshot(
+    pending: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingScreenSnapshot>)>,
     browsers: NonSend<Browsers>,
     service: Option<Res<ServiceClient>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
-    for (entity, process_id) in &owed {
+    for (entity, process_id) in &pending {
         if !browsers.can_emit_to(&entity) {
             continue;
         }
         service.0.send(ClientMessage::RequestSnapshot {
             process_id: *process_id,
         });
-        commands.entity(entity).remove::<OwedSnapshot>();
+        commands.entity(entity).remove::<PendingScreenSnapshot>();
     }
 }
 
@@ -211,6 +211,6 @@ mod tests {
         });
         app.update();
 
-        assert!(app.world().get::<OwedSnapshot>(webview).is_some());
+        assert!(app.world().get::<PendingScreenSnapshot>(webview).is_some());
     }
 }
