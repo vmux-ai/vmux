@@ -11,7 +11,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
-use vmux_core::page::{PageManifest, PageReady};
+use vmux_core::page::PageManifest;
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tool::{
     ToolAction, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolResult,
@@ -21,7 +21,6 @@ use vmux_core::vault::{
     VaultAction, VaultAuthProgress, VaultRefreshRequest, VaultRepository, VaultRequest,
     VaultResult, VaultSnapshot,
 };
-use vmux_layout::LayoutCef;
 use vmux_tool::{self as manifest_store, ToolsManifest};
 
 pub struct ToolPlugin;
@@ -153,7 +152,6 @@ impl Plugin for ToolPlugin {
                     drain_tool_actions,
                     start_vault_action,
                     drain_vault_actions,
-                    register_layout_subscribers,
                     emit_tools_snapshot,
                 )
                     .chain(),
@@ -197,7 +195,6 @@ struct ToolRegistry {
     load_vault_repositories: bool,
     generation: u64,
     revision: u64,
-    loaded: bool,
     snapshot: ToolsSnapshot,
 }
 
@@ -210,7 +207,6 @@ impl Default for ToolRegistry {
             load_vault_repositories: false,
             generation: 1,
             revision: 0,
-            loaded: false,
             snapshot: ToolsSnapshot::default(),
         }
     }
@@ -402,11 +398,15 @@ fn on_refresh_request(
     commands
         .entity(trigger.event().webview)
         .insert(ToolSubscriber::default());
-    if request.refresh || !state.loaded {
+    if request.refresh || !state.snapshot.loaded {
         state.dirty = true;
         state.full_scan = true;
         state.refresh_catalogs |= request.refresh;
         state.generation = state.generation.wrapping_add(1);
+        if request.refresh && state.snapshot.loaded {
+            state.snapshot.loaded = false;
+            state.revision = state.revision.wrapping_add(1);
+        }
     }
 }
 
@@ -473,9 +473,13 @@ fn on_vault_refresh_request(
         .entity(trigger.event().webview)
         .insert(ToolSubscriber::default());
     state.dirty = true;
-    state.full_scan |= !state.loaded;
+    state.full_scan |= !state.snapshot.loaded;
     state.load_vault_repositories |= trigger.event().payload.load_repositories;
     state.generation = state.generation.wrapping_add(1);
+    if state.snapshot.loaded {
+        state.snapshot.loaded = false;
+        state.revision = state.revision.wrapping_add(1);
+    }
 }
 
 fn drain_vault_watch(
@@ -523,7 +527,7 @@ fn queue_vault_auto_sync(
     let Ok(state) = registry.single() else {
         return;
     };
-    if !auto_sync.requested || state.dirty || !state.loaded || !scans.is_empty() {
+    if !auto_sync.requested || state.dirty || !state.snapshot.loaded || !scans.is_empty() {
         return;
     }
     let vault = &state.snapshot.vault;
@@ -738,8 +742,16 @@ fn drain_tools_scan(
             continue;
         }
         state.snapshot = snapshot;
-        state.loaded = true;
         state.revision = state.revision.wrapping_add(1);
+        let vault = &state.snapshot.vault;
+        if !vault.github_owner.is_empty()
+            && (!vault.initialized || vault.remote.is_empty())
+            && !vault.repositories_loaded
+        {
+            state.dirty = true;
+            state.load_vault_repositories = true;
+            state.generation = state.generation.wrapping_add(1);
+        }
         if !auto_sync.initial_scan_complete {
             let vault = &state.snapshot.vault;
             auto_sync.requested = vault.initialized
@@ -848,18 +860,9 @@ fn drain_vault_actions(
             commands.trigger(BinHostEmitEvent::from_event(target, &event));
         }
         state.dirty = true;
-        state.full_scan |= !state.loaded;
+        state.full_scan |= !state.snapshot.loaded;
         state.load_vault_repositories |= task.request.action == VaultAction::ConnectGithub;
         state.generation = state.generation.wrapping_add(1);
-    }
-}
-
-fn register_layout_subscribers(
-    layouts: Query<Entity, (With<LayoutCef>, Changed<PageReady>)>,
-    mut commands: Commands,
-) {
-    for entity in &layouts {
-        commands.entity(entity).insert(ToolSubscriber::default());
     }
 }
 
@@ -872,9 +875,6 @@ fn emit_tools_snapshot(
     let Ok(state) = registry.single() else {
         return;
     };
-    if !state.loaded {
-        return;
-    }
     for (entity, mut subscriber) in &mut subscribers {
         if subscriber.revision == state.revision {
             continue;
@@ -954,6 +954,7 @@ fn scan_tools(
         .filter(|item| item.status == ToolStatus::Conflict)
         .count() as u32;
     ToolsSnapshot {
+        loaded: true,
         root: manifest_store::root_dir().to_string_lossy().into_owned(),
         vault: scan_vault(load_vault_repositories, previous_vault),
         categories,
@@ -1944,8 +1945,8 @@ mod tests {
             let registry = app.world_mut().spawn(ToolRegistry::default()).id();
             {
                 let mut state = app.world_mut().get_mut::<ToolRegistry>(registry).unwrap();
-                state.loaded = true;
                 state.dirty = false;
+                state.snapshot.loaded = true;
                 state.snapshot.vault = vault;
             }
             let mut auto_sync = app.world_mut().resource_mut::<VaultAutoSync>();

@@ -155,8 +155,9 @@ pub struct ToolCategory {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(target = "tools")]
+#[vmux_api::host_event(version = 2, targets = ["tools", "vault"])]
 pub struct ToolsSnapshot {
+    pub loaded: bool,
     pub root: String,
     pub vault: crate::vault::VaultSnapshot,
     pub categories: Vec<ToolCategory>,

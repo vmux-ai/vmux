@@ -11,7 +11,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
     ManagerRow, ManagerSpinner, ManagerTab, ManagerTabs, ManagerThumbnail,
 };
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -136,16 +136,11 @@ pub(crate) fn ToolsManagerTabs(mut active_route: Signal<ToolsRoute>) -> Element 
 #[component]
 fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
     let locale = use_theme();
-    let mut snapshot = use_signal(ToolsSnapshot::default);
-    let mut loaded = use_signal(|| false);
+    let snapshot = use_ui_state::<ToolsSnapshot>();
     let mut query = use_signal(String::new);
     let mut pending = use_signal(BTreeSet::<String>::new);
     let mut notice = use_signal(|| None::<ToolResult>);
 
-    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(move |event| {
-        snapshot.set(event);
-        loaded.set(true);
-    });
     let _result_listener = use_listener::<ToolResult, _>(move |result| {
         pending
             .write()
@@ -200,7 +195,6 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         onclick: move |_| {
-                            loaded.set(false);
                             request_snapshot(true);
                         },
                         {translate("common-refresh")}
@@ -232,7 +226,7 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
                         "{current.error}"
                     }
                 }
-                if !loaded() {
+                if !current.loaded {
                     ManagerSpinner { detail: translate("tools-scanning") }
                 } else if visible_count == 0 {
                     ManagerEmpty {
