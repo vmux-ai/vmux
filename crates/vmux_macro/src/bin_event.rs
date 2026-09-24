@@ -1,6 +1,6 @@
-use heck::{ToSnakeCase, ToUpperCamelCase};
+use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{DeriveInput, Ident, LitInt, LitStr, Token, bracketed};
 
@@ -80,17 +80,13 @@ impl Parse for Args {
     }
 }
 
-fn inferred_event_parts(ident: &Ident) -> (LitStr, LitStr) {
+fn inferred_event_name(ident: &Ident) -> LitStr {
     let snake = ident.to_string().to_snake_case();
     let stem = snake
         .strip_suffix("_request")
         .or_else(|| snake.strip_suffix("_event"))
         .unwrap_or(&snake);
-    let family = stem.split_once('_').map_or(stem, |(family, _)| family);
-    (
-        LitStr::new(family, ident.span()),
-        LitStr::new(stem, ident.span()),
-    )
+    LitStr::new(stem, ident.span())
 }
 
 pub(crate) fn expand(
@@ -100,7 +96,7 @@ pub(crate) fn expand(
 ) -> syn::Result<TokenStream> {
     let Args { version, target } = syn::parse2(args)?;
     let ident = &input.ident;
-    let (_, name) = inferred_event_parts(ident);
+    let name = inferred_event_name(ident);
     let generics = &input.generics;
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let version_value = version
@@ -149,8 +145,7 @@ pub(crate) fn derive(input: DeriveInput, direction: Direction) -> syn::Result<To
     let ident = &input.ident;
     let generics = &input.generics;
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
-    let (family_name, name) = inferred_event_parts(ident);
-    let family = format_ident!("{}Events", family_name.value().to_upper_camel_case());
+    let name = inferred_event_name(ident);
     let id = LitStr::new(&format!("{}@1", name.value()), ident.span());
     let direction_impl = match direction {
         Direction::Host => quote! {
@@ -170,7 +165,7 @@ pub(crate) fn derive(input: DeriveInput, direction: Direction) -> syn::Result<To
             const ID: &'static str = #id;
             const NAME: &'static str = #name;
             const TARGET: ::vmux_api::BinEventTarget =
-                <#family as ::vmux_api::BinEventFamily>::TARGET;
+                <Events as ::vmux_api::BinEventFamily>::TARGET;
         }
 
         #direction_impl
@@ -183,18 +178,16 @@ mod tests {
     use proc_macro2::Span;
 
     #[test]
-    fn request_type_infers_family_and_name() {
+    fn request_type_infers_name() {
         let ident = Ident::new("BookmarkMenuPinRequest", Span::call_site());
-        let (family, name) = inferred_event_parts(&ident);
-        assert_eq!(family.value(), "bookmark");
+        let name = inferred_event_name(&ident);
         assert_eq!(name.value(), "bookmark_menu_pin");
     }
 
     #[test]
-    fn event_type_infers_family_and_name() {
+    fn event_type_infers_name() {
         let ident = Ident::new("EditorPageEvent", Span::call_site());
-        let (family, name) = inferred_event_parts(&ident);
-        assert_eq!(family.value(), "editor");
+        let name = inferred_event_name(&ident);
         assert_eq!(name.value(), "editor_page");
     }
 }

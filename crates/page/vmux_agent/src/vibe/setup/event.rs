@@ -1,6 +1,6 @@
-pub enum AgentEvents {}
+enum Events {}
 
-impl vmux_api::BinEventFamily for AgentEvents {
+impl vmux_api::BinEventFamily for Events {
     const TARGET: vmux_api::BinEventTarget = vmux_api::BinEventTarget::Hosts(&["agent", "agents"]);
 }
 

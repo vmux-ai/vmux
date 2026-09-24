@@ -14,19 +14,12 @@ pub use vmux_api::prompt_media::{
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_api::room::ModelOptionEntry;
 
-enum ChatEvents {}
+enum Events {}
 
-impl vmux_api::BinEventFamily for ChatEvents {
+impl vmux_api::BinEventFamily for Events {
     const TARGET: vmux_api::BinEventTarget =
         vmux_api::BinEventTarget::Hosts(&["sessions", "agent", "start"]);
 }
-
-type ComposerEvents = ChatEvents;
-type ModeEvents = ChatEvents;
-type ModelEvents = ChatEvents;
-type RuntimeEvents = ChatEvents;
-type SelectEvents = ChatEvents;
-type SetEvents = ChatEvents;
 
 #[derive(
     Clone,
