@@ -28,8 +28,7 @@ pub fn Page() -> Element {
     let state = GitPageState::use_state();
     use_context_provider(|| state);
     let GitPageState {
-        workspace,
-        repository,
+        snapshot,
         selected_path_bytes,
         selected_commit,
         selected_branch,
@@ -39,7 +38,6 @@ pub fn Page() -> Element {
         selected_stash,
         mut confirm_discard,
         mut focused_panel,
-        branch_log,
         mut shortcut_help,
         ..
     } = state;
@@ -48,15 +46,18 @@ pub fn Page() -> Element {
         let _ = send(&PageContextRequest {});
     });
     use_effect(move || {
+        let ui = snapshot();
         if focused_panel() != GitPanel::Branches {
             return;
         }
-        let repo_root = workspace();
+        let repo_root = ui.workspace;
         let branch = selected_branch();
         if repo_root.is_empty() || branch.is_empty() {
             return;
         }
-        if branch_log().is_some_and(|event| event.repo_root == repo_root && event.branch == branch)
+        if ui
+            .branch_log
+            .is_some_and(|event| event.repo_root == repo_root && event.branch == branch)
         {
             return;
         }
@@ -109,7 +110,8 @@ pub fn Page() -> Element {
                     focused_panel.set(panel);
                     return;
                 }
-                let Some(repository) = repository() else {
+                let ui = snapshot();
+                let Some(repository) = ui.repository else {
                     return;
                 };
                 let handled = match (focused_panel(), key.as_str()) {
@@ -315,7 +317,7 @@ pub fn Page() -> Element {
                     event.stop_propagation();
                 }
             },
-            if repository().is_some() {
+            if snapshot().repository.is_some() {
                 GitDashboard {}
             } else {
                 EmptyRepository {}

@@ -98,6 +98,7 @@ impl Emit {
         commands: &mut Commands,
         pages: &mut Query<&mut vmux_core::PageMetadata>,
         file_pages: &Query<(), With<FileUiStateUpdates>>,
+        views: &mut Query<&mut super::view::GitView>,
         webview: Entity,
     ) {
         match self {
@@ -111,10 +112,18 @@ impl Emit {
                         false => format!("{} · {}", event.repo_name, event.branch),
                     };
                 }
-                commands.trigger(BinHostEmitEvent::from_event(webview, &event));
+                if let Ok(mut view) = views.get_mut(webview) {
+                    view.set_repository(event);
+                } else {
+                    commands.trigger(BinHostEmitEvent::from_event(webview, &event));
+                }
             }
             Self::BranchLog(event) => {
-                commands.trigger(BinHostEmitEvent::from_event(webview, &event));
+                if let Ok(mut view) = views.get_mut(webview) {
+                    view.set_branch_log(event);
+                } else {
+                    commands.trigger(BinHostEmitEvent::from_event(webview, &event));
+                }
             }
             Self::Status(event) => {
                 FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
@@ -123,13 +132,34 @@ impl Emit {
                 FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
             }
             Self::DiffViewport(event) => {
-                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+                if let Ok(mut view) = views.get_mut(webview) {
+                    view.set_diff_viewport(event);
+                } else {
+                    FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+                }
             }
             Self::Result(event) => {
-                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+                if let Ok(mut view) = views.get_mut(webview) {
+                    view.apply_result(&event);
+                    if !view.workspace().is_empty() {
+                        GitJob::enqueue(
+                            commands,
+                            webview,
+                            JobKind::Repository {
+                                path: view.workspace().into(),
+                            },
+                        );
+                    }
+                } else {
+                    FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+                }
             }
             Self::Error(event) => {
-                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+                if let Ok(mut view) = views.get_mut(webview) {
+                    view.apply_error(&event);
+                } else {
+                    FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
+                }
             }
         }
     }
@@ -154,11 +184,18 @@ fn deliver_git_outputs(
     mut outputs: Query<(Entity, &mut GitJobOutput)>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
     file_pages: Query<(), With<FileUiStateUpdates>>,
+    mut views: Query<&mut super::view::GitView>,
     mut commands: Commands,
 ) {
     for (entity, mut output) in &mut outputs {
         for emit in std::mem::take(&mut output.emits) {
-            emit.deliver(&mut commands, &mut pages, &file_pages, output.webview);
+            emit.deliver(
+                &mut commands,
+                &mut pages,
+                &file_pages,
+                &mut views,
+                output.webview,
+            );
         }
         commands.entity(entity).despawn();
     }

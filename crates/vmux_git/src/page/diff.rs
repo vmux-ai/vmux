@@ -15,11 +15,11 @@ use crate::view::EditorDiffMarker;
 #[component]
 pub(super) fn CommitDiffCard(
     repository: GitRepositoryEvent,
-    repo_root: Signal<String>,
+    repo_root: ReadSignal<String>,
     selected_commit: Signal<String>,
-    nonce: Signal<u32>,
+    nonce: ReadSignal<u32>,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
-    diff_viewport: Signal<Option<GitDiffViewportEvent>>,
+    diff_viewport: ReadSignal<Option<GitDiffViewportEvent>>,
 ) -> Element {
     let empty_path = use_signal(String::new);
     let selected = repository
@@ -61,13 +61,13 @@ pub(super) fn CommitDiffCard(
 
 #[component]
 pub(super) fn DiffCard(
-    repo_root: Signal<String>,
+    repo_root: ReadSignal<String>,
     selected_path: Signal<String>,
     selected_path_bytes: Signal<Vec<u8>>,
     selected_abs_path: Signal<String>,
-    nonce: Signal<u32>,
+    nonce: ReadSignal<u32>,
     markers: Signal<HashMap<u32, EditorDiffMarker>>,
-    diff_viewport: Signal<Option<GitDiffViewportEvent>>,
+    diff_viewport: ReadSignal<Option<GitDiffViewportEvent>>,
 ) -> Element {
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-emerald-400/25 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",

@@ -86,9 +86,13 @@ impl GitDirectory {
 fn on_directory_request(
     trigger: On<BinReceive<GitDirectoryRequest>>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
+    mut views: Query<&mut super::view::GitView>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
+    if let Ok(mut view) = views.get_mut(trigger.event().webview) {
+        view.start_directory(Path::new(&request.path), request.preview);
+    }
     let event = GitDirectory::event(Path::new(&request.path), request.preview);
     if !request.preview
         && let Ok(mut page) = pages.get_mut(trigger.event().webview)
@@ -103,8 +107,12 @@ fn on_directory_request(
             .unwrap_or_else(|| "Git".to_string());
         page.title = format!("{name} · Git");
     }
-    commands.trigger(BinHostEmitEvent::from_event(
-        trigger.event().webview,
-        &event,
-    ));
+    if let Ok(mut view) = views.get_mut(trigger.event().webview) {
+        view.set_directory(event);
+    } else {
+        commands.trigger(BinHostEmitEvent::from_event(
+            trigger.event().webview,
+            &event,
+        ));
+    }
 }

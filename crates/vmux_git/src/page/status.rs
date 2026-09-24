@@ -17,7 +17,7 @@ use super::panel::{PanelHeader, PanelIcon};
 pub(super) fn StatusCard(
     repository: GitRepositoryEvent,
     focused_panel: Signal<GitPanel>,
-    fetching: Signal<bool>,
+    fetching: bool,
 ) -> Element {
     let focused = focused_panel() == GitPanel::Status;
 
@@ -44,7 +44,7 @@ pub(super) fn StatusCard(
                 span { class: "shrink-0 text-muted-foreground", "→" }
                 span { class: "min-w-0 truncate font-medium", "{repository.branch}" }
                 div { class: "ml-auto flex shrink-0 items-center gap-1.5 text-[10px] tabular-nums text-muted-foreground",
-                    if fetching() {
+                    if fetching {
                         FetchIndicator {}
                     }
                     if repository.ahead > 0 {
@@ -66,7 +66,7 @@ pub(super) fn StatusCard(
 }
 
 #[component]
-pub(super) fn StatusDetailCard(repository: GitRepositoryEvent, fetching: Signal<bool>) -> Element {
+pub(super) fn StatusDetailCard(repository: GitRepositoryEvent, fetching: bool) -> Element {
     let changed = repository.files.len();
     let staged = repository.files.iter().filter(|entry| entry.staged).count();
     let clean = changed == 0;
@@ -79,7 +79,7 @@ pub(super) fn StatusDetailCard(repository: GitRepositoryEvent, fetching: Signal<
                 }
                 span { class: "font-mono text-[9px] font-semibold text-muted-foreground", "[0]" }
                 span { class: "min-w-0 flex-1 truncate text-[11px] font-semibold tracking-[-0.01em]", {translate("git-status")} }
-                if fetching() {
+                if fetching {
                     FetchIndicator {}
                 }
                 Button {
