@@ -13,7 +13,6 @@ use other as platform;
 #[cfg(target_os = "macos")]
 pub(crate) use macos::ensure_native_window_active;
 
-use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 #[cfg(feature = "tray")]
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -32,15 +31,18 @@ pub struct RuntimePlugin;
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(platform::RuntimePlatformPlugin)
-            .add_message::<LifecycleEvent>()
-            .add_systems(Update, handle_lifecycle_events)
-            .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
+            .add_message::<HideAllWindowsRequest>()
+            .add_systems(Update, hide_all_windows)
             .add_systems(Update, keep_awake_while_revealing);
         #[cfg(feature = "tray")]
-        app.add_systems(
-            Update,
-            resolve_quit_confirmation.after(handle_lifecycle_events),
-        );
+        app.add_message::<ShowAllWindowsRequest>()
+            .add_message::<QuitRequest>()
+            .add_systems(Update, show_all_windows.after(hide_all_windows))
+            .add_systems(Update, request_quit.after(show_all_windows))
+            .add_systems(Update, resolve_quit_confirmation.after(request_quit))
+            .add_systems(Update, sync_winit_power_mode.after(request_quit));
+        #[cfg(not(feature = "tray"))]
+        app.add_systems(Update, sync_winit_power_mode.after(hide_all_windows));
     }
 }
 
@@ -50,13 +52,15 @@ const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(60);
 const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Message, Debug, Clone, Copy)]
-pub enum LifecycleEvent {
-    HideAllWindows,
-    #[cfg(feature = "tray")]
-    ShowAllWindows,
-    #[cfg(feature = "tray")]
-    QuitVmux,
-}
+pub(crate) struct HideAllWindowsRequest;
+
+#[cfg(feature = "tray")]
+#[derive(Message, Debug, Clone, Copy)]
+pub(crate) struct ShowAllWindowsRequest;
+
+#[cfg(feature = "tray")]
+#[derive(Message, Debug, Clone, Copy)]
+pub(crate) struct QuitRequest;
 
 #[cfg(feature = "tray")]
 #[derive(Resource)]
@@ -192,74 +196,74 @@ fn keep_awake_while_revealing(
     }
 }
 
-fn handle_lifecycle_events(world: &mut World) {
-    let drained: Vec<LifecycleEvent> = {
-        let mut events = world.resource_mut::<Messages<LifecycleEvent>>();
-        events.drain().collect()
-    };
-
-    for event in drained {
-        match event {
-            LifecycleEvent::HideAllWindows => {
-                let mut q = world.query::<&mut Window>();
-                for mut w in q.iter_mut(world) {
-                    w.visible = false;
-                }
-                hide_all_osr_webviews(world);
-            }
-            #[cfg(feature = "tray")]
-            LifecycleEvent::ShowAllWindows => {
-                let mut q = world.query::<&mut Window>();
-                for mut w in q.iter_mut(world) {
-                    w.visible = true;
-                }
-            }
-            #[cfg(feature = "tray")]
-            LifecycleEvent::QuitVmux => {
-                let live = {
-                    let mut q = world.query_filtered::<(), (With<Terminal>, Without<PtyExited>)>();
-                    q.iter(world).count()
-                };
-                if live > 0 {
-                    if world.contains_resource::<QuitConfirmation>() {
-                        continue;
-                    }
-                    let wake = world
-                        .get_resource::<EventLoopProxyWrapper>()
-                        .map(|proxy| (**proxy).clone());
-                    world.insert_resource(QuitConfirmation::start(live, wake));
-                    continue;
-                }
-                world
-                    .resource_mut::<Messages<AppExit>>()
-                    .write(AppExit::Success);
-            }
-        }
+fn hide_all_windows(
+    mut requests: MessageReader<HideAllWindowsRequest>,
+    mut windows: Query<&mut Window>,
+    browsers: Option<NonSend<Browsers>>,
+) {
+    if requests.read().count() == 0 {
+        return;
+    }
+    for mut window in &mut windows {
+        window.visible = false;
+    }
+    if let Some(browsers) = browsers {
+        browsers.set_all_osr_hidden();
     }
 }
 
 #[cfg(feature = "tray")]
-fn resolve_quit_confirmation(world: &mut World) {
-    let confirmed = {
-        let Some(mut confirmation) = world.get_resource_mut::<QuitConfirmation>() else {
-            return;
-        };
-        confirmation.poll()
-    };
-    let Some(confirmed) = confirmed else {
+fn show_all_windows(
+    mut requests: MessageReader<ShowAllWindowsRequest>,
+    mut windows: Query<&mut Window>,
+) {
+    if requests.read().count() == 0 {
         return;
-    };
-    world.remove_resource::<QuitConfirmation>();
-    if confirmed {
-        world
-            .resource_mut::<Messages<AppExit>>()
-            .write(AppExit::Success);
+    }
+    for mut window in &mut windows {
+        window.visible = true;
     }
 }
 
-fn hide_all_osr_webviews(world: &mut World) {
-    if let Some(browsers) = world.get_non_send::<Browsers>() {
-        browsers.set_all_osr_hidden();
+#[cfg(feature = "tray")]
+fn request_quit(
+    mut requests: MessageReader<QuitRequest>,
+    terminals: Query<(), (With<Terminal>, Without<PtyExited>)>,
+    confirmation: Option<Res<QuitConfirmation>>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut exits: MessageWriter<AppExit>,
+    mut commands: Commands,
+) {
+    if requests.read().count() == 0 || confirmation.is_some() {
+        return;
+    }
+    let live = terminals.iter().count();
+    if live > 0 {
+        commands.insert_resource(QuitConfirmation::start(
+            live,
+            wake.map(|proxy| (**proxy).clone()),
+        ));
+        return;
+    }
+    exits.write(AppExit::Success);
+}
+
+#[cfg(feature = "tray")]
+fn resolve_quit_confirmation(
+    confirmation: Option<ResMut<QuitConfirmation>>,
+    mut exits: MessageWriter<AppExit>,
+    mut commands: Commands,
+) {
+    let Some(mut confirmation) = confirmation else {
+        return;
+    };
+    let confirmed = confirmation.poll();
+    let Some(confirmed) = confirmed else {
+        return;
+    };
+    commands.remove_resource::<QuitConfirmation>();
+    if confirmed {
+        exits.write(AppExit::Success);
     }
 }
 
@@ -271,12 +275,12 @@ mod tests {
     #[test]
     fn quit_without_live_terminal_exits_immediately() {
         let mut app = App::new();
-        app.add_message::<LifecycleEvent>()
+        app.add_message::<QuitRequest>()
             .add_message::<AppExit>()
-            .add_systems(Update, handle_lifecycle_events);
+            .add_systems(Update, request_quit);
         app.world_mut()
-            .resource_mut::<Messages<LifecycleEvent>>()
-            .write(LifecycleEvent::QuitVmux);
+            .resource_mut::<Messages<QuitRequest>>()
+            .write(QuitRequest);
 
         app.update();
 
