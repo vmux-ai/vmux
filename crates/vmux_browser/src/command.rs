@@ -37,7 +37,8 @@ impl Plugin for CommandPlugin {
         app.add_plugins((
             CommandTypePlugin::<NavigationRequest>::default(),
             CommandTypePlugin::<OpenRequest>::default(),
-            CommandTypePlugin::<ViewRequest>::default(),
+            CommandTypePlugin::<ZoomRequest>::default(),
+            CommandTypePlugin::<ShowDevToolsRequest>::default(),
         ))
         .add_observer(on_header_request)
         .add_observer(on_side_sheet_request)
@@ -49,7 +50,8 @@ impl Plugin for CommandPlugin {
             (
                 handle_navigation_requests,
                 handle_open_requests,
-                handle_view_requests,
+                handle_zoom_requests,
+                show_dev_tools,
             )
                 .chain()
                 .in_set(ReadCommandRequests),
@@ -154,16 +156,13 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 }
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ViewRequest {
-    ZoomIn,
-    ZoomOut,
-    ZoomReset,
-    DevTools,
-    ViewSource,
-    Print,
+pub enum ZoomRequest {
+    In,
+    Out,
+    Reset,
 }
 
-impl CommandRequest for ViewRequest {
+impl CommandRequest for ZoomRequest {
     fn definitions() -> Vec<CommandDefinition> {
         vec![
             CommandDefinition::new("browser_zoom_in", "Zoom In", "Browser > View")
@@ -175,34 +174,44 @@ impl CommandRequest for ViewRequest {
             CommandDefinition::new("browser_zoom_reset", "Actual Size", "Browser > View")
                 .accelerator("super+0")
                 .mcp(CommandMcp::new("Actual Size", InputSchema::object()).allow_agent()),
-            CommandDefinition::new("browser_dev_tools", "Developer Tools", "Browser > View")
-                .accelerator("super+alt+i")
-                .mcp(CommandMcp::new("Developer Tools", InputSchema::object()).allow_agent()),
-            CommandDefinition::new("browser_view_source", "View Source", "Browser > View")
-                .accelerator("super+alt+u")
-                .hidden()
-                .mcp(CommandMcp::new("View Source", InputSchema::object()).allow_agent()),
-            CommandDefinition::new("browser_print", "Print", "Browser > View")
-                .hidden()
-                .mcp(CommandMcp::new("Print", InputSchema::object()).allow_agent()),
         ]
     }
 }
 
-impl TryFrom<&CommandInvocation> for ViewRequest {
+impl TryFrom<&CommandInvocation> for ZoomRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         let request = match invocation.id.as_str() {
-            "browser_zoom_in" => Self::ZoomIn,
-            "browser_zoom_out" => Self::ZoomOut,
-            "browser_zoom_reset" => Self::ZoomReset,
-            "browser_dev_tools" => Self::DevTools,
-            "browser_view_source" => Self::ViewSource,
-            "browser_print" => Self::Print,
+            "browser_zoom_in" => Self::In,
+            "browser_zoom_out" => Self::Out,
+            "browser_zoom_reset" => Self::Reset,
             _ => return Err(()),
         };
         Ok(request)
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShowDevToolsRequest;
+
+impl CommandRequest for ShowDevToolsRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("browser_dev_tools", "Developer Tools", "Browser > View")
+                .accelerator("super+alt+i")
+                .mcp(CommandMcp::new("Developer Tools", InputSchema::object()).allow_agent()),
+        ]
+    }
+}
+
+impl TryFrom<&CommandInvocation> for ShowDevToolsRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "browser_dev_tools")
+            .then_some(Self)
+            .ok_or(())
     }
 }
 
@@ -330,16 +339,15 @@ fn handle_open_requests(
     }
 }
 
-fn handle_view_requests(
-    mut view_requests: MessageReader<ViewRequest>,
+fn handle_zoom_requests(
+    mut requests: MessageReader<ZoomRequest>,
     active_stack: ActiveStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
-    mut commands: Commands,
 ) {
-    for request in view_requests.read() {
+    for request in requests.read() {
         let Some(active) = active_stack.get() else {
             continue;
         };
@@ -353,33 +361,49 @@ fn handle_view_requests(
         let (is_terminal, is_file) = kind_q.get(webview).unwrap_or((false, false));
         let is_text_grid = is_terminal || is_file;
         match request {
-            ViewRequest::ZoomIn => {
+            ZoomRequest::In => {
                 if is_text_grid {
                     font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Increase);
                 } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
                     zoom.0 += 0.5;
                 }
             }
-            ViewRequest::ZoomOut => {
+            ZoomRequest::Out => {
                 if is_text_grid {
                     font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Decrease);
                 } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
                     zoom.0 -= 0.5;
                 }
             }
-            ViewRequest::ZoomReset => {
+            ZoomRequest::Reset => {
                 if is_text_grid {
                     font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Reset);
                 } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
                     zoom.0 = 0.0;
                 }
             }
-            ViewRequest::DevTools => {
-                commands.trigger(RequestShowDevTool { webview });
-            }
-            ViewRequest::ViewSource => {}
-            ViewRequest::Print => {}
         }
+    }
+}
+
+fn show_dev_tools(
+    mut requests: MessageReader<ShowDevToolsRequest>,
+    active_stack: ActiveStack,
+    browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
+    mut commands: Commands,
+) {
+    for _ in requests.read() {
+        let Some(active) = active_stack.get() else {
+            continue;
+        };
+        let Some(webview) = browsers
+            .iter()
+            .find(|(_, child_of)| child_of.get() == active)
+            .map(|(entity, _)| entity)
+        else {
+            continue;
+        };
+        commands.trigger(RequestShowDevTool { webview });
     }
 }
 
@@ -637,7 +661,8 @@ mod tests {
         let definitions = NavigationRequest::definitions()
             .into_iter()
             .chain(OpenRequest::definitions())
-            .chain(ViewRequest::definitions())
+            .chain(ZoomRequest::definitions())
+            .chain(ShowDevToolsRequest::definitions())
             .collect::<Vec<_>>();
         let tools = definitions
             .iter()
@@ -659,8 +684,6 @@ mod tests {
                 "browser_zoom_out",
                 "browser_zoom_reset",
                 "browser_dev_tools",
-                "browser_view_source",
-                "browser_print",
             ],
         );
         for tool in tools {
@@ -673,7 +696,8 @@ mod tests {
             assert!(
                 NavigationRequest::try_from(&invocation).is_ok()
                     || OpenRequest::try_from(&invocation).is_ok()
-                    || ViewRequest::try_from(&invocation).is_ok()
+                    || ZoomRequest::try_from(&invocation).is_ok()
+                    || ShowDevToolsRequest::try_from(&invocation).is_ok()
             );
         }
     }
@@ -744,7 +768,8 @@ mod tests {
         app.add_plugins((
             CommandTypePlugin::<NavigationRequest>::default(),
             CommandTypePlugin::<OpenRequest>::default(),
-            CommandTypePlugin::<ViewRequest>::default(),
+            CommandTypePlugin::<ZoomRequest>::default(),
+            CommandTypePlugin::<ShowDevToolsRequest>::default(),
         ));
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()

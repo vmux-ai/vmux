@@ -22,7 +22,7 @@ mod scroll;
 mod snapshot;
 mod state;
 mod window_drag;
-pub use command::{NavigationRequest, OpenRequest, ViewRequest};
+pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
 pub use host_focus::{HostFocusIntent, KeyboardContext, KeyboardContextSet};
 pub use navigation::OpenHistoryRequest;
 pub use window_drag::WindowDragRegion;
@@ -1767,7 +1767,7 @@ mod tests {
     }
 
     mod open_in_place_flow {
-        use crate::{OpenRequest, ViewRequest};
+        use crate::{OpenRequest, ZoomRequest};
         use bevy::ecs::message::Messages;
         use bevy::prelude::*;
         use bevy_cef::prelude::RequestNavigate;
@@ -2061,8 +2061,8 @@ mod tests {
             build_focused_terminal_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<ViewRequest>>()
-                .write(ViewRequest::ZoomIn);
+                .resource_mut::<Messages<ZoomRequest>>()
+                .write(ZoomRequest::In);
 
             app.update();
 
@@ -2082,8 +2082,8 @@ mod tests {
             build_focused_terminal_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<ViewRequest>>()
-                .write(ViewRequest::ZoomReset);
+                .resource_mut::<Messages<ZoomRequest>>()
+                .write(ZoomRequest::Reset);
 
             app.update();
 
