@@ -27,7 +27,7 @@ desktop = [
     "terminal",
 ]
 mobile = ["dep:vmux_chat", "dep:vmux_start", "dep:vmux_team"]
-mcp = ["dep:vmux_mcp"]
+mcp = ["dep:vmux_mcp", "vmux_mcp/connection"]
 core = [
     "dep:vmux_command",
     "dep:vmux_core",

@@ -132,7 +132,7 @@ impl Plugin for ToolPlugin {
             .init_resource::<VaultAutoSync>()
             .init_resource::<VaultRecoveryState>()
             .add_plugins((
-                crate::mcp_connection::McpConnectionPlugin,
+                vmux_app::extension::McpConnectionPlugin,
                 vmux_tool::ToolPlugin,
             ))
             .add_plugins(UiEventPlugin::<(
