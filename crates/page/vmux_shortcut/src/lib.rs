@@ -91,7 +91,7 @@ pub enum ShortcutProbeStatus {
     Miss,
 }
 
-#[vmux_api::ui_state(Default, version = 2, target = "shortcuts")]
+#[vmux_api::ui_state(Default, target = "shortcuts")]
 pub struct ShortcutUiState {
     pub groups: Vec<ShortcutGroup>,
     pub probe: ShortcutProbeView,

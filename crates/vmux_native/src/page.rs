@@ -8,7 +8,7 @@ pub struct NativePage {
     pub dom_group: Option<&'static str>,
     pub root_id: &'static str,
     pub root_class: &'static str,
-    pub head: &'static str,
+    pub stylesheet: &'static str,
     pub html_attributes: &'static str,
     pub body_class: &'static str,
     pub transparent: bool,
@@ -51,13 +51,7 @@ impl NativePage {
             dom_group: None,
             root_id: "main",
             root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
-            head: r#"<base href="/"/>
-<style>
-html, body { height: 100%; margin: 0; min-height: 0; }
-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-</style>
-<link rel="stylesheet" href="./assets/index.css"/>
-<link rel="stylesheet" href="./assets/theme.css"/>"#,
+            stylesheet: "./assets/index.css",
             html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
             body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
             transparent: false,
@@ -98,7 +92,10 @@ impl NativePage {
         } else {
             String::new()
         };
-        let head = format!("<title>{}</title>\n{}\n{favicon}", self.title, self.head);
+        let head = format!(
+            "<title>{}</title>\n<base href=\"/\"/>\n<link rel=\"stylesheet\" href=\"{}\"/>\n{favicon}",
+            self.title, self.stylesheet
+        );
         let html = crate::InterpreterShell::new(self.root_id, self.document_url())
             .with_head(head)
             .with_html_attributes(self.html_attributes)

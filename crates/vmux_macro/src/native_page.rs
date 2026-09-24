@@ -12,7 +12,7 @@ struct Args {
     dom_group: Option<LitStr>,
     root_id: LitStr,
     root_class: LitStr,
-    head: LitStr,
+    stylesheet: LitStr,
     html_attributes: LitStr,
     body_class: LitStr,
     reports_title: bool,
@@ -40,7 +40,7 @@ impl Parse for Args {
         let mut dom_group = None;
         let mut root_id = None;
         let mut root_class = None;
-        let mut head = None;
+        let mut stylesheet = None;
         let mut html_attributes = None;
         let mut body_class = None;
         let mut reports_title = true;
@@ -100,9 +100,9 @@ impl Parse for Args {
                     input.parse::<Token![=]>()?;
                     root_class = Some(input.parse()?);
                 }
-                "head" => {
+                "stylesheet" => {
                     input.parse::<Token![=]>()?;
-                    head = Some(input.parse()?);
+                    stylesheet = Some(input.parse()?);
                 }
                 "html_attributes" => {
                     input.parse::<Token![=]>()?;
@@ -142,15 +142,9 @@ impl Parse for Args {
                     proc_macro2::Span::call_site(),
                 )
             }),
-            head: head.unwrap_or_else(|| {
+            stylesheet: stylesheet.unwrap_or_else(|| {
                 LitStr::new(
-                    r#"<base href="/"/>
-<style>
-html, body { height: 100%; margin: 0; min-height: 0; }
-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-</style>
-<link rel="stylesheet" href="./assets/index.css"/>
-<link rel="stylesheet" href="./assets/theme.css"/>"#,
+                    "./assets/index.css",
                     proc_macro2::Span::call_site(),
                 )
             }),
@@ -205,7 +199,7 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
     };
     let root_id = args.root_id;
     let root_class = args.root_class;
-    let head = args.head;
+    let stylesheet = args.stylesheet;
     let html_attributes = args.html_attributes;
     let body_class = args.body_class;
     let reports_title = args.reports_title;
@@ -242,7 +236,7 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
                 dom_group: #dom_group,
                 root_id: #root_id,
                 root_class: #root_class,
-                head: #head,
+                stylesheet: #stylesheet,
                 html_attributes: #html_attributes,
                 body_class: #body_class,
                 transparent: #transparent,
