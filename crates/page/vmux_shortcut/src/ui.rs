@@ -2,9 +2,9 @@
 
 use std::rc::Rc;
 
-use crate::{ShortcutBinding, ShortcutPressedEvent, ShortcutStroke, ShortcutsEvent};
+use crate::{ShortcutBinding, ShortcutStroke, ShortcutUiState, ShortcutUiStatePatch};
 use dioxus::prelude::*;
-use vmux_ui::hooks::{use_listener, use_theme, use_ui_state};
+use vmux_ui::hooks::{use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::BuiltinIconView;
 use vmux_ui::platform::{now_millis, sleep_ms};
@@ -12,10 +12,25 @@ use vmux_ui::platform::{now_millis, sleep_ms};
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<ShortcutsEvent>();
+    let root = use_ui_state_root::<ShortcutUiState>();
+    let mut state = use_signal(crate::ShortcutCatalog::default);
     let mut probe = use_signal(ShortcutProbe::default);
-    let _pressed = use_listener::<ShortcutPressedEvent, _>(move |event| {
-        record_stroke(probe, state, event.stroke, event.pressed_at_ms);
+    let mut handled_sequence = use_signal(|| 0_u64);
+    use_effect(move || {
+        let event = root.state.read();
+        if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
+            return;
+        }
+        handled_sequence.set(event.sequence);
+        for patch in &event.patches {
+            match patch {
+                ShortcutUiStatePatch::Catalog(catalog) => state.set(catalog.clone()),
+                ShortcutUiStatePatch::Capture(_) => {}
+                ShortcutUiStatePatch::Pressed(event) => {
+                    record_stroke(probe, state, event.stroke.clone(), event.pressed_at_ms)
+                }
+            }
+        }
     });
 
     let probe_value = probe();
@@ -152,7 +167,7 @@ struct ShortcutProbe {
 
 #[derive(Default, PartialEq)]
 struct ShortcutCatalog {
-    shortcuts: ShortcutsEvent,
+    shortcuts: crate::ShortcutCatalog,
 }
 
 struct FilteredShortcutGroup {
@@ -160,8 +175,8 @@ struct FilteredShortcutGroup {
     entry_indices: Vec<usize>,
 }
 
-impl From<ShortcutsEvent> for ShortcutCatalog {
-    fn from(shortcuts: ShortcutsEvent) -> Self {
+impl From<crate::ShortcutCatalog> for ShortcutCatalog {
+    fn from(shortcuts: crate::ShortcutCatalog) -> Self {
         Self { shortcuts }
     }
 }
@@ -192,7 +207,12 @@ impl ShortcutCatalog {
 }
 
 impl ShortcutProbe {
-    fn capture(&mut self, stroke: ShortcutStroke, shortcuts: &ShortcutsEvent, pressed_at_ms: i64) {
+    fn capture(
+        &mut self,
+        stroke: ShortcutStroke,
+        shortcuts: &crate::ShortcutCatalog,
+        pressed_at_ms: i64,
+    ) {
         if stroke.is_plain_escape() {
             self.clear();
             return;
@@ -200,7 +220,12 @@ impl ShortcutProbe {
         self.press(stroke, shortcuts, pressed_at_ms);
     }
 
-    fn press(&mut self, stroke: ShortcutStroke, shortcuts: &ShortcutsEvent, pressed_at_ms: i64) {
+    fn press(
+        &mut self,
+        stroke: ShortcutStroke,
+        shortcuts: &crate::ShortcutCatalog,
+        pressed_at_ms: i64,
+    ) {
         self.generation = self.generation.wrapping_add(1);
         if self.pending
             && self.pending_at_ms.is_some_and(|started| {
@@ -233,7 +258,7 @@ impl ShortcutProbe {
     fn resolve(
         &mut self,
         sequence: &[ShortcutStroke],
-        shortcuts: &ShortcutsEvent,
+        shortcuts: &crate::ShortcutCatalog,
         pressed_at_ms: i64,
     ) -> bool {
         if let Some((_, shortcut)) = shortcuts.resolutions().find(|(_, shortcut)| {
@@ -307,7 +332,7 @@ impl ShortcutProbe {
         }
     }
 
-    fn status(&self, shortcuts: &ShortcutsEvent) -> ProbeStatus {
+    fn status(&self, shortcuts: &crate::ShortcutCatalog) -> ProbeStatus {
         if self.sequence.is_empty() {
             return ProbeStatus::Idle;
         }
@@ -347,7 +372,7 @@ impl ShortcutProbe {
 
 fn record_stroke(
     mut probe: Signal<ShortcutProbe>,
-    state: Signal<ShortcutsEvent>,
+    state: Signal<crate::ShortcutCatalog>,
     stroke: ShortcutStroke,
     pressed_at_ms: i64,
 ) {
@@ -581,8 +606,8 @@ mod tests {
         }
     }
 
-    fn shortcuts() -> ShortcutsEvent {
-        ShortcutsEvent {
+    fn shortcuts() -> crate::ShortcutCatalog {
+        crate::ShortcutCatalog {
             groups: vec![ShortcutGroup {
                 name: "Stack".into(),
                 entries: vec![ShortcutEntry {
@@ -664,7 +689,7 @@ mod tests {
 
     #[test]
     fn escape_can_be_matched_like_any_other_shortcut() {
-        let shortcuts = ShortcutsEvent {
+        let shortcuts = crate::ShortcutCatalog {
             groups: vec![ShortcutGroup {
                 name: "General".into(),
                 entries: vec![ShortcutEntry {
@@ -716,7 +741,7 @@ mod tests {
 
     #[test]
     fn contextual_shortcut_reports_its_required_context() {
-        let shortcuts = ShortcutsEvent {
+        let shortcuts = crate::ShortcutCatalog {
             groups: vec![ShortcutGroup {
                 name: "Chat".into(),
                 entries: vec![ShortcutEntry {
