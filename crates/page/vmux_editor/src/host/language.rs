@@ -24,7 +24,17 @@ impl Plugin for LanguagePlugin {
             FileGotoRequest,
             FileCompletionCommit,
         )>::default())
-            .add_observer(on_editor_language_request)
+            .add_observer(on_editor_hover)
+            .add_observer(on_editor_definition)
+            .add_observer(on_editor_references)
+            .add_observer(on_editor_rename)
+            .add_observer(on_editor_completion)
+            .add_observer(on_editor_declaration)
+            .add_observer(on_editor_type_definition)
+            .add_observer(on_editor_implementation)
+            .add_observer(on_editor_format_document)
+            .add_observer(on_editor_format_selection)
+            .add_observer(on_editor_code_action)
             .add_observer(on_file_hover_request)
             .add_observer(on_file_definition_request)
             .add_observer(on_file_references_request)
@@ -43,86 +53,110 @@ impl Plugin for LanguagePlugin {
 pub(super) struct LspEditDirty;
 
 #[derive(EntityEvent)]
-pub(super) struct WikiCompletionRequest {
-    #[event_target]
-    entity: Entity,
-}
+pub(super) struct WikiCompletionRequest(#[event_target] Entity);
 
-impl WikiCompletionRequest {
-    pub(super) fn new(entity: Entity) -> Self {
-        Self { entity }
+impl From<Entity> for WikiCompletionRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
-}
-
-#[derive(Clone, Copy)]
-enum LanguageOperation {
-    Hover,
-    Definition,
-    References,
-    BeginRename,
-    Completion,
-    Declaration,
-    TypeDefinition,
-    Implementation,
-    FormatDocument,
-    FormatSelection,
-    CodeAction,
 }
 
 #[derive(EntityEvent)]
-pub(super) struct EditorLanguageRequest {
-    #[event_target]
-    entity: Entity,
-    operation: LanguageOperation,
+pub(super) struct EditorHoverRequest(#[event_target] Entity);
+
+impl From<Entity> for EditorHoverRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
+    }
 }
 
-impl EditorLanguageRequest {
-    pub(super) fn hover(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::Hover)
-    }
+#[derive(EntityEvent)]
+pub(super) struct EditorDefinitionRequest(#[event_target] Entity);
 
-    pub(super) fn definition(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::Definition)
+impl From<Entity> for EditorDefinitionRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
+}
 
-    pub(super) fn references(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::References)
+#[derive(EntityEvent)]
+pub(super) struct EditorReferencesRequest(#[event_target] Entity);
+
+impl From<Entity> for EditorReferencesRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
+}
 
-    pub(super) fn begin_rename(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::BeginRename)
+#[derive(EntityEvent)]
+pub(super) struct EditorRenameRequest(#[event_target] Entity);
+
+impl From<Entity> for EditorRenameRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
+}
 
-    pub(super) fn completion(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::Completion)
+#[derive(EntityEvent)]
+pub(super) struct EditorCompletionRequest(#[event_target] Entity);
+
+impl From<Entity> for EditorCompletionRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
+}
 
-    fn declaration(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::Declaration)
+#[derive(EntityEvent)]
+struct EditorDeclarationRequest(#[event_target] Entity);
+
+impl From<Entity> for EditorDeclarationRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
+}
 
-    fn type_definition(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::TypeDefinition)
+#[derive(EntityEvent)]
+struct EditorTypeDefinitionRequest(#[event_target] Entity);
+
+impl From<Entity> for EditorTypeDefinitionRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
+}
 
-    fn implementation(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::Implementation)
+#[derive(EntityEvent)]
+struct EditorImplementationRequest(#[event_target] Entity);
+
+impl From<Entity> for EditorImplementationRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
+}
 
-    fn format_document(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::FormatDocument)
+#[derive(EntityEvent)]
+struct EditorFormatDocumentRequest(#[event_target] Entity);
+
+impl From<Entity> for EditorFormatDocumentRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
+}
 
-    fn format_selection(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::FormatSelection)
+#[derive(EntityEvent)]
+struct EditorFormatSelectionRequest(#[event_target] Entity);
+
+impl From<Entity> for EditorFormatSelectionRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
+}
 
-    fn code_action(entity: Entity) -> Self {
-        Self::new(entity, LanguageOperation::CodeAction)
-    }
+#[derive(EntityEvent)]
+struct EditorCodeActionRequest(#[event_target] Entity);
 
-    fn new(entity: Entity, operation: LanguageOperation) -> Self {
-        Self { entity, operation }
+impl From<Entity> for EditorCodeActionRequest {
+    fn from(entity: Entity) -> Self {
+        Self(entity)
     }
 }
 
@@ -258,90 +292,200 @@ impl WikiCompletion {
     }
 }
 
-fn on_editor_language_request(
-    trigger: On<EditorLanguageRequest>,
+fn on_editor_hover(
+    trigger: On<EditorHoverRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut code_actions: MessageWriter<crate::lsp::manager::LspCodeActionRequest>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
 ) {
-    let entity = trigger.entity;
+    let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    let path = edit.core.buffer.path.clone();
-    match trigger.operation {
-        LanguageOperation::Hover => {
-            let position = edit.caret_lsp_position();
-            manager.hover(
-                entity,
-                &path,
-                position.line,
-                position.utf16_col,
-                position.char_col as u32,
-            );
-        }
-        LanguageOperation::Definition => {
-            let position = edit.caret_lsp_position();
-            manager.definition(entity, &path, position.line, position.utf16_col);
-        }
-        LanguageOperation::References => {
-            let position = edit.caret_lsp_position();
-            manager.references(entity, &path, position.line, position.utf16_col);
-        }
-        LanguageOperation::BeginRename => {
-            let position = edit.caret_lsp_position();
-            let current = position.word();
-            if current.is_empty() || !browsers.can_emit_to(&entity) {
-                return;
-            }
-            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-                entity,
-                &FileRenameBeginEvent {
-                    line: position.line,
-                    col: position.char_col as u32,
-                    current,
-                },
-            ));
-        }
-        LanguageOperation::Completion => {
-            let position = edit.caret_lsp_position();
-            manager.completion(
-                entity,
-                &path,
-                position.line,
-                position.utf16_col,
-                position.word_start_col(),
-            );
-        }
-        LanguageOperation::Declaration => {
-            let position = edit.caret_lsp_position();
-            manager.declaration(entity, &path, position.line, position.utf16_col);
-        }
-        LanguageOperation::TypeDefinition => {
-            let position = edit.caret_lsp_position();
-            manager.type_definition(entity, &path, position.line, position.utf16_col);
-        }
-        LanguageOperation::Implementation => {
-            let position = edit.caret_lsp_position();
-            manager.implementation(entity, &path, position.line, position.utf16_col);
-        }
-        LanguageOperation::FormatDocument => manager.format_document(entity, &path),
-        LanguageOperation::FormatSelection => {
-            let (from, to) = edit.core.selected_lines();
-            manager.format_range(entity, &path, from, to);
-        }
-        LanguageOperation::CodeAction => {
-            let (from_line, to_line) = edit.core.selected_lines();
-            code_actions.write(crate::lsp::manager::LspCodeActionRequest {
-                entity,
-                path,
-                from_line,
-                to_line,
-            });
-        }
+    let position = edit.caret_lsp_position();
+    manager.hover(
+        entity,
+        &edit.core.buffer.path,
+        position.line,
+        position.utf16_col,
+        position.char_col as u32,
+    );
+}
+
+fn on_editor_definition(
+    trigger: On<EditorDefinitionRequest>,
+    views: Query<&Editor>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    let position = edit.caret_lsp_position();
+    manager.definition(
+        entity,
+        &edit.core.buffer.path,
+        position.line,
+        position.utf16_col,
+    );
+}
+
+fn on_editor_references(
+    trigger: On<EditorReferencesRequest>,
+    views: Query<&Editor>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    let position = edit.caret_lsp_position();
+    manager.references(
+        entity,
+        &edit.core.buffer.path,
+        position.line,
+        position.utf16_col,
+    );
+}
+
+fn on_editor_rename(
+    trigger: On<EditorRenameRequest>,
+    views: Query<&Editor>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    let position = edit.caret_lsp_position();
+    let current = position.word();
+    if current.is_empty() || !browsers.can_emit_to(&entity) {
+        return;
     }
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &FileRenameBeginEvent {
+            line: position.line,
+            col: position.char_col as u32,
+            current,
+        },
+    ));
+}
+
+fn on_editor_completion(
+    trigger: On<EditorCompletionRequest>,
+    views: Query<&Editor>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    let position = edit.caret_lsp_position();
+    manager.completion(
+        entity,
+        &edit.core.buffer.path,
+        position.line,
+        position.utf16_col,
+        position.word_start_col(),
+    );
+}
+
+fn on_editor_declaration(
+    trigger: On<EditorDeclarationRequest>,
+    views: Query<&Editor>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    let position = edit.caret_lsp_position();
+    manager.declaration(
+        entity,
+        &edit.core.buffer.path,
+        position.line,
+        position.utf16_col,
+    );
+}
+
+fn on_editor_type_definition(
+    trigger: On<EditorTypeDefinitionRequest>,
+    views: Query<&Editor>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    let position = edit.caret_lsp_position();
+    manager.type_definition(
+        entity,
+        &edit.core.buffer.path,
+        position.line,
+        position.utf16_col,
+    );
+}
+
+fn on_editor_implementation(
+    trigger: On<EditorImplementationRequest>,
+    views: Query<&Editor>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    let position = edit.caret_lsp_position();
+    manager.implementation(
+        entity,
+        &edit.core.buffer.path,
+        position.line,
+        position.utf16_col,
+    );
+}
+
+fn on_editor_format_document(
+    trigger: On<EditorFormatDocumentRequest>,
+    views: Query<&Editor>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    manager.format_document(entity, &edit.core.buffer.path);
+}
+
+fn on_editor_format_selection(
+    trigger: On<EditorFormatSelectionRequest>,
+    views: Query<&Editor>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    let (from, to) = edit.core.selected_lines();
+    manager.format_range(entity, &edit.core.buffer.path, from, to);
+}
+
+fn on_editor_code_action(
+    trigger: On<EditorCodeActionRequest>,
+    views: Query<&Editor>,
+    mut requests: MessageWriter<crate::lsp::manager::LspCodeActionRequest>,
+) {
+    let entity = trigger.event_target();
+    let Ok(edit) = views.get(entity) else {
+        return;
+    };
+    let (from_line, to_line) = edit.core.selected_lines();
+    requests.write(crate::lsp::manager::LspCodeActionRequest {
+        entity,
+        path: edit.core.buffer.path.clone(),
+        from_line,
+        to_line,
+    });
 }
 
 fn on_wiki_completion_request(
@@ -354,7 +498,7 @@ fn on_wiki_completion_request(
     let Some(index) = index.as_deref() else {
         return;
     };
-    let entity = trigger.entity;
+    let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
@@ -409,21 +553,30 @@ fn on_file_editor_action(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let request = match trigger.event().payload.action {
+    match trigger.event().payload.action {
         EditorAction::CommandPalette => {
             command_invocations.write(vmux_command::CommandInvocation::new(
                 entity,
                 "browser_open_command_bar",
             ));
-            return;
         }
-        EditorAction::CodeAction => EditorLanguageRequest::code_action(entity),
-        EditorAction::GotoDeclaration => EditorLanguageRequest::declaration(entity),
-        EditorAction::GotoTypeDefinition => EditorLanguageRequest::type_definition(entity),
-        EditorAction::GotoImplementation => EditorLanguageRequest::implementation(entity),
-        EditorAction::FormatDocument => EditorLanguageRequest::format_document(entity),
-        EditorAction::FormatSelection => EditorLanguageRequest::format_selection(entity),
-        EditorAction::Rename => EditorLanguageRequest::begin_rename(entity),
+        EditorAction::CodeAction => commands.trigger(EditorCodeActionRequest::from(entity)),
+        EditorAction::GotoDeclaration => {
+            commands.trigger(EditorDeclarationRequest::from(entity));
+        }
+        EditorAction::GotoTypeDefinition => {
+            commands.trigger(EditorTypeDefinitionRequest::from(entity));
+        }
+        EditorAction::GotoImplementation => {
+            commands.trigger(EditorImplementationRequest::from(entity));
+        }
+        EditorAction::FormatDocument => {
+            commands.trigger(EditorFormatDocumentRequest::from(entity));
+        }
+        EditorAction::FormatSelection => {
+            commands.trigger(EditorFormatSelectionRequest::from(entity));
+        }
+        EditorAction::Rename => commands.trigger(EditorRenameRequest::from(entity)),
         EditorAction::Copy => {
             commands.trigger(EditRequest::new(
                 entity,
@@ -433,7 +586,6 @@ fn on_file_editor_action(
                     register: None,
                 }],
             ));
-            return;
         }
         EditorAction::Cut => {
             commands.trigger(EditRequest::new(
@@ -444,21 +596,17 @@ fn on_file_editor_action(
                     register: None,
                 }],
             ));
-            return;
         }
         EditorAction::Paste => {
             commands.trigger(EditRequest::new(entity, vec![EditCommand::Paste]));
-            return;
         }
         EditorAction::ChangeAllOccurrences => {
             commands.trigger(EditRequest::new(
                 entity,
                 vec![EditCommand::SelectAllOccurrences],
             ));
-            return;
         }
-    };
-    commands.trigger(request);
+    }
 }
 
 fn on_file_code_action_pick(
