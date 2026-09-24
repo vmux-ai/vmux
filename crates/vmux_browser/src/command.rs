@@ -19,7 +19,10 @@ use vmux_layout::Browser;
 use vmux_layout::event::{SideSheetRequest, SideSheetResizeEvent};
 use vmux_layout::{
     Header, LayoutCef,
-    event::{HeaderRequest, ReloadEffect},
+    event::{
+        HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
+        ReloadEffect,
+    },
     pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{
         SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded,
@@ -40,7 +43,10 @@ impl Plugin for CommandPlugin {
             CommandTypePlugin::<ZoomRequest>::default(),
             CommandTypePlugin::<ShowDevToolsRequest>::default(),
         ))
-        .add_observer(on_header_request)
+        .add_observer(on_header_back)
+        .add_observer(on_header_forward)
+        .add_observer(on_header_reload)
+        .add_observer(on_header_address_focus)
         .add_observer(on_side_sheet_request)
         .add_observer(on_side_sheet_resize)
         .add_observer(on_reload_notify_header)
@@ -431,17 +437,44 @@ impl ActiveStack<'_, '_> {
     }
 }
 
-fn on_header_request(
-    trigger: On<BinReceive<HeaderRequest>>,
+fn on_header_back(
+    trigger: On<BinReceive<HeaderBackRequest>>,
     mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
-    let id = match trigger.event().payload {
-        HeaderRequest::PreviousPage => "browser_prev_page",
-        HeaderRequest::NextPage => "browser_next_page",
-        HeaderRequest::Reload => "browser_reload",
-        HeaderRequest::FocusAddressBar => "browser_open_page_in_command_bar",
-    };
-    command_invocations.write(CommandInvocation::new(trigger.event().webview, id));
+    command_invocations.write(CommandInvocation::new(
+        trigger.event().webview,
+        "browser_prev_page",
+    ));
+}
+
+fn on_header_forward(
+    trigger: On<BinReceive<HeaderForwardRequest>>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+) {
+    command_invocations.write(CommandInvocation::new(
+        trigger.event().webview,
+        "browser_next_page",
+    ));
+}
+
+fn on_header_reload(
+    trigger: On<BinReceive<HeaderReloadRequest>>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+) {
+    command_invocations.write(CommandInvocation::new(
+        trigger.event().webview,
+        "browser_reload",
+    ));
+}
+
+fn on_header_address_focus(
+    trigger: On<BinReceive<HeaderAddressFocusRequest>>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+) {
+    command_invocations.write(CommandInvocation::new(
+        trigger.event().webview,
+        "browser_open_page_in_command_bar",
+    ));
 }
 
 fn on_reload_notify_header(
@@ -740,11 +773,13 @@ mod tests {
             Self::over(history)
         }
 
-        fn pressed(&mut self, request: HeaderRequest) {
-            self.app.world_mut().trigger(BinReceive::<HeaderRequest> {
-                webview: Entity::PLACEHOLDER,
-                payload: request,
-            });
+        fn pressed_back(&mut self) {
+            self.app
+                .world_mut()
+                .trigger(BinReceive::<HeaderBackRequest> {
+                    webview: Entity::PLACEHOLDER,
+                    payload: HeaderBackRequest,
+                });
             self.app.update();
             self.app.update();
         }
@@ -804,7 +839,7 @@ mod tests {
     fn the_back_arrow_walks_host_history_instead_of_asking_chromium() {
         let mut arrow = NavArrow::over_a_natively_hosted_page();
 
-        arrow.pressed(HeaderRequest::PreviousPage);
+        arrow.pressed_back();
 
         assert!(
             arrow.walked_back(),
@@ -820,7 +855,7 @@ mod tests {
     fn the_back_arrow_still_asks_chromium_for_a_page_chromium_renders() {
         let mut arrow = NavArrow::over(());
 
-        arrow.pressed(HeaderRequest::PreviousPage);
+        arrow.pressed_back();
 
         assert_eq!(arrow.cef_navigations(), vec![arrow.view]);
     }

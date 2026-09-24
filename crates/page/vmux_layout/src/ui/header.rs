@@ -19,7 +19,8 @@ use super::state::LayoutUi;
 use super::tab_drag::TabDrag;
 use super::window_drag::WindowDragRegion;
 use crate::event::{
-    HeaderRequest, StackNavigationState, StackRow, TabListState, TabRow, TabsRequest,
+    HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
+    StackNavigationState, StackRow, TabListState, TabRow, TabsRequest,
 };
 use crate::extension::ExtensionBar;
 use crate::remote::RemoteControl;
@@ -161,19 +162,19 @@ fn HeaderContent() -> Element {
                 if let Some(err) = stacks_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    NavButton { label: translate("layout-back"), command: HeaderRequest::PreviousPage, disabled: !can_go_back,
+                    NavButton { label: translate("layout-back"), disabled: !can_go_back, onclick: move |_| { let _ = send(&HeaderBackRequest); },
                         Icon { class: "h-4 w-4",
                             path { d: "M19 12H5" }
                             path { d: "M12 19l-7-7 7-7" }
                         }
                     }
-                    NavButton { label: translate("layout-forward"), command: HeaderRequest::NextPage, disabled: !can_go_forward,
+                    NavButton { label: translate("layout-forward"), disabled: !can_go_forward, onclick: move |_| { let _ = send(&HeaderForwardRequest); },
                         Icon { class: "h-4 w-4",
                             path { d: "M5 12h14" }
                             path { d: "M12 5l7 7-7 7" }
                         }
                     }
-                    NavButton { label: translate("layout-reload"), command: HeaderRequest::Reload, disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()),
+                    NavButton { label: translate("layout-reload"), disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()), onclick: move |_| { let _ = send(&HeaderReloadRequest); },
                         span {
                             key: "{reload_key}",
                             class: if reload_key > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
@@ -495,8 +496,8 @@ fn NewTabButton() -> Element {
 #[component]
 fn NavButton(
     label: String,
-    command: HeaderRequest,
     #[props(default)] disabled: bool,
+    onclick: EventHandler<MouseEvent>,
     children: Element,
 ) -> Element {
     let class = if disabled {
@@ -511,9 +512,9 @@ fn NavButton(
             title: "{label}",
             disabled,
             class,
-            onclick: move |_| {
+            onclick: move |event| {
                 if !disabled {
-                    let _ = send(&command);
+                    onclick.call(event);
                 }
             },
             {children}
@@ -535,7 +536,7 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
         div {
             class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2",
             onclick: move |_| {
-                let _ = send(&HeaderRequest::FocusAddressBar);
+                let _ = send(&HeaderAddressFocusRequest);
             },
             if !has_content {
                 span { class: "truncate text-ui {empty_class}", {translate("layout-new-stack")} }
