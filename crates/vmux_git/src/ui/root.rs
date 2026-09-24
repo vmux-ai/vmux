@@ -128,7 +128,7 @@ pub fn Page() -> Element {
                         if repository.files.is_empty() {
                             false
                         } else {
-                            GitWorkspace::operate(&repository.repo_root, GitOperation::StashPush);
+                            GitOperation::StashPush.send(repository.repo_root.clone());
                             true
                         }
                     }
@@ -136,7 +136,7 @@ pub fn Page() -> Element {
                         let can_amend = !repository.commits.is_empty()
                             && repository.files.iter().any(|entry| entry.staged);
                         if can_amend {
-                            GitWorkspace::operate(&repository.repo_root, GitOperation::Amend);
+                            GitOperation::Amend.send(repository.repo_root.clone());
                         }
                         can_amend
                     }
@@ -222,7 +222,7 @@ pub fn Page() -> Element {
                                 branch: branch.name.clone(),
                             },
                         };
-                        GitWorkspace::operate(&repository.repo_root, operation);
+                        operation.send(repository.repo_root.clone());
                         true
                     }
                     (GitPanel::Branches, "n")
@@ -275,7 +275,7 @@ pub fn Page() -> Element {
                                 commit: commit.sha.clone(),
                             },
                         };
-                        GitWorkspace::operate(&repository.repo_root, operation);
+                        operation.send(repository.repo_root.clone());
                         true
                     }
                     (GitPanel::Stash, "g") | (GitPanel::Stash, "d") => {
@@ -295,7 +295,7 @@ pub fn Page() -> Element {
                                 reference: stash.reference.clone(),
                             }
                         };
-                        GitWorkspace::operate(&repository.repo_root, operation);
+                        operation.send(repository.repo_root.clone());
                         true
                     }
                     _ => false,

@@ -222,7 +222,7 @@ pub(super) fn BranchesCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         let branch = branch.name.clone();
-                        move |_| GitWorkspace::operate(&repo_root, GitOperation::Rebase { branch: branch.clone() })
+                        move |_| GitOperation::Rebase { branch: branch.clone() }.send(repo_root.clone())
                     },
                 }
                 HeaderActionButton {
@@ -234,7 +234,7 @@ pub(super) fn BranchesCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         let branch = branch.name.clone();
-                        move |_| GitWorkspace::operate(&repo_root, GitOperation::Merge { branch: branch.clone() })
+                        move |_| GitOperation::Merge { branch: branch.clone() }.send(repo_root.clone())
                     },
                 }
                 HeaderActionButton {
@@ -246,7 +246,7 @@ pub(super) fn BranchesCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         let branch = branch.name.clone();
-                        move |_| GitWorkspace::operate(&repo_root, GitOperation::FastForward { branch: branch.clone() })
+                        move |_| GitOperation::FastForward { branch: branch.clone() }.send(repo_root.clone())
                     },
                 }
             }

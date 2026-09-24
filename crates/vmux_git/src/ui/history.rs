@@ -35,7 +35,7 @@ pub(super) fn HistoryCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         let commit = commit.sha.clone();
-                        move |_| GitWorkspace::operate(&repo_root, GitOperation::CheckoutCommit { commit: commit.clone() })
+                        move |_| GitOperation::CheckoutCommit { commit: commit.clone() }.send(repo_root.clone())
                     },
                 }
                 HeaderActionButton {
@@ -47,7 +47,7 @@ pub(super) fn HistoryCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         let commit = commit.sha.clone();
-                        move |_| GitWorkspace::operate(&repo_root, GitOperation::CherryPick { commit: commit.clone() })
+                        move |_| GitOperation::CherryPick { commit: commit.clone() }.send(repo_root.clone())
                     },
                 }
                 HeaderActionButton {
@@ -59,7 +59,7 @@ pub(super) fn HistoryCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         let commit = commit.sha.clone();
-                        move |_| GitWorkspace::operate(&repo_root, GitOperation::Revert { commit: commit.clone() })
+                        move |_| GitOperation::Revert { commit: commit.clone() }.send(repo_root.clone())
                     },
                 }
             }
@@ -142,7 +142,7 @@ pub(super) fn StashCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         let reference = stash.reference.clone();
-                        move |_| GitWorkspace::operate(&repo_root, GitOperation::StashPop { reference: reference.clone() })
+                        move |_| GitOperation::StashPop { reference: reference.clone() }.send(repo_root.clone())
                     },
                 }
                 HeaderActionButton {
@@ -154,7 +154,7 @@ pub(super) fn StashCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         let reference = stash.reference.clone();
-                        move |_| GitWorkspace::operate(&repo_root, GitOperation::StashDrop { reference: reference.clone() })
+                        move |_| GitOperation::StashDrop { reference: reference.clone() }.send(repo_root.clone())
                     },
                 }
             }

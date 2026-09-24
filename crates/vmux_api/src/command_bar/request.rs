@@ -1,37 +1,84 @@
 use super::CommandBarPick;
 
 #[vmux_api::ui_event(Eq, targets = ["command-bar", "start", "layout"])]
-pub enum CommandBarRequest {
-    Prompt {
-        text: String,
-        target_url: Option<String>,
-        attachments: Vec<crate::prompt_media::ChatSubmitAttachment>,
-    },
-    Open {
-        value: String,
-        open: Option<crate::open_target::OpenTarget>,
-    },
-    Terminal {
-        value: String,
-    },
-    Command {
-        id: String,
-        open: Option<crate::open_target::OpenTarget>,
-    },
-    Space {
-        id: String,
-    },
-    SwitchTab {
-        pane: u64,
-        index: usize,
-    },
-    Ex {
-        line: String,
-    },
-    Pick {
-        pick: CommandBarPick,
-    },
-    Dismiss,
+pub struct PromptRequest {
+    pub text: String,
+    pub target_url: Option<String>,
+    pub attachments: Vec<crate::prompt_media::ChatSubmitAttachment>,
+}
+
+impl PromptRequest {
+    pub fn new(
+        text: &str,
+        target_url: &str,
+        attachments: &[crate::prompt_media::ChatAttachment],
+    ) -> Self {
+        let mut submitted = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            submitted.push(crate::prompt_media::ChatSubmitAttachment {
+                path: attachment.path.clone(),
+                name: attachment.name.clone(),
+                mime_type: attachment.mime_type.clone(),
+                size: attachment.size,
+            });
+        }
+        Self {
+            text: text.to_string(),
+            target_url: (!target_url.is_empty()).then(|| target_url.to_string()),
+            attachments: submitted,
+        }
+    }
+}
+
+#[vmux_api::ui_event(Eq, targets = ["command-bar", "start", "layout"])]
+pub struct OpenRequest {
+    pub value: String,
+    pub open: Option<crate::open_target::OpenTarget>,
+}
+
+impl OpenRequest {
+    pub fn new(value: &str, open: Option<crate::open_target::OpenTarget>) -> Self {
+        Self {
+            value: value.to_string(),
+            open,
+        }
+    }
+}
+
+#[vmux_api::ui_event(Eq, targets = ["command-bar", "start", "layout"])]
+pub struct TerminalRequest {
+    pub value: String,
+}
+
+#[vmux_api::ui_event(Eq, targets = ["command-bar", "start", "layout"])]
+pub struct InvokeRequest {
+    pub id: String,
+    pub open: Option<crate::open_target::OpenTarget>,
+}
+
+#[vmux_api::ui_event(Eq, targets = ["command-bar", "start", "layout"])]
+pub struct SwitchSpaceRequest {
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Eq, targets = ["command-bar", "start", "layout"])]
+pub struct SwitchTabRequest {
+    pub pane: u64,
+    pub index: usize,
+}
+
+#[vmux_api::ui_event(Eq, targets = ["command-bar", "start", "layout"])]
+pub struct ExRequest {
+    pub line: String,
+}
+
+#[vmux_api::ui_event(Eq, targets = ["command-bar", "start", "layout"])]
+pub struct PickRequest {
+    pub pick: CommandBarPick,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq, targets = ["command-bar", "start", "layout"])]
+pub struct DismissRequest;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,34 +184,4 @@ pub struct StartSelectModel {
 pub struct StartSelectMode {
     pub agent_key: String,
     pub mode_id: String,
-}
-
-impl CommandBarRequest {
-    pub fn open(value: &str, open: Option<crate::open_target::OpenTarget>) -> Self {
-        Self::Open {
-            value: value.to_string(),
-            open,
-        }
-    }
-
-    pub fn prompt(
-        text: &str,
-        target_url: &str,
-        attachments: &[crate::prompt_media::ChatAttachment],
-    ) -> Self {
-        let mut submitted = Vec::with_capacity(attachments.len());
-        for attachment in attachments {
-            submitted.push(crate::prompt_media::ChatSubmitAttachment {
-                path: attachment.path.clone(),
-                name: attachment.name.clone(),
-                mime_type: attachment.mime_type.clone(),
-                size: attachment.size,
-            });
-        }
-        Self::Prompt {
-            text: text.to_string(),
-            target_url: (!target_url.is_empty()).then(|| target_url.to_string()),
-            attachments: submitted,
-        }
-    }
 }

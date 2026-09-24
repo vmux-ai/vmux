@@ -5,6 +5,7 @@ mod expand;
 mod named_fields;
 mod native_page;
 mod string_id;
+mod ui_event_variants;
 mod ui_state;
 mod variant_names;
 
@@ -43,6 +44,15 @@ pub fn host_event(args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn ui_event(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match bin_event::expand(args.into(), input, bin_event::Direction::Ui) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn ui_event_variants(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match ui_event_variants::expand(args.into(), input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }

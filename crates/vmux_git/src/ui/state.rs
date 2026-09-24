@@ -426,21 +426,17 @@ impl GitPageState {
                 }
                 let mut pending_checkout = self.pending_branch_checkout;
                 pending_checkout.set(branch.clone());
-                GitWorkspace::operate(
-                    &workspace,
-                    GitOperation::CreateBranch {
-                        branch,
-                        start_point: base.clone(),
-                    },
-                );
+                GitOperation::CreateBranch {
+                    branch,
+                    start_point: base.clone(),
+                }
+                .send(workspace);
             }
             BranchPrompt::Delete { branch } => {
-                GitWorkspace::operate(
-                    &workspace,
-                    GitOperation::DeleteBranch {
-                        branch: branch.clone(),
-                    },
-                );
+                GitOperation::DeleteBranch {
+                    branch: branch.clone(),
+                }
+                .send(workspace);
             }
         }
         true

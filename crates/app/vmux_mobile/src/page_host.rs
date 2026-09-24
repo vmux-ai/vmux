@@ -16,7 +16,13 @@ use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
 use crate::runtime::World;
-use vmux_api::command_bar::{CommandBarRequest, CommandBarUiState};
+use vmux_api::command_bar::{
+    CommandBarUiState, DismissRequest as CommandBarDismissRequest,
+    ExRequest as CommandBarExRequest, InvokeRequest as CommandBarInvokeRequest,
+    OpenRequest as CommandBarOpenRequest, PickRequest as CommandBarPickRequest,
+    PromptRequest as CommandBarPromptRequest, SwitchSpaceRequest, SwitchTabRequest,
+    TerminalRequest as CommandBarTerminalRequest,
+};
 use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
 use vmux_api::room::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
@@ -125,7 +131,15 @@ impl PageHost for MobileHost {
                 Ok(())
             }
             ChatAttachPaths::ID => self.attach(decode(bytes)?),
-            CommandBarRequest::ID => self.act(decode(bytes)?),
+            CommandBarPromptRequest::ID => self.prompt(decode(bytes)?),
+            SwitchTabRequest::ID => self.switch_tab(decode(bytes)?),
+            CommandBarDismissRequest::ID => Ok(()),
+            CommandBarOpenRequest::ID
+            | CommandBarTerminalRequest::ID
+            | CommandBarInvokeRequest::ID
+            | SwitchSpaceRequest::ID
+            | CommandBarExRequest::ID
+            | CommandBarPickRequest::ID => Err(EventListenerError::Unsupported),
             StartDataRequest::ID => Ok(()),
             _ => Err(EventListenerError::Unsupported),
         }
@@ -245,30 +259,22 @@ impl MobileHost {
         Ok(())
     }
 
-    fn act(&self, action: CommandBarRequest) -> Result<(), EventListenerError> {
-        match action {
-            CommandBarRequest::Prompt {
-                text, target_url, ..
-            } => {
-                self.session
-                    .start_chat(self.api.clone(), self.sessions, text, target_url);
-                Ok(())
-            }
-            CommandBarRequest::SwitchTab { index, .. } => {
-                let Some(session) = self.sessions.read().get(index).cloned() else {
-                    return Err(EventListenerError::Unsupported);
-                };
-                self.session.open(session);
-                Ok(())
-            }
-            CommandBarRequest::Dismiss => Ok(()),
-            CommandBarRequest::Open { .. }
-            | CommandBarRequest::Terminal { .. }
-            | CommandBarRequest::Command { .. }
-            | CommandBarRequest::Space { .. }
-            | CommandBarRequest::Ex { .. }
-            | CommandBarRequest::Pick { .. } => Err(EventListenerError::Unsupported),
-        }
+    fn prompt(&self, request: CommandBarPromptRequest) -> Result<(), EventListenerError> {
+        self.session.start_chat(
+            self.api.clone(),
+            self.sessions,
+            request.text,
+            request.target_url,
+        );
+        Ok(())
+    }
+
+    fn switch_tab(&self, request: SwitchTabRequest) -> Result<(), EventListenerError> {
+        let Some(session) = self.sessions.read().get(request.index).cloned() else {
+            return Err(EventListenerError::Unsupported);
+        };
+        self.session.open(session);
+        Ok(())
     }
 
     fn agent_call<F, Fut>(&self, call: F) -> Result<(), EventListenerError>

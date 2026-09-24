@@ -47,16 +47,16 @@ pub enum SpaceRequest {
 }
 
 #[vmux_api::ui_event(Eq, targets = ["spaces", "layout", "git"])]
-pub enum ProjectRequest {
-    Activate {
-        path: String,
-        branch: String,
-        checkout: String,
-        pane_id: Option<u64>,
-    },
-    Forget {
-        path: String,
-    },
+pub struct ProjectActivateRequest {
+    pub path: String,
+    pub branch: String,
+    pub checkout: String,
+    pub pane_id: Option<u64>,
+}
+
+#[vmux_api::ui_event(Eq, target = "spaces")]
+pub struct ProjectForgetRequest {
+    pub path: String,
 }
 
 #[vmux_api::contract(Default, Eq)]

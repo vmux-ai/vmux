@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use vmux_core::event::PageContextRequest;
-use vmux_core::event::space::ProjectRequest;
+use vmux_core::event::space::ProjectActivateRequest;
 use vmux_git::state::{GitPageContext, GitUiState, GitWorkspaceChanged};
 
 use crate::settings::EffectiveStartupDir;
@@ -16,7 +16,7 @@ pub struct PageContextPlugin;
 
 impl Plugin for PageContextPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(PageContextRequest, ProjectRequest)>::default())
+        app.add_plugins(UiEventPlugin::<(PageContextRequest, ProjectActivateRequest)>::default())
             .add_observer(on_page_context_request)
             .add_observer(on_project_activate);
     }
@@ -172,7 +172,7 @@ fn on_page_context_request(
 }
 
 fn on_project_activate(
-    trigger: On<BinReceive<ProjectRequest>>,
+    trigger: On<BinReceive<ProjectActivateRequest>>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
@@ -182,15 +182,12 @@ fn on_project_activate(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let ProjectRequest::Activate {
+    let ProjectActivateRequest {
         path,
         branch,
         checkout,
         pane_id,
-    } = &trigger.event().payload
-    else {
-        return;
-    };
+    } = &trigger.event().payload;
     let mut current = pane_id
         .and_then(|pane_id| {
             pane_entities
@@ -260,7 +257,7 @@ mod tests {
 
         app.world_mut().trigger(BinReceive {
             webview,
-            payload: ProjectRequest::Activate {
+            payload: ProjectActivateRequest {
                 path: project.path().to_string_lossy().into_owned(),
                 branch: String::new(),
                 checkout: String::new(),

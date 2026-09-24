@@ -9,7 +9,7 @@ use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use super::{
-    PaneOpenRequest, PaneRequest, first_stack_in_pane,
+    OpenRequest, first_stack_in_pane,
     focus::PendingCursorWarp,
     identity::{SpawnCounter, SpawnSeq},
     tree::{
@@ -42,7 +42,7 @@ pub(super) struct DirectionalOpenPlugin;
 
 impl Plugin for DirectionalOpenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PaneRequest>()
+        app.add_message::<OpenRequest>()
             .add_systems(Update, handle_open_in_pane.in_set(LayoutRequestSet::Handle));
     }
 }
@@ -858,7 +858,7 @@ fn find_sibling_pane(
 }
 
 fn handle_open_in_pane(
-    mut reader: MessageReader<PaneRequest>,
+    mut reader: MessageReader<OpenRequest>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -874,14 +874,11 @@ fn handle_open_in_pane(
     mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for request in reader.read() {
-        let PaneRequest::Open(PaneOpenRequest {
+        let OpenRequest {
             direction,
             target,
             mode,
             url,
-        }) = request
-        else {
-            continue;
         };
 
         let (_, active_pane_opt, _) = focused_stack(
