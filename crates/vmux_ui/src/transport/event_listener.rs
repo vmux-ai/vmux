@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::transport::Host;
 use crate::transport::HostPayload;
-use vmux_api::{HostEvent, PageReady, UiEvent};
+use vmux_api::{PageReady, UiEvent, UiState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventListenerError {
@@ -49,9 +49,9 @@ where
     Host::emit(T::TARGET, T::id(), &bytes)
 }
 
-pub fn try_cef_bin_listen<T, F>(on_event: F) -> Result<(), EventListenerError>
+pub(crate) fn listen_ui_state<T, F>(on_event: F) -> Result<(), EventListenerError>
 where
-    T: HostEvent + rkyv::Archive + 'static,
+    T: UiState + rkyv::Archive + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     F: FnMut(T) + 'static,
@@ -68,6 +68,6 @@ where
     )
 }
 
-pub fn try_emit_page_ready() -> Result<(), EventListenerError> {
+pub(crate) fn try_emit_page_ready() -> Result<(), EventListenerError> {
     send(&PageReady)
 }

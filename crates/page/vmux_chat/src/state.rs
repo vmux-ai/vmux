@@ -62,7 +62,7 @@ impl ChatUiStateProjection {
             sequence: projection.sequence,
             patches: std::mem::take(&mut projection.patches),
         };
-        let Some(emit) = PageEmit::from_event(&state) else {
+        let Some(emit) = PageEmit::from_state(&state) else {
             return;
         };
         emits.write(emit);
