@@ -20,7 +20,14 @@ pub struct ServiceUnavailableEvent {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[vmux_api::host_event(target = "terminal")]
 pub struct TermThemeEvent {
@@ -91,7 +98,14 @@ pub struct TermViewportEvent {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[vmux_api::host_event(target = "terminal")]
 pub struct TermViewportPatch {
@@ -237,4 +251,58 @@ pub struct TermResizeEvent {
 #[vmux_api::host_event(target = "terminal")]
 pub struct TermTitleEvent {
     pub title: String,
+}
+
+#[vmux_api::payload]
+#[derive(vmux_api::UiStatePatch)]
+pub enum TerminalUiStatePatch {
+    ServiceUnavailable(ServiceUnavailableEvent),
+    Viewport(TermViewportPatch),
+    Theme(TermThemeEvent),
+    Title(TermTitleEvent),
+    Loading(TermLoadingEvent),
+    PromptDraft(AgentPromptDraftEvent),
+}
+
+#[vmux_api::payload(Default)]
+#[vmux_api::host_event(target = "terminal")]
+#[derive(vmux_api::UiState)]
+pub struct TerminalUiStateEvent {
+    pub sequence: u64,
+    pub patches: Vec<TerminalUiStatePatch>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_ui_state_preserves_patch_order() {
+        let event = TerminalUiStateEvent {
+            sequence: 5,
+            patches: vec![
+                TermTitleEvent {
+                    title: "Terminal".into(),
+                }
+                .into(),
+                TermLoadingEvent {
+                    loading: true,
+                    label: "Agent".into(),
+                    segment: "agent".into(),
+                }
+                .into(),
+            ],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
+        let decoded =
+            rkyv::from_bytes::<TerminalUiStateEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded.sequence, 5);
+        assert!(matches!(
+            decoded.patches.as_slice(),
+            [
+                TerminalUiStatePatch::Title(_),
+                TerminalUiStatePatch::Loading(_)
+            ]
+        ));
+    }
 }

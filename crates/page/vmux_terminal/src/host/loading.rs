@@ -1,7 +1,6 @@
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_core::page::PageReady;
 use vmux_service::protocol::ProcessId;
 
@@ -100,26 +99,28 @@ fn arm_agent_loading(
             commands.entity(entity).insert(PromptCapture::default());
         }
         if let Some(capture) = capture {
-            commands.trigger(BinHostEmitEvent::from_event(
+            crate::TerminalUiStateUpdates::write(
+                &mut commands,
                 entity,
                 &AgentPromptDraftEvent {
                     draft: capture.draft.clone(),
                     skipped: capture.skipped,
                 },
-            ));
+            );
         }
         if !announced {
             continue;
         }
         let (label, segment) = labels(session);
-        commands.trigger(BinHostEmitEvent::from_event(
+        crate::TerminalUiStateUpdates::write(
+            &mut commands,
             entity,
             &TermLoadingEvent {
                 loading: true,
                 label,
                 segment,
             },
-        ));
+        );
     }
 }
 
@@ -140,14 +141,15 @@ fn announce_slow_shell_boot(
         }
         loading.announced = true;
         let (label, segment) = labels(None);
-        commands.trigger(BinHostEmitEvent::from_event(
+        crate::TerminalUiStateUpdates::write(
+            &mut commands,
             entity,
             &TermLoadingEvent {
                 loading: true,
                 label,
                 segment,
             },
-        ));
+        );
     }
 }
 
@@ -176,26 +178,28 @@ fn arm_agent_loading_on_restart(
             commands.entity(entity).insert(PromptCapture::default());
         }
         if let Some(capture) = capture {
-            commands.trigger(BinHostEmitEvent::from_event(
+            crate::TerminalUiStateUpdates::write(
+                &mut commands,
                 entity,
                 &AgentPromptDraftEvent {
                     draft: capture.draft.clone(),
                     skipped: capture.skipped,
                 },
-            ));
+            );
         }
         if !announced {
             continue;
         }
         let (label, segment) = labels(session);
-        commands.trigger(BinHostEmitEvent::from_event(
+        crate::TerminalUiStateUpdates::write(
+            &mut commands,
             entity,
             &TermLoadingEvent {
                 loading: true,
                 label,
                 segment,
             },
-        ));
+        );
     }
 }
 
@@ -236,14 +240,15 @@ fn clear_agent_loading(
             continue;
         }
         let (label, segment) = labels(session);
-        commands.trigger(BinHostEmitEvent::from_event(
+        crate::TerminalUiStateUpdates::write(
+            &mut commands,
             entity,
             &TermLoadingEvent {
                 loading: false,
                 label,
                 segment,
             },
-        ));
+        );
     }
 }
 

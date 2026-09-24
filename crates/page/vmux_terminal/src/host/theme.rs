@@ -138,7 +138,7 @@ fn sync_terminal_theme(
 
     for entity in targets {
         if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_event(entity, &event));
+            crate::TerminalUiStateUpdates::write(&mut commands, entity, &event);
         }
     }
 }

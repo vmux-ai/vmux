@@ -8,8 +8,9 @@ pub mod event;
 pub mod render_model;
 
 #[cfg(ui)]
-#[cfg(ui)]
 pub mod page;
+#[cfg(ui)]
+mod page_state;
 
 #[cfg(host)]
 pub mod host;

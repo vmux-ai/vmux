@@ -20,7 +20,10 @@ mod view;
 
 pub(crate) mod link;
 
-pub use component::{AgentRunTerminal, ProcessExited, PtyExited, RetainOnProcessExit, Terminal};
+pub use component::{
+    AgentRunTerminal, ProcessExited, PtyExited, RetainOnProcessExit, Terminal,
+    TerminalUiStateUpdates,
+};
 pub use contract::TerminalContractPlugin;
 pub use plugin::*;
 pub use prompt::{BufferedAgentPrompt, PromptCapture};
