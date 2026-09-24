@@ -168,7 +168,7 @@ pub(super) fn NewStackRow(pane_id: u64) -> Element {
                 }
             },
             onclick: move |_| {
-                let _ = send(&crate::event::SideSheetRequest::NewStack { pane_id });
+                let _ = send(&crate::event::SideSheetStackCreateRequest { pane_id });
             },
         }
     }
@@ -206,14 +206,14 @@ impl StackCommand {
     }
 
     fn activate(self) {
-        let _ = send(&crate::event::SideSheetRequest::ActivateStack {
+        let _ = send(&crate::event::SideSheetStackActivateRequest {
             pane_id: self.pane_id,
             stack_id: self.stack_id,
         });
     }
 
     fn close(self) {
-        let _ = send(&crate::event::SideSheetRequest::CloseStack {
+        let _ = send(&crate::event::SideSheetStackCloseRequest {
             pane_id: self.pane_id,
             stack_id: self.stack_id,
         });

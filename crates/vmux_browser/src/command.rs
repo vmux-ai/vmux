@@ -16,7 +16,10 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::event::{SideSheetRequest, SideSheetResizeEvent};
+use vmux_layout::event::{
+    SideSheetProjectOpenRequest, SideSheetResizeEvent, SideSheetSectionRequest,
+    SideSheetStackActivateRequest, SideSheetStackCloseRequest, SideSheetStackCreateRequest,
+};
 use vmux_layout::{
     Header, LayoutCef,
     event::{
@@ -47,7 +50,11 @@ impl Plugin for CommandPlugin {
         .add_observer(on_header_forward)
         .add_observer(on_header_reload)
         .add_observer(on_header_address_focus)
-        .add_observer(on_side_sheet_request)
+        .add_observer(on_side_sheet_stack_activate)
+        .add_observer(on_side_sheet_stack_close)
+        .add_observer(on_side_sheet_stack_create)
+        .add_observer(on_side_sheet_project_open)
+        .add_observer(on_side_sheet_section)
         .add_observer(on_side_sheet_resize)
         .add_observer(on_reload_notify_header)
         .add_observer(on_hard_reload_notify_header)
@@ -533,117 +540,142 @@ fn on_side_sheet_resize(
     }
 }
 
-fn on_side_sheet_request(
-    trigger: On<BinReceive<SideSheetRequest>>,
+fn on_side_sheet_stack_activate(
+    trigger: On<BinReceive<SideSheetStackActivateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
     mut activation: StackActivation,
-    sections_of: vmux_layout::side_sheet::SideSheetSections,
     mut hover_intent: ResMut<PaneHoverIntent>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
-    mut close_stack_requests: MessageWriter<CloseStackRequest>,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
-    let evt = &trigger.event().payload;
-    let pane_id = match evt {
-        SideSheetRequest::ActivateStack { pane_id, .. }
-        | SideSheetRequest::CloseStack { pane_id, .. }
-        | SideSheetRequest::NewStack { pane_id }
-        | SideSheetRequest::OpenProjectPath { pane_id, .. }
-        | SideSheetRequest::CollapseCard { pane_id }
-        | SideSheetRequest::ExpandCard { pane_id }
-        | SideSheetRequest::CollapseSection { pane_id, .. }
-        | SideSheetRequest::ExpandSection { pane_id, .. } => *pane_id,
-    };
-    let Some(target_pane) = leaf_panes.iter().find(|e| e.to_bits() == pane_id) else {
+    let request = &trigger.event().payload;
+    let Some(target_pane) = leaf_panes
+        .iter()
+        .find(|entity| entity.to_bits() == request.pane_id)
+    else {
         return;
     };
     let Ok(children) = pane_children.get(target_pane) else {
         return;
     };
-    match evt {
-        SideSheetRequest::ActivateStack { stack_id, .. } => {
-            let target_stack = children
-                .iter()
-                .find(|&entity| stack_q.contains(entity) && entity.to_bits() == *stack_id);
-            let Some(target_stack) = target_stack else {
-                return;
-            };
-            activation.activate(target_pane, target_stack, &mut commands);
+    let target_stack = children
+        .iter()
+        .find(|&entity| stack_q.contains(entity) && entity.to_bits() == request.stack_id);
+    let Some(target_stack) = target_stack else {
+        return;
+    };
+    activation.activate(target_pane, target_stack, &mut commands);
+    hover_intent.target = None;
+    hover_intent.last_activation = Some(std::time::Instant::now());
+    if let Some(proxy) = proxy {
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    }
+}
 
-            hover_intent.target = None;
-            hover_intent.last_activation = Some(std::time::Instant::now());
-            if let Some(proxy) = proxy {
-                let _ = proxy.send_event(WinitUserEvent::WakeUp);
-            }
-        }
-        SideSheetRequest::CloseStack { stack_id, .. } => {
-            let target_stack = children
-                .iter()
-                .find(|&entity| stack_q.contains(entity) && entity.to_bits() == *stack_id);
-            let Some(target_stack) = target_stack else {
-                return;
-            };
-            close_stack_requests.write(CloseStackRequest::by_user(target_stack));
-            hover_intent.target = None;
-            hover_intent.last_activation = Some(std::time::Instant::now());
-        }
-        SideSheetRequest::NewStack { .. } => {
-            commands.entity(target_pane).insert(LastActivatedAt::now());
-            stack_requests.write(vmux_layout::stack::StackRequest::Open { url: None });
-        }
-        SideSheetRequest::OpenProjectPath { path, .. } => {
-            let Ok(url) = url::Url::from_file_path(path) else {
-                return;
-            };
-            page_open_requests.write(PageOpenRequest {
-                target: PageOpenTarget::ActiveStackInPane(target_pane),
-                url: url.to_string(),
-                request_id: None,
-            });
-        }
-        SideSheetRequest::CollapseCard { .. } => {
-            commands
-                .entity(target_pane)
-                .insert(SideSheetCardCollapsed)
+fn on_side_sheet_stack_close(
+    trigger: On<BinReceive<SideSheetStackCloseRequest>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_q: Query<Entity, With<Stack>>,
+    mut hover_intent: ResMut<PaneHoverIntent>,
+    mut requests: MessageWriter<CloseStackRequest>,
+) {
+    let request = &trigger.event().payload;
+    let Some(target_pane) = leaf_panes
+        .iter()
+        .find(|entity| entity.to_bits() == request.pane_id)
+    else {
+        return;
+    };
+    let Ok(children) = pane_children.get(target_pane) else {
+        return;
+    };
+    let target_stack = children
+        .iter()
+        .find(|&entity| stack_q.contains(entity) && entity.to_bits() == request.stack_id);
+    let Some(target_stack) = target_stack else {
+        return;
+    };
+    requests.write(CloseStackRequest::by_user(target_stack));
+    hover_intent.target = None;
+    hover_intent.last_activation = Some(std::time::Instant::now());
+}
+
+fn on_side_sheet_stack_create(
+    trigger: On<BinReceive<SideSheetStackCreateRequest>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut commands: Commands,
+) {
+    let Some(target_pane) = leaf_panes
+        .iter()
+        .find(|entity| entity.to_bits() == trigger.event().payload.pane_id)
+    else {
+        return;
+    };
+    commands.entity(target_pane).insert(LastActivatedAt::now());
+    requests.write(vmux_layout::stack::StackRequest::Open { url: None });
+}
+
+fn on_side_sheet_project_open(
+    trigger: On<BinReceive<SideSheetProjectOpenRequest>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut requests: MessageWriter<PageOpenRequest>,
+) {
+    let request = &trigger.event().payload;
+    let Some(target_pane) = leaf_panes
+        .iter()
+        .find(|entity| entity.to_bits() == request.pane_id)
+    else {
+        return;
+    };
+    let Ok(url) = url::Url::from_file_path(&request.path) else {
+        return;
+    };
+    requests.write(PageOpenRequest {
+        target: PageOpenTarget::ActiveStackInPane(target_pane),
+        url: url.to_string(),
+        request_id: None,
+    });
+}
+
+fn on_side_sheet_section(
+    trigger: On<BinReceive<SideSheetSectionRequest>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    sections_of: vmux_layout::side_sheet::SideSheetSections,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    let Some(target_pane) = leaf_panes
+        .iter()
+        .find(|entity| entity.to_bits() == request.pane_id)
+    else {
+        return;
+    };
+    if request.path == "pane" {
+        let mut pane = commands.entity(target_pane);
+        if request.expanded {
+            pane.remove::<SideSheetCardCollapsed>()
+                .remove::<SideSheetPaneExpanded>();
+        } else {
+            pane.insert(SideSheetCardCollapsed)
                 .remove::<SideSheetPaneExpanded>();
         }
-        SideSheetRequest::ExpandCard { .. } => {
-            commands
-                .entity(target_pane)
-                .remove::<SideSheetCardCollapsed>()
-                .remove::<SideSheetPaneExpanded>();
-        }
-        SideSheetRequest::CollapseSection { path, .. }
-        | SideSheetRequest::ExpandSection { path, .. } => {
-            let expanded = matches!(evt, SideSheetRequest::ExpandSection { .. });
-            if path == "pane" {
-                let mut pane = commands.entity(target_pane);
-                if expanded {
-                    pane.remove::<SideSheetCardCollapsed>()
-                        .remove::<SideSheetPaneExpanded>();
-                } else {
-                    pane.insert(SideSheetCardCollapsed)
-                        .remove::<SideSheetPaneExpanded>();
-                }
-                return;
-            }
-            let Some(space) = sections_of.space_of(target_pane) else {
-                return;
-            };
-            let mut state = sections_of.under(target_pane);
-            if !state.set(path, expanded) {
-                return;
-            }
-            if state.is_empty() {
-                commands.entity(space).remove::<SideSheetSectionsExpanded>();
-            } else {
-                commands.entity(space).insert(state);
-            }
-        }
+        return;
+    }
+    let Some(space) = sections_of.space_of(target_pane) else {
+        return;
+    };
+    let mut state = sections_of.under(target_pane);
+    if !state.set(&request.path, request.expanded) {
+        return;
+    }
+    if state.is_empty() {
+        commands.entity(space).remove::<SideSheetSectionsExpanded>();
+    } else {
+        commands.entity(space).insert(state);
     }
 }
 
@@ -867,7 +899,7 @@ mod tests {
             .add_message::<vmux_layout::stack::StackRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PaneHoverIntent>()
-            .add_observer(on_side_sheet_request);
+            .add_observer(on_side_sheet_stack_close);
 
         let pane = app.world_mut().spawn(Pane).id();
         let middle = app
@@ -883,13 +915,14 @@ mod tests {
             .resource::<Messages<CloseStackRequest>>()
             .get_cursor();
 
-        app.world_mut().trigger(BinReceive::<SideSheetRequest> {
-            webview: Entity::PLACEHOLDER,
-            payload: SideSheetRequest::CloseStack {
-                pane_id: pane.to_bits(),
-                stack_id: middle.to_bits(),
-            },
-        });
+        app.world_mut()
+            .trigger(BinReceive::<SideSheetStackCloseRequest> {
+                webview: Entity::PLACEHOLDER,
+                payload: SideSheetStackCloseRequest {
+                    pane_id: pane.to_bits(),
+                    stack_id: middle.to_bits(),
+                },
+            });
         app.world_mut().flush();
 
         let requests = app.world().resource::<Messages<CloseStackRequest>>();
@@ -993,7 +1026,7 @@ mod tests {
                 .add_message::<vmux_layout::stack::StackRequest>()
                 .add_message::<PageOpenRequest>()
                 .init_resource::<PaneHoverIntent>()
-                .add_observer(on_side_sheet_request);
+                .add_observer(on_side_sheet_section);
 
             let space = app
                 .world_mut()
@@ -1024,11 +1057,12 @@ mod tests {
         fn expand(&mut self, section: &str) {
             self.app
                 .world_mut()
-                .trigger(BinReceive::<SideSheetRequest> {
+                .trigger(BinReceive::<SideSheetSectionRequest> {
                     webview: Entity::PLACEHOLDER,
-                    payload: SideSheetRequest::ExpandSection {
+                    payload: SideSheetSectionRequest {
                         pane_id: self.pane_in_first_tab.to_bits(),
                         path: section.to_string(),
+                        expanded: true,
                     },
                 });
             self.app.world_mut().flush();

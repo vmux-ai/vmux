@@ -14,7 +14,9 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView, PageIconView};
 
-use crate::event::{ActiveSession, ActiveWorkspaceProject, SideSheetRequest, TabBoundary};
+use crate::event::{
+    ActiveSession, ActiveWorkspaceProject, SideSheetProjectOpenRequest, TabBoundary,
+};
 
 #[component]
 pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
@@ -304,7 +306,7 @@ fn ActiveWorkspaceProjectRow(project: ProjectRow, pane_id: u64) -> Element {
                             pane_id: pane_id.to_string(),
                         });
                     } else {
-                        let _ = send(&SideSheetRequest::OpenProjectPath {
+                        let _ = send(&SideSheetProjectOpenRequest {
                             pane_id,
                             path: path.clone(),
                         });

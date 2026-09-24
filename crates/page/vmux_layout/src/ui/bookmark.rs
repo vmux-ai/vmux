@@ -26,7 +26,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 use vmux_ui::platform::sleep_ms;
 
-use crate::event::{SideSheetRequest, StackNode};
+use crate::event::{SideSheetSectionRequest, StackNode};
 
 #[component]
 pub(super) fn BookmarksSection(
@@ -146,7 +146,7 @@ pub(super) fn BookmarksSection(
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| {
-                        let _ = send(&SideSheetRequest::section(
+                        let _ = send(&SideSheetSectionRequest::new(
                             pane_id,
                             "bookmarks",
                             !expanded,

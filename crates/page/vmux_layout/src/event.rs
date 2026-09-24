@@ -512,28 +512,41 @@ pub struct StackNode {
 }
 
 #[vmux_api::ui_event(Eq, target = "layout")]
-pub enum SideSheetRequest {
-    ActivateStack { pane_id: u64, stack_id: u64 },
-    CloseStack { pane_id: u64, stack_id: u64 },
-    NewStack { pane_id: u64 },
-    OpenProjectPath { pane_id: u64, path: String },
-    CollapseCard { pane_id: u64 },
-    ExpandCard { pane_id: u64 },
-    CollapseSection { pane_id: u64, path: String },
-    ExpandSection { pane_id: u64, path: String },
+pub struct SideSheetStackActivateRequest {
+    pub pane_id: u64,
+    pub stack_id: u64,
 }
 
-impl SideSheetRequest {
-    pub fn section(pane_id: u64, path: impl Into<String>, expanded: bool) -> Self {
-        if expanded {
-            return Self::ExpandSection {
-                pane_id,
-                path: path.into(),
-            };
-        }
-        Self::CollapseSection {
+#[vmux_api::ui_event(Eq, target = "layout")]
+pub struct SideSheetStackCloseRequest {
+    pub pane_id: u64,
+    pub stack_id: u64,
+}
+
+#[vmux_api::ui_event(Eq, target = "layout")]
+pub struct SideSheetStackCreateRequest {
+    pub pane_id: u64,
+}
+
+#[vmux_api::ui_event(Eq, target = "layout")]
+pub struct SideSheetProjectOpenRequest {
+    pub pane_id: u64,
+    pub path: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "layout")]
+pub struct SideSheetSectionRequest {
+    pub pane_id: u64,
+    pub path: String,
+    pub expanded: bool,
+}
+
+impl SideSheetSectionRequest {
+    pub fn new(pane_id: u64, path: impl Into<String>, expanded: bool) -> Self {
+        Self {
             pane_id,
             path: path.into(),
+            expanded,
         }
     }
 }
