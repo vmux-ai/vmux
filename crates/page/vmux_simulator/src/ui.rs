@@ -1,9 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    HardwareButton, SimulatorClipboard, SimulatorClipboardAction, SimulatorKey,
-    SimulatorKeyModifiers, SimulatorReady, SimulatorSoftwareKeyboard, SimulatorTouch,
-    SimulatorTouchPhase,
+    HardwareButton, SimulatorClipboardOperation, SimulatorInputOperation, SimulatorKeyModifiers,
+    SimulatorReady, SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase,
 };
 use crate::url::SimulatorRoute;
 use dioxus::html::geometry::ClientPoint;
@@ -117,14 +116,14 @@ fn Mirror(
                 }
                 if let Some(action) = ClipboardShortcut::from_event(&event) {
                     event.prevent_default();
-                    let _ = send(&SimulatorClipboard { action });
+                    action.send();
                     return;
                 }
-                let Some(key) = Keystroke::from_event(&event) else {
+                let Some(operation) = Keystroke::from_event(&event) else {
                     return;
                 };
                 event.prevent_default();
-                let _ = send(&key);
+                operation.send();
             },
             onpointermove: move |event: Event<PointerData>| {
                 let Some(current) = press() else {
@@ -340,7 +339,7 @@ impl SoftwareKeyboardShortcut {
 struct ClipboardShortcut;
 
 impl ClipboardShortcut {
-    fn from_event(event: &Event<KeyboardData>) -> Option<SimulatorClipboardAction> {
+    fn from_event(event: &Event<KeyboardData>) -> Option<SimulatorClipboardOperation> {
         let modifiers = event.modifiers();
         if !modifiers.meta() || modifiers.ctrl() || modifiers.alt() || modifiers.shift() {
             return None;
@@ -348,12 +347,12 @@ impl ClipboardShortcut {
         Self::for_key(&event.key().to_string())
     }
 
-    fn for_key(key: &str) -> Option<SimulatorClipboardAction> {
+    fn for_key(key: &str) -> Option<SimulatorClipboardOperation> {
         match key.to_ascii_lowercase().as_str() {
-            "a" => Some(SimulatorClipboardAction::SelectAll),
-            "c" => Some(SimulatorClipboardAction::Copy),
-            "x" => Some(SimulatorClipboardAction::Cut),
-            "v" => Some(SimulatorClipboardAction::Paste),
+            "a" => Some(SimulatorClipboardOperation::SelectAll),
+            "c" => Some(SimulatorClipboardOperation::Copy),
+            "x" => Some(SimulatorClipboardOperation::Cut),
+            "v" => Some(SimulatorClipboardOperation::Paste),
             _ => None,
         }
     }
@@ -362,15 +361,21 @@ impl ClipboardShortcut {
 struct Keystroke;
 
 impl Keystroke {
-    fn from_event(event: &Event<KeyboardData>) -> Option<SimulatorKey> {
+    fn from_event(event: &Event<KeyboardData>) -> Option<SimulatorInputOperation> {
         let modifiers = event.modifiers();
         let key = event.key().to_string();
         if modifiers.meta() && !modifiers.ctrl() && !modifiers.alt() && !modifiers.shift() {
             return match key.to_ascii_lowercase().as_str() {
-                "h" => Some(SimulatorKey::Button(HardwareButton::Home)),
-                "l" => Some(SimulatorKey::Button(HardwareButton::Lock)),
-                "s" => Some(SimulatorKey::Button(HardwareButton::Siri)),
-                _ => SimulatorKey::modified_browser_code(
+                "h" => Some(SimulatorInputOperation::HardwareButton {
+                    button: HardwareButton::Home,
+                }),
+                "l" => Some(SimulatorInputOperation::HardwareButton {
+                    button: HardwareButton::Lock,
+                }),
+                "s" => Some(SimulatorInputOperation::HardwareButton {
+                    button: HardwareButton::Siri,
+                }),
+                _ => SimulatorInputOperation::modified_browser_code(
                     &event.code().to_string(),
                     Self::modifiers(event),
                 ),
@@ -378,9 +383,12 @@ impl Keystroke {
         }
         let modifiers = Self::modifiers(event);
         if !modifiers.is_empty() {
-            return SimulatorKey::modified_browser_code(&event.code().to_string(), modifiers);
+            return SimulatorInputOperation::modified_browser_code(
+                &event.code().to_string(),
+                modifiers,
+            );
         }
-        SimulatorKey::try_from(key.as_str()).ok()
+        SimulatorInputOperation::try_from(key.as_str()).ok()
     }
 
     fn modifiers(event: &Event<KeyboardData>) -> SimulatorKeyModifiers {
@@ -642,7 +650,10 @@ impl PointerRelease {
             }
             Self::Home => {
                 home_progress.set(1.0);
-                let _ = send(&SimulatorKey::Button(HardwareButton::Home));
+                SimulatorInputOperation::HardwareButton {
+                    button: HardwareButton::Home,
+                }
+                .send();
                 spawn(async move {
                     sleep_ms(300).await;
                     home_progress.set(0.0);
@@ -695,19 +706,19 @@ mod tests {
     fn command_edit_shortcuts_are_forwarded_to_the_simulator() {
         assert_eq!(
             ClipboardShortcut::for_key("a"),
-            Some(SimulatorClipboardAction::SelectAll)
+            Some(SimulatorClipboardOperation::SelectAll)
         );
         assert_eq!(
             ClipboardShortcut::for_key("x"),
-            Some(SimulatorClipboardAction::Cut)
+            Some(SimulatorClipboardOperation::Cut)
         );
         assert_eq!(
             ClipboardShortcut::for_key("c"),
-            Some(SimulatorClipboardAction::Copy)
+            Some(SimulatorClipboardOperation::Copy)
         );
         assert_eq!(
             ClipboardShortcut::for_key("v"),
-            Some(SimulatorClipboardAction::Paste)
+            Some(SimulatorClipboardOperation::Paste)
         );
     }
 }

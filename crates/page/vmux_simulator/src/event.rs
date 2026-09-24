@@ -26,15 +26,21 @@ pub enum SimulatorTouchPhase {
     Tap,
 }
 
-#[vmux_api::ui_event(target = "simulator")]
-pub enum SimulatorKey {
-    Text(String),
-    Code(u16),
-    Modified {
+#[vmux_api::ui_event_variants(Eq, target = "simulator")]
+pub enum SimulatorInputOperation {
+    Text {
+        text: String,
+    },
+    Key {
+        code: u16,
+    },
+    ModifiedKey {
         code: u16,
         modifiers: SimulatorKeyModifiers,
     },
-    Button(HardwareButton),
+    HardwareButton {
+        button: HardwareButton,
+    },
 }
 
 #[vmux_api::contract(Copy, Default, Eq)]
@@ -52,17 +58,12 @@ pub enum HardwareButton {
     Siri,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub enum SimulatorClipboardAction {
+#[vmux_api::ui_event_variants(Copy, Eq, target = "simulator")]
+pub enum SimulatorClipboardOperation {
     Copy,
     Cut,
     Paste,
     SelectAll,
-}
-
-#[vmux_api::ui_event(Copy, Eq, target = "simulator")]
-pub struct SimulatorClipboard {
-    pub action: SimulatorClipboardAction,
 }
 
 #[vmux_api::ui_event(Copy, Eq, target = "simulator")]
@@ -78,7 +79,7 @@ impl HardwareButton {
     }
 }
 
-impl SimulatorKey {
+impl SimulatorInputOperation {
     fn parse_browser_key(key: &str) -> Option<Self> {
         let code = match key {
             "Enter" => 40,
@@ -94,10 +95,12 @@ impl SimulatorKey {
                 let (Some(c), None) = (chars.next(), chars.next()) else {
                     return None;
                 };
-                return Some(Self::Text(c.to_string()));
+                return Some(Self::Text {
+                    text: c.to_string(),
+                });
             }
         };
-        Some(Self::Code(code))
+        Some(Self::Key { code })
     }
 
     pub fn modified_browser_code(
@@ -184,7 +187,7 @@ impl SimulatorKey {
             "ArrowUp" => 82,
             _ => return None,
         };
-        Some(Self::Modified { code, modifiers })
+        Some(Self::ModifiedKey { code, modifiers })
     }
 }
 
@@ -199,7 +202,7 @@ impl std::fmt::Display for InvalidSimulatorKey {
 
 impl std::error::Error for InvalidSimulatorKey {}
 
-impl TryFrom<&str> for SimulatorKey {
+impl TryFrom<&str> for SimulatorInputOperation {
     type Error = InvalidSimulatorKey;
 
     fn try_from(key: &str) -> Result<Self, Self::Error> {
@@ -237,32 +240,37 @@ mod tests {
     #[test]
     fn a_printable_key_is_typed_rather_than_coded() {
         assert_eq!(
-            SimulatorKey::try_from("a"),
-            Ok(SimulatorKey::Text("a".into()))
+            SimulatorInputOperation::try_from("a"),
+            Ok(SimulatorInputOperation::Text { text: "a".into() })
         );
         assert_eq!(
-            SimulatorKey::try_from("あ"),
-            Ok(SimulatorKey::Text("あ".into()))
+            SimulatorInputOperation::try_from("あ"),
+            Ok(SimulatorInputOperation::Text {
+                text: "あ".into()
+            })
         );
     }
 
     #[test]
     fn keys_with_no_text_become_hid_codes() {
-        assert_eq!(SimulatorKey::try_from("Enter"), Ok(SimulatorKey::Code(40)));
         assert_eq!(
-            SimulatorKey::try_from("Backspace"),
-            Ok(SimulatorKey::Code(42))
+            SimulatorInputOperation::try_from("Enter"),
+            Ok(SimulatorInputOperation::Key { code: 40 })
         );
         assert_eq!(
-            SimulatorKey::try_from("ArrowUp"),
-            Ok(SimulatorKey::Code(82))
+            SimulatorInputOperation::try_from("Backspace"),
+            Ok(SimulatorInputOperation::Key { code: 42 })
+        );
+        assert_eq!(
+            SimulatorInputOperation::try_from("ArrowUp"),
+            Ok(SimulatorInputOperation::Key { code: 82 })
         );
     }
 
     #[test]
     fn a_modifier_or_unknown_named_key_is_dropped() {
         for key in ["Shift", "Meta", "F13", "Unidentified"] {
-            assert!(SimulatorKey::try_from(key).is_err(), "{key}");
+            assert!(SimulatorInputOperation::try_from(key).is_err(), "{key}");
         }
     }
 
@@ -275,15 +283,15 @@ mod tests {
         };
 
         assert_eq!(
-            SimulatorKey::modified_browser_code("ArrowLeft", modifiers),
-            Some(SimulatorKey::Modified {
+            SimulatorInputOperation::modified_browser_code("ArrowLeft", modifiers),
+            Some(SimulatorInputOperation::ModifiedKey {
                 code: 80,
                 modifiers,
             })
         );
         assert_eq!(
-            SimulatorKey::modified_browser_code("KeyA", modifiers),
-            Some(SimulatorKey::Modified { code: 4, modifiers })
+            SimulatorInputOperation::modified_browser_code("KeyA", modifiers),
+            Some(SimulatorInputOperation::ModifiedKey { code: 4, modifiers })
         );
         assert_eq!(modifiers.hid_codes(), vec![225, 227]);
     }

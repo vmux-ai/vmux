@@ -6,8 +6,12 @@ use super::{
     SimulatorFocusRequest, SimulatorFocusSet, SimulatorInputSet, SimulatorSoftwareKeyboardRequest,
 };
 use crate::event::{
-    SimulatorClipboard, SimulatorKey, SimulatorSoftwareKeyboard, SimulatorTouch,
-    SimulatorTouchPhase,
+    HardwareButton, SimulatorClipboardCopyRequest, SimulatorClipboardCutRequest,
+    SimulatorClipboardOperation, SimulatorClipboardOperationRequests,
+    SimulatorClipboardPasteRequest, SimulatorClipboardSelectAllRequest,
+    SimulatorInputHardwareButtonRequest, SimulatorInputKeyRequest,
+    SimulatorInputModifiedKeyRequest, SimulatorInputOperation, SimulatorInputOperationRequests,
+    SimulatorInputTextRequest, SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase,
 };
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
@@ -22,7 +26,7 @@ pub(super) struct SimulatorInputPlugin;
 impl Plugin for SimulatorInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClipboardWorker>()
-            .add_message::<SimulatorKeyRequest>()
+            .add_message::<SimulatorInputRequest>()
             .add_systems(Update, apply_focus_requests.in_set(SimulatorFocusSet))
             .add_systems(
                 Update,
@@ -35,28 +39,31 @@ impl Plugin for SimulatorInputPlugin {
                     .chain()
                     .in_set(SimulatorInputSet),
             )
-            .add_plugins(UiEventPlugin::<(
-                SimulatorTouch,
-                SimulatorKey,
-                SimulatorClipboard,
-                SimulatorSoftwareKeyboard,
-            )>::default())
+            .add_plugins(UiEventPlugin::<(SimulatorTouch, SimulatorSoftwareKeyboard)>::default())
+            .add_plugins(UiEventPlugin::<SimulatorInputOperationRequests>::default())
+            .add_plugins(UiEventPlugin::<SimulatorClipboardOperationRequests>::default())
             .add_observer(on_touch)
-            .add_observer(on_key)
-            .add_observer(on_clipboard)
+            .add_observer(on_input_text)
+            .add_observer(on_input_key)
+            .add_observer(on_input_modified_key)
+            .add_observer(on_input_hardware_button)
+            .add_observer(on_clipboard_copy)
+            .add_observer(on_clipboard_cut)
+            .add_observer(on_clipboard_paste)
+            .add_observer(on_clipboard_select_all)
             .add_observer(on_software_keyboard);
     }
 }
 
 #[derive(Message)]
-struct SimulatorKeyRequest {
+struct SimulatorInputRequest {
     view: Option<Entity>,
-    key: SimulatorKey,
+    operation: SimulatorInputOperation,
 }
 
 #[derive(Component)]
 pub(super) struct SimulatorKeyboard {
-    sender: mpsc::Sender<SimulatorKey>,
+    sender: mpsc::Sender<SimulatorInputOperation>,
 }
 
 impl SimulatorKeyboard {
@@ -72,8 +79,8 @@ impl SimulatorKeyboard {
         Ok(Self { sender })
     }
 
-    fn dispatch(&self, key: SimulatorKey) {
-        if self.sender.send(key).is_err() {
+    fn dispatch(&self, operation: SimulatorInputOperation) {
+        if self.sender.send(operation).is_err() {
             error!("simulator keyboard worker stopped");
         }
     }
@@ -87,7 +94,7 @@ struct SimulatorKeyboardRunner {
 impl SimulatorKeyboardRunner {
     const MAX_BATCH_KEYS: usize = 256;
 
-    fn run(&self, receiver: mpsc::Receiver<SimulatorKey>) {
+    fn run(&self, receiver: mpsc::Receiver<SimulatorInputOperation>) {
         while let Ok(first) = receiver.recv() {
             let batch = SimulatorKeyboardBatch::from_receiver(first, &receiver);
             if let Err(error) = self.execute(batch) {
@@ -121,27 +128,30 @@ impl SimulatorKeyboardRunner {
 }
 
 struct SimulatorKeyboardBatch {
-    keys: Vec<SimulatorKey>,
+    operations: Vec<SimulatorInputOperation>,
 }
 
 impl SimulatorKeyboardBatch {
-    fn from_receiver(first: SimulatorKey, receiver: &mpsc::Receiver<SimulatorKey>) -> Self {
-        let mut keys = vec![first];
-        while keys.len() < SimulatorKeyboardRunner::MAX_BATCH_KEYS {
-            let Ok(key) = receiver.try_recv() else {
+    fn from_receiver(
+        first: SimulatorInputOperation,
+        receiver: &mpsc::Receiver<SimulatorInputOperation>,
+    ) -> Self {
+        let mut operations = vec![first];
+        while operations.len() < SimulatorKeyboardRunner::MAX_BATCH_KEYS {
+            let Ok(operation) = receiver.try_recv() else {
                 break;
             };
-            keys.push(key);
+            operations.push(operation);
         }
-        Self { keys }
+        Self { operations }
     }
 
     fn steps(self) -> Vec<String> {
         let mut steps = Vec::new();
         let mut text = String::new();
-        for key in self.keys {
-            match key {
-                SimulatorKey::Text(value) => text.push_str(&value),
+        for operation in self.operations {
+            match operation {
+                SimulatorInputOperation::Text { text: value } => text.push_str(&value),
                 other => {
                     Self::push_text(&mut steps, &mut text);
                     steps.push(Self::step(other));
@@ -160,11 +170,11 @@ impl SimulatorKeyboardBatch {
         text.clear();
     }
 
-    fn step(key: SimulatorKey) -> String {
-        match key {
-            SimulatorKey::Text(text) => format!("type {}", Self::quote(&text)),
-            SimulatorKey::Code(code) => format!("key {code}"),
-            SimulatorKey::Modified { code, modifiers } => {
+    fn step(operation: SimulatorInputOperation) -> String {
+        match operation {
+            SimulatorInputOperation::Text { text } => format!("type {}", Self::quote(&text)),
+            SimulatorInputOperation::Key { code } => format!("key {code}"),
+            SimulatorInputOperation::ModifiedKey { code, modifiers } => {
                 let modifiers = modifiers
                     .hid_codes()
                     .iter()
@@ -173,7 +183,9 @@ impl SimulatorKeyboardBatch {
                     .join(",");
                 format!("key-combo --modifiers {modifiers} --key {code}")
             }
-            SimulatorKey::Button(button) => format!("button {}", button.as_arg()),
+            SimulatorInputOperation::HardwareButton { button } => {
+                format!("button {}", button.as_arg())
+            }
         }
     }
 
@@ -224,25 +236,25 @@ impl FromWorld for ClipboardWorker {
 struct ClipboardJob {
     axe: PathBuf,
     udid: String,
-    action: crate::event::SimulatorClipboardAction,
+    operation: SimulatorClipboardOperation,
 }
 
 impl ClipboardJob {
     fn run(&self) -> Result<(), String> {
-        match self.action {
-            crate::event::SimulatorClipboardAction::Copy => {
+        match self.operation {
+            SimulatorClipboardOperation::Copy => {
                 self.key_combo(6)?;
                 self.sync(&self.udid, "host")
             }
-            crate::event::SimulatorClipboardAction::Cut => {
+            SimulatorClipboardOperation::Cut => {
                 self.key_combo(27)?;
                 self.sync(&self.udid, "host")
             }
-            crate::event::SimulatorClipboardAction::Paste => {
+            SimulatorClipboardOperation::Paste => {
                 self.sync("host", &self.udid)?;
                 self.key_combo(25)
             }
-            crate::event::SimulatorClipboardAction::SelectAll => self.key_combo(4),
+            SimulatorClipboardOperation::SelectAll => self.key_combo(4),
         }
     }
 
@@ -401,20 +413,83 @@ fn normalized_point(touch: &SimulatorTouch, points: (f32, f32)) -> Option<(f32, 
     ))
 }
 
-fn on_key(trigger: On<BinReceive<SimulatorKey>>, mut requests: MessageWriter<SimulatorKeyRequest>) {
-    requests.write(SimulatorKeyRequest {
+fn on_input_text(
+    trigger: On<BinReceive<SimulatorInputTextRequest>>,
+    mut requests: MessageWriter<SimulatorInputRequest>,
+) {
+    requests.write(SimulatorInputRequest {
         view: Some(trigger.event().webview),
-        key: trigger.event().payload.clone(),
+        operation: trigger.event().payload.operation(),
     });
 }
 
-fn on_clipboard(
-    trigger: On<BinReceive<SimulatorClipboard>>,
+fn on_input_key(
+    trigger: On<BinReceive<SimulatorInputKeyRequest>>,
+    mut requests: MessageWriter<SimulatorInputRequest>,
+) {
+    requests.write(SimulatorInputRequest {
+        view: Some(trigger.event().webview),
+        operation: trigger.event().payload.operation(),
+    });
+}
+
+fn on_input_modified_key(
+    trigger: On<BinReceive<SimulatorInputModifiedKeyRequest>>,
+    mut requests: MessageWriter<SimulatorInputRequest>,
+) {
+    requests.write(SimulatorInputRequest {
+        view: Some(trigger.event().webview),
+        operation: trigger.event().payload.operation(),
+    });
+}
+
+fn on_input_hardware_button(
+    trigger: On<BinReceive<SimulatorInputHardwareButtonRequest>>,
+    mut requests: MessageWriter<SimulatorInputRequest>,
+) {
+    requests.write(SimulatorInputRequest {
+        view: Some(trigger.event().webview),
+        operation: trigger.event().payload.operation(),
+    });
+}
+
+fn on_clipboard_copy(
+    trigger: On<BinReceive<SimulatorClipboardCopyRequest>>,
     mut requests: MessageWriter<SimulatorClipboardRequest>,
 ) {
     requests.write(SimulatorClipboardRequest {
         view: Some(trigger.event().webview),
-        action: trigger.event().payload.action,
+        operation: trigger.event().payload.operation(),
+    });
+}
+
+fn on_clipboard_cut(
+    trigger: On<BinReceive<SimulatorClipboardCutRequest>>,
+    mut requests: MessageWriter<SimulatorClipboardRequest>,
+) {
+    requests.write(SimulatorClipboardRequest {
+        view: Some(trigger.event().webview),
+        operation: trigger.event().payload.operation(),
+    });
+}
+
+fn on_clipboard_paste(
+    trigger: On<BinReceive<SimulatorClipboardPasteRequest>>,
+    mut requests: MessageWriter<SimulatorClipboardRequest>,
+) {
+    requests.write(SimulatorClipboardRequest {
+        view: Some(trigger.event().webview),
+        operation: trigger.event().payload.operation(),
+    });
+}
+
+fn on_clipboard_select_all(
+    trigger: On<BinReceive<SimulatorClipboardSelectAllRequest>>,
+    mut requests: MessageWriter<SimulatorClipboardRequest>,
+) {
+    requests.write(SimulatorClipboardRequest {
+        view: Some(trigger.event().webview),
+        operation: trigger.event().payload.operation(),
     });
 }
 
@@ -438,12 +513,14 @@ fn apply_focus_requests(
 
 fn handle_button_requests(
     mut requests: MessageReader<HardwareButtonRequest>,
-    mut keys: MessageWriter<SimulatorKeyRequest>,
+    mut inputs: MessageWriter<SimulatorInputRequest>,
 ) {
     for request in requests.read() {
-        keys.write(SimulatorKeyRequest {
+        inputs.write(SimulatorInputRequest {
             view: request.view,
-            key: SimulatorKey::Button(request.button),
+            operation: SimulatorInputOperation::HardwareButton {
+                button: request.button,
+            },
         });
     }
 }
@@ -471,7 +548,7 @@ fn handle_clipboard_requests(
         let Ok((_, device, axe, hid, touch)) = attachments.get(target) else {
             continue;
         };
-        if request.action == crate::event::SimulatorClipboardAction::SelectAll
+        if request.operation == SimulatorClipboardOperation::SelectAll
             && let Some(point) = touch.focus
         {
             hid.dispatch(HidRequest::triple_tap(point));
@@ -480,7 +557,7 @@ fn handle_clipboard_requests(
         let job = ClipboardJob {
             axe: axe.path().to_path_buf(),
             udid: device.udid.clone(),
-            action: request.action,
+            operation: request.operation,
         };
         if worker.0.send(job).is_err() {
             error!("simulator clipboard worker stopped");
@@ -491,7 +568,7 @@ fn handle_clipboard_requests(
 fn handle_control_requests(
     mut requests: MessageReader<SimulatorControlRequest>,
     mut responses: MessageWriter<SimulatorControlResponse>,
-    mut keys: MessageWriter<SimulatorKeyRequest>,
+    mut inputs: MessageWriter<SimulatorInputRequest>,
     active: Res<ActiveSimulatorView>,
     attachments: ControlAttachments,
 ) {
@@ -535,28 +612,30 @@ fn handle_control_requests(
                 (_, None) => Err("simulator input is unavailable".to_string()),
             },
             SimulatorAction::TypeText(text) => {
-                keys.write(SimulatorKeyRequest {
+                inputs.write(SimulatorInputRequest {
                     view: Some(target),
-                    key: SimulatorKey::Text(text.clone()),
+                    operation: SimulatorInputOperation::Text { text: text.clone() },
                 });
                 Ok("typed text into simulator".to_string())
             }
             SimulatorAction::Key(keycode) => {
-                keys.write(SimulatorKeyRequest {
+                inputs.write(SimulatorInputRequest {
                     view: Some(target),
-                    key: SimulatorKey::Code(u16::from(*keycode)),
+                    operation: SimulatorInputOperation::Key {
+                        code: u16::from(*keycode),
+                    },
                 });
                 Ok(format!("pressed simulator keycode {keycode}"))
             }
             SimulatorAction::Button(button) => {
                 let button = match button {
-                    SimulatorButton::Home => crate::event::HardwareButton::Home,
-                    SimulatorButton::Lock => crate::event::HardwareButton::Lock,
-                    SimulatorButton::Siri => crate::event::HardwareButton::Siri,
+                    SimulatorButton::Home => HardwareButton::Home,
+                    SimulatorButton::Lock => HardwareButton::Lock,
+                    SimulatorButton::Siri => HardwareButton::Siri,
                 };
-                keys.write(SimulatorKeyRequest {
+                inputs.write(SimulatorInputRequest {
                     view: Some(target),
-                    key: SimulatorKey::Button(button),
+                    operation: SimulatorInputOperation::HardwareButton { button },
                 });
                 Ok("pressed simulator hardware button".to_string())
             }
@@ -579,7 +658,7 @@ fn control_coordinates(
 }
 
 fn send_key_requests(
-    mut requests: MessageReader<SimulatorKeyRequest>,
+    mut requests: MessageReader<SimulatorInputRequest>,
     active: Res<ActiveSimulatorView>,
     attachments: Query<(Entity, &SimulatorKeyboard)>,
 ) {
@@ -594,7 +673,7 @@ fn send_key_requests(
         let Ok((_, keyboard)) = attachments.get(target) else {
             continue;
         };
-        keyboard.dispatch(request.key.clone());
+        keyboard.dispatch(request.operation.clone());
     }
 }
 
@@ -656,11 +735,13 @@ mod tests {
     #[test]
     fn keyboard_batch_preserves_order_and_quotes_text() {
         let batch = SimulatorKeyboardBatch {
-            keys: vec![
-                SimulatorKey::Text("a".into()),
-                SimulatorKey::Text("\"".into()),
-                SimulatorKey::Code(42),
-                SimulatorKey::Text("\\".into()),
+            operations: vec![
+                SimulatorInputOperation::Text { text: "a".into() },
+                SimulatorInputOperation::Text {
+                    text: "\"".into(),
+                },
+                SimulatorInputOperation::Key { code: 42 },
+                SimulatorInputOperation::Text { text: "\\".into() },
             ],
         };
 

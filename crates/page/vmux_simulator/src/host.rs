@@ -5,7 +5,7 @@ mod hid;
 mod input;
 mod stream;
 
-use crate::event::{HardwareButton, SimulatorClipboardAction, SimulatorReady};
+use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorReady};
 use crate::url::{PAGE_HOST, PAGE_URL, SimulatorRoute};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -75,7 +75,7 @@ pub struct HardwareButtonRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SimulatorClipboardRequest {
     pub view: Option<Entity>,
-    pub action: SimulatorClipboardAction,
+    pub operation: SimulatorClipboardOperation,
 }
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
