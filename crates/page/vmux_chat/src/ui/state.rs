@@ -185,6 +185,7 @@ impl Chat {
                 let mut commands = self.slash.commands;
                 commands.set(incoming.commands.clone());
             }
+            ChatUiStatePatch::Key(_) => {}
         }
     }
 

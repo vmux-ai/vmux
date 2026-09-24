@@ -10,7 +10,8 @@ use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::ComposerMenuKind;
 use vmux_ui::hooks::{
-    KeyClaim, MenuDirection, choice_number_index, move_selection, send, use_key_handler,
+    KeyClaim, MenuDirection, choice_number_index, move_selection, send, use_key_claim,
+    use_ui_state_patch,
 };
 
 const APPROVAL_OPTION_COUNT: usize = 3;
@@ -23,13 +24,11 @@ pub struct ChatKeys {
 
 pub fn use_chat_keys(chat: Chat) -> ChatKeys {
     let actions = ChatKeyActions(chat);
+    let events = use_ui_state_patch::<crate::state::ChatUiState, ChatKey>();
+    use_effect(move || events.for_each(|key| actions.apply(key)));
     let keys = ChatKeys {
         actions,
-        claim: use_key_handler::<ChatKey, _>(
-            Unclaimed::Types,
-            move || chat.key_context(),
-            move |key| actions.apply(key),
-        ),
+        claim: use_key_claim(Unclaimed::Types, move || chat.key_context()),
     };
     use_drop(move || {
         let _ = send(&PageKeyContext { keys: Vec::new() });
