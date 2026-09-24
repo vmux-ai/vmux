@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::MenuDirection;
-use vmux_ui::launcher::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
+use vmux_ui::launcher::keyboard::{CtrlKeyCapture, TextEditCommand, ctrl_key_capture_for_code};
 use vmux_ui::launcher::palette::{PaletteDraft, PaletteMode, PaletteRows, PaletteState};
 
 pub const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
@@ -194,14 +194,14 @@ impl Readline {
 
     fn edit(
         query: &mut Signal<String>,
-        action: CtrlEditAction,
+        action: TextEditCommand,
         ghost: &str,
         caret: usize,
         input_id: &'static str,
     ) {
         let value = query.peek().clone();
         let ghost = match action {
-            CtrlEditAction::End => ghost,
+            TextEditCommand::End => ghost,
             _ => "",
         };
 

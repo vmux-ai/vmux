@@ -9,17 +9,17 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
+use crate::state::GitPanel;
 
-use super::model::GitPanel;
 use super::panel::{PanelHeader, PanelIcon};
 
 #[component]
 pub(super) fn StatusCard(
     repository: GitRepositorySnapshot,
-    focused_panel: Signal<GitPanel>,
+    focused_panel: GitPanel,
     fetching: bool,
 ) -> Element {
-    let focused = focused_panel() == GitPanel::Status;
+    let focused = focused_panel == GitPanel::Status;
 
     rsx! {
         Card {
@@ -29,7 +29,9 @@ pub(super) fn StatusCard(
             } else {
                 "order-1 min-h-16 cursor-default sm:col-start-1 sm:row-start-1 sm:min-h-0 sm:order-none"
             },
-            onclick: move |_| focused_panel.set(GitPanel::Status),
+            onclick: move |_| {
+                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Status });
+            },
             PanelHeader {
                 index: 1,
                 title: translate("git-status"),
@@ -66,7 +68,11 @@ pub(super) fn StatusCard(
 }
 
 #[component]
-pub(super) fn StatusDetailCard(repository: GitRepositorySnapshot, fetching: bool) -> Element {
+pub(super) fn StatusDetailCard(
+    repository: GitRepositorySnapshot,
+    fetching: bool,
+    can_push: bool,
+) -> Element {
     let changed = repository.files.len();
     let staged = repository.files.iter().filter(|entry| entry.staged).count();
     let clean = changed == 0;
@@ -85,7 +91,7 @@ pub(super) fn StatusDetailCard(repository: GitRepositorySnapshot, fetching: bool
                 Button {
                     variant: ButtonVariant::Primary,
                     class: "h-6 gap-1 rounded-md px-2 py-0 text-[10px] font-medium shadow-sm",
-                    disabled: repository.branch.is_empty(),
+                    disabled: !can_push,
                     onclick: move |_| {
                         let _ = send(&GitPushRequest { path: repository.repo_root.clone() });
                     },

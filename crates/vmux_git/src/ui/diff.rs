@@ -13,7 +13,7 @@ use crate::ui::DiffView;
 pub(super) fn CommitDiffCard(
     repository: GitRepositorySnapshot,
     repo_root: ReadSignal<String>,
-    selected_commit: Signal<String>,
+    selected_commit: ReadSignal<String>,
     nonce: ReadSignal<u32>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     loading: bool,
@@ -71,9 +71,9 @@ pub(super) fn CommitDiffCard(
 #[component]
 pub(super) fn DiffCard(
     repo_root: ReadSignal<String>,
-    selected_path: Signal<String>,
-    selected_path_bytes: Signal<Vec<u8>>,
-    selected_abs_path: Signal<String>,
+    selected_path: ReadSignal<String>,
+    selected_path_bytes: ReadSignal<Vec<u8>>,
+    selected_abs_path: ReadSignal<String>,
     nonce: ReadSignal<u32>,
     diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     loading: bool,

@@ -10,21 +10,21 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
+use crate::state::{GitOperationEligibility, GitPanel};
 
-use super::model::{FileStatusView, GitPanel};
-use super::panel::{HeaderActionButton, PanelHeader, PanelIcon};
+use super::model::FileStatusView;
+use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
 use super::workspace::GitWorkspace;
 
 #[component]
 pub(super) fn ChangesCard(
     repository: GitRepositorySnapshot,
-    selected_path: Signal<String>,
-    selected_path_bytes: Signal<Vec<u8>>,
-    selected_abs_path: Signal<String>,
-    confirm_discard: Signal<Vec<u8>>,
+    selected_path_bytes: Vec<u8>,
+    confirm_discard: Vec<u8>,
     commit_message: Signal<String>,
     pending_commit_message: Signal<String>,
-    focused_panel: Signal<GitPanel>,
+    focused_panel: GitPanel,
+    operations: GitOperationEligibility,
 ) -> Element {
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
@@ -37,26 +37,24 @@ pub(super) fn ChangesCard(
         }
     }
     let staged_count = staged.len() as u32;
-    let can_stash = !repository.files.is_empty();
-    let can_amend = staged_count > 0 && !repository.commits.is_empty();
-    let file_actions = rsx! {
+    let file_operations = rsx! {
         div { class: "flex shrink-0 items-center gap-0.5",
-            HeaderActionButton {
+            HeaderOperationButton {
                 icon: LineIcon::Package,
                 shortcut: "s",
                 label: translate("git-stash"),
-                disabled: !can_stash,
+                disabled: !operations.stash,
                 danger: false,
                 onpress: {
                     let repo_root = repository.repo_root.clone();
                     move |_| GitOperation::StashPush.send(repo_root.clone())
                 },
             }
-            HeaderActionButton {
+            HeaderOperationButton {
                 icon: LineIcon::Pencil,
                 shortcut: "A",
                 label: translate("git-amend"),
-                disabled: !can_amend,
+                disabled: !operations.amend,
                 danger: false,
                 onpress: {
                     let repo_root = repository.repo_root.clone();
@@ -69,7 +67,7 @@ pub(super) fn ChangesCard(
     rsx! {
         Card {
             variant: CardVariant::Panel,
-            class: if focused_panel() == GitPanel::Files {
+            class: if focused_panel == GitPanel::Files {
                 if repository.files.is_empty() {
                     "order-4 min-h-[13rem] border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
                 } else {
@@ -82,7 +80,9 @@ pub(super) fn ChangesCard(
                     "order-4 min-h-[19rem] border-t-amber-400/30 sm:col-start-1 sm:row-start-2 sm:min-h-0 sm:order-none"
                 }
             },
-            onclick: move |_| focused_panel.set(GitPanel::Files),
+            onclick: move |_| {
+                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files });
+            },
             PanelHeader {
                 index: 2,
                 title: translate("git-files"),
@@ -90,8 +90,8 @@ pub(super) fn ChangesCard(
                 icon: PanelIcon::Line(LineIcon::File),
                 icon_class: "bg-amber-400/10 text-amber-500 ring-1 ring-inset ring-amber-400/15",
                 badge_class: "border-amber-400/20 bg-amber-400/[0.08] text-amber-500",
-                focused: focused_panel() == GitPanel::Files,
-                actions: file_actions,
+                focused: focused_panel == GitPanel::Files,
+                operations: file_operations,
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-1",
                 if repository.files.is_empty() {
@@ -106,11 +106,8 @@ pub(super) fn ChangesCard(
                             files: staged,
                             repo_root: repository.repo_root.clone(),
                             staged_view: true,
-                            selected_path,
-                            selected_path_bytes,
-                            selected_abs_path,
-                            confirm_discard,
-                            focused_panel,
+                            selected_path_bytes: selected_path_bytes.clone(),
+                            confirm_discard: confirm_discard.clone(),
                         }
                     }
                     if !unstaged.is_empty() {
@@ -119,11 +116,8 @@ pub(super) fn ChangesCard(
                             files: unstaged,
                             repo_root: repository.repo_root.clone(),
                             staged_view: false,
-                            selected_path,
-                            selected_path_bytes,
-                            selected_abs_path,
-                            confirm_discard,
-                            focused_panel,
+                            selected_path_bytes: selected_path_bytes.clone(),
+                            confirm_discard: confirm_discard.clone(),
                         }
                     }
                 }
@@ -133,6 +127,7 @@ pub(super) fn ChangesCard(
                 staged_count,
                 commit_message,
                 pending_commit_message,
+                can_commit: operations.commit,
             }
         }
     }
@@ -144,11 +139,8 @@ fn FileSection(
     files: Vec<(usize, GitFileEntry)>,
     repo_root: String,
     staged_view: bool,
-    selected_path: Signal<String>,
-    selected_path_bytes: Signal<Vec<u8>>,
-    selected_abs_path: Signal<String>,
-    confirm_discard: Signal<Vec<u8>>,
-    focused_panel: Signal<GitPanel>,
+    selected_path_bytes: Vec<u8>,
+    confirm_discard: Vec<u8>,
 ) -> Element {
     rsx! {
         div { class: "pb-1 last:pb-0",
@@ -164,11 +156,8 @@ fn FileSection(
                         entry,
                         repo_root: repo_root.clone(),
                         staged_view,
-                        selected_path,
-                        selected_path_bytes,
-                        selected_abs_path,
-                        confirm_discard,
-                        focused_panel,
+                        selected_path_bytes: selected_path_bytes.clone(),
+                        confirm_discard: confirm_discard.clone(),
                     }
                 }
             }
@@ -182,15 +171,11 @@ fn FileRow(
     entry: GitFileEntry,
     repo_root: String,
     staged_view: bool,
-    selected_path: Signal<String>,
-    selected_path_bytes: Signal<Vec<u8>>,
-    selected_abs_path: Signal<String>,
-    confirm_discard: Signal<Vec<u8>>,
-    focused_panel: Signal<GitPanel>,
+    selected_path_bytes: Vec<u8>,
+    confirm_discard: Vec<u8>,
 ) -> Element {
     let absolute = GitWorkspace::absolute_path(&repo_root, &entry.path);
-    let selected = selected_path_bytes() == entry.path_bytes;
-    let file_path = entry.path.clone();
+    let selected = selected_path_bytes == entry.path_bytes;
     let file_path_bytes = entry.path_bytes.clone();
     let file_name = entry.name().to_string();
     let parent = entry.parent().to_string();
@@ -198,7 +183,7 @@ fn FileRow(
     let status_code = entry.status.code();
     let status_class = entry.status.class();
     let can_discard = entry.can_discard() && !staged_view;
-    let confirming = confirm_discard() == entry.path_bytes;
+    let confirming = confirm_discard == entry.path_bytes;
     let section = if staged_view { "staged" } else { "unstaged" };
     let row_id = format!("git-file-{section}-row-{row_index}");
 
@@ -211,14 +196,11 @@ fn FileRow(
                 "group mx-1 flex min-h-8 cursor-default items-center gap-2 rounded-md px-2 hover:bg-foreground/[0.045]"
             },
             onclick: {
-                let file_path = file_path.clone();
                 let file_path_bytes = file_path_bytes.clone();
-                let absolute = absolute.clone();
                 move |_| {
-                    focused_panel.set(GitPanel::Files);
-                    selected_path.set(file_path.clone());
-                    selected_path_bytes.set(file_path_bytes.clone());
-                    selected_abs_path.set(absolute.clone());
+                    let _ = send(&GitFileSelectRequest {
+                        path_bytes: file_path_bytes.clone(),
+                    });
                 }
             },
             span { class: "w-4 shrink-0 text-center font-mono text-xs font-semibold {status_class}", title: "{status_label}", "{status_code}" }
@@ -240,8 +222,8 @@ fn FileRow(
                         let path_bytes = file_path_bytes.clone();
                         let repo_root = repo_root.clone();
                         move |event: Event<MouseData>| {
-                            focused_panel.set(GitPanel::Files);
                             event.stop_propagation();
+                            let _ = send(&GitPanelSelectRequest { panel: GitPanel::Files });
                             if staged_view {
                                 let _ = send(&GitUnstageRequest { repo_root: repo_root.clone(), path: absolute.clone(), path_bytes: path_bytes.clone() });
                             } else {
@@ -262,18 +244,12 @@ fn FileRow(
                         title: if confirming { translate("git-confirm-discard") } else { translate("git-discard") },
                         aria_label: if confirming { translate("git-confirm-discard") } else { translate("git-discard") },
                         onclick: {
-                            let absolute = absolute.clone();
                             let path_bytes = file_path_bytes.clone();
-                            let repo_root = repo_root.clone();
                             move |event: Event<MouseData>| {
-                                focused_panel.set(GitPanel::Files);
                                 event.stop_propagation();
-                                if confirm_discard() == path_bytes {
-                                    let _ = send(&GitDiscardRequest { repo_root: repo_root.clone(), path: absolute.clone(), path_bytes: path_bytes.clone() });
-                                    confirm_discard.set(Vec::new());
-                                } else {
-                                    confirm_discard.set(path_bytes.clone());
-                                }
+                                let _ = send(&GitDiscardFileRequest {
+                                    path_bytes: path_bytes.clone(),
+                                });
                             }
                         },
                         LineIconView { icon: if confirming { LineIcon::AlertCircle } else { LineIcon::RotateCcw }, class: "h-3.5 w-3.5" }
@@ -290,10 +266,10 @@ fn CommitPanel(
     staged_count: u32,
     commit_message: Signal<String>,
     pending_commit_message: Signal<String>,
+    can_commit: bool,
 ) -> Element {
-    let can_commit = staged_count > 0
-        && !commit_message().trim().is_empty()
-        && pending_commit_message().is_empty();
+    let can_commit =
+        can_commit && !commit_message().trim().is_empty() && pending_commit_message().is_empty();
 
     rsx! {
         div { class: "shrink-0 border-t border-foreground/[0.07] bg-foreground/[0.015] p-1.5",

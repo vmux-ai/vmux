@@ -11,7 +11,7 @@ use vmux_command::{
 };
 use vmux_core::{
     HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
-    host::page::NativelyHosted,
+    host::{UiStateWrite, page::NativelyHosted},
     page::{HostHistoryDelta, HostHistoryNavigation, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -32,6 +32,7 @@ use vmux_layout::{
         SideSheetWidth,
     },
     stack::{ActiveTabParam, CloseStackRequest, Stack, focused_stack},
+    state::LayoutUiState,
 };
 
 use vmux_terminal::{RestartPty, Terminal};
@@ -497,7 +498,10 @@ fn on_reload_notify_header(
     }) else {
         return;
     };
-    vmux_layout::LayoutUiStateUpdates::write(&mut commands, cef_e, &ReloadEffect);
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+        cef_e,
+        &ReloadEffect,
+    ));
 }
 
 fn on_hard_reload_notify_header(
@@ -513,7 +517,10 @@ fn on_hard_reload_notify_header(
     }) else {
         return;
     };
-    vmux_layout::LayoutUiStateUpdates::write(&mut commands, cef_e, &ReloadEffect);
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+        cef_e,
+        &ReloadEffect,
+    ));
 }
 
 fn on_side_sheet_resize(

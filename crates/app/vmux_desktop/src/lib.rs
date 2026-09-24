@@ -5,8 +5,7 @@
 )]
 
 mod appearance;
-mod bookmark_menu;
-mod bookmark_persistence;
+mod bookmark;
 mod boot_status;
 #[cfg(any(feature = "recording", feature = "screenshots"))]
 mod capture_output;

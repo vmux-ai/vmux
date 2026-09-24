@@ -1,8 +1,8 @@
 use super::{
-    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolManifest, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{
@@ -13,22 +13,24 @@ pub(super) struct WorkspaceToolPlugin;
 
 impl Plugin for WorkspaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(
-                Update,
-                (
-                    open_page,
-                    open_file,
-                    resume_in_acp,
-                    run,
-                    request_user_choice,
-                    select_project,
-                    create_worktree,
-                    read_terminal,
-                )
-                    .in_set(ToolDispatchSet),
-            );
+        app.add_plugins(McpToolPlugin::<WorkspaceTool>::new(include_str!(
+            "workspace.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(
+            Update,
+            (
+                open_page,
+                open_file,
+                resume_in_acp,
+                run,
+                request_user_choice,
+                select_project,
+                create_worktree,
+                read_terminal,
+            )
+                .in_set(ToolDispatchSet),
+        );
     }
 }
 
@@ -43,11 +45,6 @@ enum WorkspaceTool {
     SelectProject,
     CreateWorktree,
     ReadTerminal,
-}
-
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<WorkspaceTool>::from_ron(include_str!("workspace.ron"))
-        .spawn(&mut commands, &mut next_order);
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -159,23 +156,34 @@ fn resume_in_acp(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
 
 fn parse(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, tool) in calls.iter() {
-        match tool {
-            WorkspaceTool::ResumeInAcp => {}
-            WorkspaceTool::OpenPage => call.parse_into::<OpenPageArgs>(request, &mut commands),
-            WorkspaceTool::OpenFile => call.parse_into::<OpenFileArgs>(request, &mut commands),
-            WorkspaceTool::Run => call.parse_into::<RunArgs>(request, &mut commands),
-            WorkspaceTool::RequestUserChoice => {
-                call.parse_into::<RequestUserChoiceArgs>(request, &mut commands)
-            }
-            WorkspaceTool::SelectProject => {
-                call.parse_into::<SelectProjectArgs>(request, &mut commands)
-            }
-            WorkspaceTool::CreateWorktree => {
-                call.parse_into::<CreateWorktreeArgs>(request, &mut commands)
-            }
-            WorkspaceTool::ReadTerminal => {
-                call.parse_into::<ReadTerminalArgs>(request, &mut commands)
-            }
+        let parsed = match tool {
+            WorkspaceTool::ResumeInAcp => continue,
+            WorkspaceTool::OpenPage => call.parse::<OpenPageArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            WorkspaceTool::OpenFile => call.parse::<OpenFileArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            WorkspaceTool::Run => call.parse::<RunArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            WorkspaceTool::RequestUserChoice => call.parse::<RequestUserChoiceArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            WorkspaceTool::SelectProject => call.parse::<SelectProjectArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            WorkspaceTool::CreateWorktree => call.parse::<CreateWorktreeArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            WorkspaceTool::ReadTerminal => call.parse::<ReadTerminalArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+        };
+        if let Err(message) = parsed {
+            commands
+                .entity(request)
+                .insert(ToolDispatchResult(Err(message)));
         }
     }
 }

@@ -24,7 +24,7 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::bookmark_menu::BookmarkMenuPlugin)
+        app.add_plugins(crate::bookmark::BookmarkMenuPlugin)
             .add_message::<crate::window_manager::CloseVmuxWindow>()
             .add_message::<CloseRequest>()
             .add_message::<vmux_browser::OpenRequest>()
@@ -403,7 +403,7 @@ fn forward_menu_events(world: &mut World) {
         query.iter(world).cloned().collect::<Vec<_>>()
     };
     for event_id in drained {
-        if crate::bookmark_menu::forward_menu_event(world, &event_id) {
+        if crate::bookmark::forward_menu_event(world, &event_id) {
             continue;
         }
         if event_id == "app_quit" {

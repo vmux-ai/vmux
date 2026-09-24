@@ -1,112 +1,6 @@
-use dioxus::prelude::*;
 use vmux_ui::i18n::translate;
-use vmux_ui::list_nav::MenuDirection;
 
-use crate::event::{FileStatus, GitFileEntry, GitRepositorySnapshot};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum BranchPrompt {
-    Create { base: String },
-    Delete { branch: String },
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum BranchCollection {
-    #[default]
-    Local,
-    Remote,
-    Tags,
-}
-
-impl BranchCollection {
-    pub(super) fn references(self, repository: &GitRepositorySnapshot) -> Vec<String> {
-        match self {
-            Self::Local => repository
-                .branches
-                .iter()
-                .map(|entry| entry.name.clone())
-                .collect(),
-            Self::Remote => repository
-                .remote_branches
-                .iter()
-                .map(|entry| entry.name.clone())
-                .collect(),
-            Self::Tags => repository
-                .tags
-                .iter()
-                .map(|entry| entry.name.clone())
-                .collect(),
-        }
-    }
-
-    pub(super) fn selected_reference(
-        self,
-        repository: &GitRepositorySnapshot,
-        selected: &str,
-    ) -> String {
-        let references = self.references(repository);
-        if references.iter().any(|reference| reference == selected) {
-            return selected.to_string();
-        }
-        if self == Self::Local
-            && let Some(current) = repository.branches.iter().find(|entry| entry.current)
-        {
-            return current.name.clone();
-        }
-        references.into_iter().next().unwrap_or_default()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum GitPanel {
-    #[default]
-    Status,
-    Files,
-    Branches,
-    Commits,
-    Stash,
-}
-
-impl GitPanel {
-    pub(super) fn menu_direction(event: &KeyboardData) -> Option<MenuDirection> {
-        let modifiers = event.modifiers();
-        if !modifiers.ctrl() && !modifiers.alt() && !modifiers.meta() && !modifiers.shift() {
-            match event.key().to_string().as_str() {
-                "j" => return Some(MenuDirection::Next),
-                "k" => return Some(MenuDirection::Previous),
-                _ => {}
-            }
-        }
-        MenuDirection::from_key(event)
-    }
-
-    pub(super) fn from_key(key: &str) -> Option<Self> {
-        match key {
-            "0" => Some(Self::Status),
-            "1" => Some(Self::Status),
-            "2" => Some(Self::Files),
-            "3" => Some(Self::Branches),
-            "4" => Some(Self::Commits),
-            "5" => Some(Self::Stash),
-            _ => None,
-        }
-    }
-
-    pub(super) fn next(self, reverse: bool) -> Self {
-        match (self, reverse) {
-            (Self::Status, false) => Self::Files,
-            (Self::Files, false) => Self::Branches,
-            (Self::Branches, false) => Self::Commits,
-            (Self::Commits, false) => Self::Stash,
-            (Self::Stash, false) => Self::Status,
-            (Self::Status, true) => Self::Stash,
-            (Self::Files, true) => Self::Status,
-            (Self::Branches, true) => Self::Files,
-            (Self::Commits, true) => Self::Branches,
-            (Self::Stash, true) => Self::Commits,
-        }
-    }
-}
+use crate::event::{FileStatus, GitFileEntry};
 
 pub(super) trait FileStatusView {
     fn label(self) -> String;
@@ -159,9 +53,5 @@ impl GitFileEntry {
             .rsplit_once('/')
             .map(|(parent, _)| parent)
             .unwrap_or("")
-    }
-
-    pub(super) fn can_discard(&self) -> bool {
-        self.unstaged && self.status != FileStatus::Untracked
     }
 }

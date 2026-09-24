@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_command::{CommandDefinition, CommandInvocation, CommandRequest, CommandTypePlugin};
-use vmux_core::host::{UiState, UiStatePlugin};
+use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
 use vmux_service::event::*;
@@ -376,7 +376,7 @@ fn broadcast_to_monitors(
     };
 
     for entity in &monitors {
-        UiState::<ProcessesUiState>::write(&mut commands, entity, &state);
+        commands.trigger(UiStateWrite::<ProcessesUiState>::from_event(entity, &state));
     }
 }
 

@@ -1,5 +1,6 @@
 mod app;
 mod changes;
+mod controller;
 mod diff;
 mod directory;
 mod job;
@@ -25,6 +26,7 @@ pub use watch::RepoInfoCache;
 
 use crate::host::app::AppPlugin;
 use crate::host::changes::ChangesPlugin;
+use crate::host::controller::ControllerPlugin;
 use crate::host::diff::DiffPlugin;
 use crate::host::directory::DirectoryPlugin;
 use crate::host::job_runner::JobPlugin;
@@ -62,6 +64,7 @@ impl Plugin for GitPlugin {
             WatchPlugin,
             StatusPlugin,
             state::StatePlugin,
+            ControllerPlugin,
             JobPlugin,
             AppPlugin,
             ChangesPlugin,

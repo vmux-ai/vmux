@@ -1,7 +1,10 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_api::team::{ProfileRow, TeamEvent, TeamMemberRow, TeamRequest};
+use vmux_api::team::{
+    ProfileRow, TeamAgentPresentation, TeamAgentSubtitle, TeamEvent, TeamMemberRow,
+    TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
+};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::inline_edit::InlineEdit;
@@ -27,8 +30,8 @@ pub fn Page() -> Element {
 
     let snapshot = team();
     let profiles = snapshot.profiles;
-    let members = snapshot.members;
-    let agents: Vec<TeamMemberRow> = members.iter().filter(|m| !m.is_user).cloned().collect();
+    let active_profile = snapshot.active_profile;
+    let agents = snapshot.agents;
 
     rsx! {
         div {
@@ -40,13 +43,13 @@ pub fn Page() -> Element {
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-5 py-5",
                 div { class: "mx-auto w-full max-w-4xl",
-                    ProfileSection { profiles }
+                    ProfileSection { profiles, active: active_profile }
                     if !agents.is_empty() {
                         section {
                             div { class: "mb-2.5 px-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", {translate("team-agent")} }
                             div { class: "flex flex-col gap-0.5",
                                 for agent in agents.iter() {
-                                    AgentRow { key: "{agent.id}", member: agent.clone() }
+                                    AgentRow { key: "{agent.member.id}", presentation: agent.clone() }
                                 }
                             }
                         }
@@ -58,12 +61,11 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
+fn ProfileSection(profiles: Vec<ProfileRow>, active: Option<ProfileRow>) -> Element {
     let mut creating = use_signal(|| false);
     let mut editing = use_signal(|| false);
     let mut draft = use_signal(String::new);
     let profile_count = profiles.len();
-    let active = profiles.iter().find(|profile| profile.is_active).cloned();
     let active_id = active
         .as_ref()
         .map(|profile| profile.id.clone())
@@ -89,7 +91,10 @@ fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
                                 let id = active_id.clone();
                                 move |name| {
                                     editing.set(false);
-                                    emit_profile_command("update_profile", Some(id.clone()), Some(name));
+                                    let _ = send(&TeamProfileUpdateRequest {
+                                        profile_id: id.clone(),
+                                        name,
+                                    });
                                 }
                             },
                             on_cancel: move |_| editing.set(false),
@@ -106,7 +111,7 @@ fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
                                     if let Some(profile_id) = profile_id
                                         && profile_id != active_id
                                     {
-                                        emit_profile_command("switch_profile", Some(profile_id), None);
+                                        let _ = send(&TeamProfileSwitchRequest { profile_id });
                                     }
                                 }),
                                 attributes: vec![],
@@ -117,7 +122,7 @@ fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
                                     Avatar {
                                         src: None,
                                         seed: active.id.clone(),
-                                        background: vmux_api::avatar::hash_color(&active.id),
+                                        background: active.color.clone(),
                                         alt: active.name.clone(),
                                         class: "size-8",
                                     }
@@ -138,7 +143,7 @@ fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
                                                 Avatar {
                                                     src: None,
                                                     seed: profile.id.clone(),
-                                                    background: vmux_api::avatar::hash_color(&profile.id),
+                                                    background: profile.color.clone(),
                                                     alt: profile.name.clone(),
                                                     class: "size-7",
                                                 }
@@ -180,7 +185,7 @@ fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
                             restore_focus_id: "new-profile".to_string(),
                             on_commit: move |name| {
                                 creating.set(false);
-                                emit_profile_command("create_profile", None, Some(name));
+                                let _ = send(&TeamProfileCreateRequest { name });
                             },
                             on_cancel: move |_| creating.set(false),
                         }
@@ -205,28 +210,14 @@ fn ProfileSection(profiles: Vec<ProfileRow>) -> Element {
     }
 }
 
-fn emit_profile_command(command: &str, profile_id: Option<String>, profile_name: Option<String>) {
-    let _ = send(&TeamRequest {
-        command: command.to_string(),
-        member_id: None,
-        profile_id,
-        profile_name,
-    });
-}
-
 #[component]
-fn AgentRow(member: TeamMemberRow) -> Element {
-    let default_title = format!("{} (", member.name);
-    let subtitle = if !member.title.is_empty()
-        && member.title != member.name
-        && !member.title.starts_with(&default_title)
-    {
-        Some(member.title.clone())
-    } else if member.sid.is_empty() {
-        Some(translate("team-agent"))
-    } else {
-        None
+fn AgentRow(presentation: TeamAgentPresentation) -> Element {
+    let subtitle = match presentation.subtitle {
+        TeamAgentSubtitle::None => None,
+        TeamAgentSubtitle::Role => Some(translate("team-agent")),
+        TeamAgentSubtitle::Title(title) => Some(title),
     };
+    let member = presentation.member;
 
     rsx! {
         div {

@@ -3,15 +3,15 @@ use std::path::{Path, PathBuf};
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_core::tool::{ToolAction, ToolProvider};
+use vmux_core::tool::{ToolImportRequest, ToolProvider};
 
 use crate::manifest::{
     ToolStore, ToolsManifest, add_packages, expand_user_path, load_manifest_from, normalize_names,
     write_manifest_to,
 };
 use crate::{
-    ToolActionCompletion, ToolActionRequest, ToolActionRouteSet, ToolOperation,
-    ToolOperationPlugin, ToolStoreAction, ToolStoreTarget,
+    ToolOperation, ToolOperationCompletion, ToolOperationPlugin, ToolOperationRequest,
+    ToolOperationRouteSet, ToolStoreOperation, ToolStoreTarget,
 };
 
 pub(crate) struct HomebrewToolPlugin;
@@ -19,25 +19,21 @@ pub(crate) struct HomebrewToolPlugin;
 impl Plugin for HomebrewToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ToolOperationPlugin::<ImportBrewfile>::default())
-            .add_systems(Update, route.in_set(ToolActionRouteSet))
+            .add_systems(Update, route.in_set(ToolOperationRouteSet))
             .add_systems(Update, complete);
     }
 }
 
 fn route(
-    requests: Query<
-        (Entity, &ToolActionRequest),
-        (Added<ToolActionRequest>, With<ToolStoreTarget>),
-    >,
+    requests: Query<(Entity, &ToolOperationRequest<ToolImportRequest>), Added<ToolStoreTarget>>,
     mut commands: Commands,
 ) {
-    for (entity, action) in &requests {
-        let request = action.request();
+    for (entity, operation) in &requests {
+        let request = operation.request();
         if !matches!(
             request.provider,
             ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask
-        ) || request.action != ToolAction::Import
-        {
+        ) {
             continue;
         }
         let path = request.value.trim();
@@ -46,21 +42,21 @@ fn route(
         }
         commands
             .entity(entity)
-            .insert((ToolStoreAction, ImportBrewfile::new(path)));
+            .insert((ToolStoreOperation, ImportBrewfile::new(path)));
     }
 }
 
 fn complete(
-    actions: Query<
+    operations: Query<
         (Entity, &ImportedBrewfile),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, output) in &actions {
+    for (entity, output) in &operations {
         commands
             .entity(entity)
-            .insert(ToolActionCompletion::succeeded(format!(
+            .insert(ToolOperationCompletion::succeeded(format!(
                 "imported {} formulae and {} casks",
                 output.formulae, output.casks
             )));

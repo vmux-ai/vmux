@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
 use vmux_core::tool::{
-    ToolAction, ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest,
-    ToolInstallRequest, ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey,
+    ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
+    ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey, ToolOperationKind,
     ToolOperationNotice, ToolProvider, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest,
     ToolUpdateRequest, ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
 };
@@ -182,13 +182,13 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
                         variant: ManagerButtonVariant::Secondary,
                         disabled: pending.contains(&ToolOperationKey::new(
                             ToolProvider::Dotfiles,
-                            ToolAction::Apply,
+                            ToolOperationKind::Apply,
                             "",
                         )),
                         onclick: move |_| {
-                            send_action(
+                            send_operation(
                                 ToolProvider::Dotfiles,
-                                ToolAction::Apply,
+                                ToolOperationKind::Apply,
                                 String::new(),
                                 String::new(),
                             );
@@ -220,7 +220,7 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
                             "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                         },
                         if result.success {
-                            {action_result_message(&result)}
+                            {operation_result_message(&result)}
                         } else {
                             "{result.message}"
                         }
@@ -317,25 +317,25 @@ fn ToolRow(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
                 }
             },
             actions: rsx! {
-                for action in item.actions.iter().copied() {
+                for kind in item.operations.iter().copied() {
                     {
-                        let action_id = id.clone();
-                        let operation = ToolOperationKey::new(provider, action, action_id.clone());
-                        let key = format!("{}:{action:?}:{action_id}", provider.id());
+                        let operation_id = id.clone();
+                        let operation = ToolOperationKey::new(provider, kind, operation_id.clone());
+                        let key = format!("{}:{kind:?}:{operation_id}", provider.id());
                         rsx! {
                             ManagerButton {
                                 key: "{key}",
-                                variant: action_variant(action),
+                                variant: operation_variant(kind),
                                 disabled: pending.contains(&operation),
                                 onclick: move |_| {
-                                    send_action(
+                                    send_operation(
                                         provider,
-                                        action,
-                                        action_id.clone(),
+                                        kind,
+                                        operation_id.clone(),
                                         String::new(),
                                     );
                                 },
-                                {action_label(action)}
+                                {operation_label(kind)}
                             }
                         }
                     }
@@ -349,21 +349,21 @@ fn request_snapshot(refresh: bool) {
     let _ = send(&ToolsRefreshRequest { refresh });
 }
 
-fn send_action(provider: ToolProvider, action: ToolAction, id: String, value: String) {
-    let _ = match action {
-        ToolAction::Install => send(&ToolInstallRequest { provider, id }),
-        ToolAction::Update => send(&ToolUpdateRequest { provider, id }),
-        ToolAction::Uninstall => send(&ToolUninstallRequest { provider, id }),
-        ToolAction::Forget => send(&ToolForgetRequest { provider, id }),
-        ToolAction::Adopt => send(&ToolAdoptRequest {
+fn send_operation(provider: ToolProvider, kind: ToolOperationKind, id: String, value: String) {
+    let _ = match kind {
+        ToolOperationKind::Install => send(&ToolInstallRequest { provider, id }),
+        ToolOperationKind::Update => send(&ToolUpdateRequest { provider, id }),
+        ToolOperationKind::Uninstall => send(&ToolUninstallRequest { provider, id }),
+        ToolOperationKind::Forget => send(&ToolForgetRequest { provider, id }),
+        ToolOperationKind::Adopt => send(&ToolAdoptRequest {
             provider,
             id,
             value,
         }),
-        ToolAction::Link => send(&ToolLinkRequest { provider, id }),
-        ToolAction::Unlink => send(&ToolUnlinkRequest { provider, id }),
-        ToolAction::Apply => send(&ToolApplyRequest),
-        ToolAction::Import => send(&ToolImportRequest { provider, value }),
+        ToolOperationKind::Link => send(&ToolLinkRequest { provider, id }),
+        ToolOperationKind::Unlink => send(&ToolUnlinkRequest { provider, id }),
+        ToolOperationKind::Apply => send(&ToolApplyRequest),
+        ToolOperationKind::Import => send(&ToolImportRequest { provider, value }),
     };
 }
 
@@ -421,45 +421,45 @@ fn status_dot_class(status: ToolStatus) -> &'static str {
     }
 }
 
-fn action_label(action: ToolAction) -> String {
-    translate(match action {
-        ToolAction::Install => "common-install",
-        ToolAction::Update => "common-update",
-        ToolAction::Uninstall => "common-uninstall",
-        ToolAction::Forget => "tools-forget",
-        ToolAction::Adopt => "tools-manage",
-        ToolAction::Link => "tools-link",
-        ToolAction::Unlink => "tools-unlink",
-        ToolAction::Apply => "tools-apply",
-        ToolAction::Import => "tools-import",
+fn operation_label(kind: ToolOperationKind) -> String {
+    translate(match kind {
+        ToolOperationKind::Install => "common-install",
+        ToolOperationKind::Update => "common-update",
+        ToolOperationKind::Uninstall => "common-uninstall",
+        ToolOperationKind::Forget => "tools-forget",
+        ToolOperationKind::Adopt => "tools-manage",
+        ToolOperationKind::Link => "tools-link",
+        ToolOperationKind::Unlink => "tools-unlink",
+        ToolOperationKind::Apply => "tools-apply",
+        ToolOperationKind::Import => "tools-import",
     })
 }
 
-fn action_result_message(result: &ToolOperationNotice) -> String {
+fn operation_result_message(result: &ToolOperationNotice) -> String {
     let id = result.operation.item_id.as_str();
-    match result.operation.action {
-        ToolAction::Apply => translate("tools-result-applied"),
-        ToolAction::Import => translate("tools-result-imported"),
-        action => translate_with(
-            match action {
-                ToolAction::Install => "tools-result-installed",
-                ToolAction::Update => "tools-result-updated",
-                ToolAction::Uninstall => "tools-result-uninstalled",
-                ToolAction::Forget => "tools-result-forgotten",
-                ToolAction::Adopt => "tools-result-managed",
-                ToolAction::Link => "tools-result-linked",
-                ToolAction::Unlink => "tools-result-unlinked",
-                ToolAction::Apply | ToolAction::Import => unreachable!(),
+    match result.operation.kind {
+        ToolOperationKind::Apply => translate("tools-result-applied"),
+        ToolOperationKind::Import => translate("tools-result-imported"),
+        kind => translate_with(
+            match kind {
+                ToolOperationKind::Install => "tools-result-installed",
+                ToolOperationKind::Update => "tools-result-updated",
+                ToolOperationKind::Uninstall => "tools-result-uninstalled",
+                ToolOperationKind::Forget => "tools-result-forgotten",
+                ToolOperationKind::Adopt => "tools-result-managed",
+                ToolOperationKind::Link => "tools-result-linked",
+                ToolOperationKind::Unlink => "tools-result-unlinked",
+                ToolOperationKind::Apply | ToolOperationKind::Import => unreachable!(),
             },
             &[("name", TranslationValue::String(id))],
         ),
     }
 }
 
-fn action_variant(action: ToolAction) -> ManagerButtonVariant {
-    match action {
-        ToolAction::Install | ToolAction::Link => ManagerButtonVariant::Primary,
-        ToolAction::Uninstall | ToolAction::Forget | ToolAction::Unlink => {
+fn operation_variant(kind: ToolOperationKind) -> ManagerButtonVariant {
+    match kind {
+        ToolOperationKind::Install | ToolOperationKind::Link => ManagerButtonVariant::Primary,
+        ToolOperationKind::Uninstall | ToolOperationKind::Forget | ToolOperationKind::Unlink => {
             ManagerButtonVariant::Danger
         }
         _ => ManagerButtonVariant::Secondary,

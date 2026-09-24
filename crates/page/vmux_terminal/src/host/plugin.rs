@@ -842,7 +842,9 @@ fn broadcast_service_unavailable(
 ) {
     let evt = ServiceUnavailableEvent { message };
     for entity in terminals.iter() {
-        crate::TerminalUiStateUpdates::write(commands, entity, &evt);
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_core::event::TerminalUiState,
+        >::from_event(entity, &evt));
     }
 }
 
@@ -1194,7 +1196,9 @@ fn poll_service_messages(
                     mouse,
                     evicted_total,
                 };
-                crate::TerminalUiStateUpdates::write(&mut commands, entity, &patch);
+                commands.trigger(vmux_core::host::UiStateWrite::<
+                    vmux_core::event::TerminalUiState,
+                >::from_event(entity, &patch));
             }
             ServiceMessage::Bell { process_id } => {
                 writers
@@ -1213,7 +1217,9 @@ fn poll_service_messages(
                     continue;
                 }
                 let evt = TermTitleEvent { title };
-                crate::TerminalUiStateUpdates::write(&mut commands, entity, &evt);
+                commands.trigger(vmux_core::host::UiStateWrite::<
+                    vmux_core::event::TerminalUiState,
+                >::from_event(entity, &evt));
             }
             ServiceMessage::Snapshot {
                 process_id,
@@ -1259,7 +1265,9 @@ fn poll_service_messages(
                     mouse: false,
                     evicted_total: 0,
                 };
-                crate::TerminalUiStateUpdates::write(&mut commands, entity, &patch);
+                commands.trigger(vmux_core::host::UiStateWrite::<
+                    vmux_core::event::TerminalUiState,
+                >::from_event(entity, &patch));
             }
             ServiceMessage::ProcessExited { process_id, .. } => {
                 writers
@@ -1280,15 +1288,16 @@ fn poll_service_messages(
                     .remove::<CloseRequiresConfirmation>()
                     .remove::<AgentLoading>();
                 let is_agent = if let Ok(session) = agent_sessions.get(entity) {
-                    crate::TerminalUiStateUpdates::write(
-                        &mut commands,
+                    commands.trigger(vmux_core::host::UiStateWrite::<
+                        vmux_core::event::TerminalUiState,
+                    >::from_event(
                         entity,
                         &crate::event::TermLoadingEvent {
                             loading: false,
                             label: session.kind.display_name().to_string(),
                             segment: session.kind.as_url_segment().to_string(),
                         },
-                    );
+                    ));
                     true
                 } else {
                     false
@@ -2180,11 +2189,11 @@ fn on_term_key(
             .flatten();
         if capture.apply(event, pasted) {
             let (draft, skipped) = (capture.draft.clone(), capture.skipped);
-            crate::TerminalUiStateUpdates::write(
-                &mut commands,
-                entity,
-                &AgentPromptDraftEvent { draft, skipped },
-            );
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_core::event::TerminalUiState,
+            >::from_event(
+                entity, &AgentPromptDraftEvent { draft, skipped }
+            ));
         }
         return;
     }

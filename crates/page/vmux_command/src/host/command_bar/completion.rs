@@ -2,11 +2,13 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
+use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use vmux_core::host::UiStateWrite;
 
 use crate::command_bar::project_files::{MAX_RESULTS, ProjectCompletions, ProjectIndex, RankBias};
-use crate::event::{PathCompleteRequest, PathEntry};
-use crate::snapshot::{CommandBarProjection, CommandBarUiStateUpdates, WriteCommandBarSnapshots};
+use crate::event::{CommandBarUiState, PathCompleteRequest, PathEntry};
+use crate::snapshot::{CommandBarProjection, WriteCommandBarSnapshots};
 
 pub(super) struct CompletionPlugin;
 
@@ -33,6 +35,7 @@ fn on_path_complete_request(
     browsers: NonSend<Browsers>,
     mut index: ResMut<ProjectIndex>,
     mut paths: ResMut<PathCompletions>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let workspace = &state.workspace;
@@ -47,7 +50,12 @@ fn on_path_complete_request(
     let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
     if roots.is_empty() {
         index.forget(asking);
-        paths.start(asking, request_id, query);
+        paths.start(
+            asking,
+            request_id,
+            query,
+            vmux_core::host::wake::Wake::from_resource(proxy),
+        );
         return;
     }
     let bias = RankBias::new(
@@ -57,15 +65,29 @@ fn on_path_complete_request(
         ),
         &work.recent_files,
     );
-    let Some(completions) = index.matches(&roots, &bias, request_id, query, asking) else {
-        paths.start(asking, request_id, query);
+    let Some(completions) =
+        index.matches(&roots, &bias, request_id, query, asking, proxy.as_deref())
+    else {
+        paths.start(
+            asking,
+            request_id,
+            query,
+            vmux_core::host::wake::Wake::from_resource(proxy),
+        );
         return;
     };
     paths.cancel(asking);
-    CommandBarUiStateUpdates::write(&mut commands, asking, &completions.response(request_id));
+    commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
+        asking,
+        &completions.response(request_id),
+    ));
 }
 
-fn warm_project_index(state: Res<CommandBarProjection>, mut index: ResMut<ProjectIndex>) {
+fn warm_project_index(
+    state: Res<CommandBarProjection>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut index: ResMut<ProjectIndex>,
+) {
     if !state.is_changed() {
         return;
     }
@@ -75,12 +97,13 @@ fn warm_project_index(state: Res<CommandBarProjection>, mut index: ResMut<Projec
     if roots.is_empty() {
         return;
     }
-    index.warm(&roots);
+    index.warm(&roots, proxy.as_deref());
 }
 
 fn answer_settled_project_index(
     state: Res<CommandBarProjection>,
     browsers: NonSend<Browsers>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut index: ResMut<ProjectIndex>,
     mut paths: ResMut<PathCompletions>,
     mut commands: Commands,
@@ -113,15 +136,15 @@ fn answer_settled_project_index(
         if roots.is_empty() {
             continue;
         }
-        let Some(completions) = index.settled_for(asked.webview, &roots, &bias) else {
+        let Some(completions) = index.settled_for(asked.webview, &roots, &bias, proxy.as_deref())
+        else {
             continue;
         };
         paths.cancel(asked.webview);
-        CommandBarUiStateUpdates::write(
-            &mut commands,
+        commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
             asked.webview,
             &completions.response(asked.request_id),
-        );
+        ));
     }
 }
 
@@ -132,11 +155,10 @@ fn answer_path_completions(
 ) {
     for (webview, request_id, completions) in paths.settled() {
         if browsers.can_emit_to(&webview) {
-            CommandBarUiStateUpdates::write(
-                &mut commands,
+            commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
                 webview,
                 &completions.response(request_id),
-            );
+            ));
         }
     }
 }
@@ -189,10 +211,19 @@ impl ProjectQuery {
 struct PathCompletions(Vec<PendingPathCompletion>);
 
 impl PathCompletions {
-    fn start(&mut self, webview: Entity, request_id: u64, query: &str) {
+    fn start(
+        &mut self,
+        webview: Entity,
+        request_id: u64,
+        query: &str,
+        wake: vmux_core::host::wake::Wake,
+    ) {
         self.cancel(webview);
         let query = PathQuery(query.to_string());
-        let task = IoTaskPool::get().spawn(async move { query.complete() });
+        let task = IoTaskPool::get().spawn(async move {
+            let _wake = wake;
+            query.complete()
+        });
         self.0.push(PendingPathCompletion {
             webview,
             request_id,

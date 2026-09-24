@@ -2,6 +2,7 @@ use bevy::{ecs::entity::EntityHashMap, ecs::relationship::Relationship, prelude:
 use bevy_cef::prelude::*;
 use vmux_core::{
     PageIdentity, PageMetadata,
+    host::UiStateWrite,
     page::{HostHistory, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -10,7 +11,7 @@ use vmux_layout::projection::{
 };
 use vmux_layout::{Browser, Loading};
 use vmux_layout::{
-    Header, LayoutCef, LayoutUiStateUpdates, NavigationState, Open, UpdateState,
+    Header, LayoutCef, NavigationState, Open, UpdateState,
     event::{
         HEADER_HEIGHT_PX, LayoutGeometry, PaneNode, PaneTreeState, StackNavigationState, StackNode,
         StackRow, TabBoundary, TabBoundaryState, TabListState, TabRow, UpdateCleared,
@@ -19,6 +20,7 @@ use vmux_layout::{
     pane::{Pane, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
+    state::LayoutUiState,
     tab::Tab,
     window::VmuxWindow,
 };
@@ -453,7 +455,7 @@ fn push_layout_state_emit(
     if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
         return;
     }
-    LayoutUiStateUpdates::write(&mut commands, cef_e, &payload);
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 struct AddressRoots<'a> {
@@ -584,7 +586,7 @@ fn push_stacks_host_emit(
     if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
         return;
     }
-    LayoutUiStateUpdates::write(&mut commands, cef_e, &payload);
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 fn push_pane_tree_emit(
@@ -712,7 +714,7 @@ fn push_pane_tree_emit(
     if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
         return;
     }
-    LayoutUiStateUpdates::write(&mut commands, cef_e, &payload);
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 fn abbreviate_project_path(path: &std::path::Path) -> String {
@@ -811,7 +813,7 @@ fn push_projects_host_emit(
     if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
         return;
     }
-    LayoutUiStateUpdates::write(&mut commands, cef_e, &payload);
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -942,7 +944,7 @@ fn push_bookmarks_host_emit(
     if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
         return;
     }
-    LayoutUiStateUpdates::write(&mut commands, cef_e, &payload);
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 fn push_tabs_host_emit(
@@ -1028,7 +1030,7 @@ fn push_tabs_host_emit(
     if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
         return;
     }
-    LayoutUiStateUpdates::write(&mut commands, cef_e, &payload);
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &payload));
 }
 
 fn push_update_notice_emit(
@@ -1049,38 +1051,46 @@ fn push_update_notice_emit(
         return;
     }
     match &*state {
-        UpdateState::Idle => LayoutUiStateUpdates::write(&mut commands, cef_e, &UpdateCleared),
+        UpdateState::Idle => {
+            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+                cef_e,
+                &UpdateCleared,
+            ));
+        }
         UpdateState::Downloading {
             version,
             downloaded,
             total,
-        } => LayoutUiStateUpdates::write(
-            &mut commands,
-            cef_e,
-            &UpdateProgress {
-                version: version.clone(),
-                downloaded: *downloaded,
-                total: *total,
-                installing: false,
-            },
-        ),
-        UpdateState::Installing { version } => LayoutUiStateUpdates::write(
-            &mut commands,
-            cef_e,
-            &UpdateProgress {
-                version: version.clone(),
-                downloaded: 0,
-                total: 0,
-                installing: true,
-            },
-        ),
-        UpdateState::Ready { version } => LayoutUiStateUpdates::write(
-            &mut commands,
-            cef_e,
-            &UpdateReady {
-                version: version.clone(),
-            },
-        ),
+        } => {
+            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+                cef_e,
+                &UpdateProgress {
+                    version: version.clone(),
+                    downloaded: *downloaded,
+                    total: *total,
+                    installing: false,
+                },
+            ));
+        }
+        UpdateState::Installing { version } => {
+            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+                cef_e,
+                &UpdateProgress {
+                    version: version.clone(),
+                    downloaded: 0,
+                    total: 0,
+                    installing: true,
+                },
+            ));
+        }
+        UpdateState::Ready { version } => {
+            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+                cef_e,
+                &UpdateReady {
+                    version: version.clone(),
+                },
+            ));
+        }
     }
     last.insert(cef_e, state.clone());
 }

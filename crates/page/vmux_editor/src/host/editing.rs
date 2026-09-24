@@ -283,18 +283,20 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::ClearSearchHighlight => {
-                vmux_core::host::FileUiStateUpdates::write(
-                    &mut commands,
-                    entity,
-                    &vmux_core::event::FileKey::FindClose,
+                commands.trigger(
+                    vmux_core::host::UiStateWrite::<vmux_core::event::FileUiState>::from_event(
+                        entity,
+                        &vmux_core::event::FileKey::FindClose,
+                    ),
                 );
                 cursor_stale = true;
             }
             EditCommand::OpenFind { forward } => {
-                vmux_core::host::FileUiStateUpdates::write(
-                    &mut commands,
-                    entity,
-                    &vmux_core::event::FileKey::Find { forward: *forward },
+                commands.trigger(
+                    vmux_core::host::UiStateWrite::<vmux_core::event::FileUiState>::from_event(
+                        entity,
+                        &vmux_core::event::FileKey::Find { forward: *forward },
+                    ),
                 );
                 continue;
             }

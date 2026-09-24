@@ -31,7 +31,7 @@ pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::bookmark_persistence::BookmarkPersistencePlugin)
+        app.add_plugins(crate::bookmark::BookmarkPersistencePlugin)
             .insert_resource(AutoSave {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),

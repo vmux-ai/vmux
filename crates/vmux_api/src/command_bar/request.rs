@@ -80,6 +80,38 @@ pub struct PickRequest {
 #[vmux_api::ui_event(Copy, Default, Eq, targets = ["command-bar", "start", "layout"])]
 pub struct DismissRequest;
 
+#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
+pub struct CommandPaletteDraftRequest {
+    pub open_id: super::OpenId,
+    pub query: String,
+    pub start: bool,
+}
+
+#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
+pub struct CommandPaletteSelectionRequest {
+    pub open_id: super::OpenId,
+    pub selected: u32,
+}
+
+#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
+pub struct CommandPalettePromptHistoryRequest {
+    pub open_id: super::OpenId,
+    pub agent: String,
+    pub cwd: String,
+}
+
+#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
+pub struct CommandPaletteBranchesRequest {
+    pub open_id: super::OpenId,
+    pub project: String,
+}
+
+#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
+pub struct CommandPaletteRemoveAttachmentRequest {
+    pub open_id: super::OpenId,
+    pub path: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExCommandName {
     pub name: &'static str,

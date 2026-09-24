@@ -10,7 +10,7 @@ use crate::event::{
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_core::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
 
-use super::state::{HistoryQueryState, HistoryUiStateUpdates};
+use super::state::HistoryQueryState;
 
 pub struct HistoryQueryPlugin;
 
@@ -51,7 +51,12 @@ fn on_history_query_request(
     };
     *state = HistoryQueryState::from_request(req);
     let response = history_query_response(req, &urls, &visits);
-    HistoryUiStateUpdates::write(&mut commands, trigger.event().webview, &response);
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
+            trigger.event().webview,
+            &response,
+        ),
+    );
 }
 
 fn history_query_response(
@@ -209,7 +214,11 @@ fn broadcast_history_changed(
             request_id: state.request_id,
         };
         let response = history_query_response(&request, &urls, &visits);
-        HistoryUiStateUpdates::write(&mut commands, entity, &response);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
+                entity, &response,
+            ),
+        );
     }
 }
 
@@ -249,14 +258,15 @@ fn on_history_suggestions_request(
         .map(|(_, e)| e)
         .collect();
 
-    vmux_core::host::UiState::<vmux_api::command_bar::CommandBarUiState>::write(
-        &mut commands,
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(
         trigger.event().webview,
         &HistorySuggestionsResponse {
             request_id: req.request_id,
             entries,
         },
-    );
+    ));
 }
 
 #[cfg(test)]

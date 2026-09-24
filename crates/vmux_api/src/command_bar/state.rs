@@ -1,7 +1,10 @@
 use super::{CommandBarKey, CommandBarOpenEvent, PathCompleteResponse, StartProjectBranches};
-use crate::chat::{PromptHistory, ResumableSessions};
-use crate::history::HistorySuggestionsResponse;
-use crate::prompt_media::{ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries};
+use crate::chat::{PromptHistory, ResumableSessionEntry, ResumableSessions};
+use crate::history::{HistoryEntry, HistorySuggestionsResponse};
+use crate::prompt_media::{
+    ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
+};
+use crate::space::ProjectBranch;
 
 #[vmux_api::contract(Copy, Default, Eq)]
 pub struct CommandBarFocusInput;
@@ -25,6 +28,26 @@ pub enum CommandBarUiStatePatch {
 pub struct CommandBarUiState {
     pub sequence: u64,
     pub patches: Vec<CommandBarUiStatePatch>,
+}
+
+#[vmux_api::ui_state(Default, targets = ["command-bar", "start", "layout"])]
+pub struct CommandPaletteState {
+    pub open_id: super::OpenId,
+    pub completions: Vec<super::PathEntry>,
+    pub completions_partial: bool,
+    pub completions_total: u32,
+    pub history: Vec<HistoryEntry>,
+    pub prompt_history: Vec<String>,
+    pub branch_project: String,
+    pub branches: Vec<ProjectBranch>,
+    pub sessions: Vec<ResumableSessionEntry>,
+    pub sessions_total: u32,
+    pub sessions_loading: bool,
+    pub media_query: Option<String>,
+    pub media_entries: Vec<ChatMediaEntry>,
+    pub media_loading: bool,
+    pub attachments: Vec<ChatAttachment>,
+    pub attachment_sequence: u64,
 }
 
 #[cfg(test)]

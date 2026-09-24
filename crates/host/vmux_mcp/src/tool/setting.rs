@@ -1,8 +1,8 @@
 use super::{
-    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolManifest, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue};
@@ -11,12 +11,14 @@ pub(super) struct SettingToolPlugin;
 
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(
-                Update,
-                (get_settings, update_settings).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(McpToolPlugin::<SettingTool>::new(include_str!(
+            "setting.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(
+            Update,
+            (get_settings, update_settings).in_set(ToolDispatchSet),
+        );
     }
 }
 
@@ -34,15 +36,19 @@ struct UpdateSettingsArgs {
     value: serde_json::Value,
 }
 
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<SettingTool>::from_ron(include_str!("setting.ron"))
-        .spawn(&mut commands, &mut next_order);
-}
-
 fn parse(mut commands: Commands, calls: ToolCalls<SettingTool>) {
     for (request, call, tool) in calls.iter() {
         if *tool == SettingTool::UpdateSettings {
-            call.parse_into::<UpdateSettingsArgs>(request, &mut commands);
+            match call.parse::<UpdateSettingsArgs>() {
+                Ok(args) => {
+                    commands.entity(request).insert(args);
+                }
+                Err(message) => {
+                    commands
+                        .entity(request)
+                        .insert(ToolDispatchResult(Err(message)));
+                }
+            }
         }
     }
 }

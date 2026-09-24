@@ -13,7 +13,7 @@ pub(super) fn PanelHeader(
     icon_class: &'static str,
     badge_class: &'static str,
     focused: bool,
-    #[props(default)] actions: Option<Element>,
+    #[props(default)] operations: Option<Element>,
 ) -> Element {
     rsx! {
         div { class: if focused {
@@ -32,8 +32,8 @@ pub(super) fn PanelHeader(
             if let Some(count) = count {
                 Badge { class: "min-h-4 min-w-4 rounded-full border px-1 text-[8px] font-semibold tabular-nums {badge_class}", "{count}" }
             }
-            if let Some(actions) = actions {
-                {actions}
+            if let Some(operations) = operations {
+                {operations}
             }
         }
     }
@@ -46,7 +46,7 @@ pub(super) enum PanelIcon {
 }
 
 #[component]
-pub(super) fn HeaderActionButton(
+pub(super) fn HeaderOperationButton(
     icon: LineIcon,
     shortcut: &'static str,
     label: String,

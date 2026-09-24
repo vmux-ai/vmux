@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput};
-use vmux_core::KeyboardOwner;
 use vmux_core::event::{
     ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
     ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,
 };
 use vmux_core::extension::store;
+use vmux_core::{KeyboardOwner, host::UiStateWrite};
 use vmux_flex::prelude::Visibility;
-use vmux_layout::{Browser, LayoutCef, LayoutUiStateUpdates};
+use vmux_layout::{Browser, LayoutCef, state::LayoutUiState};
 
 pub(super) struct PopupPlugin;
 
@@ -53,7 +53,10 @@ impl ExtensionPopup {
             closed = true;
         }
         if closed {
-            LayoutUiStateUpdates::write(commands, owner, &ExtensionPopupEvent::default());
+            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+                owner,
+                &ExtensionPopupEvent::default(),
+            ));
         }
     }
 }
@@ -139,8 +142,7 @@ fn on_open_request(
             },
             Visibility::Hidden,
         ));
-    LayoutUiStateUpdates::write(
-        &mut commands,
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
         owner,
         &ExtensionPopupEvent {
             id,
@@ -148,7 +150,7 @@ fn on_open_request(
             icon: entry.icon,
             anchor: trigger.event().payload.anchor,
         },
-    );
+    ));
 }
 
 fn on_bounds_request(
@@ -269,13 +271,12 @@ fn on_size(
     let Ok(popup) = popups.get(trigger.event().webview) else {
         return;
     };
-    LayoutUiStateUpdates::write(
-        &mut commands,
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
         popup.owner,
         &ExtensionPopupSizeEvent {
             id: popup.extension_id.clone(),
             width: request.width.clamp(200.0, 360.0),
             height: request.height.clamp(80.0, 600.0),
         },
-    );
+    ));
 }

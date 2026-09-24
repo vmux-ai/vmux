@@ -1,8 +1,8 @@
 use super::{
-    NextToolOrder, ProtocolTool, RegisterTools, ToolCall, ToolCalls, ToolDispatchSet,
-    ToolExecution, ToolManifest, ToolOutcome, ToolRequestSet,
+    McpToolPlugin, ProtocolTool, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolExecution, ToolOutcome, ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ pub(super) struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
+        app.add_plugins(McpToolPlugin::<FileTool>::new(include_str!("files.ron")))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
     }
@@ -21,11 +21,6 @@ impl Plugin for FileToolPlugin {
 enum FileTool {
     ReadFile,
     Grep,
-}
-
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<FileTool>::from_ron(include_str!("files.ron"))
-        .spawn(&mut commands, &mut next_order);
 }
 
 #[derive(Component, Deserialize, Serialize)]
@@ -45,9 +40,18 @@ struct GrepArgs {
 
 fn parse(mut commands: Commands, calls: ToolCalls<FileTool>) {
     for (request, call, tool) in calls.iter() {
-        match tool {
-            FileTool::ReadFile => call.parse_into::<ReadFileArgs>(request, &mut commands),
-            FileTool::Grep => call.parse_into::<GrepArgs>(request, &mut commands),
+        let parsed = match tool {
+            FileTool::ReadFile => call.parse::<ReadFileArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            FileTool::Grep => call.parse::<GrepArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+        };
+        if let Err(message) = parsed {
+            commands
+                .entity(request)
+                .insert(ToolDispatchResult(Err(message)));
         }
     }
 }

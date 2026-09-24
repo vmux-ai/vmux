@@ -22,7 +22,7 @@ impl Plugin for KeyboardPlugin {
             )
             .add_systems(
                 Update,
-                KeyboardRuntime::sync_context
+                sync_keyboard_context
                     .after(vmux_layout::stack::ComputeFocusSet)
                     .after(vmux_browser::KeyboardContextSet)
                     .after(vmux_shortcut::ShortcutCaptureSet)
@@ -30,8 +30,8 @@ impl Plugin for KeyboardPlugin {
             )
             .add_systems(
                 Update,
-                KeyboardRuntime::dispatch
-                    .after(KeyboardRuntime::sync_context)
+                dispatch_keyboard_input
+                    .after(sync_keyboard_context)
                     .in_set(vmux_command::WriteCommandRequests)
                     .before(vmux_simulator::SimulatorInputSet),
             );
@@ -171,7 +171,7 @@ fn simulator_text_shortcut(combo: &KeyCombo) -> bool {
     false
 }
 
-enum KeyAction {
+enum KeyDisposition {
     Consume(Option<String>),
     PassThrough,
 }
@@ -182,7 +182,7 @@ fn decide(
     combo: KeyCombo,
     now: Instant,
     text_entry_owns_keys: bool,
-) -> KeyAction {
+) -> KeyDisposition {
     if let Some((_, started)) = pending.as_ref()
         && now.duration_since(*started) > Duration::from_millis(map.chord_timeout_ms)
     {
@@ -192,57 +192,57 @@ fn decide(
     if let Some((prefix, _)) = pending.clone() {
         if let Some(cmd) = map.chord(&prefix, &combo) {
             *pending = None;
-            return KeyAction::Consume(Some(cmd));
+            return KeyDisposition::Consume(Some(cmd));
         }
         *pending = None;
     }
 
     if let Some(cmd) = map.direct(&combo) {
         if combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key {
-            return KeyAction::Consume(Some(cmd));
+            return KeyDisposition::Consume(Some(cmd));
         }
-        return KeyAction::PassThrough;
+        return KeyDisposition::PassThrough;
     }
 
     if !text_entry_owns_keys && map.has_chord_prefix(&combo) {
         *pending = Some((combo, now));
-        return KeyAction::Consume(None);
+        return KeyDisposition::Consume(None);
     }
 
-    KeyAction::PassThrough
+    KeyDisposition::PassThrough
 }
 
 impl KeyboardState {
-    fn classify(&mut self, combo: KeyCombo) -> KeyAction {
+    fn classify(&mut self, combo: KeyCombo) -> KeyDisposition {
         if self.simulator_active && toggles_simulator_software_keyboard(&combo) {
             self.pending.simulator_keyboard += 1;
-            return KeyAction::Consume(None);
+            return KeyDisposition::Consume(None);
         }
         if self.simulator_active
-            && let Some(action) = simulator_clipboard(&combo)
+            && let Some(operation) = simulator_clipboard(&combo)
         {
-            self.pending.simulator_clipboard.push(action);
-            return KeyAction::Consume(None);
+            self.pending.simulator_clipboard.push(operation);
+            return KeyDisposition::Consume(None);
         }
         if self.simulator_active
             && let Some(button) = simulator_button(&combo)
         {
             self.pending.simulator_buttons.push(button);
-            return KeyAction::Consume(None);
+            return KeyDisposition::Consume(None);
         }
         if self.simulator_active && simulator_text_shortcut(&combo) {
-            return KeyAction::PassThrough;
+            return KeyDisposition::PassThrough;
         }
         if escape_exits_fullscreen(&combo, self.window_fullscreen, self.page_owns_escape) {
             self.pending.exit_fullscreen = true;
-            return KeyAction::Consume(None);
+            return KeyDisposition::Consume(None);
         }
         if quits_the_app(&combo) {
             self.pending.quit = true;
-            return KeyAction::Consume(None);
+            return KeyDisposition::Consume(None);
         }
         let Some(map) = self.keymap.as_ref() else {
-            return KeyAction::PassThrough;
+            return KeyDisposition::PassThrough;
         };
         decide(
             map,
@@ -253,15 +253,15 @@ impl KeyboardState {
         )
     }
 
-    fn consume(&mut self, action: KeyAction) -> bool {
-        match action {
-            KeyAction::Consume(command) => {
+    fn consume(&mut self, disposition: KeyDisposition) -> bool {
+        match disposition {
+            KeyDisposition::Consume(command) => {
                 if let Some(command) = command {
                     self.pending.commands.push(command);
                 }
                 true
             }
-            KeyAction::PassThrough => false,
+            KeyDisposition::PassThrough => false,
         }
     }
 }
@@ -508,115 +508,110 @@ fn install_monitor(
     });
 }
 
-impl KeyboardRuntime {
-    fn sync_context(
-        runtime: Single<&Self>,
-        keymap: Res<Keymap>,
-        browser: Option<Res<vmux_browser::KeyboardContext>>,
-        capture: Option<Res<vmux_shortcut::ShortcutCaptureTarget>>,
-        focus: Option<Res<vmux_layout::stack::FocusedStack>>,
-        children: Query<&Children>,
-        pages: Query<&vmux_core::PageMetadata>,
-        mut requests: Option<ResMut<Messages<vmux_simulator::SimulatorFocusRequest>>>,
-    ) {
-        let active = focus
-            .as_deref()
-            .and_then(|focus| focus.stack)
-            .and_then(|stack| children.get(stack).ok())
-            .and_then(|children| {
-                children.iter().find(|entity| {
-                    pages.get(*entity).is_ok_and(|metadata| {
-                        vmux_simulator::url::SimulatorRoute::try_from(metadata.url.as_str()).is_ok()
-                    })
+fn sync_keyboard_context(
+    runtime: Single<&KeyboardRuntime>,
+    keymap: Res<Keymap>,
+    browser: Option<Res<vmux_browser::KeyboardContext>>,
+    capture: Option<Res<vmux_shortcut::ShortcutCaptureTarget>>,
+    focus: Option<Res<vmux_layout::stack::FocusedStack>>,
+    children: Query<&Children>,
+    pages: Query<&vmux_core::PageMetadata>,
+    mut requests: Option<ResMut<Messages<vmux_simulator::SimulatorFocusRequest>>>,
+) {
+    let active = focus
+        .as_deref()
+        .and_then(|focus| focus.stack)
+        .and_then(|stack| children.get(stack).ok())
+        .and_then(|children| {
+            children.iter().find(|entity| {
+                pages.get(*entity).is_ok_and(|metadata| {
+                    vmux_simulator::url::SimulatorRoute::try_from(metadata.url.as_str()).is_ok()
                 })
-            });
-        {
-            let mut state = runtime.0.lock();
-            if keymap.is_changed() || state.keymap.is_none() {
-                state.keymap = Some(keymap.clone());
-            }
-            state.capture_target = capture.as_deref().and_then(|capture| capture.token());
-            state.simulator_active = active.is_some();
-            state.page_owns_escape = browser
-                .as_deref()
-                .is_some_and(|context| context.page_owns_escape);
-            state.text_entry_owns_keys = browser
-                .as_deref()
-                .is_some_and(|context| context.text_entry_owns_keys);
+            })
+        });
+    {
+        let mut state = runtime.0.lock();
+        if keymap.is_changed() || state.keymap.is_none() {
+            state.keymap = Some(keymap.clone());
         }
-        if let Some(requests) = requests.as_mut() {
-            requests.write(vmux_simulator::SimulatorFocusRequest(active));
+        state.capture_target = capture.as_deref().and_then(|capture| capture.token());
+        state.simulator_active = active.is_some();
+        state.page_owns_escape = browser
+            .as_deref()
+            .is_some_and(|context| context.page_owns_escape);
+        state.text_entry_owns_keys = browser
+            .as_deref()
+            .is_some_and(|context| context.text_entry_owns_keys);
+    }
+    if let Some(requests) = requests.as_mut() {
+        requests.write(vmux_simulator::SimulatorFocusRequest(active));
+    }
+}
+
+fn dispatch_keyboard_input(
+    runtime: Single<&KeyboardRuntime>,
+    mut invocations: MessageWriter<vmux_command::CommandInvocation>,
+    mut simulator_buttons: Option<ResMut<Messages<vmux_simulator::HardwareButtonRequest>>>,
+    mut simulator_clipboard: Option<ResMut<Messages<vmux_simulator::SimulatorClipboardRequest>>>,
+    mut simulator_keyboard: Option<
+        ResMut<Messages<vmux_simulator::SimulatorSoftwareKeyboardRequest>>,
+    >,
+    mut fullscreen: MessageWriter<ExitFullscreenRequest>,
+    mut hide_windows: Option<MessageWriter<crate::runtime::HideAllWindowsRequest>>,
+    user: Query<Entity, With<vmux_core::team::User>>,
+    mut shortcut_capture: Option<ResMut<vmux_shortcut::ShortcutCaptureTarget>>,
+    mut commands: Commands,
+) {
+    let pending = runtime.drain();
+    let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
+    for command in pending.commands {
+        invocations.write(vmux_command::CommandInvocation::new(caller, command));
+    }
+    if let Some(target) = shortcut_capture.as_deref_mut() {
+        for token in pending.shortcut_releases {
+            target.release(token);
         }
     }
-
-    fn dispatch(
-        runtime: Single<&Self>,
-        mut invocations: MessageWriter<vmux_command::CommandInvocation>,
-        mut simulator_buttons: Option<ResMut<Messages<vmux_simulator::HardwareButtonRequest>>>,
-        mut simulator_clipboard: Option<
-            ResMut<Messages<vmux_simulator::SimulatorClipboardRequest>>,
-        >,
-        mut simulator_keyboard: Option<
-            ResMut<Messages<vmux_simulator::SimulatorSoftwareKeyboardRequest>>,
-        >,
-        mut fullscreen: MessageWriter<ExitFullscreenRequest>,
-        mut hide_windows: Option<MessageWriter<crate::runtime::HideAllWindowsRequest>>,
-        user: Query<Entity, With<vmux_core::team::User>>,
-        mut shortcut_capture: Option<ResMut<vmux_shortcut::ShortcutCaptureTarget>>,
-        mut commands: Commands,
-    ) {
-        let pending = runtime.drain();
-        let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
-        for command in pending.commands {
-            invocations.write(vmux_command::CommandInvocation::new(caller, command));
-        }
-        if let Some(target) = shortcut_capture.as_deref_mut() {
-            for token in pending.shortcut_releases {
-                target.release(token);
+    if let Some(token) = shortcut_capture
+        .as_deref()
+        .and_then(|target| target.token())
+    {
+        for capture in pending.shortcut_captures {
+            if capture.token == token {
+                commands.trigger(vmux_shortcut::ShortcutProbePress::new(
+                    token.target,
+                    capture.stroke,
+                    capture.pressed_at_ms,
+                ));
             }
         }
-        if let Some(token) = shortcut_capture
-            .as_deref()
-            .and_then(|target| target.token())
-        {
-            for capture in pending.shortcut_captures {
-                if capture.token == token {
-                    commands.trigger(vmux_shortcut::ShortcutProbePress::new(
-                        token.target,
-                        capture.stroke,
-                        capture.pressed_at_ms,
-                    ));
-                }
-            }
+    }
+    if let Some(simulator_buttons) = simulator_buttons.as_mut() {
+        for button in pending.simulator_buttons {
+            simulator_buttons.write(vmux_simulator::HardwareButtonRequest { view: None, button });
         }
-        if let Some(simulator_buttons) = simulator_buttons.as_mut() {
-            for button in pending.simulator_buttons {
-                simulator_buttons
-                    .write(vmux_simulator::HardwareButtonRequest { view: None, button });
-            }
+    }
+    if let Some(simulator_clipboard) = simulator_clipboard.as_mut() {
+        for operation in pending.simulator_clipboard {
+            simulator_clipboard.write(vmux_simulator::SimulatorClipboardRequest {
+                view: None,
+                operation,
+            });
         }
-        if let Some(simulator_clipboard) = simulator_clipboard.as_mut() {
-            for operation in pending.simulator_clipboard {
-                simulator_clipboard.write(vmux_simulator::SimulatorClipboardRequest {
-                    view: None,
-                    operation,
-                });
-            }
+    }
+    if let Some(simulator_keyboard) = simulator_keyboard.as_mut() {
+        for _ in 0..pending.simulator_keyboard {
+            simulator_keyboard
+                .write(vmux_simulator::SimulatorSoftwareKeyboardRequest { view: None });
         }
-        if let Some(simulator_keyboard) = simulator_keyboard.as_mut() {
-            for _ in 0..pending.simulator_keyboard {
-                simulator_keyboard
-                    .write(vmux_simulator::SimulatorSoftwareKeyboardRequest { view: None });
-            }
-        }
-        if pending.exit_fullscreen {
-            fullscreen.write(ExitFullscreenRequest);
-        }
-        if pending.quit
-            && let Some(hide_windows) = hide_windows.as_mut()
-        {
-            hide_windows.write(crate::runtime::HideAllWindowsRequest);
-        }
+    }
+    if pending.exit_fullscreen {
+        fullscreen.write(ExitFullscreenRequest);
+    }
+    if pending.quit
+        && let Some(hide_windows) = hide_windows.as_mut()
+    {
+        hide_windows.write(crate::runtime::HideAllWindowsRequest);
     }
 }
 
@@ -667,7 +662,7 @@ mod tests {
         let map = map();
         let mut pending = None;
 
-        let action = decide(
+        let disposition = decide(
             &map,
             &mut pending,
             combo(KeyCode::KeyB, true),
@@ -675,7 +670,7 @@ mod tests {
             true,
         );
 
-        assert!(matches!(action, KeyAction::PassThrough));
+        assert!(matches!(disposition, KeyDisposition::PassThrough));
         assert!(pending.is_none(), "no chord may be left open");
     }
 
@@ -686,13 +681,13 @@ mod tests {
         let now = Instant::now();
 
         let prefix = decide(&map, &mut pending, combo(KeyCode::KeyB, true), now, false);
-        assert!(matches!(prefix, KeyAction::Consume(None)));
+        assert!(matches!(prefix, KeyDisposition::Consume(None)));
         assert!(pending.is_some());
 
         let second = decide(&map, &mut pending, combo(KeyCode::KeyH, false), now, false);
         assert!(matches!(
             second,
-            KeyAction::Consume(Some(id)) if id == "select_pane_left"
+            KeyDisposition::Consume(Some(id)) if id == "select_pane_left"
         ));
         assert!(pending.is_none());
     }
@@ -701,14 +696,14 @@ mod tests {
     fn bare_key_without_pending_passes_through() {
         let map = map();
         let mut pending = None;
-        let action = decide(
+        let disposition = decide(
             &map,
             &mut pending,
             combo(KeyCode::KeyH, false),
             Instant::now(),
             false,
         );
-        assert!(matches!(action, KeyAction::PassThrough));
+        assert!(matches!(disposition, KeyDisposition::PassThrough));
     }
 
     #[test]
@@ -718,23 +713,25 @@ mod tests {
             ..Default::default()
         };
 
-        let action = state.classify(combo(KeyCode::Escape, false));
+        let disposition = state.classify(combo(KeyCode::Escape, false));
 
-        assert!(state.consume(action));
+        assert!(state.consume(disposition));
         assert!(state.pending.exit_fullscreen);
 
         state.pending.exit_fullscreen = false;
         state.page_owns_escape = true;
-        let action = state.classify(combo(KeyCode::Escape, false));
+        let disposition = state.classify(combo(KeyCode::Escape, false));
 
-        assert!(matches!(action, KeyAction::PassThrough));
+        assert!(matches!(disposition, KeyDisposition::PassThrough));
         assert!(!state.pending.exit_fullscreen);
     }
 
     #[test]
     fn consumed_shortcut_queues_command() {
         let mut state = KeyboardState::default();
-        let consumed = state.consume(KeyAction::Consume(Some("select_pane_left".to_string())));
+        let consumed = state.consume(KeyDisposition::Consume(Some(
+            "select_pane_left".to_string(),
+        )));
         assert!(consumed);
         assert_eq!(state.pending.commands, ["select_pane_left"]);
     }
@@ -744,14 +741,14 @@ mod tests {
         let map = map();
         let mut pending = Some((combo(KeyCode::KeyB, true), Instant::now()));
         let later = Instant::now() + Duration::from_millis(2000);
-        let action = decide(
+        let disposition = decide(
             &map,
             &mut pending,
             combo(KeyCode::KeyH, false),
             later,
             false,
         );
-        assert!(matches!(action, KeyAction::PassThrough));
+        assert!(matches!(disposition, KeyDisposition::PassThrough));
         assert!(pending.is_none());
     }
 
@@ -770,10 +767,10 @@ mod tests {
         ];
 
         for (pressed, expected) in shortcuts {
-            let action = decide(&map, &mut pending, pressed, now, false);
+            let disposition = decide(&map, &mut pending, pressed, now, false);
             assert!(matches!(
-                action,
-                KeyAction::Consume(Some(id)) if id == expected
+                disposition,
+                KeyDisposition::Consume(Some(id)) if id == expected
             ));
         }
     }

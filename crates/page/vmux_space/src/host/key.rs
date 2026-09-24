@@ -1,4 +1,3 @@
-use super::SpacesUiStateUpdates;
 use bevy::prelude::*;
 use vmux_api::space::SpaceKey;
 use vmux_command::{
@@ -64,7 +63,11 @@ fn echo_key_command(
     let Ok(key) = keys.get(trigger.event().command()) else {
         return;
     };
-    SpacesUiStateUpdates::write(&mut commands, trigger.event().invocation().caller, &key.0);
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::space::SpacesUiState,
+    >::from_event(
+        trigger.event().invocation().caller, &key.0
+    ));
 }
 
 #[cfg(test)]

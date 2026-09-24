@@ -99,28 +99,30 @@ fn arm_agent_loading(
             commands.entity(entity).insert(PromptCapture::default());
         }
         if let Some(capture) = capture {
-            crate::TerminalUiStateUpdates::write(
-                &mut commands,
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_core::event::TerminalUiState,
+            >::from_event(
                 entity,
                 &AgentPromptDraftEvent {
                     draft: capture.draft.clone(),
                     skipped: capture.skipped,
                 },
-            );
+            ));
         }
         if !announced {
             continue;
         }
         let (label, segment) = labels(session);
-        crate::TerminalUiStateUpdates::write(
-            &mut commands,
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_core::event::TerminalUiState,
+        >::from_event(
             entity,
             &TermLoadingEvent {
                 loading: true,
                 label,
                 segment,
             },
-        );
+        ));
     }
 }
 
@@ -141,15 +143,16 @@ fn announce_slow_shell_boot(
         }
         loading.announced = true;
         let (label, segment) = labels(None);
-        crate::TerminalUiStateUpdates::write(
-            &mut commands,
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_core::event::TerminalUiState,
+        >::from_event(
             entity,
             &TermLoadingEvent {
                 loading: true,
                 label,
                 segment,
             },
-        );
+        ));
     }
 }
 
@@ -178,28 +181,30 @@ fn arm_agent_loading_on_restart(
             commands.entity(entity).insert(PromptCapture::default());
         }
         if let Some(capture) = capture {
-            crate::TerminalUiStateUpdates::write(
-                &mut commands,
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_core::event::TerminalUiState,
+            >::from_event(
                 entity,
                 &AgentPromptDraftEvent {
                     draft: capture.draft.clone(),
                     skipped: capture.skipped,
                 },
-            );
+            ));
         }
         if !announced {
             continue;
         }
         let (label, segment) = labels(session);
-        crate::TerminalUiStateUpdates::write(
-            &mut commands,
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_core::event::TerminalUiState,
+        >::from_event(
             entity,
             &TermLoadingEvent {
                 loading: true,
                 label,
                 segment,
             },
-        );
+        ));
     }
 }
 
@@ -240,15 +245,16 @@ fn clear_agent_loading(
             continue;
         }
         let (label, segment) = labels(session);
-        crate::TerminalUiStateUpdates::write(
-            &mut commands,
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_core::event::TerminalUiState,
+        >::from_event(
             entity,
             &TermLoadingEvent {
                 loading: false,
                 label,
                 segment,
             },
-        );
+        ));
     }
 }
 

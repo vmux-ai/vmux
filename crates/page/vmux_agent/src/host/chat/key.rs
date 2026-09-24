@@ -4,8 +4,6 @@ use vmux_command::{
     CommandDispatch, CommandManifest, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
 
-use super::ChatUiStateUpdates;
-
 pub(crate) struct ChatKeyPlugin;
 
 impl Plugin for ChatKeyPlugin {
@@ -36,7 +34,12 @@ fn echo_key_command(
     let Ok(key) = keys.get(trigger.event().command()) else {
         return;
     };
-    ChatUiStateUpdates::write(&mut commands, trigger.event().invocation().caller, &key.0);
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            trigger.event().invocation().caller,
+            &key.0,
+        ),
+    );
 }
 
 #[cfg(test)]

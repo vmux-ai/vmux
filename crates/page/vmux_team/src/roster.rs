@@ -35,10 +35,7 @@ pub struct Team(pub TeamEvent);
 
 impl Team {
     fn project(members: Res<Members>, mut team: ResMut<Team>) {
-        team.0 = TeamEvent {
-            members: members.0.clone(),
-            profiles: Vec::new(),
-        };
+        team.0 = TeamEvent::project(members.0.clone(), Vec::new());
     }
 
     fn emit(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {
@@ -94,6 +91,13 @@ mod tests {
             .map(|m| m.name.as_str())
             .collect();
         assert_eq!(names, ["ada", "grace"], "in the order the Mac gave them");
+        let agents: Vec<&str> = started
+            .team()
+            .agents
+            .iter()
+            .map(|agent| agent.member.name.as_str())
+            .collect();
+        assert_eq!(agents, ["ada", "grace"]);
 
         started.reroster(Vec::new());
         assert!(

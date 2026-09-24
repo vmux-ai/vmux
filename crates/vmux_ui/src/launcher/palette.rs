@@ -975,7 +975,7 @@ impl PaletteState {
         Submission::closing(SubmissionKind::prompt(self.query.trim(), "", attachments))
     }
 
-    pub fn submit_action(&self, attachments: &[ChatAttachment]) -> Submission {
+    pub fn submit_current(&self, attachments: &[ChatAttachment]) -> Submission {
         if self.mode == PaletteMode::Slash && self.rows.is_empty() {
             return Submission::default();
         }
@@ -2392,7 +2392,7 @@ mod tests {
         );
 
         assert_eq!(
-            palette.submit_action(&[]).request,
+            palette.submit_current(&[]).request,
             Some(SubmissionKind::prompt(
                 "fix the failing test",
                 "vmux://sessions/codex/cli",
@@ -2410,7 +2410,7 @@ mod tests {
             ..palette
         };
 
-        assert_eq!(empty.submit_action(&[]), Submission::default());
+        assert_eq!(empty.submit_current(&[]), Submission::default());
     }
 
     #[test]

@@ -5,6 +5,13 @@ use url::Url;
 use vmux_transport::{ClientCredential, DeviceId};
 use vmux_ui::i18n::translate;
 
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum AuthState {
+    Loading,
+    Paired,
+    Unpaired,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub(crate) struct Credentials {
     pub(crate) base_url: String,

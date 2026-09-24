@@ -11,13 +11,29 @@ pub(super) struct JobPlugin;
 
 impl Plugin for JobPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (poll_git_jobs, deliver_git_outputs, start_git_jobs)
-                .chain()
-                .in_set(GitUpdateSet::Jobs),
-        );
+        app.add_observer(queue_git_job)
+            .add_observer(queue_git_job_failure)
+            .add_systems(
+                Update,
+                (poll_git_jobs, deliver_git_outputs, start_git_jobs)
+                    .chain()
+                    .in_set(GitUpdateSet::Jobs),
+            );
     }
+}
+
+#[derive(EntityEvent)]
+pub(super) struct GitJobRequest {
+    #[event_target]
+    pub(super) webview: Entity,
+    pub(super) job: JobKind,
+}
+
+#[derive(EntityEvent)]
+pub(super) struct GitJobFailure {
+    #[event_target]
+    pub(super) webview: Entity,
+    pub(super) message: String,
 }
 
 #[derive(Component)]
@@ -45,55 +61,34 @@ struct GitJobOutput {
     emits: Vec<Emit>,
 }
 
-impl GitJob {
-    pub(super) fn enqueue(commands: &mut Commands, webview: Entity, job: JobKind) {
-        commands.spawn((Self { webview }, PendingGitJob(job)));
-    }
-
-    pub(super) fn deliver(commands: &mut Commands, webview: Entity, emits: Vec<Emit>) {
-        commands.spawn(GitJobOutput { webview, emits });
-    }
-
-    pub(super) fn error(commands: &mut Commands, webview: Entity, message: String) {
-        Self::deliver(
-            commands,
-            webview,
-            vec![Emit::Error(crate::event::GitOperationError { message })],
-        );
-    }
+fn queue_git_job(trigger: On<GitJobRequest>, mut commands: Commands) {
+    commands.spawn((
+        GitJob {
+            webview: trigger.event().webview,
+        },
+        PendingGitJob(trigger.event().job.clone()),
+    ));
 }
 
-impl RunningGitJob {
-    fn spawn(job: JobKind, wake: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>) -> Self {
-        let thread = std::thread::spawn(move || {
-            let emits = job.run();
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            emits
-        });
-        Self {
-            thread: Some(thread),
-        }
-    }
-
-    fn poll(&mut self) -> Option<Vec<Emit>> {
-        if !self.thread.as_ref().is_some_and(JoinHandle::is_finished) {
-            return None;
-        }
-        match self.thread.take().unwrap().join() {
-            Ok(emits) => Some(emits),
-            Err(_) => Some(vec![Emit::Error(crate::event::GitOperationError {
-                message: "Git job worker panicked".to_string(),
-            })]),
-        }
-    }
+fn queue_git_job_failure(trigger: On<GitJobFailure>, mut commands: Commands) {
+    commands.spawn(GitJobOutput {
+        webview: trigger.event().webview,
+        emits: vec![Emit::Error(crate::event::GitOperationError {
+            message: trigger.event().message.clone(),
+        })],
+    });
 }
 
 fn poll_git_jobs(mut jobs: Query<(Entity, &GitJob, &mut RunningGitJob)>, mut commands: Commands) {
     for (entity, job, mut running) in &mut jobs {
-        let Some(emits) = running.poll() else {
+        if !running.thread.as_ref().is_some_and(JoinHandle::is_finished) {
             continue;
+        }
+        let emits = match running.thread.take().unwrap().join() {
+            Ok(emits) => emits,
+            Err(_) => vec![Emit::Error(crate::event::GitOperationError {
+                message: "Git job worker panicked".to_string(),
+            })],
         };
         commands
             .entity(entity)
@@ -108,7 +103,10 @@ fn poll_git_jobs(mut jobs: Query<(Entity, &GitJob, &mut RunningGitJob)>, mut com
 fn deliver_git_outputs(
     mut outputs: Query<(Entity, &mut GitJobOutput)>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
-    mut views: Query<&mut super::state::GitState>,
+    mut views: Query<(
+        &mut super::state::GitState,
+        &mut super::controller::GitController,
+    )>,
     mut files: Query<&mut super::status::FileGit>,
     diffs: Query<&super::diff::GitDiffQuery>,
     wake: Option<Res<EventLoopProxyWrapper>>,
@@ -129,12 +127,16 @@ fn deliver_git_outputs(
                             false => format!("{} · {}", event.repo_name, event.branch),
                         };
                     }
-                    if let Ok(mut view) = views.get_mut(webview) {
+                    if let Ok((mut view, mut controller)) = views.get_mut(webview) {
+                        controller.reconcile_repository(&event);
                         view.set_repository(event);
+                        if let Some(payload) = controller.branch_log_request(&view) {
+                            commands.trigger(bevy_cef::prelude::UiInput { webview, payload });
+                        }
                     }
                 }
                 Emit::BranchLog(event) => {
-                    if let Ok(mut view) = views.get_mut(webview) {
+                    if let Ok((mut view, _)) = views.get_mut(webview) {
                         view.set_branch_log(event);
                     }
                 }
@@ -147,7 +149,7 @@ fn deliver_git_outputs(
                     let Ok(query) = diffs.get(webview) else {
                         continue;
                     };
-                    if let Ok(mut view) = views.get_mut(webview) {
+                    if let Ok((mut view, _)) = views.get_mut(webview) {
                         if query.accepts(event.generation) {
                             view.set_diff_viewport(event);
                         }
@@ -162,16 +164,27 @@ fn deliver_git_outputs(
                     file.apply_diff(event);
                 }
                 Emit::Result(event) => {
-                    if let Ok(mut view) = views.get_mut(webview) {
+                    if let Ok((mut view, mut controller)) = views.get_mut(webview) {
+                        let branch = controller.apply_result(&event);
                         view.apply_result(&event);
-                        if !view.workspace().is_empty() {
-                            GitJob::enqueue(
-                                &mut commands,
+                        if let Some(branch) = branch {
+                            commands.trigger(bevy_cef::prelude::UiInput {
                                 webview,
-                                JobKind::Repository {
+                                payload: vmux_core::event::space::ProjectActivateRequest {
+                                    path: view.workspace().to_string(),
+                                    branch,
+                                    checkout: String::new(),
+                                    pane_id: None,
+                                },
+                            });
+                        }
+                        if !view.workspace().is_empty() {
+                            commands.trigger(GitJobRequest {
+                                webview,
+                                job: JobKind::Repository {
                                     path: view.workspace().into(),
                                 },
-                            );
+                            });
                         }
                     } else if let Ok(mut file) = files.get_mut(webview) {
                         let refresh = file.apply_result(event, wake.clone());
@@ -179,7 +192,7 @@ fn deliver_git_outputs(
                     }
                 }
                 Emit::Error(event) => {
-                    if let Ok(mut view) = views.get_mut(webview) {
+                    if let Ok((mut view, _)) = views.get_mut(webview) {
                         view.apply_error(&event);
                     } else if let Ok(mut file) = files.get_mut(webview) {
                         file.apply_error(event.message);
@@ -209,10 +222,21 @@ fn start_git_jobs(
         let Ok(job) = pending.get(entity) else {
             continue;
         };
+        let kind = job.0.clone();
+        let wake = wake.clone();
+        let thread = std::thread::spawn(move || {
+            let emits = kind.run();
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            emits
+        });
         commands
             .entity(entity)
             .remove::<PendingGitJob>()
-            .insert(RunningGitJob::spawn(job.0.clone(), wake.clone()));
+            .insert(RunningGitJob {
+                thread: Some(thread),
+            });
     }
 }
 

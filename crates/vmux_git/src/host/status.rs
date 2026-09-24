@@ -6,7 +6,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
-use vmux_core::host::FileUiStateUpdates;
+use vmux_core::host::{FileUiStateUpdates, FileUiStateWrite};
 
 use crate::event::{FileGitState, FileStatus, GitDiffViewport, GitFileStatus, GitOperationResult};
 
@@ -352,7 +352,9 @@ fn publish_file_git_state(
     mut commands: Commands,
 ) {
     for (entity, file) in &files {
-        FileUiStateUpdates::deliver(&pages, &mut commands, entity, &file.state);
+        if pages.contains(entity) {
+            commands.trigger(FileUiStateWrite::from_event(entity, &file.state));
+        }
     }
 }
 

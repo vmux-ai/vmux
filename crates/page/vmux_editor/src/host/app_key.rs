@@ -96,10 +96,11 @@ fn echo_key_command(
     let Ok(key) = keys.get(trigger.event().command()) else {
         return;
     };
-    vmux_core::host::FileUiStateUpdates::write(
-        &mut commands,
-        trigger.event().invocation().caller,
-        &key.0,
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_core::event::FileUiState>::from_event(
+            trigger.event().invocation().caller,
+            &key.0,
+        ),
     );
 }
 

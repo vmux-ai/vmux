@@ -6,7 +6,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use crate::event::{GitBranchLogRequest, GitRepositoryRequest};
 
 use super::job::JobKind;
-use super::job_runner::GitJob;
+use super::job_runner::{GitJobFailure, GitJobRequest};
 use super::watch::GitWatch;
 
 pub(super) struct RepositoryPlugin;
@@ -35,7 +35,10 @@ fn on_repository_request(
         match watch.subscribe(webview, &path) {
             Ok(repo_root) => repo_root,
             Err(error) => {
-                GitJob::error(&mut commands, webview, error.0);
+                commands.trigger(GitJobFailure {
+                    webview,
+                    message: error.0,
+                });
                 return;
             }
         }
@@ -43,7 +46,10 @@ fn on_repository_request(
         match super::runner::repo_root(&path) {
             Ok(repo_root) => repo_root,
             Err(error) => {
-                GitJob::error(&mut commands, webview, error.0);
+                commands.trigger(GitJobFailure {
+                    webview,
+                    message: error.0,
+                });
                 return;
             }
         }
@@ -54,17 +60,19 @@ fn on_repository_request(
     {
         page.url = url;
     }
-    GitJob::enqueue(&mut commands, webview, JobKind::Repository { path });
+    commands.trigger(GitJobRequest {
+        webview,
+        job: JobKind::Repository { path },
+    });
 }
 
 fn on_branch_log_request(trigger: On<UiInput<GitBranchLogRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    GitJob::enqueue(
-        &mut commands,
-        trigger.event().webview,
-        JobKind::BranchLog {
+    commands.trigger(GitJobRequest {
+        webview: trigger.event().webview,
+        job: JobKind::BranchLog {
             repo_root: Path::new(&request.repo_root).to_path_buf(),
             branch: request.branch.clone(),
         },
-    );
+    });
 }

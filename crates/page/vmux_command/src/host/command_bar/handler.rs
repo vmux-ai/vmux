@@ -682,15 +682,15 @@ fn handle_open_command_bar(
     if let Some(picker) = picker {
         payload.picks = CommandBarPicks::for_picker(picker, &locale);
     }
-    crate::snapshot::CommandBarUiStateUpdates::write(&mut commands, layout_e, &payload);
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(layout_e, &payload));
 }
 
 fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
-    crate::snapshot::CommandBarUiStateUpdates::write(
-        commands,
-        layout,
-        &CommandBarOpenEvent::default(),
-    );
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(layout, &CommandBarOpenEvent::default()));
 }
 
 fn open_invocation(caller: Entity, target: Option<OpenTarget>, url: String) -> CommandInvocation {
@@ -1250,7 +1250,9 @@ fn retry_pending_command_bar_open(
         {
             continue;
         }
-        crate::snapshot::CommandBarUiStateUpdates::write(&mut commands, entity, payload);
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(entity, payload));
         pending.started_at.get_or_insert(now);
         last_emit.insert(entity, now);
     }

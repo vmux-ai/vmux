@@ -1,8 +1,8 @@
 use super::{
-    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolManifest, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue, layout};
@@ -11,7 +11,7 @@ pub(super) struct LayoutToolPlugin;
 
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
+        app.add_plugins(McpToolPlugin::<LayoutTool>::new(include_str!("layout.ron")))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
@@ -38,17 +38,21 @@ struct SelectTabArgs {
 #[serde(transparent)]
 struct UpdateLayoutArgs(layout::LayoutSnapshot);
 
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<LayoutTool>::from_ron(include_str!("layout.ron"))
-        .spawn(&mut commands, &mut next_order);
-}
-
 fn parse(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
     for (request, call, tool) in calls.iter() {
-        match tool {
-            LayoutTool::ReadLayout => {}
-            LayoutTool::UpdateLayout => call.parse_into::<UpdateLayoutArgs>(request, &mut commands),
-            LayoutTool::SelectTab => call.parse_into::<SelectTabArgs>(request, &mut commands),
+        let parsed = match tool {
+            LayoutTool::ReadLayout => continue,
+            LayoutTool::UpdateLayout => call.parse::<UpdateLayoutArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            LayoutTool::SelectTab => call.parse::<SelectTabArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+        };
+        if let Err(message) = parsed {
+            commands
+                .entity(request)
+                .insert(ToolDispatchResult(Err(message)));
         }
     }
 }

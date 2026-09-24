@@ -443,7 +443,9 @@ fn publish_shortcut_state(
     mut commands: Commands,
 ) {
     for (entity, view) in &views {
-        ShortcutUiStateUpdates::write(&mut commands, entity, &view.project());
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<ShortcutUiState>::from_event(entity, &view.project()),
+        );
     }
 }
 

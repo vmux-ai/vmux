@@ -5,13 +5,14 @@ use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::card::{Card, CardVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
 use vmux_ui::components::skeleton::Skeleton;
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::*;
+use crate::state::{GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPanel};
 
-use super::model::{BranchCollection, BranchPrompt, GitPanel};
-use super::panel::{HeaderActionButton, PanelHeader, PanelIcon};
+use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
 use super::workspace::GitWorkspace;
 
 #[component]
@@ -23,10 +24,10 @@ pub(super) fn BranchPromptDialog() -> Element {
         return rsx! {};
     };
     let title = match &prompt {
-        BranchPrompt::Create { .. } => translate("git-new-branch"),
-        BranchPrompt::Delete { .. } => translate("git-delete-branch"),
+        GitBranchPrompt::Create { .. } => translate("git-new-branch"),
+        GitBranchPrompt::Delete { .. } => translate("git-delete-branch"),
     };
-    let is_create = matches!(prompt, BranchPrompt::Create { .. });
+    let is_create = matches!(prompt, GitBranchPrompt::Create { .. });
     rsx! {
         DialogRoot {
             open: true,
@@ -58,7 +59,7 @@ pub(super) fn BranchPromptDialog() -> Element {
                             }
                         },
                     }
-                } else if let BranchPrompt::Delete { branch } = &prompt {
+                } else if let GitBranchPrompt::Delete { branch } = &prompt {
                     code { class: "rounded-md bg-foreground/[0.05] px-2 py-1 text-sm text-foreground", "{branch}" }
                 }
                 div { class: "flex justify-end gap-2",
@@ -155,32 +156,32 @@ pub(super) fn BranchLogCard(branch: String, branch_log: Option<GitBranchLog>) ->
 #[component]
 pub(super) fn BranchesCard(
     repository: GitRepositorySnapshot,
-    selected_branch: Signal<String>,
-    branch_collection: Signal<BranchCollection>,
-    branch_prompt: Signal<Option<BranchPrompt>>,
+    selected_branch: String,
+    branch_collection: GitBranchCollection,
+    branch_prompt: Signal<Option<GitBranchPrompt>>,
     branch_draft: Signal<String>,
-    focused_panel: Signal<GitPanel>,
+    focused_panel: GitPanel,
+    operations: GitOperationEligibility,
 ) -> Element {
-    let collection = branch_collection();
+    let collection = branch_collection;
     let reference_count = collection.references(&repository).len();
-    let selected = if collection == BranchCollection::Local {
+    let selected = if collection == GitBranchCollection::Local {
         repository
             .branches
             .iter()
-            .find(|entry| entry.name == selected_branch())
+            .find(|entry| entry.name == selected_branch)
             .cloned()
     } else {
         None
     };
-    let branch_actions = selected.map(|branch| {
-        let current = branch.current;
+    let branch_operations = selected.map(|branch| {
         rsx! {
             div { class: "flex shrink-0 items-center gap-0.5",
-                HeaderActionButton {
+                HeaderOperationButton {
                     icon: LineIcon::Check,
                     shortcut: "space",
                     label: translate("git-checkout"),
-                    disabled: false,
+                    disabled: !operations.checkout_branch,
                     danger: false,
                     onpress: {
                         let repo_root = repository.repo_root.clone();
@@ -188,36 +189,36 @@ pub(super) fn BranchesCard(
                         move |_| GitWorkspace::select_branch(&repo_root, &branch)
                     },
                 }
-                HeaderActionButton {
+                HeaderOperationButton {
                     icon: LineIcon::Plus,
                     shortcut: "n",
                     label: translate("git-new-branch"),
-                    disabled: false,
+                    disabled: !operations.create_branch,
                     danger: false,
                     onpress: {
                         let base = branch.name.clone();
                         move |_| {
                             branch_draft.set(String::new());
-                            branch_prompt.set(Some(BranchPrompt::Create { base: base.clone() }));
+                            branch_prompt.set(Some(GitBranchPrompt::Create { base: base.clone() }));
                         }
                     },
                 }
-                HeaderActionButton {
+                HeaderOperationButton {
                     icon: LineIcon::Trash,
                     shortcut: "d",
                     label: translate("git-delete-branch"),
-                    disabled: current || !branch.checkout.is_empty(),
+                    disabled: !operations.delete_branch,
                     danger: true,
                     onpress: {
                         let branch = branch.name.clone();
-                        move |_| branch_prompt.set(Some(BranchPrompt::Delete { branch: branch.clone() }))
+                        move |_| branch_prompt.set(Some(GitBranchPrompt::Delete { branch: branch.clone() }))
                     },
                 }
-                HeaderActionButton {
+                HeaderOperationButton {
                     icon: LineIcon::GitPullRequest,
                     shortcut: "r",
                     label: translate("git-rebase"),
-                    disabled: current,
+                    disabled: !operations.rebase,
                     danger: false,
                     onpress: {
                         let repo_root = repository.repo_root.clone();
@@ -225,11 +226,11 @@ pub(super) fn BranchesCard(
                         move |_| GitOperation::Rebase { branch: branch.clone() }.send(repo_root.clone())
                     },
                 }
-                HeaderActionButton {
+                HeaderOperationButton {
                     icon: LineIcon::GitMerge,
                     shortcut: "M",
                     label: translate("git-merge"),
-                    disabled: current,
+                    disabled: !operations.merge,
                     danger: false,
                     onpress: {
                         let repo_root = repository.repo_root.clone();
@@ -237,11 +238,11 @@ pub(super) fn BranchesCard(
                         move |_| GitOperation::Merge { branch: branch.clone() }.send(repo_root.clone())
                     },
                 }
-                HeaderActionButton {
+                HeaderOperationButton {
                     icon: LineIcon::FastForward,
                     shortcut: "f",
                     label: translate("git-fast-forward"),
-                    disabled: current,
+                    disabled: !operations.fast_forward,
                     danger: false,
                     onpress: {
                         let repo_root = repository.repo_root.clone();
@@ -256,12 +257,14 @@ pub(super) fn BranchesCard(
     rsx! {
         Card {
             variant: CardVariant::Panel,
-            class: if focused_panel() == GitPanel::Branches {
+            class: if focused_panel == GitPanel::Branches {
                 "order-5 min-h-44 border-ansi-2/55 shadow-[0_0_0_1px_color-mix(in_oklab,var(--ansi-2)_18%,transparent)] sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
             } else {
                 "order-5 min-h-44 border-t-violet-400/30 sm:col-start-1 sm:row-start-3 sm:min-h-0 sm:order-none"
             },
-            onclick: move |_| focused_panel.set(GitPanel::Branches),
+            onclick: move |_| {
+                let _ = send(&GitPanelSelectRequest { panel: GitPanel::Branches });
+            },
             PanelHeader {
                 index: 3,
                 title: translate("git-branches"),
@@ -269,52 +272,47 @@ pub(super) fn BranchesCard(
                 icon: PanelIcon::Line(LineIcon::GitBranch),
                 icon_class: "bg-violet-400/10 text-violet-400 ring-1 ring-inset ring-violet-400/15",
                 badge_class: "border-violet-400/20 bg-violet-400/[0.08] text-violet-400",
-                focused: focused_panel() == GitPanel::Branches,
-                actions: rsx! {
+                focused: focused_panel == GitPanel::Branches,
+                operations: rsx! {
                     div { class: "flex shrink-0 items-center gap-1",
                         BranchCollectionTabs {
-                            repository: repository.clone(),
-                            selected_branch,
                             branch_collection,
                         }
-                        {branch_actions}
+                        {branch_operations}
                     }
                 },
             }
             div { class: "min-h-0 flex-1 overflow-y-auto px-1 py-0.5",
                 match collection {
-                    BranchCollection::Local => rsx! {
+                    GitBranchCollection::Local => rsx! {
                         for (index, branch) in repository.branches.into_iter().enumerate() {
                             BranchRow {
                                 key: "local-{branch.name}",
                                 branch,
                                 index,
                                 remote: false,
-                                selected_branch,
-                                focused_panel,
+                                selected_branch: selected_branch.clone(),
                             }
                         }
                     },
-                    BranchCollection::Remote => rsx! {
+                    GitBranchCollection::Remote => rsx! {
                         for (index, branch) in repository.remote_branches.into_iter().enumerate() {
                             BranchRow {
                                 key: "remote-{branch.name}",
                                 branch,
                                 index,
                                 remote: true,
-                                selected_branch,
-                                focused_panel,
+                                selected_branch: selected_branch.clone(),
                             }
                         }
                     },
-                    BranchCollection::Tags => rsx! {
+                    GitBranchCollection::Tags => rsx! {
                         for (index, tag) in repository.tags.into_iter().enumerate() {
                             TagRow {
                                 key: "tag-{tag.name}",
                                 tag,
                                 index,
-                                selected_branch,
-                                focused_panel,
+                                selected_branch: selected_branch.clone(),
                             }
                         }
                     }
@@ -325,31 +323,25 @@ pub(super) fn BranchesCard(
 }
 
 #[component]
-fn BranchCollectionTabs(
-    repository: GitRepositorySnapshot,
-    selected_branch: Signal<String>,
-    branch_collection: Signal<BranchCollection>,
-) -> Element {
+fn BranchCollectionTabs(branch_collection: GitBranchCollection) -> Element {
     rsx! {
         div { class: "flex h-5 shrink-0 items-center rounded-md bg-background/50 p-0.5 ring-1 ring-inset ring-foreground/10",
             for (collection, label) in [
-                (BranchCollection::Local, translate("git-local")),
-                (BranchCollection::Remote, translate("git-remote")),
-                (BranchCollection::Tags, translate("git-tags")),
+                (GitBranchCollection::Local, translate("git-local")),
+                (GitBranchCollection::Remote, translate("git-remote")),
+                (GitBranchCollection::Tags, translate("git-tags")),
             ] {
                 button {
                     r#type: "button",
-                    class: if branch_collection() == collection {
+                    class: if branch_collection == collection {
                         "h-4 rounded px-1.5 text-[8px] font-semibold text-foreground shadow-sm bg-foreground/[0.10]"
                     } else {
                         "h-4 rounded px-1.5 text-[8px] font-medium text-muted-foreground hover:text-foreground"
                     },
                     onclick: {
-                        let repository = repository.clone();
                         move |event: MouseEvent| {
                             event.stop_propagation();
-                            branch_collection.set(collection);
-                            selected_branch.set(collection.selected_reference(&repository, ""));
+                            let _ = send(&GitBranchCollectionSelectRequest { collection });
                         }
                     },
                     "{label}"
@@ -364,8 +356,7 @@ fn BranchRow(
     branch: GitBranchEntry,
     index: usize,
     remote: bool,
-    selected_branch: Signal<String>,
-    focused_panel: Signal<GitPanel>,
+    selected_branch: String,
 ) -> Element {
     let name = branch.name.clone();
     rsx! {
@@ -373,14 +364,15 @@ fn BranchRow(
             id: "git-branch-row-{index}",
             r#type: "button",
             title: if branch.checkout.is_empty() { branch.upstream.clone() } else { branch.checkout.clone() },
-            class: if selected_branch() == branch.name {
+            class: if selected_branch == branch.name {
                 "flex h-5 w-full items-center justify-start gap-1 rounded px-1.5 text-left text-foreground bg-primary/[0.10] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
             } else {
                 "flex h-5 w-full items-center justify-start gap-1 rounded px-1.5 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
-                focused_panel.set(GitPanel::Branches);
-                selected_branch.set(name.clone());
+                let _ = send(&GitBranchSelectRequest {
+                    reference: name.clone(),
+                });
             },
             BranchMarker {
                 current: branch.current,
@@ -410,26 +402,22 @@ fn BranchRow(
 }
 
 #[component]
-fn TagRow(
-    tag: GitTagEntry,
-    index: usize,
-    selected_branch: Signal<String>,
-    focused_panel: Signal<GitPanel>,
-) -> Element {
+fn TagRow(tag: GitTagEntry, index: usize, selected_branch: String) -> Element {
     let name = tag.name.clone();
     rsx! {
         button {
             id: "git-branch-row-{index}",
             r#type: "button",
             title: "{tag.message}",
-            class: if selected_branch() == tag.name {
+            class: if selected_branch == tag.name {
                 "flex h-5 w-full items-center justify-start gap-1.5 rounded px-1.5 text-left text-foreground bg-primary/[0.10] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_16%,transparent)]"
             } else {
                 "flex h-5 w-full items-center justify-start gap-1.5 rounded px-1.5 text-left text-foreground hover:bg-foreground/[0.045]"
             },
             onclick: move |_| {
-                focused_panel.set(GitPanel::Branches);
-                selected_branch.set(name.clone());
+                let _ = send(&GitBranchSelectRequest {
+                    reference: name.clone(),
+                });
             },
             LineIconView { icon: LineIcon::Tag, class: "size-3 shrink-0 text-violet-400/75" }
             span { class: "min-w-0 flex-1 truncate text-[10px] font-medium", "{tag.name}" }

@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use vmux_api::bookmark::{BookmarkNode, BookmarkStateEvent};
 use vmux_core::event::team::{TeamEvent, TeamMemberRow};
 
-use crate::LayoutUiStateUpdates;
 use crate::cef::LayoutCef;
 use crate::event::{
     ActiveSession, ActiveSessionState, ActiveWorkspaceProject, HeaderPageState, PaneTreeState,
@@ -163,7 +162,11 @@ fn publish_active_session(
         if last.get(&entity) == Some(&event) {
             continue;
         }
-        LayoutUiStateUpdates::write(&mut commands, entity, &event);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
+                entity, &event,
+            ),
+        );
         last.insert(entity, event);
     }
 }
@@ -193,7 +196,11 @@ fn publish_header_page(
         if last.get(&entity) == Some(&event) {
             continue;
         }
-        LayoutUiStateUpdates::write(&mut commands, entity, &event);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
+                entity, &event,
+            ),
+        );
         last.insert(entity, event);
     }
 }

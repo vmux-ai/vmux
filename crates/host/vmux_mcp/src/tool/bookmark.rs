@@ -1,8 +1,8 @@
 use super::{
-    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolManifest, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentBookmarkCommand, AgentBookmarkPage, AgentCommand, AgentQuery};
@@ -11,12 +11,14 @@ pub(super) struct BookmarkToolPlugin;
 
 impl Plugin for BookmarkToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(
-                Update,
-                (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(McpToolPlugin::<BookmarkTool>::new(include_str!(
+            "bookmark.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(
+            Update,
+            (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
+        );
     }
 }
 
@@ -30,11 +32,6 @@ enum BookmarkTool {
     BookmarkPin,
     BookmarkUnpin,
     BookmarkFolderCreate,
-}
-
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<BookmarkTool>::from_ron(include_str!("bookmark.ron"))
-        .spawn(&mut commands, &mut next_order);
 }
 
 #[derive(Component, Deserialize)]
@@ -97,19 +94,30 @@ fn list(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
 
 fn parse(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     for (request, call, tool) in calls.iter() {
-        match tool {
-            BookmarkTool::BookmarkList => {}
-            BookmarkTool::BookmarkAdd => call.parse_into::<BookmarkAddArgs>(request, &mut commands),
-            BookmarkTool::BookmarkRemove => {
-                call.parse_into::<BookmarkRemoveArgs>(request, &mut commands)
-            }
-            BookmarkTool::BookmarkPin => call.parse_into::<BookmarkPinArgs>(request, &mut commands),
-            BookmarkTool::BookmarkUnpin => {
-                call.parse_into::<BookmarkUnpinArgs>(request, &mut commands)
-            }
+        let parsed = match tool {
+            BookmarkTool::BookmarkList => continue,
+            BookmarkTool::BookmarkAdd => call.parse::<BookmarkAddArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            BookmarkTool::BookmarkRemove => call.parse::<BookmarkRemoveArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            BookmarkTool::BookmarkPin => call.parse::<BookmarkPinArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            BookmarkTool::BookmarkUnpin => call.parse::<BookmarkUnpinArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
             BookmarkTool::BookmarkFolderCreate => {
-                call.parse_into::<BookmarkFolderCreateArgs>(request, &mut commands)
+                call.parse::<BookmarkFolderCreateArgs>().map(|args| {
+                    commands.entity(request).insert(args);
+                })
             }
+        };
+        if let Err(message) = parsed {
+            commands
+                .entity(request)
+                .insert(ToolDispatchResult(Err(message)));
         }
     }
 }

@@ -22,10 +22,10 @@ pub(super) fn CommandLogCard(command_log: Vec<GitCommandLogEntry>) -> Element {
                     div { class: "flex h-full min-h-20 items-center px-2 text-muted-foreground", {translate("git-command-log-empty")} }
                 } else {
                     for (index, entry) in command_log.iter().rev().enumerate() {
-                        div { key: "{index}-{entry.action}", class: "flex min-h-6 items-start gap-2 rounded-md px-2 py-1 hover:bg-foreground/[0.035]",
+                        div { key: "{index}-{entry.operation}", class: "flex min-h-6 items-start gap-2 rounded-md px-2 py-1 hover:bg-foreground/[0.035]",
                             span { class: if entry.ok { "mt-1 size-1.5 shrink-0 rounded-full bg-ansi-2" } else { "mt-1 size-1.5 shrink-0 rounded-full bg-ansi-1" } }
                             span { class: "shrink-0 font-semibold text-foreground",
-                                if entry.action.is_empty() { {translate("git-command-error")} } else { "{entry.action}" }
+                                if entry.operation.is_empty() { {translate("git-command-error")} } else { "{entry.operation}" }
                             }
                             span { class: if entry.ok { "min-w-0 truncate text-muted-foreground" } else { "min-w-0 break-words text-ansi-1" }, "{entry.message}" }
                         }

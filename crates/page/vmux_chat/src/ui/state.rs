@@ -23,7 +23,7 @@ use vmux_api::prompt_media::{
 };
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::composer::{
-    PROMPT_INPUT_ID, PromptComposerAction, PromptComposerAttachment, focus_prompt_end,
+    PROMPT_INPUT_ID, PromptComposerAttachment, PromptComposerMode, focus_prompt_end,
 };
 use vmux_ui::components::composer_bar::{
     ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
@@ -588,11 +588,11 @@ impl Chat {
         matches!(self.status().as_str(), "streaming" | "awaiting")
     }
 
-    pub fn prompt_action(&self) -> PromptComposerAction {
+    pub fn prompt_mode(&self) -> PromptComposerMode {
         if self.streaming() && self.queue.queued.read().is_empty() {
-            PromptComposerAction::Stop
+            PromptComposerMode::Stop
         } else {
-            PromptComposerAction::Send
+            PromptComposerMode::Send
         }
     }
 

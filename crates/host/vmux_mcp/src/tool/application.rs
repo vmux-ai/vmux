@@ -1,23 +1,25 @@
-use bevy_app::{App, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, JsonValue};
 
 use super::{
-    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolManifest, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolRequestSet,
 };
 
 pub(super) struct ApplicationToolPlugin;
 
 impl Plugin for ApplicationToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(RegisterTools))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(
-                Update,
-                (open_command_bar, rename_profile, notify).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(McpToolPlugin::<ApplicationTool>::new(include_str!(
+            "application.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(
+            Update,
+            (open_command_bar, rename_profile, notify).in_set(ToolDispatchSet),
+        );
     }
 }
 
@@ -48,21 +50,23 @@ struct NotifyArgs {
     body: Option<String>,
 }
 
-fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
-    ToolManifest::<ApplicationTool>::from_ron(include_str!("application.ron"))
-        .spawn(&mut commands, &mut next_order);
-}
-
 fn parse(mut commands: Commands, calls: ToolCalls<ApplicationTool>) {
     for (request, call, tool) in calls.iter() {
-        match tool {
-            ApplicationTool::OpenCommandBar => {
-                call.parse_into::<OpenCommandBarArgs>(request, &mut commands)
-            }
-            ApplicationTool::RenameProfile => {
-                call.parse_into::<RenameProfileArgs>(request, &mut commands)
-            }
-            ApplicationTool::Notify => call.parse_into::<NotifyArgs>(request, &mut commands),
+        let parsed = match tool {
+            ApplicationTool::OpenCommandBar => call.parse::<OpenCommandBarArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            ApplicationTool::RenameProfile => call.parse::<RenameProfileArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+            ApplicationTool::Notify => call.parse::<NotifyArgs>().map(|args| {
+                commands.entity(request).insert(args);
+            }),
+        };
+        if let Err(message) = parsed {
+            commands
+                .entity(request)
+                .insert(ToolDispatchResult(Err(message)));
         }
     }
 }

@@ -67,7 +67,7 @@ fn ChatComposer(chat: Chat) -> Element {
             footer: Some(rsx! {
                 ComposerFooter { chat }
             }),
-            action: chat.prompt_action(),
+            mode: chat.prompt_mode(),
             action_title: chat.prompt_action_title(),
             action_enabled: chat.prompt_action_enabled(),
             on_input: move |value| chat.edit_draft(value),

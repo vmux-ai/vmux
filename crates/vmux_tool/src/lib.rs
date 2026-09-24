@@ -11,7 +11,10 @@ use std::marker::PhantomData;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
-use vmux_core::tool::ToolRequest;
+use vmux_core::tool::{
+    ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
+    ToolLinkRequest, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
+};
 
 pub use dotfiles::*;
 pub use homebrew::*;
@@ -37,58 +40,65 @@ pub struct ToolRuntimePlugin;
 
 impl Plugin for ToolRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(Update, (ToolActionRouteSet, ToolActionRouteFlush).chain())
-            .add_systems(
-                Update,
-                bevy_ecs::schedule::ApplyDeferred.in_set(ToolActionRouteFlush),
+        app.configure_sets(
+            Update,
+            (ToolOperationRouteSet, ToolOperationRouteFlush).chain(),
+        )
+        .add_systems(
+            Update,
+            bevy_ecs::schedule::ApplyDeferred.in_set(ToolOperationRouteFlush),
+        )
+        .add_systems(
+            Update,
+            (
+                route_external_tool_operation::<ToolInstallRequest>,
+                route_external_tool_operation::<ToolUpdateRequest>,
+                route_external_tool_operation::<ToolUninstallRequest>,
+                route_external_tool_operation::<ToolForgetRequest>,
+                route_external_tool_operation::<ToolAdoptRequest>,
+                route_external_tool_operation::<ToolLinkRequest>,
+                route_external_tool_operation::<ToolUnlinkRequest>,
+                route_external_tool_operation::<ToolApplyRequest>,
+                route_external_tool_operation::<ToolImportRequest>,
             )
-            .add_systems(
-                Update,
-                route_external_tool_actions.after(ToolActionRouteFlush),
-            )
-            .add_systems(Update, complete_failed_store_action);
+                .after(ToolOperationRouteFlush),
+        )
+        .add_systems(Update, complete_failed_store_operation);
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-pub struct ToolActionRouteSet;
+pub struct ToolOperationRouteSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-struct ToolActionRouteFlush;
+struct ToolOperationRouteFlush;
 
 #[derive(Component, Clone)]
-pub struct ToolActionRequest {
-    target: Entity,
-    request: ToolRequest,
-}
+pub struct ToolOperationRequest<R: Send + Sync + 'static>(R);
 
-impl ToolActionRequest {
-    pub fn new(target: Entity, request: ToolRequest) -> Self {
-        Self { target, request }
+impl<R: Send + Sync + 'static> ToolOperationRequest<R> {
+    pub fn new(request: R) -> Self {
+        Self(request)
     }
 
-    pub fn target(&self) -> Entity {
-        self.target
-    }
-
-    pub fn request(&self) -> &ToolRequest {
-        &self.request
+    pub fn request(&self) -> &R {
+        &self.0
     }
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ExternalToolAction;
+pub struct ExternalToolOperation;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ToolStoreAction;
+pub struct ToolStoreOperation;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct ToolActionCompletion {
+pub struct ToolOperationCompletion {
     success: bool,
     message: String,
 }
 
-impl ToolActionCompletion {
+impl ToolOperationCompletion {
     pub fn success(&self) -> bool {
         self.success
     }
@@ -219,33 +229,35 @@ fn finish_operation<O>(
     }
 }
 
-fn route_external_tool_actions(
+fn route_external_tool_operation<R: Clone + Send + Sync + 'static>(
     requests: Query<
         Entity,
         (
-            Added<ToolActionRequest>,
-            With<ToolStoreTarget>,
-            Without<ToolStoreAction>,
+            Added<ToolStoreTarget>,
+            With<ToolOperationRequest<R>>,
+            Without<ToolStoreOperation>,
         ),
     >,
     mut commands: Commands,
 ) {
     for entity in &requests {
-        commands.entity(entity).insert(ExternalToolAction);
+        commands.entity(entity).insert(ExternalToolOperation);
     }
 }
 
-fn complete_failed_store_action(
-    actions: Query<
+fn complete_failed_store_operation(
+    operations: Query<
         (Entity, &ToolOperationFailure),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, failure) in &actions {
+    for (entity, failure) in &operations {
         commands
             .entity(entity)
-            .insert(ToolActionCompletion::failed(failure.message().to_string()));
+            .insert(ToolOperationCompletion::failed(
+                failure.message().to_string(),
+            ));
     }
 }
 
@@ -388,7 +400,7 @@ brew "ripgrep"
     }
 
     #[test]
-    fn npm_provider_routes_action_and_updates_the_target_store() {
+    fn npm_provider_routes_request_and_updates_the_target_store() {
         let temp = tempfile::tempdir().unwrap();
         let package_json = temp.path().join("package.json");
         std::fs::write(&package_json, r#"{"dependencies":{"typescript":"^5"}}"#).unwrap();
@@ -396,26 +408,24 @@ brew "ripgrep"
         let mut app = App::new();
         app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolPlugin));
         let store_entity = app.world_mut().spawn(store.clone()).id();
-        let target = app.world_mut().spawn_empty().id();
         let operation = app
             .world_mut()
             .spawn((
-                ToolActionRequest::new(
-                    target,
-                    ToolRequest {
-                        provider: vmux_core::tool::ToolProvider::Npm,
-                        action: vmux_core::tool::ToolAction::Import,
-                        id: String::new(),
-                        value: package_json.to_string_lossy().into_owned(),
-                    },
-                ),
+                ToolOperationRequest::new(ToolImportRequest {
+                    provider: vmux_core::tool::ToolProvider::Npm,
+                    value: package_json.to_string_lossy().into_owned(),
+                }),
                 ToolStoreTarget::new(store_entity),
             ))
             .id();
 
         for _ in 0..100 {
             app.update();
-            if app.world().get::<ToolActionCompletion>(operation).is_some() {
+            if app
+                .world()
+                .get::<ToolOperationCompletion>(operation)
+                .is_some()
+            {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -424,12 +434,16 @@ brew "ripgrep"
         let output = app.world().get::<ImportedNpmManifest>(operation).unwrap();
         assert_eq!(output, &ImportedNpmManifest { packages: 1 });
         assert_eq!(
-            app.world().get::<ToolActionCompletion>(operation),
-            Some(&ToolActionCompletion::succeeded(
+            app.world().get::<ToolOperationCompletion>(operation),
+            Some(&ToolOperationCompletion::succeeded(
                 "imported 1 NPM package(s)"
             )),
         );
-        assert!(app.world().get::<ExternalToolAction>(operation).is_none());
+        assert!(
+            app.world()
+                .get::<ExternalToolOperation>(operation)
+                .is_none()
+        );
         assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
     }
 

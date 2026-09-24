@@ -10,25 +10,35 @@ use crate::event::{
 };
 use crate::state::{GitCommandLogEntry, GitPageSnapshot, GitUiState};
 
+use super::controller::GitController;
+
+type GitUiStateUpdates = vmux_core::host::UiState<GitUiState>;
+
 pub(super) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(vmux_core::host::UiStatePlugin::<GitUiState>::default())
             .add_observer(on_page_ready)
-            .add_systems(Update, publish_git_ui_state);
+            .add_systems(Update, publish_git_state.after(super::GitUpdateSet::Jobs));
     }
 }
 
-type GitUiStateUpdates = vmux_core::host::UiState<GitUiState>;
-
 #[derive(Component, Default)]
-#[require(GitUiStateUpdates)]
+#[require(GitUiStateUpdates, GitController)]
 pub(super) struct GitState {
     snapshot: GitPageSnapshot,
 }
 
 impl GitState {
+    pub(super) fn reset(&mut self, workspace: String) {
+        self.snapshot = GitPageSnapshot {
+            workspace,
+            loading: true,
+            ..Default::default()
+        };
+    }
+
     pub(super) fn start_repository(&mut self, path: &Path) {
         self.snapshot.workspace = path.to_string_lossy().into_owned();
         self.snapshot.loading = true;
@@ -88,7 +98,7 @@ impl GitState {
 
     pub(super) fn apply_result(&mut self, event: &GitOperationResult) {
         self.push_log(GitCommandLogEntry {
-            action: event.action.clone(),
+            operation: event.action.clone(),
             message: event.message.clone(),
             ok: event.ok,
         });
@@ -107,13 +117,24 @@ impl GitState {
 
     pub(super) fn apply_error(&mut self, event: &GitOperationError) {
         self.push_log(GitCommandLogEntry {
-            action: String::new(),
+            operation: String::new(),
             message: event.message.clone(),
             ok: false,
         });
         self.snapshot.loading = false;
         self.snapshot.fetching = false;
         self.snapshot.message.clone_from(&event.message);
+    }
+
+    pub(super) fn apply_workspace_error(&mut self, message: String) {
+        self.push_log(GitCommandLogEntry {
+            operation: String::new(),
+            message: message.clone(),
+            ok: false,
+        });
+        self.snapshot.loading = false;
+        self.snapshot.fetching = false;
+        self.snapshot.message = message;
     }
 
     pub(super) fn mark_changed(&mut self) -> Option<String> {
@@ -123,6 +144,14 @@ impl GitState {
 
     pub(super) fn workspace(&self) -> &str {
         &self.snapshot.workspace
+    }
+
+    pub(super) fn repository(&self) -> Option<&GitRepositorySnapshot> {
+        self.snapshot.repository.as_ref()
+    }
+
+    pub(super) fn branch_log(&self) -> Option<&GitBranchLog> {
+        self.snapshot.branch_log.as_ref()
     }
 
     fn push_log(&mut self, entry: GitCommandLogEntry) {
@@ -148,11 +177,21 @@ fn on_page_ready(
     commands.entity(entity).insert(GitState::default());
 }
 
-fn publish_git_ui_state(
-    views: Query<(Entity, &GitState), Changed<GitState>>,
+fn publish_git_state(
+    views: Query<(Entity, Ref<GitState>, Ref<GitController>)>,
     mut commands: Commands,
 ) {
-    for (entity, view) in &views {
-        GitUiStateUpdates::write(&mut commands, entity, &view.snapshot);
+    for (entity, view, controller) in &views {
+        if !view.is_changed() && !controller.is_changed() {
+            continue;
+        }
+        commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
+            entity,
+            &view.snapshot,
+        ));
+        commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
+            entity,
+            controller.state(),
+        ));
     }
 }

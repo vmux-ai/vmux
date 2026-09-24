@@ -1,8 +1,8 @@
-#[vmux_api::contract(Default)]
+use crate::state::SettingsSelectOption;
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SettingsSchema {
-    #[serde(default)]
     pub sections: Vec<SectionSpec>,
-    #[serde(default)]
     pub fields: Vec<(String, FieldSpec)>,
 }
 
@@ -54,81 +54,38 @@ fn field_path_matches(pattern: &str, path: &str) -> bool {
             .all(|(pattern, segment)| *pattern == "*" || *pattern == segment)
 }
 
-#[vmux_api::contract]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SectionSpec {
     pub id: String,
     pub title: String,
-    #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
     pub synthetic_keys: Vec<String>,
-    #[serde(default)]
     pub root_path: String,
 }
 
-#[vmux_api::contract(Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct FieldSpec {
-    #[serde(default)]
     pub label: Option<String>,
-    #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
     pub hint: Option<String>,
-    #[serde(default)]
     pub placeholder: Option<String>,
-    #[serde(default)]
     pub widget: Option<WidgetKind>,
-    #[serde(default)]
     pub order: Vec<String>,
-    #[serde(default)]
     pub omit: bool,
-    #[serde(default)]
     pub step: Option<f64>,
-    #[serde(default)]
-    pub options: Vec<SelectOption>,
+    pub options: Vec<SettingsSelectOption>,
 }
 
-#[vmux_api::contract(Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WidgetKind {
     LeaderKbd,
     BindingsList,
     Select,
 }
 
-#[vmux_api::contract]
-pub struct SelectOption {
-    pub value: String,
-    pub label: String,
-}
-
 #[cfg(test)]
-mod select_widget_tests {
+mod tests {
     use super::*;
-
-    #[test]
-    fn select_field_with_options_round_trips_json() {
-        let spec = FieldSpec {
-            label: Some("Mode".into()),
-            widget: Some(WidgetKind::Select),
-            options: vec![
-                SelectOption {
-                    value: "device".into(),
-                    label: "Device".into(),
-                },
-                SelectOption {
-                    value: "light".into(),
-                    label: "Light".into(),
-                },
-            ],
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&spec).unwrap();
-        let back: FieldSpec = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.widget, Some(WidgetKind::Select));
-        assert_eq!(back.options.len(), 2);
-        assert_eq!(back.options[0].value, "device");
-        assert_eq!(back.options[1].label, "Light");
-    }
 
     #[test]
     fn field_lookup_matches_array_indexes_and_dynamic_map_keys() {

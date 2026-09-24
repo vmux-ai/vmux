@@ -9,7 +9,7 @@ use vmux_core::event::{
     LspManagerUiState, LspPackage, LspPackageStatus, LspPkgStatus, LspUninstallRequest,
     LspUpdateRequest,
 };
-use vmux_core::host::{UiState, UiStatePlugin};
+use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_layout::native_open::HostedPage;
 
 use crate::lsp::catalog::{self, Package};
@@ -537,7 +537,10 @@ fn publish_manager_state(
         if !state.is_changed() {
             continue;
         }
-        UiState::<LspManagerUiState>::write(&mut commands, entity, &state.event());
+        commands.trigger(UiStateWrite::<LspManagerUiState>::from_event(
+            entity,
+            &state.event(),
+        ));
     }
 }
 

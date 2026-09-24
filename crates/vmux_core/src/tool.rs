@@ -56,7 +56,7 @@ pub enum ToolStatus {
 }
 
 #[vmux_api::contract(Copy, Eq, PartialOrd, Ord, Hash)]
-pub enum ToolAction {
+pub enum ToolOperationKind {
     Install,
     Update,
     Uninstall,
@@ -78,7 +78,7 @@ pub struct ToolItem {
     pub detail: String,
     pub status: ToolStatus,
     pub managed: bool,
-    pub actions: Vec<ToolAction>,
+    pub operations: Vec<ToolOperationKind>,
 }
 
 #[vmux_api::contract(Eq)]
@@ -102,15 +102,19 @@ pub struct ToolsSnapshot {
 #[vmux_api::contract(Eq, PartialOrd, Ord, Hash)]
 pub struct ToolOperationKey {
     pub provider: ToolProvider,
-    pub action: ToolAction,
+    pub kind: ToolOperationKind,
     pub item_id: String,
 }
 
 impl ToolOperationKey {
-    pub fn new(provider: ToolProvider, action: ToolAction, item_id: impl Into<String>) -> Self {
+    pub fn new(
+        provider: ToolProvider,
+        kind: ToolOperationKind,
+        item_id: impl Into<String>,
+    ) -> Self {
         Self {
             provider,
-            action,
+            kind,
             item_id: item_id.into(),
         }
     }
@@ -123,7 +127,7 @@ pub struct ToolOperationNotice {
     pub message: String,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 4, target = "tools")]
+#[vmux_api::ui_state(Default, Eq, version = 5, target = "tools")]
 pub struct ToolsUiState {
     pub snapshot: ToolsSnapshot,
     pub pending: Vec<ToolOperationKey>,
@@ -158,15 +162,6 @@ impl ToolsNavigateRequest {
             _ => None,
         }
     }
-}
-
-#[vmux_api::contract(Eq)]
-pub struct ToolRequest {
-    pub provider: ToolProvider,
-    pub action: ToolAction,
-    pub id: String,
-    #[serde(default)]
-    pub value: String,
 }
 
 #[vmux_api::ui_event(Eq, target = "tools")]
@@ -219,59 +214,4 @@ pub struct ToolApplyRequest;
 pub struct ToolImportRequest {
     pub provider: ToolProvider,
     pub value: String,
-}
-
-macro_rules! tool_item_request {
-    ($request:ty, $action:expr) => {
-        impl From<$request> for ToolRequest {
-            fn from(request: $request) -> Self {
-                Self {
-                    provider: request.provider,
-                    action: $action,
-                    id: request.id,
-                    value: String::new(),
-                }
-            }
-        }
-    };
-}
-
-tool_item_request!(ToolInstallRequest, ToolAction::Install);
-tool_item_request!(ToolUpdateRequest, ToolAction::Update);
-tool_item_request!(ToolUninstallRequest, ToolAction::Uninstall);
-tool_item_request!(ToolForgetRequest, ToolAction::Forget);
-tool_item_request!(ToolLinkRequest, ToolAction::Link);
-tool_item_request!(ToolUnlinkRequest, ToolAction::Unlink);
-
-impl From<ToolAdoptRequest> for ToolRequest {
-    fn from(request: ToolAdoptRequest) -> Self {
-        Self {
-            provider: request.provider,
-            action: ToolAction::Adopt,
-            id: request.id,
-            value: request.value,
-        }
-    }
-}
-
-impl From<ToolApplyRequest> for ToolRequest {
-    fn from(_: ToolApplyRequest) -> Self {
-        Self {
-            provider: ToolProvider::Dotfiles,
-            action: ToolAction::Apply,
-            id: String::new(),
-            value: String::new(),
-        }
-    }
-}
-
-impl From<ToolImportRequest> for ToolRequest {
-    fn from(request: ToolImportRequest) -> Self {
-        Self {
-            provider: request.provider,
-            action: ToolAction::Import,
-            id: String::new(),
-            value: request.value,
-        }
-    }
 }
