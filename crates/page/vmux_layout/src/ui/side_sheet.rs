@@ -376,7 +376,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
                     onclick: move |_| {
-                        let _ = send(&crate::event::SideSheetRequest::section(
+                        let _ = send(&crate::event::SideSheetSectionRequest::new(
                             pane_id,
                             "pane",
                             !expanded,
