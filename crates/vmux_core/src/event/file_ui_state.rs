@@ -64,6 +64,7 @@ pub struct FileUiState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::FileDocumentKind;
 
     #[test]
     fn batches_preserve_patch_order() {

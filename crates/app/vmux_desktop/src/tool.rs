@@ -14,12 +14,13 @@ use parking_lot::Mutex;
 use vmux_core::page::PageManifest;
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tool::{
-    ToolAction, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolResult,
-    ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
+    ToolAction, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolStatus,
+    ToolUiOperation, ToolUiOperationState, ToolsNavigateRequest, ToolsRefreshRequest,
+    ToolsSnapshot, ToolsUiState,
 };
 use vmux_core::vault::{
-    VaultAction, VaultAuthProgress, VaultRefreshRequest, VaultRepository, VaultRequest,
-    VaultResult, VaultSnapshot,
+    VaultAction, VaultAuthorization, VaultCompletion, VaultOperation, VaultOperationState,
+    VaultRefreshRequest, VaultRepository, VaultRequest, VaultSnapshot, VaultUiState,
 };
 use vmux_tool::{
     ExternalToolAction, ToolActionCompletion, ToolActionRequest, ToolStore, ToolStoreAction,
@@ -161,11 +162,12 @@ impl Plugin for ToolPlugin {
                     drain_tool_actions,
                     start_vault_action,
                     drain_vault_actions,
-                    emit_tools_snapshot,
+                    emit_tools_state,
+                    emit_vault_state,
                 )
                     .chain(),
             )
-            .add_systems(Update, drain_tool_store_actions.before(emit_tools_snapshot));
+            .add_systems(Update, drain_tool_store_actions.before(emit_tools_state));
     }
 }
 
@@ -224,7 +226,150 @@ impl Default for ToolRegistry {
 
 #[derive(Component, Default)]
 struct ToolSubscriber {
+    snapshot_revision: u64,
     revision: u64,
+    emitted_revision: u64,
+    state: ToolsUiState,
+}
+
+impl ToolSubscriber {
+    fn pending(operation_id: u64, request: &ToolRequest) -> Self {
+        let mut subscriber = Self::default();
+        subscriber.begin(operation_id, request);
+        subscriber
+    }
+
+    fn begin(&mut self, operation_id: u64, request: &ToolRequest) {
+        self.state.operations.retain(ToolUiOperation::is_pending);
+        self.state.operations.push(ToolUiOperation::pending(
+            operation_id,
+            request.provider,
+            request.action,
+            request.id.clone(),
+        ));
+        self.touch();
+    }
+
+    fn complete(
+        &mut self,
+        operation_id: u64,
+        request: &ToolRequest,
+        success: bool,
+        message: String,
+    ) {
+        self.state
+            .operations
+            .retain(|operation| operation.is_pending() || operation.operation_id == operation_id);
+        let operation = self
+            .state
+            .operations
+            .iter_mut()
+            .find(|operation| operation.operation_id == operation_id);
+        if let Some(operation) = operation {
+            operation.state = ToolUiOperationState::Completed { success, message };
+        } else {
+            self.state.operations.push(ToolUiOperation {
+                operation_id,
+                provider: request.provider,
+                action: request.action,
+                item_id: request.id.clone(),
+                state: ToolUiOperationState::Completed { success, message },
+            });
+        }
+        self.touch();
+    }
+
+    fn synchronize(&mut self, revision: u64, snapshot: &ToolsSnapshot) {
+        if self.snapshot_revision == revision {
+            return;
+        }
+        self.snapshot_revision = revision;
+        self.state.snapshot = snapshot.clone();
+        self.touch();
+    }
+
+    fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1).max(1);
+    }
+}
+
+#[derive(Component, Default)]
+struct VaultSubscriber {
+    snapshot_revision: u64,
+    revision: u64,
+    emitted_revision: u64,
+    state: VaultUiState,
+}
+
+impl VaultSubscriber {
+    fn pending(operation_id: u64, action: VaultAction) -> Self {
+        let mut subscriber = Self::default();
+        subscriber.begin(operation_id, action);
+        subscriber
+    }
+
+    fn begin(&mut self, operation_id: u64, action: VaultAction) {
+        match action {
+            VaultAction::ConnectCloud => self.state.cloud_root.clear(),
+            VaultAction::GenerateRecoveryKey => self.state.generated_recovery_key.clear(),
+            _ => {}
+        }
+        self.state.operation = Some(VaultOperation::pending(operation_id, action));
+        self.touch();
+    }
+
+    fn authorize(&mut self, operation_id: u64, authorization: VaultAuthorization) {
+        let Some(operation) = self.state.operation.as_mut() else {
+            return;
+        };
+        if operation.operation_id != operation_id {
+            return;
+        }
+        operation.state = VaultOperationState::Authorizing(authorization);
+        self.touch();
+    }
+
+    fn complete(&mut self, operation_id: u64, completion: VaultCompletion) {
+        let Some(operation) = self.state.operation.as_mut() else {
+            return;
+        };
+        if operation.operation_id != operation_id {
+            return;
+        }
+        if completion.success {
+            match operation.action {
+                VaultAction::GenerateRecoveryKey => {
+                    self.state.generated_recovery_key = completion.message.clone();
+                }
+                VaultAction::CreateRecoveryKey => {
+                    self.state.generated_recovery_key.clear();
+                    self.state.recovery_upload_pending = completion.pending_upload;
+                }
+                VaultAction::Sync => {
+                    self.state.recovery_upload_pending = false;
+                }
+                VaultAction::ConnectCloud => {
+                    self.state.cloud_root = completion.message.clone();
+                }
+                _ => {}
+            }
+        }
+        operation.state = VaultOperationState::Completed(completion);
+        self.touch();
+    }
+
+    fn synchronize(&mut self, revision: u64, snapshot: &VaultSnapshot) {
+        if self.snapshot_revision == revision {
+            return;
+        }
+        self.snapshot_revision = revision;
+        self.state.vault = snapshot.clone();
+        self.touch();
+    }
+
+    fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1).max(1);
+    }
 }
 
 #[derive(Component)]
@@ -261,6 +406,9 @@ struct PendingToolAction {
     request: ToolRequest,
 }
 
+#[derive(Component)]
+struct ToolOperationId(u64);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VaultActionTarget {
     Webview(Entity),
@@ -285,10 +433,11 @@ struct PendingVaultAction {
 
 #[derive(Component)]
 struct VaultActionTask {
+    operation_id: u64,
     target: VaultActionTarget,
     request: VaultRequest,
     task: Task<Result<VaultActionOutput, String>>,
-    progress: Mutex<mpsc::Receiver<VaultAuthProgress>>,
+    progress: Mutex<mpsc::Receiver<VaultAuthorization>>,
     canceled: Arc<AtomicBool>,
 }
 
@@ -406,15 +555,18 @@ fn on_navigate_request(
 fn on_refresh_request(
     trigger: On<BinReceive<ToolsRefreshRequest>>,
     mut registry: Query<&mut ToolRegistry>,
+    subscribers: Query<(), With<ToolSubscriber>>,
     mut commands: Commands,
 ) {
     let Ok(mut state) = registry.single_mut() else {
         return;
     };
     let request = &trigger.event().payload;
-    commands
-        .entity(trigger.event().webview)
-        .insert(ToolSubscriber::default());
+    if !subscribers.contains(trigger.event().webview) {
+        commands
+            .entity(trigger.event().webview)
+            .insert(ToolSubscriber::default());
+    }
     if request.refresh || !state.snapshot.loaded {
         state.dirty = true;
         state.full_scan = true;
@@ -430,13 +582,21 @@ fn on_refresh_request(
 fn on_action_request(
     trigger: On<BinReceive<ToolRequest>>,
     mut sequence: ResMut<ActionRequestSequence>,
+    mut subscribers: Query<&mut ToolSubscriber>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
     let request = trigger.event().payload.clone();
-    commands.entity(target).insert(ToolSubscriber::default());
+    let operation_id = sequence.next();
+    if let Ok(mut subscriber) = subscribers.get_mut(target) {
+        subscriber.begin(operation_id, &request);
+    } else {
+        commands
+            .entity(target)
+            .insert(ToolSubscriber::pending(operation_id, &request));
+    }
     commands.spawn(PendingToolAction {
-        order: sequence.next(),
+        order: operation_id,
         target,
         request,
     });
@@ -447,11 +607,19 @@ fn on_vault_action_request(
     mut sequence: ResMut<ActionRequestSequence>,
     pending: Query<(Entity, &PendingVaultAction)>,
     tasks: Query<&VaultActionTask>,
+    mut subscribers: Query<&mut VaultSubscriber>,
     mut commands: Commands,
 ) {
     let target = trigger.event().webview;
     let request = trigger.event().payload.clone();
-    commands.entity(target).insert(ToolSubscriber::default());
+    let operation_id = sequence.next();
+    if let Ok(mut subscriber) = subscribers.get_mut(target) {
+        subscriber.begin(operation_id, request.action);
+    } else {
+        commands
+            .entity(target)
+            .insert(VaultSubscriber::pending(operation_id, request.action));
+    }
     let mut connecting = false;
     for task in &tasks {
         if task.request.action != VaultAction::ConnectGithub {
@@ -472,7 +640,7 @@ fn on_vault_action_request(
         }
     }
     commands.spawn(PendingVaultAction {
-        order: sequence.next(),
+        order: operation_id,
         target: VaultActionTarget::Webview(target),
         request,
     });
@@ -481,14 +649,17 @@ fn on_vault_action_request(
 fn on_vault_refresh_request(
     trigger: On<BinReceive<VaultRefreshRequest>>,
     mut registry: Query<&mut ToolRegistry>,
+    subscribers: Query<(), With<VaultSubscriber>>,
     mut commands: Commands,
 ) {
     let Ok(mut state) = registry.single_mut() else {
         return;
     };
-    commands
-        .entity(trigger.event().webview)
-        .insert(ToolSubscriber::default());
+    if !subscribers.contains(trigger.event().webview) {
+        commands
+            .entity(trigger.event().webview)
+            .insert(VaultSubscriber::default());
+    }
     state.dirty = true;
     state.full_scan |= !state.snapshot.loaded;
     state.load_vault_repositories |= trigger.event().payload.load_repositories;
@@ -629,6 +800,7 @@ fn start_tool_action(
         .entity(entity)
         .remove::<PendingToolAction>()
         .insert((
+            ToolOperationId(pending_action.order),
             ToolActionRequest::new(pending_action.target, pending_action.request.clone()),
             ToolStoreTarget::new(store),
         ));
@@ -719,6 +891,7 @@ fn start_vault_action(
         .entity(entity)
         .remove::<PendingVaultAction>()
         .insert(VaultActionTask {
+            operation_id: pending_action.order,
             target,
             request,
             task,
@@ -822,15 +995,20 @@ fn drain_tools_scan(
 }
 
 fn drain_tool_actions(
-    mut tasks: Query<(Entity, &ToolActionRequest, &mut ToolActionTask)>,
+    mut tasks: Query<(
+        Entity,
+        &ToolOperationId,
+        &ToolActionRequest,
+        &mut ToolActionTask,
+    )>,
     mut registry: Query<&mut ToolRegistry>,
-    browsers: NonSend<Browsers>,
+    mut subscribers: Query<&mut ToolSubscriber>,
     mut commands: Commands,
 ) {
     let Ok(mut state) = registry.single_mut() else {
         return;
     };
-    for (entity, action, mut task) in &mut tasks {
+    for (entity, operation_id, action, mut task) in &mut tasks {
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
@@ -840,15 +1018,8 @@ fn drain_tool_actions(
             Err(message) => (false, message),
         };
         let request = action.request();
-        let event = ToolResult {
-            provider: request.provider,
-            action: request.action,
-            id: request.id.clone(),
-            success,
-            message,
-        };
-        if browsers.can_emit_to(&action.target()) {
-            commands.trigger(BinHostEmitEvent::from_event(action.target(), &event));
+        if let Ok(mut subscriber) = subscribers.get_mut(action.target()) {
+            subscriber.complete(operation_id.0, request, success, message);
         }
         if success {
             state.dirty = true;
@@ -859,25 +1030,31 @@ fn drain_tool_actions(
 }
 
 fn drain_tool_store_actions(
-    actions: Query<(Entity, &ToolActionRequest, &ToolActionCompletion), With<ToolStoreAction>>,
+    actions: Query<
+        (
+            Entity,
+            &ToolOperationId,
+            &ToolActionRequest,
+            &ToolActionCompletion,
+        ),
+        With<ToolStoreAction>,
+    >,
     mut registry: Query<&mut ToolRegistry>,
-    browsers: NonSend<Browsers>,
+    mut subscribers: Query<&mut ToolSubscriber>,
     mut commands: Commands,
 ) {
     let Ok(mut state) = registry.single_mut() else {
         return;
     };
-    for (entity, action, completion) in &actions {
+    for (entity, operation_id, action, completion) in &actions {
         let request = action.request();
-        let event = ToolResult {
-            provider: request.provider,
-            action: request.action,
-            id: request.id.clone(),
-            success: completion.success(),
-            message: completion.message().to_string(),
-        };
-        if browsers.can_emit_to(&action.target()) {
-            commands.trigger(BinHostEmitEvent::from_event(action.target(), &event));
+        if let Ok(mut subscriber) = subscribers.get_mut(action.target()) {
+            subscriber.complete(
+                operation_id.0,
+                request,
+                completion.success(),
+                completion.message().to_string(),
+            );
         }
         if completion.success() {
             state.dirty = true;
@@ -892,7 +1069,7 @@ fn drain_vault_actions(
     mut tasks: Query<(Entity, &mut VaultActionTask)>,
     mut registry: Query<&mut ToolRegistry>,
     mut recovery: ResMut<VaultRecoveryState>,
-    browsers: NonSend<Browsers>,
+    mut subscribers: Query<&mut VaultSubscriber>,
     mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
     mut commands: Commands,
 ) {
@@ -902,13 +1079,13 @@ fn drain_vault_actions(
     for (entity, mut task) in &mut tasks {
         let target = task.target.webview();
         while let Ok(progress) = task.progress.get_mut().try_recv() {
-            if let Some(target) = target
-                && browsers.can_emit_to(&target)
-            {
+            if let Some(target) = target {
                 stack_requests.write(vmux_layout::stack::StackRequest::Open {
                     url: Some(progress.url.clone()),
                 });
-                commands.trigger(BinHostEmitEvent::from_event(target, &progress));
+                if let Ok(mut subscriber) = subscribers.get_mut(target) {
+                    subscriber.authorize(task.operation_id, progress);
+                }
             }
         }
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
@@ -930,8 +1107,7 @@ fn drain_vault_actions(
         if let Some(key) = generated_recovery_key {
             recovery.retain(key);
         }
-        let event = VaultResult {
-            action: task.request.action,
+        let completion = VaultCompletion {
             success,
             message,
             pending_upload,
@@ -944,9 +1120,9 @@ fn drain_vault_actions(
             }
         }
         if let Some(target) = target
-            && browsers.can_emit_to(&target)
+            && let Ok(mut subscriber) = subscribers.get_mut(target)
         {
-            commands.trigger(BinHostEmitEvent::from_event(target, &event));
+            subscriber.complete(task.operation_id, completion);
         }
         state.dirty = true;
         state.full_scan |= !state.snapshot.loaded;
@@ -955,7 +1131,7 @@ fn drain_vault_actions(
     }
 }
 
-fn emit_tools_snapshot(
+fn emit_tools_state(
     registry: Query<&ToolRegistry>,
     browsers: NonSend<Browsers>,
     mut subscribers: Query<(Entity, &mut ToolSubscriber)>,
@@ -965,14 +1141,37 @@ fn emit_tools_snapshot(
         return;
     };
     for (entity, mut subscriber) in &mut subscribers {
-        if subscriber.revision == state.revision {
+        subscriber.synchronize(state.revision, &state.snapshot);
+        if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &state.snapshot));
-        subscriber.revision = state.revision;
+        commands.trigger(BinHostEmitEvent::from_event(entity, &subscriber.state));
+        subscriber.emitted_revision = subscriber.revision;
+    }
+}
+
+fn emit_vault_state(
+    registry: Query<&ToolRegistry>,
+    browsers: NonSend<Browsers>,
+    mut subscribers: Query<(Entity, &mut VaultSubscriber)>,
+    mut commands: Commands,
+) {
+    let Ok(state) = registry.single() else {
+        return;
+    };
+    for (entity, mut subscriber) in &mut subscribers {
+        subscriber.synchronize(state.revision, &state.snapshot.vault);
+        if subscriber.emitted_revision == subscriber.revision {
+            continue;
+        }
+        if !browsers.can_emit_to(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_event(entity, &subscriber.state));
+        subscriber.emitted_revision = subscriber.revision;
     }
 }
 
@@ -1634,7 +1833,7 @@ async fn perform_vault_action<F, C>(
     canceled: C,
 ) -> Result<VaultActionOutput, String>
 where
-    F: Fn(VaultAuthProgress),
+    F: Fn(VaultAuthorization),
     C: Fn() -> bool,
 {
     if request.action == VaultAction::CreateRecoveryKey {
@@ -1660,7 +1859,7 @@ where
         VaultAction::Sync => vmux_core::profile::vault::sync(),
         VaultAction::ConnectGithub => vmux_core::profile::vault::connect_github_with_progress(
             |code| {
-                progress(VaultAuthProgress {
+                progress(VaultAuthorization {
                     code,
                     url: "https://github.com/login/device".to_string(),
                 });
@@ -2081,6 +2280,53 @@ mod tests {
         assert!(recovery.begin(VaultAction::Sync).1.is_none());
         assert!(recovery.begin(VaultAction::CreateRecoveryKey).1.is_some());
         assert!(recovery.begin(VaultAction::CreateRecoveryKey).1.is_none());
+    }
+
+    #[test]
+    fn tool_operation_state_tracks_pending_and_completion() {
+        let request = ToolRequest {
+            provider: ToolProvider::Npm,
+            action: ToolAction::Install,
+            id: "typescript".to_string(),
+            value: String::new(),
+        };
+        let mut subscriber = ToolSubscriber::pending(7, &request);
+
+        assert!(subscriber.state.operations[0].is_pending());
+
+        subscriber.complete(7, &request, true, "installed".to_string());
+
+        assert_eq!(
+            subscriber.state.operations[0].completion(),
+            Some((true, "installed"))
+        );
+    }
+
+    #[test]
+    fn vault_operation_state_preserves_recovery_workflow() {
+        let mut subscriber = VaultSubscriber::pending(3, VaultAction::GenerateRecoveryKey);
+        subscriber.complete(
+            3,
+            VaultCompletion {
+                success: true,
+                message: "recovery-key".to_string(),
+                pending_upload: false,
+            },
+        );
+        assert_eq!(subscriber.state.generated_recovery_key, "recovery-key");
+
+        subscriber.begin(4, VaultAction::CreateRecoveryKey);
+        subscriber.complete(
+            4,
+            VaultCompletion {
+                success: true,
+                message: String::new(),
+                pending_upload: true,
+            },
+        );
+
+        assert!(subscriber.state.generated_recovery_key.is_empty());
+        assert!(subscriber.state.recovery_upload_pending);
     }
 
     #[test]

@@ -87,7 +87,7 @@ pub struct ToolCategory {
     pub items: Vec<ToolItem>,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 2, targets = ["tools", "vault"])]
+#[vmux_api::contract(Default, Eq)]
 pub struct ToolsSnapshot {
     pub loaded: bool,
     pub root: String,
@@ -97,6 +97,55 @@ pub struct ToolsSnapshot {
     pub updates: u32,
     pub conflicts: u32,
     pub error: String,
+}
+
+#[vmux_api::contract(Eq)]
+pub enum ToolUiOperationState {
+    Pending,
+    Completed { success: bool, message: String },
+}
+
+#[vmux_api::contract(Eq)]
+pub struct ToolUiOperation {
+    pub operation_id: u64,
+    pub provider: ToolProvider,
+    pub action: ToolAction,
+    pub item_id: String,
+    pub state: ToolUiOperationState,
+}
+
+impl ToolUiOperation {
+    pub fn pending(
+        operation_id: u64,
+        provider: ToolProvider,
+        action: ToolAction,
+        item_id: String,
+    ) -> Self {
+        Self {
+            operation_id,
+            provider,
+            action,
+            item_id,
+            state: ToolUiOperationState::Pending,
+        }
+    }
+
+    pub fn is_pending(&self) -> bool {
+        self.state == ToolUiOperationState::Pending
+    }
+
+    pub fn completion(&self) -> Option<(bool, &str)> {
+        let ToolUiOperationState::Completed { success, message } = &self.state else {
+            return None;
+        };
+        Some((*success, message))
+    }
+}
+
+#[vmux_api::ui_state(Default, Eq, version = 3, target = "tools")]
+pub struct ToolsUiState {
+    pub snapshot: ToolsSnapshot,
+    pub operations: Vec<ToolUiOperation>,
 }
 
 #[vmux_api::ui_event(Default, Eq, target = "tools")]
@@ -136,13 +185,4 @@ pub struct ToolRequest {
     pub id: String,
     #[serde(default)]
     pub value: String,
-}
-
-#[vmux_api::host_event(Eq, target = "tools")]
-pub struct ToolResult {
-    pub provider: ToolProvider,
-    pub action: ToolAction,
-    pub id: String,
-    pub success: bool,
-    pub message: String,
 }

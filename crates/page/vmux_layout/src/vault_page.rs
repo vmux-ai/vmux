@@ -1,16 +1,15 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::tool::ToolsSnapshot;
 use vmux_core::vault::{
-    VaultAction, VaultAuthProgress, VaultRefreshRequest, VaultRequest, VaultResult, VaultSnapshot,
+    VaultAction, VaultOperation, VaultRefreshRequest, VaultRequest, VaultSnapshot, VaultUiState,
 };
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
     ManagerSelectItem, ManagerSelectItemKind, ManagerSpinner,
 };
-use vmux_ui::hooks::{send, use_listener, use_theme, use_ui_state};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,6 +24,65 @@ enum RemoteProvider {
 enum VaultDestination {
     Create,
     Existing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct VaultNotice {
+    action: VaultAction,
+    success: bool,
+    message: String,
+}
+
+impl VaultNotice {
+    fn from_operation(operation: &VaultOperation) -> Option<Self> {
+        let completion = operation.completion()?;
+        Some(Self {
+            action: operation.action,
+            success: completion.success,
+            message: completion.message.clone(),
+        })
+    }
+
+    fn visible(&self) -> bool {
+        if !self.success {
+            return !self.message.is_empty();
+        }
+        !matches!(
+            self.action,
+            VaultAction::GenerateRecoveryKey
+                | VaultAction::CreateRecoveryKey
+                | VaultAction::ConnectCloud
+                | VaultAction::ConnectGithub
+        )
+    }
+
+    fn message(&self) -> String {
+        if !self.success {
+            return match self.action {
+                VaultAction::Sync => translate("vault-backup-failed"),
+                VaultAction::GenerateRecoveryKey | VaultAction::CreateRecoveryKey => {
+                    translate("vault-recovery-key-create-failed")
+                }
+                VaultAction::UnlockRecoveryKey => translate("vault-recovery-key-invalid"),
+                _ => self.message.clone(),
+            };
+        }
+        translate(match self.action {
+            VaultAction::Create => "vault-result-created",
+            VaultAction::Connect => "vault-result-connected",
+            VaultAction::Sync => "vault-result-synced",
+            VaultAction::ConnectGithub => "vault-result-github-connected",
+            VaultAction::ConnectFolder => "vault-result-folder-connected",
+            VaultAction::GenerateRecoveryKey | VaultAction::CreateRecoveryKey => {
+                "vault-result-created"
+            }
+            VaultAction::UnlockRecoveryKey => "vault-result-connected",
+            VaultAction::ConnectCloud => "vault-result-connected",
+            VaultAction::CreateCloudFolder | VaultAction::ChooseCloudFolder => {
+                "vault-result-folder-connected"
+            }
+        })
+    }
 }
 
 impl RemoteProvider {
@@ -52,15 +110,10 @@ impl RemoteProvider {
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();
-    let snapshot = use_ui_state::<ToolsSnapshot>();
-    let mut pending = use_signal(|| None::<VaultAction>);
-    let mut notice = use_signal(|| None::<VaultResult>);
-    let mut generated_recovery_key = use_signal(String::new);
+    let state = use_ui_state::<VaultUiState>();
     let mut recovery_key_confirmation = use_signal(String::new);
     let mut recovery_key_copied = use_signal(|| false);
     let mut recovery_key_input = use_signal(String::new);
-    let mut recovery_upload_pending = use_signal(|| false);
-    let mut github_device_code = use_signal(String::new);
     let mut github_device_code_copied = use_signal(|| false);
     let mut repository = use_signal(|| "vmux-vault".to_string());
     let mut selected_owner = use_signal(|| None::<String>);
@@ -73,16 +126,10 @@ pub fn Page() -> Element {
         "onedrive" => Some(RemoteProvider::OneDrive),
         _ => None,
     });
-    let mut cloud_root = use_signal(String::new);
     let private = use_signal(|| true);
 
     use_effect(move || {
-        let event = snapshot();
-        if pending() == Some(VaultAction::ConnectGithub)
-            && (event.vault.repositories_loaded || !event.vault.error.is_empty())
-        {
-            pending.set(None);
-        }
+        let event = state();
         if !event.vault.github_owner.is_empty()
             && selected_owner()
                 .as_ref()
@@ -94,60 +141,20 @@ pub fn Page() -> Element {
             let owner = selected_owner().unwrap_or_else(|| event.vault.github_owner.clone());
             repository.set(suggested_repository_name(&owner, &event.vault.repositories));
         }
-    });
-    let _result_listener = use_listener::<VaultResult, _>(move |mut result| {
-        if result.action == VaultAction::ConnectGithub {
-            github_device_code.set(String::new());
+        if event.vault.unlocked {
+            recovery_key_input.set(String::new());
+        }
+        if event.generated_recovery_key.is_empty() {
+            recovery_key_confirmation.set(String::new());
+            recovery_key_copied.set(false);
+        }
+        if event
+            .operation
+            .as_ref()
+            .is_none_or(|operation| operation.authorization().is_none())
+        {
             github_device_code_copied.set(false);
         }
-        if result.action == VaultAction::Sync && result.success {
-            recovery_upload_pending.set(false);
-        }
-        if !result.success {
-            match result.action {
-                VaultAction::Sync => {
-                    result.message = translate("vault-backup-failed");
-                }
-                VaultAction::GenerateRecoveryKey | VaultAction::CreateRecoveryKey => {
-                    result.message = translate("vault-recovery-key-create-failed");
-                }
-                VaultAction::UnlockRecoveryKey => {
-                    result.message = translate("vault-recovery-key-invalid");
-                }
-                _ => {}
-            }
-        }
-        if result.action == VaultAction::GenerateRecoveryKey && result.success {
-            generated_recovery_key.set(result.message);
-            recovery_key_confirmation.set(String::new());
-            recovery_key_copied.set(false);
-            pending.set(None);
-            notice.set(None);
-        } else if result.action == VaultAction::CreateRecoveryKey && result.success {
-            generated_recovery_key.set(String::new());
-            recovery_key_confirmation.set(String::new());
-            recovery_key_copied.set(false);
-            recovery_upload_pending.set(result.pending_upload);
-            pending.set(None);
-            notice.set(None);
-        } else if result.action == VaultAction::UnlockRecoveryKey && result.success {
-            recovery_key_input.set(String::new());
-            pending.set(None);
-            notice.set(Some(result));
-        } else if result.action == VaultAction::ConnectCloud && result.success {
-            cloud_root.set(result.message);
-            pending.set(None);
-            notice.set(None);
-        } else if result.action == VaultAction::ConnectGithub && result.success {
-            notice.set(None);
-        } else {
-            pending.set(None);
-            notice.set(Some(result));
-        }
-    });
-    let _auth_progress_listener = use_listener::<VaultAuthProgress, _>(move |progress| {
-        github_device_code_copied.set(false);
-        github_device_code.set(progress.code);
     });
 
     use_effect(move || {
@@ -155,7 +162,23 @@ pub fn Page() -> Element {
         request_snapshot(false);
     });
 
-    let current = snapshot();
+    let current = state();
+    let pending = current
+        .operation
+        .as_ref()
+        .filter(|operation| operation.is_pending())
+        .map(|operation| operation.action);
+    let notice = current
+        .operation
+        .as_ref()
+        .and_then(VaultNotice::from_operation)
+        .filter(VaultNotice::visible);
+    let github_device_code = current
+        .operation
+        .as_ref()
+        .and_then(VaultOperation::authorization)
+        .map(|authorization| authorization.code.clone())
+        .unwrap_or_default();
     rsx! {
         ManagerPage {
             header { class: "shrink-0 border-b border-foreground/[0.07] px-5 py-3",
@@ -172,21 +195,17 @@ pub fn Page() -> Element {
                 }
             }
             ManagerList {
-                if !current.loaded {
+                if current.vault.root.is_empty() {
                     ManagerSpinner { detail: translate("common-loading") }
                 } else {
-                    if let Some(result) = notice().filter(|result| result.success || !result.message.is_empty()) {
+                    if let Some(notice) = notice {
                         div {
-                            class: if result.success {
+                            class: if notice.success {
                                 "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
                             } else {
                                 "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                             },
-                            if result.success {
-                                {action_result_message(result.action)}
-                            } else {
-                                "{result.message}"
-                            }
+                            {notice.message()}
                         }
                     }
                     VaultPanel {
@@ -197,15 +216,14 @@ pub fn Page() -> Element {
                         selected_provider,
                         github_device_code,
                         github_device_code_copied,
-                        cloud_root,
+                        cloud_root: current.cloud_root.clone(),
                         private,
                         pending,
-                        notice,
-                        generated_recovery_key,
+                        generated_recovery_key: current.generated_recovery_key.clone(),
                         recovery_key_confirmation,
                         recovery_key_copied,
                         recovery_key_input,
-                        recovery_upload_pending,
+                        recovery_upload_pending: current.recovery_upload_pending,
                     }
                 }
             }
@@ -220,17 +238,16 @@ fn VaultPanel(
     selected_owner: Signal<Option<String>>,
     selected_repository: Signal<Option<String>>,
     selected_provider: Signal<Option<RemoteProvider>>,
-    github_device_code: Signal<String>,
+    github_device_code: String,
     github_device_code_copied: Signal<bool>,
-    cloud_root: Signal<String>,
+    cloud_root: String,
     private: Signal<bool>,
-    pending: Signal<Option<VaultAction>>,
-    notice: Signal<Option<VaultResult>>,
-    generated_recovery_key: Signal<String>,
+    pending: Option<VaultAction>,
+    generated_recovery_key: String,
     recovery_key_confirmation: Signal<String>,
     recovery_key_copied: Signal<bool>,
     recovery_key_input: Signal<String>,
-    recovery_upload_pending: Signal<bool>,
+    recovery_upload_pending: bool,
 ) -> Element {
     let mut destination = use_signal(|| VaultDestination::Create);
     let is_connected = vault.initialized && !vault.remote.is_empty();
@@ -255,7 +272,7 @@ fn VaultPanel(
         if provider.is_github() {
             !vault.github_owner.is_empty() && vault.repositories_loaded
         } else {
-            !cloud_root().is_empty()
+            !cloud_root.is_empty()
         }
     });
     let owner = selected_owner().unwrap_or_else(|| vault.github_owner.clone());
@@ -287,7 +304,7 @@ fn VaultPanel(
             kind: ManagerSelectItemKind::Default,
         })
         .collect::<Vec<_>>();
-    let connecting = pending().is_some_and(|action| {
+    let connecting = pending.is_some_and(|action| {
         action == VaultAction::ConnectGithub || action == VaultAction::ConnectCloud
     }) || provider.is_some_and(|provider| {
         provider.is_github() && github_connected && !github_repositories_loaded
@@ -339,13 +356,8 @@ fn VaultPanel(
                 if is_connected {
                     ManagerButton {
                         variant: ManagerButtonVariant::Primary,
-                        disabled: pending().is_some(),
-                        onclick: move |_| send_action(
-                            pending,
-                            VaultAction::Sync,
-                            String::new(),
-                            true,
-                        ),
+                        disabled: pending.is_some(),
+                        onclick: move |_| send_action(VaultAction::Sync, String::new(), true),
                         {translate("vault-sync")}
                     }
                 }
@@ -364,15 +376,11 @@ fn VaultPanel(
                                 aria_label: option.name(),
                                 onclick: move |_| {
                                     selected_provider.set(Some(option));
-                                    github_device_code.set(String::new());
-                                    cloud_root.set(String::new());
                                     selected_repository.set(None);
                                     destination.set(VaultDestination::Create);
-                                    notice.set(None);
                                     if option.is_github() {
                                         if !github_connected {
                                             send_action(
-                                                pending,
                                                 VaultAction::ConnectGithub,
                                                 String::new(),
                                                 true,
@@ -381,7 +389,6 @@ fn VaultPanel(
                                     } else {
                                         repository.set("vmux-vault".to_string());
                                         send_action(
-                                            pending,
                                             VaultAction::ConnectCloud,
                                             option.name().to_string(),
                                             true,
@@ -410,17 +417,17 @@ fn VaultPanel(
                                         {translate("vault-not-connected")}
                                     }
                                 }
-                                if provider.is_github() && !github_device_code().is_empty() {
+                                if provider.is_github() && !github_device_code.is_empty() {
                                     button {
                                         r#type: "button",
                                         class: "group mt-4 rounded-xl bg-foreground/[0.06] px-4 py-2.5 text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-[opacity,transform,background-color] duration-200 ease-out hover:bg-foreground/[0.09] active:scale-[0.98] starting:scale-90 starting:opacity-0",
                                         title: translate("common-copy"),
                                         aria_label: translate("common-copy"),
                                         onclick: move |_| copy_recovery_key(
-                                            github_device_code(),
+                                            github_device_code.clone(),
                                             github_device_code_copied,
                                         ),
-                                        code { class: "font-mono text-base font-semibold tracking-[0.2em]", {github_device_code()} }
+                                        code { class: "font-mono text-base font-semibold tracking-[0.2em]", {github_device_code.clone()} }
                                     }
                                     div {
                                         class: if github_device_code_copied() {
@@ -459,7 +466,7 @@ fn VaultPanel(
                                             &[("name", TranslationValue::String(&vault.github_owner))],
                                         )}
                                     } else {
-                                        span { class: "max-w-md truncate", "{cloud_root()}" }
+                                        span { class: "max-w-md truncate", "{cloud_root}" }
                                     }
                                 }
                                 if provider == RemoteProvider::Github {
@@ -527,19 +534,17 @@ fn VaultPanel(
                                                 }
                                                 ManagerButton {
                                                     variant: ManagerButtonVariant::Primary,
-                                                    disabled: pending().is_some() || repository().trim().is_empty() || (provider == RemoteProvider::Github && owner.is_empty()),
+                                                    disabled: pending.is_some() || repository().trim().is_empty() || (provider == RemoteProvider::Github && owner.is_empty()),
                                                     onclick: move |_| {
                                                         if provider == RemoteProvider::Github {
                                                             send_action(
-                                                                pending,
                                                                 VaultAction::Create,
                                                                 format!("{owner}/{}", repository().trim()),
                                                                 private(),
                                                             );
                                                         } else {
                                                             send_cloud_create(
-                                                                pending,
-                                                                &cloud_root(),
+                                                                &cloud_root,
                                                                 repository().trim(),
                                                             );
                                                         }
@@ -575,9 +580,8 @@ fn VaultPanel(
                                                     }
                                                     ManagerButton {
                                                         variant: ManagerButtonVariant::Primary,
-                                                        disabled: pending().is_some() || selected_repository().is_none(),
+                                                        disabled: pending.is_some() || selected_repository().is_none(),
                                                         onclick: move |_| send_action(
-                                                            pending,
                                                             VaultAction::Connect,
                                                             selected_repository().unwrap_or_default(),
                                                             true,
@@ -588,11 +592,10 @@ fn VaultPanel(
                                             } else {
                                                 button {
                                                     class: "flex w-full items-center justify-center gap-2 rounded-xl bg-background/60 px-4 py-3 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-all duration-200 hover:-translate-y-0.5 hover:bg-foreground/[0.07] active:translate-y-0",
-                                                    disabled: pending().is_some(),
+                                                    disabled: pending.is_some(),
                                                     onclick: move |_| send_action(
-                                                        pending,
                                                         VaultAction::ChooseCloudFolder,
-                                                        cloud_root(),
+                                                        cloud_root.clone(),
                                                         true,
                                                     ),
                                                     svg { class: "h-4 w-4", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
@@ -621,12 +624,11 @@ fn VaultPanel(
                 RecoveryCard {
                     vault: vault.clone(),
                     pending,
-                    generated_recovery_key,
+                    generated_recovery_key: generated_recovery_key.clone(),
                     recovery_key_confirmation,
                     recovery_key_copied,
                     recovery_key_input,
                     recovery_upload_pending,
-                    notice,
                 }
             }
         }
@@ -669,15 +671,16 @@ fn ProviderIcon(provider: RemoteProvider, #[props(default)] large: bool) -> Elem
 #[component]
 fn RecoveryCard(
     vault: VaultSnapshot,
-    pending: Signal<Option<VaultAction>>,
-    mut generated_recovery_key: Signal<String>,
+    pending: Option<VaultAction>,
+    generated_recovery_key: String,
     mut recovery_key_confirmation: Signal<String>,
     mut recovery_key_copied: Signal<bool>,
     mut recovery_key_input: Signal<String>,
-    recovery_upload_pending: Signal<bool>,
-    mut notice: Signal<Option<VaultResult>>,
+    recovery_upload_pending: bool,
 ) -> Element {
-    let generated = generated_recovery_key();
+    let generated = generated_recovery_key.clone();
+    let copy_value = generated_recovery_key.clone();
+    let confirmation_value = generated_recovery_key.clone();
     let confirmation = recovery_key_confirmation();
     let confirmation_complete = recovery_key_complete(&confirmation);
     let confirmation_matches = recovery_keys_match(&generated, &confirmation);
@@ -697,9 +700,8 @@ fn RecoveryCard(
                 if vault.unlocked && !vault.recovery_enabled && generated.is_empty() {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
-                        disabled: pending().is_some() || !generated.is_empty(),
+                        disabled: pending.is_some() || !generated.is_empty(),
                         onclick: move |_| send_action(
-                            pending,
                             VaultAction::GenerateRecoveryKey,
                             String::new(),
                             true,
@@ -720,7 +722,7 @@ fn RecoveryCard(
                         },
                         onclick: move |_| {
                             recovery_key_copied.set(false);
-                            copy_recovery_key(generated_recovery_key(), recovery_key_copied);
+                            copy_recovery_key(copy_value.clone(), recovery_key_copied);
                         },
                         code { class: "min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-foreground",
                             if recovery_key_copied() {
@@ -754,29 +756,28 @@ fn RecoveryCard(
                                 r#type: "password",
                                 value: "{confirmation}",
                                 placeholder: translate("vault-recovery-key-verify-placeholder"),
-                                disabled: pending().is_some(),
+                                disabled: pending.is_some(),
                                 oninput: move |event| {
                                     let value = event.value();
                                     recovery_key_confirmation.set(value.clone());
-                                    if pending().is_none()
-                                        && recovery_keys_match(&generated_recovery_key(), &value)
+                                    if pending.is_none()
+                                        && recovery_keys_match(&confirmation_value, &value)
                                     {
                                         send_recovery_action(
-                                            pending,
                                             VaultAction::CreateRecoveryKey,
-                                            generated_recovery_key(),
+                                            confirmation_value.clone(),
                                         );
                                     }
                                 },
                             }
-                            if pending() == Some(VaultAction::CreateRecoveryKey) {
+                            if pending == Some(VaultAction::CreateRecoveryKey) {
                                 div { class: "text-[11px] text-primary", {translate("common-loading")} }
                             } else if confirmation_complete && !confirmation_matches {
                                 div { class: "text-[11px] text-ansi-1", {translate("vault-recovery-key-mismatch")} }
                             }
                         }
                     }
-                    if recovery_upload_pending() {
+                    if recovery_upload_pending {
                         div { class: "text-[11px] leading-relaxed text-amber-700 dark:text-amber-300", {translate("vault-recovery-key-upload-pending")} }
                     }
                 }
@@ -787,26 +788,25 @@ fn RecoveryCard(
                         r#type: "password",
                         value: "{recovery_key_input}",
                         placeholder: translate("vault-recovery-key-placeholder"),
-                        disabled: pending().is_some(),
+                        disabled: pending.is_some(),
                         oninput: move |event| {
                             let value = event.value();
                             recovery_key_input.set(value.clone());
-                            if pending().is_none() && recovery_key_complete(&value) {
+                            if pending.is_none() && recovery_key_complete(&value) {
                                 send_recovery_action(
-                                    pending,
                                     VaultAction::UnlockRecoveryKey,
                                     value,
                                 );
                             }
                         },
                     }
-                    if pending() == Some(VaultAction::UnlockRecoveryKey) {
+                    if pending == Some(VaultAction::UnlockRecoveryKey) {
                         div { class: "text-[11px] text-primary", {translate("common-loading")} }
                     }
                 }
             } else if vault.recovery_enabled {
                 div { class: "mt-3 text-xs font-medium text-success", {translate("vault-recovery-key-ready")} }
-                if recovery_upload_pending() {
+                if recovery_upload_pending {
                     div { class: "mt-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300", {translate("vault-recovery-key-upload-pending")} }
                 }
             }
@@ -814,23 +814,14 @@ fn RecoveryCard(
     }
 }
 
-fn send_recovery_action(
-    mut pending: Signal<Option<VaultAction>>,
-    action: VaultAction,
-    recovery_key: String,
-) {
-    pending.set(Some(action));
-    if send(&VaultRequest {
+fn send_recovery_action(action: VaultAction, recovery_key: String) {
+    let _ = send(&VaultRequest {
         action,
         repository: String::new(),
         private: true,
         folder_name: String::new(),
         recovery_key,
-    })
-    .is_err()
-    {
-        pending.set(None);
-    }
+    });
 }
 
 fn normalized_recovery_key(value: &str) -> String {
@@ -887,13 +878,7 @@ fn request_snapshot(load_repositories: bool) {
     let _ = send(&VaultRefreshRequest { load_repositories });
 }
 
-fn send_action(
-    mut pending: Signal<Option<VaultAction>>,
-    action: VaultAction,
-    repository: String,
-    private: bool,
-) {
-    pending.set(Some(action));
+fn send_action(action: VaultAction, repository: String, private: bool) {
     let _ = send(&VaultRequest {
         action,
         repository,
@@ -903,8 +888,7 @@ fn send_action(
     });
 }
 
-fn send_cloud_create(mut pending: Signal<Option<VaultAction>>, root: &str, name: &str) {
-    pending.set(Some(VaultAction::CreateCloudFolder));
+fn send_cloud_create(root: &str, name: &str) {
     let _ = send(&VaultRequest {
         action: VaultAction::CreateCloudFolder,
         repository: root.to_string(),
@@ -912,22 +896,6 @@ fn send_cloud_create(mut pending: Signal<Option<VaultAction>>, root: &str, name:
         folder_name: name.to_string(),
         recovery_key: String::new(),
     });
-}
-
-fn action_result_message(action: VaultAction) -> String {
-    translate(match action {
-        VaultAction::Create => "vault-result-created",
-        VaultAction::Connect => "vault-result-connected",
-        VaultAction::Sync => "vault-result-synced",
-        VaultAction::ConnectGithub => "vault-result-github-connected",
-        VaultAction::ConnectFolder => "vault-result-folder-connected",
-        VaultAction::GenerateRecoveryKey | VaultAction::CreateRecoveryKey => "vault-result-created",
-        VaultAction::UnlockRecoveryKey => "vault-result-connected",
-        VaultAction::ConnectCloud => "vault-result-connected",
-        VaultAction::CreateCloudFolder | VaultAction::ChooseCloudFolder => {
-            "vault-result-folder-connected"
-        }
-    })
 }
 
 fn suggested_repository_name(
