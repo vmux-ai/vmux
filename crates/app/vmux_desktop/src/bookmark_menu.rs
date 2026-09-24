@@ -5,13 +5,16 @@ impl Plugin for BookmarkMenuPlugin {
         app.add_plugins(vmux_layout::LayoutContractPlugin)
             .init_resource::<vmux_layout::window::FocusedWindow>();
         #[cfg(target_os = "macos")]
-        app.add_message::<macos::BookmarkMenuSelection>()
-            .init_resource::<macos::BookmarkMenuActionSequence>()
+        app.add_message::<macos::NewFolderInputRequest>()
+            .add_message::<macos::RenameInputRequest>()
+            .init_resource::<macos::BookmarkMenuState>()
+            .init_resource::<macos::BookmarkMenuInputSequence>()
             .add_systems(
                 Update,
                 (
                     macos::show_bookmark_menu,
-                    macos::apply_bookmark_menu_selection,
+                    macos::begin_new_folder_input,
+                    macos::begin_rename_input,
                 ),
             );
     }
@@ -39,13 +42,15 @@ mod macos {
     use bevy::ecs::system::NonSendMarker;
     use bevy::prelude::*;
     use muda::ContextMenu;
-    use parking_lot::Mutex;
     use std::collections::{HashMap, HashSet};
-    use std::sync::LazyLock;
-    use std::sync::atomic::{AtomicU64, Ordering};
     use vmux_api::bookmark::BookmarkMenuActionEvent;
     use vmux_core::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid};
-    use vmux_layout::bookmark::{BookmarkMenuTarget, BookmarkMutation, ShowBookmarkMenuRequest};
+    use vmux_layout::bookmark::{
+        AddRequest, BookmarkMenuTarget, MoveFolderRequest, MoveRequest, PinRequest,
+        RemoveFolderRequest, RemoveRequest, ShowBookmarkMenuRequest, ToggleFolderRequest,
+        UnpinRequest,
+    };
+    use vmux_layout::stack::StackRequest;
     use vmux_ui::i18n::{Locale, TranslationValue};
 
     thread_local! {
@@ -53,14 +58,16 @@ mod macos {
             const { std::cell::RefCell::new(None) };
     }
 
-    static NEXT_MENU: AtomicU64 = AtomicU64::new(0);
-    static PENDING_ACTIONS: LazyLock<Mutex<HashMap<String, BookmarkMenuSelection>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
+    #[derive(Resource, Default)]
+    pub(super) struct BookmarkMenuState {
+        next_id: u64,
+        selections: HashMap<String, BookmarkMenuSelection>,
+    }
 
     #[derive(Resource, Default)]
-    pub(super) struct BookmarkMenuActionSequence(u64);
+    pub(super) struct BookmarkMenuInputSequence(u64);
 
-    impl BookmarkMenuActionSequence {
+    impl BookmarkMenuInputSequence {
         fn send(
             &mut self,
             commands: &mut Commands,
@@ -81,16 +88,32 @@ mod macos {
         }
     }
 
-    #[derive(Message, Clone)]
-    pub(super) struct BookmarkMenuSelection {
+    #[derive(Clone)]
+    struct BookmarkMenuSelection {
         webview: Entity,
-        action: BookmarkMenuAction,
+        choice: BookmarkMenuChoice,
     }
 
     #[derive(Clone)]
-    enum BookmarkMenuAction {
+    enum BookmarkMenuChoice {
         Open(String),
-        Apply(BookmarkMutation),
+        Add {
+            metadata: PageMetadata,
+            folder: Option<String>,
+        },
+        Move {
+            uuid: String,
+            folder: Option<String>,
+        },
+        MoveFolder {
+            uuid: String,
+            parent: Option<String>,
+        },
+        Pin(String),
+        Remove(String),
+        RemoveFolder(String),
+        ToggleFolder(String),
+        Unpin(String),
         BeginNewFolder {
             parent: Option<String>,
             expand: bool,
@@ -106,33 +129,51 @@ mod macos {
         parent: Option<Entity>,
     }
 
-    struct BookmarkMenuBuilder {
+    #[derive(Message)]
+    pub(super) struct NewFolderInputRequest {
+        webview: Entity,
+        parent: Option<String>,
+    }
+
+    #[derive(Message)]
+    pub(super) struct RenameInputRequest {
+        webview: Entity,
+        uuid: String,
+    }
+
+    struct BookmarkMenuBuilder<'a> {
         menu: muda::Menu,
         webview: Entity,
         menu_id: u64,
         item_index: usize,
+        selections: &'a mut HashMap<String, BookmarkMenuSelection>,
     }
 
-    impl BookmarkMenuBuilder {
-        fn new(webview: Entity) -> Self {
+    impl<'a> BookmarkMenuBuilder<'a> {
+        fn new(
+            webview: Entity,
+            menu_id: u64,
+            selections: &'a mut HashMap<String, BookmarkMenuSelection>,
+        ) -> Self {
             Self {
                 menu: muda::Menu::new(),
                 webview,
-                menu_id: NEXT_MENU.fetch_add(1, Ordering::Relaxed),
+                menu_id,
                 item_index: 0,
+                selections,
             }
         }
 
-        fn item(&mut self, label: String, enabled: bool, action: BookmarkMenuAction) {
+        fn item(&mut self, label: String, enabled: bool, choice: BookmarkMenuChoice) {
             let id = format!("bookmark_context_{}_{}", self.menu_id, self.item_index);
             self.item_index += 1;
             let item = muda::MenuItem::with_id(id.clone(), label, enabled, None);
             if self.menu.append(&item).is_ok() {
-                PENDING_ACTIONS.lock().insert(
+                self.selections.insert(
                     id,
                     BookmarkMenuSelection {
                         webview: self.webview,
-                        action,
+                        choice,
                     },
                 );
             }
@@ -171,6 +212,7 @@ mod macos {
             Option<&ChildOf>,
         )>,
         settings: Res<vmux_setting::AppSettings>,
+        mut state: ResMut<BookmarkMenuState>,
     ) {
         use bevy::winit::WINIT_WINDOWS;
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -195,10 +237,12 @@ mod macos {
             return;
         };
 
-        PENDING_ACTIONS.lock().clear();
+        state.selections.clear();
+        let menu_id = state.next_id;
+        state.next_id = state.next_id.wrapping_add(1);
         let locale = Locale::requested(Some(&settings.appearance.locale));
         let folders = folder_rows(&entries);
-        let mut builder = BookmarkMenuBuilder::new(request.webview);
+        let mut builder = BookmarkMenuBuilder::new(request.webview, menu_id, &mut state.selections);
         match request.target {
             BookmarkMenuTarget::Root => root_menu(&mut builder, &locale),
             BookmarkMenuTarget::Pin { uuid } => pin_menu(&mut builder, &locale, &entries, &uuid),
@@ -221,7 +265,7 @@ mod macos {
         builder.item(
             locale.translate("layout-new-folder"),
             true,
-            BookmarkMenuAction::BeginNewFolder {
+            BookmarkMenuChoice::BeginNewFolder {
                 parent: None,
                 expand: false,
             },
@@ -252,23 +296,19 @@ mod macos {
         builder.item(
             locale.translate("common-open"),
             true,
-            BookmarkMenuAction::Open(metadata.url.clone()),
+            BookmarkMenuChoice::Open(metadata.url.clone()),
         );
         builder.item(
             locale.translate("layout-unpin-page"),
             true,
-            BookmarkMenuAction::Apply(BookmarkMutation::Unpin {
-                uuid: uuid.to_string(),
-            }),
+            BookmarkMenuChoice::Unpin(uuid.to_string()),
         );
         if bookmarked {
             builder.separator();
             builder.item(
                 locale.translate("layout-remove-bookmark"),
                 true,
-                BookmarkMenuAction::Apply(BookmarkMutation::Remove {
-                    uuid: uuid.to_string(),
-                }),
+                BookmarkMenuChoice::Remove(uuid.to_string()),
             );
         }
     }
@@ -298,12 +338,12 @@ mod macos {
         builder.item(
             locale.translate("common-open"),
             true,
-            BookmarkMenuAction::Open(metadata.url.clone()),
+            BookmarkMenuChoice::Open(metadata.url.clone()),
         );
         builder.item(
             locale.translate("common-rename"),
             true,
-            BookmarkMenuAction::BeginRename(uuid.to_string()),
+            BookmarkMenuChoice::BeginRename(uuid.to_string()),
         );
         builder.item(
             locale.translate(if pinned {
@@ -312,25 +352,21 @@ mod macos {
                 "layout-pin"
             }),
             true,
-            BookmarkMenuAction::Apply(if pinned {
-                BookmarkMutation::Unpin {
-                    uuid: uuid.to_string(),
-                }
+            if pinned {
+                BookmarkMenuChoice::Unpin(uuid.to_string())
             } else {
-                BookmarkMutation::Pin {
-                    uuid: uuid.to_string(),
-                }
-            }),
+                BookmarkMenuChoice::Pin(uuid.to_string())
+            },
         );
         builder.separator();
         if parent.is_some() {
             builder.item(
                 locale.translate("layout-move-to-bookmarks"),
                 true,
-                BookmarkMenuAction::Apply(BookmarkMutation::Move {
+                BookmarkMenuChoice::Move {
                     uuid: uuid.to_string(),
                     folder: None,
-                }),
+                },
             );
         }
         for folder in folder_choices(folders) {
@@ -343,19 +379,17 @@ mod macos {
                     &[("folder", TranslationValue::String(&folder.label))],
                 ),
                 true,
-                BookmarkMenuAction::Apply(BookmarkMutation::Move {
+                BookmarkMenuChoice::Move {
                     uuid: uuid.to_string(),
                     folder: Some(folder.uuid),
-                }),
+                },
             );
         }
         builder.separator();
         builder.item(
             locale.translate("common-remove"),
             true,
-            BookmarkMenuAction::Apply(BookmarkMutation::Remove {
-                uuid: uuid.to_string(),
-            }),
+            BookmarkMenuChoice::Remove(uuid.to_string()),
         );
     }
 
@@ -389,24 +423,22 @@ mod macos {
                 "common-collapse"
             }),
             true,
-            BookmarkMenuAction::Apply(BookmarkMutation::ToggleFolder {
-                uuid: uuid.to_string(),
-            }),
+            BookmarkMenuChoice::ToggleFolder(uuid.to_string()),
         );
         let current_page_enabled = active_page.is_some();
         let current_page = active_page.unwrap_or_default();
         builder.item(
             locale.translate("layout-bookmark-current-page"),
             current_page_enabled,
-            BookmarkMenuAction::Apply(BookmarkMutation::Add {
+            BookmarkMenuChoice::Add {
                 metadata: current_page,
                 folder: Some(uuid.to_string()),
-            }),
+            },
         );
         builder.item(
             locale.translate("layout-new-folder"),
             true,
-            BookmarkMenuAction::BeginNewFolder {
+            BookmarkMenuChoice::BeginNewFolder {
                 parent: Some(uuid.to_string()),
                 expand: collapsed,
             },
@@ -414,17 +446,17 @@ mod macos {
         builder.item(
             locale.translate("layout-rename-folder"),
             true,
-            BookmarkMenuAction::BeginRename(uuid.to_string()),
+            BookmarkMenuChoice::BeginRename(uuid.to_string()),
         );
         builder.separator();
         if parent.is_some() {
             builder.item(
                 locale.translate("layout-move-to-bookmarks"),
                 true,
-                BookmarkMenuAction::Apply(BookmarkMutation::MoveFolder {
+                BookmarkMenuChoice::MoveFolder {
                     uuid: uuid.to_string(),
                     parent: None,
-                }),
+                },
             );
         }
         for folder in folder_choices(folders) {
@@ -437,19 +469,17 @@ mod macos {
                     &[("folder", TranslationValue::String(&folder.label))],
                 ),
                 true,
-                BookmarkMenuAction::Apply(BookmarkMutation::MoveFolder {
+                BookmarkMenuChoice::MoveFolder {
                     uuid: uuid.to_string(),
                     parent: Some(folder.uuid),
-                }),
+                },
             );
         }
         builder.separator();
         builder.item(
             locale.translate("layout-remove-folder"),
             true,
-            BookmarkMenuAction::Apply(BookmarkMutation::RemoveFolder {
-                uuid: uuid.to_string(),
-            }),
+            BookmarkMenuChoice::RemoveFolder(uuid.to_string()),
         );
     }
 
@@ -547,53 +577,111 @@ mod macos {
     }
 
     pub(super) fn forward_menu_event(world: &mut World, event_id: &str) -> bool {
-        let Some(selection) = PENDING_ACTIONS.lock().remove(event_id) else {
+        let Some(selection) = world
+            .resource_mut::<BookmarkMenuState>()
+            .selections
+            .remove(event_id)
+        else {
             return false;
         };
-        world
-            .resource_mut::<Messages<BookmarkMenuSelection>>()
-            .write(selection);
+        match selection.choice {
+            BookmarkMenuChoice::Open(url) => {
+                world
+                    .resource_mut::<Messages<StackRequest>>()
+                    .write(StackRequest::Open { url: Some(url) });
+            }
+            BookmarkMenuChoice::Add { metadata, folder } => {
+                world
+                    .resource_mut::<Messages<AddRequest>>()
+                    .write(AddRequest { metadata, folder });
+            }
+            BookmarkMenuChoice::Move { uuid, folder } => {
+                world
+                    .resource_mut::<Messages<MoveRequest>>()
+                    .write(MoveRequest { uuid, folder });
+            }
+            BookmarkMenuChoice::MoveFolder { uuid, parent } => {
+                world
+                    .resource_mut::<Messages<MoveFolderRequest>>()
+                    .write(MoveFolderRequest { uuid, parent });
+            }
+            BookmarkMenuChoice::Pin(uuid) => {
+                world
+                    .resource_mut::<Messages<PinRequest>>()
+                    .write(PinRequest { uuid });
+            }
+            BookmarkMenuChoice::Remove(uuid) => {
+                world
+                    .resource_mut::<Messages<RemoveRequest>>()
+                    .write(RemoveRequest { uuid });
+            }
+            BookmarkMenuChoice::RemoveFolder(uuid) => {
+                world
+                    .resource_mut::<Messages<RemoveFolderRequest>>()
+                    .write(RemoveFolderRequest { uuid });
+            }
+            BookmarkMenuChoice::ToggleFolder(uuid) => {
+                world
+                    .resource_mut::<Messages<ToggleFolderRequest>>()
+                    .write(ToggleFolderRequest { uuid });
+            }
+            BookmarkMenuChoice::Unpin(uuid) => {
+                world
+                    .resource_mut::<Messages<UnpinRequest>>()
+                    .write(UnpinRequest { uuid });
+            }
+            BookmarkMenuChoice::BeginNewFolder { parent, expand } => {
+                if expand && let Some(uuid) = &parent {
+                    world
+                        .resource_mut::<Messages<ToggleFolderRequest>>()
+                        .write(ToggleFolderRequest { uuid: uuid.clone() });
+                }
+                world
+                    .resource_mut::<Messages<NewFolderInputRequest>>()
+                    .write(NewFolderInputRequest {
+                        webview: selection.webview,
+                        parent,
+                    });
+            }
+            BookmarkMenuChoice::BeginRename(uuid) => {
+                world
+                    .resource_mut::<Messages<RenameInputRequest>>()
+                    .write(RenameInputRequest {
+                        webview: selection.webview,
+                        uuid,
+                    });
+            }
+        }
         true
     }
 
-    pub(super) fn apply_bookmark_menu_selection(
-        mut reader: MessageReader<BookmarkMenuSelection>,
-        mut bookmark_mutations: MessageWriter<BookmarkMutation>,
-        mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
-        mut sequence: ResMut<BookmarkMenuActionSequence>,
+    pub(super) fn begin_new_folder_input(
+        mut reader: MessageReader<NewFolderInputRequest>,
+        mut sequence: ResMut<BookmarkMenuInputSequence>,
         mut commands: Commands,
     ) {
-        for selection in reader.read() {
-            match &selection.action {
-                BookmarkMenuAction::Open(url) => {
-                    stack_requests.write(vmux_layout::stack::StackRequest::Open {
-                        url: Some(url.clone()),
-                    });
-                }
-                BookmarkMenuAction::Apply(operation) => {
-                    bookmark_mutations.write(operation.clone());
-                }
-                BookmarkMenuAction::BeginNewFolder { parent, expand } => {
-                    if *expand && let Some(uuid) = parent {
-                        bookmark_mutations
-                            .write(BookmarkMutation::ToggleFolder { uuid: uuid.clone() });
-                    }
-                    sequence.send(
-                        &mut commands,
-                        selection.webview,
-                        "new_folder",
-                        parent.clone(),
-                    );
-                }
-                BookmarkMenuAction::BeginRename(uuid) => {
-                    sequence.send(
-                        &mut commands,
-                        selection.webview,
-                        "rename",
-                        Some(uuid.clone()),
-                    );
-                }
-            }
+        for request in reader.read() {
+            sequence.send(
+                &mut commands,
+                request.webview,
+                "new_folder",
+                request.parent.clone(),
+            );
+        }
+    }
+
+    pub(super) fn begin_rename_input(
+        mut reader: MessageReader<RenameInputRequest>,
+        mut sequence: ResMut<BookmarkMenuInputSequence>,
+        mut commands: Commands,
+    ) {
+        for request in reader.read() {
+            sequence.send(
+                &mut commands,
+                request.webview,
+                "rename",
+                Some(request.uuid.clone()),
+            );
         }
     }
 }
