@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
 
-use crate::host::editor::FileView;
+use crate::host::editor::{FileDocumentRevision, FileView};
 use crate::host::viewport::FileViewport;
 
 pub(crate) struct HistoryPlugin;
@@ -20,12 +20,18 @@ impl Plugin for HistoryPlugin {
 
 fn show_traversed_file_view(
     mut traversed: MessageReader<vmux_core::host::page::HostHistoryTraversed>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<(
+        &mut FileView,
+        &mut FileDocumentRevision,
+        &mut FileViewport,
+        &mut PageMetadata,
+    )>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     for event in traversed.read() {
-        let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(event.webview) else {
+        let Ok((mut view, mut revision, mut viewport, mut metadata)) = views.get_mut(event.webview)
+        else {
             continue;
         };
         let Some(path) =
@@ -37,6 +43,7 @@ fn show_traversed_file_view(
             event.webview,
             path,
             event.entry.top_line,
+            &mut revision,
             &mut viewport,
             &mut metadata,
             &mut manager,

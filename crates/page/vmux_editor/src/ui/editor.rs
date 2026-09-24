@@ -10,7 +10,7 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 
-use super::viewport::{column_in_line, gutter_px};
+use super::text_geometry::{column_in_line, gutter_px};
 use super::{
     HOVER_DELAY_MS, diff_marker_row_class, diff_marker_sign, diff_marker_text_class,
     focus_file_input,

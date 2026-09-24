@@ -7,7 +7,7 @@ use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpen
 use vmux_flex::prelude::*;
 use vmux_layout::Browser;
 
-use super::editor::FileView;
+use super::editor::{FileDocumentRevision, FileView};
 use super::explorer::ExplorerState;
 use super::navigation::PendingGoto;
 use super::viewport::FileViewport;
@@ -83,7 +83,12 @@ pub fn restore_file_view_bundle(url: &str) -> Option<impl Bundle> {
 fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children: Query<&Children>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<(
+        &mut FileView,
+        &mut FileDocumentRevision,
+        &mut FileViewport,
+        &mut PageMetadata,
+    )>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     effective_startup_dir: Option<Res<vmux_layout::settings::EffectiveStartupDir>>,
     mut commands: Commands,
@@ -125,20 +130,22 @@ fn handle_file_page_open(
         let pending = PendingGoto::from_url(&task.url);
         let view = match FileView::in_stack(task.stack, &children, &views) {
             Some(view) => {
-                if let Ok((mut file_view, mut viewport, mut metadata)) = views.get_mut(view)
+                if let Ok((mut file_view, mut revision, mut viewport, mut metadata)) =
+                    views.get_mut(view)
                     && file_view.path != path
                 {
                     file_view.navigate(
                         view,
                         path,
                         0,
+                        &mut revision,
                         &mut viewport,
                         &mut metadata,
                         &mut manager,
                         &mut commands,
                     );
                 }
-                if let Ok((_, _, mut metadata)) = views.get_mut(view)
+                if let Ok((_, _, _, mut metadata)) = views.get_mut(view)
                     && page_url.starts_with("vmux://")
                 {
                     metadata.title.clone_from(&page_url);

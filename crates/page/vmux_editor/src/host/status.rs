@@ -3,7 +3,7 @@ use bevy_cef::prelude::*;
 use vmux_core::event::*;
 
 use crate::host::dir::parent_listing;
-use crate::host::editor::{Editor, FileView};
+use crate::host::editor::{Editor, FileDocumentRevision, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, FileBuffer, FileDir};
 use crate::host::keymap::KeymapConfig;
 use crate::host::note::{NoteRevealLine, NoteSent};
@@ -112,11 +112,20 @@ fn send_initial_meta(
 }
 
 fn send_initial_text_meta(
-    mut files: Query<(Entity, &FileView, &Editor, &FileViewport), ReadyUnsentMeta>,
+    mut files: Query<
+        (
+            Entity,
+            &FileView,
+            &FileDocumentRevision,
+            &Editor,
+            &FileViewport,
+        ),
+        ReadyUnsentMeta,
+    >,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, file, edit, viewport) in &mut files {
+    for (entity, file, revision, edit, viewport) in &mut files {
         if !browsers.can_emit_to(&entity) {
             continue;
         }
@@ -124,8 +133,10 @@ fn send_initial_text_meta(
         commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileMetaEvent {
+                revision: revision.get(),
                 path: file.display_path(),
                 abs_path: file.path.to_string_lossy().into_owned(),
+                kind: file.document_kind(),
                 language: edit.core.buffer.language.clone(),
                 total_lines: edit.core.buffer.len_lines() as u32,
                 indent: shape.indent,
