@@ -11,7 +11,10 @@ use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use std::time::Instant;
-use vmux_command::{CommandDefinition, CommandInvocation, CommandMcp, InputSchema};
+use vmux_command::{
+    CommandDefinition, CommandInvocation, CommandMcp, CommandRequest, CommandTypePlugin,
+    InputSchema,
+};
 use vmux_core::Order;
 pub use vmux_core::workspace::TabCommandSet;
 use vmux_flex::prelude::*;
@@ -23,8 +26,8 @@ pub struct TabPlugin;
 
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
-        TabRequest::register(app);
-        app.register_type::<Tab>()
+        app.add_plugins(CommandTypePlugin::<TabRequest>::default())
+            .register_type::<Tab>()
             .register_type::<Option<String>>()
             .register_type::<TabWorkspace>()
             .register_type::<TabWorktree>()
@@ -86,12 +89,8 @@ pub enum TabRequest {
     Move(SiblingDirection),
 }
 
-impl TabRequest {
-    pub fn register(app: &mut App) {
-        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
-    pub fn definitions() -> Vec<CommandDefinition> {
+impl CommandRequest for TabRequest {
+    fn definitions() -> Vec<CommandDefinition> {
         vec![
             CommandDefinition::new("close_tab", "Close Tab", "Layout > Tab").chord("Ctrl+b, &"),
             CommandDefinition::new("new_task", "New Task…", "Layout > Tab"),
@@ -141,8 +140,12 @@ impl TabRequest {
                 )),
         ]
     }
+}
 
-    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+impl TryFrom<&CommandInvocation> for TabRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         let request = match invocation.id.as_str() {
             "close_tab" => Self::Close,
             "new_task" => Self::Create,
@@ -162,9 +165,9 @@ impl TabRequest {
             "open_in_new_tab" => Self::Open {
                 url: invocation.argument("url"),
             },
-            _ => return None,
+            _ => return Err(()),
         };
-        Some(request)
+        Ok(request)
     }
 }
 
@@ -620,7 +623,7 @@ mod tests {
         );
         let invocation = CommandInvocation::new(Entity::PLACEHOLDER, "open_in_new_tab")
             .with_arguments(serde_json::json!({"url": "https://vmux.ai"}));
-        assert!(TabRequest::from_invocation(&invocation).is_some());
+        assert!(TabRequest::try_from(&invocation).is_ok());
     }
 
     #[test]

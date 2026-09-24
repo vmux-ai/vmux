@@ -201,9 +201,14 @@ content.
 Binary events name their direction. `UiEvent` marks an event emitted by Dioxus and consumed by the
 Bevy host; `HostEvent` marks the reverse direction. The payload type determines the complete wire
 name, while the event family owns its allowed page hosts. `BookmarkMenuPinRequest` therefore has
-the wire id `bookmark_menu_pin@1`, with `BookmarkEvents` supplying its `layout` target. A namespace
+the wire id `bookmark_menu_pin@1`, with its module-local `Events` family supplying the `layout`
+target. A namespace
 would duplicate the target and the type prefix. Both UI-to-host decoding and host-to-UI delivery
 reject a mismatched host before touching the payload.
+
+Command-bar requests implement `CommandRequest` and are registered through `CommandTypePlugin`.
+Their definitions become ECS entities with targeted dispatch observers; no callback registry owns
+their behavior.
 
 ---
 

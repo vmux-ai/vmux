@@ -9,6 +9,8 @@ use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, HostWindow, UiEv
 use std::collections::{BTreeMap, HashMap};
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
 use vmux_command::{CommandDefinition, ResolvedLocale, localized_command_name};
+#[cfg(test)]
+use vmux_command::CommandRequest;
 use vmux_core::page::PageReady;
 use vmux_core::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};

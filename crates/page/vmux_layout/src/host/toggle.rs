@@ -13,8 +13,8 @@ pub struct TogglePlugin;
 
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
-        ToggleLayoutRequest::register(app);
-        app.init_resource::<LayoutHidden>()
+        app.add_plugins(vmux_command::CommandTypePlugin::<ToggleLayoutRequest>::default())
+            .init_resource::<LayoutHidden>()
             .add_systems(
                 Update,
                 handle_visibility_requests.in_set(LayoutRequestSet::Handle),

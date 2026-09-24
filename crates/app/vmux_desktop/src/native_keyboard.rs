@@ -614,8 +614,10 @@ mod tests {
     fn map() -> Keymap {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin))
-            .add_plugins(vmux_command::command_bar::CommandBarPlugin);
-        vmux_layout::pane::PaneRequest::register(&mut app);
+            .add_plugins(vmux_command::command_bar::CommandBarPlugin)
+            .add_plugins(vmux_command::CommandTypePlugin::<
+                vmux_layout::pane::PaneRequest,
+            >::default());
         app.world_mut().run_schedule(Startup);
         let mut query = app.world_mut().query::<&vmux_command::CommandDefinition>();
         let definitions = query.iter(app.world()).cloned().collect::<Vec<_>>();

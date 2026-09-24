@@ -6,7 +6,8 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
 use vmux_command::{
-    CommandDefinition, CommandInvocation, CommandMcp, InputSchema, ReadCommandRequests,
+    CommandDefinition, CommandInvocation, CommandMcp, CommandRequest, CommandTypePlugin,
+    InputSchema, ReadCommandRequests,
 };
 use vmux_core::{
     HostSpawnRegistry, PageMetadata, PageOpenRequest, PageOpenTarget,
@@ -32,8 +33,8 @@ pub(crate) struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        BrowserRequest::register(app);
-        app.add_message::<NavigationRequest>()
+        app.add_plugins(CommandTypePlugin::<BrowserRequest>::default())
+            .add_message::<NavigationRequest>()
             .add_message::<OpenRequest>()
             .add_message::<ViewRequest>()
             .add_observer(on_header_request)
@@ -77,17 +78,21 @@ impl NavigationRequest {
                 .mcp(CommandMcp::new("Stop Loading", InputSchema::object()).allow_agent()),
         ]
     }
+}
 
-    fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+impl TryFrom<&CommandInvocation> for NavigationRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         let request = match invocation.id.as_str() {
             "browser_prev_page" => Self::Back,
             "browser_next_page" => Self::Forward,
             "browser_reload" => Self::Reload,
             "browser_hard_reload" => Self::HardReload,
             "browser_stop" => Self::Stop,
-            _ => return None,
+            _ => return Err(()),
         };
-        Some(request)
+        Ok(request)
     }
 }
 
@@ -123,11 +128,17 @@ impl OpenRequest {
             ),
         ]
     }
+}
 
-    fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
-        (invocation.id == "open_in_place").then(|| Self {
-            url: invocation.argument("url"),
-        })
+impl TryFrom<&CommandInvocation> for OpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "open_in_place")
+            .then(|| Self {
+                url: invocation.argument("url"),
+            })
+            .ok_or(())
     }
 }
 
@@ -165,8 +176,12 @@ impl ViewRequest {
                 .mcp(CommandMcp::new("Print", InputSchema::object()).allow_agent()),
         ]
     }
+}
 
-    fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+impl TryFrom<&CommandInvocation> for ViewRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         let request = match invocation.id.as_str() {
             "browser_zoom_in" => Self::ZoomIn,
             "browser_zoom_out" => Self::ZoomOut,
@@ -174,9 +189,9 @@ impl ViewRequest {
             "browser_dev_tools" => Self::DevTools,
             "browser_view_source" => Self::ViewSource,
             "browser_print" => Self::Print,
-            _ => return None,
+            _ => return Err(()),
         };
-        Some(request)
+        Ok(request)
     }
 }
 
@@ -187,26 +202,26 @@ enum BrowserRequest {
     View(ViewRequest),
 }
 
-impl BrowserRequest {
-    fn register(app: &mut App) {
-        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
+impl CommandRequest for BrowserRequest {
     fn definitions() -> Vec<CommandDefinition> {
         let mut definitions = NavigationRequest::definitions();
         definitions.extend(OpenRequest::definitions());
         definitions.extend(ViewRequest::definitions());
         definitions
     }
+}
 
-    fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
-        if let Some(request) = NavigationRequest::from_invocation(invocation) {
-            return Some(Self::Navigate(request));
+impl TryFrom<&CommandInvocation> for BrowserRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        if let Ok(request) = NavigationRequest::try_from(invocation) {
+            return Ok(Self::Navigate(request));
         }
-        if let Some(request) = OpenRequest::from_invocation(invocation) {
-            return Some(Self::Open(request));
+        if let Ok(request) = OpenRequest::try_from(invocation) {
+            return Ok(Self::Open(request));
         }
-        ViewRequest::from_invocation(invocation).map(Self::View)
+        ViewRequest::try_from(invocation).map(Self::View)
     }
 }
 
@@ -640,7 +655,7 @@ mod tests {
             };
             let invocation =
                 CommandInvocation::new(Entity::PLACEHOLDER, tool.name).with_arguments(arguments);
-            assert!(BrowserRequest::from_invocation(&invocation).is_some());
+            assert!(BrowserRequest::try_from(&invocation).is_ok());
         }
     }
 
@@ -708,7 +723,7 @@ mod tests {
     fn command_invocations_keep_their_original_order() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        BrowserRequest::register(&mut app);
+        app.add_plugins(CommandTypePlugin::<BrowserRequest>::default());
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
             .write_batch([

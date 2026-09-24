@@ -10,7 +10,10 @@ use bevy::{
     window::{ClosingWindow, PrimaryWindow},
 };
 use moonshine_save::prelude::*;
-use vmux_command::{CommandDefinition, CommandInvocation, CommandMcp, InputSchema};
+use vmux_command::{
+    CommandDefinition, CommandInvocation, CommandMcp, CommandRequest, CommandTypePlugin,
+    InputSchema,
+};
 pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
@@ -22,8 +25,8 @@ pub struct StackPlugin;
 
 impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
-        StackRequest::register(app);
-        app.register_type::<Stack>()
+        app.add_plugins(CommandTypePlugin::<StackRequest>::default())
+            .register_type::<Stack>()
             .init_resource::<FocusedStack>()
             .add_message::<CloseStackRequest>()
             .add_systems(
@@ -59,12 +62,8 @@ pub enum StackRequest {
     Move(SiblingDirection),
 }
 
-impl StackRequest {
-    pub fn register(app: &mut App) {
-        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
-    pub fn definitions() -> Vec<CommandDefinition> {
+impl CommandRequest for StackRequest {
+    fn definitions() -> Vec<CommandDefinition> {
         vec![
             CommandDefinition::new("stack_close", "Close Stack", "Layout > Stack")
                 .accelerator("super+w")
@@ -94,8 +93,12 @@ impl StackRequest {
                 .expose_to_mcp(),
         ]
     }
+}
 
-    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+impl TryFrom<&CommandInvocation> for StackRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         let request = match invocation.id.as_str() {
             "stack_close" => Self::Close,
             "stack_next" => Self::Focus(SiblingDirection::Next),
@@ -106,9 +109,9 @@ impl StackRequest {
                 url: invocation.argument("url"),
             },
             "service_open" => Self::OpenServices,
-            _ => return None,
+            _ => return Err(()),
         };
-        Some(request)
+        Ok(request)
     }
 }
 
@@ -697,7 +700,7 @@ mod tests {
         );
         for tool in tools {
             let invocation = CommandInvocation::new(Entity::PLACEHOLDER, tool.name);
-            assert!(StackRequest::from_invocation(&invocation).is_some());
+            assert!(StackRequest::try_from(&invocation).is_ok());
         }
     }
 

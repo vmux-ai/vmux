@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::marker::PhantomData;
 
 use bevy::prelude::*;
 
@@ -125,32 +125,6 @@ pub struct CommandDefinition {
 }
 
 impl CommandDefinition {
-    pub fn register<T: Message>(
-        app: &mut App,
-        definitions: fn() -> Vec<Self>,
-        request: fn(&CommandInvocation) -> Option<T>,
-    ) {
-        if !app.is_plugin_added::<CommandRuntimePlugin>() {
-            app.add_plugins(CommandRuntimePlugin);
-        }
-        let validator = RequestValidator(Arc::new(move |invocation| {
-            request(invocation)
-                .map(drop)
-                .ok_or_else(|| format!("{} rejected its command arguments", invocation.id))
-        }));
-        app.add_message::<T>().add_systems(
-            Startup,
-            (move |mut commands: Commands| {
-                for definition in definitions() {
-                    commands
-                        .spawn((definition, RequestParser(request), validator.clone()))
-                        .observe(dispatch_request::<T>);
-                }
-            })
-            .in_set(RegisterCommandDefinitions),
-        );
-    }
-
     pub fn inferred(module_path: &str, request_type: &str) -> Self {
         let crate_namespace = module_path
             .split("::")
@@ -529,6 +503,36 @@ pub struct DispatchCommandInvocations;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RegisterCommandDefinitions;
 
+pub trait CommandRequest: Message + for<'a> TryFrom<&'a CommandInvocation> {
+    fn definitions() -> Vec<CommandDefinition>;
+}
+
+pub struct CommandTypePlugin<T>(PhantomData<fn() -> T>);
+
+impl<T> Default for CommandTypePlugin<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T: CommandRequest> Plugin for CommandTypePlugin<T> {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
+        app.add_message::<T>().add_systems(
+            Startup,
+            spawn_command_definitions::<T>.in_set(RegisterCommandDefinitions),
+        );
+    }
+}
+
+fn spawn_command_definitions<T: CommandRequest>(mut commands: Commands) {
+    for definition in T::definitions() {
+        commands.spawn(definition).observe(dispatch_request::<T>);
+    }
+}
+
 pub struct CommandRuntimePlugin;
 
 impl Plugin for CommandRuntimePlugin {
@@ -561,7 +565,6 @@ impl Plugin for CommandRuntimePlugin {
 #[derive(Clone)]
 struct RegisteredCommand {
     definition: CommandDefinition,
-    validator: Option<RequestValidator>,
 }
 
 #[derive(Resource, Default)]
@@ -571,14 +574,11 @@ pub struct CommandCatalog {
 }
 
 fn index_command_definitions(
-    definitions: Query<
-        (Entity, &CommandDefinition, Option<&RequestValidator>),
-        Added<CommandDefinition>,
-    >,
+    definitions: Query<(Entity, &CommandDefinition), Added<CommandDefinition>>,
     mut catalog: ResMut<CommandCatalog>,
     mut commands: Commands,
 ) {
-    for (entity, definition, validator) in &definitions {
+    for (entity, definition) in &definitions {
         let mut ids = Vec::with_capacity(definition.aliases.len() + 1);
         ids.push(definition.id.clone());
         ids.extend(definition.aliases.iter().cloned());
@@ -596,7 +596,6 @@ fn index_command_definitions(
             entity,
             RegisteredCommand {
                 definition: definition.clone(),
-                validator: validator.cloned(),
             },
         );
         commands
@@ -621,14 +620,6 @@ impl CommandDispatch {
         &self.invocation
     }
 }
-
-#[derive(Component)]
-struct RequestParser<T: Message>(fn(&CommandInvocation) -> Option<T>);
-
-type ValidateRequest = dyn Fn(&CommandInvocation) -> Result<(), String> + Send + Sync + 'static;
-
-#[derive(Component, Clone)]
-struct RequestValidator(Arc<ValidateRequest>);
 
 impl CommandCatalog {
     pub fn tools(&self) -> Vec<vmux_api::protocol::AgentCommandTool> {
@@ -680,11 +671,7 @@ impl CommandCatalog {
             return Err("focus-changing app command is disabled for agents".to_string());
         }
         definition.validate_arguments(&arguments)?;
-        let invocation = CommandInvocation::new(caller, &definition.id).with_arguments(arguments);
-        if let Some(validator) = &command.validator {
-            validator.0(&invocation)?;
-        }
-        Ok(invocation)
+        Ok(CommandInvocation::new(caller, &definition.id).with_arguments(arguments))
     }
 }
 
@@ -717,17 +704,15 @@ fn dispatch_command_invocations(
     }
 }
 
-fn dispatch_request<T: Message>(
+fn dispatch_request<T: CommandRequest>(
     trigger: On<CommandDispatch>,
-    parsers: Query<&RequestParser<T>>,
     mut requests: MessageWriter<T>,
 ) {
-    let Ok(parser) = parsers.get(trigger.command) else {
+    let Ok(request) = T::try_from(&trigger.invocation) else {
+        warn!(command = %trigger.invocation.id, "command request rejected its registered definition");
         return;
     };
-    if let Some(request) = parser.0(&trigger.invocation) {
-        requests.write(request);
-    }
+    requests.write(request);
 }
 
 impl KeyCombo {
@@ -778,68 +763,68 @@ mod tests {
     #[derive(Message)]
     struct DuplicateCommandA;
 
-    impl DuplicateCommandA {
-        fn register(app: &mut App) {
-            CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-        }
-
+    impl CommandRequest for DuplicateCommandA {
         fn definitions() -> Vec<CommandDefinition> {
             vec![CommandDefinition::new("duplicate", "First", "Test")]
         }
+    }
 
-        fn from_invocation(_invocation: &CommandInvocation) -> Option<Self> {
-            None
+    impl TryFrom<&CommandInvocation> for DuplicateCommandA {
+        type Error = ();
+
+        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            Err(())
         }
     }
 
     #[derive(Message)]
     struct DuplicateCommandB;
 
-    impl DuplicateCommandB {
-        fn register(app: &mut App) {
-            CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-        }
-
+    impl CommandRequest for DuplicateCommandB {
         fn definitions() -> Vec<CommandDefinition> {
             vec![CommandDefinition::new("duplicate", "Second", "Test")]
         }
+    }
 
-        fn from_invocation(_invocation: &CommandInvocation) -> Option<Self> {
-            None
+    impl TryFrom<&CommandInvocation> for DuplicateCommandB {
+        type Error = ();
+
+        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            Err(())
         }
     }
 
     #[derive(Message, Debug, PartialEq, Eq)]
     struct AliasedCommand(String);
 
-    impl AliasedCommand {
-        fn register(app: &mut App) {
-            CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-        }
-
+    impl CommandRequest for AliasedCommand {
         fn definitions() -> Vec<CommandDefinition> {
             vec![CommandDefinition::new("canonical", "Canonical", "Test").alias("legacy")]
         }
+    }
 
-        fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
-            Some(Self(invocation.id.clone()))
+    impl TryFrom<&CommandInvocation> for AliasedCommand {
+        type Error = ();
+
+        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            Ok(Self(invocation.id.clone()))
         }
     }
 
     #[derive(Message)]
     struct DuplicateAlias;
 
-    impl DuplicateAlias {
-        fn register(app: &mut App) {
-            CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-        }
-
+    impl CommandRequest for DuplicateAlias {
         fn definitions() -> Vec<CommandDefinition> {
             vec![CommandDefinition::new("alias_owner", "Alias", "Test").alias("duplicate")]
         }
+    }
 
-        fn from_invocation(_invocation: &CommandInvocation) -> Option<Self> {
-            None
+    impl TryFrom<&CommandInvocation> for DuplicateAlias {
+        type Error = ();
+
+        fn try_from(_invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            Err(())
         }
     }
 
@@ -847,7 +832,7 @@ mod tests {
     fn registered_command_dispatches_to_its_typed_message() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        TestToggleRequest::register(&mut app);
+        app.add_plugins(CommandTypePlugin::<TestToggleRequest>::default());
         let caller = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
@@ -867,7 +852,7 @@ mod tests {
     fn registered_command_contributes_metadata_and_shortcuts() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        TestToggleRequest::register(&mut app);
+        app.add_plugins(CommandTypePlugin::<TestToggleRequest>::default());
         app.update();
         let mut query = app.world_mut().query::<&CommandDefinition>();
         let definitions = query.iter(app.world()).cloned().collect::<Vec<_>>();
@@ -888,7 +873,7 @@ mod tests {
     fn alias_dispatches_with_the_canonical_id() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        AliasedCommand::register(&mut app);
+        app.add_plugins(CommandTypePlugin::<AliasedCommand>::default());
         let caller = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
@@ -909,8 +894,10 @@ mod tests {
     fn duplicate_command_ids_are_rejected() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        DuplicateCommandA::register(&mut app);
-        DuplicateCommandB::register(&mut app);
+        app.add_plugins((
+            CommandTypePlugin::<DuplicateCommandA>::default(),
+            CommandTypePlugin::<DuplicateCommandB>::default(),
+        ));
         app.update();
     }
 
@@ -919,8 +906,10 @@ mod tests {
     fn aliases_cannot_collide_with_command_ids() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        DuplicateCommandA::register(&mut app);
-        DuplicateAlias::register(&mut app);
+        app.add_plugins((
+            CommandTypePlugin::<DuplicateCommandA>::default(),
+            CommandTypePlugin::<DuplicateAlias>::default(),
+        ));
         app.update();
     }
 
@@ -928,8 +917,10 @@ mod tests {
     fn command_catalog_exposes_and_dispatches_the_registered_request_definition() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        AgentVisibleRequest::register(&mut app);
-        UserOnlyRequest::register(&mut app);
+        app.add_plugins((
+            CommandTypePlugin::<AgentVisibleRequest>::default(),
+            CommandTypePlugin::<UserOnlyRequest>::default(),
+        ));
         app.update();
 
         let tools = app.world().resource::<CommandCatalog>().tools();
@@ -964,8 +955,10 @@ mod tests {
     fn command_catalog_rejects_unlisted_access_and_malformed_arguments() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        AgentVisibleRequest::register(&mut app);
-        UserOnlyRequest::register(&mut app);
+        app.add_plugins((
+            CommandTypePlugin::<AgentVisibleRequest>::default(),
+            CommandTypePlugin::<UserOnlyRequest>::default(),
+        ));
         app.update();
         let caller = app.world_mut().spawn_empty().id();
 

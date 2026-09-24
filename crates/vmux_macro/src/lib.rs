@@ -1244,16 +1244,8 @@ fn impl_inferred_command_bar_request(
     Ok(quote! {
         impl ::bevy::ecs::message::Message for #ident {}
 
-        impl #ident {
-            pub fn register(app: &mut ::bevy::app::App) {
-                ::vmux_command::CommandDefinition::register::<Self>(
-                    app,
-                    Self::definitions,
-                    Self::from_invocation,
-                );
-            }
-
-            pub fn definitions() -> ::std::vec::Vec<::vmux_command::CommandDefinition> {
+        impl ::vmux_command::CommandRequest for #ident {
+            fn definitions() -> ::std::vec::Vec<::vmux_command::CommandDefinition> {
                 let mut definition = ::vmux_command::CommandDefinition::inferred(
                     module_path!(),
                     stringify!(#ident),
@@ -1262,15 +1254,19 @@ fn impl_inferred_command_bar_request(
                 #mcp
                 ::std::vec![definition]
             }
+        }
 
-            pub fn from_invocation(
+        impl ::core::convert::TryFrom<&::vmux_command::CommandInvocation> for #ident {
+            type Error = ();
+
+            fn try_from(
                 invocation: &::vmux_command::CommandInvocation,
-            ) -> ::core::option::Option<Self> {
+            ) -> ::core::result::Result<Self, Self::Error> {
                 let definition = ::vmux_command::CommandDefinition::inferred(
                     module_path!(),
                     stringify!(#ident),
                 );
-                (invocation.id == definition.id).then_some(Self)
+                (invocation.id == definition.id).then_some(Self).ok_or(())
             }
         }
     })

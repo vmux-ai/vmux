@@ -20,7 +20,9 @@ use crate::open_target::{OpenTarget, PaneDirection};
 use crate::snapshot::{
     ClaimedUrl, CommandBarUiState, ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
-use crate::{CommandDefinition, CommandInvocation, ReadCommandRequests};
+use crate::{
+    CommandDefinition, CommandInvocation, CommandRequest, CommandTypePlugin, ReadCommandRequests,
+};
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::event::space::SpaceRequest;
@@ -43,61 +45,63 @@ pub(crate) struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        CommandBarOpenRequest::register(app);
-        SpaceOpenRequest::register(app);
-        app.init_resource::<PendingLaunch>()
-            .add_message::<vmux_core::ContributedCommandChosen>()
-            .add_message::<InlineTransitionRequested>()
-            .add_message::<StackInPaneChosen>()
-            .add_message::<RestoreKeyboardToStack>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_message::<SettingsPageSpawnRequest>()
-            .add_message::<SpacesPageSpawnRequest>()
-            .add_plugins(UiEventPlugin::<(
-                CommandBarRequest,
-                CommandBarReadyEvent,
-                CommandBarRenderedEvent,
-                CommandBarSizeEvent,
-            )>::default())
-            .add_observer(on_command_bar_request)
-            .add_observer(on_command_bar_ready)
-            .add_observer(on_command_bar_rendered)
-            .add_observer(on_command_bar_size)
-            .add_systems(
-                Update,
-                prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
+        app.add_plugins((
+            CommandTypePlugin::<CommandBarOpenRequest>::default(),
+            CommandTypePlugin::<SpaceOpenRequest>::default(),
+        ))
+        .init_resource::<PendingLaunch>()
+        .add_message::<vmux_core::ContributedCommandChosen>()
+        .add_message::<InlineTransitionRequested>()
+        .add_message::<StackInPaneChosen>()
+        .add_message::<RestoreKeyboardToStack>()
+        .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+        .add_message::<SettingsPageSpawnRequest>()
+        .add_message::<SpacesPageSpawnRequest>()
+        .add_plugins(UiEventPlugin::<(
+            CommandBarRequest,
+            CommandBarReadyEvent,
+            CommandBarRenderedEvent,
+            CommandBarSizeEvent,
+        )>::default())
+        .add_observer(on_command_bar_request)
+        .add_observer(on_command_bar_ready)
+        .add_observer(on_command_bar_rendered)
+        .add_observer(on_command_bar_size)
+        .add_systems(
+            Update,
+            prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
+        )
+        .add_systems(
+            Update,
+            handle_open_command_bar
+                .in_set(ReadCommandRequests)
+                .after(prewarm_command_bar_modal)
+                .after(vmux_core::workspace::TabCommandSet)
+                .after(vmux_core::workspace::StackCommandSet),
+        )
+        .add_systems(
+            Update,
+            retry_pending_command_bar_open.after(handle_open_command_bar),
+        )
+        .add_systems(
+            Update,
+            (
+                update_work_dirs_snapshot,
+                update_recent_files_snapshot,
+                mirror_project_roots,
             )
-            .add_systems(
-                Update,
-                handle_open_command_bar
-                    .in_set(ReadCommandRequests)
-                    .after(prewarm_command_bar_modal)
-                    .after(vmux_core::workspace::TabCommandSet)
-                    .after(vmux_core::workspace::StackCommandSet),
-            )
-            .add_systems(
-                Update,
-                retry_pending_command_bar_open.after(handle_open_command_bar),
-            )
-            .add_systems(
-                Update,
-                (
-                    update_work_dirs_snapshot,
-                    update_recent_files_snapshot,
-                    mirror_project_roots,
-                )
-                    .in_set(WriteCommandBarSnapshots),
-            )
-            .add_systems(
-                Update,
-                deferred_dismiss_modal
-                    .after(ReadCommandRequests)
-                    .before(vmux_core::workspace::ComputeFocusSet),
-            )
-            .add_systems(
-                PostUpdate,
-                reveal_command_bar.chain().after(LayoutSystems::Layout),
-            );
+                .in_set(WriteCommandBarSnapshots),
+        )
+        .add_systems(
+            Update,
+            deferred_dismiss_modal
+                .after(ReadCommandRequests)
+                .before(vmux_core::workspace::ComputeFocusSet),
+        )
+        .add_systems(
+            PostUpdate,
+            reveal_command_bar.chain().after(LayoutSystems::Layout),
+        );
     }
 }
 
@@ -115,12 +119,8 @@ enum CommandBarOpenRequest {
     Picker(CommandBarPicker),
 }
 
-impl CommandBarOpenRequest {
-    pub fn register(app: &mut App) {
-        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
-    pub fn definitions() -> Vec<CommandDefinition> {
+impl CommandRequest for CommandBarOpenRequest {
+    fn definitions() -> Vec<CommandDefinition> {
         vec![
             CommandDefinition::new("browser_open_command_bar", "Command Bar", "Browser > Bar")
                 .accelerator("super+k")
@@ -174,8 +174,12 @@ impl CommandBarOpenRequest {
             .expose_to_mcp(),
         ]
     }
+}
 
-    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+impl TryFrom<&CommandInvocation> for CommandBarOpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         let request = match invocation.id.as_str() {
             "browser_open_command_bar" => Self::Toggle,
             "browser_open_page_in_command_bar" => Self::EditPage,
@@ -188,9 +192,9 @@ impl CommandBarOpenRequest {
             "browser_open_encoding" => Self::Picker(CommandBarPicker::Encoding),
             "browser_open_reopen_with_encoding" => Self::Picker(CommandBarPicker::EncodingReopen),
             "browser_open_save_with_encoding" => Self::Picker(CommandBarPicker::EncodingSave),
-            _ => return None,
+            _ => return Err(()),
         };
-        Some(request)
+        Ok(request)
     }
 }
 
@@ -1189,7 +1193,7 @@ mod tests {
         );
         for tool in tools {
             let invocation = CommandInvocation::new(Entity::PLACEHOLDER, tool.name);
-            assert!(CommandBarOpenRequest::from_invocation(&invocation).is_some());
+            assert!(CommandBarOpenRequest::try_from(&invocation).is_ok());
         }
     }
 
@@ -1688,11 +1692,9 @@ mod tests {
                 CommandBarPicker::EncodingSave,
             ),
         ] {
-            let open = CommandBarOpenRequest::from_invocation(&CommandInvocation::new(
-                Entity::PLACEHOLDER,
-                id,
-            ))
-            .unwrap();
+            let open =
+                CommandBarOpenRequest::try_from(&CommandInvocation::new(Entity::PLACEHOLDER, id))
+                    .unwrap();
             let request = command_bar_open_state([&open], std::iter::empty());
 
             assert!(request.should_toggle, "{id}");
@@ -1713,11 +1715,9 @@ mod tests {
             "browser_open_commands",
             "browser_open_ex_bar",
         ] {
-            let open = CommandBarOpenRequest::from_invocation(&CommandInvocation::new(
-                Entity::PLACEHOLDER,
-                id,
-            ))
-            .unwrap();
+            let open =
+                CommandBarOpenRequest::try_from(&CommandInvocation::new(Entity::PLACEHOLDER, id))
+                    .unwrap();
             let request = command_bar_open_state([&open], std::iter::empty());
 
             assert_eq!(request.picker, None, "{id}");
@@ -1815,8 +1815,8 @@ mod tests {
     fn send(app: &mut App, id: &str) {
         if id == "space_open" {
             app.world_mut().write_message(SpaceOpenRequest);
-        } else if let Some(request) =
-            CommandBarOpenRequest::from_invocation(&CommandInvocation::new(Entity::PLACEHOLDER, id))
+        } else if let Ok(request) =
+            CommandBarOpenRequest::try_from(&CommandInvocation::new(Entity::PLACEHOLDER, id))
         {
             app.world_mut().write_message(request);
         } else {

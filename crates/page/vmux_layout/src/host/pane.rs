@@ -11,7 +11,7 @@ use bevy::{
 };
 use moonshine_save::prelude::*;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-use vmux_command::{CommandDefinition, CommandInvocation};
+use vmux_command::{CommandDefinition, CommandInvocation, CommandRequest, CommandTypePlugin};
 #[cfg(test)]
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 #[cfg(test)]
@@ -82,12 +82,8 @@ pub enum PaneRequest {
     ToggleZoom,
 }
 
-impl PaneRequest {
-    pub fn register(app: &mut App) {
-        CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
-    pub fn definitions() -> Vec<CommandDefinition> {
+impl CommandRequest for PaneRequest {
+    fn definitions() -> Vec<CommandDefinition> {
         vec![
             CommandDefinition::new("toggle_pane", "Next Pane", "Layout > Pane")
                 .hidden()
@@ -167,8 +163,12 @@ impl PaneRequest {
                 .direct("Super+Shift+H"),
         ]
     }
+}
 
-    pub fn from_invocation(invocation: &CommandInvocation) -> Option<Self> {
+impl TryFrom<&CommandInvocation> for PaneRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         let request = match invocation.id.as_str() {
             "toggle_pane" => Self::Focus(PaneFocus::Next),
             "close_pane" => Self::Close,
@@ -233,9 +233,9 @@ impl PaneRequest {
                     .unwrap_or(PaneOpenMode::NewStack),
                 url: invocation.argument("url"),
             }),
-            _ => return None,
+            _ => return Err(()),
         };
-        Some(request)
+        Ok(request)
     }
 }
 
@@ -243,17 +243,18 @@ pub struct PanePlugin;
 
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
-        PaneRequest::register(app);
-        app.register_type::<SideSheetCardCollapsed>().add_plugins((
-            TreePlugin,
-            IdentityPlugin,
-            ArrangementPlugin,
-            OpenPlugin,
-            PaneZoomPlugin,
-            FocusPlugin,
-            ResizePlugin,
-            ClosePlugin,
-        ));
+        app.add_plugins(CommandTypePlugin::<PaneRequest>::default())
+            .register_type::<SideSheetCardCollapsed>()
+            .add_plugins((
+                TreePlugin,
+                IdentityPlugin,
+                ArrangementPlugin,
+                OpenPlugin,
+                PaneZoomPlugin,
+                FocusPlugin,
+                ResizePlugin,
+                ClosePlugin,
+            ));
     }
 }
 
