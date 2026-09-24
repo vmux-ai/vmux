@@ -47,9 +47,9 @@ pub struct PageReady;
 mod tests {
     use super::*;
 
-    enum DerivedEvents {}
+    enum Events {}
 
-    impl BinEventFamily for DerivedEvents {
+    impl BinEventFamily for Events {
         const TARGET: BinEventTarget = BinEventTarget::Host("layout");
     }
 

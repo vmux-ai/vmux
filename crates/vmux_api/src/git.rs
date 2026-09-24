@@ -1,6 +1,6 @@
-pub enum GitEvents {}
+enum Events {}
 
-impl crate::BinEventFamily for GitEvents {
+impl crate::BinEventFamily for Events {
     const TARGET: crate::BinEventTarget = crate::BinEventTarget::Host("git");
 }
 

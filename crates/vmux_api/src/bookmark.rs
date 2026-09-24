@@ -1,8 +1,8 @@
 use crate::PageMetadata;
 
-pub enum BookmarkEvents {}
+enum Events {}
 
-impl crate::BinEventFamily for BookmarkEvents {
+impl crate::BinEventFamily for Events {
     const TARGET: crate::BinEventTarget = crate::BinEventTarget::Host("layout");
 }
 
