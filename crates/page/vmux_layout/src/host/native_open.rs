@@ -22,7 +22,6 @@ impl<M: HostedPage> Default for HostedPagePlugin<M> {
 
 impl<M: HostedPage> Plugin for HostedPagePlugin<M> {
     fn build(&self, app: &mut App) {
-        vmux_core::register_host_spawn(app, M::HOST);
         app.world_mut()
             .spawn(NativelyHosted::page(M::URL, M::TITLE));
         app.add_systems(

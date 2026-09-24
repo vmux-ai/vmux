@@ -40,8 +40,7 @@ use std::sync::{LazyLock, Mutex};
 use vmux_command::ReadCommandRequests;
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_core::{
-    CefPageAttachRequest, HostSpawnRegistry, PageIdentity, PageMetadata, PageOpenRequest,
-    PageOpenSet,
+    CefPageAttachRequest, PageIdentity, PageMetadata, PageOpenRequest, PageOpenSet,
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -206,7 +205,6 @@ impl Plugin for BrowserPlugin {
                 vmux_layout::mirror_metadata_to_url
                     .after(vmux_layout::apply_cef_state_from_webview),
             )
-            .init_resource::<HostSpawnRegistry>()
             .add_plugins((
                 host_focus::HostFocusPlugin,
                 appearance::AppearancePlugin,
@@ -1924,11 +1922,20 @@ mod tests {
                     captured.0.push(trigger.url.clone());
                 },
             );
-            for host in [
-                "terminal", "sessions", "services", "settings", "team", "spaces",
-            ] {
-                vmux_core::register_host_spawn(&mut app, host);
+            for host in ["terminal", "sessions"] {
+                app.world_mut().spawn(vmux_core::HostSpawnRoute::host(host));
             }
+            for (url, title) in [
+                ("vmux://services/", "Services"),
+                ("vmux://settings/", "Settings"),
+                ("vmux://team/", "Team"),
+                ("vmux://spaces/", "Spaces"),
+            ] {
+                app.world_mut()
+                    .spawn(vmux_core::host::page::NativelyHosted::subtree(url, title));
+            }
+            app.world_mut()
+                .spawn(vmux_core::HostSpawnRoute::scheme("file"));
             app
         }
 

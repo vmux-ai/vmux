@@ -27,7 +27,6 @@ impl Plugin for SimulatorPlugin {
             PAGE_MANIFEST,
             NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title),
         ));
-        vmux_core::register_host_spawn(app, PAGE_HOST);
         app.init_resource::<ActiveSimulatorView>()
             .configure_sets(Update, (SimulatorFocusSet, SimulatorInputSet).chain())
             .add_message::<HardwareButtonRequest>()

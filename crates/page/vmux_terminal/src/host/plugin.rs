@@ -47,7 +47,8 @@ pub struct TerminalPlugin;
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        vmux_core::register_host_spawn(app, "terminal");
+        app.world_mut()
+            .spawn(vmux_core::HostSpawnRoute::host("terminal"));
         app.add_plugins((
             vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiStateEvent>::default(),
             vmux_command::CommandTypePlugin::<super::command::CloseRequest>::default(),

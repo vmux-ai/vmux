@@ -57,7 +57,8 @@ impl<M: WarmPage> Default for WarmPagePlugin<M> {
 
 impl<M: WarmPage> Plugin for WarmPagePlugin<M> {
     fn build(&self, app: &mut App) {
-        vmux_core::register_host_spawn(app, M::HOST);
+        app.world_mut()
+            .spawn(vmux_core::HostSpawnRoute::host(M::HOST));
         app.init_resource::<WarmPageSpawnBudget>()
             .add_systems(
                 Update,

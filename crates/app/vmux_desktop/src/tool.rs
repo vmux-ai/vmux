@@ -119,8 +119,6 @@ impl Plugin for ToolPlugin {
             VAULT_PAGE_MANIFEST,
             vmux_core::host::page::NativelyHosted::page("vmux://vault/", "Vault"),
         ));
-        vmux_core::register_host_spawn(app, "tools");
-        vmux_core::register_host_spawn(app, "vault");
         app.world_mut().spawn((
             Name::new("Tool registry"),
             ToolRegistry::default(),

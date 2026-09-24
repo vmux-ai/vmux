@@ -10,7 +10,8 @@ use vmux_command::{
     InputSchema, ReadCommandRequests,
 };
 use vmux_core::{
-    HostSpawnRegistry, PageMetadata, PageOpenRequest, PageOpenTarget,
+    HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
+    host::page::NativelyHosted,
     page::{HostHistoryDelta, HostHistoryNavigation, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -236,7 +237,8 @@ fn handle_browser_commands(
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
-    host_spawn: Res<HostSpawnRegistry>,
+    native_pages: Query<&NativelyHosted>,
+    host_spawn_routes: Query<&HostSpawnRoute>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
     mut host_history: HostHistoryNavigation,
@@ -310,10 +312,18 @@ fn handle_browser_commands(
                     .get(webview)
                     .map(|metadata| metadata.url.clone())
                     .unwrap_or_default();
-                if is_terminal
-                    || host_spawn.needs_host_spawn(&current_url)
-                    || host_spawn.needs_host_spawn(&resolved)
-                {
+                let current_is_hosted = native_pages
+                    .iter()
+                    .any(|page| page.answers_for(&current_url))
+                    || host_spawn_routes
+                        .iter()
+                        .any(|route| route.answers_for(&current_url));
+                let resolved_is_hosted =
+                    native_pages.iter().any(|page| page.answers_for(&resolved))
+                        || host_spawn_routes
+                            .iter()
+                            .any(|route| route.answers_for(&resolved));
+                if is_terminal || current_is_hosted || resolved_is_hosted {
                     page_open_requests.write(PageOpenRequest {
                         target: PageOpenTarget::Stack(active),
                         url: resolved,
@@ -670,7 +680,6 @@ mod tests {
             app.add_plugins((MinimalPlugins, vmux_core::CorePlugin, CommandPlugin))
                 .add_message::<PageOpenRequest>()
                 .add_message::<vmux_terminal::TerminalFontSizeCommand>()
-                .init_resource::<HostSpawnRegistry>()
                 .init_resource::<CefNavigations>()
                 .add_observer(CefNavigations::record_back);
 

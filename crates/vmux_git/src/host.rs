@@ -41,8 +41,6 @@ impl Plugin for GitPlugin {
         ));
         app.world_mut()
             .spawn(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git"));
-        vmux_core::register_host_spawn(app, "git");
-        vmux_core::register_scheme_spawn(app, "git");
         app.configure_sets(
             Update,
             (

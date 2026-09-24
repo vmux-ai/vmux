@@ -34,7 +34,6 @@ impl Plugin for StartPlugin {
                     begin_requested_inline_transition,
                 ),
             );
-        vmux_core::register_host_spawn(app, "start");
         app.add_plugins(UiEventPlugin::<(
             StartDataRequest,
             StartSelectWorkspace,
