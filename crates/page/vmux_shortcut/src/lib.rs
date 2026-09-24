@@ -18,20 +18,38 @@ pub struct ShortcutCaptureToken {
     pub generation: u64,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq, target = "shortcuts")]
-pub struct ShortcutCaptureRequest {
-    pub active: bool,
+#[cfg(host)]
+#[derive(bevy::prelude::EntityEvent, Clone, Debug)]
+pub struct ShortcutProbePress {
+    #[event_target]
+    target: bevy::prelude::Entity,
+    stroke: ShortcutStroke,
+    pressed_at_ms: i64,
 }
 
-#[vmux_api::contract(Copy, Default, Eq)]
-pub struct ShortcutCaptureState {
-    pub active: bool,
+#[cfg(host)]
+impl ShortcutProbePress {
+    pub fn new(target: bevy::prelude::Entity, stroke: ShortcutStroke, pressed_at_ms: i64) -> Self {
+        Self {
+            target,
+            stroke,
+            pressed_at_ms,
+        }
+    }
+
+    pub fn stroke(&self) -> &ShortcutStroke {
+        &self.stroke
+    }
+
+    pub fn pressed_at_ms(&self) -> i64 {
+        self.pressed_at_ms
+    }
 }
 
-#[vmux_api::contract(Default, Eq)]
-pub struct ShortcutPressed {
-    pub stroke: ShortcutStroke,
-    pub pressed_at_ms: i64,
+#[vmux_api::ui_event(Eq, target = "shortcuts")]
+pub enum ShortcutProbeRequest {
+    Press(ShortcutStroke),
+    Clear,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -57,17 +75,27 @@ impl ShortcutCatalog {
     }
 }
 
-#[vmux_api::ui_state_patch]
-pub enum ShortcutUiStatePatch {
-    Catalog(ShortcutCatalog),
-    Capture(ShortcutCaptureState),
-    Pressed(ShortcutPressed),
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutProbeView {
+    pub sequence: Vec<ShortcutStroke>,
+    pub status: ShortcutProbeStatus,
 }
 
-#[vmux_api::ui_state(Default, target = "shortcuts")]
+#[vmux_api::contract(Default, Eq)]
+pub enum ShortcutProbeStatus {
+    #[default]
+    Idle,
+    Pending,
+    Match(Vec<String>),
+    Contextual(Vec<String>),
+    Miss,
+}
+
+#[vmux_api::ui_state(Default, version = 2, target = "shortcuts")]
 pub struct ShortcutUiState {
-    pub sequence: u64,
-    pub patches: Vec<ShortcutUiStatePatch>,
+    pub groups: Vec<ShortcutGroup>,
+    pub probe: ShortcutProbeView,
+    pub shortcut_count: u32,
 }
 
 #[cfg(host)]
@@ -92,6 +120,8 @@ pub struct ShortcutBinding {
     pub strokes: Vec<ShortcutStroke>,
     pub resolves: bool,
     pub contexts: Vec<String>,
+    #[serde(default)]
+    pub emphasized: bool,
 }
 
 impl ShortcutBinding {
@@ -168,33 +198,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ui_state_preserves_catalog_and_pressed_order() {
+    fn ui_state_round_trips_projected_shortcuts() {
         let state = ShortcutUiState {
-            sequence: 2,
-            patches: vec![
-                ShortcutCatalog::default().into(),
-                ShortcutPressed {
-                    stroke: ShortcutStroke {
-                        code: "KeyK".to_string(),
-                        label: "K".to_string(),
-                        ctrl: true,
-                        ..Default::default()
-                    },
-                    pressed_at_ms: 9,
-                }
-                .into(),
-            ],
+            probe: ShortcutProbeView {
+                sequence: vec![ShortcutStroke {
+                    code: "KeyK".to_string(),
+                    label: "K".to_string(),
+                    ctrl: true,
+                    ..Default::default()
+                }],
+                status: ShortcutProbeStatus::Pending,
+            },
+            shortcut_count: 3,
+            ..Default::default()
         };
 
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
         let decoded = rkyv::from_bytes::<ShortcutUiState, rkyv::rancor::Error>(&bytes).unwrap();
 
-        assert!(matches!(
-            decoded.patches.as_slice(),
-            [
-                ShortcutUiStatePatch::Catalog(_),
-                ShortcutUiStatePatch::Pressed(_)
-            ]
-        ));
+        assert_eq!(decoded.shortcut_count, 3);
+        assert_eq!(decoded.probe.sequence[0].code, "KeyK");
+        assert_eq!(decoded.probe.status, ShortcutProbeStatus::Pending);
     }
 }
