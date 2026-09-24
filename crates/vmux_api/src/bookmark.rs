@@ -159,9 +159,14 @@ pub struct BookmarkContextMenuRequest {
     pub active: bool,
 }
 
+#[vmux_api::contract(Eq)]
+pub enum BookmarkMenuInput {
+    CreateFolder { parent: Option<String> },
+    Rename { uuid: String },
+}
+
 #[vmux_api::contract(Eq, Default)]
-pub struct BookmarkMenuActionEvent {
-    pub sequence: u64,
-    pub action: String,
-    pub uuid: Option<String>,
+pub struct BookmarkMenuEffect {
+    pub revision: u64,
+    pub input: Option<BookmarkMenuInput>,
 }

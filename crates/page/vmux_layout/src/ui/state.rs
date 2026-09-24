@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_api::bookmark::{BookmarkMenuActionEvent, BookmarkStateEvent};
+use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkStateEvent};
 use vmux_core::event::space::SpacesListEvent;
 use vmux_core::event::team::TeamEvent;
 use vmux_core::event::{
@@ -31,7 +31,7 @@ pub(crate) struct LayoutPageState {
     pub extension_popup: ExtensionPopupEvent,
     pub extension_popup_size: ExtensionPopupSizeEvent,
     pub update: Option<UpdatePhase>,
-    pub bookmark_menu_action: BookmarkMenuActionEvent,
+    pub bookmark_menu: BookmarkMenuEffect,
     pub reload_revision: u32,
 }
 
@@ -84,9 +84,7 @@ impl LayoutPageState {
             }
             LayoutUiStatePatch::UpdateReady(event) => self.update = Some(UpdatePhase::from(event)),
             LayoutUiStatePatch::UpdateCleared(_) => self.update = None,
-            LayoutUiStatePatch::BookmarkMenuAction(event) => {
-                self.bookmark_menu_action = event.clone()
-            }
+            LayoutUiStatePatch::BookmarkMenu(event) => self.bookmark_menu = event.clone(),
             LayoutUiStatePatch::Reload(_) => {
                 self.reload_revision = self.reload_revision.wrapping_add(1)
             }
@@ -163,17 +161,21 @@ mod tests {
     fn transient_layout_effects_are_applied_from_ui_state() {
         let mut state = LayoutPageState::default();
 
-        state.apply(&LayoutUiStatePatch::BookmarkMenuAction(
-            BookmarkMenuActionEvent {
-                sequence: 4,
-                action: "rename".to_string(),
-                uuid: Some("bookmark".to_string()),
-            },
-        ));
+        state.apply(&LayoutUiStatePatch::BookmarkMenu(BookmarkMenuEffect {
+            revision: 4,
+            input: Some(vmux_api::bookmark::BookmarkMenuInput::Rename {
+                uuid: "bookmark".to_string(),
+            }),
+        }));
         state.apply(&LayoutUiStatePatch::Reload(ReloadEffect));
 
-        assert_eq!(state.bookmark_menu_action.sequence, 4);
-        assert_eq!(state.bookmark_menu_action.action, "rename");
+        assert_eq!(state.bookmark_menu.revision, 4);
+        assert_eq!(
+            state.bookmark_menu.input,
+            Some(vmux_api::bookmark::BookmarkMenuInput::Rename {
+                uuid: "bookmark".to_string(),
+            })
+        );
         assert_eq!(state.reload_revision, 1);
     }
 

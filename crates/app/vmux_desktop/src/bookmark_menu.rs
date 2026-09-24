@@ -13,8 +13,8 @@ impl Plugin for BookmarkMenuPlugin {
                 Update,
                 (
                     macos::show_bookmark_menu,
-                    macos::begin_new_folder_input,
-                    macos::begin_rename_input,
+                    (macos::begin_new_folder_input, macos::begin_rename_input)
+                        .after(vmux_layout::bookmark::BookmarkRequestSet),
                 ),
             );
     }
@@ -43,7 +43,7 @@ mod macos {
     use bevy::prelude::*;
     use muda::ContextMenu;
     use std::collections::{HashMap, HashSet};
-    use vmux_api::bookmark::BookmarkMenuActionEvent;
+    use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkMenuInput};
     use vmux_core::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid};
     use vmux_layout::bookmark::{
         AddRequest, BookmarkMenuTarget, MoveFolderRequest, MoveRequest, PinRequest,
@@ -68,21 +68,14 @@ mod macos {
     pub(super) struct BookmarkMenuInputSequence(u64);
 
     impl BookmarkMenuInputSequence {
-        fn send(
-            &mut self,
-            commands: &mut Commands,
-            webview: Entity,
-            action: &str,
-            uuid: Option<String>,
-        ) {
+        fn send(&mut self, commands: &mut Commands, webview: Entity, input: BookmarkMenuInput) {
             self.0 = self.0.wrapping_add(1);
             vmux_layout::LayoutUiStateUpdates::write(
                 commands,
                 webview,
-                &BookmarkMenuActionEvent {
-                    sequence: self.0,
-                    action: action.to_string(),
-                    uuid,
+                &BookmarkMenuEffect {
+                    revision: self.0,
+                    input: Some(input),
                 },
             );
         }
@@ -664,8 +657,9 @@ mod macos {
             sequence.send(
                 &mut commands,
                 request.webview,
-                "new_folder",
-                request.parent.clone(),
+                BookmarkMenuInput::CreateFolder {
+                    parent: request.parent.clone(),
+                },
             );
         }
     }
@@ -679,8 +673,9 @@ mod macos {
             sequence.send(
                 &mut commands,
                 request.webview,
-                "rename",
-                Some(request.uuid.clone()),
+                BookmarkMenuInput::Rename {
+                    uuid: request.uuid.clone(),
+                },
             );
         }
     }
