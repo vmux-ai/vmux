@@ -1,6 +1,3 @@
-#[vmux_api::host_event(Default, target = "history")]
-pub struct HistoryChangedEvent;
-
 #[vmux_api::contract]
 pub struct HistoryEntry {
     pub url_entity_bits: u64,
@@ -20,9 +17,10 @@ pub struct HistoryQueryRequest {
     pub request_id: u64,
 }
 
-#[vmux_api::host_event(target = "history")]
+#[vmux_api::contract]
 pub struct HistoryQueryResponse {
     pub request_id: u64,
+    pub offset: u32,
     pub entries: Vec<HistoryEntry>,
     pub has_more: bool,
 }
