@@ -5,9 +5,9 @@ use vmux_core::PageIcon;
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 #[vmux_api::contract(Default, Eq)]
-pub struct ReloadEvent;
+pub struct ReloadEffect;
 #[vmux_api::contract(Copy, Default)]
-pub struct LayoutStateEvent {
+pub struct LayoutGeometry {
     #[serde(default)]
     pub header_open: bool,
     #[serde(default)]
@@ -36,7 +36,7 @@ pub struct LayoutStateEvent {
     pub window_pad_left: f32,
 }
 
-impl LayoutStateEvent {
+impl LayoutGeometry {
     pub fn main_cef_left(&self) -> f32 {
         if self.side_sheet_open {
             self.window_pad_left + self.side_sheet_width + self.pane_gap
@@ -234,13 +234,13 @@ mod tests {
 
     #[test]
     fn main_cef_left_includes_side_sheet_gap_when_open() {
-        let open = LayoutStateEvent {
+        let open = LayoutGeometry {
             side_sheet_open: true,
             side_sheet_width: 280.0,
             pane_gap: 8.0,
             ..Default::default()
         };
-        let closed = LayoutStateEvent {
+        let closed = LayoutGeometry {
             side_sheet_open: false,
             side_sheet_width: 280.0,
             pane_gap: 8.0,
@@ -253,12 +253,12 @@ mod tests {
 
     #[test]
     fn main_cef_left_includes_effective_window_left_padding() {
-        let closed = LayoutStateEvent {
+        let closed = LayoutGeometry {
             side_sheet_open: false,
             window_pad_left: 16.0,
             ..Default::default()
         };
-        let open = LayoutStateEvent {
+        let open = LayoutGeometry {
             side_sheet_open: true,
             side_sheet_width: 280.0,
             pane_gap: 8.0,
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn header_offsets_can_override_derived_window_padding() {
-        let state = LayoutStateEvent {
+        let state = LayoutGeometry {
             side_sheet_open: true,
             side_sheet_width: 220.0,
             pane_gap: 4.0,
@@ -293,11 +293,11 @@ mod tests {
 
     #[test]
     fn tab_row_pad_left_clears_traffic_lights_when_side_sheet_closed() {
-        let closed = LayoutStateEvent {
+        let closed = LayoutGeometry {
             side_sheet_open: false,
             ..Default::default()
         };
-        let open = LayoutStateEvent {
+        let open = LayoutGeometry {
             side_sheet_open: true,
             ..Default::default()
         };
@@ -308,12 +308,12 @@ mod tests {
 
     #[test]
     fn header_visibility_tracks_header_open() {
-        let open = LayoutStateEvent {
+        let open = LayoutGeometry {
             header_open: true,
             side_sheet_open: false,
             ..Default::default()
         };
-        let closed = LayoutStateEvent {
+        let closed = LayoutGeometry {
             header_open: false,
             side_sheet_open: true,
             ..Default::default()
@@ -360,7 +360,7 @@ pub enum HeaderRequest {
 }
 
 #[vmux_api::contract(Default, Eq)]
-pub struct StacksHostEvent {
+pub struct StackNavigationState {
     pub stacks: Vec<StackRow>,
     #[serde(default)]
     pub can_go_back: bool,
@@ -433,7 +433,7 @@ impl AddressParts {
 }
 
 #[vmux_api::contract(Default, Eq)]
-pub struct TabsHostEvent {
+pub struct TabListState {
     pub tabs: Vec<TabRow>,
 }
 
@@ -489,7 +489,7 @@ impl TabDropPlacement {
 }
 
 #[vmux_api::contract(Default)]
-pub struct PaneTreeEvent {
+pub struct PaneTreeState {
     pub panes: Vec<PaneNode>,
 }
 
@@ -620,13 +620,13 @@ pub struct TabBoundary {
 }
 
 #[vmux_api::contract(Default)]
-pub struct TabBoundaryEvent {
+pub struct TabBoundaryState {
     pub boundary: Option<TabBoundary>,
     pub projects: Vec<vmux_core::event::ProjectRow>,
 }
 
 #[vmux_api::contract(Default)]
-pub struct ActiveSessionEvent {
+pub struct ActiveSessionState {
     pub session: Option<ActiveSession>,
 }
 
@@ -647,7 +647,7 @@ pub struct ActiveWorkspaceProject {
 }
 
 #[vmux_api::contract(Default)]
-pub struct HeaderPageEvent {
+pub struct HeaderPageState {
     pub active: Option<StackRow>,
     pub bookmarked: bool,
     pub pinned_uuid: Option<String>,
@@ -675,12 +675,12 @@ pub enum LayoutNode {
 }
 
 #[vmux_api::contract(Default)]
-pub struct UpdateReadyEvent {
+pub struct UpdateReady {
     pub version: String,
 }
 
 #[vmux_api::contract(Default)]
-pub struct UpdateProgressEvent {
+pub struct UpdateProgress {
     pub version: String,
     pub downloaded: u64,
     pub total: u64,
@@ -688,7 +688,7 @@ pub struct UpdateProgressEvent {
 }
 
 #[vmux_api::contract(Copy, Default, Eq)]
-pub struct UpdateClearedEvent;
+pub struct UpdateCleared;
 
 #[vmux_api::ui_event(Copy, Default, Eq, targets = ["debug", "extensions", "layout"])]
 pub struct RestartRequestEvent;
@@ -699,24 +699,24 @@ mod update_event_tests {
 
     #[test]
     fn update_ready_event_rkyv_round_trips() {
-        let evt = UpdateReadyEvent {
+        let evt = UpdateReady {
             version: "v9.9.9".to_string(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&evt).unwrap();
-        let back = rkyv::from_bytes::<UpdateReadyEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        let back = rkyv::from_bytes::<UpdateReady, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.version, "v9.9.9");
     }
 
     #[test]
     fn update_progress_event_rkyv_round_trips() {
-        let evt = UpdateProgressEvent {
+        let evt = UpdateProgress {
             version: "0.0.20".to_string(),
             downloaded: 42,
             total: 100,
             installing: false,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&evt).unwrap();
-        let back = rkyv::from_bytes::<UpdateProgressEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        let back = rkyv::from_bytes::<UpdateProgress, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.version, "0.0.20");
         assert_eq!(back.downloaded, 42);
         assert_eq!(back.total, 100);

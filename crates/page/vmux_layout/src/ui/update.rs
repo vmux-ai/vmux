@@ -20,8 +20,8 @@ pub(crate) enum UpdatePhase {
     },
 }
 
-impl From<&crate::event::UpdateProgressEvent> for UpdatePhase {
-    fn from(event: &crate::event::UpdateProgressEvent) -> Self {
+impl From<&crate::event::UpdateProgress> for UpdatePhase {
+    fn from(event: &crate::event::UpdateProgress) -> Self {
         if event.installing {
             return Self::Installing {
                 version: event.version.clone(),
@@ -35,8 +35,8 @@ impl From<&crate::event::UpdateProgressEvent> for UpdatePhase {
     }
 }
 
-impl From<&crate::event::UpdateReadyEvent> for UpdatePhase {
-    fn from(event: &crate::event::UpdateReadyEvent) -> Self {
+impl From<&crate::event::UpdateReady> for UpdatePhase {
+    fn from(event: &crate::event::UpdateReady) -> Self {
         Self::Ready {
             version: event.version.clone(),
         }

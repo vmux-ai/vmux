@@ -19,7 +19,7 @@ use vmux_layout::Browser;
 use vmux_layout::event::{SideSheetRequest, SideSheetResizeEvent};
 use vmux_layout::{
     Header, LayoutCef,
-    event::{HeaderRequest, ReloadEvent},
+    event::{HeaderRequest, ReloadEffect},
     pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{
         SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded,
@@ -426,7 +426,7 @@ fn on_reload_notify_header(
     }) else {
         return;
     };
-    vmux_layout::LayoutUiStateUpdates::write(&mut commands, cef_e, &ReloadEvent);
+    vmux_layout::LayoutUiStateUpdates::write(&mut commands, cef_e, &ReloadEffect);
 }
 
 fn on_hard_reload_notify_header(
@@ -442,7 +442,7 @@ fn on_hard_reload_notify_header(
     }) else {
         return;
     };
-    vmux_layout::LayoutUiStateUpdates::write(&mut commands, cef_e, &ReloadEvent);
+    vmux_layout::LayoutUiStateUpdates::write(&mut commands, cef_e, &ReloadEffect);
 }
 
 fn on_side_sheet_resize(

@@ -18,7 +18,9 @@ use super::stack::{StackIcon, StackTitle};
 use super::state::LayoutUi;
 use super::tab_drag::TabDrag;
 use super::window_drag::WindowDragRegion;
-use crate::event::{HeaderRequest, StackRow, StacksHostEvent, TabRow, TabsHostEvent, TabsRequest};
+use crate::event::{
+    HeaderRequest, StackNavigationState, StackRow, TabListState, TabRow, TabsRequest,
+};
 use crate::extension::ExtensionBar;
 use crate::remote::RemoteControl;
 
@@ -62,13 +64,13 @@ fn HeaderContent() -> Element {
     let stacks_error = layout.error();
     let tabs_error = stacks_error.clone();
     let tab_drag = TabDrag::use_state();
-    let StacksHostEvent {
+    let StackNavigationState {
         stacks: _,
         can_go_back,
         can_go_forward,
         is_zoomed: _,
     } = stacks_state;
-    let TabsHostEvent { tabs } = tabs_state;
+    let TabListState { tabs } = tabs_state;
     let host_tab_order = tabs.iter().map(|tab| tab.id.clone()).collect::<Vec<_>>();
     let host_tab_activation = tabs
         .iter()

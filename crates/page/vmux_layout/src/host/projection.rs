@@ -5,8 +5,8 @@ use vmux_core::event::team::{TeamEvent, TeamMemberRow};
 use crate::LayoutUiStateUpdates;
 use crate::cef::LayoutCef;
 use crate::event::{
-    ActiveSession, ActiveSessionEvent, ActiveWorkspaceProject, HeaderPageEvent, PaneTreeEvent,
-    StackNode, StacksHostEvent, TabBoundaryEvent,
+    ActiveSession, ActiveSessionState, ActiveWorkspaceProject, HeaderPageState, PaneTreeState,
+    StackNavigationState, StackNode, TabBoundaryState,
 };
 
 pub struct LayoutUiProjectionPlugin;
@@ -18,16 +18,16 @@ impl Plugin for LayoutUiProjectionPlugin {
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-pub struct PaneTreeProjection(pub PaneTreeEvent);
+pub struct PaneTreeProjection(pub PaneTreeState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-pub struct ProjectProjection(pub TabBoundaryEvent);
+pub struct ProjectProjection(pub TabBoundaryState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct TeamProjection(pub TeamEvent);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-pub struct StackProjection(pub StacksHostEvent);
+pub struct StackProjection(pub StackNavigationState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct BookmarkProjection(pub BookmarkStateEvent);
@@ -59,8 +59,8 @@ impl ActiveWorkspaceProject {
 
 impl ActiveSession {
     fn from_projections(
-        panes: &PaneTreeEvent,
-        projects: &TabBoundaryEvent,
+        panes: &PaneTreeState,
+        projects: &TabBoundaryState,
         team: &TeamEvent,
     ) -> Option<Self> {
         let pane = panes
@@ -97,8 +97,8 @@ impl ActiveSession {
     }
 }
 
-impl HeaderPageEvent {
-    fn from_projections(stacks: &StacksHostEvent, bookmarks: &BookmarkStateEvent) -> Self {
+impl HeaderPageState {
+    fn from_projections(stacks: &StackNavigationState, bookmarks: &BookmarkStateEvent) -> Self {
         let active = stacks.stacks.iter().find(|stack| stack.is_active).cloned();
         let Some(url) = active
             .as_ref()
@@ -143,11 +143,11 @@ fn publish_active_session(
         ),
         With<LayoutCef>,
     >,
-    mut last: Local<std::collections::HashMap<Entity, ActiveSessionEvent>>,
+    mut last: Local<std::collections::HashMap<Entity, ActiveSessionState>>,
     mut commands: Commands,
 ) {
-    let empty_panes = PaneTreeEvent::default();
-    let empty_projects = TabBoundaryEvent::default();
+    let empty_panes = PaneTreeState::default();
+    let empty_projects = TabBoundaryState::default();
     let empty_team = TeamEvent::default();
     for (entity, panes, projects, team) in &layouts {
         let panes = panes
@@ -157,7 +157,7 @@ fn publish_active_session(
             .map(|projection| &projection.0)
             .unwrap_or(&empty_projects);
         let team = team.map(|projection| &projection.0).unwrap_or(&empty_team);
-        let event = ActiveSessionEvent {
+        let event = ActiveSessionState {
             session: ActiveSession::from_projections(panes, projects, team),
         };
         if last.get(&entity) == Some(&event) {
@@ -177,10 +177,10 @@ fn publish_header_page(
         ),
         With<LayoutCef>,
     >,
-    mut last: Local<std::collections::HashMap<Entity, HeaderPageEvent>>,
+    mut last: Local<std::collections::HashMap<Entity, HeaderPageState>>,
     mut commands: Commands,
 ) {
-    let empty_stacks = StacksHostEvent::default();
+    let empty_stacks = StackNavigationState::default();
     let empty_bookmarks = BookmarkStateEvent::default();
     for (entity, stacks, bookmarks) in &layouts {
         let stacks = stacks
@@ -189,7 +189,7 @@ fn publish_header_page(
         let bookmarks = bookmarks
             .map(|projection| &projection.0)
             .unwrap_or(&empty_bookmarks);
-        let event = HeaderPageEvent::from_projections(stacks, bookmarks);
+        let event = HeaderPageState::from_projections(stacks, bookmarks);
         if last.get(&entity) == Some(&event) {
             continue;
         }

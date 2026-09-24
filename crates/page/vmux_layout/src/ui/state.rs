@@ -9,22 +9,22 @@ use vmux_ui::hooks::{send, use_ui_state_root};
 
 use super::update::UpdatePhase;
 use crate::event::{
-    ActiveSession, HeaderPageEvent, LayoutStateEvent, PaneTreeEvent, RemoteUiState,
-    StacksHostEvent, TabBoundaryEvent, TabsHostEvent,
+    ActiveSession, HeaderPageState, LayoutGeometry, PaneTreeState, RemoteUiState,
+    StackNavigationState, TabBoundaryState, TabListState,
 };
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
 
 #[derive(Clone, Default)]
 pub(crate) struct LayoutPageState {
-    pub layout: Option<LayoutStateEvent>,
-    pub stacks: Option<StacksHostEvent>,
-    pub tabs: Option<TabsHostEvent>,
+    pub layout: Option<LayoutGeometry>,
+    pub stacks: Option<StackNavigationState>,
+    pub tabs: Option<TabListState>,
     pub bookmarks: BookmarkStateEvent,
-    pub pane_tree: Option<PaneTreeEvent>,
+    pub pane_tree: Option<PaneTreeState>,
     pub spaces: Option<SpacesListEvent>,
-    pub projects: TabBoundaryEvent,
+    pub projects: TabBoundaryState,
     pub active_session: Option<ActiveSession>,
-    pub header_page: HeaderPageEvent,
+    pub header_page: HeaderPageState,
     pub team: TeamEvent,
     pub remote: RemoteUiState,
     pub extensions: ExtensionsEvent,
@@ -146,11 +146,11 @@ impl LayoutUi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{LayoutStateEvent, ReloadEvent};
+    use crate::event::{LayoutGeometry, ReloadEffect};
 
     fn state(header_open: bool, side_sheet_open: bool) -> LayoutPageState {
         LayoutPageState {
-            layout: Some(LayoutStateEvent {
+            layout: Some(LayoutGeometry {
                 header_open,
                 side_sheet_open,
                 ..Default::default()
@@ -170,7 +170,7 @@ mod tests {
                 uuid: Some("bookmark".to_string()),
             },
         ));
-        state.apply(&LayoutUiStatePatch::Reload(ReloadEvent));
+        state.apply(&LayoutUiStatePatch::Reload(ReloadEffect));
 
         assert_eq!(state.bookmark_menu_action.sequence, 4);
         assert_eq!(state.bookmark_menu_action.action, "rename");
