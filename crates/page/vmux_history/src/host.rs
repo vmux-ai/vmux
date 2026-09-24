@@ -1,6 +1,7 @@
 pub mod prune;
 pub mod query;
 pub mod spawn;
+mod state;
 pub mod transition;
 
 use bevy::prelude::*;
@@ -18,6 +19,7 @@ impl Plugin for HistoryPlugin {
         ));
         app.add_plugins((
             crate::spawn::HistorySpawnPlugin,
+            crate::host::state::StatePlugin,
             crate::query::HistoryQueryPlugin,
             crate::prune::HistoryPrunePlugin,
         ));

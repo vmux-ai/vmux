@@ -1,16 +1,17 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    HistoryChangedEvent, HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry,
-    HistoryOpenRequest, HistoryQueryRequest, HistoryQueryResponse,
+    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryOpenRequest,
+    HistoryQueryRequest,
 };
+use crate::state::{HistoryUiState, HistoryUiStatePatch};
 use dioxus::prelude::*;
 use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::now_millis;
 
@@ -37,17 +38,29 @@ pub fn Page() -> Element {
     let mut has_more: Signal<bool> = use_signal(|| true);
     let mut request_id: Signal<u64> = use_signal(|| 0);
     let mut last_reset_id: Signal<u64> = use_signal(|| 0);
+    let state = use_ui_state_root::<HistoryUiState>();
+    let mut handled_sequence = use_signal(|| 0);
 
-    let _listener = use_listener::<HistoryQueryResponse, _>(move |resp: HistoryQueryResponse| {
-        if resp.request_id < *last_reset_id.read() {
+    use_effect(move || {
+        let state = state.state.read();
+        if state.sequence == 0 || state.sequence == *handled_sequence.peek() {
             return;
         }
-        if resp.request_id == *last_reset_id.read() {
-            entries.set(resp.entries);
-        } else {
-            entries.write().extend(resp.entries);
+        handled_sequence.set(state.sequence);
+        for patch in &state.patches {
+            let HistoryUiStatePatch::Query(response) = patch;
+            if response.request_id < *last_reset_id.peek() {
+                continue;
+            }
+            if response.offset == 0 {
+                entries.set(response.entries.clone());
+                offset.set(0);
+                last_reset_id.set(response.request_id);
+            } else {
+                entries.write().extend(response.entries.clone());
+            }
+            has_more.set(response.has_more);
         }
-        has_more.set(resp.has_more);
     });
 
     use_effect(move || {
@@ -55,16 +68,6 @@ pub fn Page() -> Element {
         last_reset_id.set(1);
         emit_query("", 0, 1);
     });
-
-    let _changed_listener =
-        use_listener::<HistoryChangedEvent, _>(move |_: HistoryChangedEvent| {
-            let new_id = *request_id.peek() + 1;
-            request_id.set(new_id);
-            offset.set(0);
-            last_reset_id.set(new_id);
-            let q = query.peek().clone();
-            emit_query(&q, 0, new_id);
-        });
 
     let load_more = move |e: Event<VisibleData>| {
         if !e.is_intersecting().unwrap_or(false) {
