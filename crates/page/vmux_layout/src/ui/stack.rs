@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use vmux_api::bookmark::BookmarkFolderChoice;
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
@@ -7,8 +8,8 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 
 use super::bookmark::{
-    BookmarkDragItem, BookmarkDragState, BookmarkFolderChoice, BookmarkPageCommand,
-    LayoutContextMenu, SideSheetContextMenuContent,
+    BookmarkDragItem, BookmarkDragState, BookmarkPageCommand, LayoutContextMenu,
+    SideSheetContextMenuContent,
 };
 use crate::event::StackNode;
 

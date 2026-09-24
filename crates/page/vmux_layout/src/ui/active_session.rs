@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::event::team::TeamMemberRow;
 use vmux_core::event::{ProjectRow, ProjectTreeToggle, TabWorkspaceRequest};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::badge::Badge;
@@ -15,99 +14,16 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{BuiltinIconView, GitIconView, LineIcon, LineIconView, PageIconView};
 
-use crate::event::{SideSheetRequest, StackNode, TabBoundary};
-
-#[derive(Clone, PartialEq)]
-struct ActiveSessionInfo {
-    page: StackNode,
-    agent: Option<TeamMemberRow>,
-    project: Option<ActiveWorkspaceProject>,
-    boundary: Option<TabBoundary>,
-}
-
-#[derive(Clone, PartialEq)]
-struct ActiveWorkspaceProject {
-    root: ProjectRow,
-    children: Vec<ProjectRow>,
-    choices: Vec<ProjectRow>,
-}
-
-impl ActiveWorkspaceProject {
-    fn find(projects: &[ProjectRow]) -> Option<Self> {
-        let index = projects
-            .iter()
-            .position(|project| project.depth == 0 && project.is_active)?;
-        let root = projects[index].clone();
-        let children = projects
-            .iter()
-            .skip(index + 1)
-            .take_while(|project| project.depth > 0)
-            .cloned()
-            .collect();
-        let choices = projects
-            .iter()
-            .filter(|project| project.depth == 0 && !project.missing)
-            .cloned()
-            .collect();
-        Some(Self {
-            root,
-            children,
-            choices,
-        })
-    }
-}
-
-impl ActiveSessionInfo {
-    fn resolve(
-        page: Option<StackNode>,
-        team: &[TeamMemberRow],
-        projects: &[ProjectRow],
-        boundary: Option<TabBoundary>,
-    ) -> Option<Self> {
-        let page = page?;
-        let agent = Self::agent_for(&page.url, team);
-        let project = ActiveWorkspaceProject::find(projects);
-        Some(Self {
-            page,
-            agent,
-            project,
-            boundary,
-        })
-    }
-
-    fn agent_for(url: &str, team: &[TeamMemberRow]) -> Option<TeamMemberRow> {
-        for member in team.iter().filter(|member| !member.is_user) {
-            if member.sid.is_empty() {
-                continue;
-            }
-            let segment = format!("/{}", member.sid);
-            if url.ends_with(&segment) || url.contains(&format!("{segment}/")) {
-                return Some(member.clone());
-            }
-        }
-        team.iter()
-            .filter(|member| !member.is_user && !member.url.is_empty())
-            .find(|member| url.trim_end_matches('/') == member.url.trim_end_matches('/'))
-            .cloned()
-    }
-}
+use crate::event::{ActiveSession, ActiveWorkspaceProject, SideSheetRequest, TabBoundary};
 
 #[component]
-pub(crate) fn ActiveSessionPanel(
-    active_page: Option<StackNode>,
-    team: Vec<TeamMemberRow>,
-    projects: Vec<ProjectRow>,
-    boundary: Option<TabBoundary>,
-    pane_id: u64,
-) -> Element {
-    let Some(session) = ActiveSessionInfo::resolve(active_page, &team, &projects, boundary) else {
-        return rsx! {};
-    };
-    let ActiveSessionInfo {
+pub(crate) fn ActiveSessionPanel(session: ActiveSession) -> Element {
+    let ActiveSession {
         page,
         agent,
         project,
         boundary,
+        pane_id,
     } = session;
     let title = if page.title.trim().is_empty() {
         page.url.clone()
@@ -402,35 +318,5 @@ fn ActiveWorkspaceProjectRow(project: ProjectRow, pane_id: u64) -> Element {
                 },
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn active_session_matches_the_agent_by_session_id() {
-        let team = vec![
-            TeamMemberRow {
-                id: "first".into(),
-                name: "Codex one".into(),
-                url: "vmux://sessions/codex/".into(),
-                sid: "session-one".into(),
-                ..Default::default()
-            },
-            TeamMemberRow {
-                id: "second".into(),
-                name: "Codex two".into(),
-                url: "vmux://sessions/codex/".into(),
-                sid: "session-two".into(),
-                ..Default::default()
-            },
-        ];
-
-        let agent =
-            ActiveSessionInfo::agent_for("vmux://sessions/codex/cli/session-two", &team).unwrap();
-
-        assert_eq!(agent.id, "second");
     }
 }

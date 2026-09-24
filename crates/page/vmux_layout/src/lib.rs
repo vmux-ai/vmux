@@ -16,9 +16,6 @@ pub mod tool_page;
 pub mod ui;
 
 #[cfg(ui)]
-mod active_session;
-
-#[cfg(ui)]
 mod extension;
 
 #[cfg(ui)]

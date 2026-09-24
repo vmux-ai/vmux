@@ -12,6 +12,7 @@ use vmux_core::{PageMetadata, focus_pane_entity};
 use vmux_layout::LayoutUiStateUpdates;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
+use vmux_layout::projection::TeamProjection;
 use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
 use vmux_layout::stack::Stack;
 use vmux_service::agent_events::AgentCommandRequest;
@@ -90,6 +91,9 @@ struct TeamViews<'w, 's> {
             With<TeamListSent>,
         ),
     >,
+    layout_cefs: Query<'w, 's, (), With<LayoutCef>>,
+    layout_ui: Query<'w, 's, (), With<LayoutUiStateUpdates>>,
+    team_projections: Query<'w, 's, &'static TeamProjection>,
 }
 
 fn spawn_user_profile(mut commands: Commands) {
@@ -336,7 +340,6 @@ fn emit_team(
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
     profile_labels: Query<(&ProfileId, &Name, Has<vmux_core::Active>), With<ProfileLabel>>,
-    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     mut last: Local<std::collections::HashMap<Entity, TeamEvent>>,
     mut commands: Commands,
 ) {
@@ -374,13 +377,22 @@ fn emit_team(
             ),
             profiles: build_profiles(&profile_labels),
         };
+        let projection_changed = match views.team_projections.get(entity) {
+            Ok(projection) => projection.0 != payload,
+            Err(_) => true,
+        };
+        if views.layout_cefs.contains(entity) && projection_changed {
+            commands
+                .entity(entity)
+                .insert(TeamProjection(payload.clone()));
+        }
         if !pending && last.get(&entity) == Some(&payload) {
             continue;
         }
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        LayoutUiStateUpdates::deliver(&layout_ui, &mut commands, entity, &payload);
+        LayoutUiStateUpdates::deliver(&views.layout_ui, &mut commands, entity, &payload);
         commands.entity(entity).insert(TeamListSent);
         last.insert(entity, payload);
     }

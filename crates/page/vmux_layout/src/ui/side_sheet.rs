@@ -1,4 +1,3 @@
-use crate::active_session::ActiveSessionPanel;
 use crate::event::{PaneNode, PaneTreeEvent};
 use dioxus::prelude::*;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
@@ -9,9 +8,10 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::scroll::ScrollIntoView;
 
+use super::active_session::ActiveSessionPanel;
 use super::bookmark::{
-    BookmarkContext, BookmarkDragState, BookmarkFolderChoice, BookmarkInput, BookmarksSection,
-    LayoutContextMenu, OptimisticPinOrder,
+    BookmarkContext, BookmarkDragState, BookmarkInput, BookmarksSection, LayoutContextMenu,
+    OptimisticPinOrder,
 };
 use super::stack::{NewStackRow, SideSheetStackRow};
 use super::state::LayoutUi;
@@ -128,9 +128,7 @@ fn SideSheetContent() -> Element {
         .into_iter()
         .find(|space| space.is_active);
     let bookmarks = ui.bookmarks;
-    let projects = ui.projects.projects;
-    let boundary = ui.projects.boundary;
-    let team = ui.team.members;
+    let active_session = ui.active_session;
     let pane_tree_error = layout.error();
     let update_phase = ui.update;
     let reveal = StackReveal::side_sheet(use_signal(|| None::<(u64, u64)>));
@@ -168,12 +166,8 @@ fn SideSheetContent() -> Element {
         .find(|pane| pane.is_active)
         .or_else(|| panes.first())
         .cloned();
-    let active_page = active_pane
-        .as_ref()
-        .and_then(|pane| pane.stacks.iter().find(|stack| stack.is_active))
-        .filter(|stack| !stack.url.is_empty())
-        .cloned();
-    let folders = BookmarkFolderChoice::all(&bookmarks.roots);
+    let active_page = active_session.as_ref().map(|session| session.page.clone());
+    let folders = bookmarks.folders.clone();
     let initial_folders = folders.clone();
     let mut folder_context = use_signal(|| initial_folders);
     let drag_state = use_signal(|| None::<BookmarkDragState>);
@@ -204,12 +198,8 @@ fn SideSheetContent() -> Element {
                     if let Some(space) = active_space {
                         div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                             SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
-                            ActiveSessionPanel {
-                                active_page: active_page.clone(),
-                                team: team.clone(),
-                                projects: projects.clone(),
-                                boundary: boundary.clone(),
-                                pane_id: active_pane.as_ref().map(|pane| pane.id).unwrap_or_default(),
+                            if let Some(session) = active_session {
+                                ActiveSessionPanel { session }
                             }
                         }
                     }

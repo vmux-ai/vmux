@@ -9,8 +9,8 @@ use vmux_ui::hooks::{send, use_ui_state_root};
 
 use super::update::UpdatePhase;
 use crate::event::{
-    LayoutStateEvent, PaneTreeEvent, RemoteStateEvent, StacksHostEvent, TabBoundaryEvent,
-    TabsHostEvent,
+    ActiveSession, HeaderPageEvent, LayoutStateEvent, PaneTreeEvent, RemoteStateEvent,
+    StacksHostEvent, TabBoundaryEvent, TabsHostEvent,
 };
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
 
@@ -23,6 +23,8 @@ pub(crate) struct LayoutPageState {
     pub pane_tree: Option<PaneTreeEvent>,
     pub spaces: Option<SpacesListEvent>,
     pub projects: TabBoundaryEvent,
+    pub active_session: Option<ActiveSession>,
+    pub header_page: HeaderPageEvent,
     pub team: TeamEvent,
     pub remote: RemoteStateEvent,
     pub extensions: ExtensionsEvent,
@@ -68,6 +70,8 @@ impl LayoutPageState {
             LayoutUiStatePatch::PaneTree(event) => self.pane_tree = Some(event.clone()),
             LayoutUiStatePatch::Spaces(event) => self.spaces = Some(event.clone()),
             LayoutUiStatePatch::Projects(event) => self.projects = event.clone(),
+            LayoutUiStatePatch::ActiveSession(event) => self.active_session = event.session.clone(),
+            LayoutUiStatePatch::HeaderPage(event) => self.header_page = event.clone(),
             LayoutUiStatePatch::Team(event) => self.team = event.clone(),
             LayoutUiStatePatch::Remote(event) => self.remote = event.clone(),
             LayoutUiStatePatch::Extensions(event) => self.extensions = event.clone(),

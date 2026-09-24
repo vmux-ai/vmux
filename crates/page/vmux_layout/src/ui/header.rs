@@ -13,7 +13,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::util::cn;
 
-use super::bookmark::{BookmarkIdCommand, BookmarkPageCommand, BookmarkTree, LayoutContextMenu};
+use super::bookmark::{BookmarkIdCommand, BookmarkPageCommand, LayoutContextMenu};
 use super::stack::{StackIcon, StackTitle};
 use super::state::LayoutUi;
 use super::tab_drag::TabDrag;
@@ -54,7 +54,7 @@ fn HeaderContent() -> Element {
     let ui = layout.value();
     let stacks_state = ui.stacks.unwrap_or_default();
     let tabs_state = ui.tabs.unwrap_or_default();
-    let bookmarks = ui.bookmarks;
+    let header_page = ui.header_page;
     let team = ui.team.members;
     let extensions = ui.extensions.extensions;
     let remote = ui.remote;
@@ -63,7 +63,7 @@ fn HeaderContent() -> Element {
     let tabs_error = stacks_error.clone();
     let tab_drag = TabDrag::use_state();
     let StacksHostEvent {
-        stacks,
+        stacks: _,
         can_go_back,
         can_go_forward,
         is_zoomed: _,
@@ -89,24 +89,15 @@ fn HeaderContent() -> Element {
     }));
     let tabs = tab_drag.ordered(tabs);
     let tab_metrics_style = TabDrag::metrics_style();
-    let active_row = stacks.iter().find(|t| t.is_active).cloned();
+    let active_row = header_page.active;
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
     let active_url = active_row
         .as_ref()
         .map(|r| r.url.clone())
         .unwrap_or_default();
     let show_bookmark = !active_url.is_empty();
-    let is_bookmarked = show_bookmark
-        && (BookmarkTree::contains_url(&bookmarks.roots, &active_url)
-            || bookmarks
-                .pins
-                .iter()
-                .any(|pin| pin.metadata.url == active_url && pin.bookmarked));
-    let pinned_uuid = bookmarks
-        .pins
-        .iter()
-        .find(|pin| pin.metadata.url == active_url)
-        .map(|pin| pin.uuid.clone());
+    let is_bookmarked = header_page.bookmarked;
+    let pinned_uuid = header_page.pinned_uuid;
     let is_pinned = pinned_uuid.is_some();
     let active_metadata = active_row.as_ref().map(|row| PageMetadata {
         title: row.title.clone(),
