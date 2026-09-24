@@ -60,7 +60,7 @@ struct KeyboardState {
 struct PendingKeyboardInput {
     commands: Vec<String>,
     simulator_buttons: Vec<vmux_simulator::event::HardwareButton>,
-    simulator_clipboard: Vec<vmux_simulator::event::SimulatorClipboardAction>,
+    simulator_clipboard: Vec<vmux_simulator::event::SimulatorClipboardOperation>,
     simulator_keyboard: usize,
     shortcut_captures: Vec<PendingShortcutCapture>,
     shortcut_releases: Vec<vmux_shortcut::ShortcutCaptureToken>,
@@ -115,7 +115,7 @@ fn simulator_button(combo: &KeyCombo) -> Option<vmux_simulator::event::HardwareB
 
 fn simulator_clipboard(
     combo: &KeyCombo,
-) -> Option<vmux_simulator::event::SimulatorClipboardAction> {
+) -> Option<vmux_simulator::event::SimulatorClipboardOperation> {
     if !combo.modifiers.super_key
         || combo.modifiers.ctrl
         || combo.modifiers.alt
@@ -124,10 +124,10 @@ fn simulator_clipboard(
         return None;
     }
     match combo.key {
-        KeyCode::KeyA => Some(vmux_simulator::event::SimulatorClipboardAction::SelectAll),
-        KeyCode::KeyC => Some(vmux_simulator::event::SimulatorClipboardAction::Copy),
-        KeyCode::KeyX => Some(vmux_simulator::event::SimulatorClipboardAction::Cut),
-        KeyCode::KeyV => Some(vmux_simulator::event::SimulatorClipboardAction::Paste),
+        KeyCode::KeyA => Some(vmux_simulator::event::SimulatorClipboardOperation::SelectAll),
+        KeyCode::KeyC => Some(vmux_simulator::event::SimulatorClipboardOperation::Copy),
+        KeyCode::KeyX => Some(vmux_simulator::event::SimulatorClipboardOperation::Cut),
+        KeyCode::KeyV => Some(vmux_simulator::event::SimulatorClipboardOperation::Paste),
         _ => None,
     }
 }
@@ -596,9 +596,11 @@ impl KeyboardRuntime {
             }
         }
         if let Some(simulator_clipboard) = simulator_clipboard.as_mut() {
-            for action in pending.simulator_clipboard {
-                simulator_clipboard
-                    .write(vmux_simulator::SimulatorClipboardRequest { view: None, action });
+            for operation in pending.simulator_clipboard {
+                simulator_clipboard.write(vmux_simulator::SimulatorClipboardRequest {
+                    view: None,
+                    operation,
+                });
             }
         }
         if let Some(simulator_keyboard) = simulator_keyboard.as_mut() {
@@ -805,23 +807,23 @@ mod tests {
 
     #[test]
     fn simulator_clipboard_shortcuts_map_command_edit_actions() {
-        use vmux_simulator::event::SimulatorClipboardAction;
+        use vmux_simulator::event::SimulatorClipboardOperation;
 
         assert_eq!(
             simulator_clipboard(&super_combo(KeyCode::KeyA)),
-            Some(SimulatorClipboardAction::SelectAll)
+            Some(SimulatorClipboardOperation::SelectAll)
         );
         assert_eq!(
             simulator_clipboard(&super_combo(KeyCode::KeyC)),
-            Some(SimulatorClipboardAction::Copy)
+            Some(SimulatorClipboardOperation::Copy)
         );
         assert_eq!(
             simulator_clipboard(&super_combo(KeyCode::KeyX)),
-            Some(SimulatorClipboardAction::Cut)
+            Some(SimulatorClipboardOperation::Cut)
         );
         assert_eq!(
             simulator_clipboard(&super_combo(KeyCode::KeyV)),
-            Some(SimulatorClipboardAction::Paste)
+            Some(SimulatorClipboardOperation::Paste)
         );
     }
 
