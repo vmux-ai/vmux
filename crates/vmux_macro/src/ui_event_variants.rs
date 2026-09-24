@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
 use syn::{Data, DeriveInput, Field, Fields, Ident, LitInt, LitStr, Path, Token, parenthesized};
 
 mod keyword {
@@ -204,7 +203,7 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
         let ty = &field.ty;
         quote!(#ident: #ty)
     });
-    let operation = crate::contract::expand_with_derives(input, args.derives.iter());
+    let operation = crate::contract::expand_with_derives(input.clone(), args.derives.iter());
 
     Ok(quote! {
         #operation
