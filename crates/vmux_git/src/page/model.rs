@@ -1,51 +1,13 @@
 use dioxus::prelude::*;
 use vmux_ui::i18n::translate;
-use vmux_ui::list_nav::{MenuDirection, move_selection};
-use vmux_ui::scroll::ScrollIntoView;
+use vmux_ui::list_nav::MenuDirection;
 
-use crate::event::{FileStatus, GitFileEntry, GitOperation, GitRepositoryEvent, GitResultEvent};
-
-use super::workspace::GitWorkspace;
+use crate::event::{FileStatus, GitFileEntry, GitRepositoryEvent, GitResultEvent};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum BranchPrompt {
     Create { base: String },
     Delete { branch: String },
-}
-
-impl BranchPrompt {
-    pub(super) fn submit(
-        &self,
-        repo_root: &str,
-        draft: Signal<String>,
-        mut pending_checkout: Signal<String>,
-    ) -> bool {
-        match self {
-            Self::Create { base } => {
-                let branch = draft().trim().to_string();
-                if branch.is_empty() {
-                    return false;
-                }
-                pending_checkout.set(branch.clone());
-                GitWorkspace::operate(
-                    repo_root,
-                    GitOperation::CreateBranch {
-                        branch,
-                        start_point: base.clone(),
-                    },
-                );
-            }
-            Self::Delete { branch } => {
-                GitWorkspace::operate(
-                    repo_root,
-                    GitOperation::DeleteBranch {
-                        branch: branch.clone(),
-                    },
-                );
-            }
-        }
-        true
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -105,17 +67,6 @@ pub(super) enum GitPanel {
     Stash,
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct GitPanelSelection {
-    pub(super) path: Signal<String>,
-    pub(super) path_bytes: Signal<Vec<u8>>,
-    pub(super) absolute_path: Signal<String>,
-    pub(super) branch: Signal<String>,
-    pub(super) branch_collection: Signal<BranchCollection>,
-    pub(super) commit: Signal<String>,
-    pub(super) stash: Signal<String>,
-}
-
 impl GitPanel {
     pub(super) fn menu_direction(event: &KeyboardData) -> Option<MenuDirection> {
         let modifiers = event.modifiers();
@@ -153,98 +104,6 @@ impl GitPanel {
             (Self::Branches, true) => Self::Files,
             (Self::Commits, true) => Self::Branches,
             (Self::Stash, true) => Self::Commits,
-        }
-    }
-
-    pub(super) fn move_selection(
-        self,
-        repository: &GitRepositoryEvent,
-        mut selection: GitPanelSelection,
-        direction: MenuDirection,
-    ) -> bool {
-        match self {
-            Self::Status => false,
-            Self::Files => {
-                let len = repository.files.len();
-                if len == 0 {
-                    return false;
-                }
-                let current = repository
-                    .files
-                    .iter()
-                    .position(|entry| entry.path_bytes == (selection.path_bytes)())
-                    .unwrap_or(match direction {
-                        MenuDirection::Next => len - 1,
-                        MenuDirection::Previous => 0,
-                    });
-                let index = move_selection(current, len, direction);
-                let entry = &repository.files[index];
-                selection.path.set(entry.path.clone());
-                selection.path_bytes.set(entry.path_bytes.clone());
-                selection.absolute_path.set(GitWorkspace::absolute_path(
-                    &repository.repo_root,
-                    &entry.path,
-                ));
-                let section = if entry.staged { "staged" } else { "unstaged" };
-                ScrollIntoView::nearest(&format!("git-file-{section}-row-{index}"));
-                true
-            }
-            Self::Branches => {
-                let references = (selection.branch_collection)().references(repository);
-                let len = references.len();
-                if len == 0 {
-                    return false;
-                }
-                let current = references
-                    .iter()
-                    .position(|reference| reference == &(selection.branch)())
-                    .unwrap_or(match direction {
-                        MenuDirection::Next => len - 1,
-                        MenuDirection::Previous => 0,
-                    });
-                let index = move_selection(current, len, direction);
-                selection.branch.set(references[index].clone());
-                ScrollIntoView::nearest(&format!("git-branch-row-{index}"));
-                true
-            }
-            Self::Commits => {
-                let len = repository.commits.len();
-                if len == 0 {
-                    return false;
-                }
-                let current = repository
-                    .commits
-                    .iter()
-                    .position(|entry| entry.sha == (selection.commit)())
-                    .unwrap_or(match direction {
-                        MenuDirection::Next => len - 1,
-                        MenuDirection::Previous => 0,
-                    });
-                let index = move_selection(current, len, direction);
-                selection.commit.set(repository.commits[index].sha.clone());
-                ScrollIntoView::nearest(&format!("git-commit-row-{index}"));
-                true
-            }
-            Self::Stash => {
-                let len = repository.stashes.len();
-                if len == 0 {
-                    return false;
-                }
-                let current = repository
-                    .stashes
-                    .iter()
-                    .position(|entry| entry.reference == (selection.stash)())
-                    .unwrap_or(match direction {
-                        MenuDirection::Next => len - 1,
-                        MenuDirection::Previous => 0,
-                    });
-                let index = move_selection(current, len, direction);
-                selection
-                    .stash
-                    .set(repository.stashes[index].reference.clone());
-                ScrollIntoView::nearest(&format!("git-stash-row-{index}"));
-                true
-            }
         }
     }
 }

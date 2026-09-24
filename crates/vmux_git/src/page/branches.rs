@@ -15,13 +15,13 @@ use super::panel::{HeaderActionButton, PanelHeader, PanelIcon};
 use super::workspace::GitWorkspace;
 
 #[component]
-pub(super) fn BranchPromptDialog(
-    prompt: BranchPrompt,
-    repo_root: String,
-    draft: Signal<String>,
-    pending_checkout: Signal<String>,
-    on_close: EventHandler<()>,
-) -> Element {
+pub(super) fn BranchPromptDialog() -> Element {
+    let state = use_context::<super::state::GitPageState>();
+    let mut branch_prompt = state.branch_prompt;
+    let mut draft = state.branch_draft;
+    let Some(prompt) = branch_prompt() else {
+        return rsx! {};
+    };
     let title = match &prompt {
         BranchPrompt::Create { .. } => translate("git-new-branch"),
         BranchPrompt::Delete { .. } => translate("git-delete-branch"),
@@ -32,7 +32,7 @@ pub(super) fn BranchPromptDialog(
             open: true,
             on_open_change: move |open: bool| {
                 if !open {
-                    on_close.call(());
+                    branch_prompt.set(None);
                 }
             },
             attributes: vec![],
@@ -47,14 +47,13 @@ pub(super) fn BranchPromptDialog(
                         oninput: move |event: Event<FormData>| draft.set(event.value()),
                         onkeydown: {
                             let prompt = prompt.clone();
-                            let repo_root = repo_root.clone();
                             move |event: KeyboardEvent| {
                                 event.stop_propagation();
                                 if event.key() == Key::Enter
-                                    && prompt.submit(&repo_root, draft, pending_checkout)
+                                    && state.submit_branch_prompt(&prompt)
                                 {
                                     event.prevent_default();
-                                    on_close.call(());
+                                    branch_prompt.set(None);
                                 }
                             }
                         },
@@ -66,7 +65,7 @@ pub(super) fn BranchPromptDialog(
                     Button {
                         size: ButtonSize::Xs,
                         variant: ButtonVariant::Ghost,
-                        onclick: move |_| on_close.call(()),
+                        onclick: move |_| branch_prompt.set(None),
                         {translate("common-cancel")}
                     }
                     Button {
@@ -76,8 +75,8 @@ pub(super) fn BranchPromptDialog(
                         onclick: {
                             let prompt = prompt.clone();
                             move |_| {
-                                if prompt.submit(&repo_root, draft, pending_checkout) {
-                                    on_close.call(());
+                                if state.submit_branch_prompt(&prompt) {
+                                    branch_prompt.set(None);
                                 }
                             }
                         },

@@ -8,7 +8,7 @@ use vmux_ui::i18n::translate;
 use super::branches::BranchPromptDialog;
 use super::dashboard::GitDashboard;
 use super::empty::EmptyRepository;
-use super::model::{BranchCollection, BranchPrompt, GitPanel, GitPanelSelection};
+use super::model::{BranchCollection, BranchPrompt, GitPanel};
 use super::state::GitPageState;
 use super::workspace::GitWorkspace;
 use crate::event::*;
@@ -25,39 +25,24 @@ pub static LEGACY_NATIVE_PAGE: vmux_native::NativePage =
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    let state = GitPageState::use_state();
+    use_context_provider(|| state);
     let GitPageState {
         workspace,
         repository,
-        directory,
-        directory_selected,
-        directory_children,
-        directory_preview_path,
-        directory_came_from,
-        directory_show_hidden,
-        selected_path,
         selected_path_bytes,
-        selected_abs_path,
         selected_commit,
         selected_branch,
         branch_collection,
         mut branch_prompt,
         mut branch_draft,
-        pending_branch_checkout,
         selected_stash,
         mut confirm_discard,
-        commit_message,
-        pending_commit_message,
-        fetching,
-        loading,
-        message,
         mut focused_panel,
-        command_log,
         branch_log,
         mut shortcut_help,
-        nonce,
-        markers,
-        diff_viewport,
-    } = GitPageState::use_state();
+        ..
+    } = state;
 
     use_effect(move || {
         let _ = send(&PageContextRequest {});
@@ -92,22 +77,7 @@ pub fn Page() -> Element {
                     return;
                 }
                 if let Some(direction) = GitPanel::menu_direction(&event) {
-                    let Some(repository) = repository() else {
-                        return;
-                    };
-                    if focused_panel().move_selection(
-                        &repository,
-                        GitPanelSelection {
-                            path: selected_path,
-                            path_bytes: selected_path_bytes,
-                            absolute_path: selected_abs_path,
-                            branch: selected_branch,
-                            branch_collection,
-                            commit: selected_commit,
-                            stash: selected_stash,
-                        },
-                        direction,
-                    ) {
+                    if state.move_selection(direction) {
                         event.prevent_default();
                         event.stop_propagation();
                     }
@@ -345,52 +315,13 @@ pub fn Page() -> Element {
                     event.stop_propagation();
                 }
             },
-            if let Some(repository) = repository() {
-                GitDashboard {
-                    repository,
-                    selected_path,
-                    selected_path_bytes,
-                    selected_abs_path,
-                    selected_commit,
-                    selected_branch,
-                    branch_collection,
-                    branch_prompt,
-                    branch_draft,
-                    selected_stash,
-                    confirm_discard,
-                    commit_message,
-                    pending_commit_message,
-                    workspace,
-                    nonce,
-                    markers,
-                    diff_viewport,
-                    focused_panel,
-                    command_log,
-                    branch_log,
-                    shortcut_help,
-                    fetching,
-                }
+            if repository().is_some() {
+                GitDashboard {}
             } else {
-                EmptyRepository {
-                    loading: loading(),
-                    workspace: workspace(),
-                    directory: directory(),
-                    selected: directory_selected,
-                    directory_children,
-                    preview_path: directory_preview_path,
-                    came_from: directory_came_from,
-                    show_hidden: directory_show_hidden,
-                    message: message(),
-                }
+                EmptyRepository {}
             }
-            if let Some(prompt) = branch_prompt() {
-                BranchPromptDialog {
-                    prompt,
-                    repo_root: workspace(),
-                    draft: branch_draft,
-                    pending_checkout: pending_branch_checkout,
-                    on_close: move |_| branch_prompt.set(None),
-                }
+            if branch_prompt().is_some() {
+                BranchPromptDialog {}
             }
         }
     }
