@@ -35,7 +35,7 @@ pub fn Page() -> Element {
     use_theme();
     let layout_ui = LayoutUi::use_state();
     layout_ui.provide();
-    let bookmark_menu_state = use_memo(move || layout_ui.value().bookmark_menu_action);
+    let bookmark_menu_state = use_memo(move || layout_ui.value().bookmark_menu);
     use_context_provider(|| bookmark_menu_state);
 
     rsx! {

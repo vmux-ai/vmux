@@ -6,7 +6,7 @@ use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkContextMenuRequest, BookmarkFolderChoice,
     BookmarkFolderCreateRequest, BookmarkFolderMoveRequest, BookmarkFolderRemoveRequest,
     BookmarkFolderRenameRequest, BookmarkFolderRow, BookmarkFolderToggleRequest,
-    BookmarkMenuActionEvent, BookmarkMenuEntryRequest, BookmarkMenuFolderRequest,
+    BookmarkMenuEffect, BookmarkMenuEntryRequest, BookmarkMenuFolderRequest, BookmarkMenuInput,
     BookmarkMenuPinRequest, BookmarkMenuRootRequest, BookmarkMovePinRequest, BookmarkMoveRequest,
     BookmarkNode, BookmarkOpenRequest, BookmarkPinRequest, BookmarkPinUrlRequest,
     BookmarkRemoveRequest, BookmarkRenameRequest, BookmarkReorderPinRequest, BookmarkRow,
@@ -44,16 +44,19 @@ pub(super) fn BookmarksSection(
     let mut optimistic_pin_order: Signal<Option<OptimisticPinOrder>> = use_context();
     let mut creating_folder = use_signal(|| false);
     let new_folder_draft = use_signal(|| translate("layout-new-folder"));
-    let bookmark_menu_action: Memo<BookmarkMenuActionEvent> = use_context();
-    let initial_menu_action = bookmark_menu_action.peek().sequence;
-    let mut handled_menu_action = use_signal(|| initial_menu_action);
+    let bookmark_menu: Memo<BookmarkMenuEffect> = use_context();
+    let initial_menu_revision = bookmark_menu.peek().revision;
+    let mut handled_menu_revision = use_signal(|| initial_menu_revision);
     use_effect(move || {
-        let action = bookmark_menu_action();
-        if action.sequence == handled_menu_action() {
+        let effect = bookmark_menu();
+        if effect.revision == handled_menu_revision() {
             return;
         }
-        handled_menu_action.set(action.sequence);
-        if action.action == "new_folder" && action.uuid.is_none() {
+        handled_menu_revision.set(effect.revision);
+        if matches!(
+            effect.input,
+            Some(BookmarkMenuInput::CreateFolder { parent: None })
+        ) {
             begin_new_folder(creating_folder, new_folder_draft);
         }
     });
@@ -893,23 +896,26 @@ fn BookmarkFolder(
     let child_draft = use_signal(|| translate("layout-new-folder"));
     let menu_val = use_signal(|| folder.uuid.clone());
     let new_folder_uuid = uuid.clone();
-    let bookmark_menu_action: Memo<BookmarkMenuActionEvent> = use_context();
-    let initial_menu_action = bookmark_menu_action.peek().sequence;
-    let mut handled_menu_action = use_signal(|| initial_menu_action);
-    let menu_action_uuid = uuid.clone();
-    let menu_action_name = folder.name.clone();
+    let bookmark_menu: Memo<BookmarkMenuEffect> = use_context();
+    let initial_menu_revision = bookmark_menu.peek().revision;
+    let mut handled_menu_revision = use_signal(|| initial_menu_revision);
+    let menu_uuid = uuid.clone();
+    let menu_name = folder.name.clone();
     use_effect(move || {
-        let action = bookmark_menu_action();
-        if action.sequence == handled_menu_action() {
+        let effect = bookmark_menu();
+        if effect.revision == handled_menu_revision() {
             return;
         }
-        handled_menu_action.set(action.sequence);
-        if action.uuid.as_deref() != Some(menu_action_uuid.as_str()) {
-            return;
-        }
-        match action.action.as_str() {
-            "new_folder" => begin_new_folder(creating_child, child_draft),
-            "rename" => begin_inline_rename(editing, draft, menu_action_name.clone()),
+        handled_menu_revision.set(effect.revision);
+        match &effect.input {
+            Some(BookmarkMenuInput::CreateFolder { parent })
+                if parent.as_deref() == Some(menu_uuid.as_str()) =>
+            {
+                begin_new_folder(creating_child, child_draft);
+            }
+            Some(BookmarkMenuInput::Rename { uuid }) if uuid == &menu_uuid => {
+                begin_inline_rename(editing, draft, menu_name.clone());
+            }
             _ => {}
         }
     });
@@ -1183,19 +1189,21 @@ fn BookmarkEntry(
     };
     let mut editing = use_signal(|| false);
     let draft = use_signal(|| title.clone());
-    let bookmark_menu_action: Memo<BookmarkMenuActionEvent> = use_context();
-    let initial_menu_action = bookmark_menu_action.peek().sequence;
-    let mut handled_menu_action = use_signal(|| initial_menu_action);
-    let menu_action_uuid = row.uuid.clone();
-    let menu_action_name = title.clone();
+    let bookmark_menu: Memo<BookmarkMenuEffect> = use_context();
+    let initial_menu_revision = bookmark_menu.peek().revision;
+    let mut handled_menu_revision = use_signal(|| initial_menu_revision);
+    let menu_uuid = row.uuid.clone();
+    let menu_name = title.clone();
     use_effect(move || {
-        let action = bookmark_menu_action();
-        if action.sequence == handled_menu_action() {
+        let effect = bookmark_menu();
+        if effect.revision == handled_menu_revision() {
             return;
         }
-        handled_menu_action.set(action.sequence);
-        if action.action == "rename" && action.uuid.as_deref() == Some(menu_action_uuid.as_str()) {
-            begin_inline_rename(editing, draft, menu_action_name.clone());
+        handled_menu_revision.set(effect.revision);
+        if let Some(BookmarkMenuInput::Rename { uuid }) = &effect.input
+            && uuid == &menu_uuid
+        {
+            begin_inline_rename(editing, draft, menu_name.clone());
         }
     });
     let mut move_targets: Vec<(Option<String>, String)> = Vec::new();

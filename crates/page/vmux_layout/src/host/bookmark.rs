@@ -28,6 +28,9 @@ use super::{command::LayoutRequestSet, stack::StackRequest};
 
 pub struct BookmarkPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BookmarkRequestSet;
+
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
@@ -88,21 +91,25 @@ impl Plugin for BookmarkPlugin {
             Update,
             (
                 handle_bookmark_requests.in_set(LayoutRequestSet::Handle),
-                apply_toggle_for_url_requests,
-                apply_add_requests,
-                apply_remove_requests,
-                apply_rename_requests,
-                apply_move_requests,
-                apply_move_pin_requests,
-                apply_reorder_pin_requests,
-                apply_create_folder_requests,
-                apply_move_folder_requests,
-                apply_remove_folder_requests,
-                apply_rename_folder_requests,
-                apply_toggle_folder_requests,
-                apply_pin_requests,
-                apply_pin_url_requests,
-                apply_unpin_requests,
+                (
+                    apply_toggle_for_url_requests,
+                    apply_add_requests,
+                    apply_remove_requests,
+                    apply_rename_requests,
+                    apply_move_requests,
+                    apply_move_pin_requests,
+                    apply_reorder_pin_requests,
+                    apply_create_folder_requests,
+                    apply_move_folder_requests,
+                    apply_remove_folder_requests,
+                    apply_rename_folder_requests,
+                    apply_toggle_folder_requests,
+                    apply_pin_requests,
+                    apply_pin_url_requests,
+                    apply_unpin_requests,
+                )
+                    .chain()
+                    .in_set(BookmarkRequestSet),
                 sync_bookmark_metadata,
             )
                 .chain(),
