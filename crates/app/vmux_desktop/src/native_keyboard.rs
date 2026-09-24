@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::BinHostEmitEvent;
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use parking_lot::Mutex;
 
@@ -47,7 +46,7 @@ static PENDING_SIMULATOR_CLIPBOARD: LazyLock<
 static PENDING_SIMULATOR_KEYBOARD: AtomicUsize = AtomicUsize::new(0);
 struct PendingShortcutCapture {
     token: vmux_shortcut::ShortcutCaptureToken,
-    event: vmux_shortcut::ShortcutPressedEvent,
+    event: vmux_shortcut::ShortcutPressed,
 }
 
 static PENDING_SHORTCUT_CAPTURES: LazyLock<Mutex<Vec<PendingShortcutCapture>>> =
@@ -469,7 +468,7 @@ fn install(wake: impl Fn() + Send + Sync + 'static) {
                 .lock()
                 .push(PendingShortcutCapture {
                     token,
-                    event: vmux_shortcut::ShortcutPressedEvent {
+                    event: vmux_shortcut::ShortcutPressed {
                         stroke,
                         pressed_at_ms: vmux_core::now_millis(),
                     },
@@ -585,7 +584,7 @@ fn process_monitored_keys(
             if capture.token != token {
                 continue;
             }
-            ecs.trigger(BinHostEmitEvent::from_event(token.target, &capture.event));
+            vmux_shortcut::ShortcutUiStateUpdates::write(&mut ecs, token.target, &capture.event);
         }
     }
     if let Some(simulator_buttons) = simulator_buttons.as_mut() {

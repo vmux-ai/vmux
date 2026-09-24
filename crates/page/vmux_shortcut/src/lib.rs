@@ -48,28 +48,28 @@ fn set_capture_target(target: Option<ShortcutCaptureToken>) {
 }
 
 #[vmux_api::ui_event(Copy, Default, Eq, target = "shortcuts")]
-pub struct ShortcutCaptureEvent {
+pub struct ShortcutCaptureRequest {
     pub active: bool,
 }
 
-#[vmux_api::ui_state(Copy, Default, Eq, target = "shortcuts")]
-pub struct ShortcutCaptureStateEvent {
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct ShortcutCaptureState {
     pub active: bool,
 }
 
-#[vmux_api::host_event(Default, Eq, target = "shortcuts")]
-pub struct ShortcutPressedEvent {
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutPressed {
     pub stroke: ShortcutStroke,
     pub pressed_at_ms: i64,
 }
 
-#[vmux_api::ui_state(Default, Eq, target = "shortcuts")]
-pub struct ShortcutsEvent {
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutCatalog {
     pub groups: Vec<ShortcutGroup>,
     pub chord_timeout_ms: u64,
 }
 
-impl ShortcutsEvent {
+impl ShortcutCatalog {
     pub fn bindings(&self) -> impl Iterator<Item = (&ShortcutEntry, &ShortcutBinding)> {
         self.groups.iter().flat_map(|group| {
             group.entries.iter().flat_map(|entry| {
@@ -85,6 +85,22 @@ impl ShortcutsEvent {
         self.bindings().filter(|(_, shortcut)| shortcut.resolves)
     }
 }
+
+#[vmux_api::ui_state_patch]
+pub enum ShortcutUiStatePatch {
+    Catalog(ShortcutCatalog),
+    Capture(ShortcutCaptureState),
+    Pressed(ShortcutPressed),
+}
+
+#[vmux_api::ui_state(Default, target = "shortcuts")]
+pub struct ShortcutUiState {
+    pub sequence: u64,
+    pub patches: Vec<ShortcutUiStatePatch>,
+}
+
+#[cfg(host)]
+pub type ShortcutUiStateUpdates = vmux_core::host::UiStateUpdates<ShortcutUiState>;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ShortcutGroup {
@@ -177,3 +193,39 @@ pub use host::{ShortcutCaptureTarget, ShortcutPlugin};
 pub mod native_page;
 #[cfg(ui)]
 pub mod ui;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_state_preserves_catalog_and_pressed_order() {
+        let state = ShortcutUiState {
+            sequence: 2,
+            patches: vec![
+                ShortcutCatalog::default().into(),
+                ShortcutPressed {
+                    stroke: ShortcutStroke {
+                        code: "KeyK".to_string(),
+                        label: "K".to_string(),
+                        ctrl: true,
+                        ..Default::default()
+                    },
+                    pressed_at_ms: 9,
+                }
+                .into(),
+            ],
+        };
+
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
+        let decoded = rkyv::from_bytes::<ShortcutUiState, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert!(matches!(
+            decoded.patches.as_slice(),
+            [
+                ShortcutUiStatePatch::Catalog(_),
+                ShortcutUiStatePatch::Pressed(_)
+            ]
+        ));
+    }
+}

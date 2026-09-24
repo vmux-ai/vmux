@@ -1,11 +1,11 @@
 use crate::{
-    PAGE_URL, ShortcutBinding, ShortcutCaptureEvent, ShortcutCaptureStateEvent,
-    ShortcutCaptureToken, ShortcutEntry, ShortcutGroup, ShortcutStroke, ShortcutUrl,
-    ShortcutsEvent, set_capture_target,
+    PAGE_URL, ShortcutBinding, ShortcutCaptureRequest, ShortcutCaptureState, ShortcutCaptureToken,
+    ShortcutCatalog, ShortcutEntry, ShortcutGroup, ShortcutStroke, ShortcutUiState,
+    ShortcutUiStateUpdates, ShortcutUrl, set_capture_target,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, HostWindow, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, HostWindow, UiEventPlugin};
 use std::collections::{BTreeMap, HashMap};
 #[cfg(test)]
 use vmux_command::CommandRequest;
@@ -28,7 +28,8 @@ impl Plugin for ShortcutPlugin {
         app.init_resource::<ShortcutCaptureTarget>()
             .add_plugins((
                 HostedPagePlugin::<Shortcuts>::default(),
-                UiEventPlugin::<(ShortcutCaptureEvent,)>::default(),
+                UiEventPlugin::<(ShortcutCaptureRequest,)>::default(),
+                vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
             ))
             .add_observer(send_shortcuts)
             .add_observer(update_shortcut_capture)
@@ -51,6 +52,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 };
 
 #[derive(Component, Default)]
+#[require(ShortcutUiStateUpdates)]
 struct Shortcuts;
 
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -81,12 +83,12 @@ impl ShortcutCaptureTarget {
     fn replace(&mut self, next: Option<Entity>, commands: &mut Commands) {
         if self.target() == next {
             if let Some(webview) = next {
-                ShortcutCaptureStateEvent::emit(commands, webview, true);
+                ShortcutCaptureState::emit(commands, webview, true);
             }
             return;
         }
         if let Some(webview) = self.target() {
-            ShortcutCaptureStateEvent::emit(commands, webview, false);
+            ShortcutCaptureState::emit(commands, webview, false);
         }
         self.generation = self.generation.wrapping_add(1);
         self.token = next.map(|target| ShortcutCaptureToken {
@@ -95,14 +97,14 @@ impl ShortcutCaptureTarget {
         });
         set_capture_target(self.token);
         if let Some(webview) = next {
-            ShortcutCaptureStateEvent::emit(commands, webview, true);
+            ShortcutCaptureState::emit(commands, webview, true);
         }
     }
 }
 
-impl ShortcutCaptureStateEvent {
+impl ShortcutCaptureState {
     fn emit(commands: &mut Commands, webview: Entity, active: bool) {
-        commands.trigger(BinHostEmitEvent::from_event(webview, &Self { active }));
+        ShortcutUiStateUpdates::write(commands, webview, &Self { active });
     }
 }
 
@@ -150,28 +152,24 @@ fn send_shortcuts(
     keymap: Res<Keymap>,
     definitions: Query<&CommandDefinition>,
     locale: Option<Res<ResolvedLocale>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let Ok(context) = views.get(webview) else {
         return;
     };
-    if !browsers.can_emit_to(&webview) {
-        return;
-    }
     let locale = locale
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
     let context = context.unwrap_or(KeyContext::NONE);
     let definitions = definitions.iter().cloned().collect::<Vec<_>>();
-    let payload = ShortcutsEvent::build(&keymap, context, &locale, &definitions);
-    commands.trigger(BinHostEmitEvent::from_event(webview, &payload));
+    let payload = ShortcutCatalog::build(&keymap, context, &locale, &definitions);
+    ShortcutUiStateUpdates::write(&mut commands, webview, &payload);
 }
 
 fn update_shortcut_capture(
-    trigger: On<BinReceive<ShortcutCaptureEvent>>,
+    trigger: On<BinReceive<ShortcutCaptureRequest>>,
     focus: ShortcutCaptureFocus,
     mut target: ResMut<ShortcutCaptureTarget>,
     mut commands: Commands,
@@ -184,14 +182,14 @@ fn update_shortcut_capture(
         if target.target() == Some(webview) {
             target.replace(None, &mut commands);
         } else {
-            ShortcutCaptureStateEvent::emit(&mut commands, webview, false);
+            ShortcutCaptureState::emit(&mut commands, webview, false);
         }
         return;
     }
     if focus.holds(webview) {
         target.replace(Some(webview), &mut commands);
     } else {
-        ShortcutCaptureStateEvent::emit(&mut commands, webview, false);
+        ShortcutCaptureState::emit(&mut commands, webview, false);
     }
 }
 
@@ -215,7 +213,7 @@ fn normalize_shortcut_alias(mut tasks: Query<&mut PageOpenTask, Changed<PageOpen
     }
 }
 
-impl ShortcutsEvent {
+impl ShortcutCatalog {
     fn build(
         keymap: &Keymap,
         context: &KeyContext,
@@ -335,7 +333,7 @@ mod tests {
             vmux_layout::tab::TabRequest::definitions(),
         ]
         .concat();
-        let event = ShortcutsEvent::build(
+        let event = ShortcutCatalog::build(
             &Keymap::defaults_with(&definitions),
             KeyContext::NONE,
             &Locale::from("en-US"),
@@ -359,7 +357,7 @@ mod tests {
     #[test]
     fn event_exposes_chords_as_individual_strokes() {
         let definitions = vmux_layout::pane::PaneRequest::definitions();
-        let event = ShortcutsEvent::build(
+        let event = ShortcutCatalog::build(
             &Keymap::defaults_with(&definitions),
             KeyContext::NONE,
             &Locale::from("en-US"),
@@ -405,7 +403,7 @@ mod tests {
         ];
         keymap.register(definitions.iter().map(|definition| definition.id.as_str()));
 
-        let event = ShortcutsEvent::build(
+        let event = ShortcutCatalog::build(
             &keymap,
             KeyContext::NONE,
             &Locale::from("en-US"),
