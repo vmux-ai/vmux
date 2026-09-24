@@ -2,7 +2,7 @@ use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{DeriveInput, Ident, LitInt, LitStr, Token, bracketed};
+use syn::{Attribute, DeriveInput, Ident, LitInt, LitStr, Token, bracketed};
 
 mod keyword {
     syn::custom_keyword!(any);
@@ -94,7 +94,19 @@ pub(crate) fn expand(
     input: DeriveInput,
     direction: Direction,
 ) -> syn::Result<TokenStream> {
-    let Args { version, target } = syn::parse2(args)?;
+    let implementation = implementation(&input, direction, syn::parse2(args)?)?;
+
+    Ok(quote! {
+        #input
+        #implementation
+    })
+}
+
+fn implementation(
+    input: &DeriveInput,
+    direction: Direction,
+    Args { version, target }: Args,
+) -> syn::Result<TokenStream> {
     let ident = &input.ident;
     let name = inferred_event_name(ident);
     let generics = &input.generics;
@@ -128,8 +140,6 @@ pub(crate) fn expand(
     };
 
     Ok(quote! {
-        #input
-
         impl #impl_generics ::vmux_api::BinEvent for #ident #type_generics #where_clause {
             const ID: &'static str = #id;
             const NAME: &'static str = #name;
@@ -142,6 +152,9 @@ pub(crate) fn expand(
 }
 
 pub(crate) fn derive(input: DeriveInput, direction: Direction) -> syn::Result<TokenStream> {
+    if let Some(args) = event_args(&input.attrs)? {
+        return implementation(&input, direction, args);
+    }
     let ident = &input.ident;
     let generics = &input.generics;
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
@@ -170,6 +183,23 @@ pub(crate) fn derive(input: DeriveInput, direction: Direction) -> syn::Result<To
 
         #direction_impl
     })
+}
+
+fn event_args(attributes: &[Attribute]) -> syn::Result<Option<Args>> {
+    let mut event = None;
+    for attribute in attributes {
+        if !attribute.path().is_ident("event") {
+            continue;
+        }
+        if event.is_some() {
+            return Err(syn::Error::new_spanned(
+                attribute,
+                "duplicate event attribute",
+            ));
+        }
+        event = Some(attribute.parse_args()?);
+    }
+    Ok(event)
 }
 
 #[cfg(test)]

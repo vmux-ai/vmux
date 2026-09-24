@@ -17,39 +17,56 @@ macro_rules! wire {
 }
 
 wire! {
-    #[vmux_api::ui_event(targets = ["git", "files"])]
+    #[derive(vmux_api::UiEvent)]
+#[event(targets = ["git", "files"])]
     pub struct GitStatusRequest { pub path: String }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitRepositoryRequest { pub path: String }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitRepositoryPickerRequest { pub path: String }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitAppRequest { pub repo_root: String, pub action: GitAppAction }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitBranchLogRequest { pub repo_root: String, pub branch: String }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitDirectoryRequest { pub path: String, pub preview: bool }
-    #[vmux_api::ui_event(targets = ["git", "files"])]
+    #[derive(vmux_api::UiEvent)]
+#[event(targets = ["git", "files"])]
     pub struct GitDiffRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub reference: String, pub generation: u64, pub top_line: u32, pub rows: u32 }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitStageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitUnstageRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitDiscardRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8> }
-    #[vmux_api::ui_event(targets = ["git", "files"])]
+    #[derive(vmux_api::UiEvent)]
+#[event(targets = ["git", "files"])]
     pub struct GitCommitRequest { pub path: String, pub message: String }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitFetchRequest { pub path: String }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitPullRequest { pub path: String }
-    #[vmux_api::ui_event(targets = ["git", "files"])]
+    #[derive(vmux_api::UiEvent)]
+#[event(targets = ["git", "files"])]
     pub struct GitPushRequest { pub path: String }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitStageAllRequest { pub path: String }
-    #[vmux_api::ui_event(target = "git")]
+    #[derive(vmux_api::UiEvent)]
+#[event(target = "git")]
     pub struct GitOperationRequest { pub repo_root: String, pub operation: GitOperation }
-    #[vmux_api::ui_event(targets = ["git", "files"])]
+    #[derive(vmux_api::UiEvent)]
+#[event(targets = ["git", "files"])]
     pub struct GitHunkRequest { pub repo_root: String, pub path: String, pub path_bytes: Vec<u8>, pub hunk: u32, pub accept: bool }
 
     pub struct GitFileEntry {

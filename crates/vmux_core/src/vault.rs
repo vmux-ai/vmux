@@ -60,8 +60,9 @@ pub struct VaultRepository {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "vault")]
+#[event(target = "vault")]
 pub struct VaultRefreshRequest {
     #[serde(default)]
     pub load_repositories: bool,
@@ -103,8 +104,9 @@ pub enum VaultAction {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "vault")]
+#[event(target = "vault")]
 pub struct VaultRequest {
     pub action: VaultAction,
     pub repository: String,

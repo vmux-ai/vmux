@@ -38,8 +38,9 @@ pub struct HistoryEntry {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "history")]
+#[event(target = "history")]
 pub struct HistoryQueryRequest {
     pub query: Option<String>,
     pub offset: u32,
@@ -71,8 +72,9 @@ pub struct HistoryQueryResponse {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "history")]
+#[event(target = "history")]
 pub struct HistoryDeleteRequest {
     pub url_entity_bits: u64,
 }
@@ -85,8 +87,9 @@ pub struct HistoryDeleteRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "history")]
+#[event(target = "history")]
 pub struct HistoryClearAllRequest;
 
 #[derive(
@@ -97,8 +100,9 @@ pub struct HistoryClearAllRequest;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "history")]
+#[event(target = "history")]
 pub struct HistoryOpenRequest {
     pub url: String,
     pub in_new_stack: bool,
@@ -112,8 +116,9 @@ pub struct HistoryOpenRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
+#[event(targets = ["command-bar", "start", "layout"])]
 pub struct HistorySuggestionsRequest {
     pub query: String,
     pub limit: u32,

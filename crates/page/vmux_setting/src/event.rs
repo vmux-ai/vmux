@@ -11,8 +11,9 @@ pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "settings")]
+#[event(target = "settings")]
 pub struct CheckForUpdatesEvent;
 
 #[derive(
@@ -98,8 +99,9 @@ pub struct SettingsListEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(version = 2, target = "settings")]
+#[event(version = 2, target = "settings")]
 pub struct SettingsRequest {
     pub path: String,
     pub value: vmux_api::json::JsonValue,

@@ -137,8 +137,9 @@ pub struct ChatMediaEntries {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatPickFiles;
 
 #[derive(
@@ -150,8 +151,9 @@ pub struct ChatPickFiles;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatPasteMedia;
 
 #[derive(
@@ -163,8 +165,9 @@ pub struct ChatPasteMedia;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatMediaListRequest {
     pub request_id: u64,
     pub query: String,
@@ -179,8 +182,9 @@ pub struct ChatMediaListRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatAttachPaths {
     pub paths: Vec<String>,
 }
@@ -194,8 +198,9 @@ pub struct ChatAttachPaths {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatAttachmentPreviewRequest {
     pub paths: Vec<String>,
 }

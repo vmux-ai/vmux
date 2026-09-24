@@ -195,8 +195,9 @@ pub struct ExplorerPanelEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerTreeToggle {
     pub path: String,
 }
@@ -211,8 +212,9 @@ pub struct ExplorerTreeToggle {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerTreePrefetch {
     pub path: String,
 }
@@ -227,8 +229,9 @@ pub struct ExplorerTreePrefetch {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerTreeRefresh {
     pub path: String,
 }
@@ -244,8 +247,9 @@ pub struct ExplorerTreeRefresh {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerRevealCurrent;
 
 #[derive(
@@ -260,8 +264,9 @@ pub struct ExplorerRevealCurrent;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerCollapseAll;
 
 #[derive(
@@ -274,8 +279,9 @@ pub struct ExplorerCollapseAll;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerCreate {
     pub parent: String,
     pub name: String,
@@ -292,8 +298,9 @@ pub struct ExplorerCreate {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerRename {
     pub path: String,
     pub name: String,
@@ -309,8 +316,9 @@ pub struct ExplorerRename {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerDelete {
     pub path: String,
 }
@@ -325,8 +333,9 @@ pub struct ExplorerDelete {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerCloseEditor {
     pub path: String,
 }
@@ -343,8 +352,9 @@ pub struct ExplorerCloseEditor {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerPanelSetVisible {
     pub visible: bool,
     pub client_id: u64,
@@ -362,8 +372,9 @@ pub struct ExplorerPanelSetVisible {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerPanelWidth {
     pub px: u32,
 }
@@ -378,8 +389,9 @@ pub struct ExplorerPanelWidth {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerGoto {
     pub path: String,
     pub line: u32,
@@ -449,8 +461,9 @@ pub struct ExplorerSearchEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerSearchOpen {
     pub path: String,
     pub line: u32,
@@ -469,8 +482,9 @@ pub struct ExplorerSearchOpen {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "files")]
+#[event(target = "files")]
 pub struct ExplorerSearchRequest {
     pub query: String,
     pub regex: bool,

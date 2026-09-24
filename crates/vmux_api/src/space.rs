@@ -71,7 +71,8 @@ pub struct SpaceRow {
     rkyv::Deserialize,
 )]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
-#[vmux_api::ui_event(targets = ["spaces", "layout"])]
+#[derive(vmux_api::UiEvent)]
+#[event(targets = ["spaces", "layout"])]
 pub enum SpaceRequest {
     OpenPage,
     Attach { space_id: String },
@@ -89,8 +90,9 @@ pub enum SpaceRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["spaces", "layout", "git"])]
+#[event(targets = ["spaces", "layout", "git"])]
 pub struct ProjectRequest {
     pub command: String,
     #[serde(default)]
@@ -165,8 +167,9 @@ impl ProjectRowKind {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub struct ProjectTreeToggle {
     pub path: String,
     #[serde(default)]

@@ -150,8 +150,9 @@ impl TermViewportPatch {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "terminal")]
+#[event(target = "terminal")]
 pub struct TermScrollEvent {
     pub top_row: u32,
     pub follow: bool,
@@ -187,8 +188,9 @@ pub const MOD_SUPER: u8 = 8;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "terminal")]
+#[event(target = "terminal")]
 pub struct TermMouseEvent {
     pub button: u8,
     pub col: u16,
@@ -210,8 +212,9 @@ pub struct TermMouseEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "terminal")]
+#[event(target = "terminal")]
 pub struct TermLinkOpenRequest {
     pub url: String,
 }
@@ -226,8 +229,9 @@ pub struct TermLinkOpenRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "terminal")]
+#[event(target = "terminal")]
 pub struct TermResizeEvent {
     pub char_width: f32,
     pub char_height: f32,

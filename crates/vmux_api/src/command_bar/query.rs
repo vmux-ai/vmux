@@ -50,8 +50,9 @@ impl CommandBarQuery<'_> {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
+#[event(targets = ["command-bar", "start", "layout"])]
 pub struct PathCompleteRequest {
     pub query: String,
 }

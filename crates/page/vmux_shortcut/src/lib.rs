@@ -59,8 +59,9 @@ fn set_capture_target(target: Option<ShortcutCaptureToken>) {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "shortcuts")]
+#[event(target = "shortcuts")]
 pub struct ShortcutCaptureEvent {
     pub active: bool,
 }

@@ -39,8 +39,9 @@ impl bevy::prelude::Plugin for KeyStrokePlugin {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = [
+#[event(targets = [
         "terminal",
         "files",
         "projects",
@@ -177,8 +178,9 @@ impl KeyModifiers {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = [
+#[event(targets = [
         "terminal",
         "files",
         "projects",

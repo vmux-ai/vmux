@@ -400,8 +400,9 @@ mod activity_counts_tests {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
+#[event(targets = ["sessions", "agent", "start"])]
 pub struct PromptHistoryRequest {
     pub agent: String,
     pub cwd: String,
@@ -520,8 +521,9 @@ pub struct SlashCommands {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
+#[event(targets = ["sessions", "agent", "start"])]
 pub struct ResumeListRequest {
     pub offset: u32,
 }
@@ -534,8 +536,9 @@ pub struct ResumeListRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
+#[event(targets = ["sessions", "agent", "start"])]
 pub struct ResumeSession {
     pub kind: String,
     pub sid: String,
