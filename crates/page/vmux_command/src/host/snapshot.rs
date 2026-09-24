@@ -6,7 +6,7 @@ use vmux_core::launcher::RendersLauncherPanel;
 use vmux_core::page::PageManifest;
 
 pub type CommandBarUiStateUpdates =
-    vmux_core::host::UiStateUpdates<vmux_api::command_bar::CommandBarUiState>;
+    vmux_core::host::UiState<vmux_api::command_bar::CommandBarUiState>;
 
 pub struct UiStatePlugin;
 

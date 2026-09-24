@@ -249,7 +249,7 @@ fn on_history_suggestions_request(
         .map(|(_, e)| e)
         .collect();
 
-    vmux_core::host::UiStateUpdates::<vmux_api::command_bar::CommandBarUiState>::write(
+    vmux_core::host::UiState::<vmux_api::command_bar::CommandBarUiState>::write(
         &mut commands,
         trigger.event().webview,
         &HistorySuggestionsResponse {

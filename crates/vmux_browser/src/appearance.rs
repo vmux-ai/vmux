@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::host::{UiStatePlugin, UiStateUpdates};
+use vmux_core::host::{UiState, UiStatePlugin};
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
@@ -50,11 +50,7 @@ fn on_webview_ready_send_theme(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    UiStateUpdates::<vmux_ui::theme::ThemeEvent>::write(
-        &mut commands,
-        entity,
-        &theme_event(&settings),
-    );
+    UiState::<vmux_ui::theme::ThemeEvent>::write(&mut commands, entity, &theme_event(&settings));
     if cef_q.get(entity).is_ok() || modal_q.get(entity).is_ok() {
         if let Ok(mut zoom) = zoom_q.get_mut(entity) {
             zoom.0 = 0.0;
@@ -98,7 +94,7 @@ pub(crate) fn sync_appearance_to_cef(
     }
     let payload = theme_event(&settings);
     for entity in &ready {
-        UiStateUpdates::<vmux_ui::theme::ThemeEvent>::write(&mut commands, entity, &payload);
+        UiState::<vmux_ui::theme::ThemeEvent>::write(&mut commands, entity, &payload);
     }
 }
 

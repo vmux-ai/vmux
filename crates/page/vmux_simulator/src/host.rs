@@ -15,7 +15,7 @@ use stream::StreamServer;
 use vmux_api::protocol::SimulatorAction;
 use vmux_core::PageMetadata;
 use vmux_core::host::page::{NativelyHosted, PageReady};
-use vmux_core::host::{UiStatePlugin, UiStateUpdates};
+use vmux_core::host::{UiState, UiStatePlugin};
 
 pub use device::{Axe, SimulatorDevice};
 
@@ -146,7 +146,7 @@ type SimulatorViews<'w, 's> = Query<
         Entity,
         &'static PageMetadata,
         Option<&'static ChildOf>,
-        Option<&'static UiStateUpdates<SimulatorReady>>,
+        Option<&'static UiState<SimulatorReady>>,
     ),
     With<PageReady>,
 >;
@@ -219,7 +219,7 @@ impl SimulatorPlugin {
                 DevicePoints,
                 DevicePixels,
                 StreamServer,
-                UiStateUpdates<SimulatorReady>,
+                UiState<SimulatorReady>,
                 input::DeviceTouchSession,
             )>();
             let wake = wake.as_ref().map(|wrapper| (**wrapper).clone());
@@ -328,7 +328,7 @@ impl SimulatorPlugin {
             if announced.is_some_and(|announced| announced.current() == Some(&payload)) {
                 continue;
             }
-            UiStateUpdates::<SimulatorReady>::write(&mut commands, entity, &payload);
+            UiState::<SimulatorReady>::write(&mut commands, entity, &payload);
         }
     }
 

@@ -16,7 +16,7 @@ use vmux_api::mcp::{
     McpServerAction, McpServerEntry, McpServerRequest, McpServerResult, McpServerStatus,
     McpServers, McpServersRequest,
 };
-use vmux_core::host::{UiStatePlugin, UiStateUpdates};
+use vmux_core::host::{UiState, UiStatePlugin};
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
 };
@@ -190,7 +190,7 @@ impl McpConnections {
             if !browsers.can_emit_to(&task.target) {
                 continue;
             }
-            UiStateUpdates::<McpServers>::write(&mut commands, task.target, &snapshot);
+            UiState::<McpServers>::write(&mut commands, task.target, &snapshot);
         }
     }
 }

@@ -20,7 +20,7 @@ impl Plugin for StatePlugin {
     }
 }
 
-type GitUiStateUpdates = vmux_core::host::UiStateUpdates<GitUiState>;
+type GitUiStateUpdates = vmux_core::host::UiState<GitUiState>;
 
 #[derive(Component, Default)]
 #[require(GitUiStateUpdates)]

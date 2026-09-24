@@ -5,7 +5,7 @@ use vmux_core::page::PageReady;
 use crate::event::HistoryQueryRequest;
 use crate::state::HistoryUiState;
 
-pub(super) type HistoryUiStateUpdates = vmux_core::host::UiStateUpdates<HistoryUiState>;
+pub(super) type HistoryUiStateUpdates = vmux_core::host::UiState<HistoryUiState>;
 
 pub(super) struct StatePlugin;
 

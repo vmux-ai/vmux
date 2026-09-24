@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_core::host::{UiStatePlugin, UiStateUpdates};
+use vmux_core::host::{UiState, UiStatePlugin};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
 use vmux_service::event::*;
@@ -58,10 +58,8 @@ impl Plugin for ProcessesMonitorPlugin {
 }
 
 #[derive(Component, Default)]
-#[require(ProcessesUiStateUpdates)]
+#[require(UiState<ProcessesUiState>)]
 pub struct ProcessesMonitor;
-
-type ProcessesUiStateUpdates = UiStateUpdates<ProcessesUiState>;
 
 impl ProcessesMonitor {}
 
@@ -337,7 +335,7 @@ fn broadcast_to_monitors(
     };
 
     for entity in &monitors {
-        ProcessesUiStateUpdates::write(&mut commands, entity, &state);
+        UiState::<ProcessesUiState>::write(&mut commands, entity, &state);
     }
 }
 

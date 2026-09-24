@@ -38,7 +38,7 @@ pub(crate) struct AgentSetupNavigated;
 #[require(AgentSetupUiStateUpdates)]
 pub(crate) struct AgentSetupView;
 
-type AgentSetupUiStateUpdates = vmux_core::host::UiStateUpdates<AgentSetupUiState>;
+type AgentSetupUiStateUpdates = vmux_core::host::UiState<AgentSetupUiState>;
 
 fn run_install_in_new_tab(run: &mut MessageWriter<vmux_terminal::RunShellRequest>, command: &str) {
     run.write(vmux_terminal::RunShellRequest {

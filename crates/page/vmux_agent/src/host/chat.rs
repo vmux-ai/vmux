@@ -47,7 +47,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 #[require(ChatUiStateUpdates)]
 pub struct AgentChatView;
 
-type ChatUiStateUpdates = vmux_core::host::UiStateUpdates<vmux_chat::state::ChatUiState>;
+type ChatUiStateUpdates = vmux_core::host::UiState<vmux_chat::state::ChatUiState>;
 
 #[derive(Component)]
 pub(crate) struct ChatSynced;
