@@ -4,9 +4,6 @@ pub use vmux_api::command_bar::*;
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchEngineSetting(pub SearchEngine);
 
-#[vmux_api::host_event(Copy, Default, Eq, target = "layout")]
-pub struct CommandBarPanelCloseEvent;
-
 #[vmux_api::contract(Copy)]
 pub struct PanelPlacement {
     pub left: f64,

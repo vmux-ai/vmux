@@ -13,8 +13,8 @@ use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::event::{
-    CommandBarPanelCloseEvent, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarRequest,
-    CommandBarSizeEvent, OpenId, SearchEngine, SearchEngineSetting,
+    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarRequest, CommandBarSizeEvent, OpenId,
+    SearchEngine, SearchEngineSetting,
 };
 use crate::open_target::{OpenTarget, PaneDirection};
 use crate::snapshot::{
@@ -667,7 +667,7 @@ fn handle_open_command_bar(
 fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
     commands.trigger(BinHostEmitEvent::from_event(
         layout,
-        &CommandBarPanelCloseEvent,
+        &CommandBarOpenEvent::default(),
     ));
 }
 
@@ -1881,8 +1881,9 @@ mod tests {
 
         assert_eq!(
             emitted_to_page(&app),
-            vec![(layout, CommandBarPanelCloseEvent::id())]
+            vec![(layout, CommandBarOpenEvent::id())]
         );
+        assert!(!open_payload(&app).open_id.is_open());
     }
 
     #[test]
@@ -1901,10 +1902,11 @@ mod tests {
 
         assert_eq!(
             emitted_to_page(&app),
-            vec![(layout, CommandBarPanelCloseEvent::id())],
+            vec![(layout, CommandBarOpenEvent::id())],
             "the launcher is drawn by the layout page here, so closing only the overlay window \
              leaves it on screen"
         );
+        assert!(!open_payload(&app).open_id.is_open());
     }
 
     #[test]
