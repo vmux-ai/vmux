@@ -55,7 +55,7 @@ pub enum ToolStatus {
     Failed,
 }
 
-#[vmux_api::contract(Copy, Eq)]
+#[vmux_api::contract(Copy, Eq, PartialOrd, Ord, Hash)]
 pub enum ToolAction {
     Install,
     Update,
@@ -99,53 +99,35 @@ pub struct ToolsSnapshot {
     pub error: String,
 }
 
-#[vmux_api::contract(Eq)]
-pub enum ToolUiOperationState {
-    Pending,
-    Completed { success: bool, message: String },
-}
-
-#[vmux_api::contract(Eq)]
-pub struct ToolUiOperation {
-    pub operation_id: u64,
+#[vmux_api::contract(Eq, PartialOrd, Ord, Hash)]
+pub struct ToolOperationKey {
     pub provider: ToolProvider,
     pub action: ToolAction,
     pub item_id: String,
-    pub state: ToolUiOperationState,
 }
 
-impl ToolUiOperation {
-    pub fn pending(
-        operation_id: u64,
-        provider: ToolProvider,
-        action: ToolAction,
-        item_id: String,
-    ) -> Self {
+impl ToolOperationKey {
+    pub fn new(provider: ToolProvider, action: ToolAction, item_id: impl Into<String>) -> Self {
         Self {
-            operation_id,
             provider,
             action,
-            item_id,
-            state: ToolUiOperationState::Pending,
+            item_id: item_id.into(),
         }
-    }
-
-    pub fn is_pending(&self) -> bool {
-        self.state == ToolUiOperationState::Pending
-    }
-
-    pub fn completion(&self) -> Option<(bool, &str)> {
-        let ToolUiOperationState::Completed { success, message } = &self.state else {
-            return None;
-        };
-        Some((*success, message))
     }
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 3, target = "tools")]
+#[vmux_api::contract(Eq)]
+pub struct ToolOperationNotice {
+    pub operation: ToolOperationKey,
+    pub success: bool,
+    pub message: String,
+}
+
+#[vmux_api::ui_state(Default, Eq, version = 4, target = "tools")]
 pub struct ToolsUiState {
     pub snapshot: ToolsSnapshot,
-    pub operations: Vec<ToolUiOperation>,
+    pub pending: Vec<ToolOperationKey>,
+    pub notice: Option<ToolOperationNotice>,
 }
 
 #[vmux_api::ui_event(Default, Eq, target = "tools")]
