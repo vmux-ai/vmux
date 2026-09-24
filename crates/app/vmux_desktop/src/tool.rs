@@ -21,7 +21,7 @@ use vmux_core::vault::{
     VaultAction, VaultAuthProgress, VaultRefreshRequest, VaultRepository, VaultRequest,
     VaultResult, VaultSnapshot,
 };
-use vmux_tool::{self as manifest_store, ToolsManifest};
+use vmux_tool::{ToolStore, ToolsManifest};
 
 pub struct ToolPlugin;
 
@@ -121,8 +121,12 @@ impl Plugin for ToolPlugin {
         ));
         vmux_core::register_host_spawn(app, "tools");
         vmux_core::register_host_spawn(app, "vault");
-        app.world_mut()
-            .spawn((Name::new("Tool registry"), ToolRegistry::default()));
+        app.world_mut().spawn((
+            Name::new("Tool registry"),
+            ToolRegistry::default(),
+            ToolStore::current(),
+            ToolsManifest::default(),
+        ));
         app.init_resource::<ActionRequestSequence>()
             .init_resource::<VaultAutoSync>()
             .init_resource::<VaultRecoveryState>()
@@ -220,7 +224,12 @@ struct ToolSubscriber {
 #[derive(Component)]
 struct ToolsScanTask {
     generation: u64,
-    task: Task<ToolsSnapshot>,
+    task: Task<ToolsScanOutput>,
+}
+
+struct ToolsScanOutput {
+    snapshot: ToolsSnapshot,
+    manifest: ToolsManifest,
 }
 
 #[derive(Component)]
@@ -343,10 +352,14 @@ struct InventoryItem {
 
 fn on_open_request(
     trigger: On<BinReceive<ToolOpenRequest>>,
+    stores: Query<&ToolStore, With<ToolRegistry>>,
     mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
 ) {
     let path = Path::new(trigger.event().payload.path.trim());
-    if path == manifest_store::brewfile_path() && !path.exists() {
+    let Ok(store) = stores.single() else {
+        return;
+    };
+    if path == store.brewfile_path() && !path.exists() {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -579,6 +592,7 @@ fn start_tool_action(
     tasks: Query<(), With<ToolActionTask>>,
     vault_tasks: Query<(), With<VaultActionTask>>,
     scans: Query<(), With<ToolsScanTask>>,
+    stores: Query<&ToolStore, With<ToolRegistry>>,
     mut commands: Commands,
 ) {
     if !tasks.is_empty() || !vault_tasks.is_empty() || !scans.is_empty() {
@@ -600,7 +614,11 @@ fn start_tool_action(
     let target = pending_action.target;
     let request = pending_action.request.clone();
     let task_request = request.clone();
-    let task = IoTaskPool::get().spawn(async move { perform_action(&task_request) });
+    let Ok(store) = stores.single() else {
+        return;
+    };
+    let store = store.clone();
+    let task = IoTaskPool::get().spawn(async move { perform_action(&store, &task_request) });
     commands
         .entity(entity)
         .remove::<PendingToolAction>()
@@ -678,7 +696,7 @@ fn start_vault_action(
 }
 
 fn start_tools_scan(
-    mut registry: Query<&mut ToolRegistry>,
+    mut registry: Query<(&mut ToolRegistry, &ToolStore)>,
     tasks: Query<(), With<ToolsScanTask>>,
     action_tasks: Query<(), With<ToolActionTask>>,
     vault_tasks: Query<(), With<VaultActionTask>>,
@@ -686,7 +704,7 @@ fn start_tools_scan(
     pending_vault_actions: Query<(), With<PendingVaultAction>>,
     mut commands: Commands,
 ) {
-    let Ok(mut state) = registry.single_mut() else {
+    let Ok((mut state, store)) = registry.single_mut() else {
         return;
     };
     if !state.dirty
@@ -703,6 +721,7 @@ fn start_tools_scan(
     let refresh_catalogs = state.refresh_catalogs;
     let load_vault_repositories = state.load_vault_repositories;
     let previous_snapshot = state.snapshot.clone();
+    let store = store.clone();
     state.dirty = false;
     state.full_scan = false;
     state.refresh_catalogs = false;
@@ -710,6 +729,7 @@ fn start_tools_scan(
     let task = IoTaskPool::get().spawn(async move {
         if full_scan {
             scan_tools(
+                &store,
                 refresh_catalogs,
                 load_vault_repositories,
                 previous_snapshot.vault,
@@ -717,7 +737,8 @@ fn start_tools_scan(
         } else {
             let mut snapshot = previous_snapshot;
             snapshot.vault = scan_vault(load_vault_repositories, snapshot.vault);
-            snapshot
+            let manifest = store.load().unwrap_or_default();
+            ToolsScanOutput { snapshot, manifest }
         }
     });
     commands.spawn(ToolsScanTask { generation, task });
@@ -725,11 +746,11 @@ fn start_tools_scan(
 
 fn drain_tools_scan(
     mut tasks: Query<(Entity, &mut ToolsScanTask)>,
-    mut registry: Query<&mut ToolRegistry>,
+    mut registry: Query<(&mut ToolRegistry, &mut ToolsManifest)>,
     mut auto_sync: ResMut<VaultAutoSync>,
     mut commands: Commands,
 ) {
-    let Ok(mut state) = registry.single_mut() else {
+    let Ok((mut state, mut manifest)) = registry.single_mut() else {
         return;
     };
     for (entity, mut task) in &mut tasks {
@@ -741,7 +762,8 @@ fn drain_tools_scan(
             state.dirty = true;
             continue;
         }
-        state.snapshot = snapshot;
+        state.snapshot = snapshot.snapshot;
+        *manifest = snapshot.manifest;
         state.revision = state.revision.wrapping_add(1);
         let vault = &state.snapshot.vault;
         if !vault.github_owner.is_empty()
@@ -888,11 +910,12 @@ fn emit_tools_snapshot(
 }
 
 fn scan_tools(
+    store: &ToolStore,
     refresh_catalogs: bool,
     load_vault_repositories: bool,
     previous_vault: VaultSnapshot,
-) -> ToolsSnapshot {
-    let (mut manifest, manifest_error) = match manifest_store::load_manifest() {
+) -> ToolsScanOutput {
+    let (mut manifest, manifest_error) = match store.load() {
         Ok(manifest) => (manifest, None),
         Err(error) => (ToolsManifest::default(), Some(error)),
     };
@@ -930,11 +953,11 @@ fn scan_tools(
             .into_iter()
             .map(|(provider, inventory)| build_category(provider, inventory, &manifest)),
     );
-    categories.push(scan_mcp(&mut manifest, &mut errors));
-    categories.push(scan_dotfiles(&mut manifest));
+    categories.push(scan_mcp(store, &mut manifest, &mut errors));
+    categories.push(scan_dotfiles(store, &mut manifest));
     if can_persist
         && manifest != original_manifest
-        && let Err(error) = manifest_store::write_manifest(&manifest)
+        && let Err(error) = store.save(&manifest)
     {
         errors.push(format!("Tools: {error}"));
     }
@@ -953,15 +976,18 @@ fn scan_tools(
         .flat_map(|category| &category.items)
         .filter(|item| item.status == ToolStatus::Conflict)
         .count() as u32;
-    ToolsSnapshot {
-        loaded: true,
-        root: manifest_store::root_dir().to_string_lossy().into_owned(),
-        vault: scan_vault(load_vault_repositories, previous_vault),
-        categories,
-        installed,
-        updates,
-        conflicts,
-        error: errors.join("\n"),
+    ToolsScanOutput {
+        snapshot: ToolsSnapshot {
+            loaded: true,
+            root: store.root().to_string_lossy().into_owned(),
+            vault: scan_vault(load_vault_repositories, previous_vault),
+            categories,
+            installed,
+            updates,
+            conflicts,
+            error: errors.join("\n"),
+        },
+        manifest,
     }
 }
 
@@ -1035,7 +1061,7 @@ fn build_category(
         .iter()
         .map(|item| item.id.clone())
         .collect::<BTreeSet<_>>();
-    for name in manifest_store::managed_package_set(manifest, provider.id()) {
+    for name in manifest.managed_packages(provider.id()) {
         if !existing.contains(&name) {
             items.push(ToolItem {
                 provider,
@@ -1317,8 +1343,12 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
     Ok(inventory)
 }
 
-fn scan_mcp(manifest: &mut ToolsManifest, errors: &mut Vec<String>) -> ToolCategory {
-    let (discovered, discovery_errors) = manifest_store::discover_mcp_servers();
+fn scan_mcp(
+    store: &ToolStore,
+    manifest: &mut ToolsManifest,
+    errors: &mut Vec<String>,
+) -> ToolCategory {
+    let (discovered, discovery_errors) = store.discover_mcp_servers();
     errors.extend(
         discovery_errors
             .into_iter()
@@ -1400,8 +1430,8 @@ fn scan_mcp(manifest: &mut ToolsManifest, errors: &mut Vec<String>) -> ToolCateg
     }
 }
 
-fn scan_dotfiles(manifest: &mut ToolsManifest) -> ToolCategory {
-    let discovered = manifest_store::dotfile_packages().unwrap_or_default();
+fn scan_dotfiles(store: &ToolStore, manifest: &mut ToolsManifest) -> ToolCategory {
+    let discovered = store.dotfile_packages().unwrap_or_default();
     for package in &discovered {
         manifest.set_dotfile_package(package, true);
     }
@@ -1410,7 +1440,7 @@ fn scan_dotfiles(manifest: &mut ToolsManifest) -> ToolCategory {
     let mut items = Vec::new();
     for package in package_names {
         let managed = manifest.dotfiles.packages.contains(&package);
-        let (status, detail, actions) = match manifest_store::plan_dotfile_package(&package) {
+        let (status, detail, actions) = match store.plan_dotfile_package(&package) {
             Ok(plan) => {
                 let detail = format!(
                     "{} linked · {} missing · {} conflicts",
@@ -1464,34 +1494,34 @@ fn scan_dotfiles(manifest: &mut ToolsManifest) -> ToolCategory {
     }
 }
 
-fn perform_action(request: &ToolRequest) -> Result<String, String> {
+fn perform_action(store: &ToolStore, request: &ToolRequest) -> Result<String, String> {
     if request.action == ToolAction::Apply {
-        return apply_manifest();
+        return apply_manifest(store);
     }
     if request.action == ToolAction::Import {
-        return import_provider(request.provider, request.value.trim());
+        return import_provider(store, request.provider, request.value.trim());
     }
     if request.id.trim().is_empty() {
         return Err("package name is required".to_string());
     }
     match request.action {
         ToolAction::Install => {
-            set_manifest_entry(request.provider, &request.id, true)?;
-            install_provider(request.provider, &request.id)?;
+            set_manifest_entry(store, request.provider, &request.id, true)?;
+            install_provider(store, request.provider, &request.id)?;
             Ok(format!("{} installed", request.id))
         }
         ToolAction::Update => {
-            set_manifest_entry(request.provider, &request.id, true)?;
-            update_provider(request.provider, &request.id)?;
+            set_manifest_entry(store, request.provider, &request.id, true)?;
+            update_provider(store, request.provider, &request.id)?;
             Ok(format!("{} updated", request.id))
         }
         ToolAction::Uninstall => {
-            uninstall_provider(request.provider, &request.id)?;
-            set_manifest_entry(request.provider, &request.id, false)?;
+            uninstall_provider(store, request.provider, &request.id)?;
+            set_manifest_entry(store, request.provider, &request.id, false)?;
             Ok(format!("{} removed", request.id))
         }
         ToolAction::Forget => {
-            set_manifest_entry(request.provider, &request.id, false)?;
+            set_manifest_entry(store, request.provider, &request.id, false)?;
             Ok(format!("{} removed from tools.toml", request.id))
         }
         ToolAction::Adopt => {
@@ -1499,16 +1529,14 @@ fn perform_action(request: &ToolRequest) -> Result<String, String> {
                 if request.value.trim().is_empty() {
                     return Err("dotfile path is required".to_string());
                 }
-                let destination = manifest_store::adopt_dotfile(
-                    Path::new(request.value.trim()),
-                    request.id.trim(),
-                )?;
+                let destination =
+                    store.adopt_dotfile(Path::new(request.value.trim()), request.id.trim())?;
                 Ok(format!("adopted {}", destination.display()))
             } else if request.provider == ToolProvider::Mcp {
-                manifest_store::import_discovered_mcp_server(&request.id)?;
+                store.import_discovered_mcp_server(&request.id)?;
                 Ok(format!("{} is now managed", request.id))
             } else {
-                set_manifest_entry(request.provider, &request.id, true)?;
+                set_manifest_entry(store, request.provider, &request.id, true)?;
                 Ok(format!("{} is now managed", request.id))
             }
         }
@@ -1516,15 +1544,15 @@ fn perform_action(request: &ToolRequest) -> Result<String, String> {
             if request.provider != ToolProvider::Dotfiles {
                 return Err("link is only valid for dotfiles".to_string());
             }
-            set_manifest_entry(request.provider, &request.id, true)?;
-            let linked = manifest_store::apply_dotfile_package(&request.id)?;
+            set_manifest_entry(store, request.provider, &request.id, true)?;
+            let linked = store.apply_dotfile_package(&request.id)?;
             Ok(format!("linked {linked} file(s)"))
         }
         ToolAction::Unlink => {
             if request.provider != ToolProvider::Dotfiles {
                 return Err("unlink is only valid for dotfiles".to_string());
             }
-            let removed = manifest_store::disable_and_unlink_dotfile_package(&request.id)?;
+            let removed = store.disable_and_unlink_dotfile_package(&request.id)?;
             Ok(format!("unlinked {removed} file(s)"))
         }
         ToolAction::Apply | ToolAction::Import => unreachable!(),
@@ -1707,54 +1735,58 @@ fn cloud_storage_roots(provider: &str) -> Vec<std::path::PathBuf> {
     roots
 }
 
-fn import_provider(provider: ToolProvider, path: &str) -> Result<String, String> {
+fn import_provider(
+    store: &ToolStore,
+    provider: ToolProvider,
+    path: &str,
+) -> Result<String, String> {
     match provider {
         ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => {
             if !path.is_empty() {
-                let (formulae, casks) = manifest_store::import_brewfile(Path::new(path))?;
+                let (formulae, casks) = store.import_brewfile(Path::new(path))?;
                 Ok(format!("imported {formulae} formulae and {casks} casks"))
             } else {
                 let formulae = scan_homebrew(false, false)?;
                 let casks = scan_homebrew(true, false)?;
-                let mut manifest = manifest_store::load_manifest()?;
+                let mut manifest = store.load()?;
                 let formulae =
                     import_inventory(&mut manifest, ToolProvider::HomebrewFormula, formulae);
                 let casks = import_inventory(&mut manifest, ToolProvider::HomebrewCask, casks);
-                manifest_store::write_manifest(&manifest)?;
+                store.save(&manifest)?;
                 Ok(format!("imported {formulae} formulae and {casks} casks"))
             }
         }
         ToolProvider::Npm => {
             if !path.is_empty() {
-                let imported = manifest_store::import_npm_manifest(Path::new(path))?;
+                let imported = store.import_npm_manifest(Path::new(path))?;
                 Ok(format!("imported {imported} NPM package(s)"))
             } else {
-                import_scanned_inventory(provider, scan_npm(false)?)
+                import_scanned_inventory(store, provider, scan_npm(false)?)
             }
         }
-        ToolProvider::Acp => import_scanned_inventory(provider, scan_acp(false)?),
-        ToolProvider::Lsp => import_scanned_inventory(provider, scan_lsp(false)?),
+        ToolProvider::Acp => import_scanned_inventory(store, provider, scan_acp(false)?),
+        ToolProvider::Lsp => import_scanned_inventory(store, provider, scan_lsp(false)?),
         ToolProvider::Mcp => {
             let imported = if path.is_empty() {
-                manifest_store::import_default_mcp_configs()?
+                store.import_default_mcp_configs()?
             } else {
-                manifest_store::import_mcp_config(Path::new(path))?
+                store.import_mcp_config(Path::new(path))?
             };
             Ok(format!("imported {imported} MCP server(s)"))
         }
         ToolProvider::Dotfiles => {
             if path.is_empty() {
-                let packages = manifest_store::dotfile_packages()?;
-                let mut manifest = manifest_store::load_manifest()?;
+                let packages = store.dotfile_packages()?;
+                let mut manifest = store.load()?;
                 let mut imported = 0;
                 for package in packages {
                     imported += usize::from(!manifest.dotfiles.packages.contains(&package));
                     manifest.set_dotfile_package(&package, true);
                 }
-                manifest_store::write_manifest(&manifest)?;
+                store.save(&manifest)?;
                 Ok(format!("imported {imported} dotfile package(s)"))
             } else {
-                let imported = manifest_store::import_dotfiles(Path::new(path))?;
+                let imported = store.import_dotfiles(Path::new(path))?;
                 Ok(format!("imported {imported} dotfile package(s)"))
             }
         }
@@ -1762,12 +1794,13 @@ fn import_provider(provider: ToolProvider, path: &str) -> Result<String, String>
 }
 
 fn import_scanned_inventory(
+    store: &ToolStore,
     provider: ToolProvider,
     inventory: Vec<InventoryItem>,
 ) -> Result<String, String> {
-    let mut manifest = manifest_store::load_manifest()?;
+    let mut manifest = store.load()?;
     let imported = import_inventory(&mut manifest, provider, inventory);
-    manifest_store::write_manifest(&manifest)?;
+    store.save(&manifest)?;
     Ok(format!("imported {imported} {} item(s)", provider.id()))
 }
 
@@ -1787,9 +1820,9 @@ fn import_inventory(
     imported
 }
 
-fn apply_manifest() -> Result<String, String> {
-    let manifest = manifest_store::load_manifest()?;
-    let snapshot = scan_tools(false, false, VaultSnapshot::default());
+fn apply_manifest(store: &ToolStore) -> Result<String, String> {
+    let manifest = store.load()?;
+    let snapshot = scan_tools(store, false, false, VaultSnapshot::default()).snapshot;
     let mut installed = 0;
     for item in snapshot
         .categories
@@ -1798,17 +1831,22 @@ fn apply_manifest() -> Result<String, String> {
         .filter(|item| item.managed && item.status == ToolStatus::Missing)
         .filter(|item| !matches!(item.provider, ToolProvider::Dotfiles | ToolProvider::Mcp))
     {
-        install_provider(item.provider, &item.id)?;
+        install_provider(store, item.provider, &item.id)?;
         installed += 1;
     }
-    let linked = manifest_store::apply_enabled_dotfiles(&manifest)?;
+    let linked = store.apply_enabled_dotfiles(&manifest)?;
     Ok(format!(
         "installed {installed} package(s), linked {linked} file(s)"
     ))
 }
 
-fn set_manifest_entry(provider: ToolProvider, id: &str, enabled: bool) -> Result<(), String> {
-    let mut manifest = manifest_store::load_manifest()?;
+fn set_manifest_entry(
+    store: &ToolStore,
+    provider: ToolProvider,
+    id: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut manifest = store.load()?;
     if provider == ToolProvider::Dotfiles {
         manifest.set_dotfile_package(id, enabled);
     } else if provider == ToolProvider::Mcp {
@@ -1819,10 +1857,10 @@ fn set_manifest_entry(provider: ToolProvider, id: &str, enabled: bool) -> Result
     } else {
         manifest.set_package(provider.id(), id, enabled);
     }
-    manifest_store::write_manifest(&manifest)
+    store.save(&manifest)
 }
 
-fn install_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
+fn install_provider(store: &ToolStore, provider: ToolProvider, id: &str) -> Result<(), String> {
     match provider {
         ToolProvider::HomebrewFormula => {
             command_output("brew", &["install", id], true)?;
@@ -1851,14 +1889,14 @@ fn install_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
             )?;
         }
         ToolProvider::Dotfiles => {
-            manifest_store::apply_dotfile_package(id)?;
+            store.apply_dotfile_package(id)?;
         }
         ToolProvider::Mcp => return Err("MCP servers are configuration, not packages".into()),
     }
     Ok(())
 }
 
-fn uninstall_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
+fn uninstall_provider(store: &ToolStore, provider: ToolProvider, id: &str) -> Result<(), String> {
     match provider {
         ToolProvider::HomebrewFormula => {
             command_output("brew", &["uninstall", id], true)?;
@@ -1876,14 +1914,14 @@ fn uninstall_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
                 .map_err(|error| error.to_string())?;
         }
         ToolProvider::Dotfiles => {
-            manifest_store::unlink_dotfile_package(id)?;
+            store.unlink_dotfile_package(id)?;
         }
         ToolProvider::Mcp => return Err("forget the MCP server instead".to_string()),
     }
     Ok(())
 }
 
-fn update_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
+fn update_provider(store: &ToolStore, provider: ToolProvider, id: &str) -> Result<(), String> {
     match provider {
         ToolProvider::HomebrewFormula => {
             command_output("brew", &["upgrade", id], true)?;
@@ -1895,7 +1933,7 @@ fn update_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
             command_output("npm", &["update", "--global", id], true)?;
         }
         ToolProvider::Acp | ToolProvider::Lsp | ToolProvider::Dotfiles => {
-            install_provider(provider, id)?;
+            install_provider(store, provider, id)?;
         }
         ToolProvider::Mcp => return Err("MCP servers do not update through Tools".into()),
     }

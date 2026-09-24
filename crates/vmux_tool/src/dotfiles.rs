@@ -4,8 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::{
-    ToolsManifest, expand_user_path, home_dir, load_manifest_from, manifest_path,
-    migrate_legacy_storage, root_dir, write_manifest_to,
+    ToolStore, ToolsManifest, expand_user_path, load_manifest_from, write_manifest_to,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,13 +62,66 @@ impl DotfilePlan {
     }
 }
 
+impl ToolStore {
+    pub fn import_dotfiles(&self, path: &Path) -> Result<usize, String> {
+        self.migrate_legacy_storage()?;
+        let path = self.expand_user_path(path)?;
+        import_dotfiles_to(&path, &self.dotfiles_dir(), &self.manifest_path())
+    }
+
+    pub fn dotfile_packages(&self) -> Result<Vec<String>, String> {
+        self.migrate_legacy_storage()?;
+        Ok(dotfile_packages_in(&self.dotfiles_dir()))
+    }
+
+    pub fn plan_dotfile_package(&self, package: &str) -> Result<DotfilePlan, String> {
+        self.migrate_legacy_storage()?;
+        plan_dotfile_package_in(&self.dotfiles_dir(), self.home(), package)
+    }
+
+    pub fn apply_dotfile_package(&self, package: &str) -> Result<usize, String> {
+        self.migrate_legacy_storage()?;
+        apply_dotfile_package_in(&self.dotfiles_dir(), self.home(), package)
+    }
+
+    pub fn unlink_dotfile_package(&self, package: &str) -> Result<usize, String> {
+        self.migrate_legacy_storage()?;
+        unlink_dotfile_package_in(&self.dotfiles_dir(), self.home(), package)
+    }
+
+    pub fn disable_and_unlink_dotfile_package(&self, package: &str) -> Result<usize, String> {
+        self.migrate_legacy_storage()?;
+        disable_and_unlink_dotfile_package_in(
+            &self.manifest_path(),
+            &self.dotfiles_dir(),
+            self.home(),
+            package,
+        )
+    }
+
+    pub fn apply_enabled_dotfiles(&self, manifest: &ToolsManifest) -> Result<usize, String> {
+        self.migrate_legacy_storage()?;
+        apply_enabled_dotfiles_in(manifest, &self.dotfiles_dir(), self.home())
+    }
+
+    pub fn adopt_dotfile(&self, path: &Path, package: &str) -> Result<PathBuf, String> {
+        self.migrate_legacy_storage()?;
+        adopt_dotfile_in(
+            &self.dotfiles_dir(),
+            self.home(),
+            &self.manifest_path(),
+            path,
+            package,
+        )
+    }
+}
+
 pub fn dotfiles_dir() -> PathBuf {
-    root_dir().join("dotfiles")
+    ToolStore::current().dotfiles_dir()
 }
 
 pub fn import_dotfiles(path: &Path) -> Result<usize, String> {
-    migrate_legacy_storage()?;
-    import_dotfiles_to(path, &dotfiles_dir(), &manifest_path())
+    ToolStore::current().import_dotfiles(path)
 }
 
 pub fn import_dotfiles_to(
@@ -153,8 +205,7 @@ pub fn import_dotfiles_to(
 }
 
 pub fn dotfile_packages() -> Result<Vec<String>, String> {
-    migrate_legacy_storage()?;
-    Ok(dotfile_packages_in(&dotfiles_dir()))
+    ToolStore::current().dotfile_packages()
 }
 
 pub fn dotfile_packages_in(root: &Path) -> Vec<String> {
@@ -171,8 +222,7 @@ pub fn dotfile_packages_in(root: &Path) -> Vec<String> {
 }
 
 pub fn plan_dotfile_package(package: &str) -> Result<DotfilePlan, String> {
-    migrate_legacy_storage()?;
-    plan_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
+    ToolStore::current().plan_dotfile_package(package)
 }
 
 pub fn plan_dotfile_package_in(
@@ -208,8 +258,7 @@ pub fn plan_dotfile_package_in(
 }
 
 pub fn apply_dotfile_package(package: &str) -> Result<usize, String> {
-    migrate_legacy_storage()?;
-    apply_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
+    ToolStore::current().apply_dotfile_package(package)
 }
 
 pub fn apply_dotfile_package_in(
@@ -253,13 +302,11 @@ fn apply_dotfile_plan(plan: &DotfilePlan) -> Result<Vec<PathBuf>, String> {
 }
 
 pub fn unlink_dotfile_package(package: &str) -> Result<usize, String> {
-    migrate_legacy_storage()?;
-    unlink_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
+    ToolStore::current().unlink_dotfile_package(package)
 }
 
 pub fn disable_and_unlink_dotfile_package(package: &str) -> Result<usize, String> {
-    migrate_legacy_storage()?;
-    disable_and_unlink_dotfile_package_in(&manifest_path(), &dotfiles_dir(), &home_dir(), package)
+    ToolStore::current().disable_and_unlink_dotfile_package(package)
 }
 
 pub(crate) fn disable_and_unlink_dotfile_package_in(
@@ -334,8 +381,7 @@ pub fn unlink_dotfile_package_in(
 }
 
 pub fn apply_enabled_dotfiles(manifest: &ToolsManifest) -> Result<usize, String> {
-    migrate_legacy_storage()?;
-    apply_enabled_dotfiles_in(manifest, &dotfiles_dir(), &home_dir())
+    ToolStore::current().apply_enabled_dotfiles(manifest)
 }
 
 pub(crate) fn apply_enabled_dotfiles_in(
@@ -370,14 +416,7 @@ pub(crate) fn apply_enabled_dotfiles_in(
 }
 
 pub fn adopt_dotfile(path: &Path, package: &str) -> Result<PathBuf, String> {
-    migrate_legacy_storage()?;
-    adopt_dotfile_in(
-        &dotfiles_dir(),
-        &home_dir(),
-        &manifest_path(),
-        path,
-        package,
-    )
+    ToolStore::current().adopt_dotfile(path, package)
 }
 
 pub fn adopt_dotfile_in(

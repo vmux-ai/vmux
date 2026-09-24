@@ -11004,6 +11004,7 @@ dependencies = [
 name = "vmux_tool"
 version = "0.0.34"
 dependencies = [
+ "bevy_ecs",
  "serde",
  "serde_json",
  "tempfile",
