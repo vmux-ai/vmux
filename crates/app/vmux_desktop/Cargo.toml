@@ -81,9 +81,7 @@ moonshine-save = { workspace = true }
 muda = "0.19"
 notify = { workspace = true }
 parking_lot = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rfd = { workspace = true }
-ring = { workspace = true }
 ron = { workspace = true }
 semver = { version = "1", optional = true }
 serde = { workspace = true }

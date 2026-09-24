@@ -10444,9 +10444,7 @@ dependencies = [
  "objc2-user-notifications 0.3.2",
  "parking_lot",
  "raw-window-handle 0.6.2",
- "reqwest",
  "rfd 0.15.4",
- "ring",
  "rkyv",
  "ron 0.8.1",
  "semver",
@@ -10659,15 +10657,25 @@ name = "vmux_mcp"
 version = "0.0.34"
 dependencies = [
  "base64 0.22.1",
+ "bevy",
  "bevy_app",
+ "bevy_cef",
  "bevy_ecs",
+ "parking_lot",
+ "reqwest",
+ "ring",
  "ron 0.8.1",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "url",
+ "uuid",
  "vmux_api",
  "vmux_client",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_tool",
 ]
 
 [[package]]
