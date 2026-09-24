@@ -16,7 +16,6 @@ impl Plugin for HistoryPlugin {
             crate::PAGE_MANIFEST,
             NativelyHosted::page(crate::PAGE_URL, "History"),
         ));
-        vmux_core::register_host_spawn(app, "history");
         app.add_plugins((
             crate::spawn::HistorySpawnPlugin,
             crate::query::HistoryQueryPlugin,

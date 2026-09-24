@@ -6,6 +6,8 @@ impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(FILES_PAGE_MANIFEST);
         app.world_mut().spawn(PROJECTS_PAGE_MANIFEST);
+        app.world_mut()
+            .spawn(vmux_core::HostSpawnRoute::scheme("file"));
         app.add_plugins((
             contract::ContractPlugin,
             lsp::LspPlugin,

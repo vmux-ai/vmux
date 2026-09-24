@@ -1,115 +1,49 @@
 use bevy::prelude::*;
-use std::collections::HashSet;
 
-#[derive(Resource, Default, Debug, Clone)]
-pub struct HostSpawnRegistry {
-    hosts: HashSet<String>,
-    schemes: HashSet<String>,
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostSpawnRoute {
+    Host(&'static str),
+    Scheme(&'static str),
 }
 
-impl HostSpawnRegistry {
-    pub fn register(&mut self, host: &str) {
-        self.hosts.insert(host.to_string());
+impl HostSpawnRoute {
+    pub const fn host(host: &'static str) -> Self {
+        Self::Host(host)
     }
 
-    pub fn register_scheme(&mut self, scheme: &str) {
-        self.schemes
-            .insert(scheme.trim_end_matches(':').to_ascii_lowercase());
+    pub const fn scheme(scheme: &'static str) -> Self {
+        Self::Scheme(scheme)
     }
 
-    pub fn needs_host_spawn(&self, url: &str) -> bool {
-        if url.starts_with("file:") {
-            return true;
+    pub fn answers_for(&self, url: &str) -> bool {
+        match self {
+            Self::Host(host) => {
+                vmux_api::VmuxRoute::parse(url).is_some_and(|route| route.host() == *host)
+            }
+            Self::Scheme(scheme) => url
+                .split_once(':')
+                .is_some_and(|(candidate, _)| candidate.eq_ignore_ascii_case(scheme)),
         }
-        if url
-            .split_once(':')
-            .is_some_and(|(scheme, _)| self.schemes.contains(&scheme.to_ascii_lowercase()))
-        {
-            return true;
-        }
-        vmux_api::VmuxRoute::parse(url).is_some_and(|route| self.hosts.contains(route.host()))
     }
-}
-
-pub fn register_host_spawn(app: &mut App, host: &'static str) {
-    app.init_resource::<HostSpawnRegistry>();
-    app.world_mut()
-        .resource_mut::<HostSpawnRegistry>()
-        .register(host);
-}
-
-pub fn register_scheme_spawn(app: &mut App, scheme: &'static str) {
-    app.init_resource::<HostSpawnRegistry>();
-    app.world_mut()
-        .resource_mut::<HostSpawnRegistry>()
-        .register_scheme(scheme);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn registry(hosts: &[&str]) -> HostSpawnRegistry {
-        let mut r = HostSpawnRegistry::default();
-        for h in hosts {
-            r.register(h);
-        }
-        r
+    #[test]
+    fn host_route_matches_on_boundary() {
+        let route = HostSpawnRoute::host("terminal");
+        assert!(route.answers_for("vmux://terminal/"));
+        assert!(route.answers_for("vmux://terminal/?pid=1"));
+        assert!(!route.answers_for("vmux://terminals/"));
     }
 
     #[test]
-    fn file_scheme_always_needs_host_spawn() {
-        assert!(HostSpawnRegistry::default().needs_host_spawn("file:///tmp/x.rs"));
-    }
-
-    #[test]
-    fn registered_host_matches_on_boundary() {
-        let r = registry(&["services", "terminal"]);
-        assert!(r.needs_host_spawn("vmux://services/"));
-        assert!(r.needs_host_spawn("vmux://services"));
-        assert!(r.needs_host_spawn("vmux://terminal/?pid=1"));
-    }
-
-    #[test]
-    fn unregistered_or_partial_host_does_not_match() {
-        let r = registry(&["services", "terminal"]);
-        assert!(!r.needs_host_spawn("vmux://settings/"));
-        assert!(!r.needs_host_spawn("vmux://terminals/"));
-        assert!(!r.needs_host_spawn("vmux://services-x/"));
-        assert!(!r.needs_host_spawn("https://example.com"));
-    }
-
-    #[test]
-    fn registering_settings_makes_it_match() {
-        let r = registry(&["settings"]);
-        assert!(r.needs_host_spawn("vmux://settings/"));
-    }
-
-    #[test]
-    fn register_is_idempotent() {
-        let mut r = HostSpawnRegistry::default();
-        r.register("team");
-        r.register("team");
-        assert_eq!(r.hosts.len(), 1);
-    }
-
-    #[test]
-    fn register_host_spawn_inserts_resource() {
-        let mut app = App::new();
-        register_host_spawn(&mut app, "spaces");
-        register_host_spawn(&mut app, "team");
-        let reg = app.world().resource::<HostSpawnRegistry>();
-        assert!(reg.needs_host_spawn("vmux://spaces/"));
-        assert!(reg.needs_host_spawn("vmux://team/"));
-    }
-
-    #[test]
-    fn registered_scheme_matches_repository_urls() {
-        let mut r = HostSpawnRegistry::default();
-        r.register_scheme("git");
-
-        assert!(r.needs_host_spawn("git://Users/me/repo"));
-        assert!(r.needs_host_spawn("GIT://Users/me/repo"));
-        assert!(!r.needs_host_spawn("https://example.com"));
+    fn scheme_route_matches_case_insensitively() {
+        let route = HostSpawnRoute::scheme("git");
+        assert!(route.answers_for("git://Users/me/repo"));
+        assert!(route.answers_for("GIT://Users/me/repo"));
+        assert!(!route.answers_for("https://example.com"));
     }
 }
