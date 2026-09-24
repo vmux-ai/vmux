@@ -324,14 +324,6 @@ mod tests {
     }
 
     #[test]
-    fn header_request_rkyv_roundtrip() {
-        let original = HeaderRequest::PreviousPage;
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        let recovered = rkyv::from_bytes::<HeaderRequest, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(recovered, original);
-    }
-
-    #[test]
     fn tabs_request_rkyv_roundtrip() {
         let original = TabsRequest::Reorder {
             tab_id: "work".into(),
@@ -352,12 +344,16 @@ mod tests {
     }
 }
 #[vmux_api::ui_event(Copy, Eq, target = "layout")]
-pub enum HeaderRequest {
-    PreviousPage,
-    NextPage,
-    Reload,
-    FocusAddressBar,
-}
+pub struct HeaderBackRequest;
+
+#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+pub struct HeaderForwardRequest;
+
+#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+pub struct HeaderReloadRequest;
+
+#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+pub struct HeaderAddressFocusRequest;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct StackNavigationState {

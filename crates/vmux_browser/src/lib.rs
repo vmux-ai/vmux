@@ -45,6 +45,7 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::{
+    HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
     RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest, RemoteRequest,
     RemoteRevokeRequest, SideSheetRequest, SideSheetResizeEvent, WindowDragRegionEvent,
 };
@@ -52,7 +53,6 @@ pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
-    event::HeaderRequest,
     overlay::LayoutOverlayActive,
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
@@ -147,7 +147,10 @@ impl Plugin for BrowserPlugin {
                     ..default()
                 },
                 UiEventPlugin::<(
-                    HeaderRequest,
+                    HeaderBackRequest,
+                    HeaderForwardRequest,
+                    HeaderReloadRequest,
+                    HeaderAddressFocusRequest,
                     SideSheetRequest,
                     SideSheetResizeEvent,
                     WindowDragRegionEvent,
