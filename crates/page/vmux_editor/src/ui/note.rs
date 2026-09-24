@@ -4,7 +4,7 @@ use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::prelude::*;
 use vmux_core::event::{CompletionItem, FilePointerEvent, FilePropertyEdit, MdBlock, NoteBlock};
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgePropertyKind};
-use vmux_git::ui::EditorDiffMarker;
+use vmux_git::event::GitLineStatus;
 use vmux_ui::caret::EventSelection;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
@@ -567,12 +567,12 @@ pub(super) fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
 #[component]
 pub(super) fn NoteBlockView(
     note_blocks: Signal<Vec<NoteBlock>>,
-    diff_markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    diff_markers: ReadSignal<HashMap<u32, GitLineStatus>>,
     index: usize,
     editing: bool,
     source_cursor: Signal<vmux_core::editor::CursorPos>,
     source_selections: Signal<Vec<vmux_core::editor::SelSpan>>,
-    note_diff_marker: Option<EditorDiffMarker>,
+    note_diff_marker: Option<GitLineStatus>,
     keymap: vmux_core::KeymapKind,
     note_cursor: NoteCursor,
     mut note_dragging: Signal<bool>,
@@ -898,20 +898,20 @@ pub(super) fn NoteBlockView(
     }
 }
 
-fn note_diff_marker_class(marker: EditorDiffMarker) -> &'static str {
+fn note_diff_marker_class(marker: GitLineStatus) -> &'static str {
     diff_tone(marker).marker_class()
 }
 
 fn note_block_diff_marker(
-    markers: &HashMap<u32, EditorDiffMarker>,
+    markers: &HashMap<u32, GitLineStatus>,
     start_line: u32,
     end_line: u32,
-) -> Option<EditorDiffMarker> {
+) -> Option<GitLineStatus> {
     let priority = |marker| match marker {
-        EditorDiffMarker::Staged => 0,
-        EditorDiffMarker::Deleted => 1,
-        EditorDiffMarker::Added => 2,
-        EditorDiffMarker::Modified => 3,
+        GitLineStatus::Staged => 0,
+        GitLineStatus::Deleted => 1,
+        GitLineStatus::Added => 2,
+        GitLineStatus::Modified => 3,
     };
     (start_line..=end_line)
         .filter_map(|line| markers.get(&(line + 1)).copied())

@@ -49,9 +49,18 @@ pub struct GitStatusEvent {
     pub repo_root: String,
 }
 
-#[vmux_api::contract(Eq)]
-pub struct GitDiffMetaEvent {
-    pub total_lines: u32,
+#[vmux_api::contract(Copy, Eq)]
+pub enum GitLineStatus {
+    Added,
+    Modified,
+    Deleted,
+    Staged,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct GitLineMarker {
+    pub line: u32,
+    pub status: GitLineStatus,
 }
 
 #[vmux_api::contract(Eq)]
@@ -60,6 +69,7 @@ pub struct GitDiffViewportEvent {
     pub first_line: u32,
     pub total_lines: u32,
     pub lines: Vec<DiffLine>,
+    pub markers: Vec<GitLineMarker>,
     pub error: String,
 }
 
@@ -83,6 +93,8 @@ pub struct FileGitState {
     pub result: Option<GitResultEvent>,
     pub result_sequence: u64,
     pub refresh_revision: u64,
+    pub diff_viewport: Option<GitDiffViewportEvent>,
+    pub diff_loading: bool,
 }
 
 #[vmux_api::contract(Eq)]

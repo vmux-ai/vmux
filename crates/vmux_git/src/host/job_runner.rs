@@ -3,7 +3,6 @@ use std::thread::JoinHandle;
 
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use vmux_core::host::FileUiStateUpdates;
 
 use super::GitUpdateSet;
 use super::job::{Emit, JobKind};
@@ -109,9 +108,9 @@ fn poll_git_jobs(mut jobs: Query<(Entity, &GitJob, &mut RunningGitJob)>, mut com
 fn deliver_git_outputs(
     mut outputs: Query<(Entity, &mut GitJobOutput)>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
-    file_pages: Query<(), With<FileUiStateUpdates>>,
     mut views: Query<&mut super::state::GitState>,
     mut files: Query<&mut super::status::FileGit>,
+    diffs: Query<&super::diff::GitDiffQuery>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -144,15 +143,23 @@ fn deliver_git_outputs(
                         file.apply_status(event);
                     }
                 }
-                Emit::DiffMeta(event) => {
-                    FileUiStateUpdates::deliver(&file_pages, &mut commands, webview, &event);
-                }
                 Emit::DiffViewport(event) => {
+                    let Ok(query) = diffs.get(webview) else {
+                        continue;
+                    };
                     if let Ok(mut view) = views.get_mut(webview) {
-                        view.set_diff_viewport(event);
-                    } else {
-                        FileUiStateUpdates::deliver(&file_pages, &mut commands, webview, &event);
+                        if query.accepts(event.generation) {
+                            view.set_diff_viewport(event);
+                        }
+                        continue;
                     }
+                    let Ok(mut file) = files.get_mut(webview) else {
+                        continue;
+                    };
+                    if !query.accepts_file(event.generation, &file) {
+                        continue;
+                    }
+                    file.apply_diff(event);
                 }
                 Emit::Result(event) => {
                     if let Ok(mut view) = views.get_mut(webview) {

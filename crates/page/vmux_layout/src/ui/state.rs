@@ -9,7 +9,7 @@ use vmux_ui::hooks::{send, use_ui_state_root};
 
 use super::update::UpdatePhase;
 use crate::event::{
-    ActiveSession, HeaderPageEvent, LayoutStateEvent, PaneTreeEvent, RemoteStateEvent,
+    ActiveSession, HeaderPageEvent, LayoutStateEvent, PaneTreeEvent, RemoteUiState,
     StacksHostEvent, TabBoundaryEvent, TabsHostEvent,
 };
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
@@ -26,7 +26,7 @@ pub(crate) struct LayoutPageState {
     pub active_session: Option<ActiveSession>,
     pub header_page: HeaderPageEvent,
     pub team: TeamEvent,
-    pub remote: RemoteStateEvent,
+    pub remote: RemoteUiState,
     pub extensions: ExtensionsEvent,
     pub extension_popup: ExtensionPopupEvent,
     pub extension_popup_size: ExtensionPopupSizeEvent,

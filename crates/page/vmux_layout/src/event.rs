@@ -560,7 +560,7 @@ pub enum RemotePhase {
 }
 
 #[vmux_api::contract(Default, Eq)]
-pub struct RemoteStateEvent {
+pub struct RemoteUiState {
     pub enabled: bool,
     pub phase: RemotePhase,
     pub pairing_url: String,

@@ -70,7 +70,15 @@ impl GitState {
         self.snapshot.branch_log = Some(event);
     }
 
+    pub(super) fn start_diff(&mut self, target_changed: bool) {
+        self.snapshot.diff_loading = target_changed || self.snapshot.diff_viewport.is_none();
+        if target_changed {
+            self.snapshot.diff_viewport = None;
+        }
+    }
+
     pub(super) fn set_diff_viewport(&mut self, event: GitDiffViewportEvent) {
+        self.snapshot.diff_loading = false;
         self.snapshot.diff_viewport = Some(event);
     }
 

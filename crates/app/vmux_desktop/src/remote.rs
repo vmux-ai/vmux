@@ -7,7 +7,7 @@ use crossbeam_channel::{Receiver, Sender};
 use vmux_core::page::PageReady;
 use vmux_layout::event::{
     RemoteCopyEvent, RemoteDevice, RemotePairingRequest, RemotePhase, RemoteRequest,
-    RemoteRevokeRequest, RemoteStateEvent,
+    RemoteRevokeRequest, RemoteUiState,
 };
 use vmux_layout::{LayoutCef, LayoutUiStateUpdates};
 use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
@@ -376,13 +376,13 @@ fn push_remote_state_emit(
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     states: Query<&RemoteState>,
-    mut last: Local<std::collections::HashMap<Entity, RemoteStateEvent>>,
+    mut last: Local<std::collections::HashMap<Entity, RemoteUiState>>,
 ) {
     let Ok(state) = states.single() else {
         return;
     };
     let now = Instant::now();
-    let payload = RemoteStateEvent {
+    let payload = RemoteUiState {
         enabled: state.enabled,
         phase: state.phase,
         pairing_url: state.pairing_url.clone(),

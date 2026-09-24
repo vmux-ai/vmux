@@ -4,9 +4,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
 use crate::event::{
-    GitCommitRequest, GitDiffRequest, GitDiscardRequest, GitFetchRequest, GitHunkRequest,
-    GitOperationRequest, GitPullRequest, GitPushRequest, GitStageAllRequest, GitStageRequest,
-    GitUnstageRequest,
+    GitCommitRequest, GitDiscardRequest, GitFetchRequest, GitHunkRequest, GitOperationRequest,
+    GitPullRequest, GitPushRequest, GitStageAllRequest, GitStageRequest, GitUnstageRequest,
 };
 
 use super::job::JobKind;
@@ -17,7 +16,6 @@ pub(super) struct ChangesPlugin;
 impl Plugin for ChangesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
-            GitDiffRequest,
             GitStageRequest,
             GitUnstageRequest,
             GitDiscardRequest,
@@ -29,7 +27,6 @@ impl Plugin for ChangesPlugin {
             GitStageAllRequest,
             GitHunkRequest,
         )>::default())
-            .add_observer(on_diff_request)
             .add_observer(on_stage_request)
             .add_observer(on_unstage_request)
             .add_observer(on_discard_request)
@@ -41,40 +38,6 @@ impl Plugin for ChangesPlugin {
             .add_observer(on_stage_all_request)
             .add_observer(on_hunk_request);
     }
-}
-
-#[derive(Component, Clone, Debug, Default)]
-pub struct GitDiffSource {
-    pub content: String,
-    pub dirty: bool,
-}
-
-fn on_diff_request(
-    trigger: On<BinReceive<GitDiffRequest>>,
-    sources: Query<&GitDiffSource>,
-    mut commands: Commands,
-) {
-    let request = &trigger.event().payload;
-    let repo_root = PathBuf::from(&request.repo_root);
-    let path =
-        super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    GitJob::enqueue(
-        &mut commands,
-        trigger.event().webview,
-        JobKind::Diff {
-            repo_root,
-            path,
-            reference: request.reference.clone(),
-            generation: request.generation,
-            top_line: request.top_line,
-            rows: request.rows,
-            content: sources
-                .get(trigger.event().webview)
-                .ok()
-                .filter(|source| source.dirty)
-                .map(|source| source.content.clone()),
-        },
-    );
 }
 
 fn on_stage_request(trigger: On<BinReceive<GitStageRequest>>, mut commands: Commands) {

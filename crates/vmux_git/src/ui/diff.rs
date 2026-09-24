@@ -1,7 +1,5 @@
 #![allow(non_snake_case)]
 
-use std::collections::HashMap;
-
 use dioxus::prelude::*;
 use vmux_ui::components::card::{Card, CardVariant};
 use vmux_ui::file_icon::TypeIcon;
@@ -9,7 +7,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use crate::event::{GitDiffViewportEvent, GitRepositoryEvent};
-use crate::ui::{DiffView, EditorDiffMarker};
+use crate::ui::DiffView;
 
 #[component]
 pub(super) fn CommitDiffCard(
@@ -17,8 +15,8 @@ pub(super) fn CommitDiffCard(
     repo_root: ReadSignal<String>,
     selected_commit: Signal<String>,
     nonce: ReadSignal<u32>,
-    markers: Signal<HashMap<u32, EditorDiffMarker>>,
     diff_viewport: ReadSignal<Option<GitDiffViewportEvent>>,
+    loading: bool,
 ) -> Element {
     let empty_path = use_signal(String::new);
     let selected = repository
@@ -30,6 +28,20 @@ pub(super) fn CommitDiffCard(
         .as_ref()
         .map(|commit| format!("{}  {}", commit.short_sha, commit.summary))
         .unwrap_or_else(|| translate("git-no-commits"));
+    use_effect(move || {
+        let repo_root = repo_root();
+        let reference = selected_commit();
+        let _ = nonce();
+        if repo_root.is_empty() || reference.is_empty() {
+            return;
+        }
+        let _ = vmux_ui::hooks::send(&crate::event::GitDiffRequest {
+            repo_root,
+            path: String::new(),
+            path_bytes: Vec::new(),
+            reference,
+        });
+    });
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-sky-400/25 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
             div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-sky-400/[0.055] to-transparent px-2",
@@ -47,11 +59,9 @@ pub(super) fn CommitDiffCard(
                 DiffView {
                     repo_root,
                     path: empty_path,
-                    reference: selected_commit(),
-                    nonce,
                     viewport: diff_viewport,
+                    loading,
                     visible: true,
-                    markers,
                 }
             }
         }
@@ -65,9 +75,24 @@ pub(super) fn DiffCard(
     selected_path_bytes: Signal<Vec<u8>>,
     selected_abs_path: Signal<String>,
     nonce: ReadSignal<u32>,
-    markers: Signal<HashMap<u32, EditorDiffMarker>>,
     diff_viewport: ReadSignal<Option<GitDiffViewportEvent>>,
+    loading: bool,
 ) -> Element {
+    use_effect(move || {
+        let repo_root = repo_root();
+        let path = selected_abs_path();
+        let path_bytes = selected_path_bytes();
+        let _ = nonce();
+        if repo_root.is_empty() || path.is_empty() {
+            return;
+        }
+        let _ = vmux_ui::hooks::send(&crate::event::GitDiffRequest {
+            repo_root,
+            path,
+            path_bytes,
+            reference: String::new(),
+        });
+    });
     rsx! {
         Card { variant: CardVariant::Panel, class: "order-2 min-h-[28rem] border-t-emerald-400/25 sm:col-start-2 sm:row-start-1 sm:row-span-4 sm:min-h-0 sm:order-none",
             div { class: "flex h-7 shrink-0 items-center gap-1.5 border-b border-foreground/[0.07] bg-gradient-to-r from-emerald-400/[0.055] to-transparent px-2",
@@ -84,7 +109,7 @@ pub(super) fn DiffCard(
                     {translate("git-select-file")}
                 }
             } else {
-                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), nonce, viewport: diff_viewport, visible: true, markers }
+                DiffView { repo_root, path: selected_abs_path, path_bytes: selected_path_bytes(), viewport: diff_viewport, loading, visible: true }
             }
         }
     }

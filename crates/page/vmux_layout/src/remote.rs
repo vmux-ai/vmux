@@ -8,11 +8,11 @@ use vmux_ui::i18n::translate;
 
 use crate::event::{
     LayoutOverlayEvent, RemoteCopyEvent, RemotePairingRequest, RemotePhase, RemoteRequest,
-    RemoteRevokeRequest, RemoteStateEvent,
+    RemoteRevokeRequest, RemoteUiState,
 };
 
 #[component]
-pub(crate) fn RemoteControl(remote: RemoteStateEvent) -> Element {
+pub(crate) fn RemoteControl(remote: RemoteUiState) -> Element {
     let mut open = use_signal(|| false);
     use_effect(move || {
         let _ = send(&LayoutOverlayEvent {
@@ -84,7 +84,7 @@ pub(crate) fn RemoteControl(remote: RemoteStateEvent) -> Element {
 }
 
 #[component]
-fn RemotePanel(remote: RemoteStateEvent) -> Element {
+fn RemotePanel(remote: RemoteUiState) -> Element {
     let mut copied = use_signal(|| false);
     let active = remote.phase == RemotePhase::Enabled;
     let transitioning = remote.phase == RemotePhase::Starting;

@@ -7,7 +7,7 @@ use super::{
     FileScrollByEvent, FileShapeEvent, FileThemeEvent, FileTidyPromptEvent, FileViewModeEvent,
     FileViewportPatch, LspInstallProgress, LspPkgStatusEvent, OpenEditorsEvent, OutlineEvent,
 };
-use vmux_api::git::{FileGitState, GitDiffMetaEvent, GitDiffViewportEvent};
+use vmux_api::git::FileGitState;
 
 #[vmux_api::ui_state_patch]
 pub enum FileUiStatePatch {
@@ -45,8 +45,6 @@ pub enum FileUiStatePatch {
     References(FileReferencesEvent),
     Completion(FileCompletionEvent),
     GitState(FileGitState),
-    GitDiffMeta(GitDiffMetaEvent),
-    GitDiffViewport(GitDiffViewportEvent),
     Key(FileKey),
 }
 

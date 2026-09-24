@@ -1,11 +1,8 @@
-use std::collections::HashMap;
-
 use dioxus::prelude::*;
 use vmux_ui::hooks::use_ui_state_root;
 use vmux_ui::list_nav::{MenuDirection, move_selection};
 use vmux_ui::scroll::ScrollIntoView;
 
-use super::diff_projection::EditorDiffMarker;
 use super::model::{BranchCollection, BranchPrompt, GitPanel};
 use super::workspace::GitWorkspace;
 use crate::event::*;
@@ -36,7 +33,6 @@ pub(super) struct GitPageState {
     pub(super) pending_commit_message: Signal<String>,
     pub(super) focused_panel: Signal<GitPanel>,
     pub(super) shortcut_help: Signal<bool>,
-    pub(super) markers: Signal<HashMap<u32, EditorDiffMarker>>,
     handled_result_sequence: Signal<u64>,
 }
 
@@ -63,7 +59,6 @@ impl GitPageState {
             pending_commit_message: use_signal(String::new),
             focused_panel: use_signal(GitPanel::default),
             shortcut_help: use_signal(|| false),
-            markers: use_signal(HashMap::new),
             handled_result_sequence: use_signal(|| 0),
         };
         state.subscribe();

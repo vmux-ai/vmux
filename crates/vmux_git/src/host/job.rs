@@ -66,7 +66,6 @@ pub(super) enum Emit {
     Repository(GitRepositoryEvent),
     BranchLog(GitBranchLogEvent),
     Status(GitStatusEvent),
-    DiffMeta(GitDiffMetaEvent),
     DiffViewport(GitDiffViewportEvent),
     Result(GitResultEvent),
     Error(GitErrorEvent),
@@ -127,16 +126,16 @@ impl JobKind {
                 generation,
                 top_line,
                 ..
-            } if !runner::has_repository(&repo_root) => vec![
-                Emit::DiffMeta(GitDiffMetaEvent { total_lines: 0 }),
-                Emit::DiffViewport(GitDiffViewportEvent {
+            } if !runner::has_repository(&repo_root) => {
+                vec![Emit::DiffViewport(GitDiffViewportEvent {
                     generation,
                     first_line: top_line,
                     total_lines: 0,
                     lines: Vec::new(),
+                    markers: Vec::new(),
                     error: String::new(),
-                }),
-            ],
+                })]
+            }
             JobKind::Diff {
                 repo_root,
                 path,
@@ -155,22 +154,22 @@ impl JobKind {
             } {
                 Ok(lines) => {
                     let (total, win) = parse::window(&lines, top_line, rows);
-                    vec![
-                        Emit::DiffMeta(GitDiffMetaEvent { total_lines: total }),
-                        Emit::DiffViewport(GitDiffViewportEvent {
-                            generation,
-                            first_line: top_line.min(total),
-                            total_lines: total,
-                            lines: win,
-                            error: String::new(),
-                        }),
-                    ]
+                    let markers = super::diff::GitDiffMarkers::from_lines(&lines).into_inner();
+                    vec![Emit::DiffViewport(GitDiffViewportEvent {
+                        generation,
+                        first_line: top_line.min(total),
+                        total_lines: total,
+                        lines: win,
+                        markers,
+                        error: String::new(),
+                    })]
                 }
                 Err(error) => vec![Emit::DiffViewport(GitDiffViewportEvent {
                     generation,
                     first_line: top_line,
                     total_lines: 0,
                     lines: Vec::new(),
+                    markers: Vec::new(),
                     error: error.0,
                 })],
             },
@@ -276,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_job_emits_meta_then_viewport() {
+    fn diff_job_emits_projected_viewport() {
         let (repo, file) = dirty_repo();
         let emits = JobKind::Diff {
             repo_root: repo.path().to_path_buf(),
@@ -288,9 +287,8 @@ mod tests {
             content: None,
         }
         .run();
-        assert!(matches!(emits[0], Emit::DiffMeta(_)));
         assert!(matches!(
-            emits[1],
+            emits[0],
             Emit::DiffViewport(GitDiffViewportEvent { generation: 7, .. })
         ));
     }
@@ -328,15 +326,13 @@ mod tests {
         .run();
         assert!(matches!(
             emits.as_slice(),
-            [
-                Emit::DiffMeta(GitDiffMetaEvent { total_lines: 0 }),
-                Emit::DiffViewport(GitDiffViewportEvent {
-                    generation: 7,
-                    total_lines: 0,
-                    lines,
-                    ..
-                })
-            ] if lines.is_empty()
+            [Emit::DiffViewport(GitDiffViewportEvent {
+                generation: 7,
+                total_lines: 0,
+                lines,
+                markers,
+                ..
+            })] if lines.is_empty() && markers.is_empty()
         ));
     }
 }
