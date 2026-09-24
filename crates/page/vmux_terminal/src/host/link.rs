@@ -1,8 +1,38 @@
 use std::path::Path;
 
+use bevy::prelude::*;
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use unicode_width::UnicodeWidthChar;
 use vmux_command::event::{is_data_uri, looks_like_path};
 use vmux_core::event::{LinkRange, TermLine};
+use vmux_layout::stack::StackRequest;
+
+use crate::event::TermLinkOpenRequest;
+
+pub(super) struct LinkPlugin;
+
+impl Plugin for LinkPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(UiEventPlugin::<(TermLinkOpenRequest,)>::default())
+            .add_observer(on_term_link_open);
+    }
+}
+
+fn on_term_link_open(
+    trigger: On<BinReceive<TermLinkOpenRequest>>,
+    mut stack_requests: MessageWriter<StackRequest>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    let url = trigger.payload.url.clone();
+    if url.is_empty() {
+        return;
+    }
+    stack_requests.write(StackRequest::Open { url: Some(url) });
+    if let Some(proxy) = proxy.as_ref() {
+        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
+    }
+}
 
 const TRAILING_TRIM: &[char] = &['.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '>'];
 
@@ -129,6 +159,40 @@ fn resolve_path(token: &str, cwd: Option<&Path>) -> Option<String> {
 mod tests {
     use super::*;
     use vmux_core::event::TermSpan;
+
+    #[test]
+    fn link_open_emits_stack_open_request() {
+        #[derive(Resource, Default)]
+        struct Captured(Vec<StackRequest>);
+
+        fn capture(mut requests: MessageReader<StackRequest>, mut captured: ResMut<Captured>) {
+            for request in requests.read() {
+                captured.0.push(request.clone());
+            }
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<StackRequest>()
+            .init_resource::<Captured>()
+            .add_observer(on_term_link_open)
+            .add_systems(Update, capture);
+        let webview = app.world_mut().spawn(vmux_core::team::User).id();
+
+        app.world_mut().trigger(BinReceive::<TermLinkOpenRequest> {
+            webview,
+            payload: TermLinkOpenRequest {
+                url: "https://vmux.ai".into(),
+            },
+        });
+        app.update();
+
+        let captured = app.world().resource::<Captured>();
+        assert!(captured.0.iter().any(|request| matches!(
+            request,
+            StackRequest::Open { url: Some(url) } if url == "https://vmux.ai"
+        )));
+    }
 
     fn line_of(text: &str) -> TermLine {
         TermLine {

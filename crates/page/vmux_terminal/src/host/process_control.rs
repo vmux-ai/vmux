@@ -1,33 +1,26 @@
 use bevy::prelude::*;
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin, WebviewSize};
 use vmux_core::page::PageReady;
-use vmux_layout::stack::StackRequest;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
-use crate::event::{TermLinkOpenRequest, TermResizeEvent, TermScrollEvent};
+use crate::event::{TermResizeEvent, TermScrollEvent};
 
 use super::plugin::ServiceMessageSet;
 
-pub(super) struct ScreenPlugin;
+pub(super) struct ProcessControlPlugin;
 
-impl Plugin for ScreenPlugin {
+impl Plugin for ProcessControlPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            TermResizeEvent,
-            TermScrollEvent,
-            TermLinkOpenRequest,
-        )>::default())
+        app.add_plugins(UiEventPlugin::<(TermResizeEvent, TermScrollEvent)>::default())
             .add_systems(
                 Update,
-                request_pending_screen_snapshot.after(ServiceMessageSet),
+                request_pending_terminal_snapshot.after(ServiceMessageSet),
             )
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
-            .add_observer(on_term_scroll)
-            .add_observer(on_term_link_open);
+            .add_observer(on_term_scroll);
     }
 }
 
@@ -44,7 +37,7 @@ impl Default for TerminalGridSize {
 }
 
 #[derive(Component)]
-pub(super) struct PendingScreenSnapshot;
+pub(super) struct PendingTerminalSnapshot;
 
 fn on_term_ready(
     trigger: On<BinReceive<PageReady>>,
@@ -57,7 +50,7 @@ fn on_term_ready(
         return;
     };
     let Some(service) = service else {
-        commands.entity(entity).insert(PendingScreenSnapshot);
+        commands.entity(entity).insert(PendingTerminalSnapshot);
         return;
     };
     service
@@ -65,8 +58,8 @@ fn on_term_ready(
         .send(ClientMessage::RequestSnapshot { process_id });
 }
 
-fn request_pending_screen_snapshot(
-    pending: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingScreenSnapshot>)>,
+fn request_pending_terminal_snapshot(
+    pending: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingTerminalSnapshot>)>,
     browsers: NonSend<Browsers>,
     service: Option<Res<ServiceClient>>,
     mut commands: Commands,
@@ -79,7 +72,7 @@ fn request_pending_screen_snapshot(
         service.0.send(ClientMessage::RequestSnapshot {
             process_id: *process_id,
         });
-        commands.entity(entity).remove::<PendingScreenSnapshot>();
+        commands.entity(entity).remove::<PendingTerminalSnapshot>();
     }
 }
 
@@ -146,58 +139,9 @@ fn on_term_scroll(
     });
 }
 
-fn on_term_link_open(
-    trigger: On<BinReceive<TermLinkOpenRequest>>,
-    mut stack_requests: MessageWriter<StackRequest>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-) {
-    let url = trigger.payload.url.clone();
-    if url.is_empty() {
-        return;
-    }
-    stack_requests.write(StackRequest::Open { url: Some(url) });
-    if let Some(proxy) = proxy.as_ref() {
-        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn link_open_emits_stack_open_request() {
-        #[derive(Resource, Default)]
-        struct Captured(Vec<StackRequest>);
-
-        fn capture(mut requests: MessageReader<StackRequest>, mut captured: ResMut<Captured>) {
-            for request in requests.read() {
-                captured.0.push(request.clone());
-            }
-        }
-
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<StackRequest>()
-            .init_resource::<Captured>()
-            .add_observer(on_term_link_open)
-            .add_systems(Update, capture);
-        let webview = app.world_mut().spawn(vmux_core::team::User).id();
-
-        app.world_mut().trigger(BinReceive::<TermLinkOpenRequest> {
-            webview,
-            payload: TermLinkOpenRequest {
-                url: "https://vmux.ai".into(),
-            },
-        });
-        app.update();
-
-        let captured = app.world().resource::<Captured>();
-        assert!(captured.0.iter().any(|request| matches!(
-            request,
-            StackRequest::Open { url: Some(url) } if url == "https://vmux.ai"
-        )));
-    }
 
     #[test]
     fn page_ready_without_service_owes_a_snapshot() {
@@ -211,6 +155,10 @@ mod tests {
         });
         app.update();
 
-        assert!(app.world().get::<PendingScreenSnapshot>(webview).is_some());
+        assert!(
+            app.world()
+                .get::<PendingTerminalSnapshot>(webview)
+                .is_some()
+        );
     }
 }
