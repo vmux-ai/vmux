@@ -1,4 +1,4 @@
-use crate::event::{PaneNode, PaneTreeEvent};
+use crate::event::{PaneNode, PaneTreeState};
 use dioxus::prelude::*;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
@@ -120,7 +120,7 @@ fn SideSheetContent() -> Element {
     let layout = LayoutUi::current();
     let ui = layout.value();
     let state = ui.layout.unwrap_or_default();
-    let PaneTreeEvent { panes } = ui.pane_tree.unwrap_or_default();
+    let PaneTreeState { panes } = ui.pane_tree.unwrap_or_default();
     let active_space = ui
         .spaces
         .unwrap_or_default()
@@ -138,7 +138,7 @@ fn SideSheetContent() -> Element {
             reveal.forget();
             return;
         }
-        let PaneTreeEvent { panes } = ui.pane_tree.unwrap_or_default();
+        let PaneTreeState { panes } = ui.pane_tree.unwrap_or_default();
         let Some(target) = ActiveStack::find(&panes) else {
             return;
         };

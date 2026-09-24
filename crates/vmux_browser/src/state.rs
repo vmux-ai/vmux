@@ -12,9 +12,9 @@ use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, LayoutUiStateUpdates, NavigationState, Open, UpdateState,
     event::{
-        HEADER_HEIGHT_PX, LayoutStateEvent, PaneNode, PaneTreeEvent, StackNode, StackRow,
-        StacksHostEvent, TabBoundary, TabBoundaryEvent, TabRow, TabsHostEvent, UpdateClearedEvent,
-        UpdateProgressEvent, UpdateReadyEvent,
+        HEADER_HEIGHT_PX, LayoutGeometry, PaneNode, PaneTreeState, StackNavigationState, StackNode,
+        StackRow, TabBoundary, TabBoundaryState, TabListState, TabRow, UpdateCleared,
+        UpdateProgress, UpdateReady,
     },
     pane::{Pane, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
@@ -427,7 +427,7 @@ fn push_layout_state_emit(
         }
     });
 
-    let payload = LayoutStateEvent {
+    let payload = LayoutGeometry {
         header_open,
         side_sheet_open: side_sheet_q.iter().any(|(entity, pos, is_open)| {
             *pos == SideSheetPosition::Left
@@ -571,7 +571,7 @@ fn push_stacks_host_emit(
         return;
     }
     let is_zoomed = focus.tab.map(|t| zoomed_q.get(t).is_ok()).unwrap_or(false);
-    let payload = StacksHostEvent {
+    let payload = StackNavigationState {
         stacks: rows,
         can_go_back,
         can_go_forward,
@@ -704,7 +704,7 @@ fn push_pane_tree_emit(
             stacks,
         });
     }
-    let payload = PaneTreeEvent { panes };
+    let payload = PaneTreeState { panes };
     commands
         .entity(cef_e)
         .insert(PaneTreeProjection(payload.clone()));
@@ -803,7 +803,7 @@ fn push_projects_host_emit(
             }
         }
     }
-    let payload = TabBoundaryEvent { boundary, projects };
+    let payload = TabBoundaryState { boundary, projects };
     commands
         .entity(cef_e)
         .insert(ProjectProjection(payload.clone()));
@@ -1023,7 +1023,7 @@ fn push_tabs_host_emit(
         })
         .collect();
 
-    let payload = TabsHostEvent { tabs: rows };
+    let payload = TabListState { tabs: rows };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
         return;
@@ -1049,7 +1049,7 @@ fn push_update_notice_emit(
         return;
     }
     match &*state {
-        UpdateState::Idle => LayoutUiStateUpdates::write(&mut commands, cef_e, &UpdateClearedEvent),
+        UpdateState::Idle => LayoutUiStateUpdates::write(&mut commands, cef_e, &UpdateCleared),
         UpdateState::Downloading {
             version,
             downloaded,
@@ -1057,7 +1057,7 @@ fn push_update_notice_emit(
         } => LayoutUiStateUpdates::write(
             &mut commands,
             cef_e,
-            &UpdateProgressEvent {
+            &UpdateProgress {
                 version: version.clone(),
                 downloaded: *downloaded,
                 total: *total,
@@ -1067,7 +1067,7 @@ fn push_update_notice_emit(
         UpdateState::Installing { version } => LayoutUiStateUpdates::write(
             &mut commands,
             cef_e,
-            &UpdateProgressEvent {
+            &UpdateProgress {
                 version: version.clone(),
                 downloaded: 0,
                 total: 0,
@@ -1077,7 +1077,7 @@ fn push_update_notice_emit(
         UpdateState::Ready { version } => LayoutUiStateUpdates::write(
             &mut commands,
             cef_e,
-            &UpdateReadyEvent {
+            &UpdateReady {
                 version: version.clone(),
             },
         ),

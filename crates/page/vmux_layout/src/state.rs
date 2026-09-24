@@ -1,7 +1,7 @@
 use crate::event::{
-    ActiveSessionEvent, HeaderPageEvent, LayoutStateEvent, PaneTreeEvent, ReloadEvent,
-    RemoteUiState, StacksHostEvent, TabBoundaryEvent, TabsHostEvent, UpdateClearedEvent,
-    UpdateProgressEvent, UpdateReadyEvent,
+    ActiveSessionState, HeaderPageState, LayoutGeometry, PaneTreeState, ReloadEffect,
+    RemoteUiState, StackNavigationState, TabBoundaryState, TabListState, UpdateCleared,
+    UpdateProgress, UpdateReady,
 };
 use vmux_api::bookmark::{BookmarkMenuActionEvent, BookmarkStateEvent};
 use vmux_core::event::space::SpacesListEvent;
@@ -10,25 +10,25 @@ use vmux_core::event::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsE
 
 #[vmux_api::ui_state_patch]
 pub enum LayoutUiStatePatch {
-    Layout(LayoutStateEvent),
-    Stacks(StacksHostEvent),
-    Tabs(TabsHostEvent),
+    Layout(LayoutGeometry),
+    Stacks(StackNavigationState),
+    Tabs(TabListState),
     Bookmarks(BookmarkStateEvent),
-    PaneTree(PaneTreeEvent),
+    PaneTree(PaneTreeState),
     Spaces(SpacesListEvent),
-    Projects(TabBoundaryEvent),
+    Projects(TabBoundaryState),
     Team(TeamEvent),
     Remote(RemoteUiState),
     Extensions(ExtensionsEvent),
     ExtensionPopup(ExtensionPopupEvent),
     ExtensionPopupSize(ExtensionPopupSizeEvent),
-    UpdateProgress(UpdateProgressEvent),
-    UpdateReady(UpdateReadyEvent),
-    UpdateCleared(UpdateClearedEvent),
+    UpdateProgress(UpdateProgress),
+    UpdateReady(UpdateReady),
+    UpdateCleared(UpdateCleared),
     BookmarkMenuAction(BookmarkMenuActionEvent),
-    Reload(ReloadEvent),
-    ActiveSession(Box<ActiveSessionEvent>),
-    HeaderPage(HeaderPageEvent),
+    Reload(ReloadEffect),
+    ActiveSession(Box<ActiveSessionState>),
+    HeaderPage(HeaderPageState),
 }
 
 #[vmux_api::ui_state(Default, target = "layout")]
@@ -46,8 +46,8 @@ mod tests {
         let event = LayoutUiState {
             sequence: 4,
             patches: vec![
-                LayoutStateEvent::default().into(),
-                StacksHostEvent::default().into(),
+                LayoutGeometry::default().into(),
+                StackNavigationState::default().into(),
             ],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
