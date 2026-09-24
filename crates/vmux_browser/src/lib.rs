@@ -40,7 +40,7 @@ use std::sync::{LazyLock, Mutex};
 use vmux_command::ReadCommandRequests;
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_core::{
-    CefPageAttachRequest, PageIdentity, PageMetadata, PageOpenRequest, PageOpenSet,
+    PageIdentity, PageMetadata, PageOpenSet,
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -60,7 +60,6 @@ use vmux_layout::{
     tab::Tab,
 };
 
-use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
@@ -160,23 +159,10 @@ impl Plugin for BrowserPlugin {
             .insert_resource(extension_bridge)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<WebviewLoadCompleted>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<CefPageAttachRequest>()
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .configure_sets(
                 Update,
                 CefSystems::CreateAndResize.after(ReadCommandRequests),
-            )
-            .configure_sets(
-                Update,
-                (
-                    PageOpenSet::ResolveTarget,
-                    PageOpenSet::HandleKnownPages,
-                    PageOpenSet::Fallback,
-                    PageOpenSet::Respond,
-                )
-                    .chain()
-                    .after(ReadCommandRequests),
             )
             .add_plugins((
                 CefPlugin {
@@ -757,47 +743,6 @@ fn send_page_open_response(
     });
 }
 
-fn attach_cef_page_to_stack(
-    stack: Entity,
-    url: &str,
-    title: &str,
-    bg_color: Option<String>,
-    children_q: &Query<&Children>,
-    commands: &mut Commands,
-) -> Entity {
-    vmux_layout::stack::Stack::clear_children(stack, children_q, commands);
-    commands.entity(stack).insert(PageMetadata {
-        url: url.to_string(),
-        title: title.to_string(),
-        bg_color,
-        ..default()
-    });
-    let browser = commands
-        .spawn((Browser::new_with_title(url, title), ChildOf(stack)))
-        .id();
-    commands.entity(browser).insert(KeyboardOwner);
-    browser
-}
-
-fn attach_error_page_to_stack(
-    stack: Entity,
-    failure: vmux_api::error::ErrorPageData,
-    children_q: &Query<&Children>,
-    commands: &mut Commands,
-) {
-    vmux_layout::stack::Stack::clear_children(stack, children_q, commands);
-    commands.entity(stack).insert(PageMetadata {
-        url: failure.url.clone(),
-        title: failure.title.clone(),
-        ..default()
-    });
-    commands.spawn((
-        Browser::native_page(vmux_api::error::ERROR_PAGE_URL, &failure.title),
-        failure,
-        ChildOf(stack),
-    ));
-}
-
 pub struct NavPending {
     pub request_id: [u8; 16],
     pub started: std::time::Duration,
@@ -1044,8 +989,8 @@ mod tests {
         use vmux_agent::host::AgentSessionPlugin;
         use vmux_agent::strategy::AgentStrategies;
         use vmux_core::{
-            CefPageAttachRequest, LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError,
-            PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTask,
+            LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
+            PageOpenId, PageOpenSet, PageOpenTask,
         };
         use vmux_layout::pane::Pane;
         use vmux_layout::settings::{
@@ -1089,36 +1034,19 @@ mod tests {
                 app.add_plugins((
                     vmux_layout::LayoutContractPlugin,
                     vmux_terminal::TerminalRequestPlugin,
+                    crate::page_open::PageOpenPlugin,
                 ))
-                .add_message::<PageOpenRequest>()
-                .add_message::<CefPageAttachRequest>()
                 .add_message::<vmux_setting::SettingsWriteRequest>()
                 .add_message::<vmux_space::SpaceRequest>()
                 .add_message::<vmux_history::query::HistoryOpenIntent>()
                 .init_resource::<crate::PendingNavSnapshots>()
                 .init_resource::<crate::input::RecentBrowserInteraction>()
-                .configure_sets(
-                    Update,
-                    (
-                        PageOpenSet::ResolveTarget,
-                        PageOpenSet::HandleKnownPages,
-                        PageOpenSet::Fallback,
-                        PageOpenSet::Respond,
-                    )
-                        .chain(),
-                )
                 .add_systems(
                     Update,
                     (
                         crate::navigation::handle_browser_navigate_requests
                             .before(PageOpenSet::ResolveTarget),
-                        crate::page_open::handle_page_open_requests
-                            .in_set(PageOpenSet::ResolveTarget),
                         handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
-                        crate::page_open::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
-                        crate::page_open::handle_unclaimed_page_open_tasks
-                            .in_set(PageOpenSet::Fallback),
-                        crate::page_open::respond_page_open_tasks.in_set(PageOpenSet::Respond),
                     ),
                 );
             }
@@ -1720,7 +1648,9 @@ mod tests {
         fn deferred_page_open_is_not_claimed_by_fallback() {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_systems(Update, crate::page_open::handle_unclaimed_page_open_tasks);
+                .add_plugins(crate::page_open::PageOpenPlugin)
+                .insert_resource(FocusedStack::default())
+                .init_resource::<crate::PendingNavSnapshots>();
             let stack = app.world_mut().spawn_empty().id();
             let task = app
                 .world_mut()
