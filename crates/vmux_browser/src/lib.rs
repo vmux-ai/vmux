@@ -45,8 +45,8 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::{
-    RemoteCopyEvent, RemotePairingRequest, RemoteRequest, RemoteRevokeRequest, SideSheetRequest,
-    SideSheetResizeEvent, WindowDragRegionEvent,
+    RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest, RemoteRequest,
+    RemoteRevokeRequest, SideSheetRequest, SideSheetResizeEvent, WindowDragRegionEvent,
 };
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
@@ -152,7 +152,8 @@ impl Plugin for BrowserPlugin {
                     SideSheetResizeEvent,
                     WindowDragRegionEvent,
                     RemoteRequest,
-                    RemotePairingRequest,
+                    RemotePairingShowRequest,
+                    RemotePairingDismissRequest,
                     RemoteCopyEvent,
                     RemoteRevokeRequest,
                 )>::default(),

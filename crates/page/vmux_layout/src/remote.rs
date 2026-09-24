@@ -7,8 +7,8 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 use crate::event::{
-    LayoutOverlayEvent, RemoteCopyEvent, RemotePairingRequest, RemotePhase, RemoteRequest,
-    RemoteRevokeRequest, RemoteUiState,
+    LayoutOverlayEvent, RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest,
+    RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteUiState,
 };
 
 #[component]
@@ -180,7 +180,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                             r#type: "button",
                             class: "rounded px-1.5 py-1 text-[9px] font-semibold text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                             onclick: move |_| {
-                                let _ = send(&RemotePairingRequest::Dismiss);
+                                let _ = send(&RemotePairingDismissRequest);
                             },
                             "Close"
                         }
@@ -223,7 +223,7 @@ fn RemotePanel(remote: RemoteUiState) -> Element {
                             class: "text-[10px] font-semibold text-foreground hover:opacity-70",
                             onclick: move |_| {
                                 copied.set(false);
-                                let _ = send(&RemotePairingRequest::Show);
+                                let _ = send(&RemotePairingShowRequest);
                             },
                             if remote.paired { "Show QR" } else { "Connect device" }
                         }
