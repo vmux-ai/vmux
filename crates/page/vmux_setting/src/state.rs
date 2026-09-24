@@ -1,44 +1,30 @@
-use crate::event::{SettingsListEvent, SettingsSchemaEvent, UpdateCheckStatusEvent};
+use crate::event::UpdateCheckStatus;
+use crate::schema::SettingsSchema;
 
-#[vmux_api::ui_state_patch]
-pub enum SettingsUiStatePatch {
-    Settings(SettingsListEvent),
-    Schema(SettingsSchemaEvent),
-    UpdateStatus(UpdateCheckStatusEvent),
-}
-
-#[vmux_api::ui_state(Default, target = "settings")]
+#[vmux_api::ui_state(Default, version = 2, target = "settings")]
 pub struct SettingsUiState {
-    pub sequence: u64,
-    pub patches: Vec<SettingsUiStatePatch>,
+    pub settings: vmux_api::json::JsonValue,
+    pub schema: SettingsSchema,
+    pub update_status: UpdateCheckStatus,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::UpdateCheckStatus;
 
     #[test]
-    fn batches_preserve_patch_order() {
-        let event = SettingsUiState {
-            sequence: 2,
-            patches: vec![
-                SettingsListEvent::default().into(),
-                UpdateCheckStatusEvent {
-                    status: UpdateCheckStatus::Checking,
-                }
-                .into(),
-            ],
+    fn snapshot_round_trips() {
+        let state = SettingsUiState {
+            settings: serde_json::json!({"auto_update": true}).into(),
+            schema: SettingsSchema::default(),
+            update_status: UpdateCheckStatus::Checking,
         };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
         let decoded = rkyv::from_bytes::<SettingsUiState, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded.sequence, 2);
-        assert!(matches!(
-            decoded.patches.as_slice(),
-            [
-                SettingsUiStatePatch::Settings(_),
-                SettingsUiStatePatch::UpdateStatus(_)
-            ]
-        ));
+        assert_eq!(
+            serde_json::Value::try_from(&decoded.settings).unwrap(),
+            serde_json::json!({"auto_update": true})
+        );
+        assert_eq!(decoded.update_status, UpdateCheckStatus::Checking);
     }
 }

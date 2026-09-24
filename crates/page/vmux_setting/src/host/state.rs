@@ -12,7 +12,7 @@ use vmux_ui::i18n::Locale;
 
 use crate::event::{
     CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SETTINGS_PAGE_URL,
-    SettingsListEvent, SettingsRequest, SettingsSchemaEvent, UpdateCheckStatusEvent,
+    SettingsRequest,
 };
 use crate::schema::{FieldSpec, SectionSpec, SelectOption, SettingsSchema, WidgetKind};
 use crate::state::SettingsUiState;
@@ -162,26 +162,17 @@ fn publish_settings_ui_state(
     if !has_unsent && !settings.is_changed() && !status.is_changed() {
         return;
     }
-    let settings_event = SettingsListEvent {
-        value: serde_json::to_value(&*settings)
+    let state = SettingsUiState {
+        settings: serde_json::to_value(&*settings)
             .unwrap_or(serde_json::Value::Null)
             .into(),
-    };
-    let locale = Locale::requested(Some(&settings.appearance.locale));
-    let schema_event = SettingsSchemaEvent {
-        schema: build_settings_schema_for(&locale),
-    };
-    let update_event = UpdateCheckStatusEvent {
-        status: status.0.clone(),
+        schema: build_settings_schema_for(&Locale::requested(Some(&settings.appearance.locale))),
+        update_status: status.0.clone(),
     };
 
     for (entity, sent) in &views {
-        if !sent || settings.is_changed() {
-            SettingsUiStateUpdates::write(&mut commands, entity, &settings_event);
-            SettingsUiStateUpdates::write(&mut commands, entity, &schema_event);
-        }
-        if !sent || status.is_changed() {
-            SettingsUiStateUpdates::write(&mut commands, entity, &update_event);
+        if !sent || settings.is_changed() || status.is_changed() {
+            SettingsUiStateUpdates::write(&mut commands, entity, &state);
         }
         if !sent {
             commands.entity(entity).insert(SettingsUiStateSent);
@@ -939,7 +930,8 @@ mod page_open_tests {
 #[cfg(test)]
 mod ui_state_tests {
     use super::*;
-    use crate::state::{SettingsUiState, SettingsUiStatePatch};
+    use crate::event::UpdateCheckStatus;
+    use crate::state::SettingsUiState;
     use vmux_api::BinEvent;
 
     #[derive(Resource, Default)]
@@ -958,7 +950,7 @@ mod ui_state_tests {
     }
 
     #[test]
-    fn initial_settings_state_is_one_ordered_batch() {
+    fn initial_settings_state_is_one_snapshot() {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -978,13 +970,12 @@ mod ui_state_tests {
 
         let emitted = &app.world().resource::<Emitted>().0;
         assert_eq!(emitted.len(), 1);
-        assert!(matches!(
-            emitted[0].patches.as_slice(),
-            [
-                SettingsUiStatePatch::Settings(_),
-                SettingsUiStatePatch::Schema(_),
-                SettingsUiStatePatch::UpdateStatus(_)
-            ]
-        ));
+        assert!(
+            !serde_json::Value::try_from(&emitted[0].settings)
+                .unwrap()
+                .is_null()
+        );
+        assert!(!emitted[0].schema.sections.is_empty());
+        assert_eq!(emitted[0].update_status, UpdateCheckStatus::Idle);
     }
 }

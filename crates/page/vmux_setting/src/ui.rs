@@ -2,7 +2,7 @@
 
 use crate::event::{CheckForUpdatesEvent, SettingsRequest, UpdateCheckStatus};
 use crate::schema::{SettingsSchema, WidgetKind};
-use crate::state::{SettingsUiState, SettingsUiStatePatch};
+use crate::state::SettingsUiState;
 use dioxus::prelude::*;
 use serde_json::{Map, Value};
 use vmux_ui::components::button::{Button, ButtonVariant};
@@ -14,7 +14,7 @@ use vmux_ui::components::select::{
 use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{send, use_theme, use_ui_state_root};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_native::page(
@@ -27,10 +27,10 @@ pub(crate) struct SettingsPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = SettingsPageState::use_state()();
+    let state = use_ui_state::<SettingsUiState>()();
     let mut search = use_signal(String::new);
 
-    let s = state.settings;
+    let s = serde_json::Value::try_from(&state.settings).unwrap_or(Value::Null);
     if s.is_null() {
         return rsx! {
             div { class: "flex h-full items-center justify-center text-sm text-muted-foreground",
@@ -96,44 +96,6 @@ pub fn Page() -> Element {
                     }
                 }
             }
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-struct SettingsPageState {
-    settings: Value,
-    schema: SettingsSchema,
-    update_status: UpdateCheckStatus,
-}
-
-impl SettingsPageState {
-    fn use_state() -> Signal<Self> {
-        let root = use_ui_state_root::<SettingsUiState>();
-        let mut state = use_signal(Self::default);
-        let mut handled_sequence = use_signal(|| 0);
-        use_effect(move || {
-            let event = root.state.read();
-            if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
-                return;
-            }
-            handled_sequence.set(event.sequence);
-            state.with_mut(|state| {
-                for patch in &event.patches {
-                    state.apply(patch);
-                }
-            });
-        });
-        state
-    }
-
-    fn apply(&mut self, patch: &SettingsUiStatePatch) {
-        match patch {
-            SettingsUiStatePatch::Settings(event) => {
-                self.settings = serde_json::Value::try_from(&event.value).unwrap_or(Value::Null);
-            }
-            SettingsUiStatePatch::Schema(event) => self.schema = event.schema.clone(),
-            SettingsUiStatePatch::UpdateStatus(event) => self.update_status = event.status.clone(),
         }
     }
 }
