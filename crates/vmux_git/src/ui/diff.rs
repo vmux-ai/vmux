@@ -6,16 +6,16 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-use crate::event::{GitDiffViewportEvent, GitRepositoryEvent};
+use crate::event::{GitDiffViewport, GitRepositorySnapshot};
 use crate::ui::DiffView;
 
 #[component]
 pub(super) fn CommitDiffCard(
-    repository: GitRepositoryEvent,
+    repository: GitRepositorySnapshot,
     repo_root: ReadSignal<String>,
     selected_commit: Signal<String>,
     nonce: ReadSignal<u32>,
-    diff_viewport: ReadSignal<Option<GitDiffViewportEvent>>,
+    diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     loading: bool,
 ) -> Element {
     let empty_path = use_signal(String::new);
@@ -75,7 +75,7 @@ pub(super) fn DiffCard(
     selected_path_bytes: Signal<Vec<u8>>,
     selected_abs_path: Signal<String>,
     nonce: ReadSignal<u32>,
-    diff_viewport: ReadSignal<Option<GitDiffViewportEvent>>,
+    diff_viewport: ReadSignal<Option<GitDiffViewport>>,
     loading: bool,
 ) -> Element {
     use_effect(move || {

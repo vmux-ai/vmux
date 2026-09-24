@@ -1,5 +1,5 @@
 use crate::event::{
-    GitBranchLogEvent, GitDiffViewportEvent, GitDirectoryEvent, GitRepositoryEvent, GitResultEvent,
+    GitBranchLog, GitDiffViewport, GitDirectorySnapshot, GitOperationResult, GitRepositorySnapshot,
 };
 
 #[vmux_api::contract]
@@ -30,14 +30,14 @@ pub struct GitCommandLogEntry {
 #[vmux_api::contract]
 pub struct GitPageSnapshot {
     pub workspace: String,
-    pub repository: Option<GitRepositoryEvent>,
-    pub directory: Option<GitDirectoryEvent>,
-    pub directory_preview: Option<GitDirectoryEvent>,
-    pub branch_log: Option<GitBranchLogEvent>,
-    pub diff_viewport: Option<GitDiffViewportEvent>,
+    pub repository: Option<GitRepositorySnapshot>,
+    pub directory: Option<GitDirectorySnapshot>,
+    pub directory_preview: Option<GitDirectorySnapshot>,
+    pub branch_log: Option<GitBranchLog>,
+    pub diff_viewport: Option<GitDiffViewport>,
     pub diff_loading: bool,
     pub command_log: Vec<GitCommandLogEntry>,
-    pub result: Option<GitResultEvent>,
+    pub result: Option<GitOperationResult>,
     pub result_sequence: u64,
     pub loading: bool,
     pub fetching: bool,

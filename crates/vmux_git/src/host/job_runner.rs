@@ -58,7 +58,7 @@ impl GitJob {
         Self::deliver(
             commands,
             webview,
-            vec![Emit::Error(crate::event::GitErrorEvent { message })],
+            vec![Emit::Error(crate::event::GitOperationError { message })],
         );
     }
 }
@@ -83,7 +83,7 @@ impl RunningGitJob {
         }
         match self.thread.take().unwrap().join() {
             Ok(emits) => Some(emits),
-            Err(_) => Some(vec![Emit::Error(crate::event::GitErrorEvent {
+            Err(_) => Some(vec![Emit::Error(crate::event::GitOperationError {
                 message: "Git job worker panicked".to_string(),
             })]),
         }

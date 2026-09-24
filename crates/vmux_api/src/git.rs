@@ -38,7 +38,7 @@ pub enum DiffKind {
 }
 
 #[vmux_api::contract(Eq)]
-pub struct GitStatusEvent {
+pub struct GitFileStatus {
     pub path: String,
     pub branch: String,
     pub ahead: u32,
@@ -64,7 +64,7 @@ pub struct GitLineMarker {
 }
 
 #[vmux_api::contract(Eq)]
-pub struct GitDiffViewportEvent {
+pub struct GitDiffViewport {
     pub generation: u64,
     pub first_line: u32,
     pub total_lines: u32,
@@ -74,7 +74,7 @@ pub struct GitDiffViewportEvent {
 }
 
 #[vmux_api::contract(Eq)]
-pub struct GitResultEvent {
+pub struct GitOperationResult {
     pub action: String,
     pub ok: bool,
     pub message: String,
@@ -90,15 +90,15 @@ pub struct FileGitState {
     pub behind: u32,
     pub staged_count: u32,
     pub message: String,
-    pub result: Option<GitResultEvent>,
+    pub result: Option<GitOperationResult>,
     pub result_sequence: u64,
     pub refresh_revision: u64,
-    pub diff_viewport: Option<GitDiffViewportEvent>,
+    pub diff_viewport: Option<GitDiffViewport>,
     pub diff_loading: bool,
 }
 
 #[vmux_api::contract(Eq)]
-pub struct GitErrorEvent {
+pub struct GitOperationError {
     pub message: String,
 }
 

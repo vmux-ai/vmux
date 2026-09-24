@@ -5,8 +5,8 @@ use bevy_cef::prelude::BinReceive;
 use vmux_core::page::PageReady;
 
 use crate::event::{
-    GitBranchLogEvent, GitDiffViewportEvent, GitDirectoryEvent, GitErrorEvent, GitRepositoryEvent,
-    GitResultEvent,
+    GitBranchLog, GitDiffViewport, GitDirectorySnapshot, GitOperationError, GitOperationResult,
+    GitRepositorySnapshot,
 };
 use crate::state::{GitCommandLogEntry, GitPageSnapshot, GitUiState};
 
@@ -35,7 +35,7 @@ impl GitState {
         self.snapshot.message.clear();
     }
 
-    pub(super) fn set_repository(&mut self, event: GitRepositoryEvent) {
+    pub(super) fn set_repository(&mut self, event: GitRepositorySnapshot) {
         self.snapshot.workspace.clone_from(&event.repo_root);
         self.snapshot.repository = Some(event);
         self.snapshot.directory = None;
@@ -53,7 +53,7 @@ impl GitState {
         self.snapshot.message.clear();
     }
 
-    pub(super) fn set_directory(&mut self, event: GitDirectoryEvent) {
+    pub(super) fn set_directory(&mut self, event: GitDirectorySnapshot) {
         if event.preview {
             self.snapshot.directory_preview = Some(event);
             return;
@@ -66,7 +66,7 @@ impl GitState {
         self.snapshot.message.clear();
     }
 
-    pub(super) fn set_branch_log(&mut self, event: GitBranchLogEvent) {
+    pub(super) fn set_branch_log(&mut self, event: GitBranchLog) {
         self.snapshot.branch_log = Some(event);
     }
 
@@ -77,7 +77,7 @@ impl GitState {
         }
     }
 
-    pub(super) fn set_diff_viewport(&mut self, event: GitDiffViewportEvent) {
+    pub(super) fn set_diff_viewport(&mut self, event: GitDiffViewport) {
         self.snapshot.diff_loading = false;
         self.snapshot.diff_viewport = Some(event);
     }
@@ -86,7 +86,7 @@ impl GitState {
         self.snapshot.fetching = true;
     }
 
-    pub(super) fn apply_result(&mut self, event: &GitResultEvent) {
+    pub(super) fn apply_result(&mut self, event: &GitOperationResult) {
         self.push_log(GitCommandLogEntry {
             action: event.action.clone(),
             message: event.message.clone(),
@@ -105,7 +105,7 @@ impl GitState {
         self.snapshot.result_sequence = self.snapshot.result_sequence.wrapping_add(1).max(1);
     }
 
-    pub(super) fn apply_error(&mut self, event: &GitErrorEvent) {
+    pub(super) fn apply_error(&mut self, event: &GitOperationError) {
         self.push_log(GitCommandLogEntry {
             action: String::new(),
             message: event.message.clone(),

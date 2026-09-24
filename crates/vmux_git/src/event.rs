@@ -1,6 +1,6 @@
 pub use vmux_api::git::{
-    DiffKind, DiffLine, FileGitState, FileStatus, GitDiffViewportEvent, GitErrorEvent,
-    GitLineMarker, GitLineStatus, GitResultEvent, GitStatusEvent, StyledSpan,
+    DiffKind, DiffLine, FileGitState, FileStatus, GitDiffViewport, GitFileStatus, GitLineMarker,
+    GitLineStatus, GitOperationError, GitOperationResult, StyledSpan,
 };
 #[vmux_api::ui_event(Eq, target = "git")]
 pub struct GitRepositoryRequest {
@@ -134,7 +134,7 @@ pub struct GitStashEntry {
 }
 
 #[vmux_api::contract(Eq)]
-pub struct GitRepositoryEvent {
+pub struct GitRepositorySnapshot {
     pub path: String,
     pub repo_root: String,
     pub repo_name: String,
@@ -151,14 +151,14 @@ pub struct GitRepositoryEvent {
 }
 
 #[vmux_api::contract(Eq)]
-pub struct GitBranchLogEvent {
+pub struct GitBranchLog {
     pub repo_root: String,
     pub branch: String,
     pub commits: Vec<GitCommitEntry>,
 }
 
 #[vmux_api::contract(Eq)]
-pub struct GitDirectoryEvent {
+pub struct GitDirectorySnapshot {
     pub path: String,
     pub parent_path: String,
     pub entries: Vec<vmux_core::event::FileDirEntry>,

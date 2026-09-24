@@ -63,12 +63,12 @@ pub(super) enum JobKind {
 
 #[derive(Debug, Clone)]
 pub(super) enum Emit {
-    Repository(GitRepositoryEvent),
-    BranchLog(GitBranchLogEvent),
-    Status(GitStatusEvent),
-    DiffViewport(GitDiffViewportEvent),
-    Result(GitResultEvent),
-    Error(GitErrorEvent),
+    Repository(GitRepositorySnapshot),
+    BranchLog(GitBranchLog),
+    Status(GitFileStatus),
+    DiffViewport(GitDiffViewport),
+    Result(GitOperationResult),
+    Error(GitOperationError),
 }
 
 fn result_then_status(
@@ -77,14 +77,14 @@ fn result_then_status(
     action: &str,
     message: &str,
 ) -> Vec<Emit> {
-    let result = Emit::Result(GitResultEvent {
+    let result = Emit::Result(GitOperationResult {
         action: action.to_string(),
         ok: true,
         message: message.to_string(),
     });
     match runner::status_at(repo_root, path) {
         Ok(ev) => vec![result, Emit::Status(ev)],
-        Err(e) => vec![result, Emit::Error(GitErrorEvent { message: e.0 })],
+        Err(e) => vec![result, Emit::Error(GitOperationError { message: e.0 })],
     }
 }
 
@@ -96,7 +96,7 @@ fn mutate(
 ) -> Vec<Emit> {
     match op(repo_root, path) {
         Ok(()) => result_then_status(repo_root, path, action, "ok"),
-        Err(e) => vec![Emit::Result(GitResultEvent {
+        Err(e) => vec![Emit::Result(GitOperationResult {
             action: action.to_string(),
             ok: false,
             message: e.0,
@@ -107,18 +107,18 @@ fn mutate(
 impl JobKind {
     pub(super) fn run(self) -> Vec<Emit> {
         match self {
-            JobKind::Repository { path } => match GitRepositoryEvent::load(&path) {
+            JobKind::Repository { path } => match GitRepositorySnapshot::load(&path) {
                 Ok(event) => vec![Emit::Repository(event)],
-                Err(error) => vec![Emit::Error(GitErrorEvent { message: error.0 })],
+                Err(error) => vec![Emit::Error(GitOperationError { message: error.0 })],
             },
             JobKind::BranchLog { repo_root, branch } => {
                 match GitCommitEntry::for_reference(&repo_root, &branch) {
-                    Ok(commits) => vec![Emit::BranchLog(GitBranchLogEvent {
+                    Ok(commits) => vec![Emit::BranchLog(GitBranchLog {
                         repo_root: repo_root.to_string_lossy().into_owned(),
                         branch,
                         commits,
                     })],
-                    Err(error) => vec![Emit::Error(GitErrorEvent { message: error.0 })],
+                    Err(error) => vec![Emit::Error(GitOperationError { message: error.0 })],
                 }
             }
             JobKind::Diff {
@@ -127,7 +127,7 @@ impl JobKind {
                 top_line,
                 ..
             } if !runner::has_repository(&repo_root) => {
-                vec![Emit::DiffViewport(GitDiffViewportEvent {
+                vec![Emit::DiffViewport(GitDiffViewport {
                     generation,
                     first_line: top_line,
                     total_lines: 0,
@@ -155,7 +155,7 @@ impl JobKind {
                 Ok(lines) => {
                     let (total, win) = parse::window(&lines, top_line, rows);
                     let markers = super::diff::GitDiffMarkers::from_lines(&lines).into_inner();
-                    vec![Emit::DiffViewport(GitDiffViewportEvent {
+                    vec![Emit::DiffViewport(GitDiffViewport {
                         generation,
                         first_line: top_line.min(total),
                         total_lines: total,
@@ -164,7 +164,7 @@ impl JobKind {
                         error: String::new(),
                     })]
                 }
-                Err(error) => vec![Emit::DiffViewport(GitDiffViewportEvent {
+                Err(error) => vec![Emit::DiffViewport(GitDiffViewport {
                     generation,
                     first_line: top_line,
                     total_lines: 0,
@@ -182,7 +182,7 @@ impl JobKind {
             }
             JobKind::Commit { path, message } => match runner::commit(&path, &message) {
                 Ok(()) => result_then_status(&path, &path, "commit", "committed"),
-                Err(e) => vec![Emit::Result(GitResultEvent {
+                Err(e) => vec![Emit::Result(GitOperationResult {
                     action: "commit".into(),
                     ok: false,
                     message: e.0,
@@ -190,7 +190,7 @@ impl JobKind {
             },
             JobKind::Fetch { path } => match runner::fetch(&path) {
                 Ok(()) => result_then_status(&path, &path, "fetch", "fetched"),
-                Err(e) => vec![Emit::Result(GitResultEvent {
+                Err(e) => vec![Emit::Result(GitOperationResult {
                     action: "fetch".into(),
                     ok: false,
                     message: e.0,
@@ -198,7 +198,7 @@ impl JobKind {
             },
             JobKind::Pull { path } => match runner::pull(&path) {
                 Ok(()) => result_then_status(&path, &path, "pull", "pulled"),
-                Err(e) => vec![Emit::Result(GitResultEvent {
+                Err(e) => vec![Emit::Result(GitOperationResult {
                     action: "pull".into(),
                     ok: false,
                     message: e.0,
@@ -210,12 +210,12 @@ impl JobKind {
             } => {
                 let action = operation.action().to_string();
                 match operation.run(&repo_root) {
-                    Ok(message) => vec![Emit::Result(GitResultEvent {
+                    Ok(message) => vec![Emit::Result(GitOperationResult {
                         action,
                         ok: true,
                         message,
                     })],
-                    Err(error) => vec![Emit::Result(GitResultEvent {
+                    Err(error) => vec![Emit::Result(GitOperationResult {
                         action,
                         ok: false,
                         message: error.0,
@@ -224,7 +224,7 @@ impl JobKind {
             }
             JobKind::Push { path } => match runner::push(&path) {
                 Ok(()) => result_then_status(&path, &path, "push", "pushed"),
-                Err(e) => vec![Emit::Result(GitResultEvent {
+                Err(e) => vec![Emit::Result(GitOperationResult {
                     action: "push".into(),
                     ok: false,
                     message: e.0,
@@ -232,7 +232,7 @@ impl JobKind {
             },
             JobKind::StageAll { path } => match runner::stage_all(&path) {
                 Ok(()) => result_then_status(&path, &path, "stage all", "staged"),
-                Err(e) => vec![Emit::Result(GitResultEvent {
+                Err(e) => vec![Emit::Result(GitOperationResult {
                     action: "stage all".into(),
                     ok: false,
                     message: e.0,
@@ -250,7 +250,7 @@ impl JobKind {
                     if accept { "accept" } else { "reject" },
                     "ok",
                 ),
-                Err(e) => vec![Emit::Result(GitResultEvent {
+                Err(e) => vec![Emit::Result(GitOperationResult {
                     action: "hunk".into(),
                     ok: false,
                     message: e.0,
@@ -289,7 +289,7 @@ mod tests {
         .run();
         assert!(matches!(
             emits[0],
-            Emit::DiffViewport(GitDiffViewportEvent { generation: 7, .. })
+            Emit::DiffViewport(GitDiffViewport { generation: 7, .. })
         ));
     }
 
@@ -326,7 +326,7 @@ mod tests {
         .run();
         assert!(matches!(
             emits.as_slice(),
-            [Emit::DiffViewport(GitDiffViewportEvent {
+            [Emit::DiffViewport(GitDiffViewport {
                 generation: 7,
                 total_lines: 0,
                 lines,

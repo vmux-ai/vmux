@@ -129,7 +129,7 @@ impl GitPageState {
         current.set(snapshot);
     }
 
-    fn reconcile_repository(self, repository: &GitRepositoryEvent) {
+    fn reconcile_repository(self, repository: &GitRepositorySnapshot) {
         let next_file = repository
             .files
             .iter()
@@ -176,7 +176,7 @@ impl GitPageState {
         selected_stash.set(next_stash);
     }
 
-    fn reconcile_directory(self, directory: &GitDirectoryEvent) {
+    fn reconcile_directory(self, directory: &GitDirectorySnapshot) {
         let current = (self.snapshot)();
         if current.directory.as_ref().map(|current| &current.path) == Some(&directory.path) {
             return;
@@ -313,7 +313,7 @@ impl GitPageState {
 
     fn move_file_selection(
         self,
-        repository: &GitRepositoryEvent,
+        repository: &GitRepositorySnapshot,
         direction: MenuDirection,
     ) -> bool {
         let len = repository.files.len();
@@ -346,7 +346,7 @@ impl GitPageState {
 
     fn move_branch_selection(
         self,
-        repository: &GitRepositoryEvent,
+        repository: &GitRepositorySnapshot,
         direction: MenuDirection,
     ) -> bool {
         let references = (self.branch_collection)().references(repository);
@@ -370,7 +370,7 @@ impl GitPageState {
 
     fn move_commit_selection(
         self,
-        repository: &GitRepositoryEvent,
+        repository: &GitRepositorySnapshot,
         direction: MenuDirection,
     ) -> bool {
         let len = repository.commits.len();
@@ -394,7 +394,7 @@ impl GitPageState {
 
     fn move_stash_selection(
         self,
-        repository: &GitRepositoryEvent,
+        repository: &GitRepositorySnapshot,
         direction: MenuDirection,
     ) -> bool {
         let len = repository.stashes.len();
