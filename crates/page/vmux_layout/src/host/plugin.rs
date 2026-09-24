@@ -24,7 +24,9 @@ use crate::toggle::TogglePlugin;
 use crate::warm_page::PrewarmPagesPlugin;
 use crate::window::WindowLayoutPlugin;
 use crate::worktree::WorktreePlugin;
-use crate::{LayoutSpawnRequest, LayoutStartupSet, Open, TabLayoutSpawnRequest, apply, settings};
+use crate::{
+    LayoutStartupSet, Open, TabLayoutSpawnRequest, TerminalLayoutSpawnRequest, apply, settings,
+};
 
 pub struct LayoutPlugin;
 
@@ -43,7 +45,7 @@ impl Plugin for LayoutPlugin {
             .init_resource::<settings::ConfirmCloseSettings>()
             .init_resource::<settings::ResolvedLocale>()
             .init_resource::<crate::UpdateState>()
-            .add_message::<LayoutSpawnRequest>()
+            .add_message::<TerminalLayoutSpawnRequest>()
             .add_message::<TabLayoutSpawnRequest>()
             .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()

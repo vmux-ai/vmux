@@ -15,7 +15,6 @@ impl Plugin for RoomPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RoomIndex>()
             .init_resource::<RoomEventIndex>()
-            .add_message::<RoomIntent>()
             .add_message::<RoomOpReceived>()
             .add_message::<RoomOpCommitted>()
             .add_message::<CrdtChangeReceived>()
@@ -118,16 +117,6 @@ pub struct RoomIndex(pub HashMap<RoomId, Entity>);
 
 #[derive(Resource, Default)]
 pub struct RoomEventIndex(pub HashMap<EventId, Entity>);
-
-#[derive(Message, Clone, Debug, PartialEq)]
-pub enum RoomIntent {
-    Append {
-        room_id: RoomId,
-        actor_id: MemberId,
-        client_op_id: ClientOpId,
-        message: Message,
-    },
-}
 
 #[derive(Message, Clone, Debug, PartialEq)]
 pub struct RoomOpReceived(pub vmux_api::room::RoomEvent);

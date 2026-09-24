@@ -840,7 +840,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<TabRequest>()
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<crate::NewTabRequest>()
             .add_message::<CloseTabRequest>()

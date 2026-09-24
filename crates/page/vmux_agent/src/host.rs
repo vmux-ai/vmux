@@ -71,8 +71,8 @@ pub use url::{AgentKind, AgentUrl};
 pub use vmux_session::room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
     MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomEventIndex,
-    RoomIndex, RoomIntent, RoomMember, RoomMessageContent, RoomMetadata, RoomOpCommitted,
-    RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
+    RoomIndex, RoomMember, RoomMessageContent, RoomMetadata, RoomOpCommitted, RoomOpReceived,
+    RoomPlugin, RoomProjection, StreamingMessage,
 };
 pub use vmux_session::{
     AcpSession, AgentApprovalPolicy, AgentMessages, AgentSession, AgentVariant, PromptQueue,

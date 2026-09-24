@@ -18,7 +18,7 @@ use vmux_core::{
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::stack::StackRequest;
-use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
+use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage, SharedEvent},
@@ -350,7 +350,7 @@ fn on_terminal_removed(
 }
 
 fn spawn_layout_requested_content(
-    mut reader: MessageReader<LayoutSpawnRequest>,
+    mut reader: MessageReader<TerminalLayoutSpawnRequest>,
     settings: Res<AppSettings>,
     active_space: Res<vmux_space::spaces::ActiveSpace>,
     child_of: Query<&ChildOf>,
@@ -358,22 +358,17 @@ fn spawn_layout_requested_content(
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        match request {
-            LayoutSpawnRequest::Terminal { stack } => {
-                let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(*stack, &child_of, &tabs);
-                let Ok(cwd) = settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())
-                else {
-                    continue;
-                };
-                let terminal = commands
-                    .spawn((
-                        new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
-                        ChildOf(*stack),
-                    ))
-                    .id();
-                commands.entity(terminal).insert(KeyboardOwner);
-            }
-        }
+        let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(request.stack, &child_of, &tabs);
+        let Ok(cwd) = settings.workspace_dir(&active_space.record.id, tab_dir.as_deref()) else {
+            continue;
+        };
+        let terminal = commands
+            .spawn((
+                new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
+                ChildOf(request.stack),
+            ))
+            .id();
+        commands.entity(terminal).insert(KeyboardOwner);
     }
 }
 
@@ -2896,7 +2891,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<LayoutSpawnRequest>()
+            .add_message::<TerminalLayoutSpawnRequest>()
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
             .add_systems(Update, spawn_layout_requested_content);
@@ -2913,8 +2908,8 @@ mod tests {
             .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
             .id();
         app.world_mut()
-            .resource_mut::<Messages<LayoutSpawnRequest>>()
-            .write(LayoutSpawnRequest::Terminal { stack });
+            .resource_mut::<Messages<TerminalLayoutSpawnRequest>>()
+            .write(TerminalLayoutSpawnRequest { stack });
 
         app.update();
 
@@ -2990,7 +2985,7 @@ mod tests {
             vmux_command::CommandPlugin,
             vmux_layout::stack::StackPlugin,
         ))
-        .add_message::<LayoutSpawnRequest>()
+        .add_message::<TerminalLayoutSpawnRequest>()
         .add_plugins(TerminalUpdatePlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
