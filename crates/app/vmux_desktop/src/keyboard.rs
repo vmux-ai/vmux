@@ -70,7 +70,8 @@ struct PendingKeyboardInput {
 
 struct PendingShortcutCapture {
     token: vmux_shortcut::ShortcutCaptureToken,
-    event: vmux_shortcut::ShortcutPressed,
+    stroke: vmux_shortcut::ShortcutStroke,
+    pressed_at_ms: i64,
 }
 
 impl KeyboardRuntime {
@@ -469,10 +470,8 @@ fn install(state: Arc<Mutex<KeyboardState>>, wake: impl Fn() + Send + Sync + 'st
                 .shortcut_captures
                 .push(PendingShortcutCapture {
                     token,
-                    event: vmux_shortcut::ShortcutPressed {
-                        stroke,
-                        pressed_at_ms: vmux_core::now_millis(),
-                    },
+                    stroke,
+                    pressed_at_ms: vmux_core::now_millis(),
                 });
             return std::ptr::null_mut();
         }
@@ -573,7 +572,7 @@ impl KeyboardRuntime {
         }
         if let Some(target) = shortcut_capture.as_deref_mut() {
             for token in pending.shortcut_releases {
-                target.release(token, &mut commands);
+                target.release(token);
             }
         }
         if let Some(token) = shortcut_capture
@@ -582,11 +581,11 @@ impl KeyboardRuntime {
         {
             for capture in pending.shortcut_captures {
                 if capture.token == token {
-                    vmux_shortcut::ShortcutUiStateUpdates::write(
-                        &mut commands,
+                    commands.trigger(vmux_shortcut::ShortcutProbePress::new(
                         token.target,
-                        &capture.event,
-                    );
+                        capture.stroke,
+                        capture.pressed_at_ms,
+                    ));
                 }
             }
         }
