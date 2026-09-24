@@ -373,15 +373,51 @@ struct AcpModelRequestCounter(u64);
 #[derive(Resource, Default)]
 struct AcpModeRequestCounter(u64);
 
-fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
-    let Some(state) = state else {
-        return ModelState::default();
-    };
-    ModelState {
-        current_model_id: state.display_model_id().to_string(),
-        current_model_name: state.current_name().to_string(),
-        default_model_id: state.default_model_id.clone(),
-        models: state
+pub(super) struct ModelProjection {
+    state: ModelState,
+    slash_commands: SlashCommands,
+}
+
+impl ModelProjection {
+    pub(super) fn new(
+        model: Option<&AcpModelState>,
+        cross_runtime: bool,
+        agent_key: &str,
+        settings: Option<&vmux_setting::AppSettings>,
+    ) -> Self {
+        let mut state = match model {
+            Some(model) => ModelState {
+                current_model_id: model.display_model_id().to_string(),
+                current_model_name: model.current_name().to_string(),
+                default_model_id: model.default_model_id.clone(),
+                models: Self::options(model),
+                ..Default::default()
+            },
+            None => ModelState::default(),
+        };
+        state.agent_key = agent_key.to_string();
+        state.effort_current = settings
+            .and_then(|settings| settings.agent.effort_for(agent_key))
+            .unwrap_or("")
+            .to_string();
+        state.effort_default = vmux_core::agent::default_effort(agent_key).to_string();
+        state.effort_levels = vmux_core::agent::effort_levels(agent_key)
+            .iter()
+            .map(|level| level.to_string())
+            .collect();
+        Self {
+            state,
+            slash_commands: SlashCommands::for_agent(cross_runtime, model.is_some()),
+        }
+    }
+
+    pub(super) fn write(self, webview: Entity, commands: &mut Commands) {
+        ChatUiStateUpdates::write(commands, webview, &self.state);
+        ChatUiStateUpdates::write(commands, webview, &self.slash_commands);
+    }
+
+    fn options(model: &AcpModelState) -> Vec<ModelOptionEntry> {
+        model
             .models
             .iter()
             .map(|model| ModelOptionEntry {
@@ -389,57 +425,28 @@ fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
                 name: model.name.clone(),
                 description: model.description.clone().unwrap_or_default(),
             })
-            .collect(),
-        ..Default::default()
+            .collect()
     }
 }
 
-pub(super) fn emit_model_state(
-    webview: Entity,
-    model_state: Option<&AcpModelState>,
-    cross_runtime: bool,
-    agent_key: &str,
-    effort_current: &str,
-    commands: &mut Commands,
-) {
-    let mut state = model_state_of(model_state);
-    state.agent_key = agent_key.to_string();
-    state.effort_current = effort_current.to_string();
-    state.effort_default = vmux_core::agent::default_effort(agent_key).to_string();
-    state.effort_levels = vmux_core::agent::effort_levels(agent_key)
-        .iter()
-        .map(|level| level.to_string())
-        .collect();
-    ChatUiStateUpdates::write(commands, webview, &state);
-    ChatUiStateUpdates::write(
-        commands,
-        webview,
-        &SlashCommands::for_agent(cross_runtime, model_state.is_some()),
-    );
+pub(super) struct ModeProjection(ModeState);
+
+impl From<Option<&AcpModeState>> for ModeProjection {
+    fn from(mode: Option<&AcpModeState>) -> Self {
+        Self(match mode {
+            Some(mode) => ModeState {
+                current_mode_id: mode.display_mode_id().to_string(),
+                modes: mode.modes.clone(),
+            },
+            None => ModeState::default(),
+        })
+    }
 }
 
-pub(super) fn emit_mode_state(
-    webview: Entity,
-    mode_state: Option<&AcpModeState>,
-    commands: &mut Commands,
-) {
-    let state = match mode_state {
-        Some(state) => ModeState {
-            current_mode_id: state.display_mode_id().to_string(),
-            modes: state.modes.clone(),
-        },
-        None => ModeState::default(),
-    };
-    ChatUiStateUpdates::write(commands, webview, &state);
-}
-
-pub(super) fn effort_current_for<'a>(
-    settings: Option<&'a Res<vmux_setting::AppSettings>>,
-    agent_key: &str,
-) -> &'a str {
-    settings
-        .and_then(|settings| settings.agent.effort_for(agent_key))
-        .unwrap_or("")
+impl ModeProjection {
+    pub(super) fn write(self, webview: Entity, commands: &mut Commands) {
+        ChatUiStateUpdates::write(commands, webview, &self.0);
+    }
 }
 
 fn on_start_select_model(
@@ -485,7 +492,7 @@ fn remember_acp_model_lists(
     mut last_used: ResMut<AgentModelSelections>,
 ) {
     for (session, state) in &sessions {
-        let listed = model_state_of(Some(state)).models;
+        let listed = ModelProjection::options(state);
         let current = state.display_model_id().to_string();
         let url = AgentSelectionKey::acp_url(&session.agent_id);
         last_used.remember_catalog(&session.agent_id, &url, &current, &listed);
@@ -576,14 +583,13 @@ fn push_acp_model_state_to_page(
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
-        emit_model_state(
-            webview,
+        ModelProjection::new(
             Some(model_state),
             cross,
             &session.agent_id,
-            effort_current_for(settings.as_ref(), &session.agent_id),
-            &mut commands,
-        );
+            settings.as_deref(),
+        )
+        .write(webview, &mut commands);
     }
 }
 
@@ -612,14 +618,8 @@ fn push_removed_acp_model_state_to_page(
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
-        emit_model_state(
-            webview,
-            None,
-            cross,
-            &session.agent_id,
-            effort_current_for(settings.as_ref(), &session.agent_id),
-            &mut commands,
-        );
+        ModelProjection::new(None, cross, &session.agent_id, settings.as_deref())
+            .write(webview, &mut commands);
     }
 }
 
@@ -638,7 +638,7 @@ fn push_acp_mode_state_to_page(
             continue;
         };
         if browsers.can_emit_to(&webview) {
-            emit_mode_state(webview, Some(mode_state), &mut commands);
+            ModeProjection::from(Some(mode_state)).write(webview, &mut commands);
         }
     }
 }
@@ -658,7 +658,7 @@ fn push_removed_acp_mode_state_to_page(
             continue;
         };
         if browsers.can_emit_to(&webview) {
-            emit_mode_state(webview, None, &mut commands);
+            ModeProjection::from(None).write(webview, &mut commands);
         }
     }
 }

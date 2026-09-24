@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
-use super::model::{effort_current_for, emit_mode_state, emit_model_state};
+use super::model::{ModeProjection, ModelProjection};
 use super::ui_state::ChatUiStateUpdates;
 use super::{AgentChatView, ChatSynced};
 use crate::client::acp::{AcpModeState, AcpModelState};
@@ -354,15 +354,9 @@ fn sync_chat_to_ready_views(
                 )
             })
             .unwrap_or((false, None, None, String::new()));
-        emit_model_state(
-            webview,
-            model_state,
-            cross,
-            &agent_key,
-            effort_current_for(settings.as_ref(), &agent_key),
-            &mut commands,
-        );
-        emit_mode_state(webview, mode_state, &mut commands);
+        ModelProjection::new(model_state, cross, &agent_key, settings.as_deref())
+            .write(webview, &mut commands);
+        ModeProjection::from(mode_state).write(webview, &mut commands);
         commands.entity(webview).insert(ChatSynced);
     }
 }
