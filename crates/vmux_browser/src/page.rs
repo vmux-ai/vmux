@@ -18,9 +18,9 @@ use crate::{
     send_page_open_response,
 };
 
-pub(crate) struct PageOpenPlugin;
+pub(crate) struct PagePlugin;
 
-impl Plugin for PageOpenPlugin {
+impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()

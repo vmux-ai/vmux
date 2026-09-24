@@ -18,17 +18,19 @@ use vmux_core::PageOpenSet;
 use vmux_core::host::page::HostsPage;
 use vmux_core::page_metadata::PageMetadata;
 use vmux_layout::LayoutCef;
-use vmux_native::{Appearance, AssetReply, Embedding, NativePage, SiblingOrder, WebView};
+use vmux_native::{
+    Appearance, AssetReply, Embedding, NativePage, NativePagePlacement, NativePageRegistration,
+    SiblingOrder, WebView,
+};
 use vmux_setting::{AppSettings, ColorScheme};
 use vmux_ui::hooks::EventListenerError;
 
-use super::{NativePages, Placement};
 use crate::LayoutPointerCapture;
 use crate::present::PaneFrames;
 
-pub(super) struct NativePagesMacosPlugin;
+pub(super) struct NativePageMacosPlugin;
 
-impl Plugin for NativePagesMacosPlugin {
+impl Plugin for NativePageMacosPlugin {
     fn build(&self, app: &mut App) {
         let (metadata_tx, metadata_rx) = async_channel::unbounded();
         app.insert_resource(NativePageMetadataSender(metadata_tx))
@@ -63,7 +65,7 @@ struct HostedPages(HashMap<Entity, HostedPage>);
 
 struct HostedPage {
     surface: WebView,
-    placement: Placement,
+    placement: NativePagePlacement,
     page: &'static NativePage,
     window: Entity,
 }
@@ -112,7 +114,7 @@ impl HostedPages {
 
     fn layout(&self, window: Option<Entity>) -> Option<Entity> {
         for (entity, hosted) in self.0.iter() {
-            if hosted.placement == Placement::Layout
+            if hosted.placement == NativePagePlacement::Layout
                 && window.is_none_or(|window| hosted.window == window)
             {
                 return Some(*entity);
@@ -124,11 +126,15 @@ impl HostedPages {
 }
 
 fn open_native_pages(world: &mut World) {
-    let registered = world.resource::<NativePages>().0.clone();
+    let registered = world
+        .query::<&NativePageRegistration>()
+        .iter(world)
+        .copied()
+        .collect::<Vec<_>>();
     let mut wanted = Vec::new();
-    for (page, placement, instance) in registered {
-        for entity in placement.claim(world, page) {
-            wanted.push((entity, page, placement, instance));
+    for registration in registered {
+        for entity in registration.placement().claim(world, registration) {
+            wanted.push((entity, registration));
         }
     }
     if wanted.is_empty() {
@@ -151,7 +157,9 @@ fn open_native_pages(world: &mut World) {
         world.insert_non_send(HostedPages::default());
     }
 
-    for (entity, page, placement, read_instance) in wanted {
+    for (entity, registration) in wanted {
+        let page = registration.page();
+        let placement = registration.placement();
         let Some(window_entity) = host_window_for(world, entity).or(primary_window) else {
             report_waiting("page has no host window entity");
             continue;
@@ -165,10 +173,7 @@ fn open_native_pages(world: &mut World) {
         {
             continue;
         }
-        let instance = match read_instance {
-            Some(read) => read(world, entity),
-            None => vmux_native::Instance::default(),
-        };
+        let instance = registration.instance(world, entity);
         if current.is_some_and(|(current, window)| {
             current.transparent == page.transparent && window == window_entity
         }) {
@@ -376,38 +381,49 @@ fn appearance_of(mode: ColorScheme) -> Appearance {
     }
 }
 
-impl Placement {
+trait NativePagePlacementExt {
+    fn paints_in_front(self) -> bool;
+    fn pointer_order(self, capturing: bool) -> Option<SiblingOrder>;
+    fn claim(self, world: &mut World, registration: NativePageRegistration) -> Vec<Entity>;
+    fn bounds(
+        self,
+        entity: Entity,
+        window: Option<&Window>,
+        frames: &PaneFrames,
+    ) -> Option<wry::Rect>;
+}
+
+impl NativePagePlacementExt for NativePagePlacement {
     fn paints_in_front(self) -> bool {
-        matches!(self, Self::Layout | Self::Modal)
+        matches!(
+            self,
+            NativePagePlacement::Layout | NativePagePlacement::Modal
+        )
     }
 
     fn pointer_order(self, capturing: bool) -> Option<SiblingOrder> {
         match self {
-            Self::Layout if !capturing => Some(SiblingOrder::Back),
-            Self::Layout | Self::Modal => Some(SiblingOrder::Front),
-            Self::Pane => None,
+            NativePagePlacement::Layout if !capturing => Some(SiblingOrder::Back),
+            NativePagePlacement::Layout | NativePagePlacement::Modal => Some(SiblingOrder::Front),
+            NativePagePlacement::Pane => None,
         }
     }
 
-    fn claim(self, world: &mut World, page: &NativePage) -> Vec<Entity> {
+    fn claim(self, world: &mut World, registration: NativePageRegistration) -> Vec<Entity> {
         match self {
-            Self::Layout => world
+            NativePagePlacement::Layout => world
                 .query_filtered::<Entity, With<LayoutCef>>()
                 .iter(world)
                 .collect(),
-            Self::Pane | Self::Modal => {
+            NativePagePlacement::Pane | NativePagePlacement::Modal => {
+                let candidates = world
+                    .query_filtered::<(Entity, &PageMetadata), (With<HostsPage>, Without<LayoutCef>)>()
+                    .iter(world)
+                    .map(|(entity, metadata)| (entity, metadata.url.clone()))
+                    .collect::<Vec<_>>();
                 let mut claimed = Vec::new();
-                let mut pages = world.query_filtered::<
-                    (Entity, &PageMetadata, Has<vmux_terminal::Terminal>),
-                    (With<HostsPage>, Without<LayoutCef>),
-                >();
-                for (entity, meta, terminal) in pages.iter(world) {
-                    let url = if terminal {
-                        super::TERMINAL_PAGE.url
-                    } else {
-                        &meta.url
-                    };
-                    if page.answers_for(url) {
+                for (entity, url) in candidates {
+                    if registration.answers_for(world, entity, &url) {
                         claimed.push(entity);
                     }
                 }
@@ -424,14 +440,14 @@ impl Placement {
         frames: &PaneFrames,
     ) -> Option<wry::Rect> {
         match self {
-            Self::Layout => {
+            NativePagePlacement::Layout => {
                 let window = window?;
                 Some(wry::Rect {
                     position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
                     size: wry::dpi::LogicalSize::new(window.width(), window.height()).into(),
                 })
             }
-            Self::Pane | Self::Modal => {
+            NativePagePlacement::Pane | NativePagePlacement::Modal => {
                 let frame = frames.frame(entity)?;
                 Some(wry::Rect {
                     position: wry::dpi::LogicalPosition::new(frame.left, frame.top).into(),
@@ -830,27 +846,28 @@ fn report_waiting(reason: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        NativePageMetadataReceiver, NativePageMetadataSender, PageOutbox, Placement, SiblingOrder,
+        NativePageMetadataReceiver, NativePageMetadataSender, NativePagePlacementExt, PageOutbox,
         SimulatorFrame, SimulatorFrameRequest,
     };
     use bevy::prelude::{App, MinimalPlugins, Update};
+    use vmux_native::{NativePagePlacement, SiblingOrder};
 
     #[test]
     fn the_layout_is_asked_for_the_pointer_only_while_a_surface_of_its_own_is_up() {
         assert_eq!(
-            Placement::Layout.pointer_order(false),
+            NativePagePlacement::Layout.pointer_order(false),
             Some(SiblingOrder::Back)
         );
         assert_eq!(
-            Placement::Layout.pointer_order(true),
+            NativePagePlacement::Layout.pointer_order(true),
             Some(SiblingOrder::Front)
         );
         assert_eq!(
-            Placement::Modal.pointer_order(false),
+            NativePagePlacement::Modal.pointer_order(false),
             Some(SiblingOrder::Front)
         );
-        assert_eq!(Placement::Pane.pointer_order(false), None);
-        assert!(Placement::Layout.paints_in_front());
+        assert_eq!(NativePagePlacement::Pane.pointer_order(false), None);
+        assert!(NativePagePlacement::Layout.paints_in_front());
     }
 
     #[test]
@@ -871,31 +888,6 @@ mod tests {
 
         let emitted = rx.recv_blocking().unwrap();
         assert_eq!(emitted.host, "sessions");
-    }
-
-    #[test]
-    fn a_cli_terminal_keeps_the_terminal_renderer() {
-        let mut world = bevy::prelude::World::new();
-        let terminal = world
-            .spawn((
-                vmux_core::host::page::HostsPage,
-                vmux_terminal::Terminal,
-                vmux_core::PageMetadata {
-                    url: "vmux://sessions/claude/cli".to_string(),
-                    ..Default::default()
-                },
-            ))
-            .id();
-
-        assert_eq!(
-            Placement::Pane.claim(&mut world, &super::super::TERMINAL_PAGE),
-            vec![terminal]
-        );
-        assert!(
-            Placement::Pane
-                .claim(&mut world, &super::super::CHAT_PAGE)
-                .is_empty()
-        );
     }
 
     #[test]

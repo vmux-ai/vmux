@@ -17,6 +17,7 @@ path = "src/lib.rs"
 rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_api = { path = "../../vmux_api" }
+vmux_native = { path = "../../vmux_native" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }

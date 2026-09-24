@@ -21,6 +21,8 @@ pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::native_page::SettingsPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins((
             SettingsRuntimePlugin,

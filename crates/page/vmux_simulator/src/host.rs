@@ -23,6 +23,8 @@ pub struct SimulatorPlugin;
 
 impl Plugin for SimulatorPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::native_page::SimulatorPage::plugin());
         app.world_mut().spawn((
             PAGE_MANIFEST,
             NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title),

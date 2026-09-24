@@ -3,6 +3,7 @@ mod bin_event;
 mod contract;
 mod expand;
 mod named_fields;
+mod native_page;
 mod string_id;
 mod ui_state;
 mod variant_names;
@@ -78,6 +79,15 @@ pub fn ui_state_patch(args: TokenStream, input: TokenStream) -> TokenStream {
     };
     match contract::expand(args.into(), input) {
         Ok(contract) => quote!(#contract #patch).into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn page(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match native_page::expand(args.into(), input) {
+        Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }
 }

@@ -22,6 +22,8 @@ pub struct ShortcutPlugin;
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::native_page::ShortcutPage::plugin());
         app.world_mut().spawn(PAGE_MANIFEST);
         app.init_resource::<ShortcutCaptureTarget>()
             .add_plugins((

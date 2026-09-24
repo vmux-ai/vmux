@@ -7,6 +7,8 @@ publish = false
 
 [dependencies]
 base64 = "0.22"
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
 dioxus-core = "=0.7.9"
 dioxus-html = { version = "=0.7.9", features = ["serialize"] }
 dioxus-interpreter-js = { version = "=0.7.9", features = [
@@ -16,6 +18,7 @@ dioxus-interpreter-js = { version = "=0.7.9", features = [
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
+vmux_macro = { path = "../vmux_macro" }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 objc2-quartz-core = { version = "0.3", default-features = false, features = [

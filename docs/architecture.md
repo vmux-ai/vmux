@@ -307,8 +307,8 @@ Two engines, and which one draws a surface depends on what the surface *is*.
 flowchart TB
     win["Vmux window"]
     native["Vmux's own pages — 17 of them<br/>native Dioxus components in this process<br/>painted by a transparent wry WKWebView"]
-    layout["the layout: header · URL bar · sidebar<br/>NativePagePlugin::as_layout"]
-    pane["everything in a pane: terminal, files,<br/>settings, agents, start, spaces …<br/>NativePagePlugin::in_pane"]
+    layout["the layout: header · URL bar · sidebar<br/>owned by vmux_layout"]
+    pane["everything in a pane: terminal, files,<br/>settings, agents, start, spaces …<br/>owned by its feature crate"]
     cef["content you browse — https://<br/>full Chromium via CEF"]
 
     win --> native
@@ -381,6 +381,11 @@ game engine.
 ## How a native page works
 
 This is the part that changed most, and the part worth understanding.
+
+Each feature declares its own native page with `#[vmux_native::page(...)]`. The marker type
+owns the route, renderer description and registration plugin. Building the feature plugin
+spawns that registration as an ECS entity. `vmux_browser` only discovers registrations and
+runs the native-page lifecycle; it has no catalog of which product pages exist.
 
 A page's components are ordinary Dioxus — the *same* code the phone runs. What differs is
 who executes them. There is no renderer and no `dioxus-desktop`: `PageDom` owns a
@@ -725,7 +730,7 @@ crates/
 │   ├── vmux_team
 │   └── vmux_terminal
 ├── vmux_app                platform-neutral application plugin facade
-├── vmux_browser            composes pages into the workspace shell
+├── vmux_browser            browser runtime and native-page renderer
 ├── vmux_clipboard
 ├── vmux_core
 ├── vmux_flex

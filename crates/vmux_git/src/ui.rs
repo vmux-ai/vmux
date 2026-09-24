@@ -16,5 +16,5 @@ mod status;
 mod workspace;
 
 pub use diff_projection::{DiffViewRow, EditorDiffMarker};
-pub use root::{LEGACY_NATIVE_PAGE, NATIVE_PAGE, Page};
+pub use root::Page;
 pub use shared::{DiffView, GitFooter, GitStatusFeed};

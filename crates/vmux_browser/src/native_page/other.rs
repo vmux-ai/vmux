@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
-pub(super) struct NativePagesOtherPlugin;
+pub(super) struct NativePageOtherPlugin;
 
-impl Plugin for NativePagesOtherPlugin {
+impl Plugin for NativePageOtherPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, report_missing_renderer);
     }

@@ -22,6 +22,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_transport = { path = "../vmux_transport" }
 vmux_api = { path = "../../vmux_api" }
+vmux_native = { path = "../../vmux_native" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 base64 = "0.22"

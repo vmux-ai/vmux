@@ -13,6 +13,9 @@ pub mod state;
 pub mod tool_page;
 
 #[cfg(ui)]
+pub mod native_page;
+
+#[cfg(ui)]
 pub mod ui;
 
 #[cfg(ui)]
