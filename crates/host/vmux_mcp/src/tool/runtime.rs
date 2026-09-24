@@ -10,9 +10,32 @@ use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue, ProcessId};
 
 use vmux_api::InputSchema;
 
-pub struct ToolPlugin;
+pub struct BuiltinToolPlugin;
 
-impl Plugin for ToolPlugin {
+impl Plugin for BuiltinToolPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ToolRuntimePlugin>() {
+            app.add_plugins(ToolRuntimePlugin);
+        }
+        app.add_plugins((
+            super::application::ApplicationToolPlugin,
+            super::browser::BrowserToolPlugin,
+            super::terminal::TerminalToolPlugin,
+            super::layout::LayoutToolPlugin,
+            super::setting::SettingToolPlugin,
+            super::space::SpaceToolPlugin,
+            super::workspace::WorkspaceToolPlugin,
+            super::files::FileToolPlugin,
+            super::knowledge::KnowledgeToolPlugin,
+            super::visual::VisualToolPlugin,
+            super::bookmark::BookmarkToolPlugin,
+        ));
+    }
+}
+
+pub struct ToolRuntimePlugin;
+
+impl Plugin for ToolRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NextToolOrder>()
             .init_resource::<ToolCatalog>()
@@ -23,23 +46,6 @@ impl Plugin for ToolPlugin {
                     ToolRequestFlush,
                     ToolDispatchSet,
                     ToolDispatchFlush,
-                )
-                    .chain(),
-            )
-            .configure_sets(
-                Startup,
-                (
-                    ToolRegistrationSet::Application,
-                    ToolRegistrationSet::Browser,
-                    ToolRegistrationSet::Terminal,
-                    ToolRegistrationSet::Layout,
-                    ToolRegistrationSet::Setting,
-                    ToolRegistrationSet::Space,
-                    ToolRegistrationSet::Workspace,
-                    ToolRegistrationSet::Files,
-                    ToolRegistrationSet::Knowledge,
-                    ToolRegistrationSet::Visual,
-                    ToolRegistrationSet::Bookmark,
                 )
                     .chain(),
             )
@@ -60,25 +66,12 @@ impl Plugin for ToolPlugin {
                 )
                     .chain()
                     .in_set(ToolDispatchFlush),
-            )
-            .add_plugins((
-                super::application::ApplicationToolPlugin,
-                super::browser::BrowserToolPlugin,
-                super::terminal::TerminalToolPlugin,
-                super::layout::LayoutToolPlugin,
-                super::setting::SettingToolPlugin,
-                super::space::SpaceToolPlugin,
-                super::workspace::WorkspaceToolPlugin,
-                super::files::FileToolPlugin,
-                super::knowledge::KnowledgeToolPlugin,
-                super::visual::VisualToolPlugin,
-                super::bookmark::BookmarkToolPlugin,
-            ));
+            );
     }
 }
 
 #[cfg(test)]
-impl ToolPlugin {
+impl BuiltinToolPlugin {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(Self);
@@ -106,14 +99,11 @@ where
     T: Component + Clone + serde::de::DeserializeOwned + Serialize,
 {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ToolPlugin>() {
-            app.add_plugins(ToolPlugin);
+        if !app.is_plugin_added::<ToolRuntimePlugin>() {
+            app.add_plugins(ToolRuntimePlugin);
         }
         app.insert_resource(McpToolManifest::<T>::new(self.manifest))
-            .add_systems(
-                Startup,
-                register_mcp_tools::<T>.after(ToolRegistrationSet::Bookmark),
-            )
+            .add_systems(Startup, register_mcp_tools::<T>.in_set(RegisterTools))
             .add_systems(Update, route_mcp_tools::<T>.in_set(ToolRequestSet));
     }
 }
@@ -159,19 +149,7 @@ pub struct ToolRequestSet;
 struct ToolRequestFlush;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-pub(super) enum ToolRegistrationSet {
-    Application,
-    Browser,
-    Terminal,
-    Layout,
-    Setting,
-    Space,
-    Workspace,
-    Files,
-    Knowledge,
-    Visual,
-    Bookmark,
-}
+pub struct RegisterTools;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub struct ToolDispatchSet;
@@ -769,7 +747,7 @@ fn tool_definitions_filtered(
     acp_terminals: bool,
     shell: &str,
 ) -> Vec<ToolDefinition> {
-    let mut app = ToolPlugin::app();
+    let mut app = BuiltinToolPlugin::app();
     let shell = shell.to_string();
     app.world_mut()
         .run_system_once(move |tools: Res<ToolCatalog>| {
@@ -820,7 +798,7 @@ fn dispatch_in_shell(
     anchor: Option<ProcessId>,
     host_shell: &str,
 ) -> Result<DispatchTarget, String> {
-    let mut app = ToolPlugin::app();
+    let mut app = BuiltinToolPlugin::app();
     match ToolCall::dispatch(&mut app, name, arguments, anchor, host_shell, false, false)? {
         ToolExecution::Dispatch { target, .. } => Ok(target),
         ToolExecution::Protocol { .. }

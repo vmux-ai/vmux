@@ -1,11 +1,124 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use bevy_ecs::prelude::Component;
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
+use vmux_core::tool::{ToolAction, ToolProvider};
 
-use crate::ToolOperation;
 use crate::manifest::{ToolStore, expand_user_path, load_manifest_from, write_manifest_to};
+use crate::{
+    ToolActionCompletion, ToolActionRequest, ToolActionRouteSet, ToolOperation,
+    ToolOperationPlugin, ToolStoreAction, ToolStoreTarget,
+};
+
+pub(crate) struct McpToolPlugin;
+
+impl Plugin for McpToolPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            ToolOperationPlugin::<DiscoverMcpServers>::default(),
+            ToolOperationPlugin::<ImportMcpConfig>::default(),
+            ToolOperationPlugin::<ImportMcpServer>::default(),
+            ToolOperationPlugin::<ForgetMcpServer>::default(),
+        ))
+        .add_systems(Update, route.in_set(ToolActionRouteSet))
+        .add_systems(
+            Update,
+            (
+                complete_config_import,
+                complete_server_import,
+                complete_server_forget,
+            ),
+        );
+    }
+}
+
+fn route(
+    requests: Query<
+        (Entity, &ToolActionRequest),
+        (Added<ToolActionRequest>, With<ToolStoreTarget>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, action) in &requests {
+        let request = action.request();
+        if request.provider != ToolProvider::Mcp {
+            continue;
+        }
+        let id = request.id.trim();
+        let value = request.value.trim();
+        let mut entity = commands.entity(entity);
+        match request.action {
+            ToolAction::Import => {
+                let operation = if value.is_empty() {
+                    ImportMcpConfig::discovered()
+                } else {
+                    ImportMcpConfig::new(value)
+                };
+                entity.insert((ToolStoreAction, operation));
+            }
+            ToolAction::Adopt if !id.is_empty() => {
+                entity.insert((ToolStoreAction, ImportMcpServer::new(id)));
+            }
+            ToolAction::Forget if !id.is_empty() => {
+                entity.insert((ToolStoreAction, ForgetMcpServer::new(id)));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn complete_config_import(
+    actions: Query<
+        (Entity, &ImportedMcpConfig),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::succeeded(format!(
+                "imported {} MCP server(s)",
+                output.servers
+            )));
+    }
+}
+
+fn complete_server_import(
+    actions: Query<
+        (Entity, &ImportedMcpServer),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::succeeded(format!(
+                "{} is now managed",
+                output.name
+            )));
+    }
+}
+
+fn complete_server_forget(
+    actions: Query<
+        (Entity, &ForgottenMcpServer),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::succeeded(format!(
+                "{} removed from tools.toml",
+                output.name
+            )));
+    }
+}
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DiscoverMcpServers;

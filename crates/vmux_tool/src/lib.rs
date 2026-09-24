@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 mod dotfiles;
 mod homebrew;
 mod manifest;
@@ -9,6 +11,7 @@ use std::marker::PhantomData;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
+use vmux_core::tool::ToolRequest;
 
 pub use dotfiles::*;
 pub use homebrew::*;
@@ -21,24 +24,91 @@ pub struct ToolPlugin;
 impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            ToolOperationPlugin::<ImportNpmManifest>::default(),
-            ToolOperationPlugin::<ImportBrewfile>::default(),
-            ToolOperationPlugin::<DiscoverMcpServers>::default(),
-            ToolOperationPlugin::<ImportMcpConfig>::default(),
-            ToolOperationPlugin::<ImportMcpServer>::default(),
-            ToolOperationPlugin::<ForgetMcpServer>::default(),
-            ToolOperationPlugin::<DiscoverDotfilePackages>::default(),
-            ToolOperationPlugin::<PlanDotfilePackage>::default(),
-            ToolOperationPlugin::<ImportDotfiles>::default(),
-            ToolOperationPlugin::<ImportAvailableDotfiles>::default(),
-            ToolOperationPlugin::<LinkDotfilePackage>::default(),
-        ))
-        .add_plugins((
-            ToolOperationPlugin::<DisableDotfilePackage>::default(),
-            ToolOperationPlugin::<UnlinkDotfilePackage>::default(),
-            ToolOperationPlugin::<ApplyEnabledDotfiles>::default(),
-            ToolOperationPlugin::<AdoptDotfile>::default(),
+            ToolRuntimePlugin,
+            npm::NpmToolPlugin,
+            homebrew::HomebrewToolPlugin,
+            mcp::McpToolPlugin,
+            dotfiles::DotfileToolPlugin,
         ));
+    }
+}
+
+pub struct ToolRuntimePlugin;
+
+impl Plugin for ToolRuntimePlugin {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(Update, (ToolActionRouteSet, ToolActionRouteFlush).chain())
+            .add_systems(
+                Update,
+                bevy_ecs::schedule::ApplyDeferred.in_set(ToolActionRouteFlush),
+            )
+            .add_systems(
+                Update,
+                route_external_tool_actions.after(ToolActionRouteFlush),
+            )
+            .add_systems(Update, complete_failed_store_action);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+pub struct ToolActionRouteSet;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct ToolActionRouteFlush;
+
+#[derive(Component, Clone)]
+pub struct ToolActionRequest {
+    target: Entity,
+    request: ToolRequest,
+}
+
+impl ToolActionRequest {
+    pub fn new(target: Entity, request: ToolRequest) -> Self {
+        Self { target, request }
+    }
+
+    pub fn target(&self) -> Entity {
+        self.target
+    }
+
+    pub fn request(&self) -> &ToolRequest {
+        &self.request
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExternalToolAction;
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ToolStoreAction;
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ToolActionCompletion {
+    success: bool,
+    message: String,
+}
+
+impl ToolActionCompletion {
+    pub fn success(&self) -> bool {
+        self.success
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn succeeded(message: impl Into<String>) -> Self {
+        Self {
+            success: true,
+            message: message.into(),
+        }
+    }
+
+    pub fn failed(message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            message: message.into(),
+        }
     }
 }
 
@@ -73,7 +143,7 @@ impl ToolOperationFailure {
 #[derive(Component)]
 struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
 
-struct ToolOperationPlugin<O>(PhantomData<fn() -> O>);
+pub struct ToolOperationPlugin<O>(PhantomData<fn() -> O>);
 
 impl<O> Default for ToolOperationPlugin<O> {
     fn default() -> Self {
@@ -86,6 +156,9 @@ where
     O: ToolOperation,
 {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ToolRuntimePlugin>() {
+            app.add_plugins(ToolRuntimePlugin);
+        }
         app.add_systems(
             Update,
             (start_operation::<O>, finish_operation::<O>).chain(),
@@ -143,6 +216,36 @@ fn finish_operation<O>(
                 entity.insert(ToolOperationFailure(error));
             }
         }
+    }
+}
+
+fn route_external_tool_actions(
+    requests: Query<
+        Entity,
+        (
+            Added<ToolActionRequest>,
+            With<ToolStoreTarget>,
+            Without<ToolStoreAction>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for entity in &requests {
+        commands.entity(entity).insert(ExternalToolAction);
+    }
+}
+
+fn complete_failed_store_action(
+    actions: Query<
+        (Entity, &ToolOperationFailure),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, failure) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::failed(failure.message().to_string()));
     }
 }
 
@@ -285,7 +388,7 @@ brew "ripgrep"
     }
 
     #[test]
-    fn npm_import_operation_updates_the_target_store() {
+    fn npm_provider_routes_action_and_updates_the_target_store() {
         let temp = tempfile::tempdir().unwrap();
         let package_json = temp.path().join("package.json");
         std::fs::write(&package_json, r#"{"dependencies":{"typescript":"^5"}}"#).unwrap();
@@ -293,17 +396,26 @@ brew "ripgrep"
         let mut app = App::new();
         app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolPlugin));
         let store_entity = app.world_mut().spawn(store.clone()).id();
+        let target = app.world_mut().spawn_empty().id();
         let operation = app
             .world_mut()
             .spawn((
-                ImportNpmManifest::new(package_json),
+                ToolActionRequest::new(
+                    target,
+                    ToolRequest {
+                        provider: vmux_core::tool::ToolProvider::Npm,
+                        action: vmux_core::tool::ToolAction::Import,
+                        id: String::new(),
+                        value: package_json.to_string_lossy().into_owned(),
+                    },
+                ),
                 ToolStoreTarget::new(store_entity),
             ))
             .id();
 
         for _ in 0..100 {
             app.update();
-            if app.world().get::<ImportedNpmManifest>(operation).is_some() {
+            if app.world().get::<ToolActionCompletion>(operation).is_some() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -311,6 +423,13 @@ brew "ripgrep"
 
         let output = app.world().get::<ImportedNpmManifest>(operation).unwrap();
         assert_eq!(output, &ImportedNpmManifest { packages: 1 });
+        assert_eq!(
+            app.world().get::<ToolActionCompletion>(operation),
+            Some(&ToolActionCompletion::succeeded(
+                "imported 1 NPM package(s)"
+            )),
+        );
+        assert!(app.world().get::<ExternalToolAction>(operation).is_none());
         assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
     }
 

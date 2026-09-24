@@ -22,11 +22,7 @@ use vmux_core::vault::{
     VaultResult, VaultSnapshot,
 };
 use vmux_tool::{
-    AdoptDotfile, AdoptedDotfile, DisableDotfilePackage, DisabledDotfilePackage, ForgetMcpServer,
-    ForgottenMcpServer, ImportAvailableDotfiles, ImportBrewfile, ImportDotfiles, ImportMcpConfig,
-    ImportMcpServer, ImportNpmManifest, ImportedAvailableDotfiles, ImportedBrewfile,
-    ImportedDotfiles, ImportedMcpConfig, ImportedMcpServer, ImportedNpmManifest,
-    LinkDotfilePackage, LinkedDotfilePackage, ToolOperation, ToolOperationFailure, ToolStore,
+    ExternalToolAction, ToolActionCompletion, ToolActionRequest, ToolStore, ToolStoreAction,
     ToolStoreTarget, ToolsManifest,
 };
 
@@ -161,6 +157,7 @@ impl Plugin for ToolPlugin {
                     drain_tools_scan,
                     queue_vault_auto_sync,
                     start_tool_action,
+                    start_external_tool_action,
                     drain_tool_actions,
                     start_vault_action,
                     drain_vault_actions,
@@ -168,27 +165,7 @@ impl Plugin for ToolPlugin {
                 )
                     .chain(),
             )
-            .add_systems(
-                Update,
-                (
-                    (
-                        complete_npm_import,
-                        complete_brewfile_import,
-                        complete_mcp_config_import,
-                        complete_mcp_server_import,
-                        complete_mcp_server_forget,
-                        complete_dotfiles_import,
-                        complete_available_dotfiles_import,
-                        complete_dotfile_link,
-                        complete_dotfile_disable,
-                        complete_dotfile_adoption,
-                        complete_failed_tool_store_action,
-                    ),
-                    drain_tool_store_actions,
-                )
-                    .chain()
-                    .before(emit_tools_snapshot),
-            );
+            .add_systems(Update, drain_tool_store_actions.before(emit_tools_snapshot));
     }
 }
 
@@ -263,8 +240,6 @@ struct ToolsScanOutput {
 
 #[derive(Component)]
 struct ToolActionTask {
-    target: Entity,
-    request: ToolRequest,
     task: Task<Result<String, String>>,
 }
 
@@ -284,107 +259,6 @@ struct PendingToolAction {
     order: u64,
     target: Entity,
     request: ToolRequest,
-}
-
-impl PendingToolAction {
-    fn start_store_operation<O>(
-        &self,
-        entity: Entity,
-        store: Entity,
-        operation: O,
-        commands: &mut Commands,
-    ) where
-        O: ToolOperation,
-    {
-        commands.entity(entity).remove::<Self>().insert((
-            ToolStoreAction {
-                target: self.target,
-                request: self.request.clone(),
-            },
-            ToolStoreTarget::new(store),
-            operation,
-        ));
-    }
-
-    fn start_in_store(&self, entity: Entity, store: Entity, commands: &mut Commands) -> bool {
-        let id = self.request.id.trim();
-        let value = self.request.value.trim();
-        match (self.request.action, self.request.provider) {
-            (ToolAction::Import, ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask)
-                if !value.is_empty() =>
-            {
-                self.start_store_operation(entity, store, ImportBrewfile::new(value), commands);
-            }
-            (ToolAction::Import, ToolProvider::Npm) if !value.is_empty() => {
-                self.start_store_operation(entity, store, ImportNpmManifest::new(value), commands);
-            }
-            (ToolAction::Import, ToolProvider::Mcp) => {
-                let operation = if value.is_empty() {
-                    ImportMcpConfig::discovered()
-                } else {
-                    ImportMcpConfig::new(value)
-                };
-                self.start_store_operation(entity, store, operation, commands);
-            }
-            (ToolAction::Import, ToolProvider::Dotfiles) => {
-                if value.is_empty() {
-                    self.start_store_operation(entity, store, ImportAvailableDotfiles, commands);
-                } else {
-                    self.start_store_operation(entity, store, ImportDotfiles::new(value), commands);
-                }
-            }
-            (ToolAction::Adopt, ToolProvider::Mcp) if !id.is_empty() => {
-                self.start_store_operation(entity, store, ImportMcpServer::new(id), commands);
-            }
-            (ToolAction::Forget, ToolProvider::Mcp) if !id.is_empty() => {
-                self.start_store_operation(entity, store, ForgetMcpServer::new(id), commands);
-            }
-            (ToolAction::Adopt, ToolProvider::Dotfiles) if !id.is_empty() && !value.is_empty() => {
-                self.start_store_operation(entity, store, AdoptDotfile::new(value, id), commands);
-            }
-            (
-                ToolAction::Install | ToolAction::Update | ToolAction::Link,
-                ToolProvider::Dotfiles,
-            ) if !id.is_empty() => {
-                self.start_store_operation(entity, store, LinkDotfilePackage::new(id), commands);
-            }
-            (ToolAction::Uninstall | ToolAction::Unlink, ToolProvider::Dotfiles)
-                if !id.is_empty() =>
-            {
-                self.start_store_operation(entity, store, DisableDotfilePackage::new(id), commands);
-            }
-            _ => return false,
-        }
-        true
-    }
-}
-
-#[derive(Component)]
-struct ToolStoreAction {
-    target: Entity,
-    request: ToolRequest,
-}
-
-#[derive(Component)]
-struct ToolActionCompletion {
-    success: bool,
-    message: String,
-}
-
-impl ToolActionCompletion {
-    fn success(message: String) -> Self {
-        Self {
-            success: true,
-            message,
-        }
-    }
-
-    fn failure(message: String) -> Self {
-        Self {
-            success: false,
-            message,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -719,14 +593,16 @@ fn vault_event_requests_sync(result: &notify::Result<notify::Event>) -> bool {
 
 fn start_tool_action(
     pending: Query<(Entity, &PendingToolAction)>,
+    requests: Query<(), With<ToolActionRequest>>,
     tasks: Query<(), With<ToolActionTask>>,
     store_actions: Query<(), With<ToolStoreAction>>,
     vault_tasks: Query<(), With<VaultActionTask>>,
     scans: Query<(), With<ToolsScanTask>>,
-    stores: Query<(Entity, &ToolStore), With<ToolRegistry>>,
+    stores: Query<Entity, (With<ToolStore>, With<ToolRegistry>)>,
     mut commands: Commands,
 ) {
-    if !tasks.is_empty()
+    if !requests.is_empty()
+        || !tasks.is_empty()
         || !store_actions.is_empty()
         || !vault_tasks.is_empty()
         || !scans.is_empty()
@@ -746,38 +622,54 @@ fn start_tool_action(
     let Ok((_, pending_action)) = pending.get(entity) else {
         return;
     };
-    let Ok((store_entity, store)) = stores.single() else {
+    let Ok(store) = stores.single() else {
         return;
     };
-    if pending_action.start_in_store(entity, store_entity, &mut commands) {
-        return;
-    }
-    let target = pending_action.target;
-    let request = pending_action.request.clone();
-    let task_request = request.clone();
-    let store = store.clone();
-    let task = IoTaskPool::get().spawn(async move { perform_action(&store, &task_request) });
     commands
         .entity(entity)
         .remove::<PendingToolAction>()
-        .insert(ToolActionTask {
-            target,
-            request,
-            task,
-        });
+        .insert((
+            ToolActionRequest::new(pending_action.target, pending_action.request.clone()),
+            ToolStoreTarget::new(store),
+        ));
+}
+
+fn start_external_tool_action(
+    actions: Query<(Entity, &ToolActionRequest, &ToolStoreTarget), Added<ExternalToolAction>>,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, action, store) in &actions {
+        let Ok(store) = stores.get(store.entity()) else {
+            continue;
+        };
+        let request = action.request().clone();
+        let task_request = request.clone();
+        let store = store.clone();
+        let task = IoTaskPool::get().spawn(async move { perform_action(&store, &task_request) });
+        commands
+            .entity(entity)
+            .remove::<ExternalToolAction>()
+            .insert(ToolActionTask { task });
+    }
 }
 
 fn start_vault_action(
     pending: Query<(Entity, &PendingVaultAction)>,
     mut recovery: ResMut<VaultRecoveryState>,
     tasks: Query<(), With<VaultActionTask>>,
+    tool_requests: Query<(), With<ToolActionRequest>>,
     tool_tasks: Query<(), With<ToolActionTask>>,
     store_actions: Query<(), With<ToolStoreAction>>,
     scans: Query<(), With<ToolsScanTask>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    if !tasks.is_empty() || !tool_tasks.is_empty() || !store_actions.is_empty() || !scans.is_empty()
+    if !tasks.is_empty()
+        || !tool_requests.is_empty()
+        || !tool_tasks.is_empty()
+        || !store_actions.is_empty()
+        || !scans.is_empty()
     {
         return;
     }
@@ -839,6 +731,7 @@ fn start_tools_scan(
     mut registry: Query<(&mut ToolRegistry, &ToolStore)>,
     tasks: Query<(), With<ToolsScanTask>>,
     action_tasks: Query<(), With<ToolActionTask>>,
+    action_requests: Query<(), With<ToolActionRequest>>,
     store_actions: Query<(), With<ToolStoreAction>>,
     vault_tasks: Query<(), With<VaultActionTask>>,
     pending_actions: Query<(), With<PendingToolAction>>,
@@ -851,6 +744,7 @@ fn start_tools_scan(
     if !state.dirty
         || !tasks.is_empty()
         || !action_tasks.is_empty()
+        || !action_requests.is_empty()
         || !store_actions.is_empty()
         || !vault_tasks.is_empty()
         || !pending_actions.is_empty()
@@ -928,7 +822,7 @@ fn drain_tools_scan(
 }
 
 fn drain_tool_actions(
-    mut tasks: Query<(Entity, &mut ToolActionTask)>,
+    mut tasks: Query<(Entity, &ToolActionRequest, &mut ToolActionTask)>,
     mut registry: Query<&mut ToolRegistry>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -936,7 +830,7 @@ fn drain_tool_actions(
     let Ok(mut state) = registry.single_mut() else {
         return;
     };
-    for (entity, mut task) in &mut tasks {
+    for (entity, action, mut task) in &mut tasks {
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
@@ -945,15 +839,16 @@ fn drain_tool_actions(
             Ok(message) => (true, message),
             Err(message) => (false, message),
         };
+        let request = action.request();
         let event = ToolResult {
-            provider: task.request.provider,
-            action: task.request.action,
-            id: task.request.id.clone(),
+            provider: request.provider,
+            action: request.action,
+            id: request.id.clone(),
             success,
             message,
         };
-        if browsers.can_emit_to(&task.target) {
-            commands.trigger(BinHostEmitEvent::from_event(task.target, &event));
+        if browsers.can_emit_to(&action.target()) {
+            commands.trigger(BinHostEmitEvent::from_event(action.target(), &event));
         }
         if success {
             state.dirty = true;
@@ -963,192 +858,8 @@ fn drain_tool_actions(
     }
 }
 
-fn complete_npm_import(
-    actions: Query<
-        (Entity, &ImportedNpmManifest),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "imported {} NPM package(s)",
-                output.packages
-            )));
-    }
-}
-
-fn complete_brewfile_import(
-    actions: Query<
-        (Entity, &ImportedBrewfile),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "imported {} formulae and {} casks",
-                output.formulae, output.casks
-            )));
-    }
-}
-
-fn complete_mcp_config_import(
-    actions: Query<
-        (Entity, &ImportedMcpConfig),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "imported {} MCP server(s)",
-                output.servers
-            )));
-    }
-}
-
-fn complete_mcp_server_import(
-    actions: Query<
-        (Entity, &ImportedMcpServer),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "{} is now managed",
-                output.name
-            )));
-    }
-}
-
-fn complete_mcp_server_forget(
-    actions: Query<
-        (Entity, &ForgottenMcpServer),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "{} removed from tools.toml",
-                output.name
-            )));
-    }
-}
-
-fn complete_dotfiles_import(
-    actions: Query<
-        (Entity, &ImportedDotfiles),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "imported {} dotfile package(s)",
-                output.packages
-            )));
-    }
-}
-
-fn complete_available_dotfiles_import(
-    actions: Query<
-        (Entity, &ImportedAvailableDotfiles),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "imported {} dotfile package(s)",
-                output.packages
-            )));
-    }
-}
-
-fn complete_dotfile_link(
-    actions: Query<
-        (Entity, &LinkedDotfilePackage),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "linked {} file(s)",
-                output.files
-            )));
-    }
-}
-
-fn complete_dotfile_disable(
-    actions: Query<
-        (Entity, &DisabledDotfilePackage),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "unlinked {} file(s)",
-                output.files
-            )));
-    }
-}
-
-fn complete_dotfile_adoption(
-    actions: Query<
-        (Entity, &AdoptedDotfile),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, output) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::success(format!(
-                "adopted {}",
-                output.path.display()
-            )));
-    }
-}
-
-fn complete_failed_tool_store_action(
-    actions: Query<
-        (Entity, &ToolOperationFailure),
-        (With<ToolStoreAction>, Without<ToolActionCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, failure) in &actions {
-        commands
-            .entity(entity)
-            .insert(ToolActionCompletion::failure(failure.message().to_string()));
-    }
-}
-
 fn drain_tool_store_actions(
-    actions: Query<(Entity, &ToolStoreAction, &ToolActionCompletion)>,
+    actions: Query<(Entity, &ToolActionRequest, &ToolActionCompletion), With<ToolStoreAction>>,
     mut registry: Query<&mut ToolRegistry>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -1157,17 +868,18 @@ fn drain_tool_store_actions(
         return;
     };
     for (entity, action, completion) in &actions {
+        let request = action.request();
         let event = ToolResult {
-            provider: action.request.provider,
-            action: action.request.action,
-            id: action.request.id.clone(),
-            success: completion.success,
-            message: completion.message.clone(),
+            provider: request.provider,
+            action: request.action,
+            id: request.id.clone(),
+            success: completion.success(),
+            message: completion.message().to_string(),
         };
-        if browsers.can_emit_to(&action.target) {
-            commands.trigger(BinHostEmitEvent::from_event(action.target, &event));
+        if browsers.can_emit_to(&action.target()) {
+            commands.trigger(BinHostEmitEvent::from_event(action.target(), &event));
         }
-        if completion.success {
+        if completion.success() {
             state.dirty = true;
             state.full_scan = true;
             state.generation = state.generation.wrapping_add(1);

@@ -152,15 +152,19 @@ mod tests {
     #[test]
     fn agent_tools_dispatch_through_the_owning_world() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_mcp::tool::ToolPlugin, ToolCallPlugin))
-            .add_message::<AgentToolCallRequest>()
-            .add_message::<AgentCommandRequest>()
-            .add_message::<AgentQueryRequest>()
-            .init_resource::<CapturedAgentCommands>()
-            .add_systems(
-                Update,
-                CapturedAgentCommands::read.after(vmux_mcp::tool::ToolDispatchFlush),
-            );
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_mcp::tool::BuiltinToolPlugin,
+            ToolCallPlugin,
+        ))
+        .add_message::<AgentToolCallRequest>()
+        .add_message::<AgentCommandRequest>()
+        .add_message::<AgentQueryRequest>()
+        .init_resource::<CapturedAgentCommands>()
+        .add_systems(
+            Update,
+            CapturedAgentCommands::read.after(vmux_mcp::tool::ToolDispatchFlush),
+        );
         app.update();
 
         app.world_mut()

@@ -1,6 +1,6 @@
 use super::{
-    NextToolOrder, ProtocolTool, ToolCall, ToolCalls, ToolDispatchSet, ToolExecution, ToolManifest,
-    ToolOutcome, ToolRegistrationSet, ToolRequestSet,
+    NextToolOrder, ProtocolTool, RegisterTools, ToolCall, ToolCalls, ToolDispatchSet,
+    ToolExecution, ToolManifest, ToolOutcome, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -10,7 +10,7 @@ pub(super) struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(ToolRegistrationSet::Files))
+        app.add_systems(Startup, register.in_set(RegisterTools))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
     }

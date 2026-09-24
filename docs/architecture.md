@@ -223,6 +223,12 @@ Command-bar requests implement `CommandRequest` and are registered through `Comm
 Their definitions become ECS entities with targeted dispatch observers; no callback registry owns
 their behavior.
 
+Commands, MCP tools, and tool-store actions share one extension shape. A runtime plugin owns only
+generic catalog, routing, scheduling, and completion mechanics. Each feature plugin owns its typed
+request or operation, definition manifest, parsing, and dispatch systems. Root plugins compose the
+built-ins, while another crate can install the runtime plus only its own typed plugins; application
+crates contain composition and platform adapters, not provider-specific routing tables.
+
 ---
 
 ## The layout tree

@@ -4,15 +4,15 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::AgentCommand;
 
 use super::{
-    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
-    ToolManifest, ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
+    ToolDispatchSet, ToolManifest, ToolRequestSet,
 };
 
 pub(super) struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(ToolRegistrationSet::Terminal))
+        app.add_systems(Startup, register.in_set(RegisterTools))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(Update, dispatch.in_set(ToolDispatchSet));
     }

@@ -62,10 +62,12 @@ fn extension_plugin_registers_and_dispatches_its_manifest() {
     app.update();
 
     let definitions = ToolDefinition::all(app.world_mut(), false, false, "");
-    assert!(
+    assert_eq!(
         definitions
             .iter()
-            .any(|definition| definition.name == "echo")
+            .map(|definition| definition.name.as_str())
+            .collect::<Vec<_>>(),
+        ["echo"],
     );
 
     let execution = ToolCall::dispatch(
@@ -93,7 +95,7 @@ fn extension_plugin_registers_and_dispatches_its_manifest() {
 #[test]
 fn owning_world_dispatches_tool_entities() {
     let mut app = App::new();
-    app.add_plugins(ToolPlugin);
+    app.add_plugins(BuiltinToolPlugin);
     app.update();
 
     let call = app
@@ -264,7 +266,7 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
     assert_eq!(definitions, expected);
 
     let anchor = Some(vmux_client::protocol::ProcessId::new());
-    let mut app = ToolPlugin::app();
+    let mut app = BuiltinToolPlugin::app();
     for name in expected {
         match ToolCall::dispatch(
             &mut app,
@@ -286,7 +288,7 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
 
 #[test]
 fn aliases_resolve_to_the_same_tool_entity() {
-    let mut app = ToolPlugin::app();
+    let mut app = BuiltinToolPlugin::app();
     let select = ToolCall::find(app.world_mut(), "select_project").unwrap().0;
     assert_eq!(
         ToolCall::find(app.world_mut(), "select_workspace")

@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
-    ToolManifest, ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
+    ToolDispatchSet, ToolManifest, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -11,7 +11,7 @@ pub(super) struct VisualToolPlugin;
 
 impl Plugin for VisualToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(ToolRegistrationSet::Visual))
+        app.add_systems(Startup, register.in_set(RegisterTools))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
