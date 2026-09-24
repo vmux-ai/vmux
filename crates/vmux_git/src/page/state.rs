@@ -4,6 +4,8 @@ use dioxus::prelude::*;
 use vmux_core::event::FileDirEntry;
 use vmux_core::event::{PageContextEvent, TabWorkspaceEvent};
 use vmux_ui::hooks::use_listener;
+use vmux_ui::list_nav::{MenuDirection, move_selection};
+use vmux_ui::scroll::ScrollIntoView;
 
 use super::model::{BranchCollection, BranchPrompt, GitCommandLogEntry, GitPanel};
 use super::workspace::GitWorkspace;
@@ -301,5 +303,152 @@ impl GitPageState {
             loading.set(true);
             GitWorkspace::request(&event.path);
         });
+    }
+
+    pub(super) fn move_selection(self, direction: MenuDirection) -> bool {
+        let Some(repository) = (self.repository)() else {
+            return false;
+        };
+        match (self.focused_panel)() {
+            GitPanel::Status => false,
+            GitPanel::Files => self.move_file_selection(&repository, direction),
+            GitPanel::Branches => self.move_branch_selection(&repository, direction),
+            GitPanel::Commits => self.move_commit_selection(&repository, direction),
+            GitPanel::Stash => self.move_stash_selection(&repository, direction),
+        }
+    }
+
+    fn move_file_selection(
+        self,
+        repository: &GitRepositoryEvent,
+        direction: MenuDirection,
+    ) -> bool {
+        let len = repository.files.len();
+        if len == 0 {
+            return false;
+        }
+        let current = repository
+            .files
+            .iter()
+            .position(|entry| entry.path_bytes == (self.selected_path_bytes)())
+            .unwrap_or(match direction {
+                MenuDirection::Next => len - 1,
+                MenuDirection::Previous => 0,
+            });
+        let index = move_selection(current, len, direction);
+        let entry = &repository.files[index];
+        let mut selected_path = self.selected_path;
+        let mut selected_path_bytes = self.selected_path_bytes;
+        let mut selected_abs_path = self.selected_abs_path;
+        selected_path.set(entry.path.clone());
+        selected_path_bytes.set(entry.path_bytes.clone());
+        selected_abs_path.set(GitWorkspace::absolute_path(
+            &repository.repo_root,
+            &entry.path,
+        ));
+        let section = if entry.staged { "staged" } else { "unstaged" };
+        ScrollIntoView::nearest(&format!("git-file-{section}-row-{index}"));
+        true
+    }
+
+    fn move_branch_selection(
+        self,
+        repository: &GitRepositoryEvent,
+        direction: MenuDirection,
+    ) -> bool {
+        let references = (self.branch_collection)().references(repository);
+        let len = references.len();
+        if len == 0 {
+            return false;
+        }
+        let current = references
+            .iter()
+            .position(|reference| reference == &(self.selected_branch)())
+            .unwrap_or(match direction {
+                MenuDirection::Next => len - 1,
+                MenuDirection::Previous => 0,
+            });
+        let index = move_selection(current, len, direction);
+        let mut selected_branch = self.selected_branch;
+        selected_branch.set(references[index].clone());
+        ScrollIntoView::nearest(&format!("git-branch-row-{index}"));
+        true
+    }
+
+    fn move_commit_selection(
+        self,
+        repository: &GitRepositoryEvent,
+        direction: MenuDirection,
+    ) -> bool {
+        let len = repository.commits.len();
+        if len == 0 {
+            return false;
+        }
+        let current = repository
+            .commits
+            .iter()
+            .position(|entry| entry.sha == (self.selected_commit)())
+            .unwrap_or(match direction {
+                MenuDirection::Next => len - 1,
+                MenuDirection::Previous => 0,
+            });
+        let index = move_selection(current, len, direction);
+        let mut selected_commit = self.selected_commit;
+        selected_commit.set(repository.commits[index].sha.clone());
+        ScrollIntoView::nearest(&format!("git-commit-row-{index}"));
+        true
+    }
+
+    fn move_stash_selection(
+        self,
+        repository: &GitRepositoryEvent,
+        direction: MenuDirection,
+    ) -> bool {
+        let len = repository.stashes.len();
+        if len == 0 {
+            return false;
+        }
+        let current = repository
+            .stashes
+            .iter()
+            .position(|entry| entry.reference == (self.selected_stash)())
+            .unwrap_or(match direction {
+                MenuDirection::Next => len - 1,
+                MenuDirection::Previous => 0,
+            });
+        let index = move_selection(current, len, direction);
+        let mut selected_stash = self.selected_stash;
+        selected_stash.set(repository.stashes[index].reference.clone());
+        ScrollIntoView::nearest(&format!("git-stash-row-{index}"));
+        true
+    }
+
+    pub(super) fn submit_branch_prompt(self, prompt: &BranchPrompt) -> bool {
+        match prompt {
+            BranchPrompt::Create { base } => {
+                let branch = (self.branch_draft)().trim().to_string();
+                if branch.is_empty() {
+                    return false;
+                }
+                let mut pending_checkout = self.pending_branch_checkout;
+                pending_checkout.set(branch.clone());
+                GitWorkspace::operate(
+                    &(self.workspace)(),
+                    GitOperation::CreateBranch {
+                        branch,
+                        start_point: base.clone(),
+                    },
+                );
+            }
+            BranchPrompt::Delete { branch } => {
+                GitWorkspace::operate(
+                    &(self.workspace)(),
+                    GitOperation::DeleteBranch {
+                        branch: branch.clone(),
+                    },
+                );
+            }
+        }
+        true
     }
 }

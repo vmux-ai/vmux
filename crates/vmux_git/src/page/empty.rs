@@ -3,29 +3,33 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use vmux_core::event::FileDirEntry;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::directory::{DirectoryNavigator, DirectoryNavigatorAction, visible_directory_entries};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-use crate::event::GitDirectoryEvent;
-
+use super::state::GitPageState;
 use super::workspace::GitWorkspace;
 
 #[component]
-pub(super) fn EmptyRepository(
-    loading: bool,
-    workspace: String,
-    directory: Option<GitDirectoryEvent>,
-    selected: Signal<usize>,
-    directory_children: Signal<Option<Vec<FileDirEntry>>>,
-    preview_path: Signal<String>,
-    came_from: Signal<String>,
-    show_hidden: Signal<bool>,
-    message: String,
-) -> Element {
+pub(super) fn EmptyRepository() -> Element {
+    let GitPageState {
+        workspace,
+        directory,
+        directory_selected: mut selected,
+        mut directory_children,
+        directory_preview_path: mut preview_path,
+        directory_came_from: mut came_from,
+        directory_show_hidden: mut show_hidden,
+        loading,
+        message,
+        ..
+    } = use_context::<GitPageState>();
+    let loading = loading();
+    let workspace = workspace();
+    let directory = directory();
+    let message = message();
     let Some(directory) = directory else {
         return rsx! {
             if loading {
