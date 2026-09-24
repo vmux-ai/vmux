@@ -1,3 +1,11 @@
+mod arrangement;
+mod close;
+mod focus;
+mod identity;
+mod open;
+mod resize;
+mod tree;
+
 use crate::host::zoom::PaneZoomPlugin;
 pub use crate::host::zoom::Zoomed;
 use crate::stack::Stack;
@@ -21,29 +29,28 @@ use vmux_history::LastActivatedAt;
 
 #[cfg(test)]
 use super::command::LayoutRequestPlugin;
-use super::pane_arrangement::ArrangementPlugin;
-use super::pane_close::ClosePlugin;
-pub use super::pane_close::{ForcePaneClose, PendingPaneClose};
-use super::pane_focus::FocusPlugin;
-pub use super::pane_focus::{PaneHoverIntent, PendingCursorWarp, pane_hover_cursor_position};
-use super::pane_identity::IdentityPlugin;
-pub use super::pane_identity::{PaneId, SpawnCounter, SpawnSeq};
-use super::pane_open::OpenPlugin;
+use super::target::SiblingDirection;
+use arrangement::ArrangementPlugin;
+use close::ClosePlugin;
+pub use close::{ForcePaneClose, PendingPaneClose};
+use focus::FocusPlugin;
+pub use focus::{PaneHoverIntent, PendingCursorWarp, pane_hover_cursor_position};
+use identity::IdentityPlugin;
+pub use identity::{PaneId, SpawnCounter, SpawnSeq};
+use open::OpenPlugin;
 #[cfg(test)]
-use super::pane_open::{BesideOpenPlugin, DirectionalOpenPlugin};
-pub use super::pane_open::{
-    OpenBesideRequest, PlacementCtx, resolve_spiral_pane, resolve_split_anchor_pane,
-};
-use super::pane_resize::ResizePlugin;
-pub use super::pane_resize::{
-    PaneDrag, PaneSize, PaneSplitGaps, apply_pane_split_gaps, pane_split_gaps,
-};
-use super::pane_tree::TreePlugin;
-pub use super::pane_tree::{
+use open::{BesideOpenPlugin, DirectionalOpenPlugin};
+pub use open::{OpenBesideRequest, PlacementCtx, resolve_spiral_pane, resolve_split_anchor_pane};
+use resize::ResizePlugin;
+pub use resize::{PaneDrag, PaneSize, PaneSplitGaps, apply_pane_split_gaps, pane_split_gaps};
+use tree::TreePlugin;
+pub use tree::{
     Pane, PaneSplit, PaneSplitDirection, direction_to_split, first_leaf_descendant,
     leaf_pane_bundle, split_leaf_into_two, split_or_extend, split_root_bundle,
 };
-use super::target::SiblingDirection;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct ArrangementSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaneFocus {
