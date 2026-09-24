@@ -1,7 +1,6 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::chat::ChatItem;
-use vmux_api::page::PageEmit;
 use vmux_api::room::{
     AssistantBlock, Message as RoomMessage, RemoteAgent, RemoteApproval, RemoteEvent,
     RemoteSession, RemoteStatus, RoomEvent, RoomId,
@@ -9,16 +8,19 @@ use vmux_api::room::{
 use vmux_service::chat::group_turns_tail;
 
 use crate::event::{ChatSnapshot, PendingApproval};
+use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
 
 pub struct ChatRoomPlugin;
 
 impl Plugin for ChatRoomPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ChatUiStatePlugin>() {
+            app.add_plugins(ChatUiStatePlugin);
+        }
         #[cfg(ui)]
         app.add_plugins(crate::native_page::ChatPage::plugin());
         app.add_message::<Reported>()
             .add_message::<Submitted>()
-            .add_message::<PageEmit>()
             .init_resource::<Conversation>()
             .init_resource::<Log>()
             .init_resource::<LiveTurn>()
@@ -156,11 +158,8 @@ pub struct Agents(pub Vec<RemoteAgent>);
 pub struct Snapshot(pub ChatSnapshot);
 
 impl Snapshot {
-    fn emit(snapshot: Res<Snapshot>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::from_event(&snapshot.0) else {
-            return;
-        };
-        emits.write(emit);
+    fn emit(snapshot: Res<Snapshot>, mut projection: ResMut<ChatUiStateProjection>) {
+        projection.write(&snapshot.0);
     }
 
     fn project(

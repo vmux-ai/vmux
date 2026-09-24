@@ -1,7 +1,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
@@ -12,7 +12,7 @@ use vmux_core::PageMetadata;
 use vmux_ui::i18n::Locale;
 
 use crate::START_PAGE_URL;
-use crate::event::{StartDataRequest, StartFocusInput, StartSelectWorkspace};
+use crate::event::{StartDataRequest, StartSelectWorkspace};
 use vmux_command::build_command_bar_open_payload;
 use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
@@ -324,13 +324,14 @@ fn drain_start_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(
+        vmux_command::snapshot::CommandBarUiStateUpdates::write(
+            &mut commands,
             read.webview,
             &vmux_api::command_bar::StartProjectBranches {
                 project: read.project.clone(),
                 branches,
             },
-        ));
+        );
     }
 }
 
@@ -535,9 +536,13 @@ fn sync_live_start_pages(
         {
             commands.spawn(read);
         }
-        commands.trigger(BinHostEmitEvent::from_event(e, &payload));
+        vmux_command::snapshot::CommandBarUiStateUpdates::write(&mut commands, e, &payload);
         if focus_requested {
-            commands.trigger(BinHostEmitEvent::from_event(e, &StartFocusInput));
+            vmux_command::snapshot::CommandBarUiStateUpdates::write(
+                &mut commands,
+                e,
+                &vmux_api::command_bar::CommandBarFocusInput,
+            );
         }
         commands.entity(e).try_insert(StartWorkSynced);
     }
@@ -602,9 +607,13 @@ fn on_start_data_request(
             .unwrap_or_else(Locale::preferred),
         &definitions,
     );
-    commands.trigger(BinHostEmitEvent::from_event(webview, &payload));
+    vmux_command::snapshot::CommandBarUiStateUpdates::write(&mut commands, webview, &payload);
     if keyboard_targets.contains(webview) {
-        commands.trigger(BinHostEmitEvent::from_event(webview, &StartFocusInput));
+        vmux_command::snapshot::CommandBarUiStateUpdates::write(
+            &mut commands,
+            webview,
+            &vmux_api::command_bar::CommandBarFocusInput,
+        );
     }
 }
 
@@ -700,14 +709,23 @@ fn begin_requested_inline_transition(
 mod tests {
     use super::*;
     use bevy_cef::prelude::BinReceive;
-    use vmux_api::BinEvent;
+    use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
+    use vmux_core::host::UiStateWrite;
     use vmux_core::page::PageManifest;
 
     #[derive(Resource, Default)]
-    struct EmittedIds(Vec<String>);
+    struct EmittedIds(Vec<&'static str>);
 
-    fn capture_emit(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<EmittedIds>) {
-        emitted.0.push(trigger.id().to_string());
+    fn capture_state(
+        trigger: On<UiStateWrite<CommandBarUiState>>,
+        mut emitted: ResMut<EmittedIds>,
+    ) {
+        let kind = match trigger.event().patch() {
+            CommandBarUiStatePatch::Snapshot(_) => "snapshot",
+            CommandBarUiStatePatch::FocusInput(_) => "focus",
+            _ => "other",
+        };
+        emitted.0.push(kind);
     }
 
     fn start_ready_app() -> App {
@@ -715,7 +733,7 @@ mod tests {
         app.init_resource::<CommandBarProjection>()
             .init_resource::<EmittedIds>()
             .add_observer(on_start_data_request)
-            .add_observer(capture_emit);
+            .add_observer(capture_state);
         app
     }
 
@@ -786,6 +804,6 @@ mod tests {
         emit_start_ready(&mut app, webview);
 
         let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(emitted, &[CommandBarOpenEvent::id(), StartFocusInput::id()]);
+        assert_eq!(emitted, &["snapshot", "focus"]);
     }
 }

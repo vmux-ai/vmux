@@ -8,7 +8,10 @@ use vmux_layout::native_open::HostedPagePlugin;
 use vmux_layout::stack::Stack;
 use vmux_layout::{LayoutUiStateUpdates, TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
-use crate::event::{ProjectRequest, SPACES_PAGE_URL, SpaceRequest, SpaceRow, SpacesListEvent};
+use super::SpacesUiStateUpdates;
+use crate::event::{
+    ProjectRequest, SPACES_PAGE_URL, SpaceRequest, SpaceRow, SpacesListEvent, SpacesUiState,
+};
 use crate::spaces::{ActiveSpace, Spaces};
 
 pub struct SpacePlugin;
@@ -20,6 +23,7 @@ impl Plugin for SpacePlugin {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins(vmux_command::CommandTypePlugin::<OpenRequest>::default())
             .add_plugins(vmux_layout::LayoutContractPlugin)
+            .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
             .init_resource::<ActiveSpace>()
             .init_resource::<vmux_layout::space::ActiveSpaceEntity>()
             .init_resource::<vmux_layout::window::FocusedWindow>()
@@ -321,6 +325,7 @@ fn broadcast_spaces_to_views(
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
+    spaces_ui: Query<(), With<SpacesUiStateUpdates>>,
     mut last_body: Local<std::collections::HashMap<Entity, SpacesListEvent>>,
     mut commands: Commands,
 ) {
@@ -352,6 +357,7 @@ fn broadcast_spaces_to_views(
             continue;
         }
         LayoutUiStateUpdates::deliver(&layout_ui, &mut commands, entity, &payload);
+        SpacesUiStateUpdates::deliver(&spaces_ui, &mut commands, entity, &payload);
         commands.entity(entity).insert(SpacesListSent);
         last_body.insert(entity, payload);
     }

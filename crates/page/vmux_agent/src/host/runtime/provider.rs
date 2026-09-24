@@ -24,6 +24,9 @@ use vmux_session::{
 
 impl Plugin for ProviderAgentPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<vmux_mcp::tool::ToolRuntimePlugin>() {
+            app.add_plugins(vmux_mcp::tool::ToolRuntimePlugin);
+        }
         app.register_type::<AgentSession>()
             .register_type::<AgentApprovalPolicy>()
             .add_message::<PageAgentDelta>()

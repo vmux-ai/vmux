@@ -5,22 +5,19 @@ use dioxus::core::ReactiveContext;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use vmux_chat::event::{
-    ChatApproval, ChatCancel, ChatEscape, ChatSnapshot, ChatSubmit, ModelState, SelectModel,
-    SetAgentEffort,
+    ChatApproval, ChatCancel, ChatEscape, ChatSubmit, SelectModel, SetAgentEffort,
 };
 use vmux_chat::model::{Models, Picker};
-use vmux_chat::prompt::{Attach, Attachments, Browsed};
+use vmux_chat::prompt::{Attach, Attachments, Browsed, Media};
 use vmux_chat::room::{Reported, Snapshot, Submitted};
+use vmux_chat::state::ChatUiState;
 use vmux_start::event::StartDataRequest;
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
 use crate::runtime::World;
-use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarRequest};
-use vmux_api::prompt_media::{
-    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries,
-    ChatMediaListRequest,
-};
+use vmux_api::command_bar::{CommandBarRequest, CommandBarUiState};
+use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
 use vmux_api::room::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
@@ -144,40 +141,22 @@ impl PageHost for MobileHost {
             return Err(EventListenerError::Unsupported);
         }
         match id {
-            ChatSnapshot::ID => {
-                World::with(|world| {
-                    world.listen(ChatSnapshot::ID, on_bytes);
-                    world.refresh::<Snapshot>();
-                });
-            }
-            CommandBarOpenEvent::ID => {
-                World::with(|world| {
-                    world.listen(CommandBarOpenEvent::ID, on_bytes);
-                    world.refresh::<Launcher>();
-                });
-            }
-            ChatAttachments::ID => {
-                World::with(|world| {
-                    world.listen(ChatAttachments::ID, on_bytes);
-                    world.refresh::<Attachments>();
-                });
-            }
-            ChatAttachmentPreviews::ID => {
-                World::with(|world| {
-                    world.listen(ChatAttachmentPreviews::ID, on_bytes);
-                    world.refresh::<Attachments>();
-                });
-            }
-            ModelState::ID => {
+            ChatUiState::ID => {
                 self.poll_models();
+                self.poll_media();
                 World::with(|world| {
-                    world.listen(ModelState::ID, on_bytes);
+                    world.listen(ChatUiState::ID, on_bytes);
+                    world.refresh::<Snapshot>();
+                    world.refresh::<Attachments>();
+                    world.refresh::<Media>();
                     world.refresh::<Picker>();
                 });
             }
-            ChatMediaEntries::ID => {
-                self.poll_media();
-                World::with(|world| world.listen(ChatMediaEntries::ID, on_bytes));
+            CommandBarUiState::ID => {
+                World::with(|world| {
+                    world.listen(CommandBarUiState::ID, on_bytes);
+                    world.refresh::<Launcher>();
+                });
             }
             TeamEvent::ID => {
                 self.poll_team();

@@ -21,9 +21,8 @@ pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
 }
 
 #[derive(Component, Default)]
+#[require(super::SpacesUiStateUpdates)]
 pub struct Spaces;
-
-impl Spaces {}
 
 impl HostedPage for Spaces {
     const HOST: &'static str = "spaces";

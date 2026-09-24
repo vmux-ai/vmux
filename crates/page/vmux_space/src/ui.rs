@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::event::{SpaceKey, SpaceRequest, SpaceRow, SpacesListEvent};
+use crate::event::{
+    SpaceKey, SpaceRequest, SpaceRow, SpacesListEvent, SpacesUiState, SpacesUiStatePatch,
+};
 use dioxus::prelude::*;
 use vmux_core::event::team::{TeamEvent, TeamRequest};
 use vmux_core::input::{PageKeyContext, Unclaimed};
@@ -9,16 +11,35 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem, ManagerSelectItemKind};
-use vmux_ui::hooks::{MenuDirection, send, use_key_handler, use_theme, use_ui_state};
+use vmux_ui::hooks::{
+    MenuDirection, send, use_key_claim, use_theme, use_ui_state, use_ui_state_root,
+};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::sleep_ms;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_ui_state::<SpacesListEvent>();
+    let root = use_ui_state_root::<SpacesUiState>();
+    let mut state = use_signal(SpacesListEvent::default);
     let mut selected = use_signal(|| 0usize);
     let team = use_ui_state::<TeamEvent>();
+
+    let mut space_keys = SpaceKeys { state, selected };
+    let mut handled_sequence = use_signal(|| 0);
+    use_effect(move || {
+        let update = root.state.read();
+        if update.sequence == 0 || update.sequence == *handled_sequence.peek() {
+            return;
+        }
+        handled_sequence.set(update.sequence);
+        for patch in &update.patches {
+            match patch {
+                SpacesUiStatePatch::Snapshot(snapshot) => state.set(*snapshot.clone()),
+                SpacesUiStatePatch::Key(key) => space_keys.apply(*key),
+            }
+        }
+    });
 
     use_effect(move || {
         let active = state
@@ -30,12 +51,7 @@ pub fn Page() -> Element {
         selected.set(active);
     });
 
-    let mut space_keys = SpaceKeys { state, selected };
-    let keys = use_key_handler::<SpaceKey, _>(
-        Unclaimed::Types,
-        || vec!["spaces".to_string()],
-        move |key| space_keys.apply(key),
-    );
+    let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);
     use_drop(move || {
         let _ = send(&PageKeyContext { keys: Vec::new() });
     });

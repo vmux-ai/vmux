@@ -14,15 +14,27 @@ pub struct AgentSetupPrereqRequest {
     pub agent: String,
 }
 
-#[vmux_api::host_event(Default)]
+#[vmux_api::contract(Default)]
 pub struct AgentSetupPrereqStatus {
     pub needs_homebrew: bool,
 }
 
-#[vmux_api::host_event(Default)]
+#[vmux_api::contract(Default)]
 pub struct AgentSetupResult {
     pub agent: String,
     pub ok: bool,
+}
+
+#[vmux_api::ui_state_patch]
+pub enum AgentSetupUiStatePatch {
+    Prereq(AgentSetupPrereqStatus),
+    Result(AgentSetupResult),
+}
+
+#[vmux_api::ui_state(Default)]
+pub struct AgentSetupUiState {
+    pub sequence: u64,
+    pub patches: Vec<AgentSetupUiStatePatch>,
 }
 
 #[cfg(test)]

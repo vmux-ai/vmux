@@ -661,14 +661,15 @@ fn handle_open_command_bar(
     if let Some(picker) = picker {
         payload.picks = CommandBarPicks::for_picker(picker, &locale);
     }
-    commands.trigger(BinHostEmitEvent::from_event(layout_e, &payload));
+    crate::snapshot::CommandBarUiStateUpdates::write(&mut commands, layout_e, &payload);
 }
 
 fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
-    commands.trigger(BinHostEmitEvent::from_event(
+    crate::snapshot::CommandBarUiStateUpdates::write(
+        commands,
         layout,
         &CommandBarOpenEvent::default(),
-    ));
+    );
 }
 
 fn open_invocation(caller: Entity, target: Option<OpenTarget>, url: String) -> CommandInvocation {
@@ -1140,7 +1141,7 @@ fn retry_pending_command_bar_open(
         {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(entity, payload));
+        crate::snapshot::CommandBarUiStateUpdates::write(&mut commands, entity, payload);
         pending.started_at.get_or_insert(now);
         last_emit.insert(entity, now);
     }
@@ -1162,7 +1163,8 @@ mod tests {
     use crate::{CommandPlugin, ReadCommandRequests};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_api::BinEvent;
+    use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
+    use vmux_core::host::UiStateWrite;
     use vmux_core::overlay::OverlayState;
 
     #[test]
@@ -1767,12 +1769,15 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct EmittedToPage(Vec<(Entity, &'static str, Vec<u8>)>);
+    struct EmittedToPage(Vec<(Entity, CommandBarUiStatePatch)>);
 
-    fn capture_page_emit(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<EmittedToPage>) {
+    fn capture_page_emit(
+        trigger: On<UiStateWrite<CommandBarUiState>>,
+        mut emitted: ResMut<EmittedToPage>,
+    ) {
         emitted
             .0
-            .push((trigger.webview(), trigger.id(), trigger.payload().to_vec()));
+            .push((trigger.event().webview(), trigger.event().patch().clone()));
     }
 
     fn panel_app() -> App {
@@ -1792,26 +1797,27 @@ mod tests {
         app
     }
 
-    fn emitted_to_page(app: &App) -> Vec<(Entity, &'static str)> {
+    fn emitted_to_page(app: &App) -> Vec<Entity> {
         app.world()
             .resource::<EmittedToPage>()
             .0
             .iter()
-            .map(|(webview, id, _)| (*webview, *id))
+            .map(|(webview, _)| *webview)
             .collect()
     }
 
     fn open_payload(app: &App) -> CommandBarOpenEvent {
-        let event_id = CommandBarOpenEvent::id();
-        let (_, _, bytes) = app
+        let (_, patch) = app
             .world()
             .resource::<EmittedToPage>()
             .0
             .iter()
-            .find(|(_, id, _)| id == &event_id)
+            .find(|(_, patch)| matches!(patch, CommandBarUiStatePatch::Snapshot(_)))
             .expect("no open payload emitted");
-        rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(bytes)
-            .expect("open payload should round-trip")
+        let CommandBarUiStatePatch::Snapshot(snapshot) = patch else {
+            unreachable!()
+        };
+        *snapshot.clone()
     }
 
     fn send(app: &mut App, id: &str) {
@@ -1835,10 +1841,7 @@ mod tests {
 
         send(&mut app, "browser_open_command_bar");
 
-        assert_eq!(
-            emitted_to_page(&app),
-            vec![(layout, CommandBarOpenEvent::id())]
-        );
+        assert_eq!(emitted_to_page(&app), vec![layout]);
     }
 
     #[test]
@@ -1862,10 +1865,7 @@ mod tests {
 
         send(&mut app, "browser_open_command_bar");
 
-        assert_eq!(
-            emitted_to_page(&app),
-            vec![(layout, CommandBarOpenEvent::id())]
-        );
+        assert_eq!(emitted_to_page(&app), vec![layout]);
         assert_eq!(open_payload(&app).url, "");
     }
 
@@ -1879,10 +1879,7 @@ mod tests {
 
         send(&mut app, "browser_open_command_bar");
 
-        assert_eq!(
-            emitted_to_page(&app),
-            vec![(layout, CommandBarOpenEvent::id())]
-        );
+        assert_eq!(emitted_to_page(&app), vec![layout]);
         assert!(!open_payload(&app).open_id.is_open());
     }
 
@@ -1902,7 +1899,7 @@ mod tests {
 
         assert_eq!(
             emitted_to_page(&app),
-            vec![(layout, CommandBarOpenEvent::id())],
+            vec![layout],
             "the launcher is drawn by the layout page here, so closing only the overlay window \
              leaves it on screen"
         );
@@ -1919,10 +1916,7 @@ mod tests {
 
         send(&mut app, "space_open");
 
-        assert_eq!(
-            emitted_to_page(&app),
-            vec![(layout, CommandBarOpenEvent::id())]
-        );
+        assert_eq!(emitted_to_page(&app), vec![layout]);
         assert_eq!(open_payload(&app).picker, Some(CommandBarPicker::Space));
     }
 

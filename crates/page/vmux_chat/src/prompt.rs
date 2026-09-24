@@ -1,20 +1,22 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_api::page::PageEmit;
 use vmux_api::prompt_media::{
     ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
 };
 use vmux_api::room::RemoteMediaEntry;
 
 use crate::room::Submitted;
+use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
 
 pub struct ChatPromptPlugin;
 
 impl Plugin for ChatPromptPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ChatUiStatePlugin>() {
+            app.add_plugins(ChatUiStatePlugin);
+        }
         app.add_message::<Attach>()
             .add_message::<Submitted>()
-            .add_message::<PageEmit>()
             .init_resource::<Attachments>()
             .init_resource::<Browsed>()
             .init_resource::<Media>()
@@ -76,36 +78,27 @@ impl Media {
         };
     }
 
-    fn emit(media: Res<Media>, mut emits: MessageWriter<PageEmit>) {
+    fn emit(media: Res<Media>, mut projection: ResMut<ChatUiStateProjection>) {
         if media.0.request_id == 0 {
             return;
         }
-        let Some(emit) = PageEmit::from_event(&media.0) else {
-            return;
-        };
-        emits.write(emit);
+        projection.write(&media.0);
     }
 }
 
 impl Attachments {
-    fn emit(attachments: Res<Attachments>, mut emits: MessageWriter<PageEmit>) {
+    fn emit(attachments: Res<Attachments>, mut projection: ResMut<ChatUiStateProjection>) {
         if attachments.0.is_empty() {
             return;
         }
         let payload = ChatAttachments {
             attachments: attachments.0.clone(),
         };
-        let Some(emit) = PageEmit::from_event(&payload) else {
-            return;
-        };
-        emits.write(emit);
+        projection.write(&payload);
         let previews = ChatAttachmentPreviews {
             attachments: attachments.0.clone(),
         };
-        let Some(emit) = PageEmit::from_event(&previews) else {
-            return;
-        };
-        emits.write(emit);
+        projection.write(&previews);
     }
 
     fn spend(mut submitted: MessageReader<Submitted>, mut attachments: ResMut<Attachments>) {
