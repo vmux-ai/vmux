@@ -570,7 +570,7 @@ fn handle_space_commands(
 
 fn handle_shared_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    command_bar: Res<vmux_command::snapshot::CommandBarUiState>,
+    command_bar: Res<vmux_command::snapshot::CommandBarProjection>,
     contributed_pages: Query<&vmux_command::snapshot::ContributedPage>,
     mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
     service: Option<Res<ServiceClient>>,

@@ -23,7 +23,7 @@ impl Plugin for ChatModelPlugin {
             .init_resource::<AcpModeRequestCounter>()
             .init_resource::<AgentModelSelections>()
             .init_resource::<AgentModeSelections>()
-            .init_resource::<vmux_command::snapshot::CommandBarUiState>()
+            .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_message::<AcpSetModelRequest>()
             .add_message::<AcpSetModeRequest>()
             .add_message::<ModeSelectRequest>()
@@ -516,7 +516,7 @@ fn remember_acp_mode_lists(
 
 fn publish_agent_models(
     last_used: Res<AgentModelSelections>,
-    mut state: ResMut<vmux_command::snapshot::CommandBarUiState>,
+    mut state: ResMut<vmux_command::snapshot::CommandBarProjection>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -540,7 +540,7 @@ fn publish_agent_models(
 
 fn publish_agent_modes(
     last_used: Res<AgentModeSelections>,
-    mut state: ResMut<vmux_command::snapshot::CommandBarUiState>,
+    mut state: ResMut<vmux_command::snapshot::CommandBarProjection>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -1201,14 +1201,14 @@ mod tests {
         );
         let mut app = App::new();
         app.insert_resource(selections)
-            .init_resource::<vmux_command::snapshot::CommandBarUiState>()
+            .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_systems(Update, publish_agent_models);
 
         app.update();
 
         let published = app
             .world()
-            .resource::<vmux_command::snapshot::CommandBarUiState>();
+            .resource::<vmux_command::snapshot::CommandBarProjection>();
         let published = &published.agent_models;
         assert_eq!(published.agents.len(), 1);
         assert_eq!(published.agents[0].agent_key, "cli:codex");
@@ -1220,7 +1220,7 @@ mod tests {
     fn acp_mode_catalog_uses_the_canonical_launcher_identity() {
         let mut app = App::new();
         app.init_resource::<AgentModeSelections>()
-            .init_resource::<vmux_command::snapshot::CommandBarUiState>()
+            .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_systems(
                 Update,
                 (
@@ -1252,7 +1252,7 @@ mod tests {
 
         let published = app
             .world()
-            .resource::<vmux_command::snapshot::CommandBarUiState>();
+            .resource::<vmux_command::snapshot::CommandBarProjection>();
         let published = &published.agent_modes;
         assert_eq!(published.agents.len(), 1);
         assert_eq!(published.agents[0].agent_key, "codex");

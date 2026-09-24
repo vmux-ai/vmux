@@ -1,4 +1,4 @@
-use crate::event::{CommandBarKey, CommandBarOpenEvent, StartProjectBranches};
+use crate::event::{CommandBarKey, CommandBarOpenEvent, CommandBarUiState, StartProjectBranches};
 use crate::prompt_media::{
     ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries, ChatPasteMedia, ChatPickFiles,
     inline_media_query, merge_chat_attachments,
@@ -21,7 +21,9 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, McpQuery, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
-use vmux_ui::hooks::{MenuDirection, move_selection, send, use_key_handler, use_listener};
+use vmux_ui::hooks::{
+    MenuDirection, move_selection, send, use_key_claim, use_listener, use_ui_state_patch,
+};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::launcher::palette::{
@@ -174,13 +176,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         signals,
         on_dismiss,
     };
-    let keys = use_key_handler::<CommandBarKey, _>(
-        Unclaimed::Types,
-        move || match surface {
-            PaletteSurface::Modal => vec!["command-bar".to_string()],
-            PaletteSurface::Start => Vec::new(),
-        },
-        move |key| {
+    let keys = use_key_claim(Unclaimed::Types, move || match surface {
+        PaletteSurface::Modal => vec!["command-bar".to_string()],
+        PaletteSurface::Start => Vec::new(),
+    });
+    let key_updates = use_ui_state_patch::<CommandBarUiState, CommandBarKey>();
+    use_effect(move || {
+        for key in key_updates.take() {
             let query = signals.query.peek().clone();
             if let Some(filter) = McpQuery::read(&query) {
                 let entries = mcp.filtered(filter);
@@ -204,11 +206,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     CommandBarKey::Complete => {}
                     CommandBarKey::Dismiss => signals.retype(String::new()),
                 }
-                return;
+                continue;
             }
             palette_keys.apply(key);
-        },
-    );
+        }
+    });
 
     let state_val = state();
     let palette = std::rc::Rc::new(PaletteState::from_rows(

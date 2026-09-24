@@ -19,6 +19,7 @@ const MAX_PENDING_ASKS: usize = 8;
 #[derive(Clone)]
 pub struct Asked {
     pub webview: Entity,
+    pub request_id: u64,
     pub query: String,
     roots: Vec<PathBuf>,
     answered_with: u64,
@@ -39,8 +40,9 @@ impl ProjectCompletions {
         }
     }
 
-    pub fn response(self) -> PathCompleteResponse {
+    pub fn response(self, request_id: u64) -> PathCompleteResponse {
         PathCompleteResponse {
+            request_id,
             completions: self.entries,
             truncated: self.partial,
             total: u32::try_from(self.total).unwrap_or(u32::MAX),
@@ -60,17 +62,19 @@ impl ProjectIndex {
         &mut self,
         roots: &[PathBuf],
         bias: &RankBias,
+        request_id: u64,
         query: &str,
         webview: Entity,
     ) -> Option<ProjectCompletions> {
-        self.remember(webview, query, roots);
+        self.remember(webview, request_id, query, roots);
         self.sync(roots);
         self.rank(roots, query, bias)
     }
 
-    fn remember(&mut self, webview: Entity, query: &str, roots: &[PathBuf]) {
+    fn remember(&mut self, webview: Entity, request_id: u64, query: &str, roots: &[PathBuf]) {
         let asked = Asked {
             webview,
+            request_id,
             query: query.to_string(),
             roots: roots.to_vec(),
             answered_with: self.generation,
@@ -1067,8 +1071,8 @@ mod tests {
 
         let mut index = ProjectIndex::default();
         let bias = RankBias::after_visiting(&[]);
-        index.matches(&roots_one, &bias, "marker", first);
-        index.matches(&roots_two, &bias, "marker", second);
+        index.matches(&roots_one, &bias, 1, "marker", first);
+        index.matches(&roots_two, &bias, 2, "marker", second);
 
         let answered_one = index.answer(first, &roots_one);
         let answered_two = index.answer(second, &roots_two);

@@ -2,14 +2,22 @@ use crate::event::{CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, Sear
 use bevy::prelude::*;
 use std::collections::HashMap;
 use vmux_core::agent::AgentKind;
+use vmux_core::launcher::RendersLauncherPanel;
 use vmux_core::page::PageManifest;
+
+pub type CommandBarUiStateUpdates =
+    vmux_core::host::UiStateUpdates<vmux_api::command_bar::CommandBarUiState>;
 
 pub struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CommandBarUiState>()
-            .add_systems(Startup, update_pages_snapshot);
+        app.init_resource::<CommandBarProjection>()
+            .add_plugins(vmux_core::host::UiStatePlugin::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::default())
+            .add_systems(Startup, update_pages_snapshot)
+            .add_systems(PreUpdate, attach_command_bar_ui_state);
     }
 }
 
@@ -17,7 +25,7 @@ impl Plugin for UiStatePlugin {
 pub struct WriteCommandBarSnapshots;
 
 #[derive(Resource, Default, Clone, Debug)]
-pub struct CommandBarUiState {
+pub struct CommandBarProjection {
     pub agents: CommandBarAgentsSnapshot,
     pub workspace: CommandBarWorkspaceSnapshot,
     pub projects: CommandBarProjectRoots,
@@ -190,7 +198,7 @@ pub struct CommandBarWorkSnapshot {
     pub projects: Vec<String>,
 }
 
-fn update_pages_snapshot(manifests: Query<&PageManifest>, mut state: ResMut<CommandBarUiState>) {
+fn update_pages_snapshot(manifests: Query<&PageManifest>, mut state: ResMut<CommandBarProjection>) {
     let snapshot = &mut state.pages;
     if !snapshot.pages.is_empty() {
         return;
@@ -219,6 +227,23 @@ fn update_pages_snapshot(manifests: Query<&PageManifest>, mut state: ResMut<Comm
     }
     pages.sort_by(|a, b| a.page.url.cmp(&b.page.url));
     snapshot.pages = pages;
+}
+
+fn attach_command_bar_ui_state(
+    pages: Query<
+        Entity,
+        (
+            With<RendersLauncherPanel>,
+            Without<CommandBarUiStateUpdates>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for page in &pages {
+        commands
+            .entity(page)
+            .insert(CommandBarUiStateUpdates::default());
+    }
 }
 
 #[cfg(test)]
@@ -347,7 +372,7 @@ mod tests {
     #[test]
     fn pages_snapshot_collects_only_command_bar_pages() {
         let mut app = App::new();
-        app.init_resource::<CommandBarUiState>()
+        app.init_resource::<CommandBarProjection>()
             .add_systems(Update, update_pages_snapshot);
         app.world_mut().spawn(PageManifest {
             host: "services",
@@ -370,7 +395,7 @@ mod tests {
 
         app.update();
 
-        let snap = &app.world().resource::<CommandBarUiState>().pages;
+        let snap = &app.world().resource::<CommandBarProjection>().pages;
         assert_eq!(snap.pages.len(), 1);
         assert_eq!(snap.pages[0].page.host, "services");
         assert_eq!(snap.pages[0].page.url, "vmux://services/");

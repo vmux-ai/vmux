@@ -7,7 +7,7 @@ use crate::event::{
     HistoryQueryRequest, HistoryQueryResponse, HistorySuggestionsRequest,
     HistorySuggestionsResponse,
 };
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use vmux_core::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
 
 use super::state::{HistoryQueryState, HistoryUiStateUpdates};
@@ -249,13 +249,14 @@ fn on_history_suggestions_request(
         .map(|(_, e)| e)
         .collect();
 
-    commands.trigger(BinHostEmitEvent::from_event(
+    vmux_core::host::UiStateUpdates::<vmux_api::command_bar::CommandBarUiState>::write(
+        &mut commands,
         trigger.event().webview,
         &HistorySuggestionsResponse {
             request_id: req.request_id,
             entries,
         },
-    ));
+    );
 }
 
 #[cfg(test)]

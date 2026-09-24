@@ -46,7 +46,7 @@ pub struct HistorySuggestionsRequest {
     pub request_id: u64,
 }
 
-#[vmux_api::host_event(targets = ["command-bar", "start", "layout"])]
+#[vmux_api::contract]
 pub struct HistorySuggestionsResponse {
     pub request_id: u64,
     pub entries: Vec<HistoryEntry>,

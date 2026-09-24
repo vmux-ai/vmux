@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use vmux_command::event::CommandBarPage;
 use vmux_command::snapshot::{
-    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, CommandBarUiState, ContributedCommand,
-    ContributedPage, WriteCommandBarSnapshots,
+    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, CommandBarProjection,
+    ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
@@ -91,7 +91,7 @@ impl AgentContribution {
 }
 
 fn publish_contributions(
-    state: Res<CommandBarUiState>,
+    state: Res<CommandBarProjection>,
     mut previous: Local<Option<CommandBarAgentsSnapshot>>,
     mine: Query<Entity, With<AgentContribution>>,
     mut commands: Commands,
