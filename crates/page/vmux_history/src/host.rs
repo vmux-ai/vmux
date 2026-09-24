@@ -14,7 +14,7 @@ pub struct HistoryPlugin;
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
-        app.add_plugins(crate::native_page::HistoryPage::plugin());
+        app.add_plugins(crate::ui::HistoryPage::plugin());
         app.world_mut().spawn((
             crate::PAGE_MANIFEST,
             NativelyHosted::page(crate::PAGE_URL, "History"),

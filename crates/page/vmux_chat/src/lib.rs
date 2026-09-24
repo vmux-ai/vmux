@@ -14,6 +14,4 @@ pub mod room;
 pub mod format;
 
 #[cfg(ui)]
-pub mod native_page;
-#[cfg(ui)]
 pub mod ui;

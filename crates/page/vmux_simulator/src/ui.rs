@@ -16,6 +16,14 @@ use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::script::PageScript;
 
+#[vmux_native::page(
+    url = crate::url::PAGE_URL,
+    component = Page,
+    subtree,
+    takes = vmux_core::PageMetadata
+)]
+pub(crate) struct SimulatorPage;
+
 #[component]
 pub fn Page() -> Element {
     use_theme();

@@ -25,6 +25,14 @@ const CONTAINER_ID: &str = "term-container";
 const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 
+#[vmux_native::page(
+    url = crate::event::TERMINAL_PAGE_URL,
+    title = "Terminal",
+    component = Page,
+    claims = crate::Terminal
+)]
+pub(crate) struct TerminalPage;
+
 #[derive(Clone, Copy, Default, PartialEq)]
 struct Viewport {
     cell: (f64, f64),

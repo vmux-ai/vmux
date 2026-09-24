@@ -17,6 +17,13 @@ use vmux_ui::hooks::{
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::sleep_ms;
 
+#[vmux_native::page(
+    url = vmux_api::space::SPACES_PAGE_URL,
+    title = "Spaces",
+    component = Page
+)]
+pub(crate) struct SpacesPage;
+
 #[component]
 pub fn Page() -> Element {
     use_theme();

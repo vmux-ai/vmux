@@ -12,6 +12,9 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::page_model::{PkgAction, pkg_action, pkg_status_class};
 
+#[vmux_native::page(url = "vmux://lsp/", title = "Language Servers", component = Page)]
+pub(crate) struct LspPage;
+
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();

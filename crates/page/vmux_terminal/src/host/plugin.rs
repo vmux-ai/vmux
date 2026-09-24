@@ -44,7 +44,7 @@ pub struct TerminalPlugin;
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
-        app.add_plugins(crate::native_page::TerminalPage::plugin());
+        app.add_plugins(crate::ui::TerminalPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.world_mut()
             .spawn(vmux_core::HostSpawnRoute::host("terminal"));

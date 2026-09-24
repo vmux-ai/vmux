@@ -1,6 +1,4 @@
 pub use vmux_api::history as event;
-#[cfg(ui)]
-pub mod native_page;
 pub mod ranking;
 pub mod state;
 #[cfg(ui)]

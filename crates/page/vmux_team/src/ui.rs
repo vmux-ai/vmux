@@ -13,6 +13,13 @@ use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
+#[vmux_native::page(
+    url = vmux_core::event::team::TEAM_PAGE_URL,
+    title = "Team",
+    component = Page
+)]
+pub(crate) struct TeamPage;
+
 #[component]
 pub fn Page() -> Element {
     use_theme();

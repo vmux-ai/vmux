@@ -18,7 +18,7 @@ impl Plugin for ChatRoomPlugin {
             app.add_plugins(ChatUiStatePlugin);
         }
         #[cfg(ui)]
-        app.add_plugins(crate::native_page::ChatPage::plugin());
+        app.add_plugins(crate::ui::ChatPage::plugin());
         app.add_message::<Reported>()
             .add_message::<Submitted>()
             .init_resource::<Conversation>()
