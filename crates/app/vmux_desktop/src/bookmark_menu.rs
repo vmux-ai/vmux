@@ -38,7 +38,6 @@ mod macos {
     use bevy::ecs::relationship::Relationship;
     use bevy::ecs::system::NonSendMarker;
     use bevy::prelude::*;
-    use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
     use muda::ContextMenu;
     use parking_lot::Mutex;
     use std::collections::{HashMap, HashSet};
@@ -60,6 +59,27 @@ mod macos {
 
     #[derive(Resource, Default)]
     pub(super) struct BookmarkMenuActionSequence(u64);
+
+    impl BookmarkMenuActionSequence {
+        fn send(
+            &mut self,
+            commands: &mut Commands,
+            webview: Entity,
+            action: &str,
+            uuid: Option<String>,
+        ) {
+            self.0 = self.0.wrapping_add(1);
+            vmux_layout::LayoutUiStateUpdates::write(
+                commands,
+                webview,
+                &BookmarkMenuActionEvent {
+                    sequence: self.0,
+                    action: action.to_string(),
+                    uuid,
+                },
+            );
+        }
+    }
 
     #[derive(Message, Clone)]
     pub(super) struct BookmarkMenuSelection {
@@ -541,7 +561,6 @@ mod macos {
         mut bookmark_mutations: MessageWriter<BookmarkMutation>,
         mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
         mut sequence: ResMut<BookmarkMenuActionSequence>,
-        browsers: Option<NonSend<Browsers>>,
         mut commands: Commands,
     ) {
         for selection in reader.read() {
@@ -559,52 +578,22 @@ mod macos {
                         bookmark_mutations
                             .write(BookmarkMutation::ToggleFolder { uuid: uuid.clone() });
                     }
-                    if let Some(browsers) = browsers.as_deref() {
-                        emit_ui_action(
-                            &mut sequence,
-                            browsers,
-                            &mut commands,
-                            selection.webview,
-                            "new_folder",
-                            parent.clone(),
-                        );
-                    }
+                    sequence.send(
+                        &mut commands,
+                        selection.webview,
+                        "new_folder",
+                        parent.clone(),
+                    );
                 }
                 BookmarkMenuAction::BeginRename(uuid) => {
-                    if let Some(browsers) = browsers.as_deref() {
-                        emit_ui_action(
-                            &mut sequence,
-                            browsers,
-                            &mut commands,
-                            selection.webview,
-                            "rename",
-                            Some(uuid.clone()),
-                        );
-                    }
+                    sequence.send(
+                        &mut commands,
+                        selection.webview,
+                        "rename",
+                        Some(uuid.clone()),
+                    );
                 }
             }
         }
-    }
-
-    fn emit_ui_action(
-        sequence: &mut BookmarkMenuActionSequence,
-        browsers: &Browsers,
-        commands: &mut Commands,
-        webview: Entity,
-        action: &str,
-        uuid: Option<String>,
-    ) {
-        if !browsers.can_emit_to(&webview) {
-            return;
-        }
-        sequence.0 = sequence.0.wrapping_add(1);
-        commands.trigger(BinHostEmitEvent::from_event(
-            webview,
-            &BookmarkMenuActionEvent {
-                sequence: sequence.0,
-                action: action.to_string(),
-                uuid,
-            },
-        ));
     }
 }

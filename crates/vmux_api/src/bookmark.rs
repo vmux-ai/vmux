@@ -150,7 +150,7 @@ pub struct BookmarkContextMenuRequest {
     pub active: bool,
 }
 
-#[vmux_api::host_event(Eq, Default)]
+#[vmux_api::contract(Eq, Default)]
 pub struct BookmarkMenuActionEvent {
     pub sequence: u64,
     pub action: String,
