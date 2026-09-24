@@ -34,9 +34,13 @@ pub enum McpServerAction {
 }
 
 #[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
-pub struct McpServerRequest {
+pub struct McpServerConnectRequest {
     pub id: String,
-    pub action: McpServerAction,
+}
+
+#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
+pub struct McpServerDisconnectRequest {
+    pub id: String,
 }
 
 #[vmux_api::contract(Default, Eq)]

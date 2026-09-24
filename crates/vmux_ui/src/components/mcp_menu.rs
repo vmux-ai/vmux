@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use vmux_api::mcp::{
-    McpServerAction, McpServerEntry, McpServerRequest, McpServerStatus, McpServers,
-    McpServersRequest,
+    McpServerConnectRequest, McpServerDisconnectRequest, McpServerEntry, McpServerStatus,
+    McpServers, McpServersRequest,
 };
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
@@ -68,23 +68,22 @@ impl McpConnections {
         if !self.pending.peek().is_empty() {
             return;
         }
-        let action = match server.status {
+        let request = match server.status {
             McpServerStatus::Available
             | McpServerStatus::AuthenticationRequired
-            | McpServerStatus::Failed => McpServerAction::Connect,
+            | McpServerStatus::Failed => send(&McpServerConnectRequest {
+                id: server.id.clone(),
+            }),
             McpServerStatus::Configured => return,
-            McpServerStatus::Connected => McpServerAction::Disconnect,
+            McpServerStatus::Connected => send(&McpServerDisconnectRequest {
+                id: server.id.clone(),
+            }),
         };
         let mut pending = self.pending;
         let mut error = self.error;
         pending.set(server.id.clone());
         error.set(String::new());
-        if send(&McpServerRequest {
-            id: server.id.clone(),
-            action,
-        })
-        .is_err()
-        {
+        if request.is_err() {
             pending.set(String::new());
         }
     }
