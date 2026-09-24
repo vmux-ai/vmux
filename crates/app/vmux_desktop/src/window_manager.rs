@@ -101,7 +101,7 @@ fn close_windows(
     mut requests: MessageReader<CloseVmuxWindow>,
     windows: Query<(Entity, Has<PrimaryWindow>), With<Window>>,
     roots: Query<(Entity, &HostWindow), With<VmuxWindow>>,
-    mut lifecycle: MessageWriter<crate::runtime::LifecycleEvent>,
+    mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
     mut commands: Commands,
 ) {
     let mut remaining: Vec<(Entity, bool)> = windows.iter().collect();
@@ -113,7 +113,7 @@ fn close_windows(
             continue;
         };
         if remaining.len() <= 1 {
-            lifecycle.write(crate::runtime::LifecycleEvent::HideAllWindows);
+            hide_windows.write(crate::runtime::HideAllWindowsRequest);
             continue;
         }
         let (_, primary) = remaining.remove(index);
@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn closing_one_of_two_windows_despawns_only_its_shell() {
         let mut app = App::new();
-        app.add_message::<crate::runtime::LifecycleEvent>()
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
             .add_message::<CloseVmuxWindow>()
             .add_systems(Update, close_windows);
         let first = app.world_mut().spawn(Window::default()).id();
@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn closing_every_window_in_one_update_keeps_the_last_shell() {
         let mut app = App::new();
-        app.add_message::<crate::runtime::LifecycleEvent>()
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
             .add_message::<CloseVmuxWindow>()
             .add_systems(Update, close_windows);
         let first = app.world_mut().spawn(Window::default()).id();
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn closing_the_primary_window_promotes_the_remaining_window() {
         let mut app = App::new();
-        app.add_message::<crate::runtime::LifecycleEvent>()
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
             .add_message::<CloseVmuxWindow>()
             .add_systems(Update, close_windows);
         let primary = app

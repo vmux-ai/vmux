@@ -6,7 +6,7 @@ use tray_icon::{TrayIcon, TrayIconBuilder};
 
 #[cfg(feature = "recording")]
 use crate::recording::{RecordingControl, RecordingStatus};
-use crate::runtime::LifecycleEvent;
+use crate::runtime::{HideAllWindowsRequest, QuitRequest, ShowAllWindowsRequest};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 
@@ -129,7 +129,9 @@ fn setup_tray(world: &mut World) {
 fn drain_tray_events(
     handle: Option<NonSend<TrayHandle>>,
     windows: Query<&Window>,
-    mut events: MessageWriter<LifecycleEvent>,
+    mut hide_windows: MessageWriter<HideAllWindowsRequest>,
+    mut show_windows: MessageWriter<ShowAllWindowsRequest>,
+    mut quit: MessageWriter<QuitRequest>,
     #[cfg(feature = "recording")] mut controls: MessageWriter<RecordingControl>,
 ) {
     let Some(handle) = handle else { return };
@@ -137,9 +139,13 @@ fn drain_tray_events(
     let any_visible = windows.iter().any(|w| w.visible);
     for event_id in drained {
         if event_id == handle.toggle_id {
-            events.write(toggle_lifecycle_event(any_visible));
+            if any_visible {
+                hide_windows.write(HideAllWindowsRequest);
+            } else {
+                show_windows.write(ShowAllWindowsRequest);
+            }
         } else if event_id == handle.quit_id {
-            events.write(LifecycleEvent::QuitVmux);
+            quit.write(QuitRequest);
         } else {
             #[cfg(feature = "recording")]
             if event_id == handle.pause_id {
@@ -240,14 +246,6 @@ fn tray_locale(settings: &AppSettings) -> Locale {
     locale
 }
 
-fn toggle_lifecycle_event(any_visible: bool) -> LifecycleEvent {
-    if any_visible {
-        LifecycleEvent::HideAllWindows
-    } else {
-        LifecycleEvent::ShowAllWindows
-    }
-}
-
 fn load_tray_icon() -> tray_icon::Icon {
     let rgba = tray_icon_rgba();
     tray_icon::Icon::from_rgba(rgba, 16, 16).expect("valid placeholder rgba")
@@ -312,19 +310,6 @@ mod tests {
             super::toggle_label(false, &Locale::from("ja")),
             "ウインドウを開く"
         );
-    }
-
-    #[test]
-    fn toggle_event_routes_by_visibility() {
-        use super::LifecycleEvent;
-        assert!(matches!(
-            super::toggle_lifecycle_event(true),
-            LifecycleEvent::HideAllWindows
-        ));
-        assert!(matches!(
-            super::toggle_lifecycle_event(false),
-            LifecycleEvent::ShowAllWindows
-        ));
     }
 
     #[test]

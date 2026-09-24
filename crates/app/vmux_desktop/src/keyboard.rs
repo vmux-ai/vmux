@@ -560,7 +560,7 @@ impl KeyboardRuntime {
             ResMut<Messages<vmux_simulator::SimulatorSoftwareKeyboardRequest>>,
         >,
         mut fullscreen: MessageWriter<ExitFullscreenRequest>,
-        mut lifecycle: Option<MessageWriter<crate::runtime::LifecycleEvent>>,
+        mut hide_windows: Option<MessageWriter<crate::runtime::HideAllWindowsRequest>>,
         user: Query<Entity, With<vmux_core::team::User>>,
         mut shortcut_capture: Option<ResMut<vmux_shortcut::ShortcutCaptureTarget>>,
         mut commands: Commands,
@@ -611,9 +611,9 @@ impl KeyboardRuntime {
             fullscreen.write(ExitFullscreenRequest);
         }
         if pending.quit
-            && let Some(lifecycle) = lifecycle.as_mut()
+            && let Some(hide_windows) = hide_windows.as_mut()
         {
-            lifecycle.write(crate::runtime::LifecycleEvent::HideAllWindows);
+            hide_windows.write(crate::runtime::HideAllWindowsRequest);
         }
     }
 }
