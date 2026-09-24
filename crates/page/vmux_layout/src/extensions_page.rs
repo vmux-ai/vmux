@@ -13,6 +13,13 @@ use vmux_ui::components::manager::{
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
+#[vmux_native::page(
+    url = vmux_core::event::EXTENSIONS_PAGE_URL,
+    title = "Extensions",
+    component = Page
+)]
+pub struct ExtensionsPage;
+
 #[derive(Clone, PartialEq)]
 struct Approval {
     message: String,

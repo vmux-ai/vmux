@@ -12,6 +12,9 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
+#[vmux_native::page(url = crate::PAGE_URL, title = "Services", component = Page)]
+pub struct ServicePage;
+
 #[component]
 pub fn Page() -> Element {
     use_theme();

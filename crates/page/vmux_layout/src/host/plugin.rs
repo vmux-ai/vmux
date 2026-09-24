@@ -31,11 +31,11 @@ impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins((
-            crate::native_page::LayoutPage::plugin(),
-            crate::native_page::ToolsPage::plugin(),
-            crate::native_page::VaultPage::plugin(),
-            crate::native_page::ExtensionsPage::plugin(),
-            crate::native_page::ErrorPage::plugin(),
+            crate::ui::LayoutPage::plugin(),
+            crate::tool_page::ToolsPage::plugin(),
+            crate::vault_page::VaultPage::plugin(),
+            crate::extensions_page::ExtensionsPage::plugin(),
+            crate::error_page::ErrorPage::plugin(),
         ));
         app.add_plugins((LayoutContractPlugin, LayoutRequestPlugin))
             .register_type::<Open>()

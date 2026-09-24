@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
+use vmux_command::{CommandDefinition, CommandInvocation, CommandRequest, CommandTypePlugin};
 use vmux_core::host::{UiState, UiStatePlugin};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
@@ -13,10 +14,9 @@ use crate::plugin::{ServiceClient, reattach_terminal_bundle};
 use crate::process_index::TerminalProcessIndex;
 use vmux_core::KeyboardOwner;
 use vmux_layout::{
-    event::SERVICES_PAGE_URL,
     native_open::{HostedPage, HostedPagePlugin},
     pane::{Pane, PaneSplit},
-    stack::{ActiveTabParam, Stack, focused_stack, stack_bundle},
+    stack::{ActiveTabParam, Stack, StackRequest, focused_stack, stack_bundle},
 };
 
 pub struct ProcessesMonitorPlugin;
@@ -40,7 +40,10 @@ impl Plugin for ProcessesMonitorPlugin {
                 ProcessKillEvent,
                 ProcessKillAllEvent,
             )>::default())
-            .add_plugins(UiStatePlugin::<ProcessesUiState>::default())
+            .add_plugins((
+                UiStatePlugin::<ProcessesUiState>::default(),
+                CommandTypePlugin::<OpenServicesRequest>::default(),
+            ))
             .add_systems(
                 Update,
                 (
@@ -49,6 +52,10 @@ impl Plugin for ProcessesMonitorPlugin {
                     broadcast_to_monitors,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Update,
+                open_services.before(vmux_core::workspace::StackCommandSet),
             )
             .add_observer(on_process_navigate)
             .add_observer(on_process_kill)
@@ -65,8 +72,42 @@ impl ProcessesMonitor {}
 
 impl HostedPage for ProcessesMonitor {
     const HOST: &'static str = "services";
-    const URL: &'static str = SERVICES_PAGE_URL;
+    const URL: &'static str = vmux_service::PAGE_URL;
     const TITLE: &'static str = "Background Services";
+}
+
+#[derive(Message)]
+struct OpenServicesRequest;
+
+impl CommandRequest for OpenServicesRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        vec![
+            CommandDefinition::new("service_open", "Open Service Monitor", "Service")
+                .expose_to_mcp(),
+        ]
+    }
+}
+
+impl TryFrom<&CommandInvocation> for OpenServicesRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        match invocation.id.as_str() {
+            "service_open" => Ok(Self),
+            _ => Err(()),
+        }
+    }
+}
+
+fn open_services(
+    mut requests: MessageReader<OpenServicesRequest>,
+    mut stack_requests: MessageWriter<StackRequest>,
+) {
+    for _ in requests.read() {
+        stack_requests.write(StackRequest::Open {
+            url: Some(vmux_service::PAGE_URL.to_string()),
+        });
+    }
 }
 
 #[derive(Resource, Default)]

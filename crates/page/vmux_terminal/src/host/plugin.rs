@@ -11,12 +11,9 @@ use bevy_cef::prelude::*;
 use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_core::input::KeyStroke;
-use vmux_core::terminal::{
-    ProcessesMonitorSpawnRequest, TerminalSpawnRequest, TerminalSpawnTarget,
-};
+use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
-    PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet,
-    PageOpenTarget, PageOpenTask,
+    PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -64,7 +61,6 @@ impl Plugin for TerminalPlugin {
         .register_type::<crate::launch::TerminalKind>()
         .add_message::<TerminalStackSpawnRequest>()
         .add_message::<TerminalSpawnRequest>()
-        .add_message::<ProcessesMonitorSpawnRequest>()
         .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
         .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
         .add_plugins((
@@ -98,8 +94,7 @@ impl Plugin for TerminalServicePlugin {
             )
             .add_systems(
                 Update,
-                (respond_terminal_spawn, respond_processes_monitor_spawn)
-                    .in_set(vmux_command::ReadCommandRequests),
+                respond_terminal_spawn.in_set(vmux_command::ReadCommandRequests),
             )
             .add_systems(
                 Update,
@@ -517,19 +512,6 @@ fn respond_terminal_spawn(
                 }
             }
         }
-    }
-}
-
-fn respond_processes_monitor_spawn(
-    mut reader: MessageReader<ProcessesMonitorSpawnRequest>,
-    mut page_open: MessageWriter<PageOpenRequest>,
-) {
-    for req in reader.read() {
-        page_open.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(req.target_stack),
-            url: vmux_layout::event::SERVICES_PAGE_URL.to_string(),
-            request_id: None,
-        });
     }
 }
 

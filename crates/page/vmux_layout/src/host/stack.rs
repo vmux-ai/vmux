@@ -1,4 +1,3 @@
-use crate::event::SERVICES_PAGE_URL;
 use crate::{
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
@@ -56,7 +55,6 @@ pub struct CloseStackSet;
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub enum StackRequest {
     Open { url: Option<String> },
-    OpenServices,
     Close,
     Focus(SiblingDirection),
     Move(SiblingDirection),
@@ -89,8 +87,6 @@ impl CommandRequest for StackRequest {
                         ),
                     ),
                 )),
-            CommandDefinition::new("service_open", "Open Service Monitor", "Service")
-                .expose_to_mcp(),
         ]
     }
 }
@@ -108,7 +104,6 @@ impl TryFrom<&CommandInvocation> for StackRequest {
             "open_in_new_stack" => Self::Open {
                 url: invocation.argument("url"),
             },
-            "service_open" => Self::OpenServices,
             _ => return Err(()),
         };
         Ok(request)
@@ -503,25 +498,6 @@ fn handle_stack_requests(
         );
 
         match request {
-            StackRequest::OpenServices => {
-                let Some(pane) = active_pane else {
-                    continue;
-                };
-                let stack = commands
-                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                    .id();
-                commands.entity(stack).insert(vmux_core::PageMetadata {
-                    url: SERVICES_PAGE_URL.to_string(),
-                    title: "Background Services".to_string(),
-                    bg_color: Some(crate::event::TERMINAL_CEF_BG_COLOR.to_string()),
-                    ..default()
-                });
-                page_open_requests.write(PageOpenRequest {
-                    target: PageOpenTarget::Stack(stack),
-                    url: SERVICES_PAGE_URL.to_string(),
-                    request_id: None,
-                });
-            }
             StackRequest::Open { url } => {
                 let Some(pane) = active_pane else {
                     continue;
@@ -696,7 +672,7 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["open_in_new_stack", "service_open"],
+            ["open_in_new_stack"],
         );
         for tool in tools {
             let invocation = CommandInvocation::new(Entity::PLACEHOLDER, tool.name);
