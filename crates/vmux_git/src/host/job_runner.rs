@@ -91,77 +91,6 @@ impl RunningGitJob {
     }
 }
 
-impl Emit {
-    fn deliver(
-        self,
-        commands: &mut Commands,
-        pages: &mut Query<&mut vmux_core::PageMetadata>,
-        file_pages: &Query<(), With<FileUiStateUpdates>>,
-        views: &mut Query<&mut super::state::GitState>,
-        webview: Entity,
-    ) {
-        match self {
-            Self::Repository(event) => {
-                if let Ok(mut page) = pages.get_mut(webview) {
-                    if let Some(url) = crate::GitUrl::from_path(Path::new(&event.repo_root)) {
-                        page.url = url;
-                    }
-                    page.title = match event.branch.is_empty() {
-                        true => event.repo_name.clone(),
-                        false => format!("{} · {}", event.repo_name, event.branch),
-                    };
-                }
-                let Ok(mut view) = views.get_mut(webview) else {
-                    return;
-                };
-                view.set_repository(event);
-            }
-            Self::BranchLog(event) => {
-                let Ok(mut view) = views.get_mut(webview) else {
-                    return;
-                };
-                view.set_branch_log(event);
-            }
-            Self::Status(event) => {
-                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
-            }
-            Self::DiffMeta(event) => {
-                FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
-            }
-            Self::DiffViewport(event) => {
-                if let Ok(mut view) = views.get_mut(webview) {
-                    view.set_diff_viewport(event);
-                } else {
-                    FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
-                }
-            }
-            Self::Result(event) => {
-                if let Ok(mut view) = views.get_mut(webview) {
-                    view.apply_result(&event);
-                    if !view.workspace().is_empty() {
-                        GitJob::enqueue(
-                            commands,
-                            webview,
-                            JobKind::Repository {
-                                path: view.workspace().into(),
-                            },
-                        );
-                    }
-                } else {
-                    FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
-                }
-            }
-            Self::Error(event) => {
-                if let Ok(mut view) = views.get_mut(webview) {
-                    view.apply_error(&event);
-                } else {
-                    FileUiStateUpdates::deliver(file_pages, commands, webview, &event);
-                }
-            }
-        }
-    }
-}
-
 fn poll_git_jobs(mut jobs: Query<(Entity, &GitJob, &mut RunningGitJob)>, mut commands: Commands) {
     for (entity, job, mut running) in &mut jobs {
         let Some(emits) = running.poll() else {
@@ -182,17 +111,74 @@ fn deliver_git_outputs(
     mut pages: Query<&mut vmux_core::PageMetadata>,
     file_pages: Query<(), With<FileUiStateUpdates>>,
     mut views: Query<&mut super::state::GitState>,
+    mut files: Query<&mut super::status::FileGit>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let wake = wake.as_deref().map(|wake| (**wake).clone());
     for (entity, mut output) in &mut outputs {
+        let webview = output.webview;
         for emit in std::mem::take(&mut output.emits) {
-            emit.deliver(
-                &mut commands,
-                &mut pages,
-                &file_pages,
-                &mut views,
-                output.webview,
-            );
+            match emit {
+                Emit::Repository(event) => {
+                    if let Ok(mut page) = pages.get_mut(webview) {
+                        if let Some(url) = crate::GitUrl::from_path(Path::new(&event.repo_root)) {
+                            page.url = url;
+                        }
+                        page.title = match event.branch.is_empty() {
+                            true => event.repo_name.clone(),
+                            false => format!("{} · {}", event.repo_name, event.branch),
+                        };
+                    }
+                    if let Ok(mut view) = views.get_mut(webview) {
+                        view.set_repository(event);
+                    }
+                }
+                Emit::BranchLog(event) => {
+                    if let Ok(mut view) = views.get_mut(webview) {
+                        view.set_branch_log(event);
+                    }
+                }
+                Emit::Status(event) => {
+                    if let Ok(mut file) = files.get_mut(webview) {
+                        file.apply_status(event);
+                    }
+                }
+                Emit::DiffMeta(event) => {
+                    FileUiStateUpdates::deliver(&file_pages, &mut commands, webview, &event);
+                }
+                Emit::DiffViewport(event) => {
+                    if let Ok(mut view) = views.get_mut(webview) {
+                        view.set_diff_viewport(event);
+                    } else {
+                        FileUiStateUpdates::deliver(&file_pages, &mut commands, webview, &event);
+                    }
+                }
+                Emit::Result(event) => {
+                    if let Ok(mut view) = views.get_mut(webview) {
+                        view.apply_result(&event);
+                        if !view.workspace().is_empty() {
+                            GitJob::enqueue(
+                                &mut commands,
+                                webview,
+                                JobKind::Repository {
+                                    path: view.workspace().into(),
+                                },
+                            );
+                        }
+                    } else if let Ok(mut file) = files.get_mut(webview) {
+                        let refresh = file.apply_result(event, wake.clone());
+                        commands.entity(webview).insert(refresh);
+                    }
+                }
+                Emit::Error(event) => {
+                    if let Ok(mut view) = views.get_mut(webview) {
+                        view.apply_error(&event);
+                    } else if let Ok(mut file) = files.get_mut(webview) {
+                        file.apply_error(event.message);
+                    }
+                }
+            }
         }
         commands.entity(entity).despawn();
     }

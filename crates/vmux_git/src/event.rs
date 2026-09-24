@@ -1,12 +1,7 @@
 pub use vmux_api::git::{
-    DiffKind, DiffLine, FileStatus, GitChangedEvent, GitDiffMetaEvent, GitDiffViewportEvent,
+    DiffKind, DiffLine, FileGitState, FileStatus, GitDiffMetaEvent, GitDiffViewportEvent,
     GitErrorEvent, GitResultEvent, GitStatusEvent, StyledSpan,
 };
-
-#[vmux_api::ui_event(Eq, targets = ["git", "files"])]
-pub struct GitStatusRequest {
-    pub path: String,
-}
 #[vmux_api::ui_event(Eq, target = "git")]
 pub struct GitRepositoryRequest {
     pub path: String,

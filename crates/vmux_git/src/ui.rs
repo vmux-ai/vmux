@@ -17,7 +17,7 @@ mod workspace;
 
 pub use diff_projection::{DiffViewRow, EditorDiffMarker};
 pub use root::Page;
-pub use shared::{DiffView, GitFooter, GitStatusFeed};
+pub use shared::{DiffView, GitFooter};
 
 #[vmux_native::page(
     url = crate::GIT_PAGE_URL,

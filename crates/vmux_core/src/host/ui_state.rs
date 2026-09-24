@@ -180,7 +180,7 @@ mod tests {
     use crate::event::{FileDirtyEvent, FileUiState, FileUiStatePatch};
     use bevy_cef::prelude::BinReceive;
     use vmux_api::BinEvent;
-    use vmux_api::git::GitChangedEvent;
+    use vmux_api::git::FileGitState;
 
     #[derive(Resource, Default)]
     struct Emitted(Vec<FileUiState>);
@@ -239,8 +239,18 @@ mod tests {
         pages: Query<(), With<UiState<FileUiState>>>,
         mut commands: Commands,
     ) {
-        UiState::<FileUiState>::deliver(&pages, &mut commands, targets.file, &GitChangedEvent {});
-        UiState::<FileUiState>::deliver(&pages, &mut commands, targets.direct, &GitChangedEvent {});
+        UiState::<FileUiState>::deliver(
+            &pages,
+            &mut commands,
+            targets.file,
+            &FileGitState::default(),
+        );
+        UiState::<FileUiState>::deliver(
+            &pages,
+            &mut commands,
+            targets.direct,
+            &FileGitState::default(),
+        );
     }
 
     #[test]

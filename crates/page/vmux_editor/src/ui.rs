@@ -43,11 +43,9 @@ use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgeReference};
 use vmux_core::media::MediaKind;
-use vmux_git::event::{
-    GitChangedEvent, GitDiffViewportEvent, GitErrorEvent, GitResultEvent, GitStatusEvent,
-};
+use vmux_git::event::{FileGitState, GitDiffViewportEvent};
 use vmux_git::ui::EditorDiffMarker;
-use vmux_git::ui::{DiffView, GitFooter, GitStatusFeed};
+use vmux_git::ui::{DiffView, GitFooter};
 use vmux_ui::diff::DiffTone;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_theme, use_ui_state_root};
@@ -86,7 +84,6 @@ pub(crate) struct KnowledgePage;
 pub fn Page() -> Element {
     use_theme();
     use_ui_state_root::<FileUiState>();
-    let git_status = use_file_ui::<GitStatusEvent>();
     let mut path = use_signal(String::new);
     let mut document_revision = use_signal(|| 0u64);
     let mut document_kind = use_signal(FileDocumentKind::default);
@@ -134,7 +131,22 @@ pub fn Page() -> Element {
     let page_width = use_signal(|| 0u32);
     let last_resize = use_signal(FileResizeEvent::default);
     let mut git_path = use_signal(String::new);
-    let mut git_has_diff = use_signal(|| false);
+    let mut git_state = use_signal(FileGitState::default);
+    let mut git_diff_refresh = use_signal(|| 0u32);
+    let git_repo_root = use_memo(move || {
+        let state = git_state();
+        if state.path == git_path() {
+            state.repo_root
+        } else {
+            String::new()
+        }
+    });
+    let git_has_diff = use_memo(move || {
+        let state = git_state();
+        state.path == git_path() && state.has_diff
+    });
+    let git_nonce =
+        use_memo(move || (git_state().refresh_revision as u32).wrapping_add(git_diff_refresh()));
     let mut git_line_markers = use_signal(HashMap::<u32, EditorDiffMarker>::new);
     let mut file_view_mode = use_signal(|| FileViewMode::Note);
     let mut note_blocks = use_signal(Vec::<NoteBlock>::new);
@@ -144,29 +156,7 @@ pub fn Page() -> Element {
     let mut note_dragging = use_signal(|| false);
     let mut editor_dragging = use_signal(|| false);
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
-    let mut git_nonce = use_signal(|| 0u32);
-    let git_repo_root = use_signal(String::new);
-    let git_refresh_generation = use_signal(|| 0u32);
-    let git_refresh_settled = use_signal(|| true);
-    let git_branch = use_signal(String::new);
-    let git_ahead = use_signal(|| 0u32);
-    let git_behind = use_signal(|| 0u32);
-    let git_staged = use_signal(|| 0u32);
-    let git_message = use_signal(String::new);
-    let mut git_result = use_signal(|| None::<GitResultEvent>);
     let mut git_diff_viewport = use_signal(|| None::<GitDiffViewportEvent>);
-    let git_feed = GitStatusFeed {
-        path: git_path.into(),
-        nonce: git_nonce,
-        repo_root: git_repo_root,
-        has_diff: git_has_diff,
-        branch: git_branch,
-        ahead: git_ahead,
-        behind: git_behind,
-        staged_count: git_staged,
-        message: git_message,
-    };
-    git_feed.request();
     let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
     let mut ed_label = use_signal(String::new);
     let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
@@ -271,7 +261,6 @@ pub fn Page() -> Element {
             diagnostics.set(Vec::new());
             hover_diag.set(None);
             lsp_status.set(None);
-            git_has_diff.set(false);
             git_line_markers.set(HashMap::new());
             lsp_install_notice.set(None);
             lsp_install_request.set(None);
@@ -284,7 +273,6 @@ pub fn Page() -> Element {
             note_dragging.set(false);
             editor_dragging.set(false);
             editor_drag_origin.set(None);
-            git_nonce.set(git_nonce() + 1);
         })
     });
 
@@ -421,48 +409,10 @@ pub fn Page() -> Element {
         })
     });
 
-    let file_dirty = use_file_ui::<FileDirtyEvent>();
+    let file_git_state = use_file_ui::<FileGitState>();
     use_effect(move || {
-        file_dirty.for_each(|_| {
-            GitRefresh {
-                generation: git_refresh_generation,
-                nonce: git_nonce,
-                settled: git_refresh_settled,
-            }
-            .schedule();
-        })
-    });
-
-    use_effect(move || {
-        git_status.for_each(|status| {
-            git_feed.apply_status(status);
-        })
-    });
-
-    let git_result_event = use_file_ui::<GitResultEvent>();
-    use_effect(move || {
-        git_result_event.for_each(|event| {
-            git_feed.apply_result(event.clone());
-            git_result.set(Some(event));
-        })
-    });
-
-    let git_error = use_file_ui::<GitErrorEvent>();
-    use_effect(move || {
-        git_error.for_each(|event| {
-            git_feed.apply_error(event);
-        })
-    });
-
-    let git_changed = use_file_ui::<GitChangedEvent>();
-    use_effect(move || {
-        git_changed.for_each(|_| {
-            GitRefresh {
-                generation: git_refresh_generation,
-                nonce: git_nonce,
-                settled: git_refresh_settled,
-            }
-            .schedule();
+        file_git_state.for_each(|state| {
+            git_state.set(state);
         })
     });
 
@@ -721,11 +671,9 @@ pub fn Page() -> Element {
             );
             parent_path.set(d.parent_path);
             if git_path() != d.abs_path {
-                git_has_diff.set(false);
                 git_line_markers.set(HashMap::new());
             }
             git_path.set(d.abs_path);
-            git_nonce.set(git_nonce() + 1);
             mode.set(Mode::Dir);
             comp_open.set(false);
             comps.set(Vec::new());
@@ -1146,7 +1094,7 @@ pub fn Page() -> Element {
                                     title: translate("editor-git-diff"),
                                     onclick: move |_| {
                                         file_view_mode.set(FileViewMode::Diff);
-                                        git_nonce.set(git_nonce().wrapping_add(1));
+                                        git_diff_refresh.set(git_diff_refresh().wrapping_add(1));
                                         let _ = send(&FileViewModeSet { mode: FileViewMode::Diff });
                                     },
                                     {translate("editor-diff")}
@@ -1949,13 +1897,7 @@ pub fn Page() -> Element {
         }
 
             GitFooter {
-                path: git_path,
-                branch: git_branch,
-                ahead: git_ahead,
-                behind: git_behind,
-                staged_count: git_staged,
-                message: git_message,
-                result: git_result,
+                git_state,
                 always_visible: mode() == Mode::Text
                     && keymap() == vmux_core::KeymapKind::Vim,
                 leading: rsx! {
@@ -2021,7 +1963,6 @@ const MEASURE_WIDE_GLYPH: &str = "\u{6f22}";
 const RENAME_NOTICE_MS: u32 = 2400;
 const HOVER_DELAY_MS: u32 = 300;
 const SCROLL_ID: &str = "file-scroll";
-const GIT_REFRESH_DEBOUNCE_MS: u32 = 120;
 const LSP_NOTICE_DONE_MS: u32 = 2_500;
 const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
@@ -2040,37 +1981,6 @@ pub enum Mode {
     Dir,
     Text,
     Media(MediaKind),
-}
-
-#[derive(Clone, Copy)]
-struct GitRefresh {
-    generation: Signal<u32>,
-    nonce: Signal<u32>,
-    settled: Signal<bool>,
-}
-
-impl GitRefresh {
-    fn schedule(mut self) {
-        let next = self.generation.peek().wrapping_add(1);
-        self.generation.set(next);
-        if *self.settled.peek() {
-            self.settled.set(false);
-            self.bump();
-        }
-        spawn(async move {
-            sleep_ms(GIT_REFRESH_DEBOUNCE_MS).await;
-            if *self.generation.peek() != next {
-                return;
-            }
-            self.settled.set(true);
-            self.bump();
-        });
-    }
-
-    fn bump(&mut self) {
-        let next = self.nonce.peek().wrapping_add(1);
-        self.nonce.set(next);
-    }
 }
 
 fn diff_marker_sign(marker: EditorDiffMarker) -> &'static str {
