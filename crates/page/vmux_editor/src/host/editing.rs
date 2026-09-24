@@ -11,7 +11,10 @@ use crate::host::editor::Editor;
 use crate::host::explorer::{OpenEditorsDirty, OutlineDirty};
 use crate::host::file_lifecycle::{SelfWrites, canon};
 use crate::host::keymap::{EditorKeymap, KeymapConfig};
-use crate::host::language::{EditorLanguageRequest, LspEditDirty, WikiCompletionRequest};
+use crate::host::language::{
+    EditorCompletionRequest, EditorDefinitionRequest, EditorHoverRequest, EditorReferencesRequest,
+    EditorRenameRequest, LspEditDirty, WikiCompletionRequest,
+};
 use crate::host::note::NoteSent;
 use crate::host::status::SharedFileViewMode;
 use crate::host::viewport::{CursorRenderRequest, FileViewport, FoldsDirty, ViewportRenderRequest};
@@ -264,19 +267,19 @@ fn apply_edit_request(
         }
         match &cmd {
             EditCommand::Hover => {
-                commands.trigger(EditorLanguageRequest::hover(entity));
+                commands.trigger(EditorHoverRequest::from(entity));
                 continue;
             }
             EditCommand::GotoDefinition => {
-                commands.trigger(EditorLanguageRequest::definition(entity));
+                commands.trigger(EditorDefinitionRequest::from(entity));
                 continue;
             }
             EditCommand::FindReferences => {
-                commands.trigger(EditorLanguageRequest::references(entity));
+                commands.trigger(EditorReferencesRequest::from(entity));
                 continue;
             }
             EditCommand::BeginRename => {
-                commands.trigger(EditorLanguageRequest::begin_rename(entity));
+                commands.trigger(EditorRenameRequest::from(entity));
                 continue;
             }
             EditCommand::ClearSearchHighlight => {
@@ -301,7 +304,7 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::TriggerCompletion => {
-                commands.trigger(EditorLanguageRequest::completion(entity));
+                commands.trigger(EditorCompletionRequest::from(entity));
                 continue;
             }
             EditCommand::ScrollViewport(_) => unreachable!(),
@@ -520,7 +523,7 @@ fn on_file_text_input(
         EditCommand::InsertText(text)
     };
     commands.trigger(EditRequest::new(entity, vec![command]));
-    commands.trigger(WikiCompletionRequest::new(entity));
+    commands.trigger(WikiCompletionRequest::from(entity));
 }
 
 fn on_file_property_edit(
