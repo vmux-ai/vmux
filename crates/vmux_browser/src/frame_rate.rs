@@ -14,11 +14,7 @@ use vmux_api::command_bar::CommandBarOpenEvent;
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
-use vmux_layout::{
-    Header, LayoutCef,
-    ui_state::LayoutUiStateEvent,
-    side_sheet::SideSheet,
-};
+use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, ui_state::LayoutUiStateEvent};
 
 #[cfg(not(target_os = "macos"))]
 use crate::{
@@ -250,8 +246,7 @@ fn request_layout_frame_burst(
     mut burst: ResMut<LayoutFrameRateBurst>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    if trigger.id() != LayoutUiStateEvent::id() && trigger.id() != CommandBarOpenEvent::id()
-    {
+    if trigger.id() != LayoutUiStateEvent::id() && trigger.id() != CommandBarOpenEvent::id() {
         return;
     }
     let Ok(mut cap) = layouts.get_mut(trigger.webview()) else {

@@ -1,7 +1,12 @@
 #![allow(non_snake_case)]
 
+mod state;
+mod update;
+
 use std::rc::Rc;
 
+use self::state::LayoutPageState;
+use self::update::UpdateNoticeFooter;
 use crate::active_session::ActiveSessionPanel;
 use crate::event::{
     HeaderRequest, LayoutStateEvent, PaneNode, PaneTreeEvent, ReloadEvent, RemoteStateEvent,
@@ -10,7 +15,6 @@ use crate::event::{
 };
 use crate::extension::{ExtensionBar, ExtensionPopupModal};
 use crate::remote::RemoteControl;
-use crate::ui_state::{LayoutUiStateEvent, use_layout_ui, use_layout_ui_patches};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_api::bookmark::{
@@ -24,10 +28,8 @@ use vmux_api::bookmark::{
     BookmarkTextInputRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
 use vmux_command::panel::CommandBarPanel;
-use vmux_core::event::team::{TeamEvent, TeamMemberRow, TeamRequest};
-use vmux_core::event::{
-    ExtListRequest, ExtRow, ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
-};
+use vmux_core::event::ExtRow;
+use vmux_core::event::team::{TeamMemberRow, TeamRequest};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{
@@ -35,13 +37,12 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
-use vmux_ui::components::progress::{Progress, ProgressIndicator};
 use vmux_ui::components::tree_row::{
     SIDEBAR_CARD_CHEVRON_CLOSED, SIDEBAR_CARD_CHEVRON_OPEN, SIDEBAR_TREE_COLUMN,
     SIDEBAR_TREE_SCROLLER, SidebarTreeChildren, SidebarTreeRow, SidebarTreeRowGroup,
 };
 use vmux_ui::favicon::{Favicon, favicon_src_for_url};
-use vmux_ui::hooks::{send, use_listener, use_theme, use_ui_state, use_ui_state_root};
+use vmux_ui::hooks::{send, use_listener, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 use vmux_ui::platform::sleep_ms;
@@ -51,11 +52,7 @@ use vmux_ui::util::cn;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let layout_ui = use_ui_state_root::<LayoutUiStateEvent>();
-    let layout_state = use_layout_ui::<LayoutStateEvent>();
-    let stacks_state = use_layout_ui::<StacksHostEvent>();
-    let tabs_state = use_layout_ui::<TabsHostEvent>();
-    let bookmarks_state = use_layout_ui::<BookmarkStateEvent>();
+    let layout_ui = LayoutPageState::use_state();
     let bookmark_menu_action = use_ui_state::<BookmarkMenuActionEvent>();
     use_context_provider(|| bookmark_menu_action);
 
@@ -64,49 +61,49 @@ pub fn Page() -> Element {
         reload_key.set(reload_key() + 1);
     });
 
-    let pane_tree_state = use_layout_ui::<PaneTreeEvent>();
-    let spaces_state = use_layout_ui::<vmux_core::event::space::SpacesListEvent>();
-    let projects_state = use_layout_ui::<crate::event::TabBoundaryEvent>();
-    let team_state = use_layout_ui::<TeamEvent>();
-    let remote_state = use_layout_ui::<RemoteStateEvent>();
-    let extensions_state = use_layout_ui::<ExtensionsEvent>();
-    let extension_popup = use_layout_ui::<ExtensionPopupEvent>();
-    let extension_popup_size = use_layout_ui::<ExtensionPopupSizeEvent>();
-    use_effect(move || {
-        let _ = send(&ExtListRequest);
-    });
-    let update_phase = UpdatePhase::use_state();
-
-    let state = layout_state.value();
-    let stacks = stacks_state.value();
-    let tabs = tabs_state.value();
-    let projects = projects_state.value();
-    let team = team_state.value();
-    let remote = remote_state.value();
-    let PaneTreeEvent { panes } = pane_tree_state.value();
-    let active_space = spaces_state
-        .value()
+    let ui = layout_ui.value();
+    let layout_ready = ui.layout.is_some();
+    let stacks_ready = ui.stacks.is_some();
+    let tabs_ready = ui.tabs.is_some();
+    let pane_tree_ready = ui.pane_tree.is_some();
+    let spaces_ready = ui.spaces.is_some();
+    let state = ui.layout.unwrap_or_default();
+    let stacks = ui.stacks.unwrap_or_default();
+    let tabs = ui.tabs.unwrap_or_default();
+    let bookmarks = ui.bookmarks;
+    let PaneTreeEvent { panes } = ui.pane_tree.unwrap_or_default();
+    let active_space = ui
+        .spaces
+        .unwrap_or_default()
         .spaces
         .into_iter()
         .find(|space| space.is_active);
-    let ui_error = (layout_ui.error)();
+    let projects = ui.projects;
+    let team = ui.team;
+    let remote = ui.remote;
+    let extensions = ui.extensions;
+    let extension_popup = ui.extension_popup;
+    let extension_popup_size = ui.extension_popup_size;
+    let update_phase = ui.update;
+    let ui_error = layout_ui.error();
     let overlay_ready = layout_overlay_ready(
         &state,
-        listener_ready(layout_state.received(), &ui_error),
-        listener_ready(stacks_state.received(), &ui_error),
-        listener_ready(tabs_state.received(), &ui_error),
-        listener_ready(pane_tree_state.received(), &ui_error),
-        listener_ready(spaces_state.received(), &ui_error),
+        listener_ready(layout_ready, &ui_error),
+        listener_ready(stacks_ready, &ui_error),
+        listener_ready(tabs_ready, &ui_error),
+        listener_ready(pane_tree_ready, &ui_error),
+        listener_ready(spaces_ready, &ui_error),
     );
     let radius_px = state.radius;
     let reveal = StackReveal::side_sheet(use_signal(|| None::<(u64, u64)>));
     use_effect(move || set_root_radius_px(radius_px));
     use_effect(move || {
-        if !layout_state.value().side_sheet_open {
+        let state = layout_ui.value();
+        if !state.layout.unwrap_or_default().side_sheet_open {
             reveal.forget();
             return;
         }
-        let PaneTreeEvent { panes } = pane_tree_state.value();
+        let PaneTreeEvent { panes } = state.pane_tree.unwrap_or_default();
         let Some(target) = ActiveStack::find(&panes) else {
             return;
         };
@@ -156,13 +153,13 @@ pub fn Page() -> Element {
                         SideSheetView {
                             panes,
                             active_space,
-                            bookmarks: bookmarks_state.value(),
+                            bookmarks: bookmarks.clone(),
                             projects: projects.projects.clone(),
                             boundary: projects.boundary,
                             team: team.members.clone(),
                             pane_tree_error: ui_error.clone(),
                         }
-                        if let Some(phase) = update_phase() {
+                        if let Some(phase) = update_phase.clone() {
                             UpdateNoticeFooter { phase }
                         }
                     }
@@ -175,9 +172,9 @@ pub fn Page() -> Element {
                     HeaderView {
                         stacks_state: stacks,
                         tabs_state: tabs,
-                        bookmarks: bookmarks_state.value(),
+                        bookmarks,
                         team: team.members,
-                        extensions: extensions_state.value().extensions,
+                        extensions: extensions.extensions,
                         remote,
                         reload_key: reload_key(),
                         stacks_error: ui_error.clone(),
@@ -186,10 +183,10 @@ pub fn Page() -> Element {
                 }
             }
             CommandBarPanel {}
-            if !extension_popup.value().id.is_empty() {
+            if !extension_popup.id.is_empty() {
                 ExtensionPopupModal {
-                    popup: extension_popup.signal(),
-                    preferred_size: extension_popup_size.value(),
+                    popup: extension_popup,
+                    preferred_size: extension_popup_size,
                 }
             }
             if sheet_resizing() {
@@ -384,49 +381,6 @@ fn layout_overlay_ready(
     layout_ready
         && (!state.header_visible() || (stacks_ready && tabs_ready))
         && (!state.side_sheet_open || (pane_tree_ready && spaces_ready))
-}
-
-#[component]
-fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
-    let (label, version) = match &phase {
-        UpdatePhase::Downloading { version, .. } => {
-            (translate("layout-update-downloading"), version.clone())
-        }
-        UpdatePhase::Installing { version } => {
-            (translate("layout-update-installing"), version.clone())
-        }
-        UpdatePhase::Ready { version } => (translate("layout-update-ready"), version.clone()),
-    };
-    rsx! {
-        div {
-            class: "shrink-0 mx-2 mb-2 mt-2 flex flex-col gap-2.5 rounded-md glass px-3 py-2.5 text-foreground",
-            div { class: "flex min-w-0 items-center gap-2.5",
-                span { class: "inline-block h-2 w-2 shrink-0 rounded-full bg-success" }
-                div { class: "min-w-0 flex-1",
-                    div { class: "truncate text-ui font-medium leading-tight", "{label}" }
-                    div { class: "mt-0.5 truncate text-xs leading-tight text-muted-foreground", "{version}" }
-                }
-            }
-            {match phase {
-                UpdatePhase::Downloading { downloaded, total, .. } => rsx! {
-                    UpdateProgressBar { downloaded, total }
-                },
-                UpdatePhase::Installing { .. } => rsx! {
-                    UpdateProgressBar { downloaded: 0, total: 0 }
-                },
-                UpdatePhase::Ready { .. } => rsx! {
-                    button {
-                        r#type: "button",
-                        class: "w-full cursor-pointer rounded-md bg-primary px-2.5 py-1.5 text-ui font-medium text-primary-foreground hover:opacity-90",
-                        onclick: move |_| {
-                            let _ = send(&crate::event::RestartRequestEvent);
-                        },
-                        {translate("layout-restart-update")}
-                    }
-                },
-            }}
-        }
-    }
 }
 
 #[component]
@@ -1295,17 +1249,6 @@ impl BookmarkFolderChoice {
                 visited,
                 output,
             );
-        }
-    }
-}
-
-#[component]
-fn UpdateProgressBar(downloaded: u64, total: u64) -> Element {
-    rsx! {
-        Progress {
-            value: (total > 0).then(|| download_pct(downloaded, total) as f64),
-            attributes: vec![],
-            ProgressIndicator { attributes: vec![] }
         }
     }
 }
@@ -3296,63 +3239,6 @@ fn localized_stack_title(stack: &StackNode) -> String {
     stack.title.clone()
 }
 
-fn download_pct(downloaded: u64, total: u64) -> u64 {
-    if total == 0 {
-        return 0;
-    }
-    (downloaded.saturating_mul(100) / total).min(100)
-}
-
-#[derive(Clone, PartialEq)]
-enum UpdatePhase {
-    Downloading {
-        version: String,
-        downloaded: u64,
-        total: u64,
-    },
-    Installing {
-        version: String,
-    },
-    Ready {
-        version: String,
-    },
-}
-
-impl UpdatePhase {
-    fn use_state() -> Signal<Option<Self>> {
-        let progress = use_layout_ui_patches::<crate::event::UpdateProgressEvent>();
-        let ready = use_layout_ui_patches::<crate::event::UpdateReadyEvent>();
-        let cleared = use_layout_ui_patches::<crate::event::UpdateClearedEvent>();
-        let mut state = use_signal(|| None);
-        use_effect(move || {
-            progress.for_each(|event| {
-                state.set(Some(if event.installing {
-                    Self::Installing {
-                        version: event.version,
-                    }
-                } else {
-                    Self::Downloading {
-                        version: event.version,
-                        downloaded: event.downloaded,
-                        total: event.total,
-                    }
-                }));
-            });
-        });
-        use_effect(move || {
-            ready.for_each(|event| {
-                state.set(Some(Self::Ready {
-                    version: event.version,
-                }));
-            });
-        });
-        use_effect(move || {
-            cleared.for_each(|_| state.set(None));
-        });
-        state
-    }
-}
-
 #[component]
 fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent>) -> Element {
     rsx! {
@@ -3369,13 +3255,6 @@ fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn download_pct_clamps_and_handles_zero_total() {
-        assert_eq!(download_pct(0, 0), 0);
-        assert_eq!(download_pct(50, 100), 50);
-        assert_eq!(download_pct(250, 100), 100);
-    }
 
     #[test]
     fn tab_drag_shifts_the_tabs_between_source_and_target() {

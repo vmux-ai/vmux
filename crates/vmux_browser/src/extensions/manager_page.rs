@@ -410,12 +410,17 @@ fn close_popup(
     browsers: &Browsers,
     commands: &mut Commands,
 ) {
+    let mut closed = false;
     for (entity, popup) in popups {
         if popup.owner != owner {
             continue;
         }
         browsers.hide_child_window(&entity);
         commands.entity(entity).try_despawn();
+        closed = true;
+    }
+    if closed {
+        LayoutUiStateUpdates::write(commands, owner, &ExtensionPopupEvent::default());
     }
 }
 
