@@ -1,15 +1,16 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, WebviewSource};
+use bevy_cef::prelude::{BinReceive, WebviewSource};
 use vmux_command::shortcut::{KeyContext, Keymap};
 use vmux_core::host::page::HostsPage;
+use vmux_core::host::{UiStatePlugin, UiStateUpdates};
 use vmux_core::input::{KeyClaims, PageKeyContext};
 
 pub struct KeyClaimPlugin;
 
 impl Plugin for KeyClaimPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(receive_page_context)
-            .add_observer(reclaim_on_page_ready)
+        app.add_plugins(UiStatePlugin::<KeyClaims>::default())
+            .add_observer(receive_page_context)
             .add_systems(Update, (start_page_context, push_key_claims).chain());
     }
 }
@@ -25,7 +26,10 @@ fn start_page_context(
     mut commands: Commands,
 ) {
     for entity in pages.iter() {
-        commands.entity(entity).insert(KeyContext::default());
+        commands.entity(entity).insert((
+            KeyContext::default(),
+            UiStateUpdates::<KeyClaims>::default(),
+        ));
     }
 }
 
@@ -37,16 +41,6 @@ fn receive_page_context(
         return;
     };
     current.set_if_neq(trigger.payload.keys.iter().cloned().collect());
-}
-
-fn reclaim_on_page_ready(
-    trigger: On<BinReceive<vmux_core::host::page::PageReady>>,
-    mut contexts: Query<&mut KeyContext>,
-) {
-    let Ok(mut context) = contexts.get_mut(trigger.event_target()) else {
-        return;
-    };
-    context.set_changed();
 }
 
 fn push_key_claims(
@@ -62,7 +56,7 @@ fn push_key_claims(
             continue;
         }
         let claims: KeyClaims = keymap.in_context(&context).claims();
-        commands.trigger(BinHostEmitEvent::from_event(entity, &claims));
+        UiStateUpdates::<KeyClaims>::write(&mut commands, entity, &claims);
     }
 }
 
@@ -70,6 +64,7 @@ fn push_key_claims(
 mod tests {
     use super::*;
     use bevy::input::keyboard::KeyCode;
+    use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
     use vmux_api::BinEvent;
     use vmux_command::shortcut::{Binding, KeyCombo, Modifiers, Shortcut, Source, When};
 
@@ -154,6 +149,7 @@ mod tests {
                 .init_resource::<Pushed>()
                 .init_resource::<Rejected>()
                 .add_observer(Pushed::record);
+            app.insert_non_send(Browsers::default());
             app
         }
 
@@ -162,12 +158,18 @@ mod tests {
                 .world_mut()
                 .spawn(WebviewSource::new("about:blank"))
                 .id();
+            app.world_mut()
+                .non_send_mut::<Browsers>()
+                .set_externally_hosted(entity);
             app.update();
             entity
         }
 
         fn hosted_page(app: &mut App) -> Entity {
             let entity = app.world_mut().spawn(HostsPage).id();
+            app.world_mut()
+                .non_send_mut::<Browsers>()
+                .set_externally_hosted(entity);
             app.update();
             entity
         }

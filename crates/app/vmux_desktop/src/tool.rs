@@ -8,9 +8,10 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
+use vmux_core::host::{UiStatePlugin, UiStateUpdates};
 use vmux_core::page::PageManifest;
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tool::{
@@ -135,6 +136,8 @@ impl Plugin for ToolPlugin {
             .add_plugins((
                 vmux_app::extension::McpConnectionPlugin,
                 vmux_tool::ToolPlugin,
+                UiStatePlugin::<ToolsUiState>::default(),
+                UiStatePlugin::<VaultUiState>::default(),
             ))
             .add_plugins(UiEventPlugin::<(
                 ToolsRefreshRequest,
@@ -225,6 +228,7 @@ impl Default for ToolRegistry {
 }
 
 #[derive(Component, Default)]
+#[require(UiStateUpdates<ToolsUiState>)]
 struct ToolSubscriber {
     snapshot_revision: u64,
     revision: u64,
@@ -294,6 +298,7 @@ impl ToolSubscriber {
 }
 
 #[derive(Component, Default)]
+#[require(UiStateUpdates<VaultUiState>)]
 struct VaultSubscriber {
     snapshot_revision: u64,
     revision: u64,
@@ -1133,7 +1138,6 @@ fn drain_vault_actions(
 
 fn emit_tools_state(
     registry: Query<&ToolRegistry>,
-    browsers: NonSend<Browsers>,
     mut subscribers: Query<(Entity, &mut ToolSubscriber)>,
     mut commands: Commands,
 ) {
@@ -1145,17 +1149,13 @@ fn emit_tools_state(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &subscriber.state));
+        UiStateUpdates::<ToolsUiState>::write(&mut commands, entity, &subscriber.state);
         subscriber.emitted_revision = subscriber.revision;
     }
 }
 
 fn emit_vault_state(
     registry: Query<&ToolRegistry>,
-    browsers: NonSend<Browsers>,
     mut subscribers: Query<(Entity, &mut VaultSubscriber)>,
     mut commands: Commands,
 ) {
@@ -1167,10 +1167,7 @@ fn emit_vault_state(
         if subscriber.emitted_revision == subscriber.revision {
             continue;
         }
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &subscriber.state));
+        UiStateUpdates::<VaultUiState>::write(&mut commands, entity, &subscriber.state);
         subscriber.emitted_revision = subscriber.revision;
     }
 }

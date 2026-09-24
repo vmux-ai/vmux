@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
 use parking_lot::Mutex;
 use reqwest::blocking::{Client, Response};
 use ring::digest::{SHA256, digest};
@@ -16,6 +16,7 @@ use vmux_api::mcp::{
     McpServerAction, McpServerEntry, McpServerRequest, McpServerResult, McpServerStatus,
     McpServers, McpServersRequest,
 };
+use vmux_core::host::{UiStatePlugin, UiStateUpdates};
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
 };
@@ -26,16 +27,19 @@ pub struct McpConnectionPlugin;
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(McpRuntime);
-        app.add_plugins(UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default())
-            .add_observer(McpConnections::request)
-            .add_observer(McpConnections::act)
-            .add_systems(
-                Update,
-                (
-                    (McpConnections::start, McpConnections::drain).chain(),
-                    McpConnections::drain_snapshots,
-                ),
-            );
+        app.add_plugins((
+            UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
+            UiStatePlugin::<McpServers>::default(),
+        ))
+        .add_observer(McpConnections::request)
+        .add_observer(McpConnections::act)
+        .add_systems(
+            Update,
+            (
+                (McpConnections::start, McpConnections::drain).chain(),
+                McpConnections::drain_snapshots,
+            ),
+        );
     }
 }
 
@@ -186,7 +190,7 @@ impl McpConnections {
             if !browsers.can_emit_to(&task.target) {
                 continue;
             }
-            commands.trigger(BinHostEmitEvent::from_event(task.target, &snapshot));
+            UiStateUpdates::<McpServers>::write(&mut commands, task.target, &snapshot);
         }
     }
 }
