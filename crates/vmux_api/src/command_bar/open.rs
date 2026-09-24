@@ -75,7 +75,7 @@ impl SearchEngine {
     }
 }
 
-#[vmux_api::host_event(Default, targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_state(Default, targets = ["command-bar", "start", "layout"])]
 pub struct CommandBarOpenEvent {
     #[serde(default)]
     pub open_id: OpenId,

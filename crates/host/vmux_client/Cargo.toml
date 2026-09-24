@@ -16,7 +16,7 @@ tracing = "0.1"
 url = { workspace = true }
 uuid = { workspace = true }
 vmux_profile = { path = "../../vmux_profile" }
-vmux_remote = { path = "../vmux_remote" }
+vmux_transport = { path = "../vmux_transport" }
 vmux_api = { path = "../../vmux_api" }
 vmux_path = { path = "../../vmux_path" }
 

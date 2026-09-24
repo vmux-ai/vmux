@@ -25,7 +25,7 @@ impl Plugin for AgentChatPagePlugin {
             resume::ChatResumePlugin,
             tab::ChatTabPlugin,
             transcript::ChatTranscriptPlugin,
-            vmux_core::host::UiStatePlugin::<vmux_chat::ui_state::ChatUiStateEvent>::default(),
+            vmux_core::host::UiStatePlugin::<vmux_chat::state::ChatUiState>::default(),
             workspace::ChatWorkspacePlugin,
         ))
         .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
@@ -47,7 +47,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 #[require(ChatUiStateUpdates)]
 pub struct AgentChatView;
 
-type ChatUiStateUpdates = vmux_core::host::UiStateUpdates<vmux_chat::ui_state::ChatUiStateEvent>;
+type ChatUiStateUpdates = vmux_core::host::UiStateUpdates<vmux_chat::state::ChatUiState>;
 
 #[derive(Component)]
 pub(crate) struct ChatSynced;

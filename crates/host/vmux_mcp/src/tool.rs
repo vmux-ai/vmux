@@ -12,9 +12,9 @@ mod visual;
 mod workspace;
 
 pub use runtime::{
-    DispatchTarget, McpToolPlugin, McpToolRequest, ShellNote, ToolCall, ToolCallPolicy,
-    ToolCatalog, ToolDefinition, ToolDispatchError, ToolDispatchFlush, ToolDispatchSet, ToolPlugin,
-    ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ShellNote, ToolCall, ToolCallPolicy, ToolCatalog,
+    ToolDefinition, ToolDispatchError, ToolDispatchFlush, ToolDispatchResult, ToolDispatchSet,
+    ToolPlugin, ToolRequestSet,
 };
-use runtime::{NextToolOrder, ParsedToolCall, ToolCalls, ToolManifest, ToolRegistrationSet};
+use runtime::{NextToolOrder, ToolCalls, ToolManifest, ToolRegistrationSet};
 pub(crate) use runtime::{ProtocolTool, ToolExecution, ToolOutcome, canonical_tool_name};

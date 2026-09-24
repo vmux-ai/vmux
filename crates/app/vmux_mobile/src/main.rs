@@ -362,21 +362,21 @@ fn AppBody() -> Element {
                         {translate("mobile-chat-back")}
                     }
                 }
-                div { class: "min-h-0 flex-1", vmux_team::page::Page {} }
+                div { class: "min-h-0 flex-1", vmux_team::ui::Page {} }
             }
         };
     }
 
     if session.is_open() {
         return rsx! {
-            vmux_chat::page::Page {}
+            vmux_chat::ui::Page {}
         };
     }
 
     rsx! {
         div { class: "relative h-dvh bg-background",
             div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
-                vmux_start::page::Page {}
+                vmux_start::ui::Page {}
             }
             LinkStatus {
                 reachable: reachable(),

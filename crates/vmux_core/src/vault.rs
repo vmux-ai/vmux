@@ -1,4 +1,4 @@
-#[vmux_api::host_event(Default, Eq, target = "vault")]
+#[vmux_api::ui_state(Default, Eq, target = "vault")]
 pub struct VaultSnapshot {
     pub root: String,
     pub initialized: bool,

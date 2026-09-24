@@ -49,7 +49,7 @@ impl RemoteArgs {
 
     #[cfg(target_os = "macos")]
     fn revoke(&self, client_id: &str) -> std::io::Result<i32> {
-        let client_id = vmux_remote::DeviceId::new(client_id);
+        let client_id = vmux_transport::DeviceId::new(client_id);
         if vmux_client::RemoteAuthorizationStore::current().revoke(&client_id)? {
             println!("revoked {}", client_id.as_str());
             return Ok(0);

@@ -57,7 +57,7 @@ impl Api {
 
     pub(crate) async fn paired_credentials(&self) -> Option<Credentials> {
         let credential = self.quic.credential().await;
-        if !matches!(credential, vmux_remote::ClientCredential::Device(_)) {
+        if !matches!(credential, vmux_transport::ClientCredential::Device(_)) {
             return None;
         }
         let mut credentials = self.credentials.clone();

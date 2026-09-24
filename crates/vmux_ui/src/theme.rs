@@ -1,4 +1,4 @@
-#[vmux_api::host_event(Default, target = any)]
+#[vmux_api::ui_state(Default, target = any)]
 pub struct ThemeEvent {
     pub radius: f32,
     pub locale: String,

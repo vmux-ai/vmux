@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
-    ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -149,63 +149,52 @@ fn parse(mut commands: Commands, calls: ToolCalls<VisualTool>) {
 
 fn screenshot(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<ScreenshotArgs>),
-        Added<ParsedToolCall<ScreenshotArgs>>,
-    >,
+    requests: Query<(Entity, &ScreenshotArgs), (With<ToolCall>, Added<ScreenshotArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::Screenshot {
-                pane: OptionalText::trim(request.args().pane.clone()),
-            })),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::Screenshot {
+                    pane: OptionalText::trim(args.pane.clone()),
+                },
+            ))));
     }
 }
 
 fn simulator_screenshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, _) in calls.matching(VisualTool::SimulatorScreenshot) {
-        call.finish_dispatch(
-            request,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::SimulatorScreenshot)),
-        );
+    for (request, _, _) in calls.matching(VisualTool::SimulatorScreenshot) {
+        commands
+            .entity(request)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::SimulatorScreenshot,
+            ))));
     }
 }
 
 fn simulator_tap(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<SimulatorTapArgs>),
-        Added<ParsedToolCall<SimulatorTapArgs>>,
-    >,
+    requests: Query<(Entity, &SimulatorTapArgs), (With<ToolCall>, Added<SimulatorTapArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
-                action: SimulatorAction::Tap {
-                    x: args.x,
-                    y: args.y,
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::SimulatorControl {
+                    action: SimulatorAction::Tap {
+                        x: args.x,
+                        y: args.y,
+                    },
                 },
-            })),
-        );
+            ))));
     }
 }
 
 fn simulator_swipe(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<SimulatorSwipeArgs>),
-        Added<ParsedToolCall<SimulatorSwipeArgs>>,
-    >,
+    requests: Query<(Entity, &SimulatorSwipeArgs), (With<ToolCall>, Added<SimulatorSwipeArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
+    for (entity, args) in &requests {
         let duration_ms = args.duration_ms.unwrap_or(300);
         let target = if (1..=10_000).contains(&duration_ms) {
             Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
@@ -220,19 +209,16 @@ fn simulator_swipe(
         } else {
             Err("simulator_swipe.duration_ms must be between 1 and 10000".to_string())
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn simulator_type(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<SimulatorTypeArgs>),
-        Added<ParsedToolCall<SimulatorTypeArgs>>,
-    >,
+    requests: Query<(Entity, &SimulatorTypeArgs), (With<ToolCall>, Added<SimulatorTypeArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let text = &request.args().text;
+    for (entity, args) in &requests {
+        let text = &args.text;
         let target = if text.is_empty() {
             Err("simulator_type.text is empty".to_string())
         } else {
@@ -240,83 +226,70 @@ fn simulator_type(
                 action: SimulatorAction::TypeText(text.clone()),
             }))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn simulator_key(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<SimulatorKeyArgs>),
-        Added<ParsedToolCall<SimulatorKeyArgs>>,
-    >,
+    requests: Query<(Entity, &SimulatorKeyArgs), (With<ToolCall>, Added<SimulatorKeyArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
-                action: SimulatorAction::Key(request.args().keycode),
-            })),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::SimulatorControl {
+                    action: SimulatorAction::Key(args.keycode),
+                },
+            ))));
     }
 }
 
 fn simulator_button(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<SimulatorButtonArgs>),
-        Added<ParsedToolCall<SimulatorButtonArgs>>,
-    >,
+    requests: Query<(Entity, &SimulatorButtonArgs), (With<ToolCall>, Added<SimulatorButtonArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
-                action: SimulatorAction::Button(request.args().button.into()),
-            })),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::SimulatorControl {
+                    action: SimulatorAction::Button(args.button.into()),
+                },
+            ))));
     }
 }
 
 fn record_start(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<RecordStartArgs>),
-        Added<ParsedToolCall<RecordStartArgs>>,
-    >,
+    requests: Query<(Entity, &RecordStartArgs), (With<ToolCall>, Added<RecordStartArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::RecordStart {
-                gif: args.gif,
-                max_secs: args.max_secs.unwrap_or(600),
-                pane: OptionalText::trim(args.pane.clone()),
-            })),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::RecordStart {
+                    gif: args.gif,
+                    max_secs: args.max_secs.unwrap_or(600),
+                    pane: OptionalText::trim(args.pane.clone()),
+                },
+            ))));
     }
 }
 
 fn record_stop(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<RecordStopArgs>),
-        Added<ParsedToolCall<RecordStopArgs>>,
-    >,
+    requests: Query<(Entity, &RecordStopArgs), (With<ToolCall>, Added<RecordStopArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::RecordStop {
-                dir: OptionalText::trim(request.args().dir.clone()),
-                name: OptionalText::trim(request.args().name.clone()),
-            })),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::RecordStop {
+                    dir: OptionalText::trim(args.dir.clone()),
+                    name: OptionalText::trim(args.name.clone()),
+                },
+            ))));
     }
 }
 

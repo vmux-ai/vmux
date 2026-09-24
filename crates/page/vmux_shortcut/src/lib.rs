@@ -52,7 +52,7 @@ pub struct ShortcutCaptureEvent {
     pub active: bool,
 }
 
-#[vmux_api::host_event(Copy, Default, Eq, target = "shortcuts")]
+#[vmux_api::ui_state(Copy, Default, Eq, target = "shortcuts")]
 pub struct ShortcutCaptureStateEvent {
     pub active: bool,
 }
@@ -63,7 +63,7 @@ pub struct ShortcutPressedEvent {
     pub pressed_at_ms: i64,
 }
 
-#[vmux_api::host_event(Default, Eq, target = "shortcuts")]
+#[vmux_api::ui_state(Default, Eq, target = "shortcuts")]
 pub struct ShortcutsEvent {
     pub groups: Vec<ShortcutGroup>,
     pub chord_timeout_ms: u64,
@@ -174,4 +174,4 @@ mod host;
 pub use host::{ShortcutCaptureTarget, ShortcutPlugin};
 
 #[cfg(ui)]
-pub mod page;
+pub mod ui;

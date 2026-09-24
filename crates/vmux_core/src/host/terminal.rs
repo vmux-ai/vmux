@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-pub type TerminalUiStateUpdates = super::UiStateUpdates<crate::event::TerminalUiStateEvent>;
+pub type TerminalUiStateUpdates = super::UiStateUpdates<crate::event::TerminalUiState>;
 
 #[derive(Component)]
 #[require(TerminalUiStateUpdates)]

@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, NextToolOrder, ParsedToolCall, ProtocolTool, ToolCalls, ToolDispatchSet,
-    ToolExecution, ToolManifest, ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ProtocolTool, ToolCall, ToolCalls, ToolDispatchResult,
+    ToolDispatchSet, ToolExecution, ToolManifest, ToolOutcome, ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -89,15 +89,13 @@ struct WriteKnowledgeArgs {
 
 fn vault_status(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
     for (request, call, _) in calls.matching(KnowledgeTool::VaultStatus) {
-        call.finish(
-            request,
-            &mut commands,
-            Ok(ToolExecution::Protocol {
+        commands
+            .entity(request)
+            .insert(ToolOutcome(Ok(ToolExecution::Protocol {
                 tool: ProtocolTool::VaultStatus,
                 arguments: call.arguments.clone(),
                 anchor: call.anchor,
-            }),
-        );
+            })));
     }
 }
 
@@ -124,16 +122,11 @@ fn parse(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
 
 fn open_vault(
     mut commands: Commands,
-    requests: Query<(Entity, &ParsedToolCall<OpenVaultArgs>), Added<ParsedToolCall<OpenVaultArgs>>>,
+    requests: Query<(Entity, &ToolCall, &OpenVaultArgs), Added<OpenVaultArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let target = request.require_anchor().map(|anchor| {
-            let url = match request
-                .args()
-                .provider
-                .as_ref()
-                .unwrap_or(&VaultProvider::Overview)
-            {
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().map(|anchor| {
+            let url = match args.provider.as_ref().unwrap_or(&VaultProvider::Overview) {
                 VaultProvider::Overview => "vmux://vault/",
                 VaultProvider::Github => "vmux://vault/?provider=github",
                 VaultProvider::CloudFolder => "vmux://vault/?provider=cloud_folder",
@@ -145,23 +138,21 @@ fn open_vault(
                 focus: true,
             })
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn set_conversation_title(
     mut commands: Commands,
     requests: Query<
-        (Entity, &ParsedToolCall<SetConversationTitleArgs>),
-        Added<ParsedToolCall<SetConversationTitleArgs>>,
+        (Entity, &ToolCall, &SetConversationTitleArgs),
+        Added<SetConversationTitleArgs>,
     >,
 ) {
-    for (entity, request) in &requests {
-        let target = request.require_anchor().and_then(|anchor| {
-            let title = Text::required(
-                request.args().title.clone(),
-                "set_conversation_title.title is empty",
-            )?;
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().and_then(|anchor| {
+            let title =
+                Text::required(args.title.clone(), "set_conversation_title.title is empty")?;
             if title.chars().count() > 120 {
                 return Err("set_conversation_title.title exceeds 120 characters".to_string());
             }
@@ -169,24 +160,18 @@ fn set_conversation_title(
                 AgentCommand::SetConversationTitle { anchor, title },
             ))
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn search(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<SearchKnowledgeArgs>),
-        Added<ParsedToolCall<SearchKnowledgeArgs>>,
-    >,
+    requests: Query<(Entity, &ToolCall, &SearchKnowledgeArgs), Added<SearchKnowledgeArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let target = request.require_anchor().and_then(|anchor| {
-            let query = Text::required(
-                request.args().query.clone(),
-                "search_knowledge.query is empty",
-            )?;
-            let limit = request.args().limit.unwrap_or(20);
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().and_then(|anchor| {
+            let query = Text::required(args.query.clone(), "search_knowledge.query is empty")?;
+            let limit = args.limit.unwrap_or(20);
             if !(1..=100).contains(&limit) {
                 return Err("search_knowledge.limit must be between 1 and 100".to_string());
             }
@@ -196,20 +181,16 @@ fn search(
                 limit: limit as u16,
             }))
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn read(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<ReadKnowledgeArgs>),
-        Added<ParsedToolCall<ReadKnowledgeArgs>>,
-    >,
+    requests: Query<(Entity, &ToolCall, &ReadKnowledgeArgs), Added<ReadKnowledgeArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let target = request.require_anchor().and_then(|anchor| {
-            let args = request.args();
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().and_then(|anchor| {
             let path = Text::required(args.path.clone(), "read_knowledge.path is empty")?;
             let line = args.line.unwrap_or(1);
             let limit = args.limit.unwrap_or(200);
@@ -226,20 +207,16 @@ fn read(
                 limit: limit as u32,
             }))
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn write(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<WriteKnowledgeArgs>),
-        Added<ParsedToolCall<WriteKnowledgeArgs>>,
-    >,
+    requests: Query<(Entity, &ToolCall, &WriteKnowledgeArgs), Added<WriteKnowledgeArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let target = request.require_anchor().and_then(|anchor| {
-            let args = request.args();
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().and_then(|anchor| {
             let path = args.path.clone().and_then(Text::trimmed);
             let title = Text::required(args.title.clone(), "write_knowledge.title is empty")?;
             let content = Text::required(args.content.clone(), "write_knowledge.content is empty")?;
@@ -250,7 +227,7 @@ fn write(
                 content,
             }))
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 

@@ -1,5 +1,5 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use vmux_remote::framing::LengthPrefixed;
+use vmux_transport::framing::LengthPrefixed;
 
 const CODEC: LengthPrefixed = LengthPrefixed::new(64 * 1024 * 1024);
 

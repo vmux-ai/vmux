@@ -12,7 +12,7 @@ use crate::manifest::{
 #[derive(EcsComponent, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DiscoverDotfilePackages;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(EcsComponent, Clone, Debug, Default, PartialEq, Eq)]
 pub struct DiscoveredDotfilePackages {
     pub packages: Vec<String>,
 }
@@ -59,7 +59,7 @@ impl ImportDotfiles {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImportedDotfiles {
     pub packages: usize,
 }
@@ -76,7 +76,7 @@ impl ToolOperation for ImportDotfiles {
 #[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
 pub struct ImportAvailableDotfiles;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImportedAvailableDotfiles {
     pub packages: usize,
 }
@@ -110,7 +110,7 @@ impl LinkDotfilePackage {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LinkedDotfilePackage {
     pub files: usize,
 }
@@ -140,7 +140,7 @@ impl DisableDotfilePackage {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DisabledDotfilePackage {
     pub files: usize,
 }
@@ -167,7 +167,7 @@ impl UnlinkDotfilePackage {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UnlinkedDotfilePackage {
     pub files: usize,
 }
@@ -184,7 +184,7 @@ impl ToolOperation for UnlinkDotfilePackage {
 #[derive(EcsComponent, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ApplyEnabledDotfiles;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(EcsComponent, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AppliedEnabledDotfiles {
     pub files: usize,
 }
@@ -214,7 +214,7 @@ impl AdoptDotfile {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
 pub struct AdoptedDotfile {
     pub path: PathBuf,
 }
@@ -254,7 +254,7 @@ pub struct DotfileLink {
     pub state: DotfileLinkState,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
 pub struct DotfilePlan {
     pub package: String,
     pub links: Vec<DotfileLink>,

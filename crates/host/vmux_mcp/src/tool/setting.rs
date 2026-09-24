@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
-    ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -48,24 +48,20 @@ fn parse(mut commands: Commands, calls: ToolCalls<SettingTool>) {
 }
 
 fn get_settings(mut commands: Commands, calls: ToolCalls<SettingTool>) {
-    for (request, call, _) in calls.matching(SettingTool::GetSettings) {
-        call.finish_dispatch(
-            request,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::GetSettings)),
-        );
+    for (request, _, _) in calls.matching(SettingTool::GetSettings) {
+        commands
+            .entity(request)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::GetSettings,
+            ))));
     }
 }
 
 fn update_settings(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<UpdateSettingsArgs>),
-        Added<ParsedToolCall<UpdateSettingsArgs>>,
-    >,
+    requests: Query<(Entity, &UpdateSettingsArgs), (With<ToolCall>, Added<UpdateSettingsArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
+    for (entity, args) in &requests {
         let target = if args.path.trim().is_empty() {
             Err("update_settings.path is empty".to_string())
         } else {
@@ -74,6 +70,6 @@ fn update_settings(
                 value: JsonValue::from(args.value.clone()),
             }))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }

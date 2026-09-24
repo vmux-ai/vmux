@@ -1,4 +1,4 @@
-#[vmux_api::host_event(target = "services")]
+#[vmux_api::ui_state(target = "services")]
 pub struct ProcessesListEvent {
     pub connected: bool,
     pub processes: Vec<ProcessEntry>,

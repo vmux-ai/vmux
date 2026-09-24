@@ -21,7 +21,7 @@ pub enum UpdateCheckStatus {
     Unavailable,
 }
 
-#[vmux_api::host_event(Default, Eq, target = "settings")]
+#[vmux_api::contract(Default, Eq)]
 pub struct UpdateCheckStatusEvent {
     pub status: UpdateCheckStatus,
 }
@@ -34,7 +34,7 @@ pub struct CheckForUpdatesRequest;
 #[derive(bevy::prelude::Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);
 
-#[vmux_api::host_event(Default, Eq, version = 2, target = "settings")]
+#[vmux_api::contract(Default, Eq)]
 pub struct SettingsListEvent {
     pub value: vmux_api::json::JsonValue,
 }
@@ -45,7 +45,7 @@ pub struct SettingsRequest {
     pub value: vmux_api::json::JsonValue,
 }
 
-#[vmux_api::host_event(Default, version = 2, target = "settings")]
+#[vmux_api::contract(Default)]
 pub struct SettingsSchemaEvent {
     pub schema: crate::schema::SettingsSchema,
 }

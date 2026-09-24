@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use vmux_setting::SettingsLoadSet;
 
-use crate::client::page::strategy_components::{
+use crate::client::provider::index::ProviderStrategyIndex;
+use crate::client::provider::strategy::{
     BuildRequestFn, Endpoint, EnvVarName, ParseSseFn, Strategy, StrategyKey, StrategyKind,
     StrategyVariant,
 };
-use crate::client::page::strategy_index::PageStrategyIndex;
 use crate::{AgentKind, AgentVariant};
 
 pub struct MistralPlugin;
@@ -19,7 +19,7 @@ impl Plugin for MistralPlugin {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct MistralProvider;
 
-fn register_mistral_strategy(mut commands: Commands, idx: Option<Res<PageStrategyIndex>>) {
+fn register_mistral_strategy(mut commands: Commands, idx: Option<Res<ProviderStrategyIndex>>) {
     if std::env::var(super::mistral::ENV_VAR).is_err() {
         return;
     }
@@ -48,12 +48,12 @@ fn register_mistral_strategy(mut commands: Commands, idx: Option<Res<PageStrateg
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::page::strategy_indexer::{on_strategy_added, on_strategy_removed};
+    use crate::client::provider::indexer::{on_strategy_added, on_strategy_removed};
     use serial_test::serial;
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.insert_resource(PageStrategyIndex::default())
+        app.insert_resource(ProviderStrategyIndex::default())
             .add_observer(on_strategy_added)
             .add_observer(on_strategy_removed)
             .add_plugins(MistralPlugin);
@@ -66,7 +66,7 @@ mod tests {
         unsafe { std::env::set_var(super::super::mistral::ENV_VAR, "x") };
         let mut app = test_app();
         app.update();
-        let idx = app.world().resource::<PageStrategyIndex>();
+        let idx = app.world().resource::<ProviderStrategyIndex>();
         assert!(idx.get_by_strs("mistral", "devstral-2").is_some());
         unsafe { std::env::remove_var(super::super::mistral::ENV_VAR) };
     }
@@ -77,7 +77,7 @@ mod tests {
         unsafe { std::env::remove_var(super::super::mistral::ENV_VAR) };
         let mut app = test_app();
         app.update();
-        let idx = app.world().resource::<PageStrategyIndex>();
+        let idx = app.world().resource::<ProviderStrategyIndex>();
         assert!(idx.get_by_strs("mistral", "devstral-2").is_none());
     }
 }

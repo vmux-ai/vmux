@@ -1,6 +1,6 @@
 use super::{
-    NextToolOrder, ParsedToolCall, ProtocolTool, ToolCalls, ToolDispatchSet, ToolExecution,
-    ToolManifest, ToolRegistrationSet, ToolRequestSet,
+    NextToolOrder, ProtocolTool, ToolCall, ToolCalls, ToolDispatchSet, ToolExecution, ToolManifest,
+    ToolOutcome, ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -54,32 +54,29 @@ fn parse(mut commands: Commands, calls: ToolCalls<FileTool>) {
 
 fn read_file(
     mut commands: Commands,
-    requests: Query<(Entity, &ParsedToolCall<ReadFileArgs>), Added<ParsedToolCall<ReadFileArgs>>>,
+    requests: Query<(Entity, &ToolCall, &ReadFileArgs), Added<ReadFileArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let result = request
-            .serialized_args()
+    for (entity, call, args) in &requests {
+        let result = serde_json::to_value(args)
+            .map_err(|error| format!("MCP tool arguments must serialize: {error}"))
             .map(|arguments| ToolExecution::Protocol {
                 tool: ProtocolTool::ReadFile,
                 arguments,
-                anchor: request.anchor(),
+                anchor: call.anchor,
             });
-        request.finish_execution(entity, &mut commands, result);
+        commands.entity(entity).insert(ToolOutcome(result));
     }
 }
 
-fn grep(
-    mut commands: Commands,
-    requests: Query<(Entity, &ParsedToolCall<GrepArgs>), Added<ParsedToolCall<GrepArgs>>>,
-) {
-    for (entity, request) in &requests {
-        let result = request
-            .serialized_args()
+fn grep(mut commands: Commands, requests: Query<(Entity, &ToolCall, &GrepArgs), Added<GrepArgs>>) {
+    for (entity, call, args) in &requests {
+        let result = serde_json::to_value(args)
+            .map_err(|error| format!("MCP tool arguments must serialize: {error}"))
             .map(|arguments| ToolExecution::Protocol {
                 tool: ProtocolTool::Grep,
                 arguments,
-                anchor: request.anchor(),
+                anchor: call.anchor,
             });
-        request.finish_execution(entity, &mut commands, result);
+        commands.entity(entity).insert(ToolOutcome(result));
     }
 }

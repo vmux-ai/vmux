@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
-    ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -65,48 +65,35 @@ fn parse(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
 }
 
 fn list_spaces(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
-    for (request, call, _) in calls.matching(SpaceTool::ListSpaces) {
-        call.finish_dispatch(
-            request,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::ListSpaces)),
-        );
+    for (request, _, _) in calls.matching(SpaceTool::ListSpaces) {
+        commands
+            .entity(request)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::ListSpaces,
+            ))));
     }
 }
 
 fn create(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<CreateSpaceArgs>),
-        Added<ParsedToolCall<CreateSpaceArgs>>,
-    >,
+    requests: Query<(Entity, &CreateSpaceArgs), (With<ToolCall>, Added<CreateSpaceArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Command(AgentCommand::SpaceCommand(
-                AgentSpaceCommand::Create {
-                    name: request
-                        .args()
-                        .name
-                        .clone()
-                        .filter(|name| !name.trim().is_empty()),
-                },
-            ))),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
+                AgentCommand::SpaceCommand(AgentSpaceCommand::Create {
+                    name: args.name.clone().filter(|name| !name.trim().is_empty()),
+                }),
+            ))));
     }
 }
 
 fn rename(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<RenameSpaceArgs>),
-        Added<ParsedToolCall<RenameSpaceArgs>>,
-    >,
+    requests: Query<(Entity, &RenameSpaceArgs), (With<ToolCall>, Added<RenameSpaceArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
+    for (entity, args) in &requests {
         let target = if args.space_id.trim().is_empty() {
             Err("rename_space.space_id is empty".to_string())
         } else if args.name.trim().is_empty() {
@@ -119,19 +106,16 @@ fn rename(
                 },
             )))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn delete(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<DeleteSpaceArgs>),
-        Added<ParsedToolCall<DeleteSpaceArgs>>,
-    >,
+    requests: Query<(Entity, &DeleteSpaceArgs), (With<ToolCall>, Added<DeleteSpaceArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let space_id = &request.args().space_id;
+    for (entity, args) in &requests {
+        let space_id = &args.space_id;
         let target = if space_id.trim().is_empty() {
             Err("delete_space.space_id is empty".to_string())
         } else {
@@ -141,6 +125,6 @@ fn delete(
                 },
             )))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }

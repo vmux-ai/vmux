@@ -77,7 +77,7 @@ impl Plugin for LayoutPlugin {
                 NativeOpenPlugin,
                 BookmarkPlugin,
                 LayoutCefPlugin,
-                vmux_core::host::UiStatePlugin::<crate::ui_state::LayoutUiStateEvent>::default(),
+                vmux_core::host::UiStatePlugin::<crate::state::LayoutUiState>::default(),
                 crate::workspace_snapshot_publish::SnapshotPlugin,
                 crate::overlay_adopt::OverlayAdoptPlugin,
                 crate::pending_stack::PendingStackPlugin,

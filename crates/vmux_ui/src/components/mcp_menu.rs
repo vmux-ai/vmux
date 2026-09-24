@@ -5,7 +5,7 @@ use vmux_api::mcp::{
 };
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
-use crate::hooks::{send, use_listener};
+use crate::hooks::{send, use_listener, use_ui_state};
 use crate::i18n::translate;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -28,10 +28,14 @@ pub fn use_mcp_connections() -> McpConnections {
     let mut servers = connections.servers;
     let mut loaded = connections.loaded;
     let mut loading = connections.loading;
-    let _servers = use_listener::<McpServers, _>(move |incoming| {
+    let snapshot = use_ui_state::<McpServers>();
+    use_effect(move || {
+        let incoming = snapshot();
         servers.set(incoming.servers);
-        loaded.set(true);
-        loading.set(false);
+        loaded.set(incoming.loaded);
+        if incoming.loaded {
+            loading.set(false);
+        }
     });
     let mut pending = connections.pending;
     let mut error = connections.error;

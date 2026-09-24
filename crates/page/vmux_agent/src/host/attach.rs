@@ -38,8 +38,8 @@ pub fn attach_page_agent_to_stack(
     model: &str,
     sid: &str,
     commands: &mut Commands,
-    idx: &crate::client::page::strategy_index::PageStrategyIndex,
-    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: &crate::client::provider::index::ProviderStrategyIndex,
+    kind_q: &Query<&crate::client::provider::strategy::StrategyKind>,
 ) -> Option<()> {
     attach_page_agent_to_stack_with_webview(
         stack, provider, model, sid, None, commands, idx, kind_q,
@@ -54,8 +54,8 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
     sid: &str,
     webview: Option<Entity>,
     commands: &mut Commands,
-    idx: &crate::client::page::strategy_index::PageStrategyIndex,
-    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: &crate::client::provider::index::ProviderStrategyIndex,
+    kind_q: &Query<&crate::client::provider::strategy::StrategyKind>,
 ) -> Option<()> {
     let entity = idx.get_by_strs(provider, model)?;
     let kind = kind_q.get(entity).ok()?.0;
@@ -140,7 +140,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
     webview: Option<Entity>,
     commands: &mut Commands,
 ) {
-    let agent_id = crate::acp_install::agent_url_id(agent_id);
+    let agent_id = crate::acp_tool::agent_url_id(agent_id);
     let url = match resume {
         Some(acp_sid) => format!("vmux://sessions/{agent_id}/{acp_sid}"),
         None => format!("vmux://sessions/{agent_id}"),
@@ -213,7 +213,7 @@ pub(crate) fn acp_registry_agent_for_id<'a>(
     catalog?
         .agents
         .iter()
-        .find(|agent| crate::acp_install::agent_ids_match(&agent.id, id))
+        .find(|agent| crate::acp_tool::agent_ids_match(&agent.id, id))
 }
 
 pub(crate) fn acp_icon_for_id(

@@ -18,9 +18,9 @@ use crate::page_life::spawn_popup_stacks;
 use present::CommandBarWindowedFrame;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
 mod page_open;
-mod page_state;
 mod scroll;
 mod snapshot;
+mod state;
 mod window_drag;
 pub use command::{NavigationRequest, OpenRequest, ViewRequest};
 pub use host_focus::HostFocusIntent;
@@ -201,7 +201,7 @@ impl Plugin for BrowserPlugin {
                 navigation::NavigationPlugin,
                 present::PresentPlugin,
                 page_open::PageOpenPlugin,
-                page_state::PageStatePlugin,
+                state::StatePlugin,
                 snapshot::SnapshotPlugin,
                 scroll::ScrollPlugin,
                 window_drag::WindowDragPlugin,

@@ -1,4 +1,4 @@
-use crate::event::FileUiStateEvent;
+use crate::event::FileUiState;
 
-pub type FileUiStateUpdates = super::UiStateUpdates<FileUiStateEvent>;
-pub type FileUiStateWrite = super::UiStateWrite<FileUiStateEvent>;
+pub type FileUiStateUpdates = super::UiStateUpdates<FileUiState>;
+pub type FileUiStateWrite = super::UiStateWrite<FileUiState>;

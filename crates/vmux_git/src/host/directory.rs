@@ -86,7 +86,7 @@ impl GitDirectory {
 fn on_directory_request(
     trigger: On<BinReceive<GitDirectoryRequest>>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
-    mut views: Query<&mut super::view::GitView>,
+    mut views: Query<&mut super::state::GitState>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;

@@ -40,18 +40,18 @@ impl Plugin for ExtensionToolPlugin {
 
 fn dispatch_extension_tools(
     mut commands: Commands,
-    requests: Query<(Entity, &McpToolRequest<ExtensionTool>), Added<McpToolRequest<ExtensionTool>>>,
+    requests: Query<(Entity, &ToolCall, &ExtensionTool), Added<ExtensionTool>>,
 ) {
-    for (entity, request) in &requests {
-        let result = match request.tool() {
-            ExtensionTool::Echo => request.parse::<EchoArgs>().map(|args| {
+    for (entity, call, tool) in &requests {
+        let result = match tool {
+            ExtensionTool::Echo => call.parse::<EchoArgs>().map(|args| {
                 DispatchTarget::Command(AgentCommand::Notify {
                     title: Some("Extension".to_string()),
                     body: Some(args.text),
                 })
             }),
         };
-        request.finish(entity, &mut commands, result);
+        commands.entity(entity).insert(ToolDispatchResult(result));
     }
 }
 

@@ -92,7 +92,7 @@ impl AgentChatTarget {
                 })
             }
             crate::AgentUrl::Acp { id, sid } => {
-                let id = crate::acp_install::agent_url_id(&id);
+                let id = crate::acp_tool::agent_url_id(&id);
                 let url = match sid {
                     Some(sid) => format!("vmux://sessions/{id}/{sid}"),
                     None => format!("vmux://sessions/{id}"),
@@ -484,8 +484,8 @@ fn handle_agent_page_open(
     acp_sessions: Query<&vmux_session::AcpSession>,
     child_of_q: Query<&ChildOf>,
     agent_to_entity: Option<Res<AgentSessionToEntity>>,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
     settings: Res<AppSettings>,
@@ -604,7 +604,7 @@ fn handle_swap_stack_session(
                 .agent
                 .acp
                 .iter()
-                .any(|cfg| crate::acp_install::agent_ids_match(&cfg.id, id))
+                .any(|cfg| crate::acp_tool::agent_ids_match(&cfg.id, id))
             && acp_registry_agent_for_id(catalog.as_deref(), id).is_none()
         {
             bevy::log::warn!("swap: ACP agent unavailable for '{id}'");
@@ -634,7 +634,7 @@ fn handle_swap_stack_session(
         commands
             .entity(ev.stack)
             .remove::<vmux_session::AcpSession>()
-            .remove::<crate::acp_install::AcpLaunchStarted>()
+            .remove::<crate::acp_tool::AcpLaunchStarted>()
             .remove::<vmux_session::AgentSession>()
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
@@ -663,7 +663,7 @@ fn handle_swap_stack_session(
                     .agent
                     .acp
                     .iter()
-                    .find(|cfg| crate::acp_install::agent_ids_match(&cfg.id, &id));
+                    .find(|cfg| crate::acp_tool::agent_ids_match(&cfg.id, &id));
                 let routing_sid = uuid::Uuid::new_v4().to_string();
                 let icon = acp_icon_for_id(catalog.as_deref(), &id);
                 let name = acp_profile_name_for_id(&id, cfg, catalog.as_deref());
@@ -696,8 +696,8 @@ fn handle_agent_page_open_task(
     acp_sessions: &Query<&vmux_session::AcpSession>,
     child_of_q: &Query<&ChildOf>,
     agent_to_entity: Option<&AgentSessionToEntity>,
-    idx: Option<&crate::client::page::strategy_index::PageStrategyIndex>,
-    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<&crate::client::provider::index::ProviderStrategyIndex>,
+    kind_q: &Query<&crate::client::provider::strategy::StrategyKind>,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
     commands: &mut Commands,
     default_cwd: &std::path::Path,
@@ -797,7 +797,7 @@ fn handle_agent_page_open_task(
         Some(crate::AgentUrl::Acp { id, sid }) => {
             let cfg = acp_configs
                 .iter()
-                .find(|config| crate::acp_install::agent_ids_match(&config.id, &id));
+                .find(|config| crate::acp_tool::agent_ids_match(&config.id, &id));
             if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
                 if sid.is_none()
                     && let Some(kind) = AgentKind::from_url_segment(&id)
@@ -818,7 +818,7 @@ fn handle_agent_page_open_task(
             }
             if acp_sessions
                 .get(task.stack)
-                .is_ok_and(|session| crate::acp_install::agent_ids_match(&session.agent_id, &id))
+                .is_ok_and(|session| crate::acp_tool::agent_ids_match(&session.agent_id, &id))
             {
                 return Ok(());
             }
@@ -1099,7 +1099,7 @@ mod tests {
         let (stack, _child) = spawn_stack_child(&mut app);
         app.world_mut()
             .entity_mut(stack)
-            .insert(crate::acp_install::AcpLaunchStarted);
+            .insert(crate::acp_tool::AcpLaunchStarted);
         app.world_mut()
             .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
             .write(vmux_core::agent::SwapStackSession {
@@ -1113,7 +1113,7 @@ mod tests {
 
         assert!(
             app.world()
-                .get::<crate::acp_install::AcpLaunchStarted>(stack)
+                .get::<crate::acp_tool::AcpLaunchStarted>(stack)
                 .is_none()
         );
         let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();

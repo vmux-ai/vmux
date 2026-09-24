@@ -1,4 +1,4 @@
-#[vmux_api::host_event(Default, target = "simulator")]
+#[vmux_api::ui_state(Default, target = "simulator")]
 pub struct SimulatorReady {
     pub port: u16,
     pub capability: String,

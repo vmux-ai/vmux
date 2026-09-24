@@ -278,7 +278,10 @@ impl McpCatalog {
                 status: McpServerStatus::Configured,
             });
         }
-        McpServers { servers }
+        McpServers {
+            loaded: true,
+            servers,
+        }
     }
 }
 

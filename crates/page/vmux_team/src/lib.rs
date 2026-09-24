@@ -1,7 +1,7 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 #[cfg(ui)]
-pub mod page;
+pub mod ui;
 
 #[cfg(host)]
 mod host;

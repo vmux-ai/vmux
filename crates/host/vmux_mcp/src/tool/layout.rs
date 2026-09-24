@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
-    ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -55,40 +55,37 @@ fn parse(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
 
 fn read_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
     for (request, call, _) in calls.matching(LayoutTool::ReadLayout) {
-        call.finish_dispatch(
-            request,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::ReadLayout {
-                anchor: call.anchor,
-            })),
-        );
+        commands
+            .entity(request)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::ReadLayout {
+                    anchor: call.anchor,
+                },
+            ))));
     }
 }
 
 fn update_layout(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<UpdateLayoutArgs>),
-        Added<ParsedToolCall<UpdateLayoutArgs>>,
-    >,
+    requests: Query<(Entity, &UpdateLayoutArgs), (With<ToolCall>, Added<UpdateLayoutArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Command(AgentCommand::UpdateLayout {
-                layout: request.args().0.clone(),
-            })),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
+                AgentCommand::UpdateLayout {
+                    layout: args.0.clone(),
+                },
+            ))));
     }
 }
 
 fn select_tab(
     mut commands: Commands,
-    requests: Query<(Entity, &ParsedToolCall<SelectTabArgs>), Added<ParsedToolCall<SelectTabArgs>>>,
+    requests: Query<(Entity, &SelectTabArgs), (With<ToolCall>, Added<SelectTabArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let index = request.args().index;
+    for (entity, args) in &requests {
+        let index = args.index;
         let target = if (1..=8).contains(&index) {
             Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
                 id: format!("tab_select_{index}"),
@@ -99,6 +96,6 @@ fn select_tab(
                 "select_tab.index must be between 1 and 8, got {index}"
             ))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }

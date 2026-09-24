@@ -2,7 +2,7 @@ pub mod chat;
 pub use vmux_api::service as event;
 
 #[cfg(ui)]
-pub mod page;
+pub mod ui;
 
 pub mod message;
 pub mod protocol;

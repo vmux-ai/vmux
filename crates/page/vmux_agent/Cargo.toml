@@ -46,7 +46,7 @@ vmux_layout = { path = "../vmux_layout" }
 vmux_start = { path = "../vmux_start" }
 vmux_mcp = { path = "../../host/vmux_mcp" }
 vmux_path = { path = "../../vmux_path" }
-vmux_remote = { path = "../../host/vmux_remote" }
+vmux_transport = { path = "../../host/vmux_transport" }
 vmux_service = { path = "../../host/vmux_service" }
 vmux_session = { path = "../../vmux_session" }
 vmux_setting = { path = "../vmux_setting" }

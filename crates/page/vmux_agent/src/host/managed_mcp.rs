@@ -33,7 +33,7 @@ pub(crate) fn acp_servers(agent_id: &str) -> Result<PreparedManagedMcpServers, S
         let revision = McpCredentialAccess::stable_revision()?;
         let mut servers = Vec::new();
         for (name, server) in load() {
-            if crate::acp_install::registry_id_alias(agent_id) == "codex-acp"
+            if crate::acp_tool::registry_id_alias(agent_id) == "codex-acp"
                 && server.transport == McpTransport::Sse
             {
                 bevy::log::warn!(
@@ -55,7 +55,7 @@ fn acp_server(mut name: String, server: McpServerManifest, agent_id: &str) -> Ma
     let headers = McpAuthorization::headers(&name, &server)
         .into_iter()
         .collect();
-    if crate::acp_install::registry_id_alias(agent_id) == "codex-acp" {
+    if crate::acp_tool::registry_id_alias(agent_id) == "codex-acp" {
         name = format!("vmux_{name}");
     }
     ManagedMcpServer {

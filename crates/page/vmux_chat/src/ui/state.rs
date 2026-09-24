@@ -1,0 +1,1301 @@
+use std::collections::{HashMap, HashSet};
+
+use super::scroll;
+use crate::event::{
+    ApprovalDecision, CHAT_HISTORY_PAGE_SIZE, ChatApproval, ChatAttachPaths, ChatAttachment,
+    ChatAttachmentPreviewRequest, ChatAttachmentPreviews, ChatAttachments, ChatBranch,
+    ChatBranchesRequest, ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage,
+    ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
+    ChatPickFiles, ChatProjectBranches, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
+    ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry,
+    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SelectMode,
+    SelectModel, SlashCommandEntry, latest_tool_location,
+};
+use crate::format::composer::{
+    ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
+    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_fetch_resume,
+};
+use crate::state::{ChatUiState, ChatUiStatePatch};
+use crate::tab::Accent;
+use dioxus::prelude::*;
+use vmux_api::prompt_media::{
+    inline_media_query, merge_chat_attachments, replace_inline_media_query,
+};
+use vmux_ui::agent_accent::agent_accent;
+use vmux_ui::components::composer::{
+    PROMPT_INPUT_ID, PromptComposerAction, PromptComposerAttachment, focus_prompt_end,
+};
+use vmux_ui::components::composer_bar::{
+    ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
+};
+use vmux_ui::components::mcp_menu::{McpConnections, McpQuery, use_mcp_connections};
+use vmux_ui::components::prompt_media_options::PromptMediaOption;
+use vmux_ui::file_icon::FilePath;
+use vmux_ui::hooks::{send, use_listener, use_selector, use_theme, use_ui_state_root};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct Chat {
+    pub agent: Signal<String>,
+    pub transcript: Transcript,
+    pub run: RunState,
+    pub identity: AgentIdentity,
+    pub user: UserIdentity,
+    pub handoff: Handoff,
+    pub composer: ComposerDraft,
+    pub queue: PromptQueue,
+    pub media: MediaPicker,
+    pub mcp: McpConnections,
+    pub models: ModelPicker,
+    pub effort: EffortPicker,
+    pub permissions: PermissionPicker,
+    pub projects: ProjectPicker,
+    pub slash: SlashCommands,
+    pub resume: Resume,
+    pub menu: ComposerMenu,
+    pub activity_counts: Memo<(usize, usize)>,
+    pub latest_tool: Memo<Option<(usize, usize)>>,
+}
+
+pub fn use_chat() -> Chat {
+    use_theme();
+    let transcript = use_transcript();
+    let items = transcript.items;
+    let chat = Chat {
+        agent: use_signal(CurrentAgent::read),
+        transcript,
+        run: use_run_state(),
+        identity: use_agent_identity(),
+        user: use_user_identity(),
+        handoff: use_handoff(),
+        composer: use_composer_draft(),
+        queue: use_prompt_queue(),
+        media: use_media_picker(),
+        mcp: use_mcp_connections(),
+        models: use_model_picker(),
+        effort: use_effort_picker(),
+        permissions: use_permission_picker(),
+        projects: use_project_picker(),
+        slash: use_slash_commands(),
+        resume: use_resume(),
+        menu: use_composer_menu(),
+        activity_counts: use_memo(move || vmux_api::chat::activity_counts(&items.read())),
+        latest_tool: use_memo(move || latest_tool_location(&items.read())),
+    };
+    chat.listen();
+    chat.watch();
+    chat
+}
+
+impl Chat {
+    fn listen(&self) {
+        let chat = *self;
+        let root = use_ui_state_root::<ChatUiState>();
+        let mut handled_sequence = use_signal(|| 0);
+        use_effect(move || {
+            let event = root.state.read();
+            if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
+                return;
+            }
+            handled_sequence.set(event.sequence);
+            for patch in &event.patches {
+                chat.apply_ui_state(patch);
+            }
+        });
+        let _history = use_listener::<ChatHistoryPage, _>(move |page| {
+            chat.apply_history_page(page);
+        });
+        let _attachments = use_listener::<ChatAttachments, _>(move |selected| {
+            let mut attachments = chat.composer.attachments;
+            let current = attachments.peek().clone();
+            attachments.set(merge_chat_attachments(&current, &selected.attachments));
+            focus_prompt_end(PROMPT_INPUT_ID);
+        });
+        let _previews = use_listener::<ChatAttachmentPreviews, _>(move |loaded| {
+            let mut known = chat.composer.attachment_previews;
+            let mut previews = known.peek().clone();
+            for attachment in &loaded.attachments {
+                previews.insert(attachment.path.clone(), attachment.clone());
+            }
+            known.set(previews);
+        });
+        let _media = use_listener::<ChatMediaEntries, _>(move |response| {
+            if response.request_id != (chat.media.request_id)() {
+                return;
+            }
+            let mut entries = chat.media.entries;
+            let mut loading = chat.media.loading;
+            let mut menu_sel = chat.slash.menu_sel;
+            entries.set(response.entries.clone());
+            loading.set(false);
+            menu_sel.set(0);
+        });
+        let _branches = use_listener::<ChatProjectBranches, _>(move |incoming| {
+            chat.projects
+                .remember(incoming.project.clone(), incoming.branches.clone());
+        });
+        let _sessions = use_listener::<ResumableSessions, _>(move |incoming| {
+            let mut sessions = chat.resume.sessions;
+            let mut menu_sel = chat.slash.menu_sel;
+            let mut loading = chat.resume.loading;
+            sessions.set(incoming.sessions.clone());
+            menu_sel.set(0);
+            loading.set(false);
+        });
+    }
+
+    fn apply_ui_state(&self, patch: &ChatUiStatePatch) {
+        match patch {
+            ChatUiStatePatch::Snapshot(snapshot) => self.apply_snapshot(*snapshot.clone()),
+            ChatUiStatePatch::Composer(context) => {
+                let mut composer_context = self.slash.composer_context;
+                let mut loaded = self.projects.loaded;
+                composer_context.set(context.clone());
+                loaded.set(true);
+            }
+            ChatUiStatePatch::Mode(state) => {
+                let mut modes = self.permissions.modes;
+                let mut current_mode_id = self.permissions.current_mode_id;
+                modes.set(state.modes.clone());
+                current_mode_id.set(state.current_mode_id.clone());
+            }
+            ChatUiStatePatch::Model(state) => {
+                let mut models = self.models.models;
+                let mut current_model_id = self.models.current_model_id;
+                let mut default_model_id = self.models.default_model_id;
+                let mut current_model = self.models.current_model;
+                let mut loaded = self.models.loaded;
+                let mut levels = self.effort.levels;
+                let mut current = self.effort.current;
+                let mut default_level = self.effort.default_level;
+                let mut agent_key = self.effort.agent_key;
+                let mut menu_sel = self.slash.menu_sel;
+                models.set(state.models.clone());
+                current_model_id.set(state.current_model_id.clone());
+                default_model_id.set(state.default_model_id.clone());
+                current_model.set(state.current_model_name.clone());
+                levels.set(state.effort_levels.clone());
+                current.set(state.effort_current.clone());
+                default_level.set(state.effort_default.clone());
+                agent_key.set(state.agent_key.clone());
+                menu_sel.set(0);
+                loaded.set(true);
+            }
+            ChatUiStatePatch::SlashCommands(incoming) => {
+                let mut commands = self.slash.commands;
+                commands.set(incoming.commands.clone());
+            }
+        }
+    }
+
+    fn watch(&self) {
+        let chat = *self;
+        use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
+        use_effect(move || {
+            let _ = chat.transcript.items.read().len();
+            let _ = chat.run.status.read();
+            if !*chat.transcript.at_bottom.peek() {
+                return;
+            }
+            scroll::to_bottom(chat.transcript.scroll_container);
+        });
+        use_effect(move || chat.fetch_resume_sessions());
+        use_effect(move || chat.fetch_media_entries());
+        use_effect(move || {
+            if chat.mcp_menu_open() {
+                chat.mcp.request();
+            }
+        });
+        use_selector(chat.slash.menu_sel, move |selected| {
+            let media_open = {
+                let draft = chat.composer.draft.read();
+                inline_media_query(&draft).is_some()
+            };
+            let _ = chat.resume.sessions.read().len();
+            let _ = chat.models.models.read().len();
+            let _ = chat.media.entries.read().len();
+            if !chat.run.choice_options.read().is_empty() {
+                format!("agent-choice-item-{selected}")
+            } else if media_open {
+                format!("prompt-media-item-{selected}")
+            } else {
+                format!("agent-selector-item-{selected}")
+            }
+        });
+    }
+
+    fn apply_snapshot(&self, snapshot: ChatSnapshot) {
+        let transcript = self.transcript;
+        let messages_changed = (transcript.recent_messages_start)() != snapshot.messages_start
+            || transcript.recent_messages.peek().as_slice() != snapshot.messages.as_slice();
+        if messages_changed {
+            self.request_transcript_previews(&snapshot.messages);
+            let mut items = transcript.items;
+            let mut recent_messages = transcript.recent_messages;
+            let mut recent_start = transcript.recent_messages_start;
+            let start = merge_transcript_page(
+                &mut items.write(),
+                (transcript.loaded_start)(),
+                snapshot.messages.clone(),
+                snapshot.messages_start,
+            );
+            set_if_changed(transcript.loaded_start, start);
+            recent_messages.set(snapshot.messages.clone());
+            recent_start.set(snapshot.messages_start);
+            if start == 0 {
+                set_if_changed(transcript.history_loading, false);
+            }
+        }
+        set_if_changed(transcript.messages_total, snapshot.messages_total);
+        set_if_changed(self.run.status, snapshot.status.clone());
+        set_if_changed(self.run.error, snapshot.error.clone());
+        self.request_queue_previews(&snapshot.queued);
+        set_if_changed(self.queue.queued, snapshot.queued.clone());
+        set_if_changed(self.composer.transition_preview, String::new());
+        set_if_changed(self.composer.transition_attachments, Vec::new());
+        set_if_changed(self.queue.paused, snapshot.paused);
+        set_if_changed(self.identity.agent_name, snapshot.agent_name.clone());
+        set_if_changed(
+            self.identity.conversation_title,
+            snapshot.conversation_title.clone(),
+        );
+        set_if_changed(self.identity.agent_icon, snapshot.agent_icon.clone());
+        set_if_changed(self.identity.accent, snapshot.accent_color.clone());
+        if !snapshot.user_name.is_empty() {
+            set_if_changed(self.user.name, snapshot.user_name.clone());
+        }
+        if !snapshot.user_initials.is_empty() {
+            set_if_changed(self.user.initials, snapshot.user_initials.clone());
+        }
+        if !snapshot.user_color.is_empty() {
+            set_if_changed(self.user.color, snapshot.user_color.clone());
+        }
+        set_if_changed(self.handoff.source, snapshot.handoff_source.clone());
+        set_if_changed(self.handoff.truncated, snapshot.handoff_truncated);
+        set_if_changed(self.handoff.message_count, snapshot.handoff_message_count);
+        set_if_changed(self.run.choice_question, snapshot.choice_question.clone());
+        let mut choice_options = self.run.choice_options;
+        if choice_options.peek().as_slice() != snapshot.choice_options.as_slice() {
+            set_if_changed(self.slash.menu_sel, 0);
+            choice_options.set(snapshot.choice_options.clone());
+        }
+        let next_approval = if snapshot.status == "awaiting" {
+            snapshot.approval.clone()
+        } else {
+            None
+        };
+        let mut approval = self.run.approval;
+        if approval.peek().ne(&next_approval) {
+            approval.set(next_approval);
+            set_if_changed(self.run.approval_sel, 0);
+        }
+    }
+
+    fn apply_history_page(&self, page: ChatHistoryPage) {
+        let transcript = self.transcript;
+        let mut history_loading = transcript.history_loading;
+        history_loading.set(false);
+        if page.end != (transcript.loaded_start)() {
+            return;
+        }
+        self.request_transcript_previews(&page.items);
+        let metrics = scroll::metrics(transcript.scroll_container);
+        let mut items = transcript.items;
+        let mut loaded_start = transcript.loaded_start;
+        let mut messages_total = transcript.messages_total;
+        drop(items.write().splice(0..0, page.items));
+        loaded_start.set(page.start);
+        messages_total.set(page.total);
+        if let Some((height, top)) = metrics {
+            scroll::restore(transcript.scroll_container, height, top);
+        }
+    }
+
+    fn request_transcript_previews(&self, items: &[ChatItem]) {
+        let mut paths = Vec::new();
+        for item in items {
+            let ChatItem::User { attachments, .. } = item else {
+                continue;
+            };
+            for attachment in attachments {
+                if attachment.mime_type.starts_with("image/") {
+                    paths.push(attachment.path.clone());
+                }
+            }
+        }
+        self.request_attachment_previews(paths);
+    }
+
+    fn request_queue_previews(&self, queued: &[QueuedPromptSnapshot]) {
+        let mut paths = Vec::new();
+        for prompt in queued {
+            paths.extend(prompt.image_paths());
+        }
+        self.request_attachment_previews(paths);
+    }
+
+    fn request_attachment_previews(&self, wanted: Vec<String>) {
+        let previews = self.composer.attachment_previews;
+        let mut requests = self.composer.attachment_preview_requests;
+        let known = previews.peek().keys().cloned().collect::<HashSet<_>>();
+        let mut requested = requests.peek().clone();
+        let mut paths = Vec::new();
+        for path in wanted {
+            if known.contains(&path) || !requested.insert(path.clone()) {
+                continue;
+            }
+            paths.push(path);
+        }
+        if !paths.is_empty() && send(&ChatAttachmentPreviewRequest { paths }).is_ok() {
+            requests.set(requested);
+        }
+    }
+
+    fn fetch_resume_sessions(&self) {
+        let mut requested = self.resume.requested;
+        let mut loading = self.resume.loading;
+        let should_fetch =
+            should_fetch_resume(&(self.composer.draft)(), &self.slash.commands.read());
+        if should_fetch && !requested() {
+            loading.set(true);
+            if send(&ResumeListRequest { offset: 0 }).is_err() {
+                loading.set(false);
+            }
+            requested.set(true);
+        } else if !should_fetch && requested() {
+            requested.set(false);
+            loading.set(false);
+        }
+    }
+
+    fn fetch_media_entries(&self) {
+        let mut entries = self.media.entries;
+        let mut request_id = self.media.request_id;
+        let mut requested_query = self.media.requested_query;
+        let mut loading = self.media.loading;
+        let value = (self.composer.draft)();
+        let Some(query) = inline_media_query(&value).map(|query| query.query.to_string()) else {
+            entries.set(Vec::new());
+            if requested_query.peek().is_some() {
+                request_id.set(request_id().wrapping_add(1).max(1));
+            }
+            requested_query.set(None);
+            loading.set(false);
+            return;
+        };
+        if requested_query().as_deref() == Some(query.as_str()) {
+            return;
+        }
+        let next_id = request_id().wrapping_add(1).max(1);
+        request_id.set(next_id);
+        requested_query.set(Some(query.clone()));
+        entries.set(Vec::new());
+        loading.set(true);
+        if send(&ChatMediaListRequest {
+            request_id: next_id,
+            query,
+        })
+        .is_err()
+        {
+            loading.set(false);
+        }
+    }
+
+    pub fn request_history(&self) {
+        let mut loading = self.transcript.history_loading;
+        let before = (self.transcript.loaded_start)();
+        if before == 0 || *loading.peek() {
+            return;
+        }
+        if send(&ChatHistoryRequest {
+            before,
+            limit: CHAT_HISTORY_PAGE_SIZE,
+        })
+        .is_ok()
+        {
+            loading.set(true);
+        }
+    }
+}
+
+impl Chat {
+    pub fn agent(&self) -> String {
+        (self.agent)()
+    }
+
+    pub fn header_name(&self) -> String {
+        let name = (self.identity.agent_name)();
+        if name.is_empty() { self.agent() } else { name }
+    }
+
+    pub fn title(&self) -> String {
+        chat_page_title(&(self.identity.conversation_title)(), &self.header_name())
+    }
+
+    pub fn accent(&self) -> Accent {
+        Accent::resolve(
+            &(self.identity.accent)(),
+            agent_accent(&self.agent()).rain_rgb,
+        )
+    }
+
+    pub fn status(&self) -> String {
+        (self.run.status)()
+    }
+
+    pub fn installing(&self) -> bool {
+        self.status() == "installing"
+    }
+
+    pub fn installing_splash(&self) -> bool {
+        self.installing() && self.transcript.items.read().is_empty()
+    }
+
+    pub fn install_detail(&self) -> String {
+        let detail = (self.run.error)();
+        if detail.is_empty() {
+            translate("agent-preparing")
+        } else {
+            detail
+        }
+    }
+
+    pub fn draft(&self) -> String {
+        (self.composer.draft)()
+    }
+
+    pub fn filtered_commands(&self) -> Vec<SlashCommandEntry> {
+        let draft = self.draft();
+        let SelectorMode::Commands(query) = selector_mode(&draft) else {
+            return Vec::new();
+        };
+        let query = query.to_lowercase();
+        let mut matching = Vec::new();
+        for command in self.slash.commands.read().iter() {
+            if command.name.starts_with(&query) {
+                matching.push(command.clone());
+            }
+        }
+        matching
+    }
+
+    pub fn filtered_sessions(&self) -> Vec<ResumableSessionEntry> {
+        let draft = self.draft();
+        let SelectorMode::Resume(query) = selector_mode(&draft) else {
+            return Vec::new();
+        };
+        filter_sessions(&self.resume.sessions.read(), query)
+    }
+
+    pub fn filtered_models(&self) -> Vec<ModelOptionEntry> {
+        let draft = self.draft();
+        let SelectorMode::Models(query) = selector_mode(&draft) else {
+            return Vec::new();
+        };
+        filter_models(&self.models.models.read(), query)
+    }
+
+    pub fn filtered_mcp_servers(&self) -> Vec<vmux_api::mcp::McpServerEntry> {
+        let draft = self.draft();
+        let Some(query) = McpQuery::read(&draft) else {
+            return Vec::new();
+        };
+        self.mcp.filtered(query)
+    }
+
+    pub fn command_menu_open(&self) -> bool {
+        !self.filtered_commands().is_empty()
+    }
+
+    pub fn resume_menu_open(&self) -> bool {
+        matches!(selector_mode(&self.draft()), SelectorMode::Resume(_))
+    }
+
+    pub fn model_menu_open(&self) -> bool {
+        matches!(selector_mode(&self.draft()), SelectorMode::Models(_))
+    }
+
+    pub fn mcp_menu_open(&self) -> bool {
+        #[cfg(host)]
+        {
+            McpQuery::read(&self.draft()).is_some()
+        }
+        #[cfg(not(host))]
+        {
+            false
+        }
+    }
+
+    pub fn selector_open(&self) -> bool {
+        self.media_menu_open()
+            || self.command_menu_open()
+            || self.mcp_menu_open()
+            || self.resume_menu_open()
+            || self.model_menu_open()
+    }
+
+    pub fn resume_state(&self) -> Option<ResumeMenuState> {
+        if !self.resume_menu_open() {
+            return None;
+        }
+        Some(resume_menu_state(
+            (self.resume.requested)(),
+            (self.resume.loading)(),
+            self.resume.sessions.read().len(),
+            self.filtered_sessions().len(),
+        ))
+    }
+
+    pub fn media_menu_open(&self) -> bool {
+        inline_media_query(&self.draft()).is_some()
+    }
+
+    pub fn media_options(&self) -> Vec<PromptMediaOption> {
+        let mut options = Vec::new();
+        for entry in self.media.entries.read().iter() {
+            options.push(PromptMediaOption {
+                key: format!("media-{}", entry.path),
+                name: entry.name.clone(),
+                display_path: entry.display_path(),
+                preview_data_url: entry.preview_data_url.clone(),
+                label: FilePath(&entry.name).extension_label(),
+                is_dir: entry.is_dir,
+            });
+        }
+        options
+    }
+
+    pub fn composer_attachments(&self) -> Vec<PromptComposerAttachment> {
+        let previews = self.composer.attachment_previews.read();
+        let mut pills = PromptComposerAttachment::pinned(
+            &self.composer.transition_attachments.read(),
+            &previews,
+        );
+        pills.extend(PromptComposerAttachment::removable(
+            &self.composer.attachments.read(),
+            &previews,
+        ));
+        pills
+    }
+
+    pub fn streaming(&self) -> bool {
+        matches!(self.status().as_str(), "streaming" | "awaiting")
+    }
+
+    pub fn prompt_action(&self) -> PromptComposerAction {
+        if self.streaming() && self.queue.queued.read().is_empty() {
+            PromptComposerAction::Stop
+        } else {
+            PromptComposerAction::Send
+        }
+    }
+
+    pub fn prompt_action_title(&self) -> String {
+        if self.streaming() && !self.queue.queued.read().is_empty() {
+            translate("agent-send-all-queued")
+        } else if self.streaming() {
+            translate("common-stop")
+        } else {
+            translate("agent-send")
+        }
+    }
+
+    pub fn prompt_action_enabled(&self) -> bool {
+        !self.choice_pending()
+            && (self.streaming()
+                || !self.draft().trim().is_empty()
+                || !self.composer.attachments.read().is_empty())
+    }
+
+    pub fn choice_pending(&self) -> bool {
+        !self.run.choice_options.read().is_empty() || self.run.approval.read().is_some()
+    }
+}
+
+impl Chat {
+    pub fn model_chip(&self) -> Option<ComposerChip> {
+        if !(self.models.loaded)() {
+            return Some(ComposerChip::loading());
+        }
+        let name = (self.models.current_model)();
+        if name.is_empty() {
+            return None;
+        }
+        let label = match (self.models.current_model_id)() == (self.models.default_model_id)() {
+            true => translate_with(
+                "agent-option-default",
+                &[("value", TranslationValue::String(&name))],
+            ),
+            false => name,
+        };
+        let chat = *self;
+        let open = EventHandler::new(move |()| {
+            let mut draft = chat.composer.draft;
+            let mut menu_sel = chat.slash.menu_sel;
+            chat.menu.close();
+            draft.set("/model ".to_string());
+            menu_sel.set(0);
+            focus_prompt_end(PROMPT_INPUT_ID);
+        });
+        Some(ComposerChip::ready(label, translate("agent-change-model")).opens(open))
+    }
+
+    pub fn effort_chip(&self) -> Option<ComposerChip> {
+        if !(self.models.loaded)() {
+            return Some(ComposerChip::loading());
+        }
+        if self.effort.levels.read().is_empty() {
+            return None;
+        }
+        let selected = (self.effort.current)();
+        let label = match selected.is_empty() {
+            false => selected,
+            true => translate_with(
+                "agent-option-default",
+                &[(
+                    "value",
+                    TranslationValue::String(&(self.effort.default_level)()),
+                )],
+            ),
+        };
+        let chat = *self;
+        let open = EventHandler::new(move |()| {
+            chat.open_menu(ComposerMenuKind::Effort);
+            focus_prompt_end(PROMPT_INPUT_ID);
+        });
+        Some(ComposerChip::ready(label, translate("agent-effort-tooltip")).opens(open))
+    }
+
+    pub fn permission_chip(&self) -> Option<ComposerChip> {
+        let modes = self.permissions.modes.read();
+        if modes.is_empty() {
+            return None;
+        }
+        let current_mode_id = (self.permissions.current_mode_id)();
+        let current = modes.iter().find(|mode| mode.id == current_mode_id);
+        let label = current
+            .map(|mode| mode.name.clone())
+            .unwrap_or_else(|| current_mode_id.clone());
+        let title = current
+            .and_then(|mode| mode.description.clone())
+            .filter(|description| !description.is_empty())
+            .unwrap_or_else(|| translate("composer-permission-change"));
+        let selected = modes
+            .iter()
+            .position(|mode| mode.id == current_mode_id)
+            .unwrap_or(0);
+        let chat = *self;
+        let open = EventHandler::new(move |()| {
+            chat.open_menu_at(ComposerMenuKind::Permission, selected);
+            focus_prompt_end(PROMPT_INPUT_ID);
+        });
+        Some(ComposerChip::ready(label, title).opens(open))
+    }
+
+    pub fn project_chip(&self) -> Option<ComposerChip> {
+        if !(self.projects.loaded)() {
+            return Some(ComposerChip::loading());
+        }
+        let context = (self.slash.composer_context)();
+        let active_project = context.projects.iter().find(|project| project.is_active);
+        let label = if let Some(project) = active_project {
+            project.label.clone()
+        } else if context.workspace_selected && !context.workspace_name.is_empty() {
+            context.workspace_name.clone()
+        } else {
+            translate("agent-project-select")
+        };
+        if context.can_manage_workspace {
+            let workspace_path = active_project
+                .map(|project| project.path.as_str())
+                .filter(|path| !path.is_empty())
+                .unwrap_or(&context.cwd);
+            let title = if workspace_path.is_empty() {
+                translate("agent-project-choose")
+            } else {
+                format!("{} · {}", translate("agent-project-choose"), workspace_path)
+            };
+            let selected = context
+                .projects
+                .iter()
+                .filter(|project| project.depth == 0)
+                .position(|project| project.is_active)
+                .unwrap_or(0);
+            let chat = *self;
+            let open =
+                EventHandler::new(move |()| chat.open_menu_at(ComposerMenuKind::Project, selected));
+            return Some(ComposerChip::ready(label, title).opens(open));
+        }
+        if context.cwd.is_empty() {
+            return None;
+        }
+        Some(ComposerChip::ready(label, context.cwd))
+    }
+
+    pub fn branch_chip(&self) -> Option<ComposerChip> {
+        if !(self.projects.loaded)() {
+            return Some(ComposerChip::loading());
+        }
+        let context = (self.slash.composer_context)();
+        if !context.is_git_repo {
+            return None;
+        }
+        let chat = *self;
+        let owner = context.cwd.clone();
+        let open = EventHandler::new(move |()| {
+            chat.open_menu(ComposerMenuKind::Branch);
+            if chat.menu.is(ComposerMenuKind::Branch) && !owner.is_empty() {
+                let _ = send(&ChatBranchesRequest {
+                    project: owner.clone(),
+                });
+            }
+        });
+        if context.branch.is_empty() {
+            return Some(
+                ComposerChip::ready(
+                    translate("composer-git"),
+                    translate("composer-git-repository"),
+                )
+                .opens(open),
+            );
+        }
+        let title = translate_with(
+            "composer-branch-name",
+            &[("branch", TranslationValue::String(&context.branch))],
+        );
+        Some(ComposerChip::ready(context.branch, title).opens(open))
+    }
+}
+
+impl Chat {
+    pub fn submit(&self) {
+        let mut draft = self.composer.draft;
+        let mut attachments = self.composer.attachments;
+        let mut history_cursor = self.composer.history_cursor;
+        let mut history_scratch = self.composer.history_scratch;
+        let mut at_bottom = self.transcript.at_bottom;
+        let text = draft.peek().trim().to_string();
+        let selected = attachments.peek().clone();
+        if text.is_empty() && selected.is_empty() {
+            return;
+        }
+        let mut to_submit = Vec::with_capacity(selected.len());
+        for attachment in &selected {
+            to_submit.push(ChatSubmitAttachment {
+                path: attachment.path.clone(),
+                name: attachment.name.clone(),
+                mime_type: attachment.mime_type.clone(),
+                size: attachment.size,
+            });
+        }
+        if send(&ChatSubmit {
+            text,
+            attachments: to_submit,
+        })
+        .is_err()
+        {
+            return;
+        }
+        at_bottom.set(true);
+        draft.set(String::new());
+        attachments.set(Vec::new());
+        history_cursor.set(None);
+        history_scratch.set(String::new());
+    }
+
+    pub fn stop_or_flush(&self) {
+        if self.queue.queued.peek().is_empty() {
+            let _ = send(&ChatCancel);
+        } else {
+            let _ = send(&ChatEscape);
+        }
+    }
+
+    pub fn interrupt(&self) {
+        let _ = send(&ChatEscape);
+        let mut draft = self.composer.draft;
+        if should_clear_draft_on_escape(
+            self.streaming(),
+            self.queue.queued.peek().is_empty(),
+            draft.peek().is_empty(),
+        ) {
+            draft.set(String::new());
+        }
+    }
+
+    pub fn cancel(&self) {
+        let _ = send(&ChatCancel);
+    }
+
+    pub fn run_slash_command(&self, name: &str) {
+        let mut draft = self.composer.draft;
+        let mut menu_sel = self.slash.menu_sel;
+        match name {
+            "upload" => {
+                let _ = send(&ChatPickFiles);
+                draft.set(String::new());
+            }
+            "resume" => {
+                menu_sel.set(0);
+                draft.set("/resume ".to_string());
+            }
+            "model" => {
+                menu_sel.set(0);
+                draft.set("/model ".to_string());
+            }
+            "mcp" => {
+                menu_sel.set(0);
+                draft.set("/mcp ".to_string());
+                self.mcp.request();
+            }
+            "cli" => {
+                let _ = send(&RuntimeSwitchRequest { to: "cli".into() });
+                draft.set(String::new());
+            }
+            "acp" => {
+                let _ = send(&RuntimeSwitchRequest { to: "acp".into() });
+                draft.set(String::new());
+            }
+            _ => {}
+        }
+    }
+
+    pub fn select_model(&self, model: &ModelOptionEntry) {
+        let mut draft = self.composer.draft;
+        let _ = send(&SelectModel {
+            model_id: model.id.clone(),
+        });
+        draft.set(String::new());
+    }
+
+    pub fn select_mode(&self, mode_id: String) {
+        let _ = send(&SelectMode { mode_id });
+        focus_prompt_end(PROMPT_INPUT_ID);
+    }
+
+    pub fn activate_mcp_server(&self, index: usize) {
+        let servers = self.filtered_mcp_servers();
+        let index = index.min(servers.len().saturating_sub(1));
+        let Some(server) = servers.get(index) else {
+            return;
+        };
+        self.mcp.activate(server);
+    }
+
+    pub fn mcp_selected(&self) -> usize {
+        (self.slash.menu_sel)().min(self.filtered_mcp_servers().len().saturating_sub(1))
+    }
+
+    pub fn select_resume_session(&self, session: &ResumableSessionEntry) {
+        let mut draft = self.composer.draft;
+        let _ = send(&ResumeSession {
+            kind: session.kind.clone(),
+            sid: session.sid.clone(),
+            cwd: session.cwd.clone(),
+        });
+        draft.set(String::new());
+    }
+
+    pub fn select_media_entry(&self, entry: &ChatMediaEntry) {
+        let mut draft = self.composer.draft;
+        let mut menu_sel = self.slash.menu_sel;
+        let value = draft.peek().clone();
+        let Some(query) = inline_media_query(&value) else {
+            return;
+        };
+        let reference = entry.reference();
+        let replacement = if entry.is_dir {
+            format!("@{reference}/")
+        } else {
+            if send(&ChatAttachPaths {
+                paths: vec![entry.path.clone()],
+            })
+            .is_err()
+            {
+                return;
+            }
+            String::new()
+        };
+        draft.set(replace_inline_media_query(&value, query, &replacement));
+        menu_sel.set(0);
+        focus_prompt_end(PROMPT_INPUT_ID);
+    }
+
+    pub fn answer_choice(&self, index: usize) {
+        let mut question = self.run.choice_question;
+        let mut options = self.run.choice_options;
+        let mut menu_sel = self.slash.menu_sel;
+        if send(&ChatChoiceSelected {
+            index: index as u32,
+        })
+        .is_ok()
+        {
+            question.set(String::new());
+            options.set(Vec::new());
+            menu_sel.set(0);
+        }
+    }
+
+    pub fn answer_approval(&self, call_id: String, decision: ApprovalDecision) {
+        let mut approval = self.run.approval;
+        let mut approval_sel = self.run.approval_sel;
+        if send(&ChatApproval { call_id, decision }).is_ok() {
+            approval.set(None);
+            approval_sel.set(0);
+        }
+    }
+
+    pub fn open_menu(&self, kind: ComposerMenuKind) {
+        self.open_menu_at(kind, 0);
+    }
+
+    pub fn open_menu_at(&self, kind: ComposerMenuKind, index: usize) {
+        if self.selector_open() {
+            self.dismiss_selector();
+        }
+        self.menu.toggle_at(kind, index);
+    }
+
+    pub fn dismiss_selector(&self) {
+        if self.menu.opened().is_some() {
+            self.menu.close();
+            focus_prompt_end(PROMPT_INPUT_ID);
+            return;
+        }
+        let mut draft = self.composer.draft;
+        let mut menu_sel = self.slash.menu_sel;
+        let value = draft.peek().clone();
+        if let Some(query) = inline_media_query(&value) {
+            draft.set(replace_inline_media_query(&value, query, ""));
+            focus_prompt_end(PROMPT_INPUT_ID);
+        } else {
+            draft.set(String::new());
+        }
+        menu_sel.set(0);
+    }
+
+    pub fn edit_draft(&self, value: String) {
+        let mut draft = self.composer.draft;
+        let mut history_cursor = self.composer.history_cursor;
+        let mut history_scratch = self.composer.history_scratch;
+        let mut menu_sel = self.slash.menu_sel;
+        self.menu.close();
+        draft.set(value);
+        history_cursor.set(None);
+        history_scratch.set(String::new());
+        menu_sel.set(0);
+    }
+
+    pub fn remove_attachment(&self, index: usize) {
+        let mut attachments = self.composer.attachments;
+        let mut next = attachments.peek().clone();
+        if index < next.len() {
+            next.remove(index);
+            attachments.set(next);
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct Transcript {
+    pub items: Signal<Vec<ChatItem>>,
+    pub loaded_start: Signal<u32>,
+    pub messages_total: Signal<u32>,
+    pub history_loading: Signal<bool>,
+    pub recent_messages: Signal<Vec<ChatItem>>,
+    pub recent_messages_start: Signal<u32>,
+    pub at_bottom: Signal<bool>,
+    pub last_top: Signal<i32>,
+    pub scroll_container: scroll::Container,
+}
+
+pub fn use_transcript() -> Transcript {
+    Transcript {
+        items: use_signal(Vec::new),
+        loaded_start: use_signal(|| 0),
+        messages_total: use_signal(|| 0),
+        history_loading: use_signal(|| false),
+        recent_messages: use_signal(Vec::new),
+        recent_messages_start: use_signal(|| u32::MAX),
+        at_bottom: use_signal(|| true),
+        last_top: use_signal(|| 0),
+        scroll_container: use_signal(|| None),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct RunState {
+    pub status: Signal<String>,
+    pub error: Signal<String>,
+    pub approval: Signal<Option<crate::event::PendingApproval>>,
+    pub approval_sel: Signal<usize>,
+    pub choice_question: Signal<String>,
+    pub choice_options: Signal<Vec<String>>,
+}
+
+pub fn use_run_state() -> RunState {
+    RunState {
+        status: use_signal(|| "installing".to_string()),
+        error: use_signal(String::new),
+        approval: use_signal(|| None),
+        approval_sel: use_signal(|| 0),
+        choice_question: use_signal(String::new),
+        choice_options: use_signal(Vec::new),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct AgentIdentity {
+    pub agent_name: Signal<String>,
+    pub conversation_title: Signal<String>,
+    pub agent_icon: Signal<String>,
+    pub accent: Signal<String>,
+}
+
+pub fn use_agent_identity() -> AgentIdentity {
+    AgentIdentity {
+        agent_name: use_signal(String::new),
+        conversation_title: use_signal(String::new),
+        agent_icon: use_signal(String::new),
+        accent: use_signal(String::new),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct UserIdentity {
+    pub name: Signal<String>,
+    pub initials: Signal<String>,
+    pub color: Signal<String>,
+}
+
+pub fn use_user_identity() -> UserIdentity {
+    let name = translate("team-you");
+    let initials = name
+        .chars()
+        .next()
+        .map(|character| character.to_uppercase().collect())
+        .unwrap_or_default();
+    UserIdentity {
+        name: use_signal(move || name),
+        initials: use_signal(move || initials),
+        color: use_signal(|| "#3b82f6".to_string()),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct Handoff {
+    pub source: Signal<String>,
+    pub truncated: Signal<bool>,
+    pub message_count: Signal<u32>,
+}
+
+pub fn use_handoff() -> Handoff {
+    Handoff {
+        source: use_signal(String::new),
+        truncated: use_signal(|| false),
+        message_count: use_signal(|| 0),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct ComposerDraft {
+    pub draft: Signal<String>,
+    pub attachments: Signal<Vec<ChatAttachment>>,
+    pub attachment_previews: Signal<HashMap<String, ChatAttachment>>,
+    pub attachment_preview_requests: Signal<HashSet<String>>,
+    pub history_cursor: Signal<Option<usize>>,
+    pub history_scratch: Signal<String>,
+    pub transition_preview: Signal<String>,
+    pub transition_attachments: Signal<Vec<ChatAttachment>>,
+}
+
+pub fn use_composer_draft() -> ComposerDraft {
+    ComposerDraft {
+        draft: use_signal(String::new),
+        attachments: use_signal(Vec::new),
+        attachment_previews: use_signal(HashMap::new),
+        attachment_preview_requests: use_signal(HashSet::new),
+        history_cursor: use_signal(|| None),
+        history_scratch: use_signal(String::new),
+        transition_preview: use_signal(String::new),
+        transition_attachments: use_signal(Vec::new),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct PromptQueue {
+    pub queued: Signal<Vec<QueuedPromptSnapshot>>,
+    pub paused: Signal<bool>,
+}
+
+pub fn use_prompt_queue() -> PromptQueue {
+    PromptQueue {
+        queued: use_signal(Vec::new),
+        paused: use_signal(|| false),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct MediaPicker {
+    pub entries: Signal<Vec<ChatMediaEntry>>,
+    pub request_id: Signal<u64>,
+    pub requested_query: Signal<Option<String>>,
+    pub loading: Signal<bool>,
+}
+
+pub fn use_media_picker() -> MediaPicker {
+    MediaPicker {
+        entries: use_signal(Vec::new),
+        request_id: use_signal(|| 0),
+        requested_query: use_signal(|| None),
+        loading: use_signal(|| false),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct ModelPicker {
+    pub models: Signal<Vec<ModelOptionEntry>>,
+    pub current_model_id: Signal<String>,
+    pub default_model_id: Signal<String>,
+    pub current_model: Signal<String>,
+    pub loaded: Signal<bool>,
+}
+
+pub fn use_model_picker() -> ModelPicker {
+    ModelPicker {
+        models: use_signal(Vec::new),
+        current_model_id: use_signal(String::new),
+        default_model_id: use_signal(String::new),
+        current_model: use_signal(String::new),
+        loaded: use_signal(|| false),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct ProjectPicker {
+    pub loaded: Signal<bool>,
+    pub branches: Signal<Vec<ChatBranch>>,
+    pub branches_for: Signal<String>,
+}
+
+pub fn use_project_picker() -> ProjectPicker {
+    ProjectPicker {
+        loaded: use_signal(|| false),
+        branches: use_signal(Vec::new),
+        branches_for: use_signal(String::new),
+    }
+}
+
+impl ProjectPicker {
+    pub fn remember(&self, project: String, branches: Vec<ChatBranch>) {
+        let mut held = self.branches;
+        let mut held_for = self.branches_for;
+        held.set(branches);
+        held_for.set(project);
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct EffortPicker {
+    pub levels: Signal<Vec<String>>,
+    pub current: Signal<String>,
+    pub default_level: Signal<String>,
+    pub agent_key: Signal<String>,
+}
+
+pub fn use_effort_picker() -> EffortPicker {
+    EffortPicker {
+        levels: use_signal(Vec::new),
+        current: use_signal(String::new),
+        default_level: use_signal(String::new),
+        agent_key: use_signal(String::new),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct PermissionPicker {
+    pub modes: Signal<Vec<vmux_api::protocol::AcpModeOption>>,
+    pub current_mode_id: Signal<String>,
+}
+
+pub fn use_permission_picker() -> PermissionPicker {
+    PermissionPicker {
+        modes: use_signal(Vec::new),
+        current_mode_id: use_signal(String::new),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct SlashCommands {
+    pub commands: Signal<Vec<SlashCommandEntry>>,
+    pub menu_sel: Signal<usize>,
+    pub composer_context: Signal<ComposerContext>,
+}
+
+pub fn use_slash_commands() -> SlashCommands {
+    SlashCommands {
+        commands: use_signal(Vec::new),
+        menu_sel: use_signal(|| 0),
+        composer_context: use_signal(ComposerContext::default),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct Resume {
+    pub sessions: Signal<Vec<ResumableSessionEntry>>,
+    pub requested: Signal<bool>,
+    pub loading: Signal<bool>,
+}
+
+pub fn use_resume() -> Resume {
+    Resume {
+        sessions: use_signal(Vec::new),
+        requested: use_signal(|| false),
+        loading: use_signal(|| false),
+    }
+}
+
+fn set_if_changed<T: PartialEq + 'static>(mut signal: Signal<T>, value: T) {
+    if signal.peek().ne(&value) {
+        signal.set(value);
+    }
+}
+
+fn merge_transcript_page(
+    current: &mut Vec<ChatItem>,
+    current_start: u32,
+    incoming: Vec<ChatItem>,
+    incoming_start: u32,
+) -> u32 {
+    if current_start <= incoming_start {
+        let keep = incoming_start.saturating_sub(current_start) as usize;
+        if keep <= current.len() {
+            current.truncate(keep);
+            current.extend(incoming);
+            return current_start;
+        }
+    }
+    *current = incoming;
+    incoming_start
+}
+
+struct CurrentAgent;
+
+impl CurrentAgent {
+    fn read() -> String {
+        if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
+            && let Some(rest) = meta
+                .url
+                .strip_prefix("vmux://sessions/")
+                .or_else(|| meta.url.strip_prefix("vmux://agent/"))
+            && let Some(agent) = Self::provider(rest)
+        {
+            return agent;
+        }
+        "agent".to_string()
+    }
+
+    fn provider(path: &str) -> Option<String> {
+        Some(path.split('/').find(|part| !part.is_empty())?.to_string())
+    }
+}

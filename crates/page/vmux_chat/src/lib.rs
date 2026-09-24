@@ -2,9 +2,9 @@
 
 pub mod activity;
 pub mod event;
+pub mod state;
 pub mod tab;
 pub mod transcript;
-pub mod ui_state;
 
 pub mod model;
 pub mod prompt;
@@ -14,4 +14,4 @@ pub mod room;
 pub mod format;
 
 #[cfg(ui)]
-pub mod page;
+pub mod ui;

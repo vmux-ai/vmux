@@ -5,8 +5,8 @@ mod job;
 mod job_runner;
 mod repository;
 mod repository_picker;
+mod state;
 mod status;
-mod view;
 mod watch;
 
 mod highlight;
@@ -28,7 +28,6 @@ use crate::host::job_runner::JobPlugin;
 use crate::host::repository::RepositoryPlugin;
 use crate::host::repository_picker::RepositoryPickerPlugin;
 use crate::host::status::StatusPlugin;
-use crate::host::view::GitViewPlugin;
 use crate::host::watch::WatchPlugin;
 
 pub struct GitPlugin;
@@ -53,7 +52,7 @@ impl Plugin for GitPlugin {
         .add_plugins((
             WatchPlugin,
             StatusPlugin,
-            GitViewPlugin,
+            state::StatePlugin,
             JobPlugin,
             AppPlugin,
             ChangesPlugin,

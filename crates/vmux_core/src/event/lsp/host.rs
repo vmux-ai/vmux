@@ -38,7 +38,7 @@ pub struct LspPkgStatusEvent {
     pub version: Option<String>,
 }
 
-#[vmux_api::host_event(Eq, target = "lsp")]
+#[vmux_api::ui_state(Eq, target = "lsp")]
 pub struct LspManagerStateEvent {
     pub packages: Vec<LspPackage>,
     pub progress: Vec<LspInstallProgress>,

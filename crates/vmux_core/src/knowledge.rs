@@ -1,6 +1,6 @@
 pub const KNOWLEDGE_PAGE_URL: &str = "vmux://knowledge/";
 
-#[vmux_api::host_event(Default, Eq, target = "knowledge")]
+#[vmux_api::ui_state(Default, Eq, target = "knowledge")]
 pub struct KnowledgeTreeEvent {
     pub root: String,
     pub entries: Vec<KnowledgeEntry>,
@@ -43,7 +43,7 @@ pub struct KnowledgeSearchMatch {
     pub preview: String,
 }
 
-#[vmux_api::host_event(Default, Eq, target = "knowledge")]
+#[vmux_api::ui_state(Default, Eq, target = "knowledge")]
 pub struct KnowledgeSearchEvent {
     pub query: String,
     pub matches: Vec<KnowledgeSearchMatch>,

@@ -31,7 +31,7 @@ impl<S, T> Copy for UiStatePatchBatch<S, T> {}
 
 impl<S, T> UiStatePatchBatch<S, T>
 where
-    S: vmux_api::UiState,
+    S: vmux_api::BatchedUiState,
     S::Patch: vmux_api::UiStatePatch<T>,
     T: Clone + 'static,
 {
@@ -63,7 +63,7 @@ where
 
 pub fn use_ui_state<T>() -> Signal<T>
 where
-    T: vmux_api::HostEvent + rkyv::Archive + Default + 'static,
+    T: vmux_api::UiState + rkyv::Archive + Default + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
@@ -74,7 +74,7 @@ where
 
 pub fn use_ui_state_root<T>() -> UiStateRoot<T>
 where
-    T: vmux_api::HostEvent + vmux_api::UiState + rkyv::Archive + Default + 'static,
+    T: vmux_api::BatchedUiState + rkyv::Archive + Default + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
@@ -89,7 +89,7 @@ where
 
 pub fn use_ui_state_patch<S, T>() -> UiStatePatchBatch<S, T>
 where
-    S: vmux_api::UiState,
+    S: vmux_api::BatchedUiState,
     S::Patch: vmux_api::UiStatePatch<T>,
     T: Clone + 'static,
 {

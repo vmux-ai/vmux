@@ -7,13 +7,13 @@
 pub mod event;
 pub mod protocol;
 pub mod reconcile;
-pub mod ui_state;
+pub mod state;
 
 #[cfg(ui)]
 pub mod tool_page;
 
 #[cfg(ui)]
-pub mod page;
+pub mod ui;
 
 #[cfg(ui)]
 mod active_session;

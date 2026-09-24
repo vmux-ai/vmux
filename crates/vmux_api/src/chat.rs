@@ -377,7 +377,7 @@ pub struct SlashCommandEntry {
     pub name: String,
     pub description: String,
 }
-#[vmux_api::host_event(Default, targets = ["sessions", "agent", "start"])]
+#[vmux_api::ui_state(Default, targets = ["sessions", "agent", "start"])]
 pub struct SlashCommands {
     pub commands: Vec<SlashCommandEntry>,
 }

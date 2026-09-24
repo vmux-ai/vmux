@@ -10185,7 +10185,6 @@ dependencies = [
  "vmux_layout",
  "vmux_mcp",
  "vmux_path",
- "vmux_remote",
  "vmux_service",
  "vmux_session",
  "vmux_setting",
@@ -10194,6 +10193,7 @@ dependencies = [
  "vmux_start",
  "vmux_terminal",
  "vmux_tool",
+ "vmux_transport",
  "vmux_ui",
 ]
 
@@ -10326,8 +10326,8 @@ dependencies = [
  "tokio",
  "vmux_client",
  "vmux_mcp",
- "vmux_remote",
  "vmux_tool",
+ "vmux_transport",
 ]
 
 [[package]]
@@ -10348,7 +10348,7 @@ dependencies = [
  "vmux_api",
  "vmux_path",
  "vmux_profile",
- "vmux_remote",
+ "vmux_transport",
 ]
 
 [[package]]
@@ -10711,10 +10711,10 @@ dependencies = [
  "vmux_app",
  "vmux_chat",
  "vmux_path",
- "vmux_remote",
  "vmux_service",
  "vmux_start",
  "vmux_team",
+ "vmux_transport",
  "vmux_ui",
 ]
 
@@ -10824,7 +10824,7 @@ dependencies = [
  "vmux_core",
  "vmux_git",
  "vmux_path",
- "vmux_remote",
+ "vmux_transport",
  "vmux_ui",
  "vte",
 ]
@@ -11022,6 +11022,23 @@ dependencies = [
  "toml",
  "vmux_path",
  "vmux_profile",
+]
+
+[[package]]
+name = "vmux_transport"
+version = "0.0.34"
+dependencies = [
+ "bytes",
+ "quinn",
+ "rcgen",
+ "ring",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "webpki-roots",
 ]
 
 [[package]]

@@ -98,7 +98,7 @@ impl Emit {
         commands: &mut Commands,
         pages: &mut Query<&mut vmux_core::PageMetadata>,
         file_pages: &Query<(), With<FileUiStateUpdates>>,
-        views: &mut Query<&mut super::view::GitView>,
+        views: &mut Query<&mut super::state::GitState>,
         webview: Entity,
     ) {
         match self {
@@ -184,7 +184,7 @@ fn deliver_git_outputs(
     mut outputs: Query<(Entity, &mut GitJobOutput)>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
     file_pages: Query<(), With<FileUiStateUpdates>>,
-    mut views: Query<&mut super::view::GitView>,
+    mut views: Query<&mut super::state::GitState>,
     mut commands: Commands,
 ) {
     for (entity, mut output) in &mut outputs {

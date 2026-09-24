@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::AgentCommand;
 
 use super::{
-    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
-    ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 
 pub(super) struct TerminalToolPlugin;
@@ -45,13 +45,9 @@ fn parse(mut commands: Commands, calls: ToolCalls<TerminalTool>) {
 
 fn dispatch(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<TerminalSendArgs>),
-        Added<ParsedToolCall<TerminalSendArgs>>,
-    >,
+    requests: Query<(Entity, &TerminalSendArgs), (With<ToolCall>, Added<TerminalSendArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
+    for (entity, args) in &requests {
         let text = if args.enter.unwrap_or(false) {
             format!("{}\r", args.text)
         } else {
@@ -65,6 +61,6 @@ fn dispatch(
                 terminal: args.terminal.clone(),
             }))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }

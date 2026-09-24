@@ -1,4 +1,6 @@
-pub trait UiState: Clone + Send + Sync + 'static {
+pub trait UiState: crate::HostEvent + Clone + Send + Sync + 'static {}
+
+pub trait BatchedUiState: UiState {
     type Patch: Clone + Send + Sync + 'static;
 
     fn sequence(&self) -> u64;
@@ -14,13 +16,13 @@ pub trait UiStatePatch<T>: 'static {
 mod tests {
     use super::*;
 
-    #[derive(Clone, vmux_api::UiState)]
+    #[vmux_api::ui_state(target = any)]
     struct TestState {
         sequence: u64,
         patches: Vec<TestPatch>,
     }
 
-    #[derive(Clone, vmux_api::UiStatePatch)]
+    #[vmux_api::ui_state_patch]
     enum TestPatch {
         Number(u32),
         Text(String),
@@ -41,5 +43,17 @@ mod tests {
         );
         let text = <TestPatch as UiStatePatch<String>>::payload(&state.patches()[1]);
         assert_eq!(text.map(String::as_str), Some("ready"));
+    }
+
+    #[vmux_api::ui_state(Default, target = any)]
+    struct TestSnapshot {
+        value: u32,
+    }
+
+    #[test]
+    fn derives_snapshot_state_without_patch_fields() {
+        fn assert_state<T: UiState>() {}
+        assert_state::<TestSnapshot>();
+        assert_eq!(TestSnapshot::default().value, 0);
     }
 }

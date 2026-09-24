@@ -10,7 +10,7 @@ use crate::manifest::{ToolStore, expand_user_path, load_manifest_from, write_man
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DiscoverMcpServers;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct DiscoveredMcpServers {
     pub servers: BTreeMap<String, DiscoveredMcpServer>,
     pub errors: Vec<String>,
@@ -42,7 +42,7 @@ impl ImportMcpConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImportedMcpConfig {
     pub servers: usize,
 }
@@ -70,7 +70,7 @@ impl ImportMcpServer {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ImportedMcpServer {
     pub name: String,
 }
@@ -97,7 +97,7 @@ impl ForgetMcpServer {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ForgottenMcpServer {
     pub name: String,
 }

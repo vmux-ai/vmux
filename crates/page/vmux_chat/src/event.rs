@@ -41,7 +41,7 @@ impl QueuedPromptSnapshot {
     }
 }
 
-#[vmux_api::host_event(Default, Eq, version = 2, targets = ["sessions", "agent", "start"])]
+#[vmux_api::ui_state(Default, Eq, version = 2, targets = ["sessions", "agent", "start"])]
 pub struct ChatSnapshot {
     pub messages: Vec<ChatItem>,
     pub messages_start: u32,
@@ -75,7 +75,7 @@ pub struct PendingApproval {
     pub args: JsonValue,
 }
 
-#[vmux_api::host_event(Default, Eq)]
+#[vmux_api::ui_state(Default, Eq)]
 pub struct ComposerContext {
     pub cwd: String,
     pub workspace_name: String,
@@ -91,7 +91,7 @@ pub struct ComposerContext {
     pub projects: Vec<vmux_core::event::ProjectRow>,
 }
 
-#[vmux_api::host_event(Default, Eq)]
+#[vmux_api::ui_state(Default, Eq)]
 pub struct ModeState {
     pub current_mode_id: String,
     pub modes: Vec<vmux_service::protocol::AcpModeOption>,
@@ -174,7 +174,7 @@ pub struct ChatGoToBranch {
     pub checkout: String,
 }
 
-#[vmux_api::host_event(Default)]
+#[vmux_api::ui_state(Default)]
 pub struct ModelState {
     pub current_model_id: String,
     pub current_model_name: String,

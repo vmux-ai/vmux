@@ -23,7 +23,7 @@ fn on_repository_request(
     trigger: On<BinReceive<GitRepositoryRequest>>,
     watch: Option<NonSendMut<GitWatch>>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
-    mut views: Query<&mut super::view::GitView>,
+    mut views: Query<&mut super::state::GitState>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;

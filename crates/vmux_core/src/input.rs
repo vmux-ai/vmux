@@ -41,7 +41,7 @@ pub struct PageKeyContext {
     pub keys: Vec<String>,
 }
 
-#[vmux_api::host_event(Default, Eq, targets = [
+#[vmux_api::ui_state(Default, Eq, targets = [
     "terminal",
     "files",
     "projects",
