@@ -737,9 +737,7 @@ mod tests {
         let batch = SimulatorKeyboardBatch {
             operations: vec![
                 SimulatorInputOperation::Text { text: "a".into() },
-                SimulatorInputOperation::Text {
-                    text: "\"".into(),
-                },
+                SimulatorInputOperation::Text { text: "\"".into() },
                 SimulatorInputOperation::Key { code: 42 },
                 SimulatorInputOperation::Text { text: "\\".into() },
             ],

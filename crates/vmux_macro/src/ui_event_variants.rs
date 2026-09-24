@@ -158,14 +158,10 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
         let field_idents = field_idents(&fields)?;
         ensure_unique_fields(&args.shared, &fields)?;
         let request_field_idents = shared_idents.iter().chain(field_idents.iter());
-        let request_fields = args
-            .shared
+        let request_fields = args.shared.iter().chain(fields.iter()).map(public_field);
+        let operation_fields = field_idents
             .iter()
-            .chain(fields.iter())
-            .map(public_field);
-        let operation_fields = field_idents.iter().map(|field| {
-            quote!(#field: self.#field.clone())
-        });
+            .map(|field| quote!(#field: self.#field.clone()));
         let operation = if field_idents.is_empty() {
             quote!(#operation_ident::#variant_ident)
         } else {
@@ -266,11 +262,7 @@ mod tests {
                 CheckoutCommit { commit: String },
             }
         };
-        let output = expand(
-            quote!(Eq, target = "git", shared(repo_root: String)),
-            input,
-        )
-        .unwrap();
+        let output = expand(quote!(Eq, target = "git", shared(repo_root: String)), input).unwrap();
         let file = parse2::<syn::File>(output).unwrap();
         let names = file
             .items

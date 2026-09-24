@@ -404,9 +404,7 @@ mod tests {
 
         assert_eq!(
             requests,
-            vec![PaneFocusRequest(PaneFocus::Direction(
-                PaneDirection::Left
-            ))]
+            vec![PaneFocusRequest(PaneFocus::Direction(PaneDirection::Left))]
         );
     }
 
@@ -432,9 +430,7 @@ mod tests {
 
         assert_eq!(
             requests,
-            vec![PaneFocusRequest(PaneFocus::Direction(
-                PaneDirection::Right
-            ))]
+            vec![PaneFocusRequest(PaneFocus::Direction(PaneDirection::Right))]
         );
     }
 

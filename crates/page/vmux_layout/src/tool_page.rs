@@ -350,7 +350,7 @@ fn request_snapshot(refresh: bool) {
 }
 
 fn send_action(provider: ToolProvider, action: ToolAction, id: String, value: String) {
-    match action {
+    let _ = match action {
         ToolAction::Install => send(&ToolInstallRequest { provider, id }),
         ToolAction::Update => send(&ToolUpdateRequest { provider, id }),
         ToolAction::Uninstall => send(&ToolUninstallRequest { provider, id }),

@@ -828,7 +828,7 @@ fn RecoveryCard(
 }
 
 fn send_recovery_action(action: VaultAction, recovery_key: String) {
-    match action {
+    let _ = match action {
         VaultAction::CreateRecoveryKey => send(&VaultCreateRecoveryKeyRequest),
         VaultAction::UnlockRecoveryKey => send(&VaultUnlockRecoveryKeyRequest { recovery_key }),
         _ => unreachable!(),
@@ -890,7 +890,7 @@ fn request_snapshot(load_repositories: bool) {
 }
 
 fn send_action(action: VaultAction, repository: String, private: bool) {
-    match action {
+    let _ = match action {
         VaultAction::Create => send(&VaultCreateRequest {
             repository,
             private,
@@ -902,9 +902,7 @@ fn send_action(action: VaultAction, repository: String, private: bool) {
         VaultAction::ConnectCloud => send(&VaultConnectCloudRequest {
             provider: repository,
         }),
-        VaultAction::ChooseCloudFolder => send(&VaultChooseCloudFolderRequest {
-            root: repository,
-        }),
+        VaultAction::ChooseCloudFolder => send(&VaultChooseCloudFolderRequest { root: repository }),
         _ => unreachable!(),
     };
 }

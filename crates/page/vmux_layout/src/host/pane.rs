@@ -157,12 +157,7 @@ pub struct CloseRequest;
 
 impl CommandRequest for CloseRequest {
     fn definitions() -> Vec<CommandDefinition> {
-        vec![CommandDefinition::new(
-            "close_pane",
-            "Close Pane",
-            "Layout > Pane",
-        )
-        .chord("Ctrl+b, x")]
+        vec![CommandDefinition::new("close_pane", "Close Pane", "Layout > Pane").chord("Ctrl+b, x")]
     }
 }
 
@@ -260,9 +255,9 @@ impl TryFrom<&CommandInvocation> for ArrangeRequest {
             "rotate_forward" => Ok(Self(PaneArrangement::Rotate(SiblingDirection::Next))),
             "rotate_backward" => Ok(Self(PaneArrangement::Rotate(SiblingDirection::Previous))),
             "mirror_panes" => Ok(Self(PaneArrangement::Mirror(None))),
-            "mirror_panes_horizontal" => Ok(Self(PaneArrangement::Mirror(Some(
-                PaneSplitDirection::Row,
-            )))),
+            "mirror_panes_horizontal" => {
+                Ok(Self(PaneArrangement::Mirror(Some(PaneSplitDirection::Row))))
+            }
             "mirror_panes_vertical" => Ok(Self(PaneArrangement::Mirror(Some(
                 PaneSplitDirection::Column,
             )))),
@@ -344,17 +339,17 @@ impl Plugin for PanePlugin {
             CommandTypePlugin::<ResizeRequest>::default(),
             CommandTypePlugin::<ToggleZoomRequest>::default(),
         ))
-            .register_type::<SideSheetCardCollapsed>()
-            .add_plugins((
-                TreePlugin,
-                IdentityPlugin,
-                ArrangementPlugin,
-                OpenPlugin,
-                PaneZoomPlugin,
-                FocusPlugin,
-                ResizePlugin,
-                ClosePlugin,
-            ));
+        .register_type::<SideSheetCardCollapsed>()
+        .add_plugins((
+            TreePlugin,
+            IdentityPlugin,
+            ArrangementPlugin,
+            OpenPlugin,
+            PaneZoomPlugin,
+            FocusPlugin,
+            ResizePlugin,
+            ClosePlugin,
+        ));
     }
 }
 
@@ -2532,9 +2527,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<FocusRequest>>()
-            .write(FocusRequest(PaneFocus::Direction(
-                PaneDirection::Left,
-            )));
+            .write(FocusRequest(PaneFocus::Direction(PaneDirection::Left)));
         app.update();
 
         assert!(

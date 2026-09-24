@@ -1023,10 +1023,7 @@ fn on_invoke_request(
     commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
 }
 
-fn on_switch_space_request(
-    trigger: On<BinReceive<SwitchSpaceRequest>>,
-    mut commands: Commands,
-) {
+fn on_switch_space_request(trigger: On<BinReceive<SwitchSpaceRequest>>, mut commands: Commands) {
     let webview = trigger.event().webview;
     let id = &trigger.event().payload.id;
     if !id.is_empty() {
@@ -1120,7 +1117,9 @@ fn close_command_bar(
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
     }
-    if trigger.event().restore_keyboard && let Some(stack) = command_bar.workspace.stack {
+    if trigger.event().restore_keyboard
+        && let Some(stack) = command_bar.workspace.stack
+    {
         restore_keyboard.write(RestoreKeyboardToStack { stack });
     }
 }

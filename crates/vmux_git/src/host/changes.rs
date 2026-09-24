@@ -146,10 +146,7 @@ fn on_checkout_commit_request(
     );
 }
 
-fn on_cherry_pick_request(
-    trigger: On<BinReceive<GitCherryPickRequest>>,
-    mut commands: Commands,
-) {
+fn on_cherry_pick_request(trigger: On<BinReceive<GitCherryPickRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -191,10 +188,7 @@ fn on_delete_branch_request(
     );
 }
 
-fn on_fast_forward_request(
-    trigger: On<BinReceive<GitFastForwardRequest>>,
-    mut commands: Commands,
-) {
+fn on_fast_forward_request(trigger: On<BinReceive<GitFastForwardRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -242,10 +236,7 @@ fn on_revert_request(trigger: On<BinReceive<GitRevertRequest>>, mut commands: Co
     );
 }
 
-fn on_stash_drop_request(
-    trigger: On<BinReceive<GitStashDropRequest>>,
-    mut commands: Commands,
-) {
+fn on_stash_drop_request(trigger: On<BinReceive<GitStashDropRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -257,10 +248,7 @@ fn on_stash_drop_request(
     );
 }
 
-fn on_stash_pop_request(
-    trigger: On<BinReceive<GitStashPopRequest>>,
-    mut commands: Commands,
-) {
+fn on_stash_pop_request(trigger: On<BinReceive<GitStashPopRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -272,10 +260,7 @@ fn on_stash_pop_request(
     );
 }
 
-fn on_stash_push_request(
-    trigger: On<BinReceive<GitStashPushRequest>>,
-    mut commands: Commands,
-) {
+fn on_stash_push_request(trigger: On<BinReceive<GitStashPushRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,

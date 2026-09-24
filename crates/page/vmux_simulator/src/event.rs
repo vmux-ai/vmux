@@ -245,9 +245,7 @@ mod tests {
         );
         assert_eq!(
             SimulatorInputOperation::try_from("あ"),
-            Ok(SimulatorInputOperation::Text {
-                text: "あ".into()
-            })
+            Ok(SimulatorInputOperation::Text { text: "あ".into() })
         );
     }
 
