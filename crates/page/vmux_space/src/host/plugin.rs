@@ -64,11 +64,7 @@ impl Plugin for SpacePlugin {
                 super::key::SpaceKeyPlugin,
                 super::project::SpaceProjectPlugin,
                 crate::snapshot_updater::SnapshotPlugin,
-                UiEventPlugin::<(
-                    SpaceRequest,
-                    ProjectRequest,
-                    vmux_core::event::ProjectTreeToggle,
-                )>::default(),
+                UiEventPlugin::<(SpaceRequest, vmux_core::event::ProjectTreeToggle)>::default(),
             ))
             .add_observer(on_space_request)
             .add_observer(on_project_request)
@@ -373,18 +369,14 @@ fn on_project_request(
     let (Some(active), Some(mut settings)) = (active, settings) else {
         return;
     };
-    let Some(path) = evt.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) else {
-        return;
-    };
     let space_id = active.record.id.clone();
-    let changed = match evt.command.as_str() {
-        "activate" => settings
+    let changed = match evt {
+        ProjectRequest::Activate { path, .. } => settings
             .bypass_change_detection()
-            .activate_space_project(&space_id, path),
-        "forget" => settings
+            .activate_space_project(&space_id, path.trim()),
+        ProjectRequest::Forget { path } => settings
             .bypass_change_detection()
-            .forget_space_project(&space_id, path),
-        _ => false,
+            .forget_space_project(&space_id, path.trim()),
     };
     if changed {
         settings.set_changed();
@@ -1324,14 +1316,11 @@ mod tests {
         app
     }
 
-    fn run_project_request(app: &mut App, command: &str, path: &str) {
+    fn run_project_request(app: &mut App, request: ProjectRequest) {
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().trigger(BinReceive {
             webview,
-            payload: ProjectRequest {
-                command: command.into(),
-                path: Some(path.into()),
-            },
+            payload: request,
         });
         app.update();
     }
@@ -1377,7 +1366,15 @@ mod tests {
             })
             .collect();
 
-        run_project_request(&mut app, "activate", "/repo/beta");
+        run_project_request(
+            &mut app,
+            ProjectRequest::Activate {
+                path: "/repo/beta".into(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: None,
+            },
+        );
 
         assert_eq!(space_state(&app).1.as_deref(), Some("/repo/beta"));
         let after: Vec<Option<String>> = tabs
@@ -1404,7 +1401,12 @@ mod tests {
             ],
         );
 
-        run_project_request(&mut app, "forget", "/repo/beta");
+        run_project_request(
+            &mut app,
+            ProjectRequest::Forget {
+                path: "/repo/beta".into(),
+            },
+        );
 
         assert_eq!(
             space_state(&app),
@@ -1419,7 +1421,15 @@ mod tests {
             vec![vmux_setting::SpaceProject::at("/repo/alpha")],
         );
 
-        run_project_request(&mut app, "activate", "/repo/elsewhere");
+        run_project_request(
+            &mut app,
+            ProjectRequest::Activate {
+                path: "/repo/elsewhere".into(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: None,
+            },
+        );
 
         assert_eq!(space_state(&app).1.as_deref(), Some("/repo/alpha"));
     }
