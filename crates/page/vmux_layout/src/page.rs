@@ -2,6 +2,7 @@
 
 mod header;
 mod side_sheet;
+mod stack;
 mod state;
 mod tab_drag;
 mod update;
