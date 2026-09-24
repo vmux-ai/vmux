@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
 use vmux_api::mcp::{
-    McpServerConnectRequest, McpServerDisconnectRequest, McpServerEntry, McpServerStatus,
-    McpServers, McpServersRequest,
+    McpServerEntry, McpServerRequest, McpServerStatus, McpServers, McpServersRequest,
 };
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
@@ -10,88 +9,33 @@ use crate::i18n::translate;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct McpConnections {
-    pub servers: Signal<Vec<McpServerEntry>>,
-    pub loaded: Signal<bool>,
-    pub loading: Signal<bool>,
-    pub pending: Signal<String>,
-    pub error: Signal<String>,
+    state: Signal<McpServers>,
 }
 
 pub fn use_mcp_connections() -> McpConnections {
-    let connections = McpConnections {
-        servers: use_signal(Vec::new),
-        loaded: use_signal(|| false),
-        loading: use_signal(|| false),
-        pending: use_signal(String::new),
-        error: use_signal(String::new),
-    };
-    let mut servers = connections.servers;
-    let mut loaded = connections.loaded;
-    let mut loading = connections.loading;
-    let mut pending = connections.pending;
-    let mut error = connections.error;
-    let snapshot = use_ui_state::<McpServers>();
-    use_effect(move || {
-        let incoming = snapshot();
-        servers.set(incoming.servers);
-        loaded.set(incoming.loaded);
-        if incoming.loaded {
-            loading.set(false);
-        }
-        if let Some(result) = incoming.result {
-            if *pending.peek() == result.id {
-                pending.set(String::new());
-            }
-            if result.success {
-                error.set(String::new());
-            } else {
-                error.set(result.message);
-            }
-        }
-    });
-    connections
+    McpConnections {
+        state: use_ui_state::<McpServers>(),
+    }
 }
 
 impl McpConnections {
     pub fn request(&self) {
-        if *self.loading.peek() {
-            return;
-        }
-        let mut loading = self.loading;
-        loading.set(true);
-        if send(&McpServersRequest).is_err() {
-            loading.set(false);
-        }
+        let _ = send(&McpServersRequest);
     }
 
     pub fn activate(&self, server: &McpServerEntry) {
-        if !self.pending.peek().is_empty() {
+        if self.state.peek().pending.is_some() {
             return;
         }
-        let request = match server.status {
-            McpServerStatus::Available
-            | McpServerStatus::AuthenticationRequired
-            | McpServerStatus::Failed => send(&McpServerConnectRequest {
-                id: server.id.clone(),
-            }),
-            McpServerStatus::Configured => return,
-            McpServerStatus::Connected => send(&McpServerDisconnectRequest {
-                id: server.id.clone(),
-            }),
-        };
-        let mut pending = self.pending;
-        let mut error = self.error;
-        pending.set(server.id.clone());
-        error.set(String::new());
-        if request.is_err() {
-            pending.set(String::new());
-        }
+        let _ = send(&McpServerRequest {
+            id: server.id.clone(),
+        });
     }
 
     pub fn filtered(&self, query: &str) -> Vec<McpServerEntry> {
         let query = query.trim().to_ascii_lowercase();
         let mut matching = Vec::new();
-        for server in self.servers.read().iter() {
+        for server in self.state.read().servers.iter() {
             let description = McpServerText::description(server);
             if query.is_empty()
                 || server.id.to_ascii_lowercase().contains(&query)
@@ -130,8 +74,18 @@ pub fn McpMenu(
     on_hover: EventHandler<usize>,
     on_dismiss: EventHandler<()>,
 ) -> Element {
-    let pending = (connections.pending)();
-    let error = (connections.error)();
+    let snapshot = (connections.state)();
+    let pending = snapshot
+        .pending
+        .as_ref()
+        .map(|pending| pending.id.clone())
+        .unwrap_or_default();
+    let error = snapshot
+        .result
+        .as_ref()
+        .filter(|result| !result.success)
+        .map(|result| result.message.clone())
+        .unwrap_or_default();
     rsx! {
         PromptPopup {
             placement,
@@ -142,7 +96,7 @@ pub fn McpMenu(
                     "{error}"
                 }
             }
-            if (connections.loading)() && !(connections.loaded)() {
+            if snapshot.loading && !snapshot.loaded {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("common-loading")} }
             } else if entries.is_empty() {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("tools-empty")} }

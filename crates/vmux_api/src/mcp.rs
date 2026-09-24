@@ -19,7 +19,9 @@ pub struct McpServerEntry {
 #[vmux_api::ui_state(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
 pub struct McpServers {
     pub loaded: bool,
+    pub loading: bool,
     pub servers: Vec<McpServerEntry>,
+    pub pending: Option<McpServerPending>,
     pub result: Option<McpServerResult>,
 }
 
@@ -33,13 +35,14 @@ pub enum McpServerAction {
     Disconnect,
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
-pub struct McpServerConnectRequest {
+#[vmux_api::contract(Default, Eq)]
+pub struct McpServerPending {
     pub id: String,
+    pub action: McpServerAction,
 }
 
 #[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
-pub struct McpServerDisconnectRequest {
+pub struct McpServerRequest {
     pub id: String,
 }
 
@@ -59,7 +62,9 @@ mod tests {
     fn server_result_round_trips_inside_state() {
         let state = McpServers {
             loaded: true,
+            loading: false,
             servers: Vec::new(),
+            pending: None,
             result: Some(McpServerResult {
                 id: "linear".to_string(),
                 action: McpServerAction::Connect,
