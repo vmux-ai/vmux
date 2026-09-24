@@ -1,14 +1,15 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
-use vmux_core::event::{
-    PageContextEvent, PageContextRequest, TabWorkspaceEvent, TabWorkspaceRequest,
-};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use vmux_core::event::{PageContextRequest, TabWorkspaceRequest};
+use vmux_git::state::{GitPageContext, GitUiState, GitWorkspaceChanged};
 
 use crate::settings::EffectiveStartupDir;
 use crate::tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use crate::worktree::{ManagedWorktreeRoot, TabWorktreeReady};
+
+type GitUiStateUpdates = vmux_core::host::UiStateUpdates<GitUiState>;
 
 pub struct PageContextPlugin;
 
@@ -157,13 +158,14 @@ fn on_page_context_request(
         .get(trigger.event().webview)
         .map(|page| page.url.clone())
         .unwrap_or_default();
-    commands.trigger(BinHostEmitEvent::from_event(
+    GitUiStateUpdates::write(
+        &mut commands,
         trigger.event().webview,
-        &PageContextEvent {
+        &GitPageContext {
             working_directory: path,
             page_url,
         },
-    ));
+    );
 }
 
 fn on_tab_workspace_request(
@@ -209,20 +211,20 @@ fn on_tab_workspace_request(
         Ok(path) => (path, String::new()),
         Err(error) => (String::new(), error),
     };
-    let event = TabWorkspaceEvent {
+    let event = GitWorkspaceChanged {
         path,
         branch: request.branch.clone(),
         error,
     };
     let Some(tab_entity) = tab_entity else {
-        commands.trigger(BinHostEmitEvent::from_event(webview, &event));
+        GitUiStateUpdates::write(&mut commands, webview, &event);
         return;
     };
     for page in &pages {
         let mut current = page;
         loop {
             if current == tab_entity {
-                commands.trigger(BinHostEmitEvent::from_event(page, &event));
+                GitUiStateUpdates::write(&mut commands, page, &event);
                 break;
             }
             let Ok(parent) = child_of.get(current) else {

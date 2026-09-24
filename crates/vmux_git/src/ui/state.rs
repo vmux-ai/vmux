@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
-use vmux_core::event::{PageContextEvent, TabWorkspaceEvent};
-use vmux_ui::hooks::{use_listener, use_ui_state_root};
+use vmux_ui::hooks::use_ui_state_root;
 use vmux_ui::list_nav::{MenuDirection, move_selection};
 use vmux_ui::scroll::ScrollIntoView;
 
@@ -10,7 +9,10 @@ use super::diff_projection::EditorDiffMarker;
 use super::model::{BranchCollection, BranchPrompt, GitPanel};
 use super::workspace::GitWorkspace;
 use crate::event::*;
-use crate::state::{GitCommandLogEntry, GitPageSnapshot, GitUiState, GitUiStatePatch};
+use crate::state::{
+    GitCommandLogEntry, GitPageContext, GitPageSnapshot, GitRepositoryPicked, GitUiState,
+    GitUiStatePatch, GitWorkspaceChanged,
+};
 
 #[derive(Clone, Copy)]
 pub(super) struct GitPageState {
@@ -79,36 +81,45 @@ impl GitPageState {
             handled_ui_sequence.set(event.sequence);
             for patch in &event.patches {
                 match patch {
+                    GitUiStatePatch::Context(context) => self.apply_context(context.clone()),
+                    GitUiStatePatch::RepositoryPicked(picked) => {
+                        self.apply_repository_picked(picked.clone());
+                    }
+                    GitUiStatePatch::Workspace(workspace) => {
+                        self.apply_workspace_changed(workspace.clone());
+                    }
                     GitUiStatePatch::Snapshot(snapshot) => self.apply_snapshot(*snapshot.clone()),
                 }
             }
         });
+    }
 
-        let _context = use_listener::<PageContextEvent, _>(move |context| {
-            let path = crate::GitUrl::parse(&context.page_url)
-                .map(|path| path.to_string_lossy().to_string())
-                .unwrap_or(context.working_directory);
-            self.reset(path.clone(), String::new());
-            GitWorkspace::browse(&path, false);
-        });
-        let _repository_picked = use_listener::<GitRepositoryPickedEvent, _>(move |event| {
-            if event.path.is_empty() {
-                return;
-            }
-            self.start_loading();
-            GitWorkspace::browse(&event.path, false);
-        });
-        let _workspace = use_listener::<TabWorkspaceEvent, _>(move |event| {
-            if !event.error.is_empty() {
-                self.record_error(event.error);
-                return;
-            }
-            if event.path.is_empty() || event.path == self.workspace() {
-                return;
-            }
-            self.reset(event.path.clone(), event.branch);
-            GitWorkspace::request(&event.path);
-        });
+    fn apply_context(self, context: GitPageContext) {
+        let path = crate::GitUrl::parse(&context.page_url)
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or(context.working_directory);
+        self.reset(path.clone(), String::new());
+        GitWorkspace::browse(&path, false);
+    }
+
+    fn apply_repository_picked(self, event: GitRepositoryPicked) {
+        if event.path.is_empty() {
+            return;
+        }
+        self.start_loading();
+        GitWorkspace::browse(&event.path, false);
+    }
+
+    fn apply_workspace_changed(self, event: GitWorkspaceChanged) {
+        if !event.error.is_empty() {
+            self.record_error(event.error);
+            return;
+        }
+        if event.path.is_empty() || event.path == self.workspace() {
+            return;
+        }
+        self.reset(event.path.clone(), event.branch);
+        GitWorkspace::request(&event.path);
     }
 
     fn apply_snapshot(self, snapshot: GitPageSnapshot) {
