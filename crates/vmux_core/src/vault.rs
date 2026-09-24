@@ -112,11 +112,146 @@ pub enum VaultAction {
     ChooseCloudFolder,
 }
 
-#[vmux_api::ui_event(Eq, target = "vault")]
+#[vmux_api::contract(Eq)]
 pub struct VaultRequest {
     pub action: VaultAction,
     pub repository: String,
     pub private: bool,
     pub folder_name: String,
     pub recovery_key: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "vault")]
+pub struct VaultCreateRequest {
+    pub repository: String,
+    pub private: bool,
+}
+
+#[vmux_api::ui_event(Eq, target = "vault")]
+pub struct VaultConnectRequest {
+    pub repository: String,
+}
+
+#[vmux_api::ui_event(Default, Eq, target = "vault")]
+pub struct VaultSyncRequest;
+
+#[vmux_api::ui_event(Default, Eq, target = "vault")]
+pub struct VaultConnectGithubRequest;
+
+#[vmux_api::ui_event(Default, Eq, target = "vault")]
+pub struct VaultConnectFolderRequest;
+
+#[vmux_api::ui_event(Default, Eq, target = "vault")]
+pub struct VaultGenerateRecoveryKeyRequest;
+
+#[vmux_api::ui_event(Default, Eq, target = "vault")]
+pub struct VaultCreateRecoveryKeyRequest;
+
+#[vmux_api::ui_event(Eq, target = "vault")]
+pub struct VaultUnlockRecoveryKeyRequest {
+    pub recovery_key: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "vault")]
+pub struct VaultConnectCloudRequest {
+    pub provider: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "vault")]
+pub struct VaultCreateCloudFolderRequest {
+    pub root: String,
+    pub folder_name: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "vault")]
+pub struct VaultChooseCloudFolderRequest {
+    pub root: String,
+}
+
+impl VaultRequest {
+    fn empty(action: VaultAction) -> Self {
+        Self {
+            action,
+            repository: String::new(),
+            private: false,
+            folder_name: String::new(),
+            recovery_key: String::new(),
+        }
+    }
+}
+
+macro_rules! empty_vault_request {
+    ($request:ty, $action:expr) => {
+        impl From<$request> for VaultRequest {
+            fn from(_: $request) -> Self {
+                Self::empty($action)
+            }
+        }
+    };
+}
+
+empty_vault_request!(VaultSyncRequest, VaultAction::Sync);
+empty_vault_request!(VaultConnectGithubRequest, VaultAction::ConnectGithub);
+empty_vault_request!(VaultConnectFolderRequest, VaultAction::ConnectFolder);
+empty_vault_request!(
+    VaultGenerateRecoveryKeyRequest,
+    VaultAction::GenerateRecoveryKey
+);
+empty_vault_request!(VaultCreateRecoveryKeyRequest, VaultAction::CreateRecoveryKey);
+
+impl From<VaultCreateRequest> for VaultRequest {
+    fn from(request: VaultCreateRequest) -> Self {
+        Self {
+            action: VaultAction::Create,
+            repository: request.repository,
+            private: request.private,
+            ..Self::empty(VaultAction::Create)
+        }
+    }
+}
+
+impl From<VaultConnectRequest> for VaultRequest {
+    fn from(request: VaultConnectRequest) -> Self {
+        Self {
+            repository: request.repository,
+            ..Self::empty(VaultAction::Connect)
+        }
+    }
+}
+
+impl From<VaultUnlockRecoveryKeyRequest> for VaultRequest {
+    fn from(request: VaultUnlockRecoveryKeyRequest) -> Self {
+        Self {
+            recovery_key: request.recovery_key,
+            ..Self::empty(VaultAction::UnlockRecoveryKey)
+        }
+    }
+}
+
+impl From<VaultConnectCloudRequest> for VaultRequest {
+    fn from(request: VaultConnectCloudRequest) -> Self {
+        Self {
+            repository: request.provider,
+            ..Self::empty(VaultAction::ConnectCloud)
+        }
+    }
+}
+
+impl From<VaultCreateCloudFolderRequest> for VaultRequest {
+    fn from(request: VaultCreateCloudFolderRequest) -> Self {
+        Self {
+            repository: request.root,
+            folder_name: request.folder_name,
+            ..Self::empty(VaultAction::CreateCloudFolder)
+        }
+    }
+}
+
+impl From<VaultChooseCloudFolderRequest> for VaultRequest {
+    fn from(request: VaultChooseCloudFolderRequest) -> Self {
+        Self {
+            repository: request.root,
+            ..Self::empty(VaultAction::ChooseCloudFolder)
+        }
+    }
 }

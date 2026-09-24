@@ -2,7 +2,11 @@
 
 use dioxus::prelude::*;
 use vmux_core::vault::{
-    VaultAction, VaultOperation, VaultRefreshRequest, VaultRequest, VaultSnapshot, VaultUiState,
+    VaultAction, VaultChooseCloudFolderRequest, VaultConnectCloudRequest,
+    VaultConnectGithubRequest, VaultConnectRequest, VaultCreateCloudFolderRequest,
+    VaultCreateRecoveryKeyRequest, VaultCreateRequest, VaultGenerateRecoveryKeyRequest,
+    VaultOperation, VaultRefreshRequest, VaultSnapshot, VaultSyncRequest, VaultUiState,
+    VaultUnlockRecoveryKeyRequest,
 };
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::components::manager::{
@@ -824,13 +828,11 @@ fn RecoveryCard(
 }
 
 fn send_recovery_action(action: VaultAction, recovery_key: String) {
-    let _ = send(&VaultRequest {
-        action,
-        repository: String::new(),
-        private: true,
-        folder_name: String::new(),
-        recovery_key,
-    });
+    match action {
+        VaultAction::CreateRecoveryKey => send(&VaultCreateRecoveryKeyRequest),
+        VaultAction::UnlockRecoveryKey => send(&VaultUnlockRecoveryKeyRequest { recovery_key }),
+        _ => unreachable!(),
+    };
 }
 
 fn normalized_recovery_key(value: &str) -> String {
@@ -888,22 +890,29 @@ fn request_snapshot(load_repositories: bool) {
 }
 
 fn send_action(action: VaultAction, repository: String, private: bool) {
-    let _ = send(&VaultRequest {
-        action,
-        repository,
-        private,
-        folder_name: String::new(),
-        recovery_key: String::new(),
-    });
+    match action {
+        VaultAction::Create => send(&VaultCreateRequest {
+            repository,
+            private,
+        }),
+        VaultAction::Connect => send(&VaultConnectRequest { repository }),
+        VaultAction::Sync => send(&VaultSyncRequest),
+        VaultAction::ConnectGithub => send(&VaultConnectGithubRequest),
+        VaultAction::GenerateRecoveryKey => send(&VaultGenerateRecoveryKeyRequest),
+        VaultAction::ConnectCloud => send(&VaultConnectCloudRequest {
+            provider: repository,
+        }),
+        VaultAction::ChooseCloudFolder => send(&VaultChooseCloudFolderRequest {
+            root: repository,
+        }),
+        _ => unreachable!(),
+    };
 }
 
 fn send_cloud_create(root: &str, name: &str) {
-    let _ = send(&VaultRequest {
-        action: VaultAction::CreateCloudFolder,
-        repository: root.to_string(),
-        private: true,
+    let _ = send(&VaultCreateCloudFolderRequest {
+        root: root.to_string(),
         folder_name: name.to_string(),
-        recovery_key: String::new(),
     });
 }
 
