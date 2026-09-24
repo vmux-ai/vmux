@@ -1,8 +1,6 @@
 use crate::active_session::ActiveSessionPanel;
-use crate::event::{LayoutStateEvent, PaneNode};
+use crate::event::{PaneNode, PaneTreeEvent};
 use dioxus::prelude::*;
-use vmux_api::bookmark::BookmarkStateEvent;
-use vmux_core::event::team::TeamMemberRow;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::inline_edit::EditableText;
@@ -16,6 +14,9 @@ use super::bookmark::{
     LayoutContextMenu, OptimisticPinOrder,
 };
 use super::stack::{NewStackRow, SideSheetStackRow};
+use super::state::LayoutUi;
+use super::update::UpdateNoticeFooter;
+use super::window_drag::WindowDragRegion;
 
 #[component]
 pub(super) fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
@@ -103,15 +104,65 @@ impl StackReveal {
 }
 
 #[component]
-pub(super) fn SideSheetView(
-    panes: Vec<PaneNode>,
-    active_space: Option<vmux_core::event::space::SpaceRow>,
-    bookmarks: BookmarkStateEvent,
-    projects: Vec<vmux_core::event::ProjectRow>,
-    boundary: Option<crate::event::TabBoundary>,
-    team: Vec<TeamMemberRow>,
-    pane_tree_error: Option<String>,
-) -> Element {
+pub(super) fn SideSheetView() -> Element {
+    let layout = LayoutUi::current();
+    let ui = layout.value();
+    let state = ui.layout.unwrap_or_default();
+    if !ui.overlay_ready(&layout.error()) || !state.side_sheet_open {
+        return rsx! {};
+    }
+
+    rsx! { SideSheetContent {} }
+}
+
+#[component]
+fn SideSheetContent() -> Element {
+    let layout = LayoutUi::current();
+    let ui = layout.value();
+    let state = ui.layout.unwrap_or_default();
+    let PaneTreeEvent { panes } = ui.pane_tree.unwrap_or_default();
+    let active_space = ui
+        .spaces
+        .unwrap_or_default()
+        .spaces
+        .into_iter()
+        .find(|space| space.is_active);
+    let bookmarks = ui.bookmarks;
+    let projects = ui.projects.projects;
+    let boundary = ui.projects.boundary;
+    let team = ui.team.members;
+    let pane_tree_error = layout.error();
+    let update_phase = ui.update;
+    let reveal = StackReveal::side_sheet(use_signal(|| None::<(u64, u64)>));
+    use_effect(move || {
+        let ui = layout.value();
+        if !ui.layout.unwrap_or_default().side_sheet_open {
+            reveal.forget();
+            return;
+        }
+        let PaneTreeEvent { panes } = ui.pane_tree.unwrap_or_default();
+        let Some(target) = ActiveStack::find(&panes) else {
+            return;
+        };
+        reveal.follow(target);
+    });
+    let host_sheet_width = state.side_sheet_width;
+    let sheet_left = state.window_pad_left;
+    let mut sheet_width = use_signal(|| host_sheet_width);
+    let mut sheet_resizing = use_signal(|| false);
+    use_effect(use_reactive!(|host_sheet_width| {
+        if !*sheet_resizing.peek() {
+            sheet_width.set(host_sheet_width);
+        }
+    }));
+    let side_sheet_vars = format!(
+        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;",
+        sheet_width(),
+        state.window_pad_left,
+        state.window_pad_top,
+        state.window_pad_bottom,
+        crate::event::url_bar_top(),
+    );
     let active_pane = panes
         .iter()
         .find(|pane| pane.is_active)
@@ -135,64 +186,75 @@ pub(super) fn SideSheetView(
         BookmarkContext::set_active(false);
     });
     rsx! {
-        div {
-            class: "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2 text-foreground [scrollbar-gutter:stable]",
-            ..BookmarkDragState::listeners(drag_state, optimistic_pin_order),
-            if let Some(space) = active_space {
-                div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
-                    SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
-                    ActiveSessionPanel {
-                        active_page: active_page.clone(),
-                        team: team.clone(),
-                        projects: projects.clone(),
-                        boundary: boundary.clone(),
-                        pane_id: active_pane.as_ref().map(|pane| pane.id).unwrap_or_default(),
+        aside {
+            id: "vmux-side-sheet",
+            class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
+            style: "{side_sheet_vars}",
+            WindowDragRegion {
+                id: "side-sheet-titlebar",
+                revision: sheet_width().to_string(),
+                class: "pointer-events-none absolute top-0 h-7",
+                style: "left:80px;right:4px;",
+            }
+            SideSheetGrab { resizing: sheet_resizing }
+            div { class: "flex h-full min-h-0 flex-col",
+                div {
+                    class: "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2 text-foreground [scrollbar-gutter:stable]",
+                    ..BookmarkDragState::listeners(drag_state, optimistic_pin_order),
+                    if let Some(space) = active_space {
+                        div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+                            SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
+                            ActiveSessionPanel {
+                                active_page: active_page.clone(),
+                                team: team.clone(),
+                                projects: projects.clone(),
+                                boundary: boundary.clone(),
+                                pane_id: active_pane.as_ref().map(|pane| pane.id).unwrap_or_default(),
+                            }
+                        }
+                    }
+                    if let Some(pane) = active_pane {
+                        BookmarksSection {
+                            bookmarks: bookmarks.clone(),
+                            active_page,
+                            pane_id: pane.id,
+                            expanded: pane.bookmarks_expanded,
+                        }
+                    }
+                    if let Some(err) = pane_tree_error {
+                        div { class: "flex shrink-0 items-center px-2 py-1",
+                            span { class: "text-ui text-destructive", "{err}" }
+                        }
+                    } else if panes.is_empty() {
+                        div { class: "flex shrink-0 items-center px-2 py-1",
+                            span { class: "text-ui text-muted-foreground", {translate("layout-no-stacks")} }
+                        }
+                    } else {
+                        for (i, pane) in panes.iter().enumerate() {
+                            PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
+                        }
                     }
                 }
-            }
-            if let Some(pane) = active_pane {
-                BookmarksSection {
-                    bookmarks: bookmarks.clone(),
-                    active_page,
-                    pane_id: pane.id,
-                    expanded: pane.bookmarks_expanded,
-                }
-            }
-            if let Some(err) = pane_tree_error {
-                div { class: "flex shrink-0 items-center px-2 py-1",
-                    span { class: "text-ui text-destructive", "{err}" }
-                }
-            } else if panes.is_empty() {
-                div { class: "flex shrink-0 items-center px-2 py-1",
-                    span { class: "text-ui text-muted-foreground", {translate("layout-no-stacks")} }
-                }
-            } else {
-                for (i, pane) in panes.iter().enumerate() {
-                    PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
+                if let Some(phase) = update_phase {
+                    UpdateNoticeFooter { phase }
                 }
             }
         }
-    }
-}
-
-pub(super) struct OverlayReadiness;
-
-impl OverlayReadiness {
-    pub(super) fn listener(received: bool, error: &Option<String>) -> bool {
-        received || error.is_some()
-    }
-
-    pub(super) fn is_ready(
-        state: &LayoutStateEvent,
-        layout_ready: bool,
-        stacks_ready: bool,
-        tabs_ready: bool,
-        pane_tree_ready: bool,
-        spaces_ready: bool,
-    ) -> bool {
-        layout_ready
-            && (!state.header_visible() || (stacks_ready && tabs_ready))
-            && (!state.side_sheet_open || (pane_tree_ready && spaces_ready))
+        if sheet_resizing() {
+            div {
+                class: "pointer-events-auto fixed inset-0 z-[900] cursor-col-resize",
+                onmousemove: move |event: Event<MouseData>| {
+                    let x = event.client_coordinates().x as f32 - sheet_left;
+                    let width = crate::event::SideSheetResizeEvent::live(x).clamped();
+                    sheet_width.set(width);
+                    let _ = send(&crate::event::SideSheetResizeEvent::live(width));
+                },
+                onmouseup: move |_| {
+                    sheet_resizing.set(false);
+                    let _ = send(&crate::event::SideSheetResizeEvent::settled(sheet_width()));
+                },
+            }
+        }
     }
 }
 
@@ -358,72 +420,5 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn state(header_open: bool, side_sheet_open: bool) -> LayoutStateEvent {
-        LayoutStateEvent {
-            header_open,
-            side_sheet_open,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn overlay_waits_for_layout_state() {
-        assert!(!OverlayReadiness::is_ready(
-            &state(false, false),
-            false,
-            true,
-            true,
-            true,
-            true
-        ));
-    }
-
-    #[test]
-    fn overlay_waits_for_header_state_when_header_visible() {
-        let visible = state(true, false);
-
-        assert!(!OverlayReadiness::is_ready(
-            &visible, true, false, true, true, true
-        ));
-        assert!(!OverlayReadiness::is_ready(
-            &visible, true, true, false, true, true
-        ));
-        assert!(OverlayReadiness::is_ready(
-            &visible, true, true, true, true, true
-        ));
-    }
-
-    #[test]
-    fn overlay_waits_for_side_sheet_state_when_side_sheet_visible() {
-        let visible = state(false, true);
-
-        assert!(!OverlayReadiness::is_ready(
-            &visible, true, true, true, false, true
-        ));
-        assert!(!OverlayReadiness::is_ready(
-            &visible, true, true, true, true, false
-        ));
-        assert!(OverlayReadiness::is_ready(
-            &visible, true, true, true, true, true
-        ));
-    }
-
-    #[test]
-    fn overlay_can_be_ready_when_overlay_is_closed() {
-        assert!(OverlayReadiness::is_ready(
-            &state(false, false),
-            true,
-            false,
-            false,
-            false,
-            false
-        ));
     }
 }
