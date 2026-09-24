@@ -14,6 +14,20 @@ pub use vmux_api::prompt_media::{
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_api::room::ModelOptionEntry;
 
+enum ChatEvents {}
+
+impl vmux_api::BinEventFamily for ChatEvents {
+    const TARGET: vmux_api::BinEventTarget =
+        vmux_api::BinEventTarget::Hosts(&["sessions", "agent", "start"]);
+}
+
+type ComposerEvents = ChatEvents;
+type ModeEvents = ChatEvents;
+type ModelEvents = ChatEvents;
+type RuntimeEvents = ChatEvents;
+type SelectEvents = ChatEvents;
+type SetEvents = ChatEvents;
+
 #[derive(
     Clone,
     Debug,
@@ -112,8 +126,8 @@ pub struct PendingApproval {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::HostEvent,
 )]
-#[vmux_api::host_event(targets = ["sessions", "agent", "start"])]
 pub struct ComposerContext {
     pub cwd: String,
     pub workspace_name: String,
@@ -140,8 +154,8 @@ pub struct ComposerContext {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::HostEvent,
 )]
-#[vmux_api::host_event(targets = ["sessions", "agent", "start"])]
 pub struct ModeState {
     pub current_mode_id: String,
     pub modes: Vec<vmux_service::protocol::AcpModeOption>,
@@ -156,8 +170,8 @@ pub struct ModeState {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct SelectMode {
     pub mode_id: String,
 }
@@ -171,8 +185,8 @@ pub struct SelectMode {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatHistoryRequest {
     pub before: u32,
     pub limit: u32,
@@ -205,8 +219,8 @@ pub struct ChatHistoryPage {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatSubmit {
     pub text: String,
     pub attachments: Vec<ChatSubmitAttachment>,
@@ -221,8 +235,8 @@ pub struct ChatSubmit {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatChoiceSelected {
     pub index: u32,
 }
@@ -236,8 +250,8 @@ pub struct ChatChoiceSelected {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatApproval {
     pub call_id: String,
     pub decision: ApprovalDecision,
@@ -252,8 +266,8 @@ pub struct ChatApproval {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatCancel;
 
 #[derive(
@@ -265,8 +279,8 @@ pub struct ChatCancel;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatResume;
 
 #[derive(
@@ -278,8 +292,8 @@ pub struct ChatResume;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatClearQueue;
 
 #[derive(
@@ -291,8 +305,8 @@ pub struct ChatClearQueue;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatCancelQueuedPrompt {
     pub id: u64,
 }
@@ -306,8 +320,8 @@ pub struct ChatCancelQueuedPrompt {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatEscape;
 
 #[derive(
@@ -319,8 +333,8 @@ pub struct ChatEscape;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatSelectWorkspace;
 
 #[derive(
@@ -332,8 +346,8 @@ pub struct ChatSelectWorkspace;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatBranchesRequest {
     pub project: String,
 }
@@ -347,8 +361,8 @@ pub struct ChatBranchesRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::HostEvent,
 )]
-#[vmux_api::host_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatProjectBranches {
     pub project: String,
     pub branches: Vec<ChatBranch>,
@@ -365,8 +379,8 @@ pub use vmux_core::event::ProjectBranch as ChatBranch;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatGoToBranch {
     pub project: String,
     pub branch: String,
@@ -383,8 +397,8 @@ pub struct ChatGoToBranch {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::HostEvent,
 )]
-#[vmux_api::host_event(targets = ["sessions", "agent", "start"])]
 pub struct ModelState {
     pub current_model_id: String,
     pub current_model_name: String,
@@ -405,8 +419,8 @@ pub struct ModelState {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct SelectModel {
     pub model_id: String,
 }
@@ -420,8 +434,8 @@ pub struct SelectModel {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct SetAgentEffort {
     pub agent_key: String,
     pub level: String,
@@ -436,8 +450,8 @@ pub struct SetAgentEffort {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct ChatOpenPage {
     pub url: String,
 }
@@ -451,8 +465,8 @@ pub struct ChatOpenPage {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["sessions", "agent", "start"])]
 pub struct RuntimeSwitchRequest {
     pub to: String,
 }

@@ -13,8 +13,6 @@ use vmux_terminal::ServiceMessageSet;
 use crate::events::{AgentCommandRequest, CommandOrigin};
 use crate::session::AgentSession;
 
-use super::command::origin_is_agent;
-
 pub(super) struct FollowPlugin;
 
 impl Plugin for FollowPlugin {
@@ -330,7 +328,7 @@ fn handle_agent_file_touch(
                 agent_pane,
                 url: file_touch_url(path, *line, *col, *end_col),
                 request_id: request.request_id.0,
-                user_origin: !origin_is_agent(&request.origin),
+                user_origin: !request.origin.is_agent(),
                 kind: *kind,
             });
     }
