@@ -45,6 +45,24 @@ pub struct LspPkgStatusEvent {
     pub version: Option<String>,
 }
 
+#[vmux_api::payload(Eq)]
+#[vmux_api::host_event(target = "lsp")]
+pub struct LspManagerStateEvent {
+    pub packages: Vec<LspPackage>,
+    pub progress: Vec<LspInstallProgress>,
+    pub loading: bool,
+}
+
+impl Default for LspManagerStateEvent {
+    fn default() -> Self {
+        Self {
+            packages: Vec::new(),
+            progress: Vec::new(),
+            loading: true,
+        }
+    }
+}
+
 #[vmux_api::payload]
 pub struct FileHoverEvent {
     pub line: u32,
