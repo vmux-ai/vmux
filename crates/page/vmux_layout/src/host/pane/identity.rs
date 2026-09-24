@@ -2,10 +2,8 @@ use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
 
-use super::{
-    pane::{Pane, PaneSplit, first_leaf_descendant, leaf_pane_bundle},
-    stack::Stack,
-};
+use super::{Pane, PaneSplit, first_leaf_descendant, leaf_pane_bundle};
+use crate::stack::Stack;
 
 pub(super) struct IdentityPlugin;
 

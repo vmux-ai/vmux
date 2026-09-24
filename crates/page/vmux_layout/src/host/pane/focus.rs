@@ -4,9 +4,9 @@ use std::time::Instant;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
-use super::{
-    command::LayoutRequestSet,
-    pane::{Pane, PaneDrag, PaneFocus, PaneRequest, PaneSplit},
+use super::{Pane, PaneDrag, PaneFocus, PaneRequest, PaneSplit};
+use crate::{
+    host::command::LayoutRequestSet,
     stack::{ActiveTabParam, Stack, active_among, active_pane_in_tab, active_stack_in_pane},
 };
 

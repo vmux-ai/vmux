@@ -11,7 +11,7 @@ use crate::{
     tab::Tab,
 };
 
-use super::{command::LayoutRequestSet, pane_arrangement::ArrangementSet};
+use super::{command::LayoutRequestSet, pane::ArrangementSet};
 
 pub(crate) struct PaneZoomPlugin;
 

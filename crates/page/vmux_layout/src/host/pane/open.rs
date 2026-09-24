@@ -9,15 +9,15 @@ use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 use super::{
-    command::LayoutRequestSet,
-    pane::{PaneOpenRequest, PaneRequest, first_stack_in_pane},
-    pane_focus::PendingCursorWarp,
-    pane_identity::{SpawnCounter, SpawnSeq},
-    pane_tree::{
+    PaneOpenRequest, PaneRequest, first_stack_in_pane,
+    focus::PendingCursorWarp,
+    identity::{SpawnCounter, SpawnSeq},
+    tree::{
         Pane, PaneSplit, PaneSplitDirection, direction_to_split, first_leaf_descendant,
         split_leaf_into_two, split_or_extend,
     },
 };
+use crate::host::command::LayoutRequestSet;
 
 pub(super) struct OpenPlugin;
 

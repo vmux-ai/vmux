@@ -3,17 +3,14 @@ use vmux_history::LastActivatedAt;
 
 use crate::host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings};
 
-use super::{
-    command::LayoutRequestSet,
-    pane::{Pane, PaneArrangement, PaneRequest, PaneSplit, PaneSplitDirection},
+use super::{ArrangementSet, Pane, PaneArrangement, PaneRequest, PaneSplit, PaneSplitDirection};
+use crate::{
+    host::command::LayoutRequestSet,
     stack::{ActiveTabParam, Stack, focused_stack},
     target::SiblingDirection,
 };
 
 pub(super) struct ArrangementPlugin;
-
-#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct ArrangementSet;
 
 impl Plugin for ArrangementPlugin {
     fn build(&self, app: &mut App) {

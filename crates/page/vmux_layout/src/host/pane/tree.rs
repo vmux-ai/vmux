@@ -4,7 +4,7 @@ use vmux_api::open_target::PaneDirection;
 use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
-use super::pane_resize::{PaneSize, pane_split_gaps};
+use super::resize::{PaneSize, pane_split_gaps};
 
 pub(super) struct TreePlugin;
 

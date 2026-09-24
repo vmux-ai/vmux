@@ -6,9 +6,9 @@ use vmux_history::LastActivatedAt;
 
 use crate::settings::LayoutSettings;
 
-use super::{
-    command::LayoutRequestSet,
-    pane::{Pane, PaneRequest, PaneResize, PaneSplit, PaneSplitDirection},
+use super::{Pane, PaneRequest, PaneResize, PaneSplit, PaneSplitDirection};
+use crate::{
+    host::command::LayoutRequestSet,
     stack::{ActiveTabParam, Stack, focused_stack},
 };
 

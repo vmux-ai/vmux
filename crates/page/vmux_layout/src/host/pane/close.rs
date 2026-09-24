@@ -17,13 +17,11 @@ use crate::{
 };
 
 #[cfg(test)]
-use super::pane::PaneSplitDirection;
+use super::PaneSplitDirection;
 use super::{
-    command::LayoutRequestSet,
-    pane::{
-        Pane, PaneRequest, PaneSplit, first_leaf_descendant, first_stack_in_pane, leaf_pane_bundle,
-    },
+    Pane, PaneRequest, PaneSplit, first_leaf_descendant, first_stack_in_pane, leaf_pane_bundle,
 };
+use crate::host::command::LayoutRequestSet;
 
 pub(super) struct ClosePlugin;
 
