@@ -10,19 +10,15 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-rkyv = { workspace = true }
-serde = { workspace = true }
 vmux_core = { path = "../../vmux_core" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
-bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
 notify = { workspace = true }
 vmux_git = { path = "../../vmux_git" }
-vmux_layout = { path = "../vmux_layout" }
 
 [dev-dependencies]
 tempfile = "3"

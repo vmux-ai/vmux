@@ -332,12 +332,14 @@ fn sync_window_glass_visibility(
     mut window_q: Query<(Entity, &mut bevy::window::Window)>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     mut window_fullscreen: ResMut<crate::window_state::WindowFullscreen>,
+    keyboard: Single<&crate::keyboard::KeyboardRuntime>,
+    mut exit_fullscreen: MessageReader<crate::keyboard::ExitFullscreenRequest>,
 ) {
     use objc2::ClassType;
     use objc2_app_kit::NSWindowStyleMask;
 
     let mut focused_fullscreen = false;
-    let exit_fullscreen = crate::native_keyboard::take_exit_fullscreen_request();
+    let exit_fullscreen = exit_fullscreen.read().next().is_some();
     state.0.retain(|entity, _| window_q.contains(*entity));
     for (entity, mut window) in &mut window_q {
         let Some(glass) = state.0.get_mut(&entity) else {
@@ -404,7 +406,7 @@ fn sync_window_glass_visibility(
         clear_color.0 = want_clear;
     }
 
-    crate::native_keyboard::set_window_fullscreen(focused_fullscreen);
+    keyboard.set_window_fullscreen(focused_fullscreen);
 }
 
 fn focus_shadow_visible(focused: bool, visible: bool, fullscreen: bool) -> bool {

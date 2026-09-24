@@ -1,7 +1,7 @@
 use crate::{
     PAGE_URL, ShortcutBinding, ShortcutCaptureRequest, ShortcutCaptureState, ShortcutCaptureToken,
     ShortcutCatalog, ShortcutEntry, ShortcutGroup, ShortcutStroke, ShortcutUiState,
-    ShortcutUiStateUpdates, ShortcutUrl, set_capture_target,
+    ShortcutUiStateUpdates, ShortcutUrl,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -37,7 +37,12 @@ impl Plugin for ShortcutPlugin {
                 Update,
                 normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
             )
-            .add_systems(Update, sync_shortcut_capture.after(ComputeFocusSet));
+            .add_systems(
+                Update,
+                sync_shortcut_capture
+                    .in_set(ShortcutCaptureSet)
+                    .after(ComputeFocusSet),
+            );
     }
 }
 
@@ -60,6 +65,9 @@ pub struct ShortcutCaptureTarget {
     token: Option<ShortcutCaptureToken>,
     generation: u64,
 }
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ShortcutCaptureSet;
 
 impl ShortcutCaptureTarget {
     pub fn target(&self) -> Option<Entity> {
@@ -95,7 +103,6 @@ impl ShortcutCaptureTarget {
             target,
             generation: self.generation,
         });
-        set_capture_target(self.token);
         if let Some(webview) = next {
             ShortcutCaptureState::emit(commands, webview, true);
         }
@@ -492,36 +499,23 @@ mod tests {
             app.world().resource::<ShortcutCaptureTarget>().target(),
             Some(page)
         );
-        assert_eq!(
-            crate::capture_target().map(|token| token.target),
-            Some(page)
-        );
-
         app.world_mut().get_mut::<Window>(window).unwrap().focused = false;
         app.update();
         assert_eq!(
             app.world().resource::<ShortcutCaptureTarget>().target(),
             None
         );
-        assert_eq!(crate::capture_target(), None);
-
         app.world_mut().get_mut::<Window>(window).unwrap().focused = true;
         app.update();
         assert_eq!(
             app.world().resource::<ShortcutCaptureTarget>().target(),
             Some(page)
         );
-        assert_eq!(
-            crate::capture_target().map(|token| token.target),
-            Some(page)
-        );
-
         app.world_mut().despawn(page);
         app.update();
         assert_eq!(
             app.world().resource::<ShortcutCaptureTarget>().target(),
             None
         );
-        assert_eq!(crate::capture_target(), None);
     }
 }

@@ -23,7 +23,7 @@ mod snapshot;
 mod state;
 mod window_drag;
 pub use command::{NavigationRequest, OpenRequest, ViewRequest};
-pub use host_focus::HostFocusIntent;
+pub use host_focus::{HostFocusIntent, KeyboardContext, KeyboardContextSet};
 pub use navigation::OpenHistoryRequest;
 pub use window_drag::WindowDragRegion;
 
@@ -548,30 +548,12 @@ struct CommandBarRoute {
 static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
-static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
-static NATIVE_TEXT_ENTRY_OWNS_KEYS: AtomicBool = AtomicBool::new(false);
 
 #[cfg(any(target_os = "macos", test))]
 fn native_command_bar_route() -> CommandBarRoute {
     *NATIVE_COMMAND_BAR_ROUTE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-pub(crate) fn set_native_page_owns_escape(owns: bool) {
-    NATIVE_PAGE_OWNS_ESCAPE.store(owns, Ordering::Relaxed);
-}
-
-pub fn native_page_owns_escape() -> bool {
-    NATIVE_PAGE_OWNS_ESCAPE.load(Ordering::Relaxed)
-}
-
-pub(crate) fn set_native_text_entry_owns_keys(owns: bool) {
-    NATIVE_TEXT_ENTRY_OWNS_KEYS.store(owns, Ordering::Relaxed);
-}
-
-pub fn native_text_entry_owns_keys() -> bool {
-    NATIVE_TEXT_ENTRY_OWNS_KEYS.load(Ordering::Relaxed)
 }
 
 pub fn set_native_left_mouse_down(down: bool) {
