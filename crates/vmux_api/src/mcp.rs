@@ -20,6 +20,7 @@ pub struct McpServerEntry {
 pub struct McpServers {
     pub loaded: bool,
     pub servers: Vec<McpServerEntry>,
+    pub result: Option<McpServerResult>,
 }
 
 #[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
@@ -38,10 +39,36 @@ pub struct McpServerRequest {
     pub action: McpServerAction,
 }
 
-#[vmux_api::host_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
+#[vmux_api::contract(Default, Eq)]
 pub struct McpServerResult {
     pub id: String,
     pub action: McpServerAction,
     pub success: bool,
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_result_round_trips_inside_state() {
+        let state = McpServers {
+            loaded: true,
+            servers: Vec::new(),
+            result: Some(McpServerResult {
+                id: "linear".to_string(),
+                action: McpServerAction::Connect,
+                success: false,
+                message: "denied".to_string(),
+            }),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
+        let decoded = rkyv::from_bytes::<McpServers, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert!(matches!(
+            decoded.result,
+            Some(McpServerResult { id, success: false, .. }) if id == "linear"
+        ));
+    }
 }
