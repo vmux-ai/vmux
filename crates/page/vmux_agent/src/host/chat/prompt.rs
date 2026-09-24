@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::events::{AgentApprovalReply, AgentChoiceSelected};
 use crate::run_state::AgentRunState;
@@ -39,7 +39,7 @@ impl Plugin for ChatPromptPlugin {
 }
 
 fn on_chat_submit(
-    trigger: On<BinReceive<ChatSubmit>>,
+    trigger: On<UiInput<ChatSubmit>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(
         &mut PromptQueue,
@@ -94,7 +94,7 @@ fn enqueue_prompt(
 }
 
 fn on_chat_cancel(
-    trigger: On<BinReceive<ChatCancel>>,
+    trigger: On<UiInput<ChatCancel>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&mut PromptQueue, Option<&AcpSession>, Option<&AgentSession>)>,
     service: Option<Res<ServiceClient>>,
@@ -132,7 +132,7 @@ fn cancel_session(
 }
 
 fn on_chat_escape(
-    trigger: On<BinReceive<ChatEscape>>,
+    trigger: On<UiInput<ChatEscape>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(
         &mut PromptQueue,
@@ -169,7 +169,7 @@ fn on_chat_escape(
 }
 
 fn on_chat_resume(
-    trigger: On<BinReceive<ChatResume>>,
+    trigger: On<UiInput<ChatResume>>,
     child_of: Query<&ChildOf>,
     mut queues: Query<&mut PromptQueue>,
 ) {
@@ -182,7 +182,7 @@ fn on_chat_resume(
 }
 
 fn on_chat_clear_queue(
-    trigger: On<BinReceive<ChatClearQueue>>,
+    trigger: On<UiInput<ChatClearQueue>>,
     child_of: Query<&ChildOf>,
     mut queues: Query<&mut PromptQueue>,
 ) {
@@ -195,7 +195,7 @@ fn on_chat_clear_queue(
 }
 
 fn on_chat_cancel_queued_prompt(
-    trigger: On<BinReceive<ChatCancelQueuedPrompt>>,
+    trigger: On<UiInput<ChatCancelQueuedPrompt>>,
     child_of: Query<&ChildOf>,
     mut queues: Query<&mut PromptQueue>,
 ) {
@@ -208,7 +208,7 @@ fn on_chat_cancel_queued_prompt(
 }
 
 fn on_chat_approval(
-    trigger: On<BinReceive<ChatApproval>>,
+    trigger: On<UiInput<ChatApproval>>,
     child_of: Query<&ChildOf>,
     mut commands: Commands,
 ) {
@@ -224,7 +224,7 @@ fn on_chat_approval(
     });
 }
 
-fn on_chat_choice_selected(trigger: On<BinReceive<ChatChoiceSelected>>, mut commands: Commands) {
+fn on_chat_choice_selected(trigger: On<UiInput<ChatChoiceSelected>>, mut commands: Commands) {
     commands.trigger(AgentChoiceSelected {
         webview: trigger.event().webview,
         index: trigger.event().payload.index as usize,
@@ -245,7 +245,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(session)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: ChatSubmit {
                 text: "  make me a new\nJapanese restaurant website  ".into(),
@@ -268,7 +268,7 @@ mod tests {
             Some("  make me a new\nJapanese restaurant website  ")
         );
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: ChatSubmit {
                 text: "make it darker".into(),
@@ -310,7 +310,7 @@ mod tests {
         let stack = app.world_mut().spawn(queue).id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive::<ChatCancel> {
+        app.world_mut().trigger(UiInput::<ChatCancel> {
             webview,
             payload: ChatCancel,
         });
@@ -337,7 +337,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive::<ChatEscape> {
+        app.world_mut().trigger(UiInput::<ChatEscape> {
             webview,
             payload: ChatEscape,
         });
@@ -366,7 +366,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive::<ChatEscape> {
+        app.world_mut().trigger(UiInput::<ChatEscape> {
             webview,
             payload: ChatEscape,
         });
@@ -391,11 +391,10 @@ mod tests {
         let stack = app.world_mut().spawn(queue).id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut()
-            .trigger(BinReceive::<ChatCancelQueuedPrompt> {
-                webview,
-                payload: ChatCancelQueuedPrompt { id: second_id },
-            });
+        app.world_mut().trigger(UiInput::<ChatCancelQueuedPrompt> {
+            webview,
+            payload: ChatCancelQueuedPrompt { id: second_id },
+        });
         app.world_mut().flush();
 
         let queue = app.world().get::<PromptQueue>(stack).unwrap();

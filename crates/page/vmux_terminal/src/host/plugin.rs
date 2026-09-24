@@ -2131,7 +2131,7 @@ fn key_code_from_web_code(code: &str) -> KeyCode {
 }
 
 fn on_term_key(
-    trigger: On<BinReceive<KeyStroke>>,
+    trigger: On<UiInput<KeyStroke>>,
     terminals: Query<(), With<Terminal>>,
     q: Query<&ProcessId, With<Terminal>>,
     agents: Query<&vmux_core::agent::AgentSession>,

@@ -458,7 +458,7 @@ fn apply_edit_request(
 }
 
 fn on_file_key(
-    trigger: On<BinReceive<KeyStroke>>,
+    trigger: On<UiInput<KeyStroke>>,
     mut q: Query<(&Editor, &mut EditorKeymap)>,
     app_keymap: Option<Res<Keymap>>,
     app_contexts: Query<&KeyContext>,
@@ -503,7 +503,7 @@ fn on_file_key(
 }
 
 fn on_file_text_input(
-    trigger: On<BinReceive<FileTextInput>>,
+    trigger: On<UiInput<FileTextInput>>,
     mut q: Query<(&Editor, &mut EditorKeymap)>,
     mut commands: Commands,
 ) {
@@ -529,7 +529,7 @@ fn on_file_text_input(
 }
 
 fn on_file_property_edit(
-    trigger: On<BinReceive<FilePropertyEdit>>,
+    trigger: On<UiInput<FilePropertyEdit>>,
     q: Query<&Editor>,
     mut commands: Commands,
 ) {
@@ -590,7 +590,7 @@ fn run_submitted_ex_lines(
 }
 
 fn on_file_find_request(
-    trigger: On<BinReceive<FileFindRequest>>,
+    trigger: On<UiInput<FileFindRequest>>,
     mut q: Query<&mut Editor>,
     mut commands: Commands,
 ) {
@@ -619,7 +619,7 @@ fn on_file_find_request(
 }
 
 fn on_file_pointer(
-    trigger: On<BinReceive<FilePointerEvent>>,
+    trigger: On<UiInput<FilePointerEvent>>,
     mut q: Query<(&mut Editor, &mut EditorKeymap)>,
     mut commands: Commands,
 ) {

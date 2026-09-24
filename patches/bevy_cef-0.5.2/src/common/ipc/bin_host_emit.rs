@@ -91,7 +91,6 @@ mod tests {
     use super::*;
     use bevy::prelude::Entity;
 
-    #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
     #[vmux_api::host_event(target = "test-host")]
     struct TestPayload {
         value: u32,

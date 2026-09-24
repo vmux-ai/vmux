@@ -296,7 +296,7 @@ fn send_initial_dir(
 }
 
 fn on_file_view_mode_set(
-    trigger: On<BinReceive<FileViewModeSet>>,
+    trigger: On<UiInput<FileViewModeSet>>,
     files: Query<(&FileView, Option<&Editor>)>,
     mut mode: ResMut<SharedFileViewMode>,
     mut commands: Commands,
@@ -318,7 +318,7 @@ fn on_file_view_mode_set(
 }
 
 fn on_file_keymap_set(
-    trigger: On<BinReceive<FileKeymapSet>>,
+    trigger: On<UiInput<FileKeymapSet>>,
     views: Query<(), With<FileView>>,
     mut settings: ResMut<vmux_setting::AppSettings>,
     mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
@@ -368,7 +368,7 @@ mod tests {
             })
             .id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: first,
             payload: FileViewModeSet {
                 mode: FileViewMode::Diff,
@@ -410,7 +410,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: entity,
             payload: FileViewModeSet {
                 mode: FileViewMode::Note,
@@ -451,7 +451,7 @@ mod tests {
             .add_observer(on_file_view_mode_set);
         let other = app.world_mut().spawn_empty().id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: other,
             payload: FileViewModeSet {
                 mode: FileViewMode::Diff,

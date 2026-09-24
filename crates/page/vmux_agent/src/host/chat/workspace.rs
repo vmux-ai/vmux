@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::AgentChatView;
 use super::ChatUiStateUpdates;
@@ -197,7 +197,7 @@ struct BranchRead {
 }
 
 fn on_chat_branches_request(
-    trigger: On<BinReceive<ChatBranchesRequest>>,
+    trigger: On<UiInput<ChatBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -261,7 +261,7 @@ fn drain_branch_reads(
 }
 
 fn on_chat_go_to_branch(
-    trigger: On<BinReceive<ChatGoToBranch>>,
+    trigger: On<UiInput<ChatGoToBranch>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
     mut requests: MessageWriter<AgentCommandRequest>,
@@ -295,7 +295,7 @@ fn on_chat_go_to_branch(
 }
 
 fn on_chat_select_workspace(
-    trigger: On<BinReceive<ChatSelectWorkspace>>,
+    trigger: On<UiInput<ChatSelectWorkspace>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
     mut requests: MessageWriter<AgentCommandRequest>,
@@ -337,7 +337,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: ChatSelectWorkspace,
         });
@@ -372,7 +372,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: ChatGoToBranch {
                 project: "/tmp/elsewhere".into(),

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, HostWindow};
+use bevy_cef::prelude::{HostWindow, UiInput};
 use std::sync::{LazyLock, Mutex};
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_flex::prelude::{ComputedNode, LayoutSystems};
@@ -109,7 +109,7 @@ impl ReportedWindowDragRegions {
 }
 
 fn on_window_drag_region(
-    trigger: On<BinReceive<WindowDragRegionEvent>>,
+    trigger: On<UiInput<WindowDragRegionEvent>>,
     mut reported: ResMut<ReportedWindowDragRegions>,
 ) {
     let region = trigger.event().payload.clone();

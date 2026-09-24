@@ -21,7 +21,7 @@ impl Plugin for SpaceProjectPlugin {
 }
 
 fn on_project_tree_toggle(
-    trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::ProjectTreeToggle>>,
+    trigger: On<bevy_cef::prelude::UiInput<vmux_core::event::ProjectTreeToggle>>,
     space_of_pane: vmux_layout::space::SpaceOfPane,
     mut expanded: Query<&mut ExpandedProjectDirs>,
     mut commands: Commands,
@@ -362,17 +362,15 @@ mod tests {
         }
 
         fn toggle(&mut self, path: &str, pane_id: String) {
-            self.app
-                .world_mut()
-                .trigger(
-                    bevy_cef::prelude::BinReceive::<vmux_core::event::ProjectTreeToggle> {
-                        webview: Entity::PLACEHOLDER,
-                        payload: vmux_core::event::ProjectTreeToggle {
-                            path: path.to_string(),
-                            pane_id,
-                        },
-                    },
-                );
+            self.app.world_mut().trigger(bevy_cef::prelude::UiInput::<
+                vmux_core::event::ProjectTreeToggle,
+            > {
+                webview: Entity::PLACEHOLDER,
+                payload: vmux_core::event::ProjectTreeToggle {
+                    path: path.to_string(),
+                    pane_id,
+                },
+            });
             self.app.update();
         }
 

@@ -2,7 +2,7 @@ use crate::pane::{Pane, PaneSplit};
 use crate::stack::{ActiveTabParam, Stack, focused_stack};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::bookmark::{
     BookmarkAddRequest as BookmarkAddUiRequest, BookmarkContextMenuRequest,
     BookmarkFolderCreateRequest as BookmarkFolderCreateUiRequest,
@@ -270,7 +270,7 @@ pub struct BookmarkTextInputActive;
 pub struct BookmarkContextMenuActive;
 
 fn on_bookmark_context_menu_request(
-    trigger: On<BinReceive<BookmarkContextMenuRequest>>,
+    trigger: On<UiInput<BookmarkContextMenuRequest>>,
     mut commands: Commands,
 ) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
@@ -284,7 +284,7 @@ fn on_bookmark_context_menu_request(
 }
 
 fn on_bookmark_text_input_request(
-    trigger: On<BinReceive<BookmarkTextInputRequest>>,
+    trigger: On<UiInput<BookmarkTextInputRequest>>,
     mut commands: Commands,
 ) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
@@ -783,14 +783,14 @@ fn sync_bookmark_metadata(
 }
 
 fn on_bookmark_toggle_request(
-    _trigger: On<BinReceive<BookmarkToggleRequest>>,
+    _trigger: On<UiInput<BookmarkToggleRequest>>,
     mut requests: MessageWriter<ToggleActiveRequest>,
 ) {
     requests.write(ToggleActiveRequest);
 }
 
 fn on_bookmark_open_request(
-    trigger: On<BinReceive<BookmarkOpenRequest>>,
+    trigger: On<UiInput<BookmarkOpenRequest>>,
     mut requests: MessageWriter<OpenRequest>,
 ) {
     requests.write(OpenRequest {
@@ -799,7 +799,7 @@ fn on_bookmark_open_request(
 }
 
 fn on_bookmark_menu_request<R>(
-    trigger: On<BinReceive<R>>,
+    trigger: On<UiInput<R>>,
     mut menu_req: MessageWriter<ShowBookmarkMenuRequest>,
 ) where
     R: Clone + Send + Sync + 'static,
@@ -812,7 +812,7 @@ fn on_bookmark_menu_request<R>(
 }
 
 fn on_bookmark_add_request(
-    trigger: On<BinReceive<BookmarkAddUiRequest>>,
+    trigger: On<UiInput<BookmarkAddUiRequest>>,
     mut requests: MessageWriter<AddRequest>,
 ) {
     requests.write(AddRequest {
@@ -822,7 +822,7 @@ fn on_bookmark_add_request(
 }
 
 fn on_bookmark_pin_url_request(
-    trigger: On<BinReceive<BookmarkPinUrlUiRequest>>,
+    trigger: On<UiInput<BookmarkPinUrlUiRequest>>,
     mut requests: MessageWriter<PinUrlRequest>,
 ) {
     requests.write(PinUrlRequest {
@@ -831,7 +831,7 @@ fn on_bookmark_pin_url_request(
 }
 
 fn on_bookmark_remove_request(
-    trigger: On<BinReceive<BookmarkRemoveUiRequest>>,
+    trigger: On<UiInput<BookmarkRemoveUiRequest>>,
     mut requests: MessageWriter<RemoveRequest>,
 ) {
     requests.write(RemoveRequest {
@@ -840,7 +840,7 @@ fn on_bookmark_remove_request(
 }
 
 fn on_bookmark_rename_request(
-    trigger: On<BinReceive<BookmarkRenameUiRequest>>,
+    trigger: On<UiInput<BookmarkRenameUiRequest>>,
     mut requests: MessageWriter<RenameRequest>,
 ) {
     requests.write(RenameRequest {
@@ -850,7 +850,7 @@ fn on_bookmark_rename_request(
 }
 
 fn on_bookmark_move_request(
-    trigger: On<BinReceive<BookmarkMoveUiRequest>>,
+    trigger: On<UiInput<BookmarkMoveUiRequest>>,
     mut requests: MessageWriter<MoveRequest>,
 ) {
     requests.write(MoveRequest {
@@ -860,7 +860,7 @@ fn on_bookmark_move_request(
 }
 
 fn on_bookmark_move_pin_request(
-    trigger: On<BinReceive<BookmarkMovePinUiRequest>>,
+    trigger: On<UiInput<BookmarkMovePinUiRequest>>,
     mut requests: MessageWriter<MovePinRequest>,
 ) {
     requests.write(MovePinRequest {
@@ -870,7 +870,7 @@ fn on_bookmark_move_pin_request(
 }
 
 fn on_bookmark_reorder_pin_request(
-    trigger: On<BinReceive<BookmarkReorderPinUiRequest>>,
+    trigger: On<UiInput<BookmarkReorderPinUiRequest>>,
     mut requests: MessageWriter<ReorderPinRequest>,
 ) {
     requests.write(ReorderPinRequest {
@@ -880,7 +880,7 @@ fn on_bookmark_reorder_pin_request(
 }
 
 fn on_bookmark_pin_request(
-    trigger: On<BinReceive<BookmarkPinUiRequest>>,
+    trigger: On<UiInput<BookmarkPinUiRequest>>,
     mut requests: MessageWriter<PinRequest>,
 ) {
     requests.write(PinRequest {
@@ -889,7 +889,7 @@ fn on_bookmark_pin_request(
 }
 
 fn on_bookmark_unpin_request(
-    trigger: On<BinReceive<BookmarkUnpinUiRequest>>,
+    trigger: On<UiInput<BookmarkUnpinUiRequest>>,
     mut requests: MessageWriter<UnpinRequest>,
 ) {
     requests.write(UnpinRequest {
@@ -898,7 +898,7 @@ fn on_bookmark_unpin_request(
 }
 
 fn on_bookmark_folder_toggle_request(
-    trigger: On<BinReceive<BookmarkFolderToggleUiRequest>>,
+    trigger: On<UiInput<BookmarkFolderToggleUiRequest>>,
     mut requests: MessageWriter<ToggleFolderRequest>,
 ) {
     requests.write(ToggleFolderRequest {
@@ -907,7 +907,7 @@ fn on_bookmark_folder_toggle_request(
 }
 
 fn on_bookmark_folder_create_request(
-    trigger: On<BinReceive<BookmarkFolderCreateUiRequest>>,
+    trigger: On<UiInput<BookmarkFolderCreateUiRequest>>,
     mut requests: MessageWriter<CreateFolderRequest>,
 ) {
     requests.write(CreateFolderRequest {
@@ -917,7 +917,7 @@ fn on_bookmark_folder_create_request(
 }
 
 fn on_bookmark_folder_move_request(
-    trigger: On<BinReceive<BookmarkFolderMoveUiRequest>>,
+    trigger: On<UiInput<BookmarkFolderMoveUiRequest>>,
     mut requests: MessageWriter<MoveFolderRequest>,
 ) {
     requests.write(MoveFolderRequest {
@@ -927,7 +927,7 @@ fn on_bookmark_folder_move_request(
 }
 
 fn on_bookmark_folder_rename_request(
-    trigger: On<BinReceive<BookmarkFolderRenameUiRequest>>,
+    trigger: On<UiInput<BookmarkFolderRenameUiRequest>>,
     mut requests: MessageWriter<RenameFolderRequest>,
 ) {
     requests.write(RenameFolderRequest {
@@ -937,7 +937,7 @@ fn on_bookmark_folder_rename_request(
 }
 
 fn on_bookmark_folder_remove_request(
-    trigger: On<BinReceive<BookmarkFolderRemoveUiRequest>>,
+    trigger: On<UiInput<BookmarkFolderRemoveUiRequest>>,
     mut requests: MessageWriter<RemoveFolderRequest>,
 ) {
     requests.write(RemoveFolderRequest {
@@ -1106,7 +1106,7 @@ mod tests {
             .add_message::<OpenRequest>()
             .add_observer(on_bookmark_open_request);
         let webview = app.world_mut().spawn_empty().id();
-        app.world_mut().trigger(BinReceive::<BookmarkOpenRequest> {
+        app.world_mut().trigger(UiInput::<BookmarkOpenRequest> {
             webview,
             payload: BookmarkOpenRequest {
                 url: "https://a.test".into(),
@@ -1132,7 +1132,7 @@ mod tests {
             .add_observer(on_bookmark_text_input_request);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .trigger(BinReceive::<BookmarkTextInputRequest> {
+            .trigger(UiInput::<BookmarkTextInputRequest> {
                 webview,
                 payload: BookmarkTextInputRequest { active: true },
             });
@@ -1143,7 +1143,7 @@ mod tests {
                 .contains::<BookmarkTextInputActive>()
         );
         app.world_mut()
-            .trigger(BinReceive::<BookmarkTextInputRequest> {
+            .trigger(UiInput::<BookmarkTextInputRequest> {
                 webview,
                 payload: BookmarkTextInputRequest { active: false },
             });
@@ -1162,7 +1162,7 @@ mod tests {
             .add_observer(on_bookmark_context_menu_request);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .trigger(BinReceive::<BookmarkContextMenuRequest> {
+            .trigger(UiInput::<BookmarkContextMenuRequest> {
                 webview,
                 payload: BookmarkContextMenuRequest { active: true },
             });
@@ -1173,7 +1173,7 @@ mod tests {
                 .contains::<BookmarkContextMenuActive>()
         );
         app.world_mut()
-            .trigger(BinReceive::<BookmarkContextMenuRequest> {
+            .trigger(UiInput::<BookmarkContextMenuRequest> {
                 webview,
                 payload: BookmarkContextMenuRequest { active: false },
             });

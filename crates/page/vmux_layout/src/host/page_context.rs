@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_core::event::PageContextRequest;
 use vmux_core::event::space::ProjectActivateRequest;
 use vmux_git::state::{GitPageContext, GitUiState, GitWorkspaceChanged};
@@ -139,7 +139,7 @@ impl TabWorkspaceSelection {
 }
 
 fn on_page_context_request(
-    trigger: On<BinReceive<PageContextRequest>>,
+    trigger: On<UiInput<PageContextRequest>>,
     child_of: Query<&ChildOf>,
     tabs: Query<&Tab>,
     pages: Query<&vmux_core::PageMetadata>,
@@ -172,7 +172,7 @@ fn on_page_context_request(
 }
 
 fn on_project_activate(
-    trigger: On<BinReceive<ProjectActivateRequest>>,
+    trigger: On<UiInput<ProjectActivateRequest>>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
@@ -255,7 +255,7 @@ mod tests {
         let tab = app.world_mut().spawn(Tab::default()).id();
         let webview = app.world_mut().spawn(ChildOf(tab)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: ProjectActivateRequest {
                 path: project.path().to_string_lossy().into_owned(),

@@ -423,7 +423,7 @@ fn sync_editor_wrap_settings(
 }
 
 fn on_file_resize(
-    trigger: On<BinReceive<FileResizeEvent>>,
+    trigger: On<UiInput<FileResizeEvent>>,
     mut views: Query<(&mut FileViewport, Option<&mut Editor>, Has<EditorKeymap>)>,
     mut commands: Commands,
 ) {
@@ -449,7 +449,7 @@ fn on_file_resize(
 }
 
 fn on_file_scroll(
-    trigger: On<BinReceive<FileScrollEvent>>,
+    trigger: On<UiInput<FileScrollEvent>>,
     mut views: Query<(&mut Editor, &mut FileViewport), With<EditorKeymap>>,
     mut commands: Commands,
 ) {
@@ -469,7 +469,7 @@ fn on_file_scroll(
 }
 
 fn on_file_fold_toggle(
-    trigger: On<BinReceive<FileFoldToggle>>,
+    trigger: On<UiInput<FileFoldToggle>>,
     mut views: Query<&mut Editor, (With<EditorKeymap>, With<FileViewport>)>,
     mut commands: Commands,
 ) {
@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn a_report_that_asks_for_no_rows_still_moves_the_host_viewport() {
         let (mut app, entity) = FileViewport::scrolling(0, 40);
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: entity,
             payload: FileScrollEvent {
                 top_row: 120,
@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn a_report_past_the_end_is_clamped_to_the_last_screenful() {
         let (mut app, entity) = FileViewport::scrolling(0, 40);
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: entity,
             payload: FileScrollEvent {
                 top_row: 9_000,

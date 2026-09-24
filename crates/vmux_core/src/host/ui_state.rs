@@ -108,7 +108,7 @@ impl<S: UiStateContract> UiState<S> {
     }
 
     fn replay(
-        trigger: On<bevy_cef::prelude::BinReceive<vmux_api::PageReady>>,
+        trigger: On<bevy_cef::prelude::UiInput<vmux_api::PageReady>>,
         mut updates: Query<&mut Self>,
     ) {
         let Ok(mut updates) = updates.get_mut(trigger.event().webview) else {
@@ -178,7 +178,7 @@ impl<S: BatchedUiState> UiStateWrite<S> {
 mod tests {
     use super::*;
     use crate::event::{FileDirtyEvent, FileUiState, FileUiStatePatch};
-    use bevy_cef::prelude::BinReceive;
+    use bevy_cef::prelude::UiInput;
     use vmux_api::BinEvent;
     use vmux_api::git::FileGitState;
 
@@ -312,7 +312,7 @@ mod tests {
         app.world_mut().insert_non_send(browsers);
         app.update();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: entity,
             payload: vmux_api::PageReady {},
         });

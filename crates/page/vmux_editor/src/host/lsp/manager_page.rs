@@ -2,7 +2,7 @@ use std::path::Path;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::event::{
     InstallPhase, LspCatalog, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
@@ -382,7 +382,7 @@ impl Package {
 }
 
 fn on_catalog_request(
-    trigger: On<BinReceive<LspCatalogRequest>>,
+    trigger: On<UiInput<LspCatalogRequest>>,
     mut states: Query<&mut ManagerState>,
     jobs: Query<(Entity, &CatalogJob)>,
     mut commands: Commands,
@@ -403,7 +403,7 @@ fn on_catalog_request(
 }
 
 fn on_install_request(
-    trigger: On<BinReceive<LspInstallRequest>>,
+    trigger: On<UiInput<LspInstallRequest>>,
     jobs: Query<&PackageJob>,
     mut commands: Commands,
 ) {
@@ -417,7 +417,7 @@ fn on_install_request(
 }
 
 fn on_update_request(
-    trigger: On<BinReceive<LspUpdateRequest>>,
+    trigger: On<UiInput<LspUpdateRequest>>,
     jobs: Query<&PackageJob>,
     mut commands: Commands,
 ) {
@@ -431,7 +431,7 @@ fn on_update_request(
 }
 
 fn on_uninstall_request(
-    trigger: On<BinReceive<LspUninstallRequest>>,
+    trigger: On<UiInput<LspUninstallRequest>>,
     jobs: Query<&PackageJob>,
     mut commands: Commands,
 ) {

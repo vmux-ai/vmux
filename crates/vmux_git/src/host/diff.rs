@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{DiffKind, DiffLine, GitDiffRequest, GitLineMarker, GitLineStatus};
 
@@ -99,7 +99,7 @@ pub(super) struct FileDiffRefresh {
     pub(super) entity: Entity,
 }
 
-fn on_diff_request(trigger: On<BinReceive<GitDiffRequest>>, mut commands: Commands) {
+fn on_diff_request(trigger: On<UiInput<GitDiffRequest>>, mut commands: Commands) {
     let target = GitDiffTarget::from_request(&trigger.event().payload);
     commands
         .entity(trigger.event().webview)

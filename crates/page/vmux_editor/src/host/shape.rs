@@ -144,7 +144,7 @@ impl Reindent {
 
 #[allow(clippy::too_many_arguments)]
 fn on_file_shape_set(
-    trigger: On<BinReceive<FileShapeSet>>,
+    trigger: On<UiInput<FileShapeSet>>,
     mut views: Query<&mut Editor>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,

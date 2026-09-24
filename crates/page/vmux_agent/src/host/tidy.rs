@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_setting::AppSettings;
 
 use crate::follow::AgentFileLayout;
@@ -39,7 +39,7 @@ struct PendingTidy {
 }
 
 fn on_tidy_request(
-    trigger: On<BinReceive<vmux_core::event::FileTidyRequest>>,
+    trigger: On<UiInput<vmux_core::event::FileTidyRequest>>,
     child_of: Query<&ChildOf>,
     pending: Query<&PendingTidy>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,

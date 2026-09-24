@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{GitBranchLogRequest, GitRepositoryRequest};
 
@@ -20,7 +20,7 @@ impl Plugin for RepositoryPlugin {
 }
 
 fn on_repository_request(
-    trigger: On<BinReceive<GitRepositoryRequest>>,
+    trigger: On<UiInput<GitRepositoryRequest>>,
     watch: Option<NonSendMut<GitWatch>>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
     mut views: Query<&mut super::state::GitState>,
@@ -57,7 +57,7 @@ fn on_repository_request(
     GitJob::enqueue(&mut commands, webview, JobKind::Repository { path });
 }
 
-fn on_branch_log_request(trigger: On<BinReceive<GitBranchLogRequest>>, mut commands: Commands) {
+fn on_branch_log_request(trigger: On<UiInput<GitBranchLogRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,

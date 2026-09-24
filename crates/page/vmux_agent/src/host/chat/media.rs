@@ -1,7 +1,7 @@
 use base64::Engine;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use super::ChatUiStateUpdates;
 
@@ -360,10 +360,7 @@ fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
     response
 }
 
-fn on_chat_media_list_request(
-    trigger: On<BinReceive<ChatMediaListRequest>>,
-    mut commands: Commands,
-) {
+fn on_chat_media_list_request(trigger: On<UiInput<ChatMediaListRequest>>, mut commands: Commands) {
     let request = trigger.event().payload.clone();
     let task = IoTaskPool::get()
         .spawn(async move { chat_media_entries(request.request_id, request.query) });
@@ -374,7 +371,7 @@ fn on_chat_media_list_request(
 }
 
 fn on_chat_attach_paths(
-    trigger: On<BinReceive<ChatAttachPaths>>,
+    trigger: On<UiInput<ChatAttachPaths>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -395,7 +392,7 @@ fn on_chat_attach_paths(
 }
 
 fn on_chat_attachment_preview_request(
-    trigger: On<BinReceive<ChatAttachmentPreviewRequest>>,
+    trigger: On<UiInput<ChatAttachmentPreviewRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -417,7 +414,7 @@ fn on_chat_attachment_preview_request(
 }
 
 fn on_chat_pick_files(
-    trigger: On<BinReceive<ChatPickFiles>>,
+    trigger: On<UiInput<ChatPickFiles>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -457,7 +454,7 @@ fn clipboard_image_path() -> Option<std::path::PathBuf> {
 }
 
 fn on_chat_paste_media(
-    trigger: On<BinReceive<ChatPasteMedia>>,
+    trigger: On<UiInput<ChatPasteMedia>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {

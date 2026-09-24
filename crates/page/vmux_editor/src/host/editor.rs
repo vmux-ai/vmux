@@ -307,7 +307,7 @@ struct CachedWrapView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_cef::prelude::{BinIpcEventRawBuffer, BinReceive, Browsers};
+    use bevy_cef::prelude::{BinIpcEventRawBuffer, Browsers, UiInput};
     use vmux_core::PageMetadata;
     use vmux_core::event::{FileEncoding, FileEncodingAction, FileEncodingSet, FileOpenEvent};
 
@@ -421,7 +421,7 @@ mod tests {
         }
 
         fn encoding_action(&mut self, encoding: FileEncoding, action: FileEncodingAction) {
-            self.app.world_mut().trigger(BinReceive {
+            self.app.world_mut().trigger(UiInput {
                 webview: self.entity,
                 payload: FileEncodingSet { encoding, action },
             });
@@ -430,7 +430,7 @@ mod tests {
 
         fn navigate_to(&mut self, name: &str) {
             let path = self.dir.path().join(name).to_string_lossy().into_owned();
-            self.app.world_mut().trigger(BinReceive {
+            self.app.world_mut().trigger(UiInput {
                 webview: self.entity,
                 payload: FileOpenEvent { path },
             });

@@ -5,7 +5,7 @@ use crate::{
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, HostWindow, UiEventPlugin};
+use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 use std::collections::{BTreeMap, HashMap};
 #[cfg(test)]
 use vmux_command::CommandRequest;
@@ -369,7 +369,7 @@ impl HostedPage for Shortcuts {
 }
 
 fn send_shortcuts(
-    trigger: On<BinReceive<PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     mut views: Query<(&mut Shortcuts, Option<&KeyContext>)>,
     keymap: Res<Keymap>,
     definitions: Query<&CommandDefinition>,
@@ -389,7 +389,7 @@ fn send_shortcuts(
 }
 
 fn on_shortcut_probe_request(
-    trigger: On<BinReceive<ShortcutProbeRequest>>,
+    trigger: On<UiInput<ShortcutProbeRequest>>,
     mut views: Query<&mut Shortcuts>,
 ) {
     let webview = trigger.event_target();

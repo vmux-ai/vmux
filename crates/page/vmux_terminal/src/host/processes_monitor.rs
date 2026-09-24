@@ -381,7 +381,7 @@ fn broadcast_to_monitors(
 }
 
 fn on_process_navigate(
-    trigger: On<BinReceive<ProcessNavigateEvent>>,
+    trigger: On<UiInput<ProcessNavigateEvent>>,
     process_index: Res<TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
@@ -427,7 +427,7 @@ fn on_process_navigate(
 }
 
 fn on_process_kill(
-    trigger: On<BinReceive<ProcessKillEvent>>,
+    trigger: On<UiInput<ProcessKillEvent>>,
     service: Option<Res<ServiceClient>>,
     mut process_list: ResMut<ServiceProcessList>,
     process_index: Res<TerminalProcessIndex>,
@@ -455,7 +455,7 @@ fn on_process_kill(
 }
 
 fn on_process_kill_all(
-    _trigger: On<BinReceive<ProcessKillAllEvent>>,
+    _trigger: On<UiInput<ProcessKillAllEvent>>,
     service: Option<Res<ServiceClient>>,
     mut process_list: ResMut<ServiceProcessList>,
     process_index: Res<TerminalProcessIndex>,

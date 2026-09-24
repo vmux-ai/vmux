@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_core::event::{
     ExtInstallPhase, ExtInstallProgress, ExtListRequest, ExtOpenManagerRequest, ExtPinRequest,
     ExtRow, ExtStatus, ExtToggleRequest, ExtUninstallRequest, ExtensionsEvent,
@@ -234,7 +234,7 @@ fn spawn_install(outbox: &ExtOutbox, request: InstallRequest) {
 }
 
 fn on_list_request(
-    trigger: On<BinReceive<ExtListRequest>>,
+    trigger: On<UiInput<ExtListRequest>>,
     mut catalog: Query<&mut ExtensionCatalog>,
     mut commands: Commands,
 ) {
@@ -247,7 +247,7 @@ fn on_list_request(
     catalog.replace(snapshot());
 }
 
-fn on_toggle_request(trigger: On<BinReceive<ExtToggleRequest>>, outbox: Res<ExtOutbox>) {
+fn on_toggle_request(trigger: On<UiInput<ExtToggleRequest>>, outbox: Res<ExtOutbox>) {
     let request = trigger.event().payload.clone();
     let profile = vmux_core::profile::active_profile_name();
     let _ = store::update_index(&store::root(), |index| {
@@ -261,13 +261,13 @@ fn on_toggle_request(trigger: On<BinReceive<ExtToggleRequest>>, outbox: Res<ExtO
     queue_snapshot(&outbox);
 }
 
-fn on_uninstall_request(trigger: On<BinReceive<ExtUninstallRequest>>, outbox: Res<ExtOutbox>) {
+fn on_uninstall_request(trigger: On<UiInput<ExtUninstallRequest>>, outbox: Res<ExtOutbox>) {
     let profile = vmux_core::profile::active_profile_name();
     let _ = store::uninstall_for_profile(&store::root(), &profile, &trigger.event().payload.id);
     queue_snapshot(&outbox);
 }
 
-fn on_pin_request(trigger: On<BinReceive<ExtPinRequest>>, outbox: Res<ExtOutbox>) {
+fn on_pin_request(trigger: On<UiInput<ExtPinRequest>>, outbox: Res<ExtOutbox>) {
     let request = trigger.event().payload.clone();
     let outbox = outbox.clone();
     std::thread::spawn(move || {
@@ -301,7 +301,7 @@ fn on_pin_request(trigger: On<BinReceive<ExtPinRequest>>, outbox: Res<ExtOutbox>
 }
 
 fn on_open_manager_request(
-    _trigger: On<BinReceive<ExtOpenManagerRequest>>,
+    _trigger: On<UiInput<ExtOpenManagerRequest>>,
     mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     requests.write(vmux_layout::stack::OpenRequest {

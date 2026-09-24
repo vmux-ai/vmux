@@ -633,14 +633,14 @@ fn sync_tab_order(
 }
 
 fn on_tab_create_request(
-    _trigger: On<BinReceive<TabCreateRequest>>,
+    _trigger: On<UiInput<TabCreateRequest>>,
     mut requests: MessageWriter<OpenRequest>,
 ) {
     requests.write(OpenRequest { url: None });
 }
 
 fn on_tab_close_request(
-    trigger: On<BinReceive<TabCloseRequest>>,
+    trigger: On<UiInput<TabCloseRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: crate::stack::ActiveTabParam,
     mut close_requests: MessageWriter<CloseTabRequest>,
@@ -656,7 +656,7 @@ fn on_tab_close_request(
 }
 
 fn on_tab_activate_request(
-    trigger: On<BinReceive<TabActivateRequest>>,
+    trigger: On<UiInput<TabActivateRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     mut commands: Commands,
 ) {
@@ -670,7 +670,7 @@ fn on_tab_activate_request(
 }
 
 fn on_tab_reorder_request(
-    trigger: On<BinReceive<TabReorderRequest>>,
+    trigger: On<UiInput<TabReorderRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
@@ -1325,7 +1325,7 @@ mod tests {
             .id();
         app.world_mut().spawn(PrimaryWindow);
 
-        app.world_mut().trigger(BinReceive::<TabCloseRequest> {
+        app.world_mut().trigger(UiInput::<TabCloseRequest> {
             webview,
             payload: TabCloseRequest {
                 tab_id: Some(tab.to_bits().to_string()),
@@ -1347,7 +1347,7 @@ mod tests {
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(PrimaryWindow);
 
-        app.world_mut().trigger(BinReceive::<TabCloseRequest> {
+        app.world_mut().trigger(UiInput::<TabCloseRequest> {
             webview,
             payload: TabCloseRequest { tab_id: None },
         });
@@ -1377,7 +1377,7 @@ mod tests {
             .spawn((tab_bundle(), LastActivatedAt(3), ChildOf(space)))
             .id();
 
-        app.world_mut().trigger(BinReceive::<TabReorderRequest> {
+        app.world_mut().trigger(UiInput::<TabReorderRequest> {
             webview,
             payload: TabReorderRequest {
                 tab_id: first.to_bits().to_string(),
@@ -1498,7 +1498,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive::<TabCloseRequest> {
+        app.world_mut().trigger(UiInput::<TabCloseRequest> {
             webview,
             payload: TabCloseRequest {
                 tab_id: Some(d.to_bits().to_string()),

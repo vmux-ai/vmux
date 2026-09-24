@@ -125,7 +125,7 @@ impl HostedPage for Settings {
 }
 
 fn reset_sent_markers_on_page_ready(
-    trigger: On<BinReceive<PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     views: Query<Entity, With<Settings>>,
     mut commands: Commands,
 ) {
@@ -181,7 +181,7 @@ fn publish_settings_ui_state(
 }
 
 fn on_settings_request(
-    trigger: On<BinReceive<SettingsRequest>>,
+    trigger: On<UiInput<SettingsRequest>>,
     mut settings: ResMut<AppSettings>,
     mut writes: MessageWriter<SettingsWriteRequest>,
 ) {
@@ -202,7 +202,7 @@ fn on_settings_request(
 }
 
 fn on_check_for_updates(
-    _trigger: On<BinReceive<CheckForUpdatesEvent>>,
+    _trigger: On<UiInput<CheckForUpdatesEvent>>,
     mut requests: MessageWriter<CheckForUpdatesRequest>,
 ) {
     requests.write(CheckForUpdatesRequest);

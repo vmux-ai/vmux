@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{GitDirectoryRequest, GitDirectorySnapshot};
 
@@ -84,7 +84,7 @@ impl GitDirectory {
 }
 
 fn on_directory_request(
-    trigger: On<BinReceive<GitDirectoryRequest>>,
+    trigger: On<UiInput<GitDirectoryRequest>>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
     mut views: Query<&mut super::state::GitState>,
 ) {

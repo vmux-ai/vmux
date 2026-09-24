@@ -73,7 +73,7 @@ type GlobalSearchDirtyReady = (
     With<vmux_core::page::PageReady>,
 );
 fn on_explorer_goto(
-    trigger: On<BinReceive<ExplorerGoto>>,
+    trigger: On<UiInput<ExplorerGoto>>,
     views: Query<&FileView>,
     mut writer: MessageWriter<crate::lsp::manager::LspGoto>,
 ) {
@@ -163,7 +163,7 @@ fn emit_global_search(
 }
 
 fn on_explorer_search_open(
-    trigger: On<BinReceive<ExplorerSearchOpen>>,
+    trigger: On<UiInput<ExplorerSearchOpen>>,
     mut views: Query<(
         &mut FileView,
         &mut FileDocumentRevision,
@@ -335,7 +335,7 @@ mod tests {
                 path: PathBuf::from("/x.rs"),
             })
             .id();
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: entity,
             payload: ExplorerGoto {
                 path: "/x.rs".to_string(),

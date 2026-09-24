@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::ChatUiStateUpdates;
 
@@ -450,7 +450,7 @@ impl ModeProjection {
 }
 
 fn on_start_select_model(
-    trigger: On<BinReceive<StartSelectModel>>,
+    trigger: On<UiInput<StartSelectModel>>,
     mut last_used: ResMut<AgentModelSelections>,
 ) {
     let request = &trigger.event().payload;
@@ -461,7 +461,7 @@ fn on_start_select_model(
 }
 
 fn on_start_select_mode(
-    trigger: On<BinReceive<StartSelectMode>>,
+    trigger: On<UiInput<StartSelectMode>>,
     mut last_used: ResMut<AgentModeSelections>,
 ) {
     let request = &trigger.event().payload;
@@ -664,7 +664,7 @@ fn push_removed_acp_mode_state_to_page(
 }
 
 fn on_select_model(
-    trigger: On<BinReceive<SelectModel>>,
+    trigger: On<UiInput<SelectModel>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
     mut selects: MessageWriter<ModelSelectRequest>,
@@ -682,7 +682,7 @@ fn on_select_model(
 }
 
 fn on_select_mode(
-    trigger: On<BinReceive<SelectMode>>,
+    trigger: On<UiInput<SelectMode>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
     mut selects: MessageWriter<ModeSelectRequest>,
@@ -734,7 +734,7 @@ fn apply_mode_selection(
 }
 
 fn on_set_agent_effort(
-    trigger: On<BinReceive<SetAgentEffort>>,
+    trigger: On<UiInput<SetAgentEffort>>,
     mut efforts: MessageWriter<EffortSetRequest>,
 ) {
     let payload = &trigger.event().payload;
@@ -1048,7 +1048,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SelectModel {
                 model_id: "fable".into(),
@@ -1087,13 +1087,13 @@ mod tests {
             "fable"
         );
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SelectModel {
                 model_id: "fable".into(),
             },
         });
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SelectModel {
                 model_id: "missing".into(),
@@ -1149,7 +1149,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SelectMode {
                 mode_id: "auto".into(),

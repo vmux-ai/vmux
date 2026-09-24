@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
 use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch, ExplorerSearchRequest};
@@ -27,7 +27,7 @@ impl Plugin for SearchPlugin {
 }
 
 fn start_project_search(
-    trigger: On<BinReceive<ExplorerSearchRequest>>,
+    trigger: On<UiInput<ExplorerSearchRequest>>,
     views: Query<&FileView>,
     mut commands: Commands,
 ) {

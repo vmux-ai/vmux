@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::model::{ModeProjection, ModelProjection};
 use super::{AgentChatView, ChatSynced, ChatUiStateUpdates};
@@ -361,7 +361,7 @@ fn sync_chat_to_ready_views(
 }
 
 fn reset_chat_synced_on_page_ready(
-    trigger: On<BinReceive<vmux_core::page::PageReady>>,
+    trigger: On<UiInput<vmux_core::page::PageReady>>,
     chat_views: Query<(), With<AgentChatView>>,
     mut commands: Commands,
 ) {
@@ -372,7 +372,7 @@ fn reset_chat_synced_on_page_ready(
 }
 
 fn on_chat_history_request(
-    trigger: On<BinReceive<ChatHistoryRequest>>,
+    trigger: On<UiInput<ChatHistoryRequest>>,
     child_of: Query<&ChildOf>,
     sessions: Query<(
         &AgentMessages,
@@ -584,11 +584,11 @@ mod tests {
         let chat = app.world_mut().spawn((AgentChatView, ChatSynced)).id();
         let other = app.world_mut().spawn(ChatSynced).id();
 
-        app.world_mut().trigger(BinReceive::<PageReady> {
+        app.world_mut().trigger(UiInput::<PageReady> {
             webview: chat,
             payload: PageReady {},
         });
-        app.world_mut().trigger(BinReceive::<PageReady> {
+        app.world_mut().trigger(UiInput::<PageReady> {
             webview: other,
             payload: PageReady {},
         });

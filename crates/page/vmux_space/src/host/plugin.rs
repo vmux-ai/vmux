@@ -218,7 +218,7 @@ fn update_effective_startup_dir(
 struct SpacesListSent;
 
 fn reset_spaces_sent_marker_on_page_ready(
-    trigger: On<BinReceive<PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     spaces_views: Query<(), With<Spaces>>,
     cef_views: Query<(), With<vmux_layout::LayoutCef>>,
     mut commands: Commands,
@@ -389,7 +389,7 @@ fn broadcast_spaces_to_views(
 }
 
 fn on_project_activate(
-    trigger: On<BinReceive<ProjectActivateRequest>>,
+    trigger: On<UiInput<ProjectActivateRequest>>,
     active: Option<Res<ActiveSpace>>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
@@ -408,7 +408,7 @@ fn on_project_activate(
 }
 
 fn on_project_forget(
-    trigger: On<BinReceive<ProjectForgetRequest>>,
+    trigger: On<UiInput<ProjectForgetRequest>>,
     active: Option<Res<ActiveSpace>>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
@@ -428,7 +428,7 @@ fn on_project_forget(
 
 fn relay_space_requests<T: Message + Clone>(mut reader: MessageReader<T>, mut commands: Commands) {
     for request in reader.read() {
-        commands.trigger(BinReceive {
+        commands.trigger(UiInput {
             webview: Entity::PLACEHOLDER,
             payload: request.clone(),
         });
@@ -582,7 +582,7 @@ fn sync_space_name_to_id(
 }
 
 fn on_space_rename(
-    trigger: On<BinReceive<SpaceRenameRequest>>,
+    trigger: On<UiInput<SpaceRenameRequest>>,
     spaces: SpaceQuery,
     tabs: SpaceTabQuery,
     mut active_id: ResMut<vmux_layout::space::ActiveSpaceId>,
@@ -634,7 +634,7 @@ fn on_space_rename(
 }
 
 fn on_space_open_page(
-    trigger: On<BinReceive<SpaceOpenPageRequest>>,
+    trigger: On<UiInput<SpaceOpenPageRequest>>,
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     host_windows: Query<&HostWindow>,
     focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
@@ -682,7 +682,7 @@ fn on_space_open_page(
 
 #[allow(clippy::too_many_arguments)]
 fn on_space_delete(
-    trigger: On<BinReceive<SpaceDeleteRequest>>,
+    trigger: On<UiInput<SpaceDeleteRequest>>,
     spaces: SpaceQuery,
     space_list: SpaceListQuery,
     tabs: SpaceTabQuery,
@@ -766,7 +766,7 @@ fn on_space_delete(
 
 #[allow(clippy::too_many_arguments)]
 fn on_space_attach(
-    trigger: On<BinReceive<SpaceAttachRequest>>,
+    trigger: On<UiInput<SpaceAttachRequest>>,
     spaces: SpaceQuery,
     space_list: SpaceListQuery,
     tabs: SpaceTabQuery,
@@ -820,7 +820,7 @@ fn on_space_attach(
 
 #[allow(clippy::too_many_arguments)]
 fn on_space_create(
-    trigger: On<BinReceive<SpaceCreateRequest>>,
+    trigger: On<UiInput<SpaceCreateRequest>>,
     spaces: SpaceQuery,
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     host_windows: Query<&HostWindow>,
@@ -1170,7 +1170,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(HostWindow(second_window)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SpaceAttachRequest {
                 space_id: "shared".to_string(),
@@ -1246,7 +1246,7 @@ mod tests {
         ));
         let webview = app.world_mut().spawn(HostWindow(second_window)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SpaceDeleteRequest {
                 space_id: "shared".to_string(),
@@ -1420,7 +1420,7 @@ mod tests {
 
     fn run_project_request<T: Send + Sync + 'static>(app: &mut App, request: T) {
         let webview = app.world_mut().spawn_empty().id();
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: request,
         });
@@ -1725,7 +1725,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: Entity::PLACEHOLDER,
             payload: SpaceRenameRequest {
                 space_id: "rename-src-test".to_string(),

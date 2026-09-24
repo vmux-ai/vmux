@@ -2,7 +2,7 @@ use std::path::Path;
 
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use unicode_width::UnicodeWidthChar;
 use vmux_command::event::{is_data_uri, looks_like_path};
 use vmux_core::event::{LinkRange, TermLine};
@@ -20,7 +20,7 @@ impl Plugin for LinkPlugin {
 }
 
 fn on_term_link_open(
-    trigger: On<BinReceive<TermLinkOpenRequest>>,
+    trigger: On<UiInput<TermLinkOpenRequest>>,
     mut stack_requests: MessageWriter<OpenRequest>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
@@ -179,7 +179,7 @@ mod tests {
             .add_systems(Update, capture);
         let webview = app.world_mut().spawn(vmux_core::team::User).id();
 
-        app.world_mut().trigger(BinReceive::<TermLinkOpenRequest> {
+        app.world_mut().trigger(UiInput::<TermLinkOpenRequest> {
             webview,
             payload: TermLinkOpenRequest {
                 url: "https://vmux.ai".into(),

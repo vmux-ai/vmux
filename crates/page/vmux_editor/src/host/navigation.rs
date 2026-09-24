@@ -66,7 +66,7 @@ impl PendingGoto {
 }
 
 fn on_file_open(
-    trigger: On<BinReceive<FileOpenEvent>>,
+    trigger: On<UiInput<FileOpenEvent>>,
     mut views: Query<(
         &mut FileView,
         &mut FileDocumentRevision,
@@ -94,7 +94,7 @@ fn on_file_open(
 }
 
 fn on_knowledge_link_open(
-    trigger: On<BinReceive<KnowledgeLinkOpen>>,
+    trigger: On<UiInput<KnowledgeLinkOpen>>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,

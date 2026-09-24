@@ -1,7 +1,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
@@ -159,7 +159,7 @@ impl StartPromptContextParams<'_, '_> {
 }
 
 fn on_start_select_workspace(
-    trigger: On<BinReceive<StartSelectWorkspace>>,
+    trigger: On<UiInput<StartSelectWorkspace>>,
     child_of: Query<&ChildOf>,
     tabs: Query<(), With<Tab>>,
     pending: Query<&PendingStartWorkspacePicker>,
@@ -297,7 +297,7 @@ impl StartBranchRead {
 }
 
 fn on_start_branches_request(
-    trigger: On<BinReceive<vmux_api::command_bar::StartBranchesRequest>>,
+    trigger: On<UiInput<vmux_api::command_bar::StartBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -336,7 +336,7 @@ fn drain_start_branch_reads(
 }
 
 fn on_start_go_to_branch(
-    trigger: On<BinReceive<vmux_api::command_bar::StartGoToBranch>>,
+    trigger: On<UiInput<vmux_api::command_bar::StartGoToBranch>>,
     child_of: Query<&ChildOf>,
     tab_query: Query<(), With<Tab>>,
     mut tabs: Query<&mut Tab>,
@@ -566,7 +566,7 @@ fn should_focus_start_sync(
 }
 
 fn on_start_data_request(
-    trigger: On<BinReceive<StartDataRequest>>,
+    trigger: On<UiInput<StartDataRequest>>,
     keyboard_targets: Query<(), With<KeyboardOwner>>,
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
@@ -708,7 +708,7 @@ fn begin_requested_inline_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_cef::prelude::BinReceive;
+    use bevy_cef::prelude::UiInput;
     use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
     use vmux_core::host::UiStateWrite;
     use vmux_core::page::PageManifest;
@@ -738,7 +738,7 @@ mod tests {
     }
 
     fn emit_start_ready(app: &mut App, webview: Entity) {
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: StartDataRequest,
         });

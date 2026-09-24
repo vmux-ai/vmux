@@ -8,7 +8,7 @@ mod transcript;
 mod workspace;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use vmux_chat::event::ChatOpenPage;
 
@@ -53,7 +53,7 @@ type ChatUiStateUpdates = vmux_core::host::UiState<vmux_chat::state::ChatUiState
 pub(crate) struct ChatSynced;
 
 fn on_chat_open_page(
-    trigger: On<BinReceive<ChatOpenPage>>,
+    trigger: On<UiInput<ChatOpenPage>>,
     mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     let url = trigger.event().payload.url.clone();

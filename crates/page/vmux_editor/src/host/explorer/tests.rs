@@ -53,7 +53,7 @@ fn git_repo() -> tempfile::TempDir {
 }
 
 fn toggle(app: &mut App, e: Entity, path: &Path) {
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerTreeToggle {
             path: path.to_string_lossy().to_string(),
@@ -297,7 +297,7 @@ fn reveal_current_expands_ancestors_and_focuses_file() {
         .spawn((FileView { path: file.clone() }, ExplorerState::default()))
         .id();
     wait_for_children(&mut app, tmp.path(), tmp.path());
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerRevealCurrent,
     });
@@ -326,7 +326,7 @@ fn repeated_reveal_skips_unchanged_tree_rebuild() {
         .spawn((FileView { path: file }, ExplorerState::default()))
         .id();
     wait_for_children(&mut app, tmp.path(), tmp.path());
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerRevealCurrent,
     });
@@ -336,7 +336,7 @@ fn repeated_reveal_skips_unchanged_tree_rebuild() {
         .get_mut::<ExplorerState>(e)
         .unwrap()
         .focus_path = None;
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerRevealCurrent,
     });
@@ -481,7 +481,7 @@ fn only_an_asked_for_reveal_may_take_focus_from_the_editor() {
         vec![ExplorerReveal::Followed],
         "opening a file must not pull the caret out of the editor"
     );
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerRevealCurrent,
     });
@@ -509,7 +509,7 @@ fn collapse_all_leaves_the_root_expanded_and_nothing_else() {
     wait_for_children(&mut app, tmp.path(), &src);
     assert!(ExplorerTree::in_app(&app, tmp.path()).expanded.len() > 1);
     app.world_mut().entity_mut(e).remove::<ExplorerTreeDirty>();
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerCollapseAll,
     });
@@ -547,7 +547,7 @@ fn showing_the_panel_reveals_without_taking_the_caret() {
         .id();
     SentReveals::watch(&mut app, view);
 
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: view,
         payload: ExplorerPanelSetVisible {
             visible: true,
@@ -610,7 +610,7 @@ fn panel_visibility_is_shared_only_within_stack() {
             ChildOf(second_stack),
         ))
         .id();
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: first,
         payload: ExplorerPanelSetVisible {
             visible: false,
@@ -635,7 +635,7 @@ fn panel_visibility_is_shared_only_within_stack() {
     assert!(app.world().get::<ExplorerPanelSent>(peer).is_none());
     assert!(app.world().get::<ExplorerPanelSent>(other).is_some());
 
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: first,
         payload: ExplorerPanelSetVisible {
             visible: false,
@@ -671,7 +671,7 @@ fn panel_open_reveals_current_file() {
         ))
         .id();
     wait_for_children(&mut app, tmp.path(), tmp.path());
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerPanelSetVisible {
             visible: true,
@@ -704,7 +704,7 @@ fn panel_width_clamps() {
             path: PathBuf::from("/x"),
         })
         .id();
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerPanelWidth { px: 9000 },
     });
@@ -733,7 +733,7 @@ fn open_editors_track_on_navigate_and_close() {
     app.update();
     let st = app.world().get::<ExplorerState>(e).unwrap();
     assert_eq!(st.open_editors, vec![a.clone(), b.clone()]);
-    app.world_mut().trigger(BinReceive {
+    app.world_mut().trigger(UiInput {
         webview: e,
         payload: ExplorerCloseEditor {
             path: a.to_string_lossy().to_string(),

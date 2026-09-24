@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::CommandBar;
 use crate::event::CommandBarPanelRequest;
@@ -37,7 +37,7 @@ fn mark_command_bar_shown_inline(
 }
 
 fn on_command_bar_panel_active(
-    trigger: On<BinReceive<CommandBarPanelRequest>>,
+    trigger: On<UiInput<CommandBarPanelRequest>>,
     mut commands: Commands,
 ) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
@@ -67,14 +67,14 @@ mod tests {
         let mut app = app();
         let webview = app.world_mut().spawn_empty().id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: CommandBarPanelRequest { active: true },
         });
         app.update();
         assert!(app.world().get::<CommandBarPanelActive>(webview).is_some());
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: CommandBarPanelRequest { active: false },
         });

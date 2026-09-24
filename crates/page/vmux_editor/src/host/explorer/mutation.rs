@@ -135,7 +135,7 @@ fn start_explorer_mutation(
 }
 
 fn on_explorer_create(
-    trigger: On<BinReceive<ExplorerCreate>>,
+    trigger: On<UiInput<ExplorerCreate>>,
     query: Query<&ExplorerState>,
     mut commands: Commands,
 ) {
@@ -157,7 +157,7 @@ fn on_explorer_create(
 }
 
 fn on_explorer_rename(
-    trigger: On<BinReceive<ExplorerRename>>,
+    trigger: On<UiInput<ExplorerRename>>,
     query: Query<&ExplorerState>,
     mut commands: Commands,
 ) {
@@ -178,7 +178,7 @@ fn on_explorer_rename(
 }
 
 fn on_explorer_delete(
-    trigger: On<BinReceive<ExplorerDelete>>,
+    trigger: On<UiInput<ExplorerDelete>>,
     query: Query<&ExplorerState>,
     mut commands: Commands,
 ) {

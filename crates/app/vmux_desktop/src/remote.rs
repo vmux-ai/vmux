@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, Browsers};
+use bevy_cef::prelude::{Browsers, UiInput};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::page::PageReady;
 use vmux_layout::event::{
@@ -38,7 +38,7 @@ impl Plugin for RemotePlugin {
 }
 
 fn on_remote_copy(
-    _trigger: On<BinReceive<RemoteCopyEvent>>,
+    _trigger: On<UiInput<RemoteCopyEvent>>,
     state: Query<(&RemoteState, &RemotePairingInfo)>,
 ) {
     let Ok((state, pairing)) = state.single() else {
@@ -50,7 +50,7 @@ fn on_remote_copy(
 }
 
 fn on_remote_revoke(
-    trigger: On<BinReceive<RemoteRevokeRequest>>,
+    trigger: On<UiInput<RemoteRevokeRequest>>,
     mut states: Query<&mut RemoteState>,
 ) {
     let Ok(mut state) = states.single_mut() else {
@@ -235,7 +235,7 @@ fn reconcile_remote_on_startup(state: Query<&RemoteState>) {
     }
 }
 
-fn on_remote_request(trigger: On<BinReceive<RemoteRequest>>, mut states: Query<&mut RemoteState>) {
+fn on_remote_request(trigger: On<UiInput<RemoteRequest>>, mut states: Query<&mut RemoteState>) {
     let Ok(mut state) = states.single_mut() else {
         return;
     };
@@ -263,7 +263,7 @@ fn on_remote_request(trigger: On<BinReceive<RemoteRequest>>, mut states: Query<&
 }
 
 fn show_remote_pairing(
-    _trigger: On<BinReceive<RemotePairingShowRequest>>,
+    _trigger: On<UiInput<RemotePairingShowRequest>>,
     mut states: Query<(&mut RemoteState, Option<&RemotePairingInfo>)>,
 ) {
     let Ok((mut state, pairing)) = states.single_mut() else {
@@ -275,7 +275,7 @@ fn show_remote_pairing(
 }
 
 fn dismiss_remote_pairing(
-    _trigger: On<BinReceive<RemotePairingDismissRequest>>,
+    _trigger: On<UiInput<RemotePairingDismissRequest>>,
     mut states: Query<&mut RemoteState>,
 ) {
     let Ok(mut state) = states.single_mut() else {
