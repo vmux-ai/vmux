@@ -15,6 +15,12 @@ pub mod tool_page;
 pub mod page;
 
 #[cfg(ui)]
+mod active_session;
+
+#[cfg(ui)]
+mod remote;
+
+#[cfg(ui)]
 pub mod error_page;
 #[cfg(ui)]
 pub mod extensions_page;
