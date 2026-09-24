@@ -100,19 +100,31 @@ impl Relay {
         recorded_device()
     }
 
-    pub fn pairing(&self, token: &str) -> Result<Option<PairingInfo>, String> {
+    pub fn pairing(
+        &self,
+        relay_token: &str,
+        pairing_token: &str,
+    ) -> Result<Option<PairingInfo>, String> {
         let (Some(base_url), Some(device), Some(fingerprint)) =
             (self.base_url()?, recorded_device(), recorded_fingerprint())
         else {
             return Ok(None);
         };
-        PairingInfo::new(&base_url, token, &fingerprint, &device).map(Some)
+        PairingInfo::new(&base_url, relay_token, pairing_token, &fingerprint, &device).map(Some)
     }
 
-    pub fn wait_for_pairing(&self, token: &str, timeout: Duration) -> std::io::Result<String> {
+    pub fn wait_for_pairing(
+        &self,
+        relay_token: &str,
+        pairing_token: &str,
+        timeout: Duration,
+    ) -> std::io::Result<String> {
         let deadline = Instant::now() + timeout;
         loop {
-            if let Some(pairing) = self.pairing(token).map_err(std::io::Error::other)? {
+            if let Some(pairing) = self
+                .pairing(relay_token, pairing_token)
+                .map_err(std::io::Error::other)?
+            {
                 return Ok(pairing.url);
             }
             if Instant::now() >= deadline {
@@ -169,22 +181,28 @@ pub struct PairingInfo {
 impl PairingInfo {
     pub fn new(
         base_url: &str,
-        token: &str,
+        relay_token: &str,
+        pairing_token: &str,
         fingerprint: &str,
         device: &str,
     ) -> Result<Self, String> {
         let mut url = url::Url::parse(base_url).map_err(|error| error.to_string())?;
         url.set_fragment(Some(&if fingerprint.is_empty() {
-            format!("token={token}&device={device}")
+            format!(
+                "relay_token={relay_token}&pairing_token={pairing_token}&device={device}"
+            )
         } else {
-            format!("token={token}&fp={fingerprint}&device={device}")
+            format!(
+                "relay_token={relay_token}&pairing_token={pairing_token}&fp={fingerprint}&device={device}"
+            )
         }));
 
         let mut deep_link = url::Url::parse("vmux://pair").map_err(|error| error.to_string())?;
         deep_link
             .query_pairs_mut()
             .append_pair("base", base_url)
-            .append_pair("token", token);
+            .append_pair("relay_token", relay_token)
+            .append_pair("pairing_token", pairing_token);
         if !fingerprint.is_empty() {
             deep_link.query_pairs_mut().append_pair("fp", fingerprint);
         }
@@ -217,37 +235,56 @@ mod tests {
 
     #[test]
     fn a_fingerprint_reaches_both_pairing_shapes() {
-        let pairing =
-            PairingInfo::new("https://relay.vmux.ai", "secret", "abc123", "dev-1").unwrap();
+        let pairing = PairingInfo::new(
+            "https://relay.vmux.ai",
+            "relay-secret",
+            "pairing-secret",
+            "abc123",
+            "dev-1",
+        )
+        .unwrap();
 
         assert_eq!(
             pairing.url,
-            "https://relay.vmux.ai/#token=secret&fp=abc123&device=dev-1"
+            "https://relay.vmux.ai/#relay_token=relay-secret&pairing_token=pairing-secret&fp=abc123&device=dev-1"
         );
         assert_eq!(
             pairing.deep_link,
-            "vmux://pair?base=https%3A%2F%2Frelay.vmux.ai&token=secret&fp=abc123&device=dev-1"
+            "vmux://pair?base=https%3A%2F%2Frelay.vmux.ai&relay_token=relay-secret&pairing_token=pairing-secret&fp=abc123&device=dev-1"
         );
     }
 
     #[test]
     fn an_absent_fingerprint_leaves_both_shapes_well_formed() {
-        let pairing = PairingInfo::new("https://relay.vmux.ai", "secret", "", "dev-1").unwrap();
+        let pairing = PairingInfo::new(
+            "https://relay.vmux.ai",
+            "relay-secret",
+            "pairing-secret",
+            "",
+            "dev-1",
+        )
+        .unwrap();
 
         assert_eq!(
             pairing.url,
-            "https://relay.vmux.ai/#token=secret&device=dev-1"
+            "https://relay.vmux.ai/#relay_token=relay-secret&pairing_token=pairing-secret&device=dev-1"
         );
         assert_eq!(
             pairing.deep_link,
-            "vmux://pair?base=https%3A%2F%2Frelay.vmux.ai&token=secret&device=dev-1"
+            "vmux://pair?base=https%3A%2F%2Frelay.vmux.ai&relay_token=relay-secret&pairing_token=pairing-secret&device=dev-1"
         );
     }
 
     #[test]
     fn every_pairing_shape_names_a_device() {
-        let pairing =
-            PairingInfo::new("https://relay.vmux.ai", "secret", "abc123", "dev-2").unwrap();
+        let pairing = PairingInfo::new(
+            "https://relay.vmux.ai",
+            "relay-secret",
+            "pairing-secret",
+            "abc123",
+            "dev-2",
+        )
+        .unwrap();
 
         assert!(pairing.url.contains("device=dev-2"));
         assert!(pairing.deep_link.contains("device=dev-2"));

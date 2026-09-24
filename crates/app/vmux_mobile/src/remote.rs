@@ -22,6 +22,7 @@ pub(crate) fn next_client_op_id() -> ClientOpId {
 #[derive(Clone)]
 pub(crate) struct Api {
     quic: crate::quic::QuicApi,
+    credentials: Credentials,
 }
 
 #[derive(Debug)]
@@ -50,7 +51,18 @@ impl Api {
         };
         Ok(Self {
             quic: crate::quic::QuicApi::new(endpoint),
+            credentials,
         })
+    }
+
+    pub(crate) async fn paired_credentials(&self) -> Option<Credentials> {
+        let credential = self.quic.credential().await;
+        if !matches!(credential, vmux_remote::ClientCredential::Device(_)) {
+            return None;
+        }
+        let mut credentials = self.credentials.clone();
+        credentials.credential = Some(credential);
+        Some(credentials)
     }
 
     pub(crate) async fn reset_transport(&self) {

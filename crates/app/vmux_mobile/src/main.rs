@@ -263,10 +263,13 @@ fn AppBody() -> Element {
                     continue;
                 }
             };
-            match client.sessions().await {
+            let result = client.sessions().await;
+            if let Some(credentials) = client.paired_credentials().await {
+                credentials::StoredCredentials::save(&credentials);
+                pair_url.set(String::new());
+            }
+            match result {
                 Ok(next) => {
-                    credentials::StoredCredentials::save(&credentials);
-                    pair_url.set(credentials.pairing_url());
                     let displaced = api.peek().clone();
                     api.set(Some(client.clone()));
                     if let Some(displaced) = displaced {

@@ -41,7 +41,7 @@ impl Registration {
                 return SessionEnd::Unregistered(format!("desktop identity: {error}"));
             }
         };
-        match Self::open(&state.token).await {
+        match Self::open(&state.relay_token).await {
             Ok(registration) => registration.serve(state, &identity, liveness).await,
             Err(reason) => SessionEnd::Unregistered(reason),
         }

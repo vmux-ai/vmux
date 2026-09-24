@@ -575,10 +575,15 @@ than at each of nine handlers.
 ### Pairing
 
 No CA signs for a Mac, so the host mints its own certificate. The QR deep link carries the
-relay endpoint, a 256-bit bearer token, and the certificate's SHA-256. The client pins that
-fingerprint and trusts nothing else — narrower than the public root set. A pairing link
-without a fingerprint is **refused rather than downgraded**, because there is no unpinned
-transport left to fall back to.
+relay routing credential, a one-use pairing credential, and the certificate's SHA-256. The
+client pins that fingerprint and trusts nothing else — narrower than the public root set. A
+pairing link without a fingerprint is **refused rather than downgraded**, because there is no
+unpinned transport left to fall back to.
+
+Successful pairing gives that client ID its own device credential and immediately rotates the
+pairing credential. The host stores only device-credential hashes. Revoking one client removes
+only its authorization and closes its live inner QUIC session; other clients and the desktop's
+relay registration remain valid.
 
 Discovery is manual by design. No mDNS, no zeroconf.
 

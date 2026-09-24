@@ -452,7 +452,7 @@ mod tests {
                 &mut wire,
                 &Frame::new(
                     MessageType::CLIENT_SETUP,
-                    br#"{"device_id":"d","token":"t","teleportation":true}"#.to_vec(),
+                    br#"{"client_id":"d","credential":{"kind":"device","token":"t"},"teleportation":true}"#.to_vec(),
                 ),
             )
             .await
@@ -465,7 +465,7 @@ mod tests {
             .read_json::<crate::quic::ClientSetup>(MessageType::CLIENT_SETUP)
             .expect("an unknown field must not stop it parsing");
 
-        assert_eq!(setup.device_id, crate::DeviceId::new("d"));
+        assert_eq!(setup.client_id, crate::DeviceId::new("d"));
     }
 
     #[test]

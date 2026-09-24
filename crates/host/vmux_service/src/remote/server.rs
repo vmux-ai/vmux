@@ -1,9 +1,9 @@
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine;
 use tokio::sync::Mutex;
+use vmux_client::{RelayToken, RemoteAuthorizationStore};
 
 use crate::RemotePaths;
 use crate::acp::AcpSessionManager;
@@ -26,8 +26,8 @@ const MAX_CLIENT_OP_ID_BYTES: usize = 256;
 
 #[derive(Clone)]
 pub(crate) struct RemoteState {
-    pub(crate) token: Arc<str>,
-    pub(crate) paired: Arc<AtomicBool>,
+    pub(crate) relay_token: Arc<str>,
+    pub(crate) authorizations: Arc<Mutex<RemoteAuthorizationStore>>,
     pub(crate) agents: Arc<Mutex<AgentSessionManager>>,
     pub(crate) acp: Arc<Mutex<AcpSessionManager>>,
     pub(crate) broker: AgentBroker,
@@ -66,16 +66,21 @@ pub fn spawn(
     broker: AgentBroker,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let token = match ensure_token() {
+        let relay_token = match RelayToken::ensure() {
             Ok(token) => token,
             Err(error) => {
                 tracing::error!(%error, "remote: token setup failed");
                 return;
             }
         };
+        let authorizations = RemoteAuthorizationStore::current();
+        if let Err(error) = authorizations.ensure() {
+            tracing::error!(%error, "remote: authorization setup failed");
+            return;
+        }
         let state = RemoteState {
-            token: Arc::from(token),
-            paired: Arc::new(AtomicBool::new(RemotePaths::current().paired().exists())),
+            relay_token: Arc::from(relay_token.as_str()),
+            authorizations: Arc::new(Mutex::new(authorizations)),
             agents,
             acp,
             broker,
@@ -130,18 +135,6 @@ pub(crate) async fn current_session(state: &RemoteState, sid: &str) -> Option<Re
         session.title = vmux_api::room::Message::conversation_title(&messages, &session.name);
     }
     Some(session)
-}
-
-pub(crate) fn secure_eq(left: &str, right: &str) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    left.bytes()
-        .zip(right.bytes())
-        .fold(0_u8, |difference, (left, right)| {
-            difference | (left ^ right)
-        })
-        == 0
 }
 
 pub(crate) fn valid_client_op_id(client_op_id: &ClientOpId) -> bool {
@@ -385,54 +378,9 @@ pub(crate) fn remote_media_entries(query: &str) -> Vec<RemoteMediaEntry> {
     entries
 }
 
-pub(crate) fn mark_paired(paired: &AtomicBool) {
-    if paired.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    let path = RemotePaths::current().paired();
-    let result = path
-        .parent()
-        .map(std::fs::create_dir_all)
-        .transpose()
-        .and_then(|_| std::fs::write(&path, b"paired\n"));
-    if let Err(error) = result {
-        paired.store(false, Ordering::Release);
-        tracing::warn!(%error, "remote: failed to record paired phone");
-    }
-}
-
-fn ensure_token() -> std::io::Result<String> {
-    let remote = RemotePaths::current();
-    let path = remote.token();
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        let existing = existing.trim();
-        if existing.len() >= 32 {
-            return Ok(existing.to_string());
-        }
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let token = format!(
-        "{}{}",
-        uuid::Uuid::new_v4().simple(),
-        uuid::Uuid::new_v4().simple()
-    );
-    let _ = std::fs::remove_file(remote.paired());
-    super::write_private(&path, &token)?;
-    Ok(token)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn secure_comparison_requires_exact_token() {
-        assert!(secure_eq("abc", "abc"));
-        assert!(!secure_eq("abc", "abd"));
-        assert!(!secure_eq("abc", "ab"));
-    }
 
     #[test]
     fn client_operation_ids_are_bounded() {

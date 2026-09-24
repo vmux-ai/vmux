@@ -10326,6 +10326,7 @@ dependencies = [
  "tokio",
  "vmux_client",
  "vmux_mcp",
+ "vmux_remote",
  "vmux_tool",
 ]
 
@@ -10335,11 +10336,17 @@ version = "0.0.34"
 dependencies = [
  "chrono",
  "libc",
+ "ring",
  "rkyv",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "url",
+ "uuid",
  "vmux_api",
+ "vmux_path",
  "vmux_profile",
  "vmux_remote",
 ]
@@ -10690,9 +10697,11 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "url",
+ "uuid",
  "vmux_api",
  "vmux_app",
  "vmux_chat",
+ "vmux_path",
  "vmux_remote",
  "vmux_service",
  "vmux_start",

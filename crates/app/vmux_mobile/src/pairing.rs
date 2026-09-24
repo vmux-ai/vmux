@@ -2,12 +2,18 @@ use crate::qr_scanner;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
+use vmux_remote::{ClientCredential, DeviceId};
 use vmux_ui::i18n::translate;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub(crate) struct Credentials {
     pub(crate) base_url: String,
-    pub(crate) token: String,
+    #[serde(alias = "token")]
+    pub(crate) relay_token: String,
+    #[serde(default)]
+    pub(crate) credential: Option<ClientCredential>,
+    #[serde(default)]
+    pub(crate) client_id: DeviceId,
     #[serde(default)]
     pub(crate) fingerprint: String,
     #[serde(default)]
@@ -16,15 +22,21 @@ pub(crate) struct Credentials {
 
 impl Credentials {
     pub(crate) fn endpoint(&self) -> Option<crate::quic::Endpoint> {
-        if self.fingerprint.is_empty() || self.device.is_empty() {
+        if self.fingerprint.is_empty()
+            || self.device.is_empty()
+            || self.client_id.as_str().is_empty()
+        {
             return None;
         }
+        let credential = self.credential.clone()?;
         let parsed = Url::parse(&self.base_url).ok()?;
         let host = parsed.host_str()?;
         let port = parsed.port().unwrap_or(443);
         Some(crate::quic::Endpoint {
             address: format!("{host}:{port}"),
-            token: self.token.clone(),
+            relay_token: self.relay_token.clone(),
+            credential,
+            client_id: self.client_id.clone(),
             fingerprint: self.fingerprint.clone(),
             desktop: vmux_remote::DeviceId::new(&self.device),
         })
@@ -44,8 +56,15 @@ impl Credentials {
                 .get("base")
                 .map(|value| value.to_string())
                 .ok_or_else(|| translate("mobile-url-no-address"))?;
-            let token = params
-                .get("token")
+            let relay_token = params
+                .get("relay_token")
+                .or_else(|| params.get("token"))
+                .map(|value| value.to_string())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| translate("mobile-url-no-token"))?;
+            let pairing_token = params
+                .get("pairing_token")
+                .or_else(|| params.get("token"))
                 .map(|value| value.to_string())
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| translate("mobile-url-no-token"))?;
@@ -67,7 +86,9 @@ impl Credentials {
             }
             return Ok(Credentials {
                 base_url,
-                token,
+                relay_token,
+                credential: Some(ClientCredential::Pairing(pairing_token)),
+                client_id: DeviceId::new(uuid::Uuid::new_v4().simple().to_string()),
                 fingerprint,
                 device,
             });
@@ -81,11 +102,20 @@ impl Credentials {
         if !matches!(parsed.scheme(), "http" | "https") {
             return Err(translate("mobile-url-scheme"));
         }
-        let token = parsed
+        let relay_token = parsed
             .fragment()
             .and_then(|fragment| {
                 url::form_urlencoded::parse(fragment.as_bytes())
-                    .find(|(name, _)| name == "token")
+                    .find(|(name, _)| name == "relay_token" || name == "token")
+                    .map(|(_, value)| value.into_owned())
+            })
+            .filter(|token| !token.is_empty())
+            .ok_or_else(|| translate("mobile-url-no-token"))?;
+        let pairing_token = parsed
+            .fragment()
+            .and_then(|fragment| {
+                url::form_urlencoded::parse(fragment.as_bytes())
+                    .find(|(name, _)| name == "pairing_token" || name == "token")
                     .map(|(_, value)| value.into_owned())
             })
             .filter(|token| !token.is_empty())
@@ -112,15 +142,21 @@ impl Credentials {
         }
         Ok(Credentials {
             base_url,
-            token,
+            relay_token,
+            credential: Some(ClientCredential::Pairing(pairing_token)),
+            client_id: DeviceId::new(uuid::Uuid::new_v4().simple().to_string()),
             fingerprint,
             device,
         })
     }
 
     pub(crate) fn pairing_url(&self) -> String {
+        let Some(ClientCredential::Pairing(pairing_token)) = &self.credential else {
+            return String::new();
+        };
         let fragment = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("token", &self.token)
+            .append_pair("relay_token", &self.relay_token)
+            .append_pair("pairing_token", pairing_token)
             .append_pair("fp", &self.fingerprint)
             .append_pair("device", &self.device)
             .finish();
@@ -254,9 +290,10 @@ mod tests {
 
         assert_eq!(pasted.fingerprint, expected);
         assert_eq!(deep_link.fingerprint, expected);
+        assert_eq!(pasted.relay_token, "secret");
         assert_eq!(
-            pasted.token, "secret",
-            "the token must survive alongside it"
+            pasted.credential,
+            Some(ClientCredential::Pairing("secret".to_string()))
         );
     }
 
@@ -265,7 +302,7 @@ mod tests {
         let credentials = Credentials::parse("https://mac.example.ts.net/#token=secret").unwrap();
 
         assert!(credentials.fingerprint.is_empty());
-        assert_eq!(credentials.token, "secret");
+        assert_eq!(credentials.relay_token, "secret");
         assert!(
             Api::new(credentials).is_err(),
             "an unpinned pairing must be refused, not silently downgraded"
@@ -273,60 +310,66 @@ mod tests {
     }
 
     #[test]
-    fn a_written_pairing_can_be_read_back() {
+    fn a_written_pairing_preserves_transport_credentials() {
         let original = Credentials {
             base_url: "https://mac.example.ts.net".to_string(),
-            token: "secret".to_string(),
+            relay_token: "relay-secret".to_string(),
+            credential: Some(ClientCredential::Pairing("pairing-secret".to_string())),
+            client_id: DeviceId::new("phone-a"),
             fingerprint: "c620a502885ddf230420184cc3a1b190".to_string(),
             device: "device-1".to_string(),
         };
+        let parsed = Credentials::parse(&original.pairing_url()).unwrap();
 
-        assert_eq!(
-            Credentials::parse(&original.pairing_url()).unwrap(),
-            original
-        );
+        assert_eq!(parsed.base_url, original.base_url);
+        assert_eq!(parsed.relay_token, original.relay_token);
+        assert_eq!(parsed.credential, original.credential);
+        assert_eq!(parsed.fingerprint, original.fingerprint);
+        assert_eq!(parsed.device, original.device);
+        assert!(!parsed.client_id.as_str().is_empty());
+        assert_ne!(parsed.client_id, original.client_id);
     }
 
     #[test]
     fn parses_pairing_url() {
-        assert_eq!(
+        let credentials =
             Credentials::parse("paste into Vmux: https://mac.example.ts.net/#token=secret")
-                .unwrap(),
-            Credentials {
-                base_url: "https://mac.example.ts.net".to_string(),
-                token: "secret".to_string(),
-                fingerprint: String::new(),
-                device: String::new(),
-            }
+                .unwrap();
+
+        assert_eq!(credentials.base_url, "https://mac.example.ts.net");
+        assert_eq!(credentials.relay_token, "secret");
+        assert_eq!(
+            credentials.credential,
+            Some(ClientCredential::Pairing("secret".to_string()))
         );
+        assert!(credentials.fingerprint.is_empty());
+        assert!(credentials.device.is_empty());
+        assert!(!credentials.client_id.as_str().is_empty());
     }
 
     #[test]
     fn parses_pairing_deep_link() {
+        let credentials = Credentials::parse(
+            "vmux://pair?base=https%3A%2F%2Fmac.example.ts.net%3A54821&token=secret",
+        )
+        .unwrap();
+
+        assert_eq!(credentials.base_url, "https://mac.example.ts.net:54821");
+        assert_eq!(credentials.relay_token, "secret");
         assert_eq!(
-            Credentials::parse(
-                "vmux://pair?base=https%3A%2F%2Fmac.example.ts.net%3A54821&token=secret"
-            )
-            .unwrap(),
-            Credentials {
-                base_url: "https://mac.example.ts.net:54821".to_string(),
-                token: "secret".to_string(),
-                fingerprint: String::new(),
-                device: String::new(),
-            }
+            credentials.credential,
+            Some(ClientCredential::Pairing("secret".to_string()))
         );
+        assert!(credentials.fingerprint.is_empty());
+        assert!(credentials.device.is_empty());
     }
 
     #[test]
     fn pairing_url_preserves_relay_path() {
-        assert_eq!(
-            Credentials::parse("http://localhost:8787/r/device-1/#token=secret").unwrap(),
-            Credentials {
-                base_url: "http://localhost:8787/r/device-1".to_string(),
-                token: "secret".to_string(),
-                fingerprint: String::new(),
-                device: String::new(),
-            }
-        );
+        let credentials =
+            Credentials::parse("http://localhost:8787/r/device-1/#token=secret").unwrap();
+
+        assert_eq!(credentials.base_url, "http://localhost:8787/r/device-1");
+        assert_eq!(credentials.relay_token, "secret");
     }
 }

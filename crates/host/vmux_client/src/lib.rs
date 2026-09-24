@@ -1,3 +1,4 @@
+pub mod authorization;
 pub mod bundle;
 pub mod cli;
 pub mod client;
@@ -12,5 +13,6 @@ pub mod protocol {
     pub use vmux_api::protocol::*;
 }
 
+pub use authorization::*;
 pub use daemon::*;
 pub use paths::*;

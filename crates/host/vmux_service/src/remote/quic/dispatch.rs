@@ -181,14 +181,18 @@ async fn release(state: &RemoteState, client_op_id: &ClientOpId) {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
     use tokio::sync::{Mutex, broadcast};
 
     fn empty_state() -> RemoteState {
         let (agent_tx, _) = broadcast::channel(8);
         RemoteState {
-            token: Arc::from("token"),
-            paired: Arc::new(AtomicBool::new(false)),
+            relay_token: Arc::from("token"),
+            authorizations: Arc::new(Mutex::new(vmux_client::RemoteAuthorizationStore::new(
+                tempfile::tempdir()
+                    .unwrap()
+                    .keep()
+                    .join("authorizations.json"),
+            ))),
             agents: Arc::new(Mutex::new(Default::default())),
             acp: Arc::new(Mutex::new(Default::default())),
             broker: crate::agent_broker::AgentBroker::new(
