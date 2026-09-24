@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -130,6 +131,38 @@ pub fn parse_registry(json: &str) -> Result<Vec<Package>, String> {
     arr.iter().map(parse_one).collect()
 }
 
+struct CatalogSource(Vec<u8>);
+
+impl CatalogSource {
+    fn read(path: &Path) -> Result<Self, String> {
+        Self::read_with_limit(path, download::CATALOG_MAX_BYTES)
+    }
+
+    fn read_with_limit(path: &Path, max_bytes: u64) -> Result<Self, String> {
+        let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+        if file.metadata().map_err(|error| error.to_string())?.len() > max_bytes {
+            return Err(format!("catalog exceeds {max_bytes} bytes"));
+        }
+        let mut bytes = Vec::new();
+        file.take(max_bytes + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(format!("catalog exceeds {max_bytes} bytes"));
+        }
+        Ok(Self(bytes))
+    }
+
+    fn packages(&self) -> Result<Vec<Package>, String> {
+        let source = std::str::from_utf8(&self.0).map_err(|error| error.to_string())?;
+        parse_registry(source)
+    }
+
+    fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 pub fn search<'a>(
     pkgs: &'a [Package],
     query: &str,
@@ -170,16 +203,16 @@ pub fn fetch_catalog(
         |_, _| {},
     )?;
     archive::extract(&zip, ArchiveKind::Zip, staging.path(), "registry.json")?;
-    let json = std::fs::read(staging.path().join("registry.json")).map_err(|e| e.to_string())?;
-    let parsed = parse_registry(std::str::from_utf8(&json).map_err(|e| e.to_string())?)?;
-    vmux_path::AtomicFile::write(cached_path(store_root), &json).map_err(|e| e.to_string())?;
+    let source = CatalogSource::read(&staging.path().join("registry.json"))?;
+    let parsed = source.packages()?;
+    vmux_path::AtomicFile::write(cached_path(store_root), source.bytes())
+        .map_err(|e| e.to_string())?;
     Ok(parsed)
 }
 
 pub fn ensure_catalog(store_root: &Path, refresh: bool) -> Result<Vec<Package>, String> {
     if !refresh && cached_path(store_root).is_file() {
-        let json = std::fs::read_to_string(cached_path(store_root)).map_err(|e| e.to_string())?;
-        return parse_registry(&json);
+        return CatalogSource::read(&cached_path(store_root))?.packages();
     }
     let artifact = download::github_release_asset(
         "mason-org",
@@ -281,6 +314,17 @@ mod tests {
         std::fs::write(cached_path(root), SAMPLE).unwrap();
         let pkgs = ensure_catalog(root, false).unwrap();
         assert_eq!(pkgs.len(), 3);
+    }
+
+    #[test]
+    fn oversized_cached_catalog_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("registry.json");
+        std::fs::write(&path, b"1234").unwrap();
+        let Err(error) = CatalogSource::read_with_limit(&path, 3) else {
+            panic!("oversized catalog was accepted");
+        };
+        assert_eq!(error, "catalog exceeds 3 bytes");
     }
 
     #[test]
