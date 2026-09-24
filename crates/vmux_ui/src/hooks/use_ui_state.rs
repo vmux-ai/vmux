@@ -8,6 +8,19 @@ pub struct UiStatePatchBatch<S, T> {
     payload: PhantomData<fn() -> T>,
 }
 
+pub struct UiStateRoot<T> {
+    pub state: Signal<T>,
+    pub error: Signal<Option<String>>,
+}
+
+impl<T> Clone for UiStateRoot<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for UiStateRoot<T> {}
+
 impl<S, T> Clone for UiStatePatchBatch<S, T> {
     fn clone(&self) -> Self {
         *self
@@ -59,15 +72,19 @@ where
     state
 }
 
-pub fn use_ui_state_root<T>() -> Signal<T>
+pub fn use_ui_state_root<T>() -> UiStateRoot<T>
 where
     T: vmux_api::HostEvent + vmux_api::UiState + rkyv::Archive + Default + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
-    let state = use_ui_state::<T>();
+    let mut state = use_signal(T::default);
+    let listener = use_listener::<T, _>(move |event| state.set(event));
     use_context_provider(|| state);
-    state
+    UiStateRoot {
+        state,
+        error: listener.error,
+    }
 }
 
 pub fn use_ui_state_patch<S, T>() -> UiStatePatchBatch<S, T>

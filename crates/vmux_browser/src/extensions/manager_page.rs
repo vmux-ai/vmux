@@ -16,7 +16,7 @@ use vmux_core::event::{
 use vmux_core::extension::store;
 use vmux_core::overlay::WindowOverlay;
 use vmux_flex::prelude::Visibility;
-use vmux_layout::{Browser, LayoutCef};
+use vmux_layout::{Browser, LayoutCef, LayoutUiStateUpdates};
 
 #[derive(Component, Default)]
 pub struct Extensions;
@@ -366,7 +366,8 @@ fn on_popup_open_request(
             },
             Visibility::Hidden,
         ));
-    commands.trigger(BinHostEmitEvent::from_event(
+    LayoutUiStateUpdates::write(
+        &mut commands,
         owner,
         &ExtensionPopupEvent {
             id,
@@ -374,7 +375,7 @@ fn on_popup_open_request(
             icon: entry.icon,
             anchor: trigger.event().payload.anchor,
         },
-    ));
+    );
 }
 
 fn on_popup_bounds_request(
@@ -628,14 +629,15 @@ fn on_extension_popup_size(
     let Ok(popup) = popups.get(trigger.event().webview) else {
         return;
     };
-    commands.trigger(BinHostEmitEvent::from_event(
+    LayoutUiStateUpdates::write(
+        &mut commands,
         popup.owner,
         &ExtensionPopupSizeEvent {
             id: popup.extension_id.clone(),
             width: request.width.clamp(200.0, 360.0),
             height: request.height.clamp(80.0, 600.0),
         },
-    ));
+    );
 }
 
 fn is_webstore_url(url: &str) -> bool {
@@ -760,7 +762,12 @@ fn on_add_extension(
     }
 }
 
-fn drain_outbox(outbox: Res<ExtOutbox>, browsers: NonSend<Browsers>, mut commands: Commands) {
+fn drain_outbox(
+    outbox: Res<ExtOutbox>,
+    browsers: NonSend<Browsers>,
+    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
+    mut commands: Commands,
+) {
     let drained: Vec<(Entity, OutMsg)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|e| e.into_inner());
         q.drain(..).collect()
@@ -770,7 +777,9 @@ fn drain_outbox(outbox: Res<ExtOutbox>, browsers: NonSend<Browsers>, mut command
             continue;
         }
         match msg {
-            OutMsg::List(ev) => commands.trigger(BinHostEmitEvent::from_event(entity, &ev)),
+            OutMsg::List(ev) => {
+                LayoutUiStateUpdates::deliver(&layout_ui, &mut commands, entity, &ev)
+            }
             OutMsg::Progress(ev) => commands.trigger(BinHostEmitEvent::from_event(entity, &ev)),
             OutMsg::Status(ev) => commands.trigger(BinHostEmitEvent::from_event(entity, &ev)),
             OutMsg::WebStoreInstallResult { id, success } => {

@@ -7,6 +7,7 @@
 pub mod event;
 pub mod protocol;
 pub mod reconcile;
+pub mod ui_state;
 
 #[cfg(ui)]
 pub mod tool_page;

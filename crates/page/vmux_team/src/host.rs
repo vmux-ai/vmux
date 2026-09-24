@@ -9,6 +9,7 @@ use vmux_core::page::PageReady;
 use vmux_core::profile::{ProfileId, ProfileLabel};
 use vmux_core::team::{Agent, Profile, User};
 use vmux_core::{PageMetadata, focus_pane_entity};
+use vmux_layout::LayoutUiStateUpdates;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
 use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
@@ -333,6 +334,7 @@ fn emit_team(
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
     profile_labels: Query<(&ProfileId, &Name, Has<vmux_core::Active>), With<ProfileLabel>>,
+    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     mut last: Local<std::collections::HashMap<Entity, TeamEvent>>,
     mut commands: Commands,
 ) {
@@ -376,7 +378,7 @@ fn emit_team(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
+        LayoutUiStateUpdates::deliver(&layout_ui, &mut commands, entity, &payload);
         commands.entity(entity).insert(TeamListSent);
         last.insert(entity, payload);
     }
