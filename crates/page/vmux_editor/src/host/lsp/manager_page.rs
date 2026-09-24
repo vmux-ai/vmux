@@ -482,7 +482,6 @@ fn poll_package_jobs(mut jobs: Query<(Entity, &mut PackageJob)>, mut commands: C
 
 fn deliver_manager_outputs(
     outputs: Query<(Entity, &ManagerOutput)>,
-    browsers: NonSend<Browsers>,
     views: Query<(Entity, &crate::host::editor::FileView)>,
     mut managers: Query<&mut ManagerState>,
     mut commands: Commands,
@@ -492,8 +491,6 @@ fn deliver_manager_outputs(
             ManagerMsg::Catalog(ev) => {
                 if let Ok(mut state) = managers.get_mut(output.target) {
                     state.apply_catalog(ev.clone());
-                } else if browsers.can_emit_to(&output.target) {
-                    commands.trigger(BinHostEmitEvent::from_event(output.target, ev));
                 }
             }
             ManagerMsg::Progress(ev) => {
@@ -501,13 +498,8 @@ fn deliver_manager_outputs(
                     state.apply_progress(ev.clone());
                 }
                 for target in output.targets(&views) {
-                    if browsers.can_emit_to(&target) {
-                        if views.contains(target) {
-                            commands
-                                .trigger(vmux_core::host::FileUiStateWrite::from_event(target, ev));
-                        } else if !managers.contains(target) {
-                            commands.trigger(BinHostEmitEvent::from_event(target, ev));
-                        }
+                    if views.contains(target) {
+                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(target, ev));
                     }
                 }
             }
@@ -530,13 +522,8 @@ fn deliver_manager_outputs(
                     }
                 }
                 for target in targets {
-                    if browsers.can_emit_to(&target) {
-                        if views.contains(target) {
-                            commands
-                                .trigger(vmux_core::host::FileUiStateWrite::from_event(target, ev));
-                        } else if !managers.contains(target) {
-                            commands.trigger(BinHostEmitEvent::from_event(target, ev));
-                        }
+                    if views.contains(target) {
+                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(target, ev));
                     }
                 }
             }

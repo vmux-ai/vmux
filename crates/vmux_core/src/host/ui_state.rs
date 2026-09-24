@@ -58,17 +58,10 @@ impl<S: BatchedUiState> UiStateUpdates<S> {
         webview: Entity,
         event: &T,
     ) where
-        T: HostEvent
-            + Clone
-            + Into<S::Patch>
-            + for<'a> rkyv::Serialize<
-                HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>,
-            >,
+        T: Clone + Into<S::Patch>,
     {
         if pages.contains(webview) {
             Self::write(commands, webview, event);
-        } else {
-            commands.trigger(BinHostEmitEvent::from_event(webview, event));
         }
     }
 
@@ -165,7 +158,6 @@ mod tests {
     #[derive(Resource, Default)]
     struct Delivered {
         writes: Vec<Entity>,
-        direct: Vec<Entity>,
     }
 
     impl Emitted {
@@ -183,10 +175,6 @@ mod tests {
     impl Delivered {
         fn write(trigger: On<UiStateWrite<FileUiState>>, mut delivered: ResMut<Self>) {
             delivered.writes.push(trigger.event().webview());
-        }
-
-        fn direct(trigger: On<BinHostEmitEvent>, mut delivered: ResMut<Self>) {
-            delivered.direct.push(trigger.event().webview());
         }
     }
 
@@ -248,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn page_updates_are_batched_while_other_targets_receive_direct_events() {
+    fn delivery_only_targets_pages_with_the_requested_ui_state() {
         let mut app = App::new();
         let file = app
             .world_mut()
@@ -258,13 +246,11 @@ mod tests {
         app.insert_resource(Targets { file, direct })
             .init_resource::<Delivered>()
             .add_observer(Delivered::write)
-            .add_observer(Delivered::direct)
             .add_systems(Update, deliver);
 
         app.update();
 
         let delivered = app.world().resource::<Delivered>();
         assert_eq!(delivered.writes, vec![file]);
-        assert_eq!(delivered.direct, vec![direct]);
     }
 }

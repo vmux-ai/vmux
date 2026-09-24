@@ -1,9 +1,3 @@
-enum Events {}
-
-impl crate::BinEventFamily for Events {
-    const TARGET: crate::BinEventTarget = crate::BinEventTarget::Host("git");
-}
-
 #[vmux_api::contract(Eq)]
 pub struct StyledSpan {
     pub text: String,
@@ -43,7 +37,7 @@ pub enum DiffKind {
     Staged,
 }
 
-#[vmux_api::host_event(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct GitStatusEvent {
     pub path: String,
     pub branch: String,
@@ -55,12 +49,12 @@ pub struct GitStatusEvent {
     pub repo_root: String,
 }
 
-#[vmux_api::host_event(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct GitDiffMetaEvent {
     pub total_lines: u32,
 }
 
-#[vmux_api::host_event(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct GitDiffViewportEvent {
     pub generation: u64,
     pub first_line: u32,
@@ -69,19 +63,19 @@ pub struct GitDiffViewportEvent {
     pub error: String,
 }
 
-#[vmux_api::host_event(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct GitResultEvent {
     pub action: String,
     pub ok: bool,
     pub message: String,
 }
 
-#[vmux_api::host_event(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct GitErrorEvent {
     pub message: String,
 }
 
-#[vmux_api::host_event(Eq, Default)]
+#[vmux_api::contract(Eq, Default)]
 pub struct GitChangedEvent {}
 
 #[cfg(test)]

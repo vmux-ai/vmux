@@ -141,7 +141,7 @@ pub struct GitStashEntry {
     pub message: String,
 }
 
-#[vmux_api::host_event(Eq, target = "git")]
+#[vmux_api::contract(Eq)]
 pub struct GitRepositoryEvent {
     pub path: String,
     pub repo_root: String,
@@ -158,14 +158,14 @@ pub struct GitRepositoryEvent {
     pub stashes: Vec<GitStashEntry>,
 }
 
-#[vmux_api::host_event(Eq, target = "git")]
+#[vmux_api::contract(Eq)]
 pub struct GitBranchLogEvent {
     pub repo_root: String,
     pub branch: String,
     pub commits: Vec<GitCommitEntry>,
 }
 
-#[vmux_api::host_event(Eq, target = "git")]
+#[vmux_api::contract(Eq)]
 pub struct GitDirectoryEvent {
     pub path: String,
     pub parent_path: String,

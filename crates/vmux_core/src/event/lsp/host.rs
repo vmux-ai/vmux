@@ -18,12 +18,12 @@ pub struct FileLspStatusEvent {
     pub actions: Vec<EditorAction>,
 }
 
-#[vmux_api::host_event(Eq, target = "lsp")]
+#[vmux_api::contract(Eq)]
 pub struct LspCatalogEvent {
     pub packages: Vec<LspPackage>,
 }
 
-#[vmux_api::host_event(Eq, targets = ["files", "lsp"])]
+#[vmux_api::contract(Eq)]
 pub struct LspInstallProgress {
     pub name: String,
     pub phase: InstallPhase,
@@ -31,7 +31,7 @@ pub struct LspInstallProgress {
     pub message: String,
 }
 
-#[vmux_api::host_event(Eq, targets = ["files", "lsp"])]
+#[vmux_api::contract(Eq)]
 pub struct LspPkgStatusEvent {
     pub name: String,
     pub status: LspPkgStatus,
