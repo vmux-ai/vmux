@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use super::AgentChatView;
+use super::ui_state::ChatUiStateUpdates;
 use crate::events::{AgentCommandRequest, CommandOrigin};
 use vmux_chat::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatProjectBranches, ChatSelectWorkspace,
@@ -95,7 +96,7 @@ fn push_composer_context_to_page(
             .get(&webview)
             .is_none_or(|entry| entry.input != input || entry.context != context);
         if changed || ready.is_changed() {
-            commands.trigger(BinHostEmitEvent::from_event(webview, &context));
+            ChatUiStateUpdates::write(&mut commands, webview, &context);
         }
         cache
             .entries

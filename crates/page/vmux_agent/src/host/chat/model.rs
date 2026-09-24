@@ -1,5 +1,7 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
+
+use super::ui_state::ChatUiStateUpdates;
 
 use crate::client::acp::{AcpModeState, AcpModelState};
 use crate::events::AgentCommandRequest;
@@ -408,11 +410,12 @@ pub(super) fn emit_model_state(
         .iter()
         .map(|level| level.to_string())
         .collect();
-    commands.trigger(BinHostEmitEvent::from_event(webview, &state));
-    commands.trigger(BinHostEmitEvent::from_event(
+    ChatUiStateUpdates::write(commands, webview, &state);
+    ChatUiStateUpdates::write(
+        commands,
         webview,
         &SlashCommands::for_agent(cross_runtime, model_state.is_some()),
-    ));
+    );
 }
 
 pub(super) fn emit_mode_state(
@@ -427,7 +430,7 @@ pub(super) fn emit_mode_state(
         },
         None => ModeState::default(),
     };
-    commands.trigger(BinHostEmitEvent::from_event(webview, &state));
+    ChatUiStateUpdates::write(commands, webview, &state);
 }
 
 pub(super) fn effort_current_for<'a>(
