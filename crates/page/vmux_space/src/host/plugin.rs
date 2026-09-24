@@ -16,8 +16,8 @@ pub struct SpacePlugin;
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        OpenRequest::register(app);
-        app.add_plugins(vmux_layout::LayoutContractPlugin)
+        app.add_plugins(vmux_command::CommandTypePlugin::<OpenRequest>::default())
+            .add_plugins(vmux_layout::LayoutContractPlugin)
             .init_resource::<ActiveSpace>()
             .init_resource::<vmux_layout::space::ActiveSpaceEntity>()
             .init_resource::<vmux_layout::window::FocusedWindow>()
@@ -85,12 +85,8 @@ pub struct OpenRequest {
     pub url: Option<String>,
 }
 
-impl OpenRequest {
-    pub fn register(app: &mut App) {
-        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
-    pub fn definitions() -> Vec<vmux_command::CommandDefinition> {
+impl vmux_command::CommandRequest for OpenRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
         vec![
             vmux_command::CommandDefinition::new(
                 "open_in_new_space",
@@ -109,11 +105,17 @@ impl OpenRequest {
             )),
         ]
     }
+}
 
-    pub fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
-        (invocation.id == "open_in_new_space").then(|| Self {
-            url: invocation.argument("url"),
-        })
+impl TryFrom<&vmux_command::CommandInvocation> for OpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "open_in_new_space")
+            .then(|| Self {
+                url: invocation.argument("url"),
+            })
+            .ok_or(())
     }
 }
 
@@ -890,6 +892,7 @@ fn respond_spaces_spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_command::CommandRequest;
     use crate::model::{SpaceRecord, bootstrap_profile_name};
     use bevy::ecs::system::RunSystemOnce;
     use vmux_layout::settings::{
@@ -914,7 +917,7 @@ mod tests {
         let invocation =
             vmux_command::CommandInvocation::new(Entity::PLACEHOLDER, "open_in_new_space")
                 .with_arguments(serde_json::json!({"url": "https://vmux.ai"}));
-        assert!(OpenRequest::from_invocation(&invocation).is_some());
+        assert!(OpenRequest::try_from(&invocation).is_ok());
     }
 
     fn test_settings() -> AppSettings {

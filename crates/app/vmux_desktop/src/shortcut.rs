@@ -173,9 +173,11 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_plugins(ShortcutPlugin)
+            .add_plugins((
+                vmux_command::CommandTypePlugin::<PaneRequest>::default(),
+                vmux_command::CommandTypePlugin::<TabRequest>::default(),
+            ))
             .insert_resource(ButtonInput::<KeyCode>::default());
-        PaneRequest::register(&mut app);
-        TabRequest::register(&mut app);
         app.world_mut().spawn(
             vmux_command::CommandDefinition::new("space_open", "Spaces", "Layout > Space")
                 .chord("Ctrl+b, s"),
@@ -188,10 +190,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_plugins(ShortcutPlugin)
+            .add_plugins((
+                vmux_command::CommandTypePlugin::<PaneRequest>::default(),
+                vmux_command::CommandTypePlugin::<TabRequest>::default(),
+            ))
             .insert_resource(settings)
             .insert_resource(ButtonInput::<KeyCode>::default());
-        PaneRequest::register(&mut app);
-        TabRequest::register(&mut app);
         app.world_mut().spawn(
             vmux_command::CommandDefinition::new("space_open", "Spaces", "Layout > Space")
                 .chord("Ctrl+b, s"),

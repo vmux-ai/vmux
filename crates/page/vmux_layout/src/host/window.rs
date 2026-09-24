@@ -22,8 +22,8 @@ pub struct WindowLayoutPlugin;
 
 impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
-        MinimizeWindowRequest::register(app);
-        app.register_type::<WindowGeometry>()
+        app.add_plugins(vmux_command::CommandTypePlugin::<MinimizeWindowRequest>::default())
+            .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .init_resource::<FocusedWindow>()

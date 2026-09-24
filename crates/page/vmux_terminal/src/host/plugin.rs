@@ -45,30 +45,32 @@ impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         vmux_core::register_host_spawn(app, "terminal");
-        super::command::CloseRequest::register(app);
-        super::command::NextRequest::register(app);
-        super::command::PrevRequest::register(app);
-        super::command::ClearRequest::register(app);
-        super::command::CopyModeRequest::register(app);
-        app.add_plugins(crate::contract::TerminalContractPlugin)
-            .register_type::<crate::launch::TerminalLaunch>()
-            .register_type::<crate::launch::TerminalKind>()
-            .add_message::<TerminalStackSpawnRequest>()
-            .add_message::<TerminalSpawnRequest>()
-            .add_message::<ProcessesMonitorSpawnRequest>()
-            .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
-            .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
-            .add_plugins((
-                crate::pid::PidPlugin,
-                crate::host::request::TerminalRequestPlugin,
-                TerminalServicePlugin,
-                TerminalInputPlugin,
-                crate::processes_monitor::ProcessesMonitorPlugin,
-                super::loading::LoadingPlugin,
-                super::prompt::PromptPlugin,
-                crate::snapshot_updater::SnapshotPlugin,
-                crate::theme::TerminalThemePlugin,
-            ));
+        app.add_plugins((
+            vmux_command::CommandTypePlugin::<super::command::CloseRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::NextRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::PrevRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::ClearRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::CopyModeRequest>::default(),
+        ))
+        .add_plugins(crate::contract::TerminalContractPlugin)
+        .register_type::<crate::launch::TerminalLaunch>()
+        .register_type::<crate::launch::TerminalKind>()
+        .add_message::<TerminalStackSpawnRequest>()
+        .add_message::<TerminalSpawnRequest>()
+        .add_message::<ProcessesMonitorSpawnRequest>()
+        .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
+        .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
+        .add_plugins((
+            crate::pid::PidPlugin,
+            crate::host::request::TerminalRequestPlugin,
+            TerminalServicePlugin,
+            TerminalInputPlugin,
+            crate::processes_monitor::ProcessesMonitorPlugin,
+            super::loading::LoadingPlugin,
+            super::prompt::PromptPlugin,
+            crate::snapshot_updater::SnapshotPlugin,
+            crate::theme::TerminalThemePlugin,
+        ));
     }
 }
 

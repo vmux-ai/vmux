@@ -17,12 +17,8 @@ pub(super) struct ClearRequest;
 #[derive(bevy::prelude::Message)]
 pub(super) struct CopyModeRequest;
 
-impl CopyModeRequest {
-    pub fn register(app: &mut bevy::prelude::App) {
-        vmux_command::CommandDefinition::register(app, Self::definitions, Self::from_invocation);
-    }
-
-    pub fn definitions() -> Vec<vmux_command::CommandDefinition> {
+impl vmux_command::CommandRequest for CopyModeRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
         vec![
             vmux_command::CommandDefinition::new("terminal_copy_mode", "Visual Mode", "Terminal")
                 .hidden()
@@ -36,15 +32,22 @@ impl CopyModeRequest {
                 ),
         ]
     }
+}
 
-    pub fn from_invocation(invocation: &vmux_command::CommandInvocation) -> Option<Self> {
-        (invocation.id == "terminal_copy_mode").then_some(Self)
+impl TryFrom<&vmux_command::CommandInvocation> for CopyModeRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "terminal_copy_mode")
+            .then_some(Self)
+            .ok_or(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_command::CommandRequest;
 
     #[test]
     fn terminal_mcp_definitions_are_the_dispatchable_command_set() {
@@ -75,11 +78,11 @@ mod tests {
         for tool in tools {
             let invocation =
                 vmux_command::CommandInvocation::new(bevy::prelude::Entity::PLACEHOLDER, tool.name);
-            let dispatches = CloseRequest::from_invocation(&invocation).is_some()
-                || NextRequest::from_invocation(&invocation).is_some()
-                || PrevRequest::from_invocation(&invocation).is_some()
-                || ClearRequest::from_invocation(&invocation).is_some()
-                || CopyModeRequest::from_invocation(&invocation).is_some();
+            let dispatches = CloseRequest::try_from(&invocation).is_ok()
+                || NextRequest::try_from(&invocation).is_ok()
+                || PrevRequest::try_from(&invocation).is_ok()
+                || ClearRequest::try_from(&invocation).is_ok()
+                || CopyModeRequest::try_from(&invocation).is_ok();
             assert!(dispatches);
         }
     }
