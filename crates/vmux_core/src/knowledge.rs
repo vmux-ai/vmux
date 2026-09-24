@@ -53,8 +53,9 @@ pub struct KnowledgeEntry {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "knowledge")]
+#[event(target = "knowledge")]
 pub struct KnowledgeTreeToggle {
     pub path: String,
     #[serde(default)]
@@ -130,8 +131,9 @@ pub struct KnowledgeSearchEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "knowledge")]
+#[event(target = "knowledge")]
 pub struct KnowledgeSearchRequest {
     pub query: String,
 }
@@ -147,8 +149,9 @@ pub struct KnowledgeSearchRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "knowledge")]
+#[event(target = "knowledge")]
 pub struct KnowledgeCreateRequest {
     pub parent: String,
     pub name: String,

@@ -10,8 +10,9 @@
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "start")]
+#[event(target = "start")]
 pub struct StartDataRequest;
 
 pub use vmux_api::command_bar::StartSelectWorkspace;

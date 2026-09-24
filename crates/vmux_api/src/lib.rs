@@ -43,6 +43,8 @@ pub use terminal::{
     TermSpan,
 };
 pub use ui_state::{UiState, UiStatePatch};
+#[deprecated(note = "use #[derive(vmux_api::UiEvent)] with #[event(...)]")]
+pub use vmux_macro::ui_event;
 pub use vmux_macro::{
-    HostEvent, UiEvent, UiState, UiStatePatch, bidirectional_event, host_event, payload, ui_event,
+    HostEvent, UiEvent, UiState, UiStatePatch, bidirectional_event, host_event, payload,
 };

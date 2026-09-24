@@ -35,9 +35,17 @@ pub enum ToastLevel {
 }
 
 #[derive(
-    Message, Clone, Debug, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Message,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(
+#[event(
     targets = ["agent", "agents"]
 )]
 pub struct AgentToast {

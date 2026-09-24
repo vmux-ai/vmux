@@ -69,8 +69,9 @@ pub struct McpServers {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(
+#[event(
     targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
 pub struct McpServersRequest;
@@ -105,8 +106,9 @@ pub enum McpServerAction {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(
+#[event(
     targets = ["command-bar", "layout", "sessions", "agent", "start"]
 )]
 pub struct McpServerRequest {

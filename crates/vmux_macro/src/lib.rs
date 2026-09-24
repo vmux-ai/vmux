@@ -65,7 +65,7 @@ pub fn derive_host_event(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(UiEvent)]
+#[proc_macro_derive(UiEvent, attributes(event))]
 pub fn derive_ui_event(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match bin_event::derive(input, bin_event::Direction::Ui) {

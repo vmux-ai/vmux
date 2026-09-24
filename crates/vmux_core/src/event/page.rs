@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "git")]
+#[event(target = "git")]
 pub struct PageContextRequest {}
 
 #[derive(
@@ -44,8 +45,9 @@ pub struct PageContextEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "git")]
+#[event(target = "git")]
 pub struct TabWorkspaceRequest {
     pub path: String,
     pub branch: String,

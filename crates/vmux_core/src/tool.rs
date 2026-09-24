@@ -178,8 +178,9 @@ pub struct ToolsSnapshot {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "tools")]
+#[event(target = "tools")]
 pub struct ToolsRefreshRequest {
     pub refresh: bool,
 }
@@ -194,8 +195,9 @@ pub struct ToolsRefreshRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "tools")]
+#[event(target = "tools")]
 pub struct ToolOpenRequest {
     pub path: String,
 }
@@ -210,8 +212,9 @@ pub struct ToolOpenRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "tools")]
+#[event(target = "tools")]
 pub struct ToolsNavigateRequest {
     pub url: String,
 }
@@ -241,8 +244,9 @@ impl ToolsNavigateRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "tools")]
+#[event(target = "tools")]
 pub struct ToolRequest {
     pub provider: ToolProvider,
     pub action: ToolAction,

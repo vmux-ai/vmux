@@ -79,8 +79,9 @@ pub struct TeamMemberRow {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["team", "layout", "spaces"])]
+#[event(targets = ["team", "layout", "spaces"])]
 pub struct TeamRequest {
     pub command: String,
     #[serde(default)]

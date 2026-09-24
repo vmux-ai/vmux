@@ -10,8 +10,9 @@ use super::CommandBarPick;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
+#[event(targets = ["command-bar", "start", "layout"])]
 pub enum CommandBarRequest {
     Prompt {
         text: String,
@@ -109,8 +110,9 @@ impl ExCommandName {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "start")]
+#[event(target = "start")]
 pub struct StartSelectWorkspace {
     pub current_dir: String,
 }
@@ -124,8 +126,9 @@ pub struct StartSelectWorkspace {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "start")]
+#[event(target = "start")]
 pub struct StartBranchesRequest {
     pub project: String,
 }
@@ -155,8 +158,9 @@ pub struct StartProjectBranches {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "start")]
+#[event(target = "start")]
 pub struct StartGoToBranch {
     pub project: String,
     pub branch: String,
@@ -209,8 +213,9 @@ pub struct AgentModes {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "start")]
+#[event(target = "start")]
 pub struct StartSelectModel {
     pub agent_key: String,
     pub model_id: String,
@@ -225,8 +230,9 @@ pub struct StartSelectModel {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "start")]
+#[event(target = "start")]
 pub struct StartSelectMode {
     pub agent_key: String,
     pub mode_id: String,

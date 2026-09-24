@@ -141,8 +141,9 @@ pub const SIDE_SHEET_MAX_WIDTH_PX: f32 = 640.0;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub struct SideSheetResizeEvent {
     pub width: f32,
     pub settled: bool,
@@ -182,8 +183,9 @@ impl SideSheetResizeEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub struct WindowDragRegionEvent {
     pub id: String,
     #[serde(default)]
@@ -408,8 +410,9 @@ mod tests {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub enum HeaderRequest {
     PreviousPage,
     NextPage,
@@ -577,8 +580,9 @@ pub struct TabRow {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub enum TabsRequest {
     New,
     Close {
@@ -695,8 +699,9 @@ pub struct StackNode {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub enum SideSheetRequest {
     ActivateStack { pane_id: u64, stack_id: u64 },
     CloseStack { pane_id: u64, stack_id: u64 },
@@ -795,8 +800,9 @@ pub struct RemoteDevice {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub struct RemoteRequest {
     pub enabled: bool,
 }
@@ -812,8 +818,9 @@ pub struct RemoteRequest {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub struct LayoutOverlayEvent {
     pub id: String,
     pub active: bool,
@@ -831,8 +838,9 @@ pub struct LayoutOverlayEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub struct RemoteCopyEvent;
 
 #[derive(
@@ -846,8 +854,9 @@ pub struct RemoteCopyEvent;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub struct RemoteRevokeRequest {
     pub client_id: String,
 }
@@ -991,8 +1000,9 @@ pub struct UpdateClearedEvent;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(
+#[event(
     targets = ["debug", "extensions", "layout"]
 )]
 pub struct RestartRequestEvent;

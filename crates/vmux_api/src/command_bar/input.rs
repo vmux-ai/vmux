@@ -12,8 +12,9 @@ use super::OpenId;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
+#[event(targets = ["command-bar", "start", "layout"])]
 pub struct CommandBarReadyEvent;
 
 #[derive(
@@ -48,8 +49,9 @@ pub enum CommandBarKey {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
+#[event(targets = ["command-bar", "start", "layout"])]
 pub struct CommandBarRenderedEvent {
     pub open_id: OpenId,
 }
@@ -66,8 +68,9 @@ pub struct CommandBarRenderedEvent {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
+#[event(targets = ["command-bar", "start", "layout"])]
 pub struct CommandBarSizeEvent {
     pub width: u32,
     pub height: u32,

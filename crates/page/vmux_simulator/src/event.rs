@@ -30,8 +30,9 @@ pub struct SimulatorReady {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "simulator")]
+#[event(target = "simulator")]
 pub struct SimulatorTouch {
     pub phase: SimulatorTouchPhase,
     pub x: f32,
@@ -69,8 +70,9 @@ pub enum SimulatorTouchPhase {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "simulator")]
+#[event(target = "simulator")]
 pub enum SimulatorKey {
     Text(String),
     Code(u16),
@@ -149,8 +151,9 @@ pub enum SimulatorClipboardAction {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "simulator")]
+#[event(target = "simulator")]
 pub struct SimulatorClipboard {
     pub action: SimulatorClipboardAction,
 }
@@ -166,8 +169,9 @@ pub struct SimulatorClipboard {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "simulator")]
+#[event(target = "simulator")]
 pub struct SimulatorSoftwareKeyboard;
 
 impl HardwareButton {

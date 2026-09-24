@@ -75,8 +75,9 @@ pub fn clamp_panel_placement(
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    vmux_api::UiEvent,
 )]
-#[vmux_api::ui_event(target = "layout")]
+#[event(target = "layout")]
 pub struct CommandBarPanelRequest {
     pub active: bool,
 }
