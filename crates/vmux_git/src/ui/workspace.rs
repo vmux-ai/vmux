@@ -4,8 +4,8 @@ use vmux_core::event::space::ProjectRequest;
 use vmux_ui::hooks::send;
 
 use crate::event::{
-    GitAppAction, GitAppRequest, GitBranchEntry, GitDirectoryRequest, GitOperation,
-    GitOperationRequest, GitRepositoryRequest,
+    GitBranchEntry, GitConfigEditRequest, GitDirectoryRequest, GitOperation, GitOperationRequest,
+    GitRepositoryRequest, GitUpdateCheckRequest,
 };
 
 pub(super) struct GitWorkspace;
@@ -68,10 +68,13 @@ impl GitWorkspace {
         });
     }
 
-    pub(super) fn app_action(repo_root: &str, action: GitAppAction) {
-        let _ = send(&GitAppRequest {
+    pub(super) fn edit_config(repo_root: &str) {
+        let _ = send(&GitConfigEditRequest {
             repo_root: repo_root.to_string(),
-            action,
         });
+    }
+
+    pub(super) fn check_for_updates() {
+        let _ = send(&GitUpdateCheckRequest);
     }
 }
