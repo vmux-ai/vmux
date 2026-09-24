@@ -225,37 +225,11 @@ struct ListToolsExecution {
     definitions: Vec<crate::tool::ToolDefinition>,
 }
 
-impl ListToolsExecution {
-    async fn run(mut self) -> Result<Value, String> {
-        if let Ok(connection) = vmux_client::client::ServiceConnection::connect().await
-            && let Ok(AgentQueryResult::Commands(commands)) =
-                agent_query(&connection, AgentQuery::ListCommands).await
-        {
-            self.definitions =
-                crate::tool::ToolDefinition::merge_commands(self.definitions, commands)?;
-        }
-        Ok(json!({ "tools": self.definitions }))
-    }
-}
-
 #[derive(Component)]
 struct CommandExecution {
     name: String,
     arguments: Value,
     anchor: Option<vmux_client::protocol::ProcessId>,
-}
-
-impl CommandExecution {
-    async fn run(self) -> Result<Value, String> {
-        run_agent_command(
-            AgentCommand::InvokeCommand {
-                id: self.name,
-                args: vmux_client::protocol::JsonValue::from(self.arguments),
-            },
-            self.anchor,
-        )
-        .await
-    }
 }
 
 #[derive(Component)]
@@ -265,53 +239,12 @@ struct ProtocolExecution {
     anchor: Option<vmux_client::protocol::ProcessId>,
 }
 
-impl ProtocolExecution {
-    async fn run(self) -> Result<Value, String> {
-        match self.tool {
-            crate::tool::ProtocolTool::ReadFile => {
-                read_file_result(&self.arguments, self.anchor).await
-            }
-            crate::tool::ProtocolTool::Grep => grep_result(&self.arguments, self.anchor).await,
-            crate::tool::ProtocolTool::VaultStatus => {
-                run_agent_query(AgentQuery::VaultStatus).await
-            }
-        }
-    }
-}
-
 #[derive(Component)]
 struct DispatchExecution {
     target: crate::tool::DispatchTarget,
     name: String,
     arguments: Value,
     anchor: Option<vmux_client::protocol::ProcessId>,
-}
-
-impl DispatchExecution {
-    async fn run(self, config: McpConfig) -> Result<Value, String> {
-        if self.name == "open_file" {
-            let path = self
-                .arguments
-                .get("path")
-                .and_then(Value::as_str)
-                .ok_or("open_file.path is required")?;
-            if !Path::new(path).is_absolute() {
-                return Err("open_file.path must be an absolute path".to_string());
-            }
-            scoped_existing_path(self.anchor, Path::new(path), "open_file").await?;
-        }
-
-        match self.target {
-            crate::tool::DispatchTarget::Command(command @ AgentCommand::Run { .. })
-            | crate::tool::DispatchTarget::Command(
-                command @ AgentCommand::RunWithPlacementOverride { .. },
-            ) => run_blocking(command, config.run_block_timeout).await,
-            crate::tool::DispatchTarget::Command(command) => {
-                run_agent_command(command, self.anchor).await
-            }
-            crate::tool::DispatchTarget::Query(query) => run_agent_query(query).await,
-        }
-    }
 }
 
 #[derive(Component)]
@@ -513,11 +446,17 @@ fn start_list_tools(
     requests: Query<(Entity, &ListToolsExecution), Added<ListToolsExecution>>,
 ) {
     for (entity, request) in &requests {
-        let execution = ListToolsExecution {
-            definitions: request.definitions.clone(),
-        };
+        let mut definitions = request.definitions.clone();
         commands.entity(entity).remove::<ListToolsExecution>();
-        McpTask::start(&mut commands, &runtime, entity, execution.run());
+        McpTask::start(&mut commands, &runtime, entity, async move {
+            if let Ok(connection) = vmux_client::client::ServiceConnection::connect().await
+                && let Ok(AgentQueryResult::Commands(commands)) =
+                    agent_query(&connection, AgentQuery::ListCommands).await
+            {
+                definitions = crate::tool::ToolDefinition::merge_commands(definitions, commands)?;
+            }
+            Ok(json!({ "tools": definitions }))
+        });
     }
 }
 
@@ -527,13 +466,18 @@ fn start_commands(
     requests: Query<(Entity, &CommandExecution), Added<CommandExecution>>,
 ) {
     for (entity, request) in &requests {
-        let execution = CommandExecution {
-            name: request.name.clone(),
-            arguments: request.arguments.clone(),
-            anchor: request.anchor,
+        let command = AgentCommand::InvokeCommand {
+            id: request.name.clone(),
+            args: vmux_client::protocol::JsonValue::from(request.arguments.clone()),
         };
+        let anchor = request.anchor;
         commands.entity(entity).remove::<CommandExecution>();
-        McpTask::start(&mut commands, &runtime, entity, execution.run());
+        McpTask::start(
+            &mut commands,
+            &runtime,
+            entity,
+            run_agent_command(command, anchor),
+        );
     }
 }
 
@@ -543,13 +487,19 @@ fn start_protocol_tools(
     requests: Query<(Entity, &ProtocolExecution), Added<ProtocolExecution>>,
 ) {
     for (entity, request) in &requests {
-        let execution = ProtocolExecution {
-            tool: request.tool,
-            arguments: request.arguments.clone(),
-            anchor: request.anchor,
-        };
+        let tool = request.tool;
+        let arguments = request.arguments.clone();
+        let anchor = request.anchor;
         commands.entity(entity).remove::<ProtocolExecution>();
-        McpTask::start(&mut commands, &runtime, entity, execution.run());
+        McpTask::start(&mut commands, &runtime, entity, async move {
+            match tool {
+                crate::tool::ProtocolTool::ReadFile => read_file_result(&arguments, anchor).await,
+                crate::tool::ProtocolTool::Grep => grep_result(&arguments, anchor).await,
+                crate::tool::ProtocolTool::VaultStatus => {
+                    run_agent_query(AgentQuery::VaultStatus).await
+                }
+            }
+        });
     }
 }
 
@@ -560,19 +510,35 @@ fn start_dispatches(
     config: Res<McpConfig>,
 ) {
     for (entity, request) in &requests {
-        let execution = DispatchExecution {
-            target: request.target.clone(),
-            name: request.name.clone(),
-            arguments: request.arguments.clone(),
-            anchor: request.anchor,
-        };
+        let target = request.target.clone();
+        let name = request.name.clone();
+        let arguments = request.arguments.clone();
+        let anchor = request.anchor;
+        let run_block_timeout = config.run_block_timeout;
         commands.entity(entity).remove::<DispatchExecution>();
-        McpTask::start(
-            &mut commands,
-            &runtime,
-            entity,
-            execution.run(config.clone()),
-        );
+        McpTask::start(&mut commands, &runtime, entity, async move {
+            if name == "open_file" {
+                let path = arguments
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .ok_or("open_file.path is required")?;
+                if !Path::new(path).is_absolute() {
+                    return Err("open_file.path must be an absolute path".to_string());
+                }
+                scoped_existing_path(anchor, Path::new(path), "open_file").await?;
+            }
+
+            match target {
+                crate::tool::DispatchTarget::Command(command @ AgentCommand::Run { .. })
+                | crate::tool::DispatchTarget::Command(
+                    command @ AgentCommand::RunWithPlacementOverride { .. },
+                ) => run_blocking(command, run_block_timeout).await,
+                crate::tool::DispatchTarget::Command(command) => {
+                    run_agent_command(command, anchor).await
+                }
+                crate::tool::DispatchTarget::Query(query) => run_agent_query(query).await,
+            }
+        });
     }
 }
 
