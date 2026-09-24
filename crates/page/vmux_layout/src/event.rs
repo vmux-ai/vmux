@@ -583,10 +583,10 @@ pub struct RemoteRequest {
 }
 
 #[vmux_api::ui_event(Copy, Eq, target = "layout")]
-pub enum RemotePairingRequest {
-    Show,
-    Dismiss,
-}
+pub struct RemotePairingShowRequest;
+
+#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+pub struct RemotePairingDismissRequest;
 
 #[vmux_api::ui_event(Default, Eq, target = "layout")]
 pub struct LayoutOverlayEvent {

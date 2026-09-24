@@ -6,8 +6,8 @@ use bevy_cef::prelude::{BinReceive, Browsers};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::page::PageReady;
 use vmux_layout::event::{
-    RemoteCopyEvent, RemoteDevice, RemotePairingRequest, RemotePhase, RemoteRequest,
-    RemoteRevokeRequest, RemoteUiState,
+    RemoteCopyEvent, RemoteDevice, RemotePairingDismissRequest, RemotePairingShowRequest,
+    RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteUiState,
 };
 use vmux_layout::{LayoutCef, LayoutUiStateUpdates};
 use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
@@ -19,7 +19,8 @@ impl Plugin for RemotePlugin {
         app.world_mut()
             .spawn((Name::new("Remote runtime"), RemoteState::default()));
         app.add_observer(on_remote_request)
-            .add_observer(on_remote_pairing_request)
+            .add_observer(show_remote_pairing)
+            .add_observer(dismiss_remote_pairing)
             .add_observer(on_remote_copy)
             .add_observer(on_remote_revoke)
             .add_systems(Startup, reconcile_remote_on_startup)
@@ -266,17 +267,24 @@ fn on_remote_request(trigger: On<BinReceive<RemoteRequest>>, mut states: Query<&
     }
 }
 
-fn on_remote_pairing_request(
-    trigger: On<BinReceive<RemotePairingRequest>>,
+fn show_remote_pairing(
+    _trigger: On<BinReceive<RemotePairingShowRequest>>,
     mut states: Query<&mut RemoteState>,
 ) {
     let Ok(mut state) = states.single_mut() else {
         return;
     };
-    match trigger.event().payload {
-        RemotePairingRequest::Show => state.show_pairing(Instant::now()),
-        RemotePairingRequest::Dismiss => state.dismiss_pairing(),
-    }
+    state.show_pairing(Instant::now());
+}
+
+fn dismiss_remote_pairing(
+    _trigger: On<BinReceive<RemotePairingDismissRequest>>,
+    mut states: Query<&mut RemoteState>,
+) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
+    state.dismiss_pairing();
 }
 
 fn poll_remote_worker(mut states: Query<&mut RemoteState>) {
