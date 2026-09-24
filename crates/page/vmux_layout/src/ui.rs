@@ -14,29 +14,19 @@ use self::side_sheet::{ActiveStack, OverlayReadiness, SideSheetGrab, SideSheetVi
 use self::state::LayoutPageState;
 use self::update::UpdateNoticeFooter;
 use self::window_drag::WindowDragRegion;
-use crate::event::{PaneTreeEvent, ReloadEvent};
+use crate::event::PaneTreeEvent;
 use crate::extension::ExtensionPopupModal;
 use dioxus::prelude::*;
-use vmux_api::bookmark::BookmarkMenuActionEvent;
 use vmux_command::panel::CommandBarPanel;
 
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_theme};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
     let layout_ui = LayoutPageState::use_state();
-    let mut bookmark_menu_action = use_signal(BookmarkMenuActionEvent::default);
-    let bookmark_menu_state = bookmark_menu_action;
-    let _bookmark_menu_listener = use_listener::<BookmarkMenuActionEvent, _>(move |event| {
-        bookmark_menu_action.set(event);
-    });
+    let bookmark_menu_state = use_memo(move || layout_ui.value().bookmark_menu_action);
     use_context_provider(|| bookmark_menu_state);
-
-    let mut reload_key = use_signal(|| 0u32);
-    let _reload_listener = use_listener::<ReloadEvent, _>(move |_| {
-        reload_key.set(reload_key() + 1);
-    });
 
     let ui = layout_ui.value();
     let layout_ready = ui.layout.is_some();
@@ -151,7 +141,7 @@ pub fn Page() -> Element {
                         team: team.members,
                         extensions: extensions.extensions,
                         remote,
-                        reload_key: reload_key(),
+                        reload_key: ui.reload_revision,
                         stacks_error: ui_error.clone(),
                         tabs_error: ui_error.clone(),
                     }

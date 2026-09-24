@@ -417,7 +417,6 @@ fn on_reload_notify_header(
     _trigger: On<RequestReload>,
     layouts: Query<(Entity, &HostWindow), (With<LayoutCef>, With<PageReady>)>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let Some(cef_e) = focused_window.0.and_then(|window| {
@@ -427,16 +426,13 @@ fn on_reload_notify_header(
     }) else {
         return;
     };
-    if browsers.can_emit_to(&cef_e) {
-        commands.trigger(BinHostEmitEvent::from_event(cef_e, &ReloadEvent));
-    }
+    vmux_layout::LayoutUiStateUpdates::write(&mut commands, cef_e, &ReloadEvent);
 }
 
 fn on_hard_reload_notify_header(
     _trigger: On<RequestReloadIgnoreCache>,
     layouts: Query<(Entity, &HostWindow), (With<LayoutCef>, With<PageReady>)>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let Some(cef_e) = focused_window.0.and_then(|window| {
@@ -446,9 +442,7 @@ fn on_hard_reload_notify_header(
     }) else {
         return;
     };
-    if browsers.can_emit_to(&cef_e) {
-        commands.trigger(BinHostEmitEvent::from_event(cef_e, &ReloadEvent));
-    }
+    vmux_layout::LayoutUiStateUpdates::write(&mut commands, cef_e, &ReloadEvent);
 }
 
 fn on_side_sheet_resize(

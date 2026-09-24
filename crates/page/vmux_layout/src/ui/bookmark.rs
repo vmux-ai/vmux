@@ -40,7 +40,7 @@ pub(super) fn BookmarksSection(
     let mut optimistic_pin_order: Signal<Option<OptimisticPinOrder>> = use_context();
     let mut creating_folder = use_signal(|| false);
     let new_folder_draft = use_signal(|| translate("layout-new-folder"));
-    let bookmark_menu_action: Signal<BookmarkMenuActionEvent> = use_context();
+    let bookmark_menu_action: Memo<BookmarkMenuActionEvent> = use_context();
     let initial_menu_action = bookmark_menu_action.peek().sequence;
     let mut handled_menu_action = use_signal(|| initial_menu_action);
     use_effect(move || {
@@ -965,7 +965,7 @@ fn BookmarkFolder(
     let child_draft = use_signal(|| translate("layout-new-folder"));
     let menu_val = use_signal(|| folder.uuid.clone());
     let new_folder_uuid = uuid.clone();
-    let bookmark_menu_action: Signal<BookmarkMenuActionEvent> = use_context();
+    let bookmark_menu_action: Memo<BookmarkMenuActionEvent> = use_context();
     let initial_menu_action = bookmark_menu_action.peek().sequence;
     let mut handled_menu_action = use_signal(|| initial_menu_action);
     let menu_action_uuid = uuid.clone();
@@ -1255,7 +1255,7 @@ fn BookmarkEntry(
     };
     let mut editing = use_signal(|| false);
     let draft = use_signal(|| title.clone());
-    let bookmark_menu_action: Signal<BookmarkMenuActionEvent> = use_context();
+    let bookmark_menu_action: Memo<BookmarkMenuActionEvent> = use_context();
     let initial_menu_action = bookmark_menu_action.peek().sequence;
     let mut handled_menu_action = use_signal(|| initial_menu_action);
     let menu_action_uuid = row.uuid.clone();
