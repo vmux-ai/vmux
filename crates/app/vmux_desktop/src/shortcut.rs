@@ -194,7 +194,9 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_layout::tab::{TabFocus, TabRequest};
+    use vmux_layout::tab::{
+        FocusRequest as TabFocusRequest, OpenRequest as TabOpenRequest, TabFocus,
+    };
     use vmux_layout::target::SiblingDirection;
     use vmux_setting::{
         AppSettings, BrowserSettings, KeyComboDef, ShortcutDef, ShortcutEntry, ShortcutSettings,
@@ -206,7 +208,8 @@ mod tests {
             .add_plugins(ShortcutPlugin)
             .add_plugins((
                 vmux_command::CommandTypePlugin::<PaneRequest>::default(),
-                vmux_command::CommandTypePlugin::<TabRequest>::default(),
+                vmux_command::CommandTypePlugin::<TabFocusRequest>::default(),
+                vmux_command::CommandTypePlugin::<TabOpenRequest>::default(),
             ))
             .insert_resource(ButtonInput::<KeyCode>::default());
         app.world_mut().spawn(
@@ -223,7 +226,8 @@ mod tests {
             .add_plugins(ShortcutPlugin)
             .add_plugins((
                 vmux_command::CommandTypePlugin::<PaneRequest>::default(),
-                vmux_command::CommandTypePlugin::<TabRequest>::default(),
+                vmux_command::CommandTypePlugin::<TabFocusRequest>::default(),
+                vmux_command::CommandTypePlugin::<TabOpenRequest>::default(),
             ))
             .insert_resource(settings)
             .insert_resource(ButtonInput::<KeyCode>::default());
@@ -709,13 +713,13 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<TabRequest>>()
+            .resource_mut::<Messages<TabFocusRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
             requests,
-            vec![TabRequest::Focus(TabFocus::Sibling(SiblingDirection::Next))]
+            vec![TabFocusRequest(TabFocus::Sibling(SiblingDirection::Next))]
         );
     }
 
@@ -738,13 +742,13 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<TabRequest>>()
+            .resource_mut::<Messages<TabFocusRequest>>()
             .drain()
             .collect();
 
         assert_eq!(
             requests,
-            vec![TabRequest::Focus(TabFocus::Sibling(
+            vec![TabFocusRequest(TabFocus::Sibling(
                 SiblingDirection::Previous
             ))]
         );
@@ -769,10 +773,10 @@ mod tests {
 
         let requests: Vec<_> = app
             .world_mut()
-            .resource_mut::<Messages<TabRequest>>()
+            .resource_mut::<Messages<TabOpenRequest>>()
             .drain()
             .collect();
 
-        assert_eq!(requests, vec![TabRequest::Open { url: None }]);
+        assert_eq!(requests, vec![TabOpenRequest { url: None }]);
     }
 }

@@ -149,14 +149,14 @@ impl McpConnections {
     fn drain(
         mut tasks: Query<(Entity, &mut McpActionTask)>,
         browsers: NonSend<Browsers>,
-        mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
+        mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
         proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
         mut commands: Commands,
     ) {
         for (entity, mut task) in &mut tasks {
             while let Ok(url) = task.progress.get_mut().try_recv() {
                 if browsers.can_emit_to(&task.target) {
-                    stack_requests.write(vmux_layout::stack::StackRequest::Open { url: Some(url) });
+                    stack_requests.write(vmux_layout::stack::OpenRequest { url: Some(url) });
                 }
             }
             let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {

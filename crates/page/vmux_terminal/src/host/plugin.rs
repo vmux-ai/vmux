@@ -17,7 +17,7 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::stack::StackRequest;
+use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest};
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
@@ -916,7 +916,7 @@ fn try_connect_service(
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PollServiceWriters<'w> {
-    stack_requests: MessageWriter<'w, StackRequest>,
+    stack_close_requests: MessageWriter<'w, StackCloseRequest>,
     agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
     agent_queries: MessageWriter<'w, vmux_service::agent_events::AgentQueryRequest>,
     agent_tool_calls: MessageWriter<'w, vmux_service::agent_events::AgentToolCallRequest>,
@@ -1296,7 +1296,7 @@ fn poll_service_messages(
                 if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
                     let tab = child_of.get();
                     commands.entity(tab).insert(LastActivatedAt::now());
-                    writers.stack_requests.write(StackRequest::Close);
+                    writers.stack_close_requests.write(StackCloseRequest);
                 }
             }
             ServiceMessage::ProcessList { processes } => {
@@ -2358,7 +2358,8 @@ fn handle_terminal_navigation_commands(
     mut previous_requests: MessageReader<super::command::PrevRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     terminals: Query<&ChildOf, With<Terminal>>,
-    mut stack_requests: MessageWriter<StackRequest>,
+    mut stack_close_requests: MessageWriter<StackCloseRequest>,
+    mut stack_focus_requests: MessageWriter<FocusRequest>,
 ) {
     let terminal_is_focused = focus
         .stack
@@ -2370,15 +2371,13 @@ fn handle_terminal_navigation_commands(
         return;
     }
     for _ in close_requests.read() {
-        stack_requests.write(StackRequest::Close);
+        stack_close_requests.write(StackCloseRequest);
     }
     for _ in next_requests.read() {
-        stack_requests.write(StackRequest::Focus(
-            vmux_layout::target::SiblingDirection::Next,
-        ));
+        stack_focus_requests.write(FocusRequest(vmux_layout::target::SiblingDirection::Next));
     }
     for _ in previous_requests.read() {
-        stack_requests.write(StackRequest::Focus(
+        stack_focus_requests.write(FocusRequest(
             vmux_layout::target::SiblingDirection::Previous,
         ));
     }

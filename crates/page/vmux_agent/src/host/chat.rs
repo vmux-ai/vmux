@@ -54,11 +54,11 @@ pub(crate) struct ChatSynced;
 
 fn on_chat_open_page(
     trigger: On<BinReceive<ChatOpenPage>>,
-    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     let url = trigger.event().payload.url.clone();
     if url.is_empty() {
         return;
     }
-    requests.write(vmux_layout::stack::StackRequest::Open { url: Some(url) });
+    requests.write(vmux_layout::stack::OpenRequest { url: Some(url) });
 }

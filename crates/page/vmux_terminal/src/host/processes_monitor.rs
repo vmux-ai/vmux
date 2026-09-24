@@ -16,7 +16,7 @@ use vmux_core::KeyboardOwner;
 use vmux_layout::{
     native_open::{HostedPage, HostedPagePlugin},
     pane::{Pane, PaneSplit},
-    stack::{ActiveTabParam, Stack, StackRequest, focused_stack, stack_bundle},
+    stack::{ActiveTabParam, OpenRequest, Stack, focused_stack, stack_bundle},
 };
 
 pub struct ProcessesMonitorPlugin;
@@ -101,10 +101,10 @@ impl TryFrom<&CommandInvocation> for OpenServicesRequest {
 
 fn open_services(
     mut requests: MessageReader<OpenServicesRequest>,
-    mut stack_requests: MessageWriter<StackRequest>,
+    mut stack_requests: MessageWriter<OpenRequest>,
 ) {
     for _ in requests.read() {
-        stack_requests.write(StackRequest::Open {
+        stack_requests.write(OpenRequest {
             url: Some(vmux_service::PAGE_URL.to_string()),
         });
     }

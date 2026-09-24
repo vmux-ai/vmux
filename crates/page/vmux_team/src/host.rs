@@ -429,7 +429,7 @@ fn parse_member_entity(member_id: &str) -> Option<Entity> {
 
 fn on_team_request(
     trigger: On<BinReceive<TeamRequest>>,
-    mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     user: Query<Entity, With<User>>,
     active_space: Res<ActiveSpaceEntity>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
@@ -527,7 +527,7 @@ fn on_team_request(
         return;
     }
 
-    stack_requests.write(vmux_layout::stack::StackRequest::Open {
+    stack_requests.write(vmux_layout::stack::OpenRequest {
         url: Some(TEAM_PAGE_URL.to_string()),
     });
 }
@@ -651,7 +651,7 @@ mod tests {
 
     fn command_app() -> App {
         let mut app = App::new();
-        app.add_message::<vmux_layout::stack::StackRequest>()
+        app.add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<ProfileSwitchRequested>()
             .add_observer(on_team_request);
         app

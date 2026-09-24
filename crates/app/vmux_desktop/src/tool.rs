@@ -501,7 +501,7 @@ struct InventoryItem {
 fn on_open_request(
     trigger: On<BinReceive<ToolOpenRequest>>,
     stores: Query<&ToolStore, With<ToolRegistry>>,
-    mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     let path = Path::new(trigger.event().payload.path.trim());
     let Ok(store) = stores.single() else {
@@ -516,7 +516,7 @@ fn on_open_request(
     let Ok(url) = url::Url::from_file_path(path) else {
         return;
     };
-    requests.write(vmux_layout::stack::StackRequest::Open {
+    requests.write(vmux_layout::stack::OpenRequest {
         url: Some(url.to_string()),
     });
 }
@@ -1065,7 +1065,7 @@ fn drain_vault_actions(
     mut registry: Query<&mut ToolRegistry>,
     mut recovery: ResMut<VaultRecoveryState>,
     mut subscribers: Query<&mut VaultSubscriber>,
-    mut stack_requests: MessageWriter<vmux_layout::stack::StackRequest>,
+    mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     mut commands: Commands,
 ) {
     let Ok(mut state) = registry.single_mut() else {
@@ -1075,7 +1075,7 @@ fn drain_vault_actions(
         let target = task.target.webview();
         while let Ok(progress) = task.progress.get_mut().try_recv() {
             if let Some(target) = target {
-                stack_requests.write(vmux_layout::stack::StackRequest::Open {
+                stack_requests.write(vmux_layout::stack::OpenRequest {
                     url: Some(progress.url.clone()),
                 });
                 if let Ok(mut subscriber) = subscribers.get_mut(target) {
