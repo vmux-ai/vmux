@@ -1,4 +1,5 @@
 pub mod event;
+pub mod ui_state;
 pub mod view;
 
 pub const FILES_HOST: &str = "files";

@@ -15,8 +15,7 @@ use super::status::{StatusCard, StatusDetailCard};
 #[component]
 pub(super) fn GitDashboard() -> Element {
     let GitPageState {
-        workspace,
-        repository,
+        snapshot,
         selected_path,
         selected_path_bytes,
         selected_abs_path,
@@ -29,24 +28,23 @@ pub(super) fn GitDashboard() -> Element {
         confirm_discard,
         commit_message,
         pending_commit_message,
-        fetching,
         focused_panel,
-        command_log,
-        branch_log,
         shortcut_help,
-        nonce,
         markers,
-        diff_viewport,
         ..
     } = use_context::<GitPageState>();
-    let Some(repository) = repository() else {
+    let ui = snapshot();
+    let Some(repository) = ui.repository else {
         return rsx! {};
     };
+    let repo_root = use_memo(move || snapshot().workspace);
+    let nonce = use_memo(move || snapshot().nonce);
+    let diff_viewport = use_memo(move || snapshot().diff_viewport);
 
     rsx! {
         main { class: "min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(120%_90%_at_50%_-20%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_55%)] p-1.5 sm:overflow-hidden sm:p-2",
             div { class: "grid min-h-full grid-cols-1 gap-1.5 sm:h-full sm:grid-cols-[minmax(18rem,0.86fr)_minmax(0,2.14fr)] sm:grid-rows-[4rem_minmax(7rem,0.55fr)_minmax(9rem,1fr)_minmax(5rem,0.75fr)_minmax(5rem,0.75fr)_1.75rem] sm:gap-2 xl:grid-cols-[minmax(22rem,0.9fr)_minmax(0,2.1fr)]",
-                StatusCard { repository: repository.clone(), focused_panel, fetching }
+                StatusCard { repository: repository.clone(), focused_panel, fetching: ui.fetching }
                 ChangesCard {
                     repository: repository.clone(),
                     selected_path,
@@ -68,16 +66,16 @@ pub(super) fn GitDashboard() -> Element {
                 HistoryCard { repository: repository.clone(), selected_commit, focused_panel }
                 StashCard { repository: repository.clone(), selected_stash, focused_panel }
                 if focused_panel() == GitPanel::Status {
-                    StatusDetailCard { repository: repository.clone(), fetching }
+                    StatusDetailCard { repository: repository.clone(), fetching: ui.fetching }
                 } else if focused_panel() == GitPanel::Branches {
                     BranchLogCard {
                         branch: selected_branch(),
-                        branch_log,
+                        branch_log: ui.branch_log.clone(),
                     }
                 } else if focused_panel() == GitPanel::Commits {
                     CommitDiffCard {
                         repository: repository.clone(),
-                        repo_root: workspace,
+                        repo_root,
                         selected_commit,
                         nonce,
                         markers,
@@ -85,7 +83,7 @@ pub(super) fn GitDashboard() -> Element {
                     }
                 } else {
                     DiffCard {
-                        repo_root: workspace,
+                        repo_root,
                         selected_path,
                         selected_path_bytes,
                         selected_abs_path,
@@ -94,7 +92,7 @@ pub(super) fn GitDashboard() -> Element {
                         diff_viewport,
                     }
                 }
-                CommandLogCard { command_log }
+                CommandLogCard { command_log: ui.command_log }
             }
         }
         GitShortcutBar {

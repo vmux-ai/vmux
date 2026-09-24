@@ -15,21 +15,18 @@ use super::workspace::GitWorkspace;
 #[component]
 pub(super) fn EmptyRepository() -> Element {
     let GitPageState {
-        workspace,
-        directory,
+        snapshot,
         directory_selected: mut selected,
-        mut directory_children,
         directory_preview_path: mut preview_path,
         directory_came_from: mut came_from,
         directory_show_hidden: mut show_hidden,
-        loading,
-        message,
         ..
     } = use_context::<GitPageState>();
-    let loading = loading();
-    let workspace = workspace();
-    let directory = directory();
-    let message = message();
+    let ui = snapshot();
+    let loading = ui.loading;
+    let workspace = ui.workspace;
+    let message = ui.message;
+    let directory = ui.directory;
     let Some(directory) = directory else {
         return rsx! {
             if loading {
@@ -50,6 +47,10 @@ pub(super) fn EmptyRepository() -> Element {
     let path = directory.path.clone();
     let entries = directory.entries.clone();
     let action_directory = directory.clone();
+    let children = ui
+        .directory_preview
+        .filter(|preview| preview.path == preview_path())
+        .map(|preview| preview.entries);
 
     rsx! {
         main { class: "flex min-h-0 flex-1 flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_60%)] font-mono text-sm leading-normal",
@@ -66,7 +67,7 @@ pub(super) fn EmptyRepository() -> Element {
                 path,
                 parent_entries: directory.parent_entries,
                 entries,
-                children: directory_children(),
+                children,
                 selected: selected(),
                 thumbs: HashMap::new(),
                 show_hidden: show_hidden(),
@@ -74,7 +75,6 @@ pub(super) fn EmptyRepository() -> Element {
                 on_action: move |action| match action {
                     DirectoryNavigatorAction::Select { index, entry } => {
                         selected.set(index);
-                        directory_children.set(None);
                         preview_path.set(String::new());
                         if entry.is_dir {
                             preview_path.set(entry.path.clone());
@@ -86,7 +86,6 @@ pub(super) fn EmptyRepository() -> Element {
                             return;
                         }
                         came_from.set(target);
-                        directory_children.set(None);
                         GitWorkspace::browse(&action_directory.parent_path, false);
                     }
                     DirectoryNavigatorAction::Descend { target } => {
@@ -97,13 +96,11 @@ pub(super) fn EmptyRepository() -> Element {
                             return;
                         }
                         came_from.set(target);
-                        directory_children.set(None);
                         GitWorkspace::browse(&entry.path, false);
                     }
                     DirectoryNavigatorAction::Open { entry } => {
                         if entry.is_dir {
                             came_from.set(String::new());
-                            directory_children.set(None);
                             GitWorkspace::browse(&entry.path, false);
                         }
                     }
@@ -113,7 +110,6 @@ pub(super) fn EmptyRepository() -> Element {
                         let entries = visible_directory_entries(&action_directory.entries, next);
                         let index = selected().min(entries.len().saturating_sub(1));
                         selected.set(index);
-                        directory_children.set(None);
                         preview_path.set(String::new());
                         if let Some(entry) = entries.get(index).filter(|entry| entry.is_dir) {
                             preview_path.set(entry.path.clone());

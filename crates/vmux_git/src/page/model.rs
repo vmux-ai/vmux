@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use vmux_ui::i18n::translate;
 use vmux_ui::list_nav::MenuDirection;
 
-use crate::event::{FileStatus, GitFileEntry, GitRepositoryEvent, GitResultEvent};
+use crate::event::{FileStatus, GitFileEntry, GitRepositoryEvent};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum BranchPrompt {
@@ -105,38 +105,6 @@ impl GitPanel {
             (Self::Commits, true) => Self::Branches,
             (Self::Stash, true) => Self::Commits,
         }
-    }
-}
-
-#[derive(Clone, PartialEq)]
-pub(super) struct GitCommandLogEntry {
-    pub(super) action: String,
-    pub(super) message: String,
-    pub(super) ok: bool,
-}
-
-impl GitCommandLogEntry {
-    pub(super) fn from_result(result: &GitResultEvent) -> Self {
-        Self {
-            action: result.action.clone(),
-            message: result.message.clone(),
-            ok: result.ok,
-        }
-    }
-
-    pub(super) fn error(message: &str) -> Self {
-        Self {
-            action: String::new(),
-            message: message.to_string(),
-            ok: false,
-        }
-    }
-
-    pub(super) fn append(self, entries: &mut Vec<Self>) {
-        if entries.len() >= 24 {
-            entries.remove(0);
-        }
-        entries.push(self);
     }
 }
 

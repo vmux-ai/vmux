@@ -89,11 +89,8 @@ pub(super) fn BranchPromptDialog() -> Element {
 }
 
 #[component]
-pub(super) fn BranchLogCard(
-    branch: String,
-    branch_log: Signal<Option<GitBranchLogEvent>>,
-) -> Element {
-    let log = branch_log().filter(|event| event.branch == branch);
+pub(super) fn BranchLogCard(branch: String, branch_log: Option<GitBranchLogEvent>) -> Element {
+    let log = branch_log.filter(|event| event.branch == branch);
     let commit_count = log.as_ref().map(|event| event.commits.len()).unwrap_or(0);
 
     rsx! {

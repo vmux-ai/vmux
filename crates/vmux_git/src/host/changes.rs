@@ -125,7 +125,14 @@ fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, mut commands: Co
     );
 }
 
-fn on_fetch_request(trigger: On<BinReceive<GitFetchRequest>>, mut commands: Commands) {
+fn on_fetch_request(
+    trigger: On<BinReceive<GitFetchRequest>>,
+    mut views: Query<&mut super::view::GitView>,
+    mut commands: Commands,
+) {
+    if let Ok(mut view) = views.get_mut(trigger.event().webview) {
+        view.start_fetch();
+    }
     GitJob::enqueue(
         &mut commands,
         trigger.event().webview,

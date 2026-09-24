@@ -541,6 +541,7 @@ fn drain_git_watch(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: ResMut<RepoInfoCache>,
     file_pages: Query<(), With<FileUiStateUpdates>>,
+    mut views: Query<&mut super::view::GitView>,
     mut commands: Commands,
 ) {
     let Some(watch) = watch else {
@@ -582,7 +583,17 @@ fn drain_git_watch(
         .map(|(entity, _)| *entity)
         .collect();
     for entity in affected {
-        FileUiStateUpdates::deliver(&file_pages, &mut commands, entity, &GitChangedEvent {});
+        if let Ok(mut view) = views.get_mut(entity) {
+            if let Some(path) = view.mark_changed() {
+                super::job_runner::GitJob::enqueue(
+                    &mut commands,
+                    entity,
+                    super::job::JobKind::Repository { path: path.into() },
+                );
+            }
+        } else {
+            FileUiStateUpdates::deliver(&file_pages, &mut commands, entity, &GitChangedEvent {});
+        }
     }
     let affected_repo_info: Vec<PathBuf> = watch
         .repo_info_subscriptions

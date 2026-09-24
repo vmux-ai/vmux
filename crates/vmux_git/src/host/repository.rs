@@ -23,10 +23,14 @@ fn on_repository_request(
     trigger: On<BinReceive<GitRepositoryRequest>>,
     watch: Option<NonSendMut<GitWatch>>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
+    mut views: Query<&mut super::view::GitView>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let path: PathBuf = trigger.event().payload.path.clone().into();
+    if let Ok(mut view) = views.get_mut(webview) {
+        view.start_repository(&path);
+    }
     let repo_root = if let Some(mut watch) = watch {
         match watch.subscribe(webview, &path) {
             Ok(repo_root) => repo_root,
