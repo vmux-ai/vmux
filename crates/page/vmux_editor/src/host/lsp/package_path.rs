@@ -65,6 +65,12 @@ impl std::fmt::Display for PackagePath {
     }
 }
 
+impl From<&PackageName> for PackagePath {
+    fn from(name: &PackageName) -> Self {
+        Self(PathBuf::from(name.as_str()))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sha256Digest(String);
 
@@ -113,6 +119,15 @@ mod tests {
                 .unwrap()
                 .as_path(),
             Path::new("node_modules/.bin/server")
+        );
+    }
+
+    #[test]
+    fn package_name_is_a_valid_package_path() {
+        let name = PackageName::parse("rust-analyzer").unwrap();
+        assert_eq!(
+            PackagePath::from(&name).as_path(),
+            Path::new("rust-analyzer")
         );
     }
 

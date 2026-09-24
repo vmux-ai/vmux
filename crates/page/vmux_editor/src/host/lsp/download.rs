@@ -9,6 +9,30 @@ use crate::lsp::package_path::Sha256Digest;
 pub const CATALOG_MAX_BYTES: u64 = 32 * 1024 * 1024;
 pub const PACKAGE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 pub const CHECKSUM_MAX_BYTES: u64 = 1024 * 1024;
+const GITHUB_RELEASE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+struct BoundedResponse(reqwest::blocking::Response);
+
+impl BoundedResponse {
+    fn read(self, max_bytes: u64, subject: &str) -> Result<Vec<u8>, String> {
+        if self
+            .0
+            .content_length()
+            .is_some_and(|length| length > max_bytes)
+        {
+            return Err(format!("{subject} exceeds {max_bytes} bytes"));
+        }
+        let mut bytes = Vec::new();
+        self.0
+            .take(max_bytes.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(format!("{subject} exceeds {max_bytes} bytes"));
+        }
+        Ok(bytes)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemoteArtifact {
@@ -68,20 +92,7 @@ pub fn sha256_from_manifest(
     if !response.status().is_success() {
         return Err(format!("http {}", response.status()));
     }
-    if response
-        .content_length()
-        .is_some_and(|length| length > max_bytes)
-    {
-        return Err(format!("checksum manifest exceeds {max_bytes} bytes"));
-    }
-    let mut bytes = Vec::new();
-    response
-        .take(max_bytes.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    if bytes.len() as u64 > max_bytes {
-        return Err(format!("checksum manifest exceeds {max_bytes} bytes"));
-    }
+    let bytes = BoundedResponse(response).read(max_bytes, "checksum manifest")?;
     let text = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
     for line in text.lines() {
         let mut fields = line.split_whitespace();
@@ -183,7 +194,10 @@ pub fn github_release_asset(
     if !response.status().is_success() {
         return Err(format!("GitHub API returned {}", response.status()));
     }
-    let release: serde_json::Value = response.json().map_err(|e| e.to_string())?;
+    let bytes =
+        BoundedResponse(response).read(GITHUB_RELEASE_MAX_BYTES, "GitHub release metadata")?;
+    let release: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     let asset = release
         .get("assets")
         .and_then(serde_json::Value::as_array)
@@ -273,6 +287,16 @@ mod tests {
         assert!(!dest.exists());
         assert!(download_to(&serve_once(b"wrong"), &dest, 1024, &digest, |_, _| {}).is_err());
         assert!(!dest.exists());
+    }
+
+    #[test]
+    fn bounded_responses_reject_declared_overflow() {
+        let declared = client()
+            .unwrap()
+            .get(serve_once(b"oversized"))
+            .send()
+            .unwrap();
+        assert!(BoundedResponse(declared).read(3, "response").is_err());
     }
 
     #[test]

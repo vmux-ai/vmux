@@ -42,7 +42,7 @@ pub fn install_from_url(
     let asset_bin = asset
         .bin
         .clone()
-        .unwrap_or_else(|| PackagePath::parse(pkg.name.as_str()).expect("validated package name"));
+        .unwrap_or_else(|| PackagePath::from(&pkg.name));
 
     let staging_root = store::staging_dir(store_root);
     std::fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
