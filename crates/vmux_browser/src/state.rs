@@ -5,6 +5,9 @@ use vmux_core::{
     page::{HostHistory, PageReady},
 };
 use vmux_history::LastActivatedAt;
+use vmux_layout::projection::{
+    BookmarkProjection, PaneTreeProjection, ProjectProjection, StackProjection,
+};
 use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, LayoutUiStateUpdates, NavigationState, Open, UpdateState,
@@ -94,6 +97,67 @@ impl StateRevision {
 struct ProjectionCache {
     revisions: EntityHashMap<u64>,
     bodies: EntityHashMap<String>,
+}
+
+struct BookmarkFolders(Vec<vmux_api::bookmark::BookmarkFolderChoice>);
+
+impl BookmarkFolders {
+    fn from_nodes(nodes: &[vmux_api::bookmark::BookmarkNode]) -> Self {
+        let folders = nodes
+            .iter()
+            .filter_map(|node| match node {
+                vmux_api::bookmark::BookmarkNode::Folder(folder) => Some(folder.clone()),
+                vmux_api::bookmark::BookmarkNode::Entry(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let mut output = Vec::new();
+        Self::collect(
+            &folders,
+            None,
+            "",
+            &[],
+            &mut std::collections::HashSet::new(),
+            &mut output,
+        );
+        Self(output)
+    }
+
+    fn collect(
+        folders: &[vmux_api::bookmark::BookmarkFolderRow],
+        parent: Option<&str>,
+        parent_label: &str,
+        ancestors: &[String],
+        visited: &mut std::collections::HashSet<String>,
+        output: &mut Vec<vmux_api::bookmark::BookmarkFolderChoice>,
+    ) {
+        for folder in folders
+            .iter()
+            .filter(|folder| folder.parent.as_deref() == parent)
+        {
+            if !visited.insert(folder.uuid.clone()) {
+                continue;
+            }
+            let label = match parent_label.is_empty() {
+                true => folder.name.clone(),
+                false => format!("{parent_label} / {}", folder.name),
+            };
+            output.push(vmux_api::bookmark::BookmarkFolderChoice {
+                uuid: folder.uuid.clone(),
+                label: label.clone(),
+                ancestors: ancestors.to_vec(),
+            });
+            let mut child_ancestors = ancestors.to_vec();
+            child_ancestors.push(folder.uuid.clone());
+            Self::collect(
+                folders,
+                Some(&folder.uuid),
+                &label,
+                &child_ancestors,
+                visited,
+                output,
+            );
+        }
+    }
 }
 
 impl ProjectionCache {
@@ -513,6 +577,9 @@ fn push_stacks_host_emit(
         can_go_forward,
         is_zoomed,
     };
+    commands
+        .entity(cef_e)
+        .insert(StackProjection(payload.clone()));
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
         return;
@@ -540,6 +607,7 @@ fn push_pane_tree_emit(
             Has<Loading>,
             Option<&PageIdentity>,
             Option<&vmux_git::GitDiffSource>,
+            Has<vmux_core::team::Agent>,
         ),
         With<Browser>,
     >,
@@ -582,10 +650,13 @@ fn push_pane_tree_emit(
                 let mut found_browser = false;
                 if let Ok(stack_kids) = stack_children.get(child) {
                     for browser_e in stack_kids.iter() {
-                        if let Ok((meta, loading, osc, diff)) = browser_meta.get(browser_e) {
+                        if let Ok((meta, loading, osc, diff, is_agent)) =
+                            browser_meta.get(browser_e)
+                        {
                             let is_new_stack = false;
                             stacks.push(StackNode {
                                 id: child.to_bits(),
+                                agent_id: is_agent.then(|| browser_e.to_bits().to_string()),
                                 title: if is_new_stack {
                                     "New Stack".to_string()
                                 } else {
@@ -613,6 +684,7 @@ fn push_pane_tree_emit(
                 if !found_browser {
                     stacks.push(StackNode {
                         id: child.to_bits(),
+                        agent_id: None,
                         title: "New Stack".to_string(),
                         url: String::new(),
                         icon: vmux_core::PageIcon::None,
@@ -633,6 +705,9 @@ fn push_pane_tree_emit(
         });
     }
     let payload = PaneTreeEvent { panes };
+    commands
+        .entity(cef_e)
+        .insert(PaneTreeProjection(payload.clone()));
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
         return;
@@ -729,6 +804,9 @@ fn push_projects_host_emit(
         }
     }
     let payload = TabBoundaryEvent { boundary, projects };
+    commands
+        .entity(cef_e)
+        .insert(ProjectProjection(payload.clone()));
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if !cache.should_emit(cef_e, revision.0, ron_body, page_ready_changed) {
         return;
@@ -851,10 +929,15 @@ fn push_bookmarks_host_emit(
     roots.sort_by_key(|(o, _)| *o);
     let roots: Vec<vmux_api::bookmark::BookmarkNode> = roots.into_iter().map(|(_, n)| n).collect();
 
+    let folders = BookmarkFolders::from_nodes(&roots).0;
     let payload = vmux_api::bookmark::BookmarkStateEvent {
         pins: pin_rows,
         roots,
+        folders,
     };
+    commands
+        .entity(cef_e)
+        .insert(BookmarkProjection(payload.clone()));
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     if !cache.should_emit(cef_e, revision.0, body, page_ready_changed) {
         return;

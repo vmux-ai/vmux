@@ -3,6 +3,7 @@ use bevy_cef::prelude::UiEventPlugin;
 use vmux_core::page::{PageReady, mark_webview_page_ready};
 
 use super::command::LayoutRequestPlugin;
+use super::projection::LayoutUiProjectionPlugin;
 use crate::active_panes::ActivePanesPlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
@@ -65,6 +66,7 @@ impl Plugin for LayoutPlugin {
             .add_observer(mark_webview_page_ready)
             .add_plugins((
                 ProfilePlugin,
+                LayoutUiProjectionPlugin,
                 LayoutOverlayPlugin,
                 SpaceLayoutPlugin,
                 WindowLayoutPlugin,

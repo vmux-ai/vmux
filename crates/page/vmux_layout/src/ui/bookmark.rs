@@ -3,14 +3,14 @@ use std::rc::Rc;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_api::bookmark::{
-    BookmarkAddRequest, BookmarkContextMenuRequest, BookmarkFolderCreateRequest,
-    BookmarkFolderMoveRequest, BookmarkFolderRemoveRequest, BookmarkFolderRenameRequest,
-    BookmarkFolderRow, BookmarkFolderToggleRequest, BookmarkMenuActionEvent,
-    BookmarkMenuEntryRequest, BookmarkMenuFolderRequest, BookmarkMenuPinRequest,
-    BookmarkMenuRootRequest, BookmarkMovePinRequest, BookmarkMoveRequest, BookmarkNode,
-    BookmarkOpenRequest, BookmarkPinRequest, BookmarkPinUrlRequest, BookmarkRemoveRequest,
-    BookmarkRenameRequest, BookmarkReorderPinRequest, BookmarkRow, BookmarkStateEvent,
-    BookmarkTextInputRequest, BookmarkUnpinRequest,
+    BookmarkAddRequest, BookmarkContextMenuRequest, BookmarkFolderChoice,
+    BookmarkFolderCreateRequest, BookmarkFolderMoveRequest, BookmarkFolderRemoveRequest,
+    BookmarkFolderRenameRequest, BookmarkFolderRow, BookmarkFolderToggleRequest,
+    BookmarkMenuActionEvent, BookmarkMenuEntryRequest, BookmarkMenuFolderRequest,
+    BookmarkMenuPinRequest, BookmarkMenuRootRequest, BookmarkMovePinRequest, BookmarkMoveRequest,
+    BookmarkNode, BookmarkOpenRequest, BookmarkPinRequest, BookmarkPinUrlRequest,
+    BookmarkRemoveRequest, BookmarkRenameRequest, BookmarkReorderPinRequest, BookmarkRow,
+    BookmarkStateEvent, BookmarkTextInputRequest, BookmarkUnpinRequest,
 };
 use vmux_core::PageMetadata;
 use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, ContextMenuItem};
@@ -35,7 +35,11 @@ pub(super) fn BookmarksSection(
     pane_id: u64,
     expanded: bool,
 ) -> Element {
-    let BookmarkStateEvent { pins, roots } = bookmarks;
+    let BookmarkStateEvent {
+        pins,
+        roots,
+        folders,
+    } = bookmarks;
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let mut optimistic_pin_order: Signal<Option<OptimisticPinOrder>> = use_context();
     let mut creating_folder = use_signal(|| false);
@@ -53,7 +57,6 @@ pub(super) fn BookmarksSection(
             begin_new_folder(creating_folder, new_folder_draft);
         }
     });
-    let folders = BookmarkFolderChoice::all(&roots);
     let folder_rows = bookmark_folder_rows(&roots);
     let host_pin_order = pins.iter().map(|pin| pin.uuid.clone()).collect::<Vec<_>>();
     let observed_host_pin_order = host_pin_order.clone();
@@ -235,13 +238,6 @@ pub(super) fn BookmarksSection(
             }
         }
     }
-}
-
-#[derive(Clone, PartialEq)]
-pub(super) struct BookmarkFolderChoice {
-    pub(super) uuid: String,
-    pub(super) label: String,
-    ancestors: Vec<String>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -472,20 +468,6 @@ impl BookmarkInput {
     }
 }
 
-pub(super) struct BookmarkTree;
-
-impl BookmarkTree {
-    pub(super) fn contains_url(nodes: &[BookmarkNode], url: &str) -> bool {
-        nodes.iter().any(|node| match node {
-            BookmarkNode::Entry(bookmark) => bookmark.metadata.url == url,
-            BookmarkNode::Folder(folder) => folder
-                .children
-                .iter()
-                .any(|bookmark| bookmark.metadata.url == url),
-        })
-    }
-}
-
 fn bookmark_folder_rows(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderRow> {
     nodes
         .iter()
@@ -494,60 +476,6 @@ fn bookmark_folder_rows(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderRow> {
             BookmarkNode::Entry(_) => None,
         })
         .collect()
-}
-
-impl BookmarkFolderChoice {
-    pub(super) fn all(nodes: &[BookmarkNode]) -> Vec<Self> {
-        let folders = bookmark_folder_rows(nodes);
-        let mut output = Vec::new();
-        Self::collect(
-            &folders,
-            None,
-            "",
-            &[],
-            &mut std::collections::HashSet::new(),
-            &mut output,
-        );
-        output
-    }
-
-    fn collect(
-        folders: &[BookmarkFolderRow],
-        parent: Option<&str>,
-        parent_label: &str,
-        ancestors: &[String],
-        visited: &mut std::collections::HashSet<String>,
-        output: &mut Vec<BookmarkFolderChoice>,
-    ) {
-        for folder in folders
-            .iter()
-            .filter(|folder| folder.parent.as_deref() == parent)
-        {
-            if !visited.insert(folder.uuid.clone()) {
-                continue;
-            }
-            let label = if parent_label.is_empty() {
-                folder.name.clone()
-            } else {
-                format!("{parent_label} / {}", folder.name)
-            };
-            output.push(BookmarkFolderChoice {
-                uuid: folder.uuid.clone(),
-                label: label.clone(),
-                ancestors: ancestors.to_vec(),
-            });
-            let mut child_ancestors = ancestors.to_vec();
-            child_ancestors.push(folder.uuid.clone());
-            Self::collect(
-                folders,
-                Some(&folder.uuid),
-                &label,
-                &child_ancestors,
-                visited,
-                output,
-            );
-        }
-    }
 }
 
 #[component]

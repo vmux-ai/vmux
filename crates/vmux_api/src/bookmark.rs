@@ -33,6 +33,15 @@ pub enum BookmarkNode {
 pub struct BookmarkStateEvent {
     pub pins: Vec<BookmarkRow>,
     pub roots: Vec<BookmarkNode>,
+    #[serde(default)]
+    pub folders: Vec<BookmarkFolderChoice>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct BookmarkFolderChoice {
+    pub uuid: String,
+    pub label: String,
+    pub ancestors: Vec<String>,
 }
 
 #[vmux_api::ui_event(Copy, Eq, Default)]

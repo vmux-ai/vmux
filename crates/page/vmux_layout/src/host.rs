@@ -18,6 +18,7 @@ pub mod pending_stack;
 pub mod placement;
 pub mod plugin;
 pub mod profile;
+pub mod projection;
 pub mod settings;
 pub mod side_sheet;
 pub mod snapshot;

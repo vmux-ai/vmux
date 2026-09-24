@@ -1,6 +1,7 @@
 use crate::event::{
-    LayoutStateEvent, PaneTreeEvent, ReloadEvent, RemoteStateEvent, StacksHostEvent,
-    TabBoundaryEvent, TabsHostEvent, UpdateClearedEvent, UpdateProgressEvent, UpdateReadyEvent,
+    ActiveSessionEvent, HeaderPageEvent, LayoutStateEvent, PaneTreeEvent, ReloadEvent,
+    RemoteStateEvent, StacksHostEvent, TabBoundaryEvent, TabsHostEvent, UpdateClearedEvent,
+    UpdateProgressEvent, UpdateReadyEvent,
 };
 use vmux_api::bookmark::{BookmarkMenuActionEvent, BookmarkStateEvent};
 use vmux_core::event::space::SpacesListEvent;
@@ -16,6 +17,8 @@ pub enum LayoutUiStatePatch {
     PaneTree(PaneTreeEvent),
     Spaces(SpacesListEvent),
     Projects(TabBoundaryEvent),
+    ActiveSession(Box<ActiveSessionEvent>),
+    HeaderPage(HeaderPageEvent),
     Team(TeamEvent),
     Remote(RemoteStateEvent),
     Extensions(ExtensionsEvent),

@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+mod active_session;
 mod bookmark;
 mod header;
 mod side_sheet;

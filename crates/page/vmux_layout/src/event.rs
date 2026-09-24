@@ -507,6 +507,8 @@ pub struct PaneNode {
 #[vmux_api::contract]
 pub struct StackNode {
     pub id: u64,
+    #[serde(default)]
+    pub agent_id: Option<String>,
     pub title: String,
     pub url: String,
     #[serde(default)]
@@ -613,6 +615,34 @@ pub struct TabBoundary {
 pub struct TabBoundaryEvent {
     pub boundary: Option<TabBoundary>,
     pub projects: Vec<vmux_core::event::ProjectRow>,
+}
+
+#[vmux_api::contract(Default)]
+pub struct ActiveSessionEvent {
+    pub session: Option<ActiveSession>,
+}
+
+#[vmux_api::contract]
+pub struct ActiveSession {
+    pub page: StackNode,
+    pub agent: Option<vmux_core::event::team::TeamMemberRow>,
+    pub project: Option<ActiveWorkspaceProject>,
+    pub boundary: Option<TabBoundary>,
+    pub pane_id: u64,
+}
+
+#[vmux_api::contract]
+pub struct ActiveWorkspaceProject {
+    pub root: vmux_core::event::ProjectRow,
+    pub children: Vec<vmux_core::event::ProjectRow>,
+    pub choices: Vec<vmux_core::event::ProjectRow>,
+}
+
+#[vmux_api::contract(Default)]
+pub struct HeaderPageEvent {
+    pub active: Option<StackRow>,
+    pub bookmarked: bool,
+    pub pinned_uuid: Option<String>,
 }
 
 #[vmux_api::contract(Copy, Eq)]
