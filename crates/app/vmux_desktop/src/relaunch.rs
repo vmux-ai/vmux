@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, Receive};
+use bevy_cef::prelude::{Receive, UiInput};
 use vmux_layout::event::RestartRequestEvent;
 
 pub(crate) struct RelaunchPlugin;
@@ -153,7 +153,7 @@ fn launch_profile(profile: &str) {
 }
 
 fn on_restart_request(
-    _trigger: On<BinReceive<RestartRequestEvent>>,
+    _trigger: On<UiInput<RestartRequestEvent>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     relaunch_now(&mut exit, None);

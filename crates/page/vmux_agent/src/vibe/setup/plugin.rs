@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use super::event::{
     AgentInstallRunRequest, AgentSetupPrereqRequest, AgentSetupPrereqStatus, AgentSetupResult,
@@ -53,7 +53,7 @@ fn prereq_needs_homebrew(segment: &str, brew_present: bool) -> bool {
 }
 
 fn on_agent_setup_prereq_request(
-    trigger: On<BinReceive<AgentSetupPrereqRequest>>,
+    trigger: On<UiInput<AgentSetupPrereqRequest>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -127,7 +127,7 @@ fn detect_agent_install_outcome(
 }
 
 fn on_agent_install_run(
-    trigger: On<BinReceive<AgentInstallRunRequest>>,
+    trigger: On<UiInput<AgentInstallRunRequest>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     ctx: vmux_layout::pane::PlacementCtx,
     mut install_panes: Query<&mut AgentInstallPane>,

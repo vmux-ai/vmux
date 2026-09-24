@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::BinReceive;
+use bevy_cef::prelude::UiInput;
 use vmux_core::page::PageReady;
 
 use crate::event::HistoryQueryRequest;
@@ -45,7 +45,7 @@ impl HistoryQueryState {
 }
 
 fn on_page_ready(
-    trigger: On<BinReceive<PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     pages: Query<&vmux_core::PageMetadata>,
     mut commands: Commands,
 ) {

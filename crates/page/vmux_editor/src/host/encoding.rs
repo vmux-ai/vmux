@@ -21,7 +21,7 @@ impl Plugin for EncodingPlugin {
 
 #[allow(clippy::too_many_arguments)]
 fn on_file_encoding_set(
-    trigger: On<BinReceive<FileEncodingSet>>,
+    trigger: On<UiInput<FileEncodingSet>>,
     mut views: Query<(&FileView, Option<&mut Editor>)>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,

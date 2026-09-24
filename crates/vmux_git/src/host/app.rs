@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 
 use crate::event::{GitConfigEditRequest, GitUpdateCheckRequest};
@@ -21,7 +21,7 @@ impl Plugin for AppPlugin {
 pub struct GitCheckForUpdatesRequest;
 
 fn on_config_edit_request(
-    trigger: On<BinReceive<GitConfigEditRequest>>,
+    trigger: On<UiInput<GitConfigEditRequest>>,
     child_of: Query<&ChildOf>,
     mut page_open: MessageWriter<PageOpenRequest>,
 ) {
@@ -45,7 +45,7 @@ fn on_config_edit_request(
 }
 
 fn on_update_check_request(
-    _trigger: On<BinReceive<GitUpdateCheckRequest>>,
+    _trigger: On<UiInput<GitUpdateCheckRequest>>,
     mut requests: MessageWriter<GitCheckForUpdatesRequest>,
 ) {
     requests.write(GitCheckForUpdatesRequest);

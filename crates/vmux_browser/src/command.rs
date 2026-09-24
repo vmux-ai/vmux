@@ -445,7 +445,7 @@ impl ActiveStack<'_, '_> {
 }
 
 fn on_header_back(
-    trigger: On<BinReceive<HeaderBackRequest>>,
+    trigger: On<UiInput<HeaderBackRequest>>,
     mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
     command_invocations.write(CommandInvocation::new(
@@ -455,7 +455,7 @@ fn on_header_back(
 }
 
 fn on_header_forward(
-    trigger: On<BinReceive<HeaderForwardRequest>>,
+    trigger: On<UiInput<HeaderForwardRequest>>,
     mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
     command_invocations.write(CommandInvocation::new(
@@ -465,7 +465,7 @@ fn on_header_forward(
 }
 
 fn on_header_reload(
-    trigger: On<BinReceive<HeaderReloadRequest>>,
+    trigger: On<UiInput<HeaderReloadRequest>>,
     mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
     command_invocations.write(CommandInvocation::new(
@@ -475,7 +475,7 @@ fn on_header_reload(
 }
 
 fn on_header_address_focus(
-    trigger: On<BinReceive<HeaderAddressFocusRequest>>,
+    trigger: On<UiInput<HeaderAddressFocusRequest>>,
     mut command_invocations: MessageWriter<CommandInvocation>,
 ) {
     command_invocations.write(CommandInvocation::new(
@@ -517,7 +517,7 @@ fn on_hard_reload_notify_header(
 }
 
 fn on_side_sheet_resize(
-    trigger: On<BinReceive<SideSheetResizeEvent>>,
+    trigger: On<UiInput<SideSheetResizeEvent>>,
     mut width: ResMut<SideSheetWidth>,
     mut sheets: Query<(&SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
@@ -541,7 +541,7 @@ fn on_side_sheet_resize(
 }
 
 fn on_side_sheet_stack_activate(
-    trigger: On<BinReceive<SideSheetStackActivateRequest>>,
+    trigger: On<UiInput<SideSheetStackActivateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
@@ -575,7 +575,7 @@ fn on_side_sheet_stack_activate(
 }
 
 fn on_side_sheet_stack_close(
-    trigger: On<BinReceive<SideSheetStackCloseRequest>>,
+    trigger: On<UiInput<SideSheetStackCloseRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
@@ -604,7 +604,7 @@ fn on_side_sheet_stack_close(
 }
 
 fn on_side_sheet_stack_create(
-    trigger: On<BinReceive<SideSheetStackCreateRequest>>,
+    trigger: On<UiInput<SideSheetStackCreateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     mut commands: Commands,
@@ -620,7 +620,7 @@ fn on_side_sheet_stack_create(
 }
 
 fn on_side_sheet_project_open(
-    trigger: On<BinReceive<SideSheetProjectOpenRequest>>,
+    trigger: On<UiInput<SideSheetProjectOpenRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut requests: MessageWriter<PageOpenRequest>,
 ) {
@@ -642,7 +642,7 @@ fn on_side_sheet_project_open(
 }
 
 fn on_side_sheet_section(
-    trigger: On<BinReceive<SideSheetSectionRequest>>,
+    trigger: On<UiInput<SideSheetSectionRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     sections_of: vmux_layout::side_sheet::SideSheetSections,
     mut commands: Commands,
@@ -806,12 +806,10 @@ mod tests {
         }
 
         fn pressed_back(&mut self) {
-            self.app
-                .world_mut()
-                .trigger(BinReceive::<HeaderBackRequest> {
-                    webview: Entity::PLACEHOLDER,
-                    payload: HeaderBackRequest,
-                });
+            self.app.world_mut().trigger(UiInput::<HeaderBackRequest> {
+                webview: Entity::PLACEHOLDER,
+                payload: HeaderBackRequest,
+            });
             self.app.update();
             self.app.update();
         }
@@ -916,7 +914,7 @@ mod tests {
             .get_cursor();
 
         app.world_mut()
-            .trigger(BinReceive::<SideSheetStackCloseRequest> {
+            .trigger(UiInput::<SideSheetStackCloseRequest> {
                 webview: Entity::PLACEHOLDER,
                 payload: SideSheetStackCloseRequest {
                     pane_id: pane.to_bits(),
@@ -958,7 +956,7 @@ mod tests {
             .resource::<Messages<vmux_setting::SettingsSaveRequest>>()
             .get_cursor();
 
-        app.world_mut().trigger(BinReceive::<SideSheetResizeEvent> {
+        app.world_mut().trigger(UiInput::<SideSheetResizeEvent> {
             webview: Entity::PLACEHOLDER,
             payload: SideSheetResizeEvent::live(320.0),
         });
@@ -987,7 +985,7 @@ mod tests {
             0,
         );
 
-        app.world_mut().trigger(BinReceive::<SideSheetResizeEvent> {
+        app.world_mut().trigger(UiInput::<SideSheetResizeEvent> {
             webview: Entity::PLACEHOLDER,
             payload: SideSheetResizeEvent::settled(320.0),
         });
@@ -1057,7 +1055,7 @@ mod tests {
         fn expand(&mut self, section: &str) {
             self.app
                 .world_mut()
-                .trigger(BinReceive::<SideSheetSectionRequest> {
+                .trigger(UiInput::<SideSheetSectionRequest> {
                     webview: Entity::PLACEHOLDER,
                     payload: SideSheetSectionRequest {
                         pane_id: self.pane_in_first_tab.to_bits(),

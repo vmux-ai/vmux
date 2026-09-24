@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use crate::command_bar::project_files::{MAX_RESULTS, ProjectCompletions, ProjectIndex, RankBias};
 use crate::event::{PathCompleteRequest, PathEntry};
@@ -28,7 +28,7 @@ impl Plugin for CompletionPlugin {
 }
 
 fn on_path_complete_request(
-    trigger: On<BinReceive<PathCompleteRequest>>,
+    trigger: On<UiInput<PathCompleteRequest>>,
     state: Res<CommandBarProjection>,
     browsers: NonSend<Browsers>,
     mut index: ResMut<ProjectIndex>,

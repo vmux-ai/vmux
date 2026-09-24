@@ -141,7 +141,7 @@ impl StackExplorerPanel {
 
 #[allow(clippy::too_many_arguments)]
 fn on_explorer_panel_set_visible(
-    trigger: On<BinReceive<ExplorerPanelSetVisible>>,
+    trigger: On<UiInput<ExplorerPanelSetVisible>>,
     child_of: Query<&ChildOf>,
     mut visibility: Query<&mut StackExplorerVisibility>,
     mut revisions: Query<&mut StackExplorerRevision>,
@@ -201,7 +201,7 @@ fn on_explorer_panel_set_visible(
 }
 
 fn on_explorer_panel_width(
-    trigger: On<BinReceive<ExplorerPanelWidth>>,
+    trigger: On<UiInput<ExplorerPanelWidth>>,
     mut panel: ResMut<ExplorerPanelDefaults>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,

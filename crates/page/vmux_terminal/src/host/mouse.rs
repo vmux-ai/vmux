@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_service::client::{ServiceClient, ServiceHandle};
 use vmux_service::protocol::{ClientMessage, ProcessId};
 
@@ -246,7 +246,7 @@ fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bo
 }
 
 fn on_term_mouse(
-    trigger: On<BinReceive<TermMouseEvent>>,
+    trigger: On<UiInput<TermMouseEvent>>,
     terminals: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
     modes: Res<TerminalModeMap>,

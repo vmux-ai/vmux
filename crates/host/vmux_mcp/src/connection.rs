@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use parking_lot::Mutex;
 use reqwest::blocking::{Client, Response};
 use ring::digest::{SHA256, digest};
@@ -52,7 +52,7 @@ struct McpConnections;
 
 impl McpConnections {
     fn request(
-        trigger: On<BinReceive<McpServersRequest>>,
+        trigger: On<UiInput<McpServersRequest>>,
         browsers: NonSend<Browsers>,
         proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
         mut commands: Commands,
@@ -65,7 +65,7 @@ impl McpConnections {
     }
 
     fn connect(
-        trigger: On<BinReceive<McpServerConnectRequest>>,
+        trigger: On<UiInput<McpServerConnectRequest>>,
         runtime: Single<Entity, With<McpRuntime>>,
         mut commands: Commands,
     ) {
@@ -79,7 +79,7 @@ impl McpConnections {
     }
 
     fn disconnect(
-        trigger: On<BinReceive<McpServerDisconnectRequest>>,
+        trigger: On<UiInput<McpServerDisconnectRequest>>,
         runtime: Single<Entity, With<McpRuntime>>,
         mut commands: Commands,
     ) {

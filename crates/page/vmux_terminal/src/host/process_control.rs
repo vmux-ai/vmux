@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin, WebviewSize};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput, WebviewSize};
 use vmux_core::page::PageReady;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{ClientMessage, ProcessId};
@@ -40,7 +40,7 @@ impl Default for TerminalGridSize {
 pub(super) struct PendingTerminalSnapshot;
 
 fn on_term_ready(
-    trigger: On<BinReceive<PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     terminals: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
     mut commands: Commands,
@@ -77,7 +77,7 @@ fn request_pending_terminal_snapshot(
 }
 
 fn on_term_resize(
-    trigger: On<BinReceive<TermResizeEvent>>,
+    trigger: On<UiInput<TermResizeEvent>>,
     webviews: Query<&WebviewSize, With<Terminal>>,
     terminals: Query<&ProcessId, With<Terminal>>,
     mut grids: Query<&mut TerminalGridSize, With<Terminal>>,
@@ -122,7 +122,7 @@ fn on_term_resize(
 }
 
 fn on_term_scroll(
-    trigger: On<BinReceive<TermScrollEvent>>,
+    trigger: On<UiInput<TermScrollEvent>>,
     terminals: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
 ) {
@@ -149,7 +149,7 @@ mod tests {
         app.add_plugins(MinimalPlugins).add_observer(on_term_ready);
         let webview = app.world_mut().spawn((Terminal, ProcessId::new())).id();
 
-        app.world_mut().trigger(BinReceive::<PageReady> {
+        app.world_mut().trigger(UiInput::<PageReady> {
             webview,
             payload: PageReady {},
         });

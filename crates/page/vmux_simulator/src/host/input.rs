@@ -14,7 +14,7 @@ use crate::event::{
     SimulatorInputTextRequest, SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase,
 };
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -337,7 +337,7 @@ impl DeviceCoordinates {
 }
 
 fn on_touch(
-    trigger: On<BinReceive<SimulatorTouch>>,
+    trigger: On<UiInput<SimulatorTouch>>,
     mut attachments: Query<(&DevicePoints, &HidBroker, &mut DeviceTouchSession)>,
 ) {
     const DRAG_THRESHOLD: f32 = 6.0;
@@ -414,7 +414,7 @@ fn normalized_point(touch: &SimulatorTouch, points: (f32, f32)) -> Option<(f32, 
 }
 
 fn on_input_text(
-    trigger: On<BinReceive<SimulatorInputTextRequest>>,
+    trigger: On<UiInput<SimulatorInputTextRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
     requests.write(SimulatorInputRequest {
@@ -424,7 +424,7 @@ fn on_input_text(
 }
 
 fn on_input_key(
-    trigger: On<BinReceive<SimulatorInputKeyRequest>>,
+    trigger: On<UiInput<SimulatorInputKeyRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
     requests.write(SimulatorInputRequest {
@@ -434,7 +434,7 @@ fn on_input_key(
 }
 
 fn on_input_modified_key(
-    trigger: On<BinReceive<SimulatorInputModifiedKeyRequest>>,
+    trigger: On<UiInput<SimulatorInputModifiedKeyRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
     requests.write(SimulatorInputRequest {
@@ -444,7 +444,7 @@ fn on_input_modified_key(
 }
 
 fn on_input_hardware_button(
-    trigger: On<BinReceive<SimulatorInputHardwareButtonRequest>>,
+    trigger: On<UiInput<SimulatorInputHardwareButtonRequest>>,
     mut requests: MessageWriter<SimulatorInputRequest>,
 ) {
     requests.write(SimulatorInputRequest {
@@ -454,7 +454,7 @@ fn on_input_hardware_button(
 }
 
 fn on_clipboard_copy(
-    trigger: On<BinReceive<SimulatorClipboardCopyRequest>>,
+    trigger: On<UiInput<SimulatorClipboardCopyRequest>>,
     mut requests: MessageWriter<SimulatorClipboardRequest>,
 ) {
     requests.write(SimulatorClipboardRequest {
@@ -464,7 +464,7 @@ fn on_clipboard_copy(
 }
 
 fn on_clipboard_cut(
-    trigger: On<BinReceive<SimulatorClipboardCutRequest>>,
+    trigger: On<UiInput<SimulatorClipboardCutRequest>>,
     mut requests: MessageWriter<SimulatorClipboardRequest>,
 ) {
     requests.write(SimulatorClipboardRequest {
@@ -474,7 +474,7 @@ fn on_clipboard_cut(
 }
 
 fn on_clipboard_paste(
-    trigger: On<BinReceive<SimulatorClipboardPasteRequest>>,
+    trigger: On<UiInput<SimulatorClipboardPasteRequest>>,
     mut requests: MessageWriter<SimulatorClipboardRequest>,
 ) {
     requests.write(SimulatorClipboardRequest {
@@ -484,7 +484,7 @@ fn on_clipboard_paste(
 }
 
 fn on_clipboard_select_all(
-    trigger: On<BinReceive<SimulatorClipboardSelectAllRequest>>,
+    trigger: On<UiInput<SimulatorClipboardSelectAllRequest>>,
     mut requests: MessageWriter<SimulatorClipboardRequest>,
 ) {
     requests.write(SimulatorClipboardRequest {
@@ -494,7 +494,7 @@ fn on_clipboard_select_all(
 }
 
 fn on_software_keyboard(
-    trigger: On<BinReceive<SimulatorSoftwareKeyboard>>,
+    trigger: On<UiInput<SimulatorSoftwareKeyboard>>,
     mut requests: MessageWriter<SimulatorSoftwareKeyboardRequest>,
 ) {
     requests.write(SimulatorSoftwareKeyboardRequest {

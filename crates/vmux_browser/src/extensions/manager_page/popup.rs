@@ -1,7 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{
-    BinReceive, Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin,
-};
+use bevy_cef::prelude::{Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput};
 use vmux_core::KeyboardOwner;
 use vmux_core::event::{
     ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
@@ -101,7 +99,7 @@ struct ExtensionPopupSizeRequest {
 const POPUP_SIZE_CHANNEL: &str = "vmux-extension-popup-size";
 
 fn on_open_request(
-    trigger: On<BinReceive<ExtensionPopupOpenRequest>>,
+    trigger: On<UiInput<ExtensionPopupOpenRequest>>,
     layouts: Query<(Entity, Option<&HostWindow>), With<LayoutCef>>,
     host_windows: Query<&HostWindow>,
     popups: Query<(Entity, &ExtensionPopup)>,
@@ -154,7 +152,7 @@ fn on_open_request(
 }
 
 fn on_bounds_request(
-    trigger: On<BinReceive<ExtensionPopupBoundsRequest>>,
+    trigger: On<UiInput<ExtensionPopupBoundsRequest>>,
     popups: Query<(Entity, &ExtensionPopup)>,
     mut commands: Commands,
 ) {
@@ -171,7 +169,7 @@ fn on_bounds_request(
 }
 
 fn on_close_request(
-    trigger: On<BinReceive<ExtensionPopupCloseRequest>>,
+    trigger: On<UiInput<ExtensionPopupCloseRequest>>,
     popups: Query<(Entity, &ExtensionPopup)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,

@@ -6,7 +6,7 @@ use bevy::{
         MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update, With,
     },
 };
-use bevy_cef::prelude::BinReceive;
+use bevy_cef::prelude::UiInput;
 use bevy_cef_core::prelude::CefEmbeddedHost;
 use std::path::{Path, PathBuf};
 pub use vmux_api::PageReady;
@@ -287,7 +287,7 @@ impl PageManifest {
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageEmbedSet;
 
-pub fn mark_webview_page_ready(trigger: On<BinReceive<PageReady>>, mut commands: Commands) {
+pub fn mark_webview_page_ready(trigger: On<UiInput<PageReady>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
         .insert(trigger.event().payload);

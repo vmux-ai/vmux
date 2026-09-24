@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, WebviewSource};
+use bevy_cef::prelude::{UiInput, WebviewSource};
 use vmux_command::shortcut::{KeyContext, Keymap};
 use vmux_core::host::page::HostsPage;
 use vmux_core::host::{UiState, UiStatePlugin};
@@ -33,7 +33,7 @@ fn start_page_context(
 }
 
 fn receive_page_context(
-    trigger: On<BinReceive<PageKeyContext>>,
+    trigger: On<UiInput<PageKeyContext>>,
     mut contexts: Query<&mut KeyContext>,
 ) {
     let Ok(mut current) = contexts.get_mut(trigger.event_target()) else {
@@ -174,7 +174,7 @@ mod tests {
         }
 
         fn publish(app: &mut App, page: Entity, keys: &[&str]) {
-            app.world_mut().trigger(BinReceive {
+            app.world_mut().trigger(UiInput {
                 webview: page,
                 payload: PageKeyContext {
                     keys: keys.iter().map(|key| (*key).to_string()).collect(),
@@ -225,7 +225,7 @@ mod tests {
         Seam::publish(&mut app, page, &["chat", "chat.selector"]);
         let before = Pushed::codes(app.world(), page).len();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: page,
             payload: vmux_core::host::page::PageReady {},
         });

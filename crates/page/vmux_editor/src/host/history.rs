@@ -73,7 +73,7 @@ fn record_file_view_visit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_cef::prelude::BinReceive;
+    use bevy_cef::prelude::UiInput;
     use vmux_core::PageOpenId;
     use vmux_core::event::FileOpenEvent;
     use vmux_core::host::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
@@ -121,7 +121,7 @@ mod tests {
 
         fn open(&mut self, name: &str) {
             let path = self.dir.path().join(name).to_string_lossy().into_owned();
-            self.app.world_mut().trigger(BinReceive {
+            self.app.world_mut().trigger(UiInput {
                 webview: self.view,
                 payload: FileOpenEvent { path },
             });

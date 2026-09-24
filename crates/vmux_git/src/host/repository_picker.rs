@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::GitRepositoryPickerRequest;
 use crate::state::{GitRepositoryPicked, GitUiState};
@@ -62,7 +62,7 @@ impl GitRepositoryPicker {
 }
 
 fn on_repository_picker_request(
-    trigger: On<BinReceive<GitRepositoryPickerRequest>>,
+    trigger: On<UiInput<GitRepositoryPickerRequest>>,
     pending: Query<&PendingGitRepositoryPicker>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,

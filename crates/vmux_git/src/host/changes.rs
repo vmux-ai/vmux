@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{
     GitAmendRequest, GitCheckoutCommitRequest, GitCherryPickRequest, GitCommitRequest,
@@ -54,7 +54,7 @@ impl Plugin for ChangesPlugin {
     }
 }
 
-fn on_stage_request(trigger: On<BinReceive<GitStageRequest>>, mut commands: Commands) {
+fn on_stage_request(trigger: On<UiInput<GitStageRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
@@ -66,7 +66,7 @@ fn on_stage_request(trigger: On<BinReceive<GitStageRequest>>, mut commands: Comm
     );
 }
 
-fn on_unstage_request(trigger: On<BinReceive<GitUnstageRequest>>, mut commands: Commands) {
+fn on_unstage_request(trigger: On<UiInput<GitUnstageRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
@@ -78,7 +78,7 @@ fn on_unstage_request(trigger: On<BinReceive<GitUnstageRequest>>, mut commands: 
     );
 }
 
-fn on_discard_request(trigger: On<BinReceive<GitDiscardRequest>>, mut commands: Commands) {
+fn on_discard_request(trigger: On<UiInput<GitDiscardRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
@@ -90,7 +90,7 @@ fn on_discard_request(trigger: On<BinReceive<GitDiscardRequest>>, mut commands: 
     );
 }
 
-fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, mut commands: Commands) {
+fn on_commit_request(trigger: On<UiInput<GitCommitRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -103,7 +103,7 @@ fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, mut commands: Co
 }
 
 fn on_fetch_request(
-    trigger: On<BinReceive<GitFetchRequest>>,
+    trigger: On<UiInput<GitFetchRequest>>,
     mut views: Query<&mut super::state::GitState>,
     mut commands: Commands,
 ) {
@@ -119,7 +119,7 @@ fn on_fetch_request(
     );
 }
 
-fn on_amend_request(trigger: On<BinReceive<GitAmendRequest>>, mut commands: Commands) {
+fn on_amend_request(trigger: On<UiInput<GitAmendRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -132,7 +132,7 @@ fn on_amend_request(trigger: On<BinReceive<GitAmendRequest>>, mut commands: Comm
 }
 
 fn on_checkout_commit_request(
-    trigger: On<BinReceive<GitCheckoutCommitRequest>>,
+    trigger: On<UiInput<GitCheckoutCommitRequest>>,
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
@@ -146,7 +146,7 @@ fn on_checkout_commit_request(
     );
 }
 
-fn on_cherry_pick_request(trigger: On<BinReceive<GitCherryPickRequest>>, mut commands: Commands) {
+fn on_cherry_pick_request(trigger: On<UiInput<GitCherryPickRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -158,10 +158,7 @@ fn on_cherry_pick_request(trigger: On<BinReceive<GitCherryPickRequest>>, mut com
     );
 }
 
-fn on_create_branch_request(
-    trigger: On<BinReceive<GitCreateBranchRequest>>,
-    mut commands: Commands,
-) {
+fn on_create_branch_request(trigger: On<UiInput<GitCreateBranchRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -173,10 +170,7 @@ fn on_create_branch_request(
     );
 }
 
-fn on_delete_branch_request(
-    trigger: On<BinReceive<GitDeleteBranchRequest>>,
-    mut commands: Commands,
-) {
+fn on_delete_branch_request(trigger: On<UiInput<GitDeleteBranchRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -188,7 +182,7 @@ fn on_delete_branch_request(
     );
 }
 
-fn on_fast_forward_request(trigger: On<BinReceive<GitFastForwardRequest>>, mut commands: Commands) {
+fn on_fast_forward_request(trigger: On<UiInput<GitFastForwardRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -200,7 +194,7 @@ fn on_fast_forward_request(trigger: On<BinReceive<GitFastForwardRequest>>, mut c
     );
 }
 
-fn on_merge_request(trigger: On<BinReceive<GitMergeRequest>>, mut commands: Commands) {
+fn on_merge_request(trigger: On<UiInput<GitMergeRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -212,7 +206,7 @@ fn on_merge_request(trigger: On<BinReceive<GitMergeRequest>>, mut commands: Comm
     );
 }
 
-fn on_rebase_request(trigger: On<BinReceive<GitRebaseRequest>>, mut commands: Commands) {
+fn on_rebase_request(trigger: On<UiInput<GitRebaseRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -224,7 +218,7 @@ fn on_rebase_request(trigger: On<BinReceive<GitRebaseRequest>>, mut commands: Co
     );
 }
 
-fn on_revert_request(trigger: On<BinReceive<GitRevertRequest>>, mut commands: Commands) {
+fn on_revert_request(trigger: On<UiInput<GitRevertRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -236,7 +230,7 @@ fn on_revert_request(trigger: On<BinReceive<GitRevertRequest>>, mut commands: Co
     );
 }
 
-fn on_stash_drop_request(trigger: On<BinReceive<GitStashDropRequest>>, mut commands: Commands) {
+fn on_stash_drop_request(trigger: On<UiInput<GitStashDropRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -248,7 +242,7 @@ fn on_stash_drop_request(trigger: On<BinReceive<GitStashDropRequest>>, mut comma
     );
 }
 
-fn on_stash_pop_request(trigger: On<BinReceive<GitStashPopRequest>>, mut commands: Commands) {
+fn on_stash_pop_request(trigger: On<UiInput<GitStashPopRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -260,7 +254,7 @@ fn on_stash_pop_request(trigger: On<BinReceive<GitStashPopRequest>>, mut command
     );
 }
 
-fn on_stash_push_request(trigger: On<BinReceive<GitStashPushRequest>>, mut commands: Commands) {
+fn on_stash_push_request(trigger: On<UiInput<GitStashPushRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     GitJob::enqueue(
         &mut commands,
@@ -272,7 +266,7 @@ fn on_stash_push_request(trigger: On<BinReceive<GitStashPushRequest>>, mut comma
     );
 }
 
-fn on_pull_request(trigger: On<BinReceive<GitPullRequest>>, mut commands: Commands) {
+fn on_pull_request(trigger: On<UiInput<GitPullRequest>>, mut commands: Commands) {
     GitJob::enqueue(
         &mut commands,
         trigger.event().webview,
@@ -282,7 +276,7 @@ fn on_pull_request(trigger: On<BinReceive<GitPullRequest>>, mut commands: Comman
     );
 }
 
-fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, mut commands: Commands) {
+fn on_push_request(trigger: On<UiInput<GitPushRequest>>, mut commands: Commands) {
     GitJob::enqueue(
         &mut commands,
         trigger.event().webview,
@@ -292,7 +286,7 @@ fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, mut commands: Comman
     );
 }
 
-fn on_stage_all_request(trigger: On<BinReceive<GitStageAllRequest>>, mut commands: Commands) {
+fn on_stage_all_request(trigger: On<UiInput<GitStageAllRequest>>, mut commands: Commands) {
     GitJob::enqueue(
         &mut commands,
         trigger.event().webview,
@@ -302,7 +296,7 @@ fn on_stage_all_request(trigger: On<BinReceive<GitStageAllRequest>>, mut command
     );
 }
 
-fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, mut commands: Commands) {
+fn on_hunk_request(trigger: On<UiInput<GitHunkRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
     let repo_root = PathBuf::from(&request.repo_root);
     let path =

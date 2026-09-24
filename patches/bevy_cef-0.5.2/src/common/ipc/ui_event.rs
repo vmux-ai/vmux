@@ -20,13 +20,13 @@ fn drain_bin_ipc_events(
 }
 
 #[derive(Debug, EntityEvent)]
-pub struct BinReceive<M: Sync + Send + 'static> {
+pub struct UiInput<M: Sync + Send + 'static> {
     #[event_target]
     pub webview: Entity,
     pub payload: M,
 }
 
-impl<M> Deref for BinReceive<M>
+impl<M> Deref for UiInput<M>
 where
     M: Sync + Send + 'static,
 {
@@ -37,7 +37,7 @@ where
     }
 }
 
-impl<M> DerefMut for BinReceive<M>
+impl<M> DerefMut for UiInput<M>
 where
     M: Sync + Send + 'static,
 {
@@ -84,7 +84,7 @@ where
     app.add_systems(
         Update,
         (move |commands: Commands, buffer: Res<BinIpcEventRawBuffer>| {
-            receive_bin_events::<E>(commands, buffer);
+            receive_ui_events::<E>(commands, buffer);
         })
         .after(drain_bin_ipc_events),
     );
@@ -126,7 +126,7 @@ impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9);
 impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
 impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
 
-fn decode_bin_event<E>(event: &BinIpcEventRaw) -> Option<E>
+fn decode_ui_event<E>(event: &BinIpcEventRaw) -> Option<E>
 where
     E: UiEvent + rkyv::Archive + Send + Sync + 'static,
     E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
@@ -138,15 +138,15 @@ where
     rkyv::from_bytes::<E, rkyv::rancor::Error>(&event.payload).ok()
 }
 
-fn receive_bin_events<E>(mut commands: Commands, buffer: Res<BinIpcEventRawBuffer>)
+fn receive_ui_events<E>(mut commands: Commands, buffer: Res<BinIpcEventRawBuffer>)
 where
     E: UiEvent + rkyv::Archive + Send + Sync + 'static,
     E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
     for event in &buffer.0 {
-        if let Some(payload) = decode_bin_event::<E>(event) {
-            commands.trigger(BinReceive {
+        if let Some(payload) = decode_ui_event::<E>(event) {
+            commands.trigger(UiInput {
                 webview: event.webview,
                 payload,
             });
@@ -168,7 +168,7 @@ impl Plugin for BinIpcRawEventPlugin {
 
 /// Public because CEF's client handler is no longer the only producer: the wry-hosted layout
 /// decodes the same envelope out of a string IPC body and pushes onto this channel, so that both
-/// engines land in one `BinReceive` path rather than each growing a routing layer.
+/// engines land in one `UiInput` path rather than each growing a routing layer.
 #[derive(Resource)]
 pub struct BinIpcEventRawSender(pub Sender<BinIpcEventRaw>);
 
@@ -180,26 +180,23 @@ mod tests {
     use super::*;
     use vmux_api::BinEvent;
 
-    #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    #[vmux_api::ui_event(target = any)]
+    #[vmux_api::ui_event(Eq, target = any)]
     struct AlphaEvent {
         value: u32,
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    #[vmux_api::ui_event(target = any)]
+    #[vmux_api::ui_event(Eq, target = any)]
     struct BetaEvent {
         value: u32,
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    #[vmux_api::ui_event(target = "allowed")]
+    #[vmux_api::ui_event(Eq, target = "allowed")]
     struct RestrictedEvent {
         value: u32,
     }
 
     #[test]
-    fn decode_bin_event_ignores_non_matching_id() {
+    fn decode_ui_event_ignores_non_matching_id() {
         let payload = BetaEvent { value: 7 };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
             .expect("serialize")
@@ -211,11 +208,11 @@ mod tests {
             payload: bytes,
         };
 
-        assert!(decode_bin_event::<AlphaEvent>(&raw).is_none());
+        assert!(decode_ui_event::<AlphaEvent>(&raw).is_none());
     }
 
     #[test]
-    fn decode_bin_event_decodes_matching_id() {
+    fn decode_ui_event_decodes_matching_id() {
         let payload = AlphaEvent { value: 7 };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
             .expect("serialize")
@@ -227,13 +224,13 @@ mod tests {
             payload: bytes,
         };
 
-        let decoded = decode_bin_event::<AlphaEvent>(&raw).unwrap();
+        let decoded = decode_ui_event::<AlphaEvent>(&raw).unwrap();
 
         assert_eq!(decoded, payload);
     }
 
     #[test]
-    fn decode_bin_event_rejects_an_unexpected_page_host() {
+    fn decode_ui_event_rejects_an_unexpected_page_host() {
         let payload = RestrictedEvent { value: 7 };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&payload)
             .expect("serialize")
@@ -245,7 +242,7 @@ mod tests {
             payload: bytes,
         };
 
-        assert!(decode_bin_event::<RestrictedEvent>(&raw).is_none());
+        assert!(decode_ui_event::<RestrictedEvent>(&raw).is_none());
     }
 
     #[test]

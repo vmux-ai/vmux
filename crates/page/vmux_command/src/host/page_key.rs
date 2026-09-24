@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::BinReceive;
+use bevy_cef::prelude::UiInput;
 use vmux_core::input::KeyStroke;
 
 use crate::definition::CommandInvocation;
@@ -14,7 +14,7 @@ impl Plugin for KeyPlugin {
 }
 
 fn resolve_page_key(
-    trigger: On<BinReceive<KeyStroke>>,
+    trigger: On<UiInput<KeyStroke>>,
     keymap: Option<Res<Keymap>>,
     contexts: Query<&KeyContext>,
     mut invocations: MessageWriter<CommandInvocation>,
@@ -91,7 +91,7 @@ mod tests {
         }
 
         fn press(app: &mut App, page: Entity, code: &str) -> Vec<(Entity, String)> {
-            app.world_mut().trigger(BinReceive {
+            app.world_mut().trigger(UiInput {
                 webview: page,
                 payload: KeyStroke {
                     key: code.to_string(),
@@ -136,7 +136,7 @@ mod tests {
 
     impl Answered {
         fn record(
-            trigger: On<BinReceive<KeyStroke>>,
+            trigger: On<UiInput<KeyStroke>>,
             keymap: Res<Keymap>,
             contexts: Query<&KeyContext>,
             mut answered: ResMut<Self>,

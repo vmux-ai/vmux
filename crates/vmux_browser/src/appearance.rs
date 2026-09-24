@@ -41,7 +41,7 @@ fn reassert_color_scheme_on_navigation(
 }
 
 fn on_webview_ready_send_theme(
-    trigger: On<BinReceive<PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     cef_q: Query<(), With<LayoutCef>>,

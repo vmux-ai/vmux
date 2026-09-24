@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use vmux_core::host::{UiState, UiStatePlugin};
@@ -545,7 +545,7 @@ struct InventoryItem {
 }
 
 fn on_open_request(
-    trigger: On<BinReceive<ToolOpenRequest>>,
+    trigger: On<UiInput<ToolOpenRequest>>,
     stores: Query<&ToolStore, With<ToolRegistry>>,
     mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
@@ -568,7 +568,7 @@ fn on_open_request(
 }
 
 fn on_navigate_request(
-    trigger: On<BinReceive<ToolsNavigateRequest>>,
+    trigger: On<UiInput<ToolsNavigateRequest>>,
     parents: Query<&ChildOf>,
     stacks: Query<(), With<vmux_layout::stack::Stack>>,
     mut requests: MessageWriter<vmux_core::PageOpenRequest>,
@@ -594,7 +594,7 @@ fn on_navigate_request(
 }
 
 fn on_refresh_request(
-    trigger: On<BinReceive<ToolsRefreshRequest>>,
+    trigger: On<UiInput<ToolsRefreshRequest>>,
     mut registry: Query<&mut ToolRegistry>,
     subscribers: Query<(), With<ToolSubscriber>>,
     mut commands: Commands,
@@ -645,7 +645,7 @@ fn queue_tool_action(
 macro_rules! tool_action_observer {
     ($name:ident, $request:ty) => {
         fn $name(
-            trigger: On<BinReceive<$request>>,
+            trigger: On<UiInput<$request>>,
             sequence: ResMut<ActionRequestSequence>,
             subscribers: Query<&mut ToolSubscriber>,
             commands: Commands,
@@ -717,7 +717,7 @@ fn queue_vault_action(
 macro_rules! vault_action_observer {
     ($name:ident, $request:ty) => {
         fn $name(
-            trigger: On<BinReceive<$request>>,
+            trigger: On<UiInput<$request>>,
             sequence: ResMut<ActionRequestSequence>,
             pending: Query<(Entity, &PendingVaultAction)>,
             tasks: Query<&VaultActionTask>,
@@ -765,7 +765,7 @@ vault_action_observer!(
 );
 
 fn on_vault_refresh_request(
-    trigger: On<BinReceive<VaultRefreshRequest>>,
+    trigger: On<UiInput<VaultRefreshRequest>>,
     mut registry: Query<&mut ToolRegistry>,
     subscribers: Query<(), With<VaultSubscriber>>,
     mut commands: Commands,
@@ -2457,7 +2457,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: ToolsNavigateRequest {
                 url: "vmux://tools/lsp".to_string(),

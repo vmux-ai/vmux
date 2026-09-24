@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use super::ChatUiStateUpdates;
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
@@ -249,7 +249,7 @@ struct PromptHistoryTask {
 }
 
 fn on_prompt_history_request(
-    trigger: On<BinReceive<PromptHistoryRequest>>,
+    trigger: On<UiInput<PromptHistoryRequest>>,
     strategies: Option<Res<AgentStrategies>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -289,7 +289,7 @@ fn drain_prompt_history_tasks(
 }
 
 fn on_resume_list_request(
-    trigger: On<BinReceive<ResumeListRequest>>,
+    trigger: On<UiInput<ResumeListRequest>>,
     strategies: Option<Res<AgentStrategies>>,
     ask: ResumeAsk,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -396,7 +396,7 @@ fn drain_resume_handoff_tasks(
 }
 
 fn on_resume_session(
-    trigger: On<BinReceive<ResumeSession>>,
+    trigger: On<UiInput<ResumeSession>>,
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     settings: Res<vmux_setting::AppSettings>,
@@ -454,7 +454,7 @@ fn on_resume_session(
 }
 
 fn on_runtime_switch_request(
-    trigger: On<BinReceive<RuntimeSwitchRequest>>,
+    trigger: On<UiInput<RuntimeSwitchRequest>>,
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     settings: Res<vmux_setting::AppSettings>,

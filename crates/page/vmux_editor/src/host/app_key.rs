@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
 use vmux_command::host::FileStatusPicked;
 use vmux_command::{
@@ -104,7 +104,7 @@ fn echo_key_command(
 }
 
 fn open_status_picker(
-    trigger: On<BinReceive<FileStatusPickerOpen>>,
+    trigger: On<UiInput<FileStatusPickerOpen>>,
     views: Query<(), With<FileView>>,
     mut invocations: MessageWriter<CommandInvocation>,
 ) {
@@ -144,7 +144,7 @@ fn apply_status_picks(
         match &message.pick {
             CommandBarPick::Picker(_) => {}
             CommandBarPick::GotoLine { line } => {
-                commands.trigger(BinReceive {
+                commands.trigger(UiInput {
                     webview: entity,
                     payload: ExplorerGoto {
                         path: String::new(),
@@ -157,7 +157,7 @@ fn apply_status_picks(
                     continue;
                 };
                 let shape = BufferShape::detect(&edit.core.buffer.rope);
-                commands.trigger(BinReceive {
+                commands.trigger(UiInput {
                     webview: entity,
                     payload: FileShapeSet {
                         indent: FileIndent {
@@ -177,7 +177,7 @@ fn apply_status_picks(
                     true => FileLineEnding::Crlf,
                     false => FileLineEnding::Lf,
                 };
-                commands.trigger(BinReceive {
+                commands.trigger(UiInput {
                     webview: entity,
                     payload: FileShapeSet {
                         indent: shape.indent,
@@ -193,7 +193,7 @@ fn apply_status_picks(
                     true => FileEncodingAction::Save,
                     false => FileEncodingAction::Reopen,
                 };
-                commands.trigger(BinReceive {
+                commands.trigger(UiInput {
                     webview: entity,
                     payload: FileEncodingSet { encoding, action },
                 });
@@ -268,7 +268,7 @@ mod tests {
     struct Reopened(Vec<(Entity, FileEncoding)>);
 
     impl Reopened {
-        fn record(trigger: On<BinReceive<FileEncodingSet>>, mut seen: ResMut<Self>) {
+        fn record(trigger: On<UiInput<FileEncodingSet>>, mut seen: ResMut<Self>) {
             if trigger.event().payload.action != FileEncodingAction::Reopen {
                 return;
             }

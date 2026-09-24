@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{
-    BinReceive, Browsers, JsEmitEventPlugin, Receive, UiEventPlugin,
-    WebviewCommittedNavigationEvent,
+    Browsers, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewCommittedNavigationEvent,
 };
 use vmux_core::event::ExtBrowseStoreRequest;
 
@@ -64,7 +63,7 @@ const WEB_STORE_URL: &str = "https://chromewebstore.google.com/category/extensio
 const INJECTOR_JS: &str = include_str!("../add_to_vmux.js");
 
 fn on_browse_request(
-    trigger: On<BinReceive<ExtBrowseStoreRequest>>,
+    trigger: On<UiInput<ExtBrowseStoreRequest>>,
     mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     let query = trigger.event().payload.query.trim();

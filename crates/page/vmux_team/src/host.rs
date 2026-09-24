@@ -399,7 +399,7 @@ fn emit_team(
 }
 
 fn reset_team_sent_on_page_ready(
-    trigger: On<BinReceive<PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     views: Query<(), Or<(With<Team>, With<LayoutCef>, With<vmux_space::Spaces>)>>,
     mut commands: Commands,
 ) {
@@ -428,7 +428,7 @@ fn parse_member_entity(member_id: &str) -> Option<Entity> {
 }
 
 fn on_team_request(
-    trigger: On<BinReceive<TeamRequest>>,
+    trigger: On<UiInput<TeamRequest>>,
     mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     user: Query<Entity, With<User>>,
     active_space: Res<ActiveSpaceEntity>,
@@ -674,7 +674,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive::<TeamRequest> {
+        app.world_mut().trigger(UiInput::<TeamRequest> {
             webview: Entity::PLACEHOLDER,
             payload: TeamRequest {
                 command: "focus".to_string(),
@@ -696,7 +696,7 @@ mod tests {
         app.insert_resource(ActiveSpaceEntity(Some(space)));
         let team = spawn_team_stack(app.world_mut(), space);
 
-        app.world_mut().trigger(BinReceive::<TeamRequest> {
+        app.world_mut().trigger(UiInput::<TeamRequest> {
             webview: Entity::PLACEHOLDER,
             payload: TeamRequest {
                 command: "open".to_string(),

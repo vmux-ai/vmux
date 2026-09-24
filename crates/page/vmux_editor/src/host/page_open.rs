@@ -301,7 +301,7 @@ mod tests {
         }
 
         fn select(&mut self, page: Entity, path: &Path) {
-            self.app.world_mut().trigger(BinReceive {
+            self.app.world_mut().trigger(UiInput {
                 webview: page,
                 payload: FileOpenEvent {
                     path: path.to_string_lossy().into_owned(),

@@ -406,7 +406,7 @@ fn apply_loaded_file_buffers(
 }
 
 fn reset_file_sent_markers_on_page_ready(
-    trigger: On<BinReceive<vmux_core::page::PageReady>>,
+    trigger: On<UiInput<vmux_core::page::PageReady>>,
     file_views: Query<&FileView>,
     mut commands: Commands,
 ) {

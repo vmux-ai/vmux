@@ -109,7 +109,7 @@ fn attach_video_overlays(
 }
 
 fn on_file_video_rect(
-    trigger: On<BinReceive<FileVideoRect>>,
+    trigger: On<UiInput<FileVideoRect>>,
     file_views: Query<(), With<FileView>>,
     browsers: NonSend<Browsers>,
 ) {
@@ -135,7 +135,7 @@ fn detach_video_overlays(
 }
 
 fn on_file_preview_request(
-    trigger: On<BinReceive<FilePreviewRequest>>,
+    trigger: On<UiInput<FilePreviewRequest>>,
     file_views: Query<(), With<FileView>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -213,7 +213,7 @@ fn drain_thumb_tasks(
 }
 
 fn on_file_open_external(
-    trigger: On<BinReceive<FileOpenExternalRequest>>,
+    trigger: On<UiInput<FileOpenExternalRequest>>,
     media: Query<&FileView, With<FileMedia>>,
 ) {
     let entity = trigger.event().webview;

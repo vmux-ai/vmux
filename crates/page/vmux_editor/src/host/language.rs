@@ -509,7 +509,7 @@ fn on_wiki_completion_request(
 }
 
 fn on_file_hover_request(
-    trigger: On<BinReceive<FileHoverRequest>>,
+    trigger: On<UiInput<FileHoverRequest>>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
@@ -529,7 +529,7 @@ fn on_file_hover_request(
 }
 
 fn on_file_definition_request(
-    trigger: On<BinReceive<FileDefinitionRequest>>,
+    trigger: On<UiInput<FileDefinitionRequest>>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
@@ -548,7 +548,7 @@ fn on_file_definition_request(
 }
 
 fn on_file_editor_action(
-    trigger: On<BinReceive<FileEditorAction>>,
+    trigger: On<UiInput<FileEditorAction>>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     mut commands: Commands,
 ) {
@@ -610,7 +610,7 @@ fn on_file_editor_action(
 }
 
 fn on_file_code_action_pick(
-    trigger: On<BinReceive<FileCodeActionPick>>,
+    trigger: On<UiInput<FileCodeActionPick>>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut edits: MessageWriter<crate::lsp::manager::LspRequestedEdit>,
@@ -633,7 +633,7 @@ fn on_file_code_action_pick(
 }
 
 fn on_file_rename_request(
-    trigger: On<BinReceive<FileRenameRequest>>,
+    trigger: On<UiInput<FileRenameRequest>>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
@@ -656,7 +656,7 @@ fn on_file_rename_request(
 }
 
 fn on_file_references_request(
-    trigger: On<BinReceive<FileReferencesRequest>>,
+    trigger: On<UiInput<FileReferencesRequest>>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
@@ -675,7 +675,7 @@ fn on_file_references_request(
 }
 
 fn on_file_completion_request(
-    trigger: On<BinReceive<FileCompletionRequest>>,
+    trigger: On<UiInput<FileCompletionRequest>>,
     views: Query<&Editor>,
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
     browsers: NonSend<Browsers>,
@@ -704,7 +704,7 @@ fn on_file_completion_request(
 }
 
 fn on_file_goto_request(
-    trigger: On<BinReceive<FileGotoRequest>>,
+    trigger: On<UiInput<FileGotoRequest>>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
 ) {
     let entity = trigger.event().webview;
@@ -721,7 +721,7 @@ fn on_file_goto_request(
 }
 
 fn on_file_completion_commit(
-    trigger: On<BinReceive<FileCompletionCommit>>,
+    trigger: On<UiInput<FileCompletionCommit>>,
     mut views: Query<&mut Editor>,
     mut commands: Commands,
 ) {

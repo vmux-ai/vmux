@@ -392,7 +392,7 @@ fn should_retry_command_bar_open_payload(
 }
 
 fn on_command_bar_ready(
-    trigger: On<BinReceive<CommandBarReadyEvent>>,
+    trigger: On<UiInput<CommandBarReadyEvent>>,
     mut pending_q: Query<&mut PendingCommandBarReveal>,
     mut commands: Commands,
 ) {
@@ -410,7 +410,7 @@ fn on_command_bar_ready(
 }
 
 fn on_command_bar_rendered(
-    trigger: On<BinReceive<CommandBarRenderedEvent>>,
+    trigger: On<UiInput<CommandBarRenderedEvent>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -427,7 +427,7 @@ fn on_command_bar_rendered(
 }
 
 fn on_command_bar_size(
-    trigger: On<BinReceive<CommandBarSizeEvent>>,
+    trigger: On<UiInput<CommandBarSizeEvent>>,
     browsers: NonSend<Browsers>,
     state: Query<(
         &Visibility,
@@ -777,7 +777,7 @@ impl CloseCommandBar {
 }
 
 fn on_prompt_request(
-    trigger: On<BinReceive<PromptRequest>>,
+    trigger: On<UiInput<PromptRequest>>,
     launcher_hosts: Query<(), With<HostsLauncher>>,
     child_of: Query<&ChildOf>,
     contributed_pages: Query<&ContributedPage>,
@@ -838,7 +838,7 @@ fn on_prompt_request(
 }
 
 fn on_page_open_request(
-    trigger: On<BinReceive<CommandBarPageOpenRequest>>,
+    trigger: On<UiInput<CommandBarPageOpenRequest>>,
     search_engine: Option<Res<SearchEngineSetting>>,
     child_of: Query<&ChildOf>,
     launcher_hosts: Query<(), With<HostsLauncher>>,
@@ -926,7 +926,7 @@ fn on_page_open_request(
 }
 
 fn on_terminal_request(
-    trigger: On<BinReceive<TerminalRequest>>,
+    trigger: On<UiInput<TerminalRequest>>,
     child_of: Query<&ChildOf>,
     command_bar: Res<CommandBarProjection>,
     locale: Option<Res<ResolvedLocale>>,
@@ -989,7 +989,7 @@ fn on_terminal_request(
 }
 
 fn on_invoke_request(
-    trigger: On<BinReceive<InvokeRequest>>,
+    trigger: On<UiInput<InvokeRequest>>,
     contributed_pages: Query<&ContributedPage>,
     contributed_commands: Query<&ContributedCommand>,
     command_bar: Res<CommandBarProjection>,
@@ -1023,11 +1023,11 @@ fn on_invoke_request(
     commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
 }
 
-fn on_switch_space_request(trigger: On<BinReceive<SwitchSpaceRequest>>, mut commands: Commands) {
+fn on_switch_space_request(trigger: On<UiInput<SwitchSpaceRequest>>, mut commands: Commands) {
     let webview = trigger.event().webview;
     let id = &trigger.event().payload.id;
     if !id.is_empty() {
-        commands.trigger(BinReceive {
+        commands.trigger(UiInput {
             webview,
             payload: SpaceAttachRequest {
                 space_id: id.clone(),
@@ -1038,7 +1038,7 @@ fn on_switch_space_request(trigger: On<BinReceive<SwitchSpaceRequest>>, mut comm
 }
 
 fn on_switch_tab_request(
-    trigger: On<BinReceive<SwitchTabRequest>>,
+    trigger: On<UiInput<SwitchTabRequest>>,
     mut chosen: MessageWriter<StackInPaneChosen>,
     mut commands: Commands,
 ) {
@@ -1052,7 +1052,7 @@ fn on_switch_tab_request(
 }
 
 fn on_ex_request(
-    trigger: On<BinReceive<ExRequest>>,
+    trigger: On<UiInput<ExRequest>>,
     command_bar: Res<CommandBarProjection>,
     mut lines: MessageWriter<crate::host::ExLineSubmitted>,
     mut commands: Commands,
@@ -1066,7 +1066,7 @@ fn on_ex_request(
 }
 
 fn on_pick_request(
-    trigger: On<BinReceive<PickRequest>>,
+    trigger: On<UiInput<PickRequest>>,
     command_bar: Res<CommandBarProjection>,
     users: Query<Entity, With<vmux_core::team::User>>,
     mut picked: MessageWriter<crate::host::FileStatusPicked>,
@@ -1089,7 +1089,7 @@ fn on_pick_request(
     commands.trigger(CloseCommandBar::after(webview, false));
 }
 
-fn on_dismiss_request(trigger: On<BinReceive<DismissRequest>>, mut commands: Commands) {
+fn on_dismiss_request(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
     commands.trigger(CloseCommandBar::after(trigger.event().webview, false));
 }
 
@@ -1190,7 +1190,7 @@ fn reveal_command_bar(
             native_size.is_some(),
         ) {
             commands.entity(entity).remove::<PendingCommandBarReveal>();
-            commands.trigger(BinReceive::<DismissRequest> {
+            commands.trigger(UiInput::<DismissRequest> {
                 webview: entity,
                 payload: DismissRequest,
             });
@@ -2067,7 +2067,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive::<DismissRequest> {
+        app.world_mut().trigger(UiInput::<DismissRequest> {
             webview: modal,
             payload: DismissRequest,
         });

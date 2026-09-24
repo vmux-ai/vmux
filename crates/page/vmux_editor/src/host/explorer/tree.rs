@@ -367,7 +367,7 @@ impl ExplorerRoot {
 }
 
 fn on_explorer_tree_toggle(
-    trigger: On<BinReceive<ExplorerTreeToggle>>,
+    trigger: On<UiInput<ExplorerTreeToggle>>,
     query: Query<&ExplorerState>,
     mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
@@ -390,7 +390,7 @@ fn on_explorer_tree_toggle(
 }
 
 fn on_explorer_tree_prefetch(
-    trigger: On<BinReceive<ExplorerTreePrefetch>>,
+    trigger: On<UiInput<ExplorerTreePrefetch>>,
     query: Query<&ExplorerState>,
     mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
@@ -406,7 +406,7 @@ fn on_explorer_tree_prefetch(
 }
 
 fn on_explorer_tree_refresh(
-    trigger: On<BinReceive<ExplorerTreeRefresh>>,
+    trigger: On<UiInput<ExplorerTreeRefresh>>,
     query: Query<&ExplorerState>,
     mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
@@ -422,7 +422,7 @@ fn on_explorer_tree_refresh(
 }
 
 fn on_explorer_reveal_current(
-    trigger: On<BinReceive<ExplorerRevealCurrent>>,
+    trigger: On<UiInput<ExplorerRevealCurrent>>,
     mut query: Query<(&FileView, &mut ExplorerState)>,
     mut trees: ResMut<ExplorerTrees>,
     browsers: Option<NonSend<Browsers>>,
@@ -445,7 +445,7 @@ fn on_explorer_reveal_current(
 }
 
 fn on_explorer_collapse_all(
-    trigger: On<BinReceive<ExplorerCollapseAll>>,
+    trigger: On<UiInput<ExplorerCollapseAll>>,
     query: Query<&ExplorerState>,
     mut trees: ResMut<ExplorerTrees>,
     mut commands: Commands,
