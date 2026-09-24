@@ -1,18 +1,6 @@
 use super::CommandBarPick;
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_event(Eq, targets = ["command-bar", "start", "layout"])]
 pub enum CommandBarRequest {
     Prompt {
         text: String,
@@ -99,68 +87,23 @@ impl ExCommandName {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "start")]
+#[vmux_api::ui_event(Default, Eq, target = "start")]
 pub struct StartSelectWorkspace {
     pub current_dir: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "start")]
+#[vmux_api::ui_event(Default, target = "start")]
 pub struct StartBranchesRequest {
     pub project: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "start")]
+#[vmux_api::host_event(Default, target = "start")]
 pub struct StartProjectBranches {
     pub project: String,
     pub branches: Vec<crate::space::ProjectBranch>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "start")]
+#[vmux_api::ui_event(Default, target = "start")]
 pub struct StartGoToBranch {
     pub project: String,
     pub branch: String,
@@ -168,17 +111,7 @@ pub struct StartGoToBranch {
     pub checkout: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct AgentModels {
     pub agent_key: String,
     pub url: String,
@@ -186,17 +119,7 @@ pub struct AgentModels {
     pub models: Vec<crate::room::ModelOptionEntry>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct AgentModes {
     pub agent_key: String,
     pub url: String,
@@ -204,35 +127,13 @@ pub struct AgentModes {
     pub modes: Vec<crate::protocol::AcpModeOption>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "start")]
+#[vmux_api::ui_event(Default, target = "start")]
 pub struct StartSelectModel {
     pub agent_key: String,
     pub model_id: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "start")]
+#[vmux_api::ui_event(Default, target = "start")]
 pub struct StartSelectMode {
     pub agent_key: String,
     pub mode_id: String,

@@ -1,18 +1,4 @@
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, PartialOrd, Ord, Hash)]
 pub enum ToolProvider {
     HomebrewFormula,
     HomebrewCask,
@@ -59,18 +45,7 @@ impl ToolProvider {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum ToolStatus {
     Available,
     Installed,
@@ -80,18 +55,7 @@ pub enum ToolStatus {
     Failed,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum ToolAction {
     Install,
     Update,
@@ -104,17 +68,7 @@ pub enum ToolAction {
     Import,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct ToolItem {
     pub provider: ToolProvider,
     pub id: String,
@@ -127,35 +81,13 @@ pub struct ToolItem {
     pub actions: Vec<ToolAction>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct ToolCategory {
     pub provider: ToolProvider,
     pub items: Vec<ToolItem>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(version = 2, targets = ["tools", "vault"])]
+#[vmux_api::host_event(Default, Eq, version = 2, targets = ["tools", "vault"])]
 pub struct ToolsSnapshot {
     pub loaded: bool,
     pub root: String,
@@ -167,54 +99,17 @@ pub struct ToolsSnapshot {
     pub error: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "tools")]
+#[vmux_api::ui_event(Default, Eq, target = "tools")]
 pub struct ToolsRefreshRequest {
     pub refresh: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "tools")]
+#[vmux_api::ui_event(Eq, target = "tools")]
 pub struct ToolOpenRequest {
     pub path: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "tools")]
+#[vmux_api::ui_event(Eq, target = "tools")]
 pub struct ToolsNavigateRequest {
     pub url: String,
 }
@@ -234,19 +129,7 @@ impl ToolsNavigateRequest {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "tools")]
+#[vmux_api::ui_event(Eq, target = "tools")]
 pub struct ToolRequest {
     pub provider: ToolProvider,
     pub action: ToolAction,
@@ -255,18 +138,7 @@ pub struct ToolRequest {
     pub value: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "tools")]
+#[vmux_api::host_event(Eq, target = "tools")]
 pub struct ToolResult {
     pub provider: ToolProvider,
     pub action: ToolAction,

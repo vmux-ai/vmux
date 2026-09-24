@@ -47,74 +47,23 @@ fn set_capture_target(target: Option<ShortcutCaptureToken>) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = target;
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "shortcuts")]
+#[vmux_api::ui_event(Copy, Default, Eq, target = "shortcuts")]
 pub struct ShortcutCaptureEvent {
     pub active: bool,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "shortcuts")]
+#[vmux_api::host_event(Copy, Default, Eq, target = "shortcuts")]
 pub struct ShortcutCaptureStateEvent {
     pub active: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "shortcuts")]
+#[vmux_api::host_event(Default, Eq, target = "shortcuts")]
 pub struct ShortcutPressedEvent {
     pub stroke: ShortcutStroke,
     pub pressed_at_ms: i64,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "shortcuts")]
+#[vmux_api::host_event(Default, Eq, target = "shortcuts")]
 pub struct ShortcutsEvent {
     pub groups: Vec<ShortcutGroup>,
     pub chord_timeout_ms: u64,
@@ -137,53 +86,20 @@ impl ShortcutsEvent {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ShortcutGroup {
     pub name: String,
     pub entries: Vec<ShortcutEntry>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ShortcutEntry {
     pub id: String,
     pub name: String,
     pub shortcuts: Vec<ShortcutBinding>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ShortcutBinding {
     pub label: String,
     pub strokes: Vec<ShortcutStroke>,
@@ -206,19 +122,7 @@ impl ShortcutBinding {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq, Hash)]
 pub struct ShortcutStroke {
     pub code: String,
     pub label: String,

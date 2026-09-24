@@ -1,16 +1,4 @@
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "vault")]
+#[vmux_api::host_event(Default, Eq, target = "vault")]
 pub struct VaultSnapshot {
     pub root: String,
     pub initialized: bool,
@@ -31,17 +19,7 @@ pub struct VaultSnapshot {
     pub error: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct VaultRepository {
     pub name: String,
     pub url: String,
@@ -49,37 +27,13 @@ pub struct VaultRepository {
     pub empty: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "vault")]
+#[vmux_api::ui_event(Default, Eq, target = "vault")]
 pub struct VaultRefreshRequest {
     #[serde(default)]
     pub load_repositories: bool,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum VaultAction {
     Create,
     Connect,
@@ -94,19 +48,7 @@ pub enum VaultAction {
     ChooseCloudFolder,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "vault")]
+#[vmux_api::ui_event(Eq, target = "vault")]
 pub struct VaultRequest {
     pub action: VaultAction,
     pub repository: String,
@@ -115,18 +57,7 @@ pub struct VaultRequest {
     pub recovery_key: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "vault")]
+#[vmux_api::host_event(Eq, target = "vault")]
 pub struct VaultResult {
     pub action: VaultAction,
     pub success: bool,
@@ -134,18 +65,7 @@ pub struct VaultResult {
     pub pending_upload: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "vault")]
+#[vmux_api::host_event(Eq, target = "vault")]
 pub struct VaultAuthProgress {
     pub code: String,
     pub url: String,

@@ -4,26 +4,22 @@ impl vmux_api::BinEventFamily for Events {
     const TARGET: vmux_api::BinEventTarget = vmux_api::BinEventTarget::Hosts(&["agent", "agents"]);
 }
 
-#[vmux_api::payload(Default)]
-#[derive(vmux_api::UiEvent)]
+#[vmux_api::ui_event(Default)]
 pub struct AgentInstallRunRequest {
     pub agent: String,
 }
 
-#[vmux_api::payload(Default)]
-#[derive(vmux_api::UiEvent)]
+#[vmux_api::ui_event(Default)]
 pub struct AgentSetupPrereqRequest {
     pub agent: String,
 }
 
-#[vmux_api::payload(Default)]
-#[derive(vmux_api::HostEvent)]
+#[vmux_api::host_event(Default)]
 pub struct AgentSetupPrereqStatus {
     pub needs_homebrew: bool,
 }
 
-#[vmux_api::payload(Default)]
-#[derive(vmux_api::HostEvent)]
+#[vmux_api::host_event(Default)]
 pub struct AgentSetupResult {
     pub agent: String,
     pub ok: bool,

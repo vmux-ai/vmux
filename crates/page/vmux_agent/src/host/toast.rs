@@ -1,9 +1,7 @@
-use bevy::prelude::*;
-use bevy_cef::prelude::UiEventPlugin;
-use serde::{Deserialize, Serialize};
-
 use crate::run_state::AgentRunState;
 use crate::run_state_kind::{AgentRunStateKind, LastRunStateKind};
+use bevy::prelude::*;
+use bevy_cef::prelude::UiEventPlugin;
 use vmux_session::{AcpSession, AgentSession};
 
 pub(crate) struct ToastPlugin;
@@ -16,38 +14,14 @@ impl Plugin for ToastPlugin {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum ToastLevel {
     Info,
     Warning,
     Error,
 }
 
-#[derive(
-    Message,
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(
-    targets = ["agent", "agents"]
-)]
+#[vmux_api::ui_event(Message, targets = ["agent", "agents"])]
 pub struct AgentToast {
     pub session_sid: String,
     pub level: ToastLevel,

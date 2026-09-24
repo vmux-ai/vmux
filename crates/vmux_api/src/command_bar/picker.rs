@@ -1,15 +1,4 @@
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum CommandBarPicker {
     Space,
     GotoLine,
@@ -54,17 +43,7 @@ impl CommandBarPicker {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub enum CommandBarPick {
     Picker(CommandBarPicker),
     GotoLine { line: u32 },
@@ -94,17 +73,7 @@ impl CommandBarPick {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct CommandBarPickRow {
     pub label: String,
     pub pick: CommandBarPick,

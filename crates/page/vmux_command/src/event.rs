@@ -4,33 +4,10 @@ pub use vmux_api::command_bar::*;
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchEngineSetting(pub SearchEngine);
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "layout")]
+#[vmux_api::host_event(Copy, Default, Eq, target = "layout")]
 pub struct CommandBarPanelCloseEvent;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy)]
 pub struct PanelPlacement {
     pub left: f64,
     pub top: f64,
@@ -63,21 +40,7 @@ pub fn clamp_panel_placement(
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "layout")]
+#[vmux_api::ui_event(Copy, Default, Eq, target = "layout")]
 pub struct CommandBarPanelRequest {
     pub active: bool,
 }

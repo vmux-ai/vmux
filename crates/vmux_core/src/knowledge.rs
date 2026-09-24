@@ -1,36 +1,13 @@
 pub const KNOWLEDGE_PAGE_URL: &str = "vmux://knowledge/";
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "knowledge")]
+#[vmux_api::host_event(Default, Eq, target = "knowledge")]
 pub struct KnowledgeTreeEvent {
     pub root: String,
     pub entries: Vec<KnowledgeEntry>,
     pub error: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct KnowledgeEntry {
     pub name: String,
     pub title: String,
@@ -42,39 +19,14 @@ pub struct KnowledgeEntry {
     pub expanded: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "knowledge")]
+#[vmux_api::ui_event(Default, Eq, target = "knowledge")]
 pub struct KnowledgeTreeToggle {
     pub path: String,
     #[serde(default)]
     pub pane_id: String,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub enum KnowledgeGitStatus {
     #[default]
     Clean,
@@ -83,18 +35,7 @@ pub enum KnowledgeGitStatus {
     Deleted,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct KnowledgeSearchMatch {
     pub title: String,
     pub path: String,
@@ -102,75 +43,25 @@ pub struct KnowledgeSearchMatch {
     pub preview: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "knowledge")]
+#[vmux_api::host_event(Default, Eq, target = "knowledge")]
 pub struct KnowledgeSearchEvent {
     pub query: String,
     pub matches: Vec<KnowledgeSearchMatch>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "knowledge")]
+#[vmux_api::ui_event(Default, Eq, target = "knowledge")]
 pub struct KnowledgeSearchRequest {
     pub query: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "knowledge")]
+#[vmux_api::ui_event(Default, Eq, target = "knowledge")]
 pub struct KnowledgeCreateRequest {
     pub parent: String,
     pub name: String,
     pub is_directory: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "knowledge")]
+#[vmux_api::host_event(Default, Eq, target = "knowledge")]
 pub struct KnowledgeCreateResult {
     pub ok: bool,
     pub path: String,
@@ -178,18 +69,7 @@ pub struct KnowledgeCreateResult {
     pub is_directory: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct KnowledgeReference {
     pub title: String,
     pub path: String,
@@ -198,19 +78,7 @@ pub struct KnowledgeReference {
     pub unlinked: bool,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub enum KnowledgePropertyKind {
     #[default]
     Text,
@@ -222,18 +90,7 @@ pub enum KnowledgePropertyKind {
     Tags,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct KnowledgeProperty {
     pub key: String,
     pub kind: KnowledgePropertyKind,

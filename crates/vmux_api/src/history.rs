@@ -1,25 +1,7 @@
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "history")]
+#[vmux_api::host_event(Default, target = "history")]
 pub struct HistoryChangedEvent;
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct HistoryEntry {
     pub url_entity_bits: u64,
     pub url: String,
@@ -30,17 +12,7 @@ pub struct HistoryEntry {
     pub last_visited_at: i64,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "history")]
+#[vmux_api::ui_event(target = "history")]
 pub struct HistoryQueryRequest {
     pub query: Option<String>,
     pub offset: u32,
@@ -48,15 +20,6 @@ pub struct HistoryQueryRequest {
     pub request_id: u64,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
 #[vmux_api::host_event(target = "history")]
 pub struct HistoryQueryResponse {
     pub request_id: u64,
@@ -64,76 +27,27 @@ pub struct HistoryQueryResponse {
     pub has_more: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "history")]
+#[vmux_api::ui_event(target = "history")]
 pub struct HistoryDeleteRequest {
     pub url_entity_bits: u64,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "history")]
+#[vmux_api::ui_event(target = "history")]
 pub struct HistoryClearAllRequest;
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "history")]
+#[vmux_api::ui_event(target = "history")]
 pub struct HistoryOpenRequest {
     pub url: String,
     pub in_new_stack: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
 pub struct HistorySuggestionsRequest {
     pub query: String,
     pub limit: u32,
     pub request_id: u64,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
 #[vmux_api::host_event(targets = ["command-bar", "start", "layout"])]
 pub struct HistorySuggestionsResponse {
     pub request_id: u64,

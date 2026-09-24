@@ -1,16 +1,4 @@
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub enum McpServerStatus {
     #[default]
     Available,
@@ -20,18 +8,7 @@ pub enum McpServerStatus {
     Failed,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct McpServerEntry {
     pub id: String,
     pub name: String,
@@ -39,98 +16,28 @@ pub struct McpServerEntry {
     pub status: McpServerStatus,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(
-    targets = ["command-bar", "layout", "sessions", "agent", "start"]
-)]
+#[vmux_api::host_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
 pub struct McpServers {
     pub servers: Vec<McpServerEntry>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(
-    targets = ["command-bar", "layout", "sessions", "agent", "start"]
-)]
+#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
 pub struct McpServersRequest;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub enum McpServerAction {
     #[default]
     Connect,
     Disconnect,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(
-    targets = ["command-bar", "layout", "sessions", "agent", "start"]
-)]
+#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
 pub struct McpServerRequest {
     pub id: String,
     pub action: McpServerAction,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(
-    targets = ["command-bar", "layout", "sessions", "agent", "start"]
-)]
+#[vmux_api::host_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
 pub struct McpServerResult {
     pub id: String,
     pub action: McpServerAction,

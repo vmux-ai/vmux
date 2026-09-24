@@ -1,8 +1,6 @@
 use super::EditorAction;
 
-#[vmux_api::payload(Default, Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "lsp")]
+#[vmux_api::ui_event(Default, Eq, target = "lsp")]
 pub struct LspCatalogRequest {
     pub query: String,
     pub language: String,
@@ -24,98 +22,72 @@ impl LspCatalogRequest {
     }
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(
-    targets = ["files", "lsp"]
-)]
+#[vmux_api::ui_event(Eq, targets = ["files", "lsp"])]
 pub struct LspInstallRequest {
     pub name: String,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "lsp")]
+#[vmux_api::ui_event(Eq, target = "lsp")]
 pub struct LspUninstallRequest {
     pub name: String,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "lsp")]
+#[vmux_api::ui_event(Eq, target = "lsp")]
 pub struct LspUpdateRequest {
     pub name: String,
 }
 
-#[vmux_api::payload(Copy, Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileHoverRequest {
     pub line: u32,
     pub col: u32,
 }
 
-#[vmux_api::payload(Copy, Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileDefinitionRequest {
     pub line: u32,
     pub col: u32,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, target = "files")]
 pub struct FileRenameRequest {
     pub line: u32,
     pub col: u32,
     pub new_name: String,
 }
 
-#[vmux_api::payload(Copy, Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileCodeActionPick {
     pub index: u32,
 }
 
-#[vmux_api::payload(Copy, Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileEditorAction {
     pub action: EditorAction,
     pub line: u32,
     pub col: u32,
 }
 
-#[vmux_api::payload(Copy, Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileReferencesRequest {
     pub line: u32,
     pub col: u32,
 }
 
-#[vmux_api::payload(Copy, Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileCompletionRequest {
     pub line: u32,
     pub col: u32,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, target = "files")]
 pub struct FileGotoRequest {
     pub path: String,
     pub line: u32,
     pub col: u32,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::UiEvent)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, target = "files")]
 pub struct FileCompletionCommit {
     pub line: u32,
     pub replace_from_col: u32,

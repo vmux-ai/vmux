@@ -7,7 +7,7 @@ use vmux_core::event::space::SpacesListEvent;
 use vmux_core::event::team::TeamEvent;
 use vmux_core::event::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent};
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 #[derive(vmux_api::UiStatePatch)]
 pub enum LayoutUiStatePatch {
     Layout(LayoutStateEvent),
@@ -27,9 +27,7 @@ pub enum LayoutUiStatePatch {
     UpdateCleared(UpdateClearedEvent),
 }
 
-#[vmux_api::payload(Default)]
-#[vmux_api::host_event(target = "layout")]
-#[derive(vmux_api::UiState)]
+#[vmux_api::host_event(Default, vmux_api::UiState, target = "layout")]
 pub struct LayoutUiStateEvent {
     pub sequence: u64,
     pub patches: Vec<LayoutUiStatePatch>,

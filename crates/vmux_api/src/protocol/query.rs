@@ -1,17 +1,7 @@
 use super::SimulatorAction;
 use crate::{ProcessId, json::JsonValue};
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct AgentSpace {
     pub id: String,
     pub name: String,
@@ -19,17 +9,7 @@ pub struct AgentSpace {
     pub is_active: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct AgentBookmark {
     pub uuid: String,
     pub url: String,
@@ -53,17 +33,7 @@ impl AgentBookmark {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentBookmarkNode {
     Entry {
@@ -78,34 +48,13 @@ pub enum AgentBookmarkNode {
     },
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct AgentBookmarks {
     pub pins: Vec<AgentBookmark>,
     pub roots: Vec<AgentBookmarkNode>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct AgentCommandTool {
     pub name: String,
     pub description: String,

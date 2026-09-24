@@ -4,7 +4,7 @@ impl crate::BinEventFamily for Events {
     const TARGET: crate::BinEventTarget = crate::BinEventTarget::Host("git");
 }
 
-#[vmux_api::payload(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct StyledSpan {
     pub text: String,
     pub fg: [u8; 3],
@@ -12,7 +12,7 @@ pub struct StyledSpan {
     pub italic: bool,
 }
 
-#[vmux_api::payload(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct DiffLine {
     pub kind: DiffKind,
     pub old_no: Option<u32>,
@@ -21,7 +21,7 @@ pub struct DiffLine {
     pub spans: Vec<StyledSpan>,
 }
 
-#[vmux_api::payload(Copy, Eq, Default)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub enum FileStatus {
     #[default]
     Clean,
@@ -33,7 +33,7 @@ pub enum FileStatus {
     Conflicted,
 }
 
-#[vmux_api::payload(Copy, Eq, Default)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub enum DiffKind {
     #[default]
     Context,
@@ -43,8 +43,7 @@ pub enum DiffKind {
     Staged,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::HostEvent)]
+#[vmux_api::host_event(Eq)]
 pub struct GitStatusEvent {
     pub path: String,
     pub branch: String,
@@ -56,14 +55,12 @@ pub struct GitStatusEvent {
     pub repo_root: String,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::HostEvent)]
+#[vmux_api::host_event(Eq)]
 pub struct GitDiffMetaEvent {
     pub total_lines: u32,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::HostEvent)]
+#[vmux_api::host_event(Eq)]
 pub struct GitDiffViewportEvent {
     pub generation: u64,
     pub first_line: u32,
@@ -72,22 +69,19 @@ pub struct GitDiffViewportEvent {
     pub error: String,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::HostEvent)]
+#[vmux_api::host_event(Eq)]
 pub struct GitResultEvent {
     pub action: String,
     pub ok: bool,
     pub message: String,
 }
 
-#[vmux_api::payload(Eq)]
-#[derive(vmux_api::HostEvent)]
+#[vmux_api::host_event(Eq)]
 pub struct GitErrorEvent {
     pub message: String,
 }
 
-#[vmux_api::payload(Eq, Default)]
-#[derive(vmux_api::HostEvent)]
+#[vmux_api::host_event(Eq, Default)]
 pub struct GitChangedEvent {}
 
 #[cfg(test)]

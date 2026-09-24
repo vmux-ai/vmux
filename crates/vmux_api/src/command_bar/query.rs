@@ -39,36 +39,12 @@ impl CommandBarQuery<'_> {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
 pub struct PathCompleteRequest {
     pub query: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct PathEntry {
     pub name: String,
     pub is_dir: bool,
@@ -76,19 +52,7 @@ pub struct PathEntry {
     pub project: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["command-bar", "start", "layout"])]
+#[vmux_api::host_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
 pub struct PathCompleteResponse {
     pub completions: Vec<PathEntry>,
     pub truncated: bool,

@@ -1,53 +1,13 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "git")]
+#[vmux_api::ui_event(Default, Eq, target = "git")]
 pub struct PageContextRequest {}
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "git")]
+#[vmux_api::host_event(Default, Eq, target = "git")]
 pub struct PageContextEvent {
     pub working_directory: String,
     pub page_url: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "git")]
+#[vmux_api::ui_event(Default, Eq, target = "git")]
 pub struct TabWorkspaceRequest {
     pub path: String,
     pub branch: String,
@@ -55,19 +15,7 @@ pub struct TabWorkspaceRequest {
     pub pane_id: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "git")]
+#[vmux_api::host_event(Default, Eq, target = "git")]
 pub struct TabWorkspaceEvent {
     pub path: String,
     pub branch: String,

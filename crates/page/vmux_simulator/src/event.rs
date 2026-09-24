@@ -1,15 +1,4 @@
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "simulator")]
+#[vmux_api::host_event(Default, target = "simulator")]
 pub struct SimulatorReady {
     pub port: u16,
     pub capability: String,
@@ -20,38 +9,14 @@ pub struct SimulatorReady {
     pub frame_stride: u32,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "simulator")]
+#[vmux_api::ui_event(Default, target = "simulator")]
 pub struct SimulatorTouch {
     pub phase: SimulatorTouchPhase,
     pub x: f32,
     pub y: f32,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub enum SimulatorTouchPhase {
     #[default]
     Down,
@@ -61,18 +26,7 @@ pub enum SimulatorTouchPhase {
     Tap,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "simulator")]
+#[vmux_api::ui_event(target = "simulator")]
 pub enum SimulatorKey {
     Text(String),
     Code(u16),
@@ -83,19 +37,7 @@ pub enum SimulatorKey {
     Button(HardwareButton),
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub struct SimulatorKeyModifiers {
     pub control: bool,
     pub shift: bool,
@@ -103,36 +45,14 @@ pub struct SimulatorKeyModifiers {
     pub meta: bool,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum HardwareButton {
     Home,
     Lock,
     Siri,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum SimulatorClipboardAction {
     Copy,
     Cut,
@@ -140,38 +60,12 @@ pub enum SimulatorClipboardAction {
     SelectAll,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "simulator")]
+#[vmux_api::ui_event(Copy, Eq, target = "simulator")]
 pub struct SimulatorClipboard {
     pub action: SimulatorClipboardAction,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "simulator")]
+#[vmux_api::ui_event(Copy, Eq, target = "simulator")]
 pub struct SimulatorSoftwareKeyboard;
 
 impl HardwareButton {

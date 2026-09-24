@@ -1,19 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq, Hash)]
 pub struct RgbColor([u8; 3]);
 
 impl RgbColor {
@@ -28,19 +13,7 @@ impl From<[u8; 3]> for RgbColor {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Hash)]
 pub struct AnsiPalette([RgbColor; 16]);
 
 impl AnsiPalette {
@@ -55,17 +28,7 @@ impl From<[[u8; 3]; 16]> for AnsiPalette {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub enum TermColor {
     #[default]
     Default,
@@ -73,18 +36,7 @@ pub enum TermColor {
     Rgb(u8, u8, u8),
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub struct TermSelectionRange {
     pub start_col: u16,
     pub start_row: u16,
@@ -93,51 +45,21 @@ pub struct TermSelectionRange {
     pub is_block: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct TermLine {
     pub spans: Vec<TermSpan>,
     #[serde(default)]
     pub links: Vec<LinkRange>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct LinkRange {
     pub start_col: u16,
     pub end_col: u16,
     pub url: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct TermSpan {
     pub text: String,
     pub fg: TermColor,
@@ -156,16 +78,7 @@ pub const FLAG_STRIKETHROUGH: u16 = 8;
 pub const FLAG_DIM: u16 = 16;
 pub const FLAG_INVERSE: u16 = 32;
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct TermCursor {
     pub col: u16,
     pub row: u32,
@@ -187,18 +100,7 @@ impl Default for TermCursor {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum CursorShape {
     Block,
     Beam,

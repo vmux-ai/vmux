@@ -1,19 +1,7 @@
 pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
 pub const PROJECTS_PAGE_URL: &str = "vmux://projects/";
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["spaces", "layout"])]
+#[vmux_api::host_event(Copy, Eq, targets = ["spaces", "layout"])]
 pub enum SpaceKey {
     Next,
     Previous,
@@ -21,35 +9,12 @@ pub enum SpaceKey {
     Delete,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["spaces", "layout"])]
+#[vmux_api::host_event(Default, Eq, targets = ["spaces", "layout"])]
 pub struct SpacesListEvent {
     pub spaces: Vec<SpaceRow>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct SpaceRow {
     pub id: String,
     pub name: String,
@@ -59,20 +24,8 @@ pub struct SpaceRow {
     pub startup_dir: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
-#[derive(vmux_api::UiEvent)]
-#[event(targets = ["spaces", "layout"])]
 pub enum SpaceRequest {
     OpenPage,
     Attach { space_id: String },
@@ -81,36 +34,14 @@ pub enum SpaceRequest {
     Create { name: String },
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["spaces", "layout", "git"])]
+#[vmux_api::ui_event(Default, targets = ["spaces", "layout", "git"])]
 pub struct ProjectRequest {
     pub command: String,
     #[serde(default)]
     pub path: Option<String>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ProjectRow {
     pub path: String,
     pub label: String,
@@ -126,19 +57,7 @@ pub struct ProjectRow {
     pub expanded: bool,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub enum ProjectRowKind {
     #[default]
     Project,
@@ -156,38 +75,14 @@ impl ProjectRowKind {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "layout")]
+#[vmux_api::ui_event(Default, Eq, target = "layout")]
 pub struct ProjectTreeToggle {
     pub path: String,
     #[serde(default)]
     pub pane_id: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ProjectBranch {
     pub branch: String,
     pub checkout: String,

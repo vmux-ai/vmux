@@ -1,7 +1,7 @@
 use super::SharedAgentCommand;
 use crate::{ProcessId, json::JsonValue};
 
-#[vmux_api::payload(Copy, Eq, Hash)]
+#[vmux_api::contract(Copy, Eq, Hash)]
 pub struct AgentRequestId(pub [u8; 16]);
 
 impl Default for AgentRequestId {
@@ -16,13 +16,13 @@ impl AgentRequestId {
     }
 }
 
-#[vmux_api::payload(Copy, Eq)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum AgentShellMode {
     NewTab,
     Active,
 }
 
-#[vmux_api::payload(Copy, Eq)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum AgentPaneDirection {
     Top,
     Right,
@@ -30,14 +30,14 @@ pub enum AgentPaneDirection {
     Left,
 }
 
-#[vmux_api::payload(Copy, Eq)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum ManagedMcpTransport {
     Stdio,
     Http,
     Sse,
 }
 
-#[vmux_api::payload(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct ManagedMcpServer {
     pub name: String,
     pub transport: ManagedMcpTransport,
@@ -49,27 +49,27 @@ pub struct ManagedMcpServer {
     pub headers: Vec<(String, String)>,
 }
 
-#[vmux_api::payload(Copy, Eq)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum PlacementMode {
     Auto,
     Split,
     Stack,
 }
 
-#[vmux_api::payload(Copy, Eq)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum FileTouchKind {
     Read,
     Edit,
 }
 
-#[vmux_api::payload(Copy, Eq)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum SimulatorButton {
     Home,
     Lock,
     Siri,
 }
 
-#[vmux_api::payload(Eq)]
+#[vmux_api::contract(Eq)]
 pub enum SimulatorAction {
     Tap {
         x: u32,
@@ -87,7 +87,7 @@ pub enum SimulatorAction {
     Button(SimulatorButton),
 }
 
-#[vmux_api::payload(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct FileSearchMatch {
     pub path: String,
     pub line: u32,
@@ -96,21 +96,21 @@ pub struct FileSearchMatch {
     pub preview: String,
 }
 
-#[vmux_api::payload(Eq)]
+#[vmux_api::contract(Eq)]
 pub enum AgentSpaceCommand {
     Create { name: Option<String> },
     Rename { space_id: String, name: String },
     Delete { space_id: String },
 }
 
-#[vmux_api::payload(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct AgentBookmarkPage {
     pub url: String,
     pub title: Option<String>,
     pub favicon_url: Option<String>,
 }
 
-#[vmux_api::payload(Eq)]
+#[vmux_api::contract(Eq)]
 pub enum AgentBookmarkCommand {
     Add {
         page: AgentBookmarkPage,
@@ -300,7 +300,7 @@ pub const BROWSER_NAVIGATE_TIMEOUT: std::time::Duration = std::time::Duration::f
 
 pub const AGENT_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 pub enum AgentCommandResult {
     Ok,
     Text(String),
@@ -308,7 +308,7 @@ pub enum AgentCommandResult {
     Error(String),
 }
 
-#[vmux_api::payload(Copy, Eq, Default)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub enum ApprovalDecision {
     Allow,
     #[default]
@@ -324,7 +324,7 @@ impl ApprovalDecision {
     }
 }
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 pub enum AgentRunStatus {
     Streaming,
     Idle,
@@ -526,7 +526,7 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), AgentCommand
     }
 }
 
-#[vmux_api::payload(Eq)]
+#[vmux_api::contract(Eq)]
 pub struct AgentAttachment {
     pub path: String,
     pub name: String,

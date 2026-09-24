@@ -1,15 +1,4 @@
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VaultProvider {
     CloudFolder,
@@ -17,17 +6,7 @@ pub enum VaultProvider {
     Git,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultStatusSnapshot {
     pub root: String,

@@ -1,19 +1,6 @@
 use super::{AgentModels, AgentModes, CommandBarPickRow, CommandBarPicker};
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq, Hash)]
 #[serde(transparent)]
 pub struct OpenId(pub u64);
 
@@ -33,19 +20,7 @@ impl OpenId {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SearchEngine {
     #[default]
@@ -100,17 +75,7 @@ impl SearchEngine {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["command-bar", "start", "layout"])]
+#[vmux_api::host_event(Default, targets = ["command-bar", "start", "layout"])]
 pub struct CommandBarOpenEvent {
     #[serde(default)]
     pub open_id: OpenId,
@@ -146,18 +111,7 @@ pub struct CommandBarOpenEvent {
     pub picks: Vec<CommandBarPickRow>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct CommandBarPromptContext {
     pub cwd: String,
     pub workspace_name: String,
@@ -180,18 +134,7 @@ impl CommandBarPromptContext {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct CommandBarPage {
     pub host: String,
     pub url: String,
@@ -203,17 +146,7 @@ pub struct CommandBarPage {
     pub prompt_target: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct CommandBarSpace {
     pub id: String,
     pub name: String,
@@ -222,16 +155,7 @@ pub struct CommandBarSpace {
     pub tab_count: u32,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct CommandBarTab {
     pub title: String,
     pub url: String,
@@ -242,51 +166,19 @@ pub struct CommandBarTab {
     pub location: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct CommandBarWorkDir {
     pub path: String,
     pub is_dir: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct CommandBarRecentFile {
     pub url: String,
     pub title: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct CommandBarCommandEntry {
     pub id: String,
     pub name: String,
