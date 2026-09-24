@@ -708,6 +708,21 @@ pub enum SideSheetRequest {
     ExpandSection { pane_id: u64, path: String },
 }
 
+impl SideSheetRequest {
+    pub fn section(pane_id: u64, path: impl Into<String>, expanded: bool) -> Self {
+        if expanded {
+            return Self::ExpandSection {
+                pane_id,
+                path: path.into(),
+            };
+        }
+        Self::CollapseSection {
+            pane_id,
+            path: path.into(),
+        }
+    }
+}
+
 #[derive(
     Clone,
     Copy,
