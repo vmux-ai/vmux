@@ -11,10 +11,11 @@ pub struct GitRepositoryPickerRequest {
     pub path: String,
 }
 #[vmux_api::ui_event(Eq, target = "git")]
-pub struct GitAppRequest {
+pub struct GitConfigEditRequest {
     pub repo_root: String,
-    pub action: GitAppAction,
 }
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitUpdateCheckRequest;
 #[vmux_api::ui_event(Eq, target = "git")]
 pub struct GitBranchLogRequest {
     pub repo_root: String,
@@ -166,12 +167,6 @@ pub struct GitDirectorySnapshot {
     pub repo_root: String,
     pub preview: bool,
 }
-#[vmux_api::contract(Copy, Eq)]
-pub enum GitAppAction {
-    EditConfig,
-    CheckForUpdates,
-}
-
 #[vmux_api::contract(Eq)]
 pub enum GitOperation {
     Amend,

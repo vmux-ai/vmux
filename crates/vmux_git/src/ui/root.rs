@@ -107,14 +107,11 @@ pub fn Page() -> Element {
                 };
                 let handled = match (focused_panel(), key.as_str()) {
                     (GitPanel::Status, "e") => {
-                        GitWorkspace::app_action(&repository.repo_root, GitAppAction::EditConfig);
+                        GitWorkspace::edit_config(&repository.repo_root);
                         true
                     }
                     (GitPanel::Status, "u") => {
-                        GitWorkspace::app_action(
-                            &repository.repo_root,
-                            GitAppAction::CheckForUpdates,
-                        );
+                        GitWorkspace::check_for_updates();
                         true
                     }
                     (GitPanel::Status, "Enter") => {
