@@ -3,9 +3,9 @@
 extern crate self as vmux_command;
 
 #[cfg(ui)]
-pub mod page;
-#[cfg(ui)]
 pub mod panel;
+#[cfg(ui)]
+pub mod ui;
 
 pub mod event;
 pub mod size;

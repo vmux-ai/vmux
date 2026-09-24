@@ -2,7 +2,7 @@ use crate::event::{
     CommandBarOpenEvent, CommandBarPanelCloseEvent, CommandBarPanelRequest, PanelPlacement,
     clamp_panel_placement,
 };
-use crate::page::CommandPalette;
+use crate::ui::CommandPalette;
 use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
 use vmux_ui::hooks::{send, use_listener};

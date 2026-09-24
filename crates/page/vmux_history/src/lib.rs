@@ -1,7 +1,7 @@
 pub use vmux_api::history as event;
-#[cfg(ui)]
-pub mod page;
 pub mod ranking;
+#[cfg(ui)]
+pub mod ui;
 
 pub const PAGE_URL: &str = "vmux://history/";
 

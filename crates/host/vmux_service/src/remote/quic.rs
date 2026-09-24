@@ -9,14 +9,16 @@ use std::time::Duration;
 
 use tokio::sync::watch;
 
-use vmux_remote::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
+use vmux_transport::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
 
 use vmux_api::protocol::{ServiceMessage, SharedMessage};
 
 use vmux_client::AuthorizationOutcome;
-use vmux_remote::DeviceId;
-use vmux_remote::framing::{Frame, FrameError, FrameStream};
-use vmux_remote::quic::{ClientCredential, ClientSetup, CloseCode, MessageType, SessionAccepted};
+use vmux_transport::DeviceId;
+use vmux_transport::framing::{Frame, FrameError, FrameStream};
+use vmux_transport::quic::{
+    ClientCredential, ClientSetup, CloseCode, MessageType, SessionAccepted,
+};
 
 const REMOTE_STATE_POLL: Duration = Duration::from_secs(1);
 const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
@@ -427,7 +429,7 @@ async fn session_snapshot(
 }
 
 pub(crate) fn inner_endpoint(
-    socket: std::sync::Arc<vmux_remote::quic::tunnel::TunnelSocket>,
+    socket: std::sync::Arc<vmux_transport::quic::tunnel::TunnelSocket>,
     identity: &SelfSignedIdentity,
 ) -> Result<quinn::Endpoint, String> {
     let config = identity.server_config()?;
@@ -502,8 +504,8 @@ mod live {
     use tokio::sync::{Mutex, broadcast};
     use vmux_api::protocol::SharedResponse;
     use vmux_client::RemoteAuthorizationStore;
-    use vmux_remote::DeviceId;
-    use vmux_remote::quic::endpoint::{SelfSignedIdentity, Trust};
+    use vmux_transport::DeviceId;
+    use vmux_transport::quic::endpoint::{SelfSignedIdentity, Trust};
 
     struct Harness {
         _directory: tempfile::TempDir,

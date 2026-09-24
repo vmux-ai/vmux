@@ -20,7 +20,7 @@ pub(crate) struct AcpModelInfoSet;
 
 impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::acp_install::AcpInstallPlugin)
+        app.add_plugins(crate::acp_tool::AcpToolPlugin)
             .init_resource::<AcpCatalog>()
             .add_message::<vmux_service::agent_events::PageAgentInfo>()
             .add_message::<vmux_service::agent_events::PageAgentWorkspaceChanged>()
@@ -562,7 +562,7 @@ fn send_acp_input(
         &AcpSession,
         &mut AgentRunState,
         &mut PromptQueue,
-        Has<crate::acp_install::AcpLaunchStarted>,
+        Has<crate::acp_tool::AcpLaunchStarted>,
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
     )>,

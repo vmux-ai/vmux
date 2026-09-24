@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery};
 
 use super::{
-    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
-    ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 
 pub(super) struct BrowserToolPlugin;
@@ -164,11 +164,9 @@ fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
                     .get("target")
                     .is_some_and(|value| !value.is_null() && !value.is_string())
                 {
-                    call.finish_dispatch(
-                        request,
-                        &mut commands,
-                        Err("browser_snapshot.target must be a string".to_string()),
-                    );
+                    commands.entity(request).insert(ToolDispatchResult(Err(
+                        "browser_snapshot.target must be a string".to_string(),
+                    )));
                 } else {
                     call.parse_into::<BrowserSnapshotArgs>(request, &mut commands);
                 }
@@ -180,13 +178,9 @@ fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
 
 fn navigate(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<BrowserNavigateArgs>),
-        Added<ParsedToolCall<BrowserNavigateArgs>>,
-    >,
+    requests: Query<(Entity, &BrowserNavigateArgs), (With<ToolCall>, Added<BrowserNavigateArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
+    for (entity, args) in &requests {
         let target = if args.url.trim().is_empty() {
             Err("browser_navigate.url is empty".to_string())
         } else {
@@ -195,55 +189,48 @@ fn navigate(
                 pane: args.pane.clone(),
             }))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn go_back(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<BrowserBackArgs>),
-        Added<ParsedToolCall<BrowserBackArgs>>,
-    >,
+    requests: Query<(Entity, &BrowserBackArgs), (With<ToolCall>, Added<BrowserBackArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Command(AgentCommand::BrowserGoBack {
-                pane: request.args().pane.clone(),
-            })),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
+                AgentCommand::BrowserGoBack {
+                    pane: args.pane.clone(),
+                },
+            ))));
     }
 }
 
 fn go_forward(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<BrowserForwardArgs>),
-        Added<ParsedToolCall<BrowserForwardArgs>>,
-    >,
+    requests: Query<(Entity, &BrowserForwardArgs), (With<ToolCall>, Added<BrowserForwardArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Command(AgentCommand::BrowserGoForward {
-                pane: request.args().pane.clone(),
-            })),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
+                AgentCommand::BrowserGoForward {
+                    pane: args.pane.clone(),
+                },
+            ))));
     }
 }
 
 fn history_search(
     mut commands: Commands,
     requests: Query<
-        (Entity, &ParsedToolCall<BrowserHistorySearchArgs>),
-        Added<ParsedToolCall<BrowserHistorySearchArgs>>,
+        (Entity, &BrowserHistorySearchArgs),
+        (With<ToolCall>, Added<BrowserHistorySearchArgs>),
     >,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
+    for (entity, args) in &requests {
         let target = if args.query.trim().is_empty() {
             Err("browser_history_search.query is empty".to_string())
         } else {
@@ -254,19 +241,19 @@ fn history_search(
                 },
             ))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn install_extension(
     mut commands: Commands,
     requests: Query<
-        (Entity, &ParsedToolCall<BrowserInstallExtensionArgs>),
-        Added<ParsedToolCall<BrowserInstallExtensionArgs>>,
+        (Entity, &BrowserInstallExtensionArgs),
+        (With<ToolCall>, Added<BrowserInstallExtensionArgs>),
     >,
 ) {
-    for (entity, request) in &requests {
-        let source = &request.args().source;
+    for (entity, args) in &requests {
+        let source = &args.source;
         let target = if source.trim().is_empty() {
             Err("browser_install_extension.source is empty".to_string())
         } else {
@@ -276,50 +263,44 @@ fn install_extension(
                 },
             ))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn snapshot(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<BrowserSnapshotArgs>),
-        Added<ParsedToolCall<BrowserSnapshotArgs>>,
-    >,
+    requests: Query<(Entity, &ToolCall, &BrowserSnapshotArgs), Added<BrowserSnapshotArgs>>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::BrowserSnapshot {
-                pane: BrowserPane::from(request.args().target.clone()).into(),
-                anchor: request.anchor(),
-            })),
-        );
+    for (entity, call, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::BrowserSnapshot {
+                    pane: BrowserPane::from(args.target.clone()).into(),
+                    anchor: call.anchor,
+                },
+            ))));
     }
 }
 
 fn scroll(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<BrowserScrollArgs>),
-        Added<ParsedToolCall<BrowserScrollArgs>>,
-    >,
+    requests: Query<(Entity, &ToolCall, &BrowserScrollArgs), Added<BrowserScrollArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let (to, delta, target) = match request.args() {
+    for (entity, call, args) in &requests {
+        let (to, delta, target) = match args {
             BrowserScrollArgs::Position(args) => (Some(args.to.into()), None, args.target.clone()),
             BrowserScrollArgs::Delta(args) => (None, Some(args.delta), args.target.clone()),
         };
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Query(AgentQuery::BrowserScroll {
-                pane: BrowserPane::from(target).into(),
-                to,
-                delta,
-                anchor: request.anchor(),
-            })),
-        );
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
+                AgentQuery::BrowserScroll {
+                    pane: BrowserPane::from(target).into(),
+                    to,
+                    delta,
+                    anchor: call.anchor,
+                },
+            ))));
     }
 }

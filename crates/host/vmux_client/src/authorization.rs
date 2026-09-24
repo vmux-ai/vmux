@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
-use vmux_remote::{ClientCredential, DeviceId};
+use vmux_transport::{ClientCredential, DeviceId};
 
 use crate::RemotePaths;
 

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, JsonValue};
 
 use super::{
-    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
-    ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 
 pub(super) struct ApplicationToolPlugin;
@@ -69,13 +69,10 @@ fn parse(mut commands: Commands, calls: ToolCalls<ApplicationTool>) {
 
 fn open_command_bar(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<OpenCommandBarArgs>),
-        Added<ParsedToolCall<OpenCommandBarArgs>>,
-    >,
+    requests: Query<(Entity, &OpenCommandBarArgs), (With<ToolCall>, Added<OpenCommandBarArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let result = match request.args().mode.as_deref().unwrap_or("default") {
+    for (entity, args) in &requests {
+        let result = match args.mode.as_deref().unwrap_or("default") {
             "default" => Ok("browser_open_command_bar"),
             "commands" => Ok("browser_open_commands"),
             "path" => Ok("browser_open_path_bar"),
@@ -87,42 +84,39 @@ fn open_command_bar(
                 args: JsonValue::Object(Vec::new()),
             })
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn rename_profile(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<RenameProfileArgs>),
-        Added<ParsedToolCall<RenameProfileArgs>>,
-    >,
+    requests: Query<(Entity, &RenameProfileArgs), (With<ToolCall>, Added<RenameProfileArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let name = request.args().name.trim();
+    for (entity, args) in &requests {
+        let name = args.name.trim();
         let target = if name.is_empty() {
             Err("rename_profile.name is empty".to_string())
         } else {
             Ok(DispatchTarget::Command(AgentCommand::RenameProfile {
-                name: request.args().name.clone(),
+                name: args.name.clone(),
             }))
         };
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn notify(
     mut commands: Commands,
-    requests: Query<(Entity, &ParsedToolCall<NotifyArgs>), Added<ParsedToolCall<NotifyArgs>>>,
+    requests: Query<(Entity, &NotifyArgs), (With<ToolCall>, Added<NotifyArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        request.finish(
-            entity,
-            &mut commands,
-            Ok(DispatchTarget::Command(AgentCommand::Notify {
-                title: request.args().title.clone(),
-                body: request.args().body.clone(),
-            })),
-        );
+    for (entity, args) in &requests {
+        commands
+            .entity(entity)
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
+                AgentCommand::Notify {
+                    title: args.title.clone(),
+                    body: args.body.clone(),
+                },
+            ))));
     }
 }

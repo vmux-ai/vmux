@@ -14,14 +14,37 @@ use vmux_client::protocol::{
 const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
-pub struct McpPlugin;
+pub struct McpPlugin {
+    config: McpConfig,
+}
+
+impl McpPlugin {
+    pub fn new(
+        anchor: Option<vmux_client::protocol::ProcessId>,
+        acp_session: bool,
+        acp_terminals: bool,
+        run_block_timeout: Duration,
+        shell: String,
+    ) -> Self {
+        Self {
+            config: McpConfig {
+                anchor,
+                acp_session,
+                acp_terminals,
+                run_block_timeout,
+                shell,
+            },
+        }
+    }
+}
 
 impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<crate::tool::ToolPlugin>() {
             app.add_plugins(crate::tool::ToolPlugin);
         }
-        app.init_resource::<NextRequestSequence>()
+        app.insert_resource(self.config.clone())
+            .init_resource::<NextRequestSequence>()
             .configure_sets(
                 Update,
                 (
@@ -67,18 +90,9 @@ pub struct McpServer {
     app: App,
 }
 
-pub struct McpServerBuilder {
-    app: App,
-}
-
-impl McpServerBuilder {
-    pub fn plugin(mut self, plugin: impl Plugin) -> Self {
-        self.app.add_plugins(plugin);
-        self
-    }
-
-    pub fn build(self) -> McpServer {
-        McpServer { app: self.app }
+impl From<App> for McpServer {
+    fn from(app: App) -> Self {
+        Self { app }
     }
 }
 
@@ -90,26 +104,15 @@ impl McpServer {
         run_block_timeout: Duration,
         shell: String,
     ) -> Self {
-        Self::builder(anchor, acp_session, acp_terminals, run_block_timeout, shell).build()
-    }
-
-    pub fn builder(
-        anchor: Option<vmux_client::protocol::ProcessId>,
-        acp_session: bool,
-        acp_terminals: bool,
-        run_block_timeout: Duration,
-        shell: String,
-    ) -> McpServerBuilder {
         let mut app = App::new();
-        app.insert_resource(McpConfig {
+        app.add_plugins(McpPlugin::new(
             anchor,
             acp_session,
             acp_terminals,
             run_block_timeout,
             shell,
-        })
-        .add_plugins(McpPlugin);
-        McpServerBuilder { app }
+        ));
+        Self::from(app)
     }
 
     pub async fn handle(&mut self, message: Value) -> Option<Value> {

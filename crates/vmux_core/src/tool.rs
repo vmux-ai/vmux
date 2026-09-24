@@ -87,7 +87,7 @@ pub struct ToolCategory {
     pub items: Vec<ToolItem>,
 }
 
-#[vmux_api::host_event(Default, Eq, version = 2, targets = ["tools", "vault"])]
+#[vmux_api::ui_state(Default, Eq, version = 2, targets = ["tools", "vault"])]
 pub struct ToolsSnapshot {
     pub loaded: bool,
     pub root: String,

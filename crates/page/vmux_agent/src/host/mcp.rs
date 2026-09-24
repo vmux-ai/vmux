@@ -44,7 +44,7 @@ fn run_timeout_secs_for_kind(kind: AgentKind) -> u64 {
 }
 
 fn run_timeout_secs_for_agent_id(agent_id: &str) -> u64 {
-    match crate::acp_install::registry_id_alias(agent_id) {
+    match crate::acp_tool::registry_id_alias(agent_id) {
         "claude-acp" | "codex-acp" => LONG_RUN_TIMEOUT_SECS,
         _ => DEFAULT_RUN_TIMEOUT_SECS,
     }
@@ -52,7 +52,7 @@ fn run_timeout_secs_for_agent_id(agent_id: &str) -> u64 {
 
 fn acp_uses_native_terminals(agent_id: &str) -> bool {
     !matches!(
-        crate::acp_install::registry_id_alias(agent_id),
+        crate::acp_tool::registry_id_alias(agent_id),
         "claude-acp" | "codex-acp" | "mistral-vibe"
     )
 }

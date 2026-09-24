@@ -430,7 +430,7 @@ impl SentReveals {
         let mut browsers = Browsers::default();
         browsers.set_externally_hosted(webview);
         app.add_plugins(vmux_core::host::UiStatePlugin::<
-            vmux_core::event::FileUiStateEvent,
+            vmux_core::event::FileUiState,
         >::default())
             .insert_non_send(browsers)
             .init_resource::<Self>()
@@ -438,10 +438,10 @@ impl SentReveals {
     }
 
     fn record(emit: On<BinHostEmitEvent>, mut sent: ResMut<Self>) {
-        if emit.id() != FileUiStateEvent::id() {
+        if emit.id() != FileUiState::id() {
             return;
         }
-        let decoded = rkyv::from_bytes::<FileUiStateEvent, rkyv::rancor::Error>(emit.payload());
+        let decoded = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(emit.payload());
         let Ok(event) = decoded else {
             return;
         };

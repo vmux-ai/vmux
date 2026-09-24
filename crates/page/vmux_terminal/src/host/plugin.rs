@@ -50,7 +50,7 @@ impl Plugin for TerminalPlugin {
         app.world_mut()
             .spawn(vmux_core::HostSpawnRoute::host("terminal"));
         app.add_plugins((
-            vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiStateEvent>::default(),
+            vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
             vmux_command::CommandTypePlugin::<super::command::CloseRequest>::default(),
             vmux_command::CommandTypePlugin::<super::command::NextRequest>::default(),
             vmux_command::CommandTypePlugin::<super::command::PrevRequest>::default(),

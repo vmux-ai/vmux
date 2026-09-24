@@ -42,5 +42,7 @@ pub use terminal::{
     FLAG_UNDERLINE, LinkRange, RgbColor, TermColor, TermCursor, TermLine, TermSelectionRange,
     TermSpan,
 };
-pub use ui_state::{UiState, UiStatePatch};
-pub use vmux_macro::{UiState, UiStatePatch, bidirectional_event, contract, host_event, ui_event};
+pub use ui_state::{BatchedUiState, UiState, UiStatePatch};
+pub use vmux_macro::{
+    bidirectional_event, contract, host_event, ui_event, ui_state, ui_state_patch,
+};

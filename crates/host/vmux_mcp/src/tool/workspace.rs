@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
-    ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -151,9 +151,9 @@ struct ReadTerminalArgs {
 fn resume_in_acp(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::ResumeInAcp) {
         let result = call
-            .require_anchor("resume_in_acp")
+            .require_anchor()
             .map(|anchor| DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor }));
-        call.finish_dispatch(request, &mut commands, result);
+        commands.entity(request).insert(ToolDispatchResult(result));
     }
 }
 
@@ -182,11 +182,10 @@ fn parse(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
 
 fn open_page(
     mut commands: Commands,
-    requests: Query<(Entity, &ParsedToolCall<OpenPageArgs>), Added<ParsedToolCall<OpenPageArgs>>>,
+    requests: Query<(Entity, &ToolCall, &OpenPageArgs), Added<OpenPageArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
-        let target = request.require_anchor().and_then(|anchor| {
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().and_then(|anchor| {
             if args.url.trim().is_empty() {
                 return Err("open_page.url is empty".to_string());
             }
@@ -197,17 +196,16 @@ fn open_page(
                 focus: args.focus,
             }))
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn open_file(
     mut commands: Commands,
-    requests: Query<(Entity, &ParsedToolCall<OpenFileArgs>), Added<ParsedToolCall<OpenFileArgs>>>,
+    requests: Query<(Entity, &ToolCall, &OpenFileArgs), Added<OpenFileArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let args = request.args();
-        let target = request.require_anchor().and_then(|anchor| {
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().and_then(|anchor| {
             let path = args.path.trim();
             if path.is_empty() {
                 return Err("open_file.path is empty".to_string());
@@ -224,17 +222,13 @@ fn open_file(
                 focus: args.focus,
             }))
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
-fn run(
-    mut commands: Commands,
-    requests: Query<(Entity, &ParsedToolCall<RunArgs>), Added<ParsedToolCall<RunArgs>>>,
-) {
-    for (entity, request) in &requests {
-        let args = request.args();
-        let target = request.require_anchor().and_then(|anchor| {
+fn run(mut commands: Commands, requests: Query<(Entity, &ToolCall, &RunArgs), Added<RunArgs>>) {
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().and_then(|anchor| {
             let placement_override =
                 args.mode.is_some() || args.direction.is_some() || args.beside.is_some();
             let mut command = args.command.clone();
@@ -244,7 +238,7 @@ fn run(
             if let Some(interpreter) = args.shell.as_ref().filter(|value| !value.trim().is_empty())
             {
                 command = crate::host_quote::HostQuote::handing_to(
-                    request.host_shell(),
+                    &call.host_shell,
                     interpreter,
                     &command,
                 )?;
@@ -285,7 +279,7 @@ fn run(
             };
             Ok(DispatchTarget::Command(command))
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
@@ -309,14 +303,10 @@ impl ProcessTarget {
 
 fn create_worktree(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<CreateWorktreeArgs>),
-        Added<ParsedToolCall<CreateWorktreeArgs>>,
-    >,
+    requests: Query<(Entity, &ToolCall, &CreateWorktreeArgs), Added<CreateWorktreeArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let target = request.require_anchor().map(|anchor| {
-            let args = request.args();
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().map(|anchor| {
             let command = if let Some(branch) = args.branch.clone().and_then(Trimmed::into_option) {
                 AgentCommand::CreateWorktreeOnBranch {
                     anchor,
@@ -333,7 +323,7 @@ fn create_worktree(
             };
             DispatchTarget::Command(command)
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
@@ -348,14 +338,10 @@ impl Trimmed {
 
 fn request_user_choice(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<RequestUserChoiceArgs>),
-        Added<ParsedToolCall<RequestUserChoiceArgs>>,
-    >,
+    requests: Query<(Entity, &ToolCall, &RequestUserChoiceArgs), Added<RequestUserChoiceArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let target = request.require_anchor().and_then(|anchor| {
-            let args = request.args();
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().and_then(|anchor| {
             let question = Trimmed::into_option(args.question.clone())
                 .ok_or("request_user_choice.question is empty")?;
             let options = args
@@ -374,43 +360,36 @@ fn request_user_choice(
                 options,
             }))
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn select_project(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<SelectProjectArgs>),
-        Added<ParsedToolCall<SelectProjectArgs>>,
-    >,
+    requests: Query<(Entity, &ToolCall, &SelectProjectArgs), Added<SelectProjectArgs>>,
 ) {
-    for (entity, request) in &requests {
-        let target = request.require_anchor().map(|anchor| {
-            let command = match request.args().path.clone().and_then(Trimmed::into_option) {
+    for (entity, call, args) in &requests {
+        let target = call.require_anchor().map(|anchor| {
+            let command = match args.path.clone().and_then(Trimmed::into_option) {
                 Some(path) => AgentCommand::ChooseWorkspaceAtPath { anchor, path },
                 None => AgentCommand::ChooseWorkspace { anchor },
             };
             DispatchTarget::Command(command)
         });
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }
 
 fn read_terminal(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &ParsedToolCall<ReadTerminalArgs>),
-        Added<ParsedToolCall<ReadTerminalArgs>>,
-    >,
+    requests: Query<(Entity, &ReadTerminalArgs), (With<ToolCall>, Added<ReadTerminalArgs>)>,
 ) {
-    for (entity, request) in &requests {
-        let target = request
-            .args()
+    for (entity, args) in &requests {
+        let target = args
             .terminal
             .parse()
             .map(|process_id| DispatchTarget::Query(AgentQuery::ReadTerminal { process_id }))
             .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string());
-        request.finish(entity, &mut commands, target);
+        commands.entity(entity).insert(ToolDispatchResult(target));
     }
 }

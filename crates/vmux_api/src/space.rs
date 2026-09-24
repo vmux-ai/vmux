@@ -9,7 +9,7 @@ pub enum SpaceKey {
     Delete,
 }
 
-#[vmux_api::host_event(Default, Eq, targets = ["spaces", "layout"])]
+#[vmux_api::ui_state(Default, Eq, targets = ["spaces", "layout"])]
 pub struct SpacesListEvent {
     pub spaces: Vec<SpaceRow>,
 }

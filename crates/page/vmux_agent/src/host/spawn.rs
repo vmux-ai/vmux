@@ -414,8 +414,8 @@ fn drain_agent_launches(
 fn respond_page_agent_attach(
     mut reader: MessageReader<PageAgentAttachRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -437,8 +437,8 @@ fn respond_page_agent_attach(
 fn respond_page_agent_spawn_stack(
     mut reader: MessageReader<PageAgentSpawnStackRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -467,8 +467,8 @@ fn respond_page_agent_spawn_stack(
 fn respond_page_agent_spawn_default(
     mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -512,8 +512,8 @@ fn respond_page_agent_spawn_default(
 fn respond_page_agent_attach_default(
     mut reader: MessageReader<PageAgentAttachDefaultRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {

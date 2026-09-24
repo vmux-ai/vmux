@@ -33,7 +33,7 @@ pub struct ExtRow {
     pub status: ExtStatus,
 }
 
-#[vmux_api::host_event(Eq, Default, version = 2, targets = ["extensions", "layout", "tools"])]
+#[vmux_api::ui_state(Eq, Default, version = 2, targets = ["extensions", "layout", "tools"])]
 pub struct ExtensionsEvent {
     pub loaded: bool,
     pub extensions: Vec<ExtRow>,
@@ -41,7 +41,7 @@ pub struct ExtensionsEvent {
     pub pending: bool,
 }
 
-#[vmux_api::host_event(Eq, targets = ["extensions", "layout", "tools"])]
+#[vmux_api::contract(Eq)]
 pub struct ExtInstallProgress {
     pub key: String,
     pub phase: ExtInstallPhase,
@@ -73,7 +73,7 @@ pub struct ExtensionPopupAnchor {
     pub bottom: i32,
 }
 
-#[vmux_api::host_event(Default, Eq, target = "layout")]
+#[vmux_api::contract(Default, Eq)]
 pub struct ExtensionPopupEvent {
     pub id: String,
     pub name: String,
@@ -89,7 +89,7 @@ pub struct ExtensionPopupBoundsRequest {
     pub height: f32,
 }
 
-#[vmux_api::host_event(Default, target = "layout")]
+#[vmux_api::contract(Default)]
 pub struct ExtensionPopupSizeEvent {
     pub id: String,
     pub width: f32,

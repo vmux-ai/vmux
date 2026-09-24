@@ -265,7 +265,7 @@ impl AgentSelectionKey {
         if agent_id.starts_with("cli:") {
             return agent_id;
         }
-        crate::acp_install::agent_url_id(agent_id)
+        crate::acp_tool::agent_url_id(agent_id)
     }
 
     fn acp_url(agent_id: &str) -> String {

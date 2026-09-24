@@ -29,7 +29,7 @@ impl Plugin for EditorPlugin {
             navigation::NavigationPlugin,
             history::HistoryPlugin,
             explorer::ExplorerPlugin,
-            vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiStateEvent>::default(),
+            vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiState>::default(),
         ));
     }
 }

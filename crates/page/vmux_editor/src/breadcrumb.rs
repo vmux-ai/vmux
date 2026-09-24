@@ -8,7 +8,7 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 use crate::explorer::OutlineGlyph;
-use crate::ui_state::use_file_ui;
+use crate::state::use_file_ui;
 
 const PATH_CRUMBS_MAX: usize = 4;
 

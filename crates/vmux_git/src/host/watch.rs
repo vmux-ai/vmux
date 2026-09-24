@@ -541,7 +541,7 @@ fn drain_git_watch(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: ResMut<RepoInfoCache>,
     file_pages: Query<(), With<FileUiStateUpdates>>,
-    mut views: Query<&mut super::view::GitView>,
+    mut views: Query<&mut super::state::GitState>,
     mut commands: Commands,
 ) {
     let Some(watch) = watch else {

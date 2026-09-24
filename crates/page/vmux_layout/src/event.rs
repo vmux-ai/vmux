@@ -7,7 +7,7 @@ pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 pub const SERVICES_PAGE_URL: &str = "vmux://services/";
 #[vmux_api::host_event(Default, Eq, target = "layout")]
 pub struct ReloadEvent;
-#[vmux_api::host_event(Copy, Default, target = "layout")]
+#[vmux_api::contract(Copy, Default)]
 pub struct LayoutStateEvent {
     #[serde(default)]
     pub header_open: bool,
@@ -360,7 +360,7 @@ pub enum HeaderRequest {
     FocusAddressBar,
 }
 
-#[vmux_api::host_event(Default, Eq, target = "layout")]
+#[vmux_api::contract(Default, Eq)]
 pub struct StacksHostEvent {
     pub stacks: Vec<StackRow>,
     #[serde(default)]
@@ -433,7 +433,7 @@ impl AddressParts {
     }
 }
 
-#[vmux_api::host_event(Default, Eq, target = "layout")]
+#[vmux_api::contract(Default, Eq)]
 pub struct TabsHostEvent {
     pub tabs: Vec<TabRow>,
 }
@@ -489,7 +489,7 @@ impl TabDropPlacement {
     }
 }
 
-#[vmux_api::host_event(Default, target = "layout")]
+#[vmux_api::contract(Default)]
 pub struct PaneTreeEvent {
     pub panes: Vec<PaneNode>,
 }
@@ -558,7 +558,7 @@ pub enum RemotePhase {
     Error,
 }
 
-#[vmux_api::host_event(Default, Eq, target = "layout")]
+#[vmux_api::contract(Default, Eq)]
 pub struct RemoteStateEvent {
     pub enabled: bool,
     pub phase: RemotePhase,
@@ -610,7 +610,7 @@ pub struct TabBoundary {
     pub pane_count: u32,
 }
 
-#[vmux_api::host_event(Default, target = "layout")]
+#[vmux_api::contract(Default)]
 pub struct TabBoundaryEvent {
     pub boundary: Option<TabBoundary>,
     pub projects: Vec<vmux_core::event::ProjectRow>,
@@ -637,12 +637,12 @@ pub enum LayoutNode {
     },
 }
 
-#[vmux_api::host_event(Default, target = "layout")]
+#[vmux_api::contract(Default)]
 pub struct UpdateReadyEvent {
     pub version: String,
 }
 
-#[vmux_api::host_event(Default, target = "layout")]
+#[vmux_api::contract(Default)]
 pub struct UpdateProgressEvent {
     pub version: String,
     pub downloaded: u64,
@@ -650,7 +650,7 @@ pub struct UpdateProgressEvent {
     pub installing: bool,
 }
 
-#[vmux_api::host_event(Copy, Default, Eq, target = "layout")]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub struct UpdateClearedEvent;
 
 #[vmux_api::ui_event(Copy, Default, Eq, targets = ["debug", "extensions", "layout"])]

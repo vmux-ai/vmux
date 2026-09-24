@@ -314,7 +314,7 @@ mod tests {
     use crate::keymap::EditorKeymap;
     use crate::keymap::KeymapKindExt;
     use vmux_api::BinEvent;
-    use vmux_core::event::{FileUiStateEvent, FileUiStatePatch};
+    use vmux_core::event::{FileUiState, FileUiStatePatch};
 
     #[derive(Resource, Default)]
     struct Emitted(Vec<FileUiStatePatch>);
@@ -345,15 +345,15 @@ mod tests {
                 .add_message::<crate::lsp::manager::LspGoto>()
                 .add_plugins((
                     NavigationPlugin,
-                    vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiStateEvent>::default(),
+                    vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiState>::default(),
                 ))
                 .init_resource::<Emitted>()
                 .add_observer(
                     |trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Emitted>| {
-                        if trigger.event().id() != FileUiStateEvent::id() {
+                        if trigger.event().id() != FileUiState::id() {
                             return;
                         }
-                        let event = rkyv::from_bytes::<FileUiStateEvent, rkyv::rancor::Error>(
+                        let event = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(
                             trigger.event().payload(),
                         )
                         .unwrap();

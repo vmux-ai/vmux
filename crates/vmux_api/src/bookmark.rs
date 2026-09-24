@@ -29,7 +29,7 @@ pub enum BookmarkNode {
     Folder(BookmarkFolderRow),
 }
 
-#[vmux_api::host_event(Eq, Default)]
+#[vmux_api::contract(Eq, Default)]
 pub struct BookmarkStateEvent {
     pub pins: Vec<BookmarkRow>,
     pub roots: Vec<BookmarkNode>,

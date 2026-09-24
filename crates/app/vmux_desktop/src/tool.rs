@@ -26,7 +26,7 @@ use vmux_tool::{
     ForgottenMcpServer, ImportAvailableDotfiles, ImportBrewfile, ImportDotfiles, ImportMcpConfig,
     ImportMcpServer, ImportNpmManifest, ImportedAvailableDotfiles, ImportedBrewfile,
     ImportedDotfiles, ImportedMcpConfig, ImportedMcpServer, ImportedNpmManifest,
-    LinkDotfilePackage, LinkedDotfilePackage, ToolOperation, ToolOperationResult, ToolStore,
+    LinkDotfilePackage, LinkedDotfilePackage, ToolOperation, ToolOperationFailure, ToolStore,
     ToolStoreTarget, ToolsManifest,
 };
 
@@ -171,17 +171,22 @@ impl Plugin for ToolPlugin {
             .add_systems(
                 Update,
                 (
-                    drain_tool_store_actions::<ImportedNpmManifest>,
-                    drain_tool_store_actions::<ImportedBrewfile>,
-                    drain_tool_store_actions::<ImportedMcpConfig>,
-                    drain_tool_store_actions::<ImportedMcpServer>,
-                    drain_tool_store_actions::<ForgottenMcpServer>,
-                    drain_tool_store_actions::<ImportedDotfiles>,
-                    drain_tool_store_actions::<ImportedAvailableDotfiles>,
-                    drain_tool_store_actions::<LinkedDotfilePackage>,
-                    drain_tool_store_actions::<DisabledDotfilePackage>,
-                    drain_tool_store_actions::<AdoptedDotfile>,
+                    (
+                        complete_npm_import,
+                        complete_brewfile_import,
+                        complete_mcp_config_import,
+                        complete_mcp_server_import,
+                        complete_mcp_server_forget,
+                        complete_dotfiles_import,
+                        complete_available_dotfiles_import,
+                        complete_dotfile_link,
+                        complete_dotfile_disable,
+                        complete_dotfile_adoption,
+                        complete_failed_tool_store_action,
+                    ),
+                    drain_tool_store_actions,
                 )
+                    .chain()
                     .before(emit_tools_snapshot),
             );
     }
@@ -360,70 +365,25 @@ struct ToolStoreAction {
     request: ToolRequest,
 }
 
-trait ToolStoreActionOutput: Send + Sync + 'static {
-    fn message(&self) -> String;
+#[derive(Component)]
+struct ToolActionCompletion {
+    success: bool,
+    message: String,
 }
 
-impl ToolStoreActionOutput for ImportedNpmManifest {
-    fn message(&self) -> String {
-        format!("imported {} NPM package(s)", self.packages)
+impl ToolActionCompletion {
+    fn success(message: String) -> Self {
+        Self {
+            success: true,
+            message,
+        }
     }
-}
 
-impl ToolStoreActionOutput for ImportedBrewfile {
-    fn message(&self) -> String {
-        format!(
-            "imported {} formulae and {} casks",
-            self.formulae, self.casks
-        )
-    }
-}
-
-impl ToolStoreActionOutput for ImportedMcpConfig {
-    fn message(&self) -> String {
-        format!("imported {} MCP server(s)", self.servers)
-    }
-}
-
-impl ToolStoreActionOutput for ImportedMcpServer {
-    fn message(&self) -> String {
-        format!("{} is now managed", self.name)
-    }
-}
-
-impl ToolStoreActionOutput for ForgottenMcpServer {
-    fn message(&self) -> String {
-        format!("{} removed from tools.toml", self.name)
-    }
-}
-
-impl ToolStoreActionOutput for ImportedDotfiles {
-    fn message(&self) -> String {
-        format!("imported {} dotfile package(s)", self.packages)
-    }
-}
-
-impl ToolStoreActionOutput for ImportedAvailableDotfiles {
-    fn message(&self) -> String {
-        format!("imported {} dotfile package(s)", self.packages)
-    }
-}
-
-impl ToolStoreActionOutput for LinkedDotfilePackage {
-    fn message(&self) -> String {
-        format!("linked {} file(s)", self.files)
-    }
-}
-
-impl ToolStoreActionOutput for DisabledDotfilePackage {
-    fn message(&self) -> String {
-        format!("unlinked {} file(s)", self.files)
-    }
-}
-
-impl ToolStoreActionOutput for AdoptedDotfile {
-    fn message(&self) -> String {
-        format!("adopted {}", self.path.display())
+    fn failure(message: String) -> Self {
+        Self {
+            success: false,
+            message,
+        }
     }
 }
 
@@ -1003,33 +963,211 @@ fn drain_tool_actions(
     }
 }
 
-fn drain_tool_store_actions<T>(
-    actions: Query<(Entity, &ToolStoreAction, &ToolOperationResult<T>)>,
+fn complete_npm_import(
+    actions: Query<
+        (Entity, &ImportedNpmManifest),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "imported {} NPM package(s)",
+                output.packages
+            )));
+    }
+}
+
+fn complete_brewfile_import(
+    actions: Query<
+        (Entity, &ImportedBrewfile),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "imported {} formulae and {} casks",
+                output.formulae, output.casks
+            )));
+    }
+}
+
+fn complete_mcp_config_import(
+    actions: Query<
+        (Entity, &ImportedMcpConfig),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "imported {} MCP server(s)",
+                output.servers
+            )));
+    }
+}
+
+fn complete_mcp_server_import(
+    actions: Query<
+        (Entity, &ImportedMcpServer),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "{} is now managed",
+                output.name
+            )));
+    }
+}
+
+fn complete_mcp_server_forget(
+    actions: Query<
+        (Entity, &ForgottenMcpServer),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "{} removed from tools.toml",
+                output.name
+            )));
+    }
+}
+
+fn complete_dotfiles_import(
+    actions: Query<
+        (Entity, &ImportedDotfiles),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "imported {} dotfile package(s)",
+                output.packages
+            )));
+    }
+}
+
+fn complete_available_dotfiles_import(
+    actions: Query<
+        (Entity, &ImportedAvailableDotfiles),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "imported {} dotfile package(s)",
+                output.packages
+            )));
+    }
+}
+
+fn complete_dotfile_link(
+    actions: Query<
+        (Entity, &LinkedDotfilePackage),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "linked {} file(s)",
+                output.files
+            )));
+    }
+}
+
+fn complete_dotfile_disable(
+    actions: Query<
+        (Entity, &DisabledDotfilePackage),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "unlinked {} file(s)",
+                output.files
+            )));
+    }
+}
+
+fn complete_dotfile_adoption(
+    actions: Query<
+        (Entity, &AdoptedDotfile),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::success(format!(
+                "adopted {}",
+                output.path.display()
+            )));
+    }
+}
+
+fn complete_failed_tool_store_action(
+    actions: Query<
+        (Entity, &ToolOperationFailure),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, failure) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::failure(failure.message().to_string()));
+    }
+}
+
+fn drain_tool_store_actions(
+    actions: Query<(Entity, &ToolStoreAction, &ToolActionCompletion)>,
     mut registry: Query<&mut ToolRegistry>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
-) where
-    T: ToolStoreActionOutput,
-{
+) {
     let Ok(mut state) = registry.single_mut() else {
         return;
     };
-    for (entity, action, result) in &actions {
-        let (success, message) = match result.value() {
-            Ok(output) => (true, output.message()),
-            Err(message) => (false, message.clone()),
-        };
+    for (entity, action, completion) in &actions {
         let event = ToolResult {
             provider: action.request.provider,
             action: action.request.action,
             id: action.request.id.clone(),
-            success,
-            message,
+            success: completion.success,
+            message: completion.message.clone(),
         };
         if browsers.can_emit_to(&action.target) {
             commands.trigger(BinHostEmitEvent::from_event(action.target, &event));
         }
-        if success {
+        if completion.success {
             state.dirty = true;
             state.full_scan = true;
             state.generation = state.generation.wrapping_add(1);
@@ -2089,7 +2227,7 @@ fn install_provider(store: &ToolStore, provider: ToolProvider, id: &str) -> Resu
             command_output("npm", &["install", "--global", id], true)?;
         }
         ToolProvider::Acp => {
-            vmux_agent::acp_install::resolve_from_registry(id, None, |_, _, _| {})?;
+            vmux_agent::acp_tool::resolve_from_registry(id, None, |_, _, _| {})?;
         }
         ToolProvider::Lsp => {
             let root = vmux_editor::lsp::store::default_root();
@@ -2124,7 +2262,7 @@ fn uninstall_provider(store: &ToolStore, provider: ToolProvider, id: &str) -> Re
         ToolProvider::Npm => {
             command_output("npm", &["uninstall", "--global", id], true)?;
         }
-        ToolProvider::Acp => vmux_agent::acp_install::uninstall(id)?,
+        ToolProvider::Acp => vmux_agent::acp_tool::uninstall(id)?,
         ToolProvider::Lsp => {
             let name = vmux_editor::lsp::package_path::PackageName::parse(id)?;
             vmux_editor::lsp::store::remove(&vmux_editor::lsp::store::default_root(), &name)

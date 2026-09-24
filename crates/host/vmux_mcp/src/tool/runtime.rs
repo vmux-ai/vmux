@@ -51,7 +51,15 @@ impl Plugin for ToolPlugin {
             .add_systems(Update, dispatch_command_calls.in_set(ToolDispatchSet))
             .add_systems(
                 Update,
-                bevy_ecs::schedule::ApplyDeferred.in_set(ToolDispatchFlush),
+                (
+                    bevy_ecs::schedule::ApplyDeferred,
+                    resolve_tool_dispatch_results,
+                    bevy_ecs::schedule::ApplyDeferred,
+                    project_tool_outcomes,
+                    bevy_ecs::schedule::ApplyDeferred,
+                )
+                    .chain()
+                    .in_set(ToolDispatchFlush),
             )
             .add_plugins((
                 super::application::ApplicationToolPlugin,
@@ -76,103 +84,6 @@ impl ToolPlugin {
         app.add_plugins(Self);
         app.update();
         app
-    }
-}
-
-#[derive(Component)]
-pub struct McpToolRequest<T> {
-    tool: T,
-    call: ToolCall,
-}
-
-#[derive(Component)]
-pub(super) struct ParsedToolCall<T> {
-    call: ToolCall,
-    args: T,
-}
-
-impl<T: Component> ParsedToolCall<T> {
-    pub(super) fn args(&self) -> &T {
-        &self.args
-    }
-
-    pub(super) fn anchor(&self) -> Option<ProcessId> {
-        self.call.anchor
-    }
-
-    pub(super) fn host_shell(&self) -> &str {
-        &self.call.host_shell
-    }
-
-    pub(super) fn require_anchor(&self) -> Result<ProcessId, String> {
-        self.call.require_anchor(&self.call.name)
-    }
-
-    pub(super) fn serialized_args(&self) -> Result<Value, String>
-    where
-        T: Serialize,
-    {
-        ToolCall::serialize_arguments(&self.args)
-    }
-
-    pub(super) fn finish(
-        &self,
-        request: Entity,
-        commands: &mut Commands,
-        result: Result<DispatchTarget, String>,
-    ) {
-        commands.entity(request).remove::<Self>();
-        self.call.finish_dispatch(request, commands, result);
-    }
-
-    pub(super) fn finish_execution(
-        &self,
-        request: Entity,
-        commands: &mut Commands,
-        result: Result<ToolExecution, String>,
-    ) {
-        commands.entity(request).remove::<Self>();
-        self.call.finish(request, commands, result);
-    }
-}
-
-impl<T: Component> McpToolRequest<T> {
-    pub fn tool(&self) -> &T {
-        &self.tool
-    }
-
-    pub fn name(&self) -> &str {
-        &self.call.name
-    }
-
-    pub fn arguments(&self) -> &Value {
-        &self.call.arguments
-    }
-
-    pub fn anchor(&self) -> Option<ProcessId> {
-        self.call.anchor
-    }
-
-    pub fn host_shell(&self) -> &str {
-        &self.call.host_shell
-    }
-
-    pub fn parse<A: serde::de::DeserializeOwned>(&self) -> Result<A, String> {
-        self.call.parse(&self.call.name)
-    }
-
-    pub fn require_anchor(&self) -> Result<ProcessId, String> {
-        self.call.require_anchor(&self.call.name)
-    }
-
-    pub fn finish(
-        &self,
-        request: Entity,
-        commands: &mut Commands,
-        result: Result<DispatchTarget, String>,
-    ) {
-        commands.entity(request).remove::<Self>();
-        self.call.finish_dispatch(request, commands, result);
     }
 }
 
@@ -236,14 +147,8 @@ fn route_mcp_tools<T>(mut commands: Commands, calls: ToolCalls<T>)
 where
     T: Component + Clone,
 {
-    for (request, call, tool) in calls.iter() {
-        commands
-            .entity(request)
-            .remove::<ToolCall>()
-            .insert(McpToolRequest {
-                tool: tool.clone(),
-                call: call.clone(),
-            });
+    for (request, _, tool) in calls.iter() {
+        commands.entity(request).insert(tool.clone());
     }
 }
 
@@ -468,6 +373,9 @@ pub enum DispatchTarget {
     Query(AgentQuery),
 }
 
+#[derive(Component)]
+pub struct ToolDispatchResult(pub Result<DispatchTarget, String>);
+
 impl DispatchTarget {
     fn from_execution(
         call: &ToolCall,
@@ -587,72 +495,34 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    fn parse<T: serde::de::DeserializeOwned>(&self, name: &str) -> Result<T, String> {
+    pub fn parse<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
         serde_json::from_value(self.arguments.clone())
-            .map_err(|error| format!("{name}: invalid arguments: {error}"))
+            .map_err(|error| format!("{}: invalid arguments: {error}", self.name))
     }
 
     pub(super) fn parse_into<T>(&self, request: Entity, commands: &mut Commands)
     where
         T: Component + serde::de::DeserializeOwned,
     {
-        match self.parse::<T>(&self.name) {
+        match self.parse::<T>() {
             Ok(args) => {
-                commands
-                    .entity(request)
-                    .remove::<Self>()
-                    .insert(ParsedToolCall {
-                        call: self.clone(),
-                        args,
-                    });
-            }
-            Err(message) => self.finish_dispatch(request, commands, Err(message)),
-        }
-    }
-
-    fn serialize_arguments<T: Serialize>(arguments: T) -> Result<Value, String> {
-        serde_json::to_value(arguments)
-            .map_err(|error| format!("MCP tool arguments must serialize: {error}"))
-    }
-
-    pub(super) fn require_anchor(&self, name: &str) -> Result<ProcessId, String> {
-        self.anchor.ok_or_else(|| {
-            format!("{name} requires an agent anchor (not available to this client)")
-        })
-    }
-
-    pub(super) fn finish(
-        &self,
-        request: Entity,
-        commands: &mut Commands,
-        result: Result<ToolExecution, String>,
-    ) {
-        let dispatch = DispatchTarget::from_execution(self, &result);
-        let mut entity = commands.entity(request);
-        entity.remove::<Self>().insert(ToolOutcome(result));
-        match dispatch {
-            Ok(target) => {
-                entity.insert(target);
+                commands.entity(request).insert(args);
             }
             Err(message) => {
-                entity.insert(ToolDispatchError(message));
+                commands
+                    .entity(request)
+                    .insert(ToolDispatchResult(Err(message)));
             }
         }
     }
 
-    pub(super) fn finish_dispatch(
-        &self,
-        request: Entity,
-        commands: &mut Commands,
-        result: Result<DispatchTarget, String>,
-    ) {
-        let result = result.map(|target| ToolExecution::Dispatch {
-            target,
-            name: self.name.clone(),
-            arguments: self.arguments.clone(),
-            anchor: self.anchor,
-        });
-        self.finish(request, commands, result);
+    pub fn require_anchor(&self) -> Result<ProcessId, String> {
+        self.anchor.ok_or_else(|| {
+            format!(
+                "{} requires an agent anchor (not available to this client)",
+                self.name
+            )
+        })
     }
 
     #[cfg(test)]
@@ -723,15 +593,50 @@ fn dispatch_command_calls(mut commands: Commands, calls: PendingCommandCalls) {
         if call.tool.is_some() {
             continue;
         }
-        call.finish(
-            entity,
-            &mut commands,
-            Ok(ToolExecution::Command {
+        commands
+            .entity(entity)
+            .insert(ToolOutcome(Ok(ToolExecution::Command {
                 name: call.name.clone(),
                 arguments: call.arguments.clone(),
                 anchor: call.anchor,
-            }),
-        );
+            })));
+    }
+}
+
+fn resolve_tool_dispatch_results(
+    results: Query<(Entity, &ToolCall, &ToolDispatchResult), Added<ToolDispatchResult>>,
+    mut commands: Commands,
+) {
+    for (entity, call, result) in &results {
+        let outcome = result.0.clone().map(|target| ToolExecution::Dispatch {
+            target,
+            name: call.name.clone(),
+            arguments: call.arguments.clone(),
+            anchor: call.anchor,
+        });
+        commands
+            .entity(entity)
+            .remove::<ToolDispatchResult>()
+            .insert(ToolOutcome(outcome));
+    }
+}
+
+fn project_tool_outcomes(
+    outcomes: Query<(Entity, &ToolCall, &ToolOutcome), Added<ToolOutcome>>,
+    mut commands: Commands,
+) {
+    for (entity, call, outcome) in &outcomes {
+        let dispatch = DispatchTarget::from_execution(call, &outcome.0);
+        let mut request = commands.entity(entity);
+        request.remove::<ToolCall>();
+        match dispatch {
+            Ok(target) => {
+                request.insert(target);
+            }
+            Err(message) => {
+                request.insert(ToolDispatchError(message));
+            }
+        }
     }
 }
 

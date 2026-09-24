@@ -5,7 +5,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use crate::page_model::merge_tree_motion_rows;
-use crate::ui_state::use_file_ui;
+use crate::state::use_file_ui;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};

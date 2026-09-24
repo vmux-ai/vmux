@@ -6,6 +6,6 @@ pub use vmux_core::{ContributedCommandChosen, page::PageManifest};
 pub use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
 #[cfg(feature = "mcp")]
 pub use vmux_mcp::{
-    protocol::{McpServer, McpServerBuilder},
-    tool::{DispatchTarget, McpToolPlugin, McpToolRequest, ToolDispatchSet},
+    protocol::{McpPlugin, McpServer},
+    tool::{DispatchTarget, McpToolPlugin, ToolCall, ToolDispatchResult, ToolDispatchSet},
 };

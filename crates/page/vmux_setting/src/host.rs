@@ -1,6 +1,6 @@
 mod appearance;
 mod runtime;
-mod view;
+mod state;
 
 use bevy::{ecs::message::MessageReader, prelude::*};
 use vmux_command::ReadCommandRequests;
@@ -14,7 +14,7 @@ pub use runtime::{
     ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir,
     TerminalSettings, TerminalTheme, UpdateChannel,
 };
-pub use view::Settings;
+pub use state::Settings;
 pub use vmux_command::event::SearchEngine;
 
 pub struct SettingsPlugin;
@@ -24,7 +24,7 @@ impl Plugin for SettingsPlugin {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins((
             SettingsRuntimePlugin,
-            view::SettingsViewPlugin,
+            state::StatePlugin,
             appearance::AppearancePlugin,
             vmux_layout::LayoutContractPlugin,
         ))

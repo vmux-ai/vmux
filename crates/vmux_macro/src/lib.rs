@@ -56,20 +56,28 @@ pub fn bidirectional_event(args: TokenStream, input: TokenStream) -> TokenStream
     }
 }
 
-#[proc_macro_derive(UiState)]
-pub fn derive_ui_state(input: TokenStream) -> TokenStream {
+#[proc_macro_attribute]
+pub fn ui_state(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    match ui_state::derive_state(input) {
-        Ok(tokens) => tokens.into(),
+    let state = match ui_state::derive_state(&input) {
+        Ok(tokens) => tokens,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    match bin_event::expand(args.into(), input, bin_event::Direction::Host) {
+        Ok(event) => quote!(#event #state).into(),
         Err(error) => error.to_compile_error().into(),
     }
 }
 
-#[proc_macro_derive(UiStatePatch)]
-pub fn derive_ui_state_patch(input: TokenStream) -> TokenStream {
+#[proc_macro_attribute]
+pub fn ui_state_patch(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    match ui_state::derive_patch(input) {
-        Ok(tokens) => tokens.into(),
+    let patch = match ui_state::derive_patch(&input) {
+        Ok(tokens) => tokens,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    match contract::expand(args.into(), input) {
+        Ok(contract) => quote!(#contract #patch).into(),
         Err(error) => error.to_compile_error().into(),
     }
 }

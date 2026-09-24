@@ -4,12 +4,12 @@ use super::{AnsiPalette, RgbColor, TermCursor, TermLine, TermSelectionRange};
 
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
-#[vmux_api::host_event(target = "terminal")]
+#[vmux_api::contract]
 pub struct ServiceUnavailableEvent {
     pub message: String,
 }
 
-#[vmux_api::host_event(target = "terminal")]
+#[vmux_api::contract]
 pub struct TermThemeEvent {
     pub foreground: RgbColor,
     pub background: RgbColor,
@@ -29,14 +29,14 @@ pub struct TermThemeEvent {
     pub cursor_blink: bool,
 }
 
-#[vmux_api::host_event(Eq, target = "terminal")]
+#[vmux_api::contract(Eq)]
 pub struct TermLoadingEvent {
     pub loading: bool,
     pub label: String,
     pub segment: String,
 }
 
-#[vmux_api::host_event(Eq, target = "terminal")]
+#[vmux_api::contract(Eq)]
 pub struct AgentPromptDraftEvent {
     pub draft: String,
     pub skipped: bool,
@@ -55,7 +55,7 @@ pub struct TermViewportEvent {
     pub selection: Option<TermSelectionRange>,
 }
 
-#[vmux_api::host_event(target = "terminal")]
+#[vmux_api::contract]
 pub struct TermViewportPatch {
     pub changed_lines: Vec<(u32, TermLine)>,
     pub cursor: TermCursor,
@@ -139,13 +139,12 @@ pub struct TermResizeEvent {
     pub viewport_height: f32,
 }
 
-#[vmux_api::host_event(Eq, target = "terminal")]
+#[vmux_api::contract(Eq)]
 pub struct TermTitleEvent {
     pub title: String,
 }
 
-#[vmux_api::contract]
-#[derive(vmux_api::UiStatePatch)]
+#[vmux_api::ui_state_patch]
 pub enum TerminalUiStatePatch {
     ServiceUnavailable(ServiceUnavailableEvent),
     Viewport(TermViewportPatch),
@@ -155,8 +154,8 @@ pub enum TerminalUiStatePatch {
     PromptDraft(AgentPromptDraftEvent),
 }
 
-#[vmux_api::host_event(Default, vmux_api::UiState, target = "terminal")]
-pub struct TerminalUiStateEvent {
+#[vmux_api::ui_state(Default, target = "terminal")]
+pub struct TerminalUiState {
     pub sequence: u64,
     pub patches: Vec<TerminalUiStatePatch>,
 }
@@ -167,7 +166,7 @@ mod tests {
 
     #[test]
     fn terminal_ui_state_preserves_patch_order() {
-        let event = TerminalUiStateEvent {
+        let event = TerminalUiState {
             sequence: 5,
             patches: vec![
                 TermTitleEvent {
@@ -183,8 +182,7 @@ mod tests {
             ],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded =
-            rkyv::from_bytes::<TerminalUiStateEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<TerminalUiState, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded.sequence, 5);
         assert!(matches!(
             decoded.patches.as_slice(),

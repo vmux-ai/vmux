@@ -43,7 +43,7 @@ impl Plugin for ToolPlugin {
 }
 
 pub trait ToolOperation: Component + Clone {
-    type Output: Send + Sync + 'static;
+    type Output: Component;
 
     fn execute(&self, store: &ToolStore) -> Result<Self::Output, String>;
 }
@@ -61,17 +61,17 @@ impl ToolStoreTarget {
     }
 }
 
-#[derive(Component)]
-pub struct ToolOperationResult<T: Send + Sync + 'static>(Result<T, String>);
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ToolOperationFailure(String);
 
-impl<T: Send + Sync + 'static> ToolOperationResult<T> {
-    pub fn value(&self) -> &Result<T, String> {
+impl ToolOperationFailure {
+    pub fn message(&self) -> &str {
         &self.0
     }
 }
 
 #[derive(Component)]
-struct ToolOperationTask<T: Send + Sync + 'static>(Task<Result<T, String>>);
+struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
 
 struct ToolOperationPlugin<O>(PhantomData<fn() -> O>);
 
@@ -98,7 +98,8 @@ fn start_operation<O>(
         (Entity, &O, &ToolStoreTarget),
         (
             Without<ToolOperationTask<O::Output>>,
-            Without<ToolOperationResult<O::Output>>,
+            Without<O::Output>,
+            Without<ToolOperationFailure>,
         ),
     >,
     stores: Query<&ToolStore>,
@@ -108,11 +109,9 @@ fn start_operation<O>(
 {
     for (entity, operation, target) in &operations {
         let Ok(store) = stores.get(target.entity()) else {
-            commands
-                .entity(entity)
-                .insert(ToolOperationResult::<O::Output>(Err(
-                    "tool store entity is unavailable".to_string(),
-                )));
+            commands.entity(entity).insert(ToolOperationFailure(
+                "tool store entity is unavailable".to_string(),
+            ));
             continue;
         };
         let operation = operation.clone();
@@ -134,10 +133,16 @@ fn finish_operation<O>(
         let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
             continue;
         };
-        commands
-            .entity(entity)
-            .remove::<ToolOperationTask<O::Output>>()
-            .insert(ToolOperationResult(result));
+        let mut entity = commands.entity(entity);
+        entity.remove::<ToolOperationTask<O::Output>>();
+        match result {
+            Ok(output) => {
+                entity.insert(output);
+            }
+            Err(error) => {
+                entity.insert(ToolOperationFailure(error));
+            }
+        }
     }
 }
 
@@ -298,21 +303,14 @@ brew "ripgrep"
 
         for _ in 0..100 {
             app.update();
-            if app
-                .world()
-                .get::<ToolOperationResult<ImportedNpmManifest>>(operation)
-                .is_some()
-            {
+            if app.world().get::<ImportedNpmManifest>(operation).is_some() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
-        let result = app
-            .world()
-            .get::<ToolOperationResult<ImportedNpmManifest>>(operation)
-            .unwrap();
-        assert_eq!(result.value(), &Ok(ImportedNpmManifest { packages: 1 }));
+        let output = app.world().get::<ImportedNpmManifest>(operation).unwrap();
+        assert_eq!(output, &ImportedNpmManifest { packages: 1 });
         assert_eq!(store.load().unwrap().packages["npm"], ["typescript"]);
     }
 

@@ -185,10 +185,17 @@ windows, menus, persistence, notifications, and device lifecycle remain adapter 
 application crates. Third-party features integrate by publishing a plugin that owns its pages,
 commands, tools, contracts, systems, and platform capabilities.
 
+Page crates use one physical layout. `host.rs` composes Bevy plugins and `host/` owns ECS
+components and systems. `ui.rs` exposes the Dioxus page entry point and `ui/` owns its UI
+subtrees. `state.rs` owns shared UI snapshots and patches; `event.rs` owns transient UI-to-host
+and host-to-UI operations. Generic `page.rs`, `page_state.rs`, `ui_state.rs`, and `view.rs` modules
+are not used because their ownership is ambiguous.
+
 `vmux_app::extension` exposes the stable integration pieces: page manifests and hosted-page
 plugins, command-bar contributions and their chosen message, and typed MCP tool plugins. A custom
-MCP binary composes tool plugins through `McpServer::builder().plugin(...)`; tool handlers own
-their typed manifest variant and return a typed command or query dispatch target.
+MCP binary builds a Bevy `App` with `McpPlugin` and its tool plugins, then passes the app to
+`McpServer::from`; tool handlers own their typed manifest variant and return a typed command or
+query dispatch target.
 
 Names describe domain semantics before transport mechanics. Implementing Bevy `Message`
 does not add a `Message` suffix. An operation to perform is a `Request`. A validated,
@@ -206,6 +213,11 @@ derives and define the complete wire name, version, and allowed page hosts. `Boo
 therefore has the wire id `bookmark_menu_pin@1`, with its module-local `Events` family supplying
 the `layout` target. A namespace would duplicate the target and the type prefix. Both UI-to-host
 decoding and host-to-UI delivery reject a mismatched host before decoding the data.
+
+`#[vmux_api::ui_state]` is the state-specific host-to-UI contract. It includes the contract,
+`HostEvent`, and `UiState` implementations, while `#[vmux_api::ui_state_patch]` supplies the
+serializable typed patch mapping. `#[vmux_api::host_event]` remains for one-shot notifications and
+responses that are not page state.
 
 Command-bar requests implement `CommandRequest` and are registered through `CommandTypePlugin`.
 Their definitions become ECS entities with targeted dispatch observers; no callback registry owns
@@ -691,7 +703,7 @@ crates/
 ├── host/                   runtime with no UI, owns state
 │   ├── vmux_client
 │   ├── vmux_mcp
-│   ├── vmux_remote
+│   ├── vmux_transport
 │   └── vmux_service
 ├── page/                   answers a URL, one per page
 │   ├── vmux_agent

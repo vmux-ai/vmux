@@ -59,8 +59,7 @@ pub use vmux_core::launcher::PendingLaunch;
 pub use webview_reveal::PendingWebviewReveal;
 pub use window::fit_window_to_screen;
 
-pub type LayoutUiStateUpdates =
-    vmux_core::host::UiStateUpdates<crate::ui_state::LayoutUiStateEvent>;
+pub type LayoutUiStateUpdates = vmux_core::host::UiStateUpdates<crate::state::LayoutUiState>;
 
 pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "layout",

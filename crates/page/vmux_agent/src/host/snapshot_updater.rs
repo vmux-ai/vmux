@@ -6,7 +6,7 @@ use vmux_command::snapshot::{
 use vmux_core::agent::AgentProviderTargetKind;
 use vmux_core::{ArchivedPage, LastActivatedAt, Ready};
 
-use crate::client::page::strategy_index::PageStrategyIndex;
+use crate::client::provider::index::ProviderStrategyIndex;
 
 pub(super) struct SnapshotPlugin;
 
@@ -17,7 +17,7 @@ pub(crate) enum SnapshotSet {
 
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<crate::acp_install::AcpPackageChanged>()
+        app.add_message::<crate::acp_tool::AcpPackageChanged>()
             .init_resource::<CommandBarUiState>()
             .add_systems(
                 Update,
@@ -42,13 +42,13 @@ fn update_agents_snapshot(
             Or<(Added<Ready>, Added<AgentProviderTargetKind>)>,
         ),
     >,
-    page_idx: Option<Res<PageStrategyIndex>>,
+    provider_idx: Option<Res<ProviderStrategyIndex>>,
     catalog: Option<Res<crate::client::acp::AcpCatalog>>,
-    mut package_changes: MessageReader<crate::acp_install::AcpPackageChanged>,
+    mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
     mut state: ResMut<CommandBarUiState>,
 ) {
     let providers_changed = !changed_q.is_empty();
-    let idx_changed = page_idx
+    let idx_changed = provider_idx
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
@@ -73,7 +73,7 @@ fn update_agents_snapshot(
         .map(|c| c.agents.as_slice())
         .unwrap_or_default();
     let acp = acp_agent_summaries(catalog_agents, |agent| {
-        crate::acp_install::is_agent_installed(agent)
+        crate::acp_tool::is_agent_installed(agent)
     });
 
     let mut providers: Vec<AgentProviderSummary> = providers_q
@@ -86,7 +86,7 @@ fn update_agents_snapshot(
         })
         .collect();
     providers.sort_by(|a, b| a.id.cmp(&b.id));
-    let strategies = page_idx
+    let strategies = provider_idx
         .as_ref()
         .map(|idx| {
             idx.keys()
@@ -120,7 +120,7 @@ fn acp_agent_summaries(
             name: agent.name.clone(),
             url: format!(
                 "vmux://sessions/{}",
-                crate::acp_install::agent_url_id(&agent.id)
+                crate::acp_tool::agent_url_id(&agent.id)
             ),
             icon: agent.icon.clone().unwrap_or_default(),
         })
@@ -150,7 +150,7 @@ fn update_recent_agents(
         consider(
             timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
             AgentPromptTarget::Acp {
-                id: crate::acp_install::agent_url_id(crate::acp_install::registry_id_alias(
+                id: crate::acp_tool::agent_url_id(crate::acp_tool::registry_id_alias(
                     &session.agent_id,
                 ))
                 .to_string(),
@@ -170,7 +170,7 @@ fn update_recent_agents(
         let target = match crate::url::AgentUrl::parse(&page.url) {
             Some(crate::url::AgentUrl::Cli { kind, .. }) => AgentPromptTarget::Cli(kind),
             Some(crate::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::Acp {
-                id: crate::acp_install::agent_url_id(crate::acp_install::registry_id_alias(&id))
+                id: crate::acp_tool::agent_url_id(crate::acp_tool::registry_id_alias(&id))
                     .to_string(),
             },
             _ => continue,

@@ -3,7 +3,7 @@
 pub mod event;
 
 #[cfg(ui)]
-pub mod page;
+pub mod ui;
 
 #[cfg(host)]
 mod host;

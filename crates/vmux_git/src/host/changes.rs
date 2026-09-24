@@ -127,7 +127,7 @@ fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, mut commands: Co
 
 fn on_fetch_request(
     trigger: On<BinReceive<GitFetchRequest>>,
-    mut views: Query<&mut super::view::GitView>,
+    mut views: Query<&mut super::state::GitState>,
     mut commands: Commands,
 ) {
     if let Ok(mut view) = views.get_mut(trigger.event().webview) {

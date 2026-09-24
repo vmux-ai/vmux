@@ -1,5 +1,5 @@
 use crate::explorer::{SEARCH_INPUT_ID, SidebarView};
-use crate::page::{ExplorerPane, Mode, focus_file_input};
+use crate::ui::{ExplorerPane, Mode, focus_file_input};
 use dioxus::prelude::*;
 use vmux_core::event::{
     CompletionItem, FileCompletionCommit, FileGotoRequest, FileKey, FileLine, RefItem,
@@ -213,7 +213,7 @@ impl FilePage {
         open.set(true);
         spawn(async move {
             sleep_ms(0).await;
-            crate::page::focus_find_input();
+            crate::ui::focus_find_input();
         });
     }
 

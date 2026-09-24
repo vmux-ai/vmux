@@ -20,7 +20,7 @@ impl ImportBrewfile {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImportedBrewfile {
     pub formulae: usize,
     pub casks: usize,

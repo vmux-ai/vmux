@@ -12,8 +12,7 @@ use vmux_api::git::{
     GitStatusEvent,
 };
 
-#[vmux_api::contract]
-#[derive(vmux_api::UiStatePatch)]
+#[vmux_api::ui_state_patch]
 pub enum FileUiStatePatch {
     Meta(FileMetaEvent),
     Viewport(FileViewportPatch),
@@ -56,8 +55,8 @@ pub enum FileUiStatePatch {
     GitChanged(GitChangedEvent),
 }
 
-#[vmux_api::host_event(Default, vmux_api::UiState, target = "files")]
-pub struct FileUiStateEvent {
+#[vmux_api::ui_state(Default, target = "files")]
+pub struct FileUiState {
     pub sequence: u64,
     pub patches: Vec<FileUiStatePatch>,
 }
@@ -68,7 +67,7 @@ mod tests {
 
     #[test]
     fn batches_preserve_patch_order() {
-        let event = FileUiStateEvent {
+        let event = FileUiState {
             sequence: 1,
             patches: vec![
                 FileMetaEvent {
@@ -85,7 +84,7 @@ mod tests {
             ],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
-        let decoded = rkyv::from_bytes::<FileUiStateEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(&bytes).unwrap();
         assert!(matches!(decoded.patches[0], FileUiStatePatch::Meta(_)));
         assert!(matches!(decoded.patches[1], FileUiStatePatch::Dirty(_)));
         assert_eq!(decoded.sequence, 1);

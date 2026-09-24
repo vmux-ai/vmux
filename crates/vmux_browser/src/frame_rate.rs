@@ -14,7 +14,7 @@ use vmux_api::command_bar::CommandBarOpenEvent;
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
-use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, ui_state::LayoutUiStateEvent};
+use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState};
 
 #[cfg(not(target_os = "macos"))]
 use crate::{
@@ -246,7 +246,7 @@ fn request_layout_frame_burst(
     mut burst: ResMut<LayoutFrameRateBurst>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    if trigger.id() != LayoutUiStateEvent::id() && trigger.id() != CommandBarOpenEvent::id() {
+    if trigger.id() != LayoutUiState::id() && trigger.id() != CommandBarOpenEvent::id() {
         return;
     }
     let Ok(mut cap) = layouts.get_mut(trigger.webview()) else {
@@ -340,7 +340,6 @@ fn sync_layout_cef_frame_rate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_layout::event::{PaneTreeEvent, TabsHostEvent};
 
     #[vmux_api::host_event(target = any)]
     struct OtherEvent;
@@ -383,31 +382,7 @@ mod tests {
             .id();
         app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
-            &PaneTreeEvent::default(),
-        ));
-        assert!(
-            app.world()
-                .resource::<LayoutFrameRateBurst>()
-                .last_emit
-                .is_none()
-        );
-        assert_eq!(
-            app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
-            LAYOUT_IDLE_FRAME_RATE
-        );
-        app.world_mut().trigger(BinHostEmitEvent::from_event(
-            layout,
-            &TabsHostEvent::default(),
-        ));
-        assert!(
-            app.world()
-                .resource::<LayoutFrameRateBurst>()
-                .last_emit
-                .is_none()
-        );
-        app.world_mut().trigger(BinHostEmitEvent::from_event(
-            layout,
-            &LayoutUiStateEvent::default(),
+            &LayoutUiState::default(),
         ));
         assert!(
             app.world()

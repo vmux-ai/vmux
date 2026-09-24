@@ -2,7 +2,7 @@ use crate::qr_scanner;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
-use vmux_remote::{ClientCredential, DeviceId};
+use vmux_transport::{ClientCredential, DeviceId};
 use vmux_ui::i18n::translate;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -38,7 +38,7 @@ impl Credentials {
             credential,
             client_id: self.client_id.clone(),
             fingerprint: self.fingerprint.clone(),
-            desktop: vmux_remote::DeviceId::new(&self.device),
+            desktop: vmux_transport::DeviceId::new(&self.device),
         })
     }
 

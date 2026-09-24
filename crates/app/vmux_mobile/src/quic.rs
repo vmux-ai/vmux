@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use vmux_api::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
-use vmux_remote::framing::{Frame, FrameStream};
-use vmux_remote::quic::endpoint::Trust;
-use vmux_remote::quic::tunnel::{DESKTOP_TAG, TunnelSocket, relayed_peer};
-use vmux_remote::quic::{
+use vmux_transport::framing::{Frame, FrameStream};
+use vmux_transport::quic::endpoint::Trust;
+use vmux_transport::quic::tunnel::{DESKTOP_TAG, TunnelSocket, relayed_peer};
+use vmux_transport::quic::{
     Accepted, ClientSetup, CloseCode, MessageType, RelaySetup, SessionAccepted,
 };
-use vmux_remote::{ClientCredential, DeviceId, PeerRole};
+use vmux_transport::{ClientCredential, DeviceId, PeerRole};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
@@ -168,7 +168,7 @@ impl QuicApi {
         let port: u16 = port
             .parse()
             .map_err(|_| QuicError::Transport(translate("mobile-error-address-no-port")))?;
-        let address = vmux_remote::quic::endpoint::resolve_preferring_ipv4(host, port)
+        let address = vmux_transport::quic::endpoint::resolve_preferring_ipv4(host, port)
             .await
             .map_err(QuicError::Transport)?;
 

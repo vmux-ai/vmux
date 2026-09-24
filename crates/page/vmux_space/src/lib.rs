@@ -6,7 +6,7 @@
 
 pub mod model;
 #[cfg(ui)]
-pub mod page;
+pub mod ui;
 
 pub use vmux_api::space as event;
 

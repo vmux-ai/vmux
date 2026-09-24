@@ -1,8 +1,8 @@
 mod tree;
 pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
 
-pub mod acp_install;
 pub mod acp_registry;
+pub mod acp_tool;
 pub(crate) mod approval;
 pub mod attach;
 pub mod attention;

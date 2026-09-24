@@ -16,8 +16,9 @@ pub struct McpServerEntry {
     pub status: McpServerStatus,
 }
 
-#[vmux_api::host_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
+#[vmux_api::ui_state(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
 pub struct McpServers {
+    pub loaded: bool,
     pub servers: Vec<McpServerEntry>,
 }
 
