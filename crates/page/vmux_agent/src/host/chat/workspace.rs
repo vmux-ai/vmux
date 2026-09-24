@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
 
 use super::AgentChatView;
 use super::ChatUiStateUpdates;
@@ -249,13 +249,14 @@ fn drain_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(
+        ChatUiStateUpdates::write(
+            &mut commands,
             read.webview,
             &ChatProjectBranches {
                 project: read.project.clone(),
                 branches,
             },
-        ));
+        );
     }
 }
 

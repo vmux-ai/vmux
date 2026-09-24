@@ -961,6 +961,7 @@ pub(crate) fn attach_cli_setup_to_stack(
     let browser = commands
         .spawn((
             vmux_layout::Browser::new_with_title(&url, &title),
+            crate::vibe::setup::AgentSetupView,
             ChildOf(stack),
         ))
         .id();

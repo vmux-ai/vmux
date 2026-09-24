@@ -97,7 +97,7 @@ pub struct StartBranchesRequest {
     pub project: String,
 }
 
-#[vmux_api::host_event(Default, target = "start")]
+#[vmux_api::contract(Default)]
 pub struct StartProjectBranches {
     pub project: String,
     pub branches: Vec<crate::space::ProjectBranch>,

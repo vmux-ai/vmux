@@ -1,17 +1,19 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_api::page::PageEmit;
 use vmux_api::room::RemoteModelState;
 
 use crate::event::ModelState;
+use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
 
 pub struct ChatModelPlugin;
 
 impl Plugin for ChatModelPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ChatUiStatePlugin>() {
+            app.add_plugins(ChatUiStatePlugin);
+        }
         app.init_resource::<Models>()
             .init_resource::<Picker>()
-            .add_message::<PageEmit>()
             .add_systems(
                 Update,
                 (
@@ -46,10 +48,7 @@ impl Picker {
         };
     }
 
-    fn emit(picker: Res<Picker>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::from_event(&picker.0) else {
-            return;
-        };
-        emits.write(emit);
+    fn emit(picker: Res<Picker>, mut projection: ResMut<ChatUiStateProjection>) {
+        projection.write(&picker.0);
     }
 }

@@ -10,7 +10,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
 use vmux_api::BinEvent;
-use vmux_api::command_bar::CommandBarOpenEvent;
+use vmux_api::command_bar::CommandBarUiState;
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
@@ -246,7 +246,7 @@ fn request_layout_frame_burst(
     mut burst: ResMut<LayoutFrameRateBurst>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    if trigger.id() != LayoutUiState::id() && trigger.id() != CommandBarOpenEvent::id() {
+    if trigger.id() != LayoutUiState::id() && trigger.id() != CommandBarUiState::id() {
         return;
     }
     let Ok(mut cap) = layouts.get_mut(trigger.webview()) else {
@@ -340,6 +340,7 @@ fn sync_layout_cef_frame_rate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_api::command_bar::CommandBarOpenEvent;
 
     #[vmux_api::host_event(target = any)]
     struct OtherEvent;
@@ -400,7 +401,10 @@ mod tests {
             .insert(WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE));
         app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
-            &CommandBarOpenEvent::default(),
+            &CommandBarUiState {
+                sequence: 1,
+                patches: vec![CommandBarOpenEvent::default().into()],
+            },
         ));
         assert_eq!(
             app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,

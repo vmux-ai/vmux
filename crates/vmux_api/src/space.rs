@@ -1,7 +1,7 @@
 pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
 pub const PROJECTS_PAGE_URL: &str = "vmux://projects/";
 
-#[vmux_api::host_event(Copy, Eq, targets = ["spaces", "layout"])]
+#[vmux_api::contract(Copy, Eq)]
 pub enum SpaceKey {
     Next,
     Previous,
@@ -9,9 +9,21 @@ pub enum SpaceKey {
     Delete,
 }
 
-#[vmux_api::ui_state(Default, Eq, targets = ["spaces", "layout"])]
+#[vmux_api::contract(Default, Eq)]
 pub struct SpacesListEvent {
     pub spaces: Vec<SpaceRow>,
+}
+
+#[vmux_api::ui_state_patch]
+pub enum SpacesUiStatePatch {
+    Snapshot(Box<SpacesListEvent>),
+    Key(SpaceKey),
+}
+
+#[vmux_api::ui_state(Default, target = "spaces")]
+pub struct SpacesUiState {
+    pub sequence: u64,
+    pub patches: Vec<SpacesUiStatePatch>,
 }
 
 #[vmux_api::contract(Default, Eq)]

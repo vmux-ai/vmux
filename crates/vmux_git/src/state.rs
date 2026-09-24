@@ -72,12 +72,6 @@ pub enum GitUiStatePatch {
     Snapshot(Box<GitPageSnapshot>),
 }
 
-impl From<GitPageSnapshot> for GitUiStatePatch {
-    fn from(snapshot: GitPageSnapshot) -> Self {
-        Self::Snapshot(Box::new(snapshot))
-    }
-}
-
 #[vmux_api::ui_state(Default, target = "git")]
 pub struct GitUiState {
     pub sequence: u64,

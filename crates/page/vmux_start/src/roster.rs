@@ -1,6 +1,8 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_api::command_bar::{CommandBarOpenEvent, CommandBarPage, CommandBarTab, OpenId};
+use vmux_api::command_bar::{
+    CommandBarOpenEvent, CommandBarPage, CommandBarTab, CommandBarUiState, OpenId,
+};
 use vmux_api::page::PageEmit;
 
 use vmux_api::icon::PageIcon;
@@ -37,15 +39,23 @@ pub struct Roster {
 }
 
 #[derive(Resource, Default)]
-pub struct Launcher(pub CommandBarOpenEvent);
+pub struct Launcher {
+    snapshot: CommandBarOpenEvent,
+    sequence: u64,
+}
 
 impl Launcher {
     fn project(roster: Res<Roster>, mut launcher: ResMut<Launcher>) {
-        launcher.0 = Self::snapshot(&roster);
+        launcher.snapshot = Self::snapshot(&roster);
     }
 
-    fn emit(launcher: Res<Launcher>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::from_event(&launcher.0) else {
+    fn emit(mut launcher: ResMut<Launcher>, mut emits: MessageWriter<PageEmit>) {
+        launcher.sequence = launcher.sequence.wrapping_add(1).max(1);
+        let state = CommandBarUiState {
+            sequence: launcher.sequence,
+            patches: vec![launcher.snapshot.clone().into()],
+        };
+        let Some(emit) = PageEmit::from_event(&state) else {
             return;
         };
         emits.write(emit);
@@ -146,7 +156,7 @@ mod tests {
         }
 
         fn launcher(&self) -> &CommandBarOpenEvent {
-            &self.0.world().resource::<Launcher>().0
+            &self.0.world().resource::<Launcher>().snapshot
         }
 
         fn reroster(&mut self, roster: Roster) {

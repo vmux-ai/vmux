@@ -1,4 +1,21 @@
-use crate::event::{ChatKey, ChatSnapshot, ComposerContext, ModeState, ModelState, SlashCommands};
+use crate::event::{
+    ChatAttachmentPreviews, ChatAttachments, ChatHistoryPage, ChatKey, ChatMediaEntries,
+    ChatProjectBranches, ChatSnapshot, ComposerContext, ModeState, ModelState, ResumableSessions,
+    SlashCommands,
+};
+use bevy_app::{App, Last, Plugin};
+use bevy_ecs::prelude::*;
+use vmux_api::page::PageEmit;
+
+pub struct ChatUiStatePlugin;
+
+impl Plugin for ChatUiStatePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ChatUiStateProjection>()
+            .add_message::<PageEmit>()
+            .add_systems(Last, ChatUiStateProjection::emit);
+    }
+}
 
 #[vmux_api::ui_state_patch]
 pub enum ChatUiStatePatch {
@@ -8,18 +25,48 @@ pub enum ChatUiStatePatch {
     Model(ModelState),
     SlashCommands(SlashCommands),
     Key(ChatKey),
-}
-
-impl From<ChatSnapshot> for ChatUiStatePatch {
-    fn from(snapshot: ChatSnapshot) -> Self {
-        Self::Snapshot(Box::new(snapshot))
-    }
+    History(Box<ChatHistoryPage>),
+    Attachments(Box<ChatAttachments>),
+    AttachmentPreviews(Box<ChatAttachmentPreviews>),
+    MediaEntries(Box<ChatMediaEntries>),
+    ProjectBranches(Box<ChatProjectBranches>),
+    ResumableSessions(Box<ResumableSessions>),
 }
 
 #[vmux_api::ui_state(Default, targets = ["sessions", "agent", "start"])]
 pub struct ChatUiState {
     pub sequence: u64,
     pub patches: Vec<ChatUiStatePatch>,
+}
+
+#[derive(Resource, Default)]
+pub struct ChatUiStateProjection {
+    sequence: u64,
+    patches: Vec<ChatUiStatePatch>,
+}
+
+impl ChatUiStateProjection {
+    pub fn write<T>(&mut self, payload: &T)
+    where
+        T: Clone + Into<ChatUiStatePatch>,
+    {
+        self.patches.push(payload.clone().into());
+    }
+
+    fn emit(mut projection: ResMut<Self>, mut emits: MessageWriter<PageEmit>) {
+        if projection.patches.is_empty() {
+            return;
+        }
+        projection.sequence = projection.sequence.wrapping_add(1).max(1);
+        let state = ChatUiState {
+            sequence: projection.sequence,
+            patches: std::mem::take(&mut projection.patches),
+        };
+        let Some(emit) = PageEmit::from_event(&state) else {
+            return;
+        };
+        emits.write(emit);
+    }
 }
 
 #[cfg(test)]

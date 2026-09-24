@@ -15,12 +15,12 @@ pub struct ChatSubmitAttachment {
     pub size: u64,
 }
 
-#[vmux_api::host_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::contract(Default)]
 pub struct ChatAttachments {
     pub attachments: Vec<ChatAttachment>,
 }
 
-#[vmux_api::host_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::contract(Default)]
 pub struct ChatAttachmentPreviews {
     pub attachments: Vec<ChatAttachment>,
 }
@@ -58,7 +58,7 @@ impl ChatMediaEntry {
     }
 }
 
-#[vmux_api::host_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::contract(Default)]
 pub struct ChatMediaEntries {
     pub request_id: u64,
     pub query: String,

@@ -6,10 +6,10 @@ use crate::event::{
     ChatAttachmentPreviewRequest, ChatAttachmentPreviews, ChatAttachments, ChatBranch,
     ChatBranchesRequest, ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage,
     ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
-    ChatPickFiles, ChatProjectBranches, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
-    ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry,
-    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SelectMode,
-    SelectModel, SlashCommandEntry, latest_tool_location,
+    ChatPickFiles, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ComposerContext,
+    ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SelectMode, SelectModel,
+    SlashCommandEntry, latest_tool_location,
 };
 use crate::format::composer::{
     ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
@@ -31,7 +31,7 @@ use vmux_ui::components::composer_bar::{
 use vmux_ui::components::mcp_menu::{McpConnections, McpQuery, use_mcp_connections};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{send, use_listener, use_selector, use_theme, use_ui_state_root};
+use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -102,46 +102,6 @@ impl Chat {
                 chat.apply_ui_state(patch);
             }
         });
-        let _history = use_listener::<ChatHistoryPage, _>(move |page| {
-            chat.apply_history_page(page);
-        });
-        let _attachments = use_listener::<ChatAttachments, _>(move |selected| {
-            let mut attachments = chat.composer.attachments;
-            let current = attachments.peek().clone();
-            attachments.set(merge_chat_attachments(&current, &selected.attachments));
-            focus_prompt_end(PROMPT_INPUT_ID);
-        });
-        let _previews = use_listener::<ChatAttachmentPreviews, _>(move |loaded| {
-            let mut known = chat.composer.attachment_previews;
-            let mut previews = known.peek().clone();
-            for attachment in &loaded.attachments {
-                previews.insert(attachment.path.clone(), attachment.clone());
-            }
-            known.set(previews);
-        });
-        let _media = use_listener::<ChatMediaEntries, _>(move |response| {
-            if response.request_id != (chat.media.request_id)() {
-                return;
-            }
-            let mut entries = chat.media.entries;
-            let mut loading = chat.media.loading;
-            let mut menu_sel = chat.slash.menu_sel;
-            entries.set(response.entries.clone());
-            loading.set(false);
-            menu_sel.set(0);
-        });
-        let _branches = use_listener::<ChatProjectBranches, _>(move |incoming| {
-            chat.projects
-                .remember(incoming.project.clone(), incoming.branches.clone());
-        });
-        let _sessions = use_listener::<ResumableSessions, _>(move |incoming| {
-            let mut sessions = chat.resume.sessions;
-            let mut menu_sel = chat.slash.menu_sel;
-            let mut loading = chat.resume.loading;
-            sessions.set(incoming.sessions.clone());
-            menu_sel.set(0);
-            loading.set(false);
-        });
     }
 
     fn apply_ui_state(&self, patch: &ChatUiStatePatch) {
@@ -186,7 +146,52 @@ impl Chat {
                 commands.set(incoming.commands.clone());
             }
             ChatUiStatePatch::Key(_) => {}
+            ChatUiStatePatch::History(page) => self.apply_history_page(*page.clone()),
+            ChatUiStatePatch::Attachments(selected) => self.apply_attachments(selected),
+            ChatUiStatePatch::AttachmentPreviews(loaded) => self.apply_previews(loaded),
+            ChatUiStatePatch::MediaEntries(response) => self.apply_media(response),
+            ChatUiStatePatch::ProjectBranches(incoming) => self
+                .projects
+                .remember(incoming.project.clone(), incoming.branches.clone()),
+            ChatUiStatePatch::ResumableSessions(incoming) => self.apply_sessions(incoming),
         }
+    }
+
+    fn apply_attachments(&self, selected: &ChatAttachments) {
+        let mut attachments = self.composer.attachments;
+        let current = attachments.peek().clone();
+        attachments.set(merge_chat_attachments(&current, &selected.attachments));
+        focus_prompt_end(PROMPT_INPUT_ID);
+    }
+
+    fn apply_previews(&self, loaded: &ChatAttachmentPreviews) {
+        let mut known = self.composer.attachment_previews;
+        let mut previews = known.peek().clone();
+        for attachment in &loaded.attachments {
+            previews.insert(attachment.path.clone(), attachment.clone());
+        }
+        known.set(previews);
+    }
+
+    fn apply_media(&self, response: &ChatMediaEntries) {
+        if response.request_id != (self.media.request_id)() {
+            return;
+        }
+        let mut entries = self.media.entries;
+        let mut loading = self.media.loading;
+        let mut menu_sel = self.slash.menu_sel;
+        entries.set(response.entries.clone());
+        loading.set(false);
+        menu_sel.set(0);
+    }
+
+    fn apply_sessions(&self, incoming: &ResumableSessions) {
+        let mut sessions = self.resume.sessions;
+        let mut menu_sel = self.slash.menu_sel;
+        let mut loading = self.resume.loading;
+        sessions.set(incoming.sessions.clone());
+        menu_sel.set(0);
+        loading.set(false);
     }
 
     fn watch(&self) {

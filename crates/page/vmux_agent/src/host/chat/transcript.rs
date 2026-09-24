@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
 
 use super::model::{ModeProjection, ModelProjection};
 use super::{AgentChatView, ChatSynced, ChatUiStateUpdates};
@@ -414,7 +414,8 @@ fn on_chat_history_request(
         request.before as usize,
         request.limit.clamp(1, CHAT_HISTORY_MAX_PAGE_SIZE) as usize,
     );
-    commands.trigger(BinHostEmitEvent::from_event(
+    ChatUiStateUpdates::write(
+        &mut commands,
         webview,
         &ChatHistoryPage {
             items: page.items,
@@ -422,7 +423,7 @@ fn on_chat_history_request(
             end: u32::try_from(page.end).unwrap_or(u32::MAX),
             total: u32::try_from(page.total).unwrap_or(u32::MAX),
         },
-    ));
+    );
 }
 
 #[cfg(test)]

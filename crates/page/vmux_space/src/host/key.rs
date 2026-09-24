@@ -1,5 +1,5 @@
+use super::SpacesUiStateUpdates;
 use bevy::prelude::*;
-use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_api::space::SpaceKey;
 use vmux_command::{
     CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
@@ -64,29 +64,25 @@ fn echo_key_command(
     let Ok(key) = keys.get(trigger.event().command()) else {
         return;
     };
-    commands.trigger(BinHostEmitEvent::from_event(
-        trigger.event().invocation().caller,
-        &key.0,
-    ));
+    SpacesUiStateUpdates::write(&mut commands, trigger.event().invocation().caller, &key.0);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::BinEvent;
+    use vmux_api::space::{SpacesUiState, SpacesUiStatePatch};
     use vmux_command::CommandInvocation;
+    use vmux_core::host::UiStateWrite;
 
     #[derive(Resource, Default)]
-    struct Echoed(Vec<(Entity, String)>);
+    struct Echoed(Vec<(Entity, SpaceKey)>);
 
     impl Echoed {
-        fn record(trigger: On<BinHostEmitEvent>, mut echoed: ResMut<Self>) {
-            let decoded = rkyv::from_bytes::<SpaceKey, rkyv::rancor::Error>(trigger.payload())
-                .map(|key| format!("{key:?}"))
-                .unwrap_or_else(|_| "undecodable".to_string());
-            echoed
-                .0
-                .push((trigger.webview(), format!("{}:{decoded}", trigger.id())));
+        fn record(trigger: On<UiStateWrite<SpacesUiState>>, mut echoed: ResMut<Self>) {
+            let SpacesUiStatePatch::Key(key) = trigger.event().patch() else {
+                return;
+            };
+            echoed.0.push((trigger.event().webview(), *key));
         }
     }
 
@@ -120,7 +116,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
-            vec![(pressed, format!("{}:Delete", SpaceKey::id()))]
+            vec![(pressed, SpaceKey::Delete)]
         );
         assert!(
             !app.world()

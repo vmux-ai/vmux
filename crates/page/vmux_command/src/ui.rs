@@ -21,9 +21,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, McpQuery, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
-use vmux_ui::hooks::{
-    MenuDirection, move_selection, send, use_key_claim, use_listener, use_ui_state_patch,
-};
+use vmux_ui::hooks::{MenuDirection, move_selection, send, use_key_claim, use_ui_state_patch};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::launcher::palette::{
@@ -41,6 +39,31 @@ mod composer;
 mod media;
 mod search;
 mod signals;
+
+pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
+    let root = vmux_ui::hooks::use_ui_state_root::<CommandBarUiState>();
+    let mut state = use_signal(CommandBarOpenEvent::default);
+    let mut handled_sequence = use_signal(|| 0);
+    use_effect(move || {
+        let event = root.state.read();
+        if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
+            return;
+        }
+        handled_sequence.set(event.sequence);
+        for patch in &event.patches {
+            match patch {
+                vmux_api::command_bar::CommandBarUiStatePatch::Snapshot(snapshot) => {
+                    state.set(*snapshot.clone());
+                }
+                vmux_api::command_bar::CommandBarUiStatePatch::FocusInput(_) => {
+                    focus_prompt_input();
+                }
+                _ => {}
+            }
+        }
+    });
+    state
+}
 
 #[component]
 pub fn CommandPalette(props: PaletteProps) -> Element {
@@ -100,13 +123,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let mut recall = use_prompt_recall();
-    let _prompt_history = use_listener::<PromptHistory, _>(move |incoming| {
-        recall.remember(incoming.prompts);
+    let prompt_history = use_ui_state_patch::<CommandBarUiState, PromptHistory>();
+    use_effect(move || {
+        for incoming in prompt_history.take() {
+            recall.remember(incoming.prompts);
+        }
     });
 
     let mut picking = use_project_picking();
-    let _project_branches = use_listener::<StartProjectBranches, _>(move |incoming| {
-        picking.remember(incoming.project, incoming.branches);
+    let project_branches = use_ui_state_patch::<CommandBarUiState, StartProjectBranches>();
+    use_effect(move || {
+        for incoming in project_branches.take() {
+            picking.remember(incoming.project, incoming.branches);
+        }
     });
 
     use_effect(move || {
@@ -115,19 +144,22 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         ));
     });
 
-    let _sessions = use_listener::<ResumableSessions, _>(move |incoming| {
-        let mut sessions = feeds.sessions;
-        let mut total = feeds.sessions_total;
-        let mut loading = feeds.sessions_loading;
-        total.set(incoming.total);
-        loading.set(false);
-        if incoming.offset == 0 {
-            sessions.set(incoming.sessions.clone());
-            return;
+    let session_updates = use_ui_state_patch::<CommandBarUiState, ResumableSessions>();
+    use_effect(move || {
+        for incoming in session_updates.take() {
+            let mut sessions = feeds.sessions;
+            let mut total = feeds.sessions_total;
+            let mut loading = feeds.sessions_loading;
+            total.set(incoming.total);
+            loading.set(false);
+            if incoming.offset == 0 {
+                sessions.set(incoming.sessions);
+                continue;
+            }
+            let mut held = sessions.peek().clone();
+            held.extend(incoming.sessions);
+            sessions.set(held);
         }
-        let mut held = sessions.peek().clone();
-        held.extend(incoming.sessions.iter().cloned());
-        sessions.set(held);
     });
     use_effect(move || {
         let query = (signals.query)();
@@ -269,27 +301,36 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         });
     };
 
-    let _attachments_listener = use_listener::<ChatAttachments, _>(move |selected| {
-        if !is_start {
-            return;
+    let attachment_updates = use_ui_state_patch::<CommandBarUiState, ChatAttachments>();
+    use_effect(move || {
+        for selected in attachment_updates.take() {
+            if !is_start {
+                continue;
+            }
+            let current = attachments.peek().clone();
+            attachments.set(merge_chat_attachments(&current, &selected.attachments));
+            focus_prompt_end(PROMPT_INPUT_ID);
         }
-        let current = attachments.peek().clone();
-        attachments.set(merge_chat_attachments(&current, &selected.attachments));
-        focus_prompt_end(PROMPT_INPUT_ID);
     });
 
-    let _attachment_previews_listener = use_listener::<ChatAttachmentPreviews, _>(move |loaded| {
-        if !is_start {
-            return;
+    let preview_updates = use_ui_state_patch::<CommandBarUiState, ChatAttachmentPreviews>();
+    use_effect(move || {
+        for loaded in preview_updates.take() {
+            if !is_start {
+                continue;
+            }
+            media.remember_previews(&loaded.attachments);
         }
-        media.remember_previews(&loaded.attachments);
     });
 
-    let _media_entries_listener = use_listener::<ChatMediaEntries, _>(move |response| {
-        if !is_start {
-            return;
+    let media_updates = use_ui_state_patch::<CommandBarUiState, ChatMediaEntries>();
+    use_effect(move || {
+        for response in media_updates.take() {
+            if !is_start {
+                continue;
+            }
+            media.receive(response);
         }
-        media.receive(response);
     });
 
     let composer = palette.composer.clone();

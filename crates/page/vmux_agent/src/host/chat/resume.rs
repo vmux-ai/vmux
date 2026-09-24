@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
+use super::ChatUiStateUpdates;
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
@@ -279,7 +280,11 @@ fn drain_prompt_history_tasks(
             continue;
         };
         commands.entity(entity).despawn();
-        commands.trigger(BinHostEmitEvent::from_event(task.webview, &history));
+        vmux_command::snapshot::CommandBarUiStateUpdates::write(
+            &mut commands,
+            task.webview,
+            &history,
+        );
     }
 }
 
@@ -352,7 +357,12 @@ fn drain_resume_list_tasks(
             scan.sessions = scanned;
             scan.read_at = Some(std::time::Instant::now());
         }
-        commands.trigger(BinHostEmitEvent::from_event(task.webview, &answer.sessions));
+        ChatUiStateUpdates::write(&mut commands, task.webview, &answer.sessions);
+        vmux_command::snapshot::CommandBarUiStateUpdates::write(
+            &mut commands,
+            task.webview,
+            &answer.sessions,
+        );
     }
 }
 

@@ -332,7 +332,7 @@ pub struct PromptHistoryRequest {
     pub cwd: String,
 }
 
-#[vmux_api::host_event(Default, Eq, targets = ["sessions", "agent", "start"])]
+#[vmux_api::contract(Default, Eq)]
 pub struct PromptHistory {
     pub prompts: Vec<String>,
 }
@@ -354,7 +354,7 @@ pub struct ResumableSessionEntry {
     pub branch: String,
     pub cross_runtime: bool,
 }
-#[vmux_api::host_event(Default, targets = ["sessions", "agent", "start"])]
+#[vmux_api::contract(Default)]
 pub struct ResumableSessions {
     pub sessions: Vec<ResumableSessionEntry>,
     pub offset: u32,
@@ -377,7 +377,7 @@ pub struct SlashCommandEntry {
     pub name: String,
     pub description: String,
 }
-#[vmux_api::ui_state(Default, targets = ["sessions", "agent", "start"])]
+#[vmux_api::contract(Default)]
 pub struct SlashCommands {
     pub commands: Vec<SlashCommandEntry>,
 }

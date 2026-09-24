@@ -5,6 +5,8 @@ pub mod project;
 pub mod snapshot_updater;
 pub mod spaces;
 
+type SpacesUiStateUpdates = vmux_core::host::UiStateUpdates<vmux_api::space::SpacesUiState>;
+
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "spaces",
     title: "Spaces",

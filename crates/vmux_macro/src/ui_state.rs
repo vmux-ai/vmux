@@ -85,14 +85,25 @@ pub(crate) fn derive_patch(input: &DeriveInput) -> syn::Result<TokenStream> {
                 "UiStatePatch variants require one unnamed field",
             ));
         }
-        let payload = &fields.unnamed[0].ty;
+        let stored = &fields.unnamed[0].ty;
+        let payload = boxed_inner(stored).unwrap_or(stored);
         let variant = &variant.ident;
+        let constructor = if boxed_inner(stored).is_some() {
+            quote! { ::std::boxed::Box::new(payload) }
+        } else {
+            quote! { payload }
+        };
+        let payload_ref = if boxed_inner(stored).is_some() {
+            quote! { payload.as_ref() }
+        } else {
+            quote! { payload }
+        };
         implementations.push(quote! {
             impl #impl_generics ::core::convert::From<#payload>
                 for #ident #type_generics #where_clause
             {
                 fn from(payload: #payload) -> Self {
-                    Self::#variant(payload)
+                    Self::#variant(#constructor)
                 }
             }
 
@@ -103,7 +114,7 @@ pub(crate) fn derive_patch(input: &DeriveInput) -> syn::Result<TokenStream> {
                     let Self::#variant(payload) = self else {
                         return ::core::option::Option::None;
                     };
-                    ::core::option::Option::Some(payload)
+                    ::core::option::Option::Some(#payload_ref)
                 }
             }
         });
@@ -127,6 +138,23 @@ fn vec_element(ty: &Type) -> Option<&Type> {
         return None;
     };
     Some(element)
+}
+
+fn boxed_inner(ty: &Type) -> Option<&Type> {
+    let Type::Path(path) = ty else {
+        return None;
+    };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Box" {
+        return None;
+    }
+    let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return None;
+    };
+    let Some(GenericArgument::Type(inner)) = arguments.args.first() else {
+        return None;
+    };
+    Some(inner)
 }
 
 #[cfg(test)]
@@ -174,5 +202,22 @@ mod tests {
         let file = parse2::<syn::File>(output).unwrap();
         assert_eq!(file.items.len(), 4);
         assert!(file.items.iter().all(|item| matches!(item, Item::Impl(_))));
+    }
+
+    #[test]
+    fn boxed_patch_maps_the_unboxed_payload_type() {
+        let input = parse_quote! {
+            pub enum EditorPatch {
+                Snapshot(Box<Snapshot>),
+            }
+        };
+        let output = derive_patch(&input).unwrap();
+        let file = parse2::<syn::File>(output).unwrap();
+        let rendered = quote!(#file).to_string();
+
+        assert!(rendered.contains("From < Snapshot >"));
+        assert!(rendered.contains("UiStatePatch < Snapshot >"));
+        assert!(rendered.contains("Box :: new (payload)"));
+        assert!(rendered.contains("payload . as_ref ()"));
     }
 }

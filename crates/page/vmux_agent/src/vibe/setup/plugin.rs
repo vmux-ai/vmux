@@ -1,8 +1,9 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
 use super::event::{
     AgentInstallRunRequest, AgentSetupPrereqRequest, AgentSetupPrereqStatus, AgentSetupResult,
+    AgentSetupUiState,
 };
 use vmux_core::agent::AgentKind;
 
@@ -10,14 +11,14 @@ pub struct AgentSetupPlugin;
 
 impl Plugin for AgentSetupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            AgentInstallRunRequest,
-            AgentSetupPrereqRequest,
-        )>::default())
-            .add_observer(on_agent_install_run)
-            .add_observer(on_agent_setup_prereq_request)
-            .add_systems(Update, auto_redirect_agent_setup_when_installed)
-            .add_systems(Update, detect_agent_install_outcome);
+        app.add_plugins((
+            UiEventPlugin::<(AgentInstallRunRequest, AgentSetupPrereqRequest)>::default(),
+            vmux_core::host::UiStatePlugin::<AgentSetupUiState>::default(),
+        ))
+        .add_observer(on_agent_install_run)
+        .add_observer(on_agent_setup_prereq_request)
+        .add_systems(Update, auto_redirect_agent_setup_when_installed)
+        .add_systems(Update, detect_agent_install_outcome);
     }
 }
 
@@ -33,6 +34,12 @@ struct AgentInstallPane {
 #[derive(Component)]
 pub(crate) struct AgentSetupNavigated;
 
+#[derive(Component)]
+#[require(AgentSetupUiStateUpdates)]
+pub(crate) struct AgentSetupView;
+
+type AgentSetupUiStateUpdates = vmux_core::host::UiStateUpdates<AgentSetupUiState>;
+
 fn run_install_in_new_tab(run: &mut MessageWriter<vmux_terminal::RunShellRequest>, command: &str) {
     run.write(vmux_terminal::RunShellRequest {
         command: command.to_string(),
@@ -47,19 +54,17 @@ fn prereq_needs_homebrew(segment: &str, brew_present: bool) -> bool {
 
 fn on_agent_setup_prereq_request(
     trigger: On<BinReceive<AgentSetupPrereqRequest>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let segment = &trigger.event().payload.agent;
     let brew_present = crate::exec::find_executable("brew").is_some();
     let needs_homebrew = prereq_needs_homebrew(segment, brew_present);
-    if browsers.can_emit_to(&webview) {
-        commands.trigger(BinHostEmitEvent::from_event(
-            webview,
-            &AgentSetupPrereqStatus { needs_homebrew },
-        ));
-    }
+    AgentSetupUiStateUpdates::write(
+        &mut commands,
+        webview,
+        &AgentSetupPrereqStatus { needs_homebrew },
+    );
 }
 
 fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
@@ -83,7 +88,6 @@ fn detect_agent_install_outcome(
     mut events: MessageReader<vmux_terminal::CommandLifecycleEvent>,
     mut install_panes: Query<(Entity, &mut AgentInstallPane)>,
     setup_stacks: Query<&vmux_core::PageMetadata, With<vmux_layout::stack::Stack>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     use vmux_service::protocol::CommandLifecycleKind;
@@ -97,15 +101,14 @@ fn detect_agent_install_outcome(
                 CommandLifecycleKind::Ended { .. } => {
                     let installed = crate::exec::find_executable(pane.agent.executable()).is_some();
                     if let Some(ok) = install_outcome(pane.armed, installed) {
-                        if browsers.can_emit_to(&pane.setup_webview) {
-                            commands.trigger(BinHostEmitEvent::from_event(
-                                pane.setup_webview,
-                                &AgentSetupResult {
-                                    agent: pane.agent.as_url_segment().to_string(),
-                                    ok,
-                                },
-                            ));
-                        }
+                        AgentSetupUiStateUpdates::write(
+                            &mut commands,
+                            pane.setup_webview,
+                            &AgentSetupResult {
+                                agent: pane.agent.as_url_segment().to_string(),
+                                ok,
+                            },
+                        );
                         if ok
                             && setup_stacks
                                 .get(pane.setup_stack)
