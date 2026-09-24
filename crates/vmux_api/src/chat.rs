@@ -239,7 +239,7 @@ pub const WORKING_VERB_IDS: &[&str] = &[
     "agent-working-spelunking",
 ];
 
-#[vmux_api::host_event(Copy, Eq, targets = ["sessions", "agent", "start"])]
+#[vmux_api::contract(Copy, Eq)]
 pub enum ChatKey {
     ListNext,
     ListPrevious,

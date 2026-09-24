@@ -1,4 +1,4 @@
-use crate::event::{ChatSnapshot, ComposerContext, ModeState, ModelState, SlashCommands};
+use crate::event::{ChatKey, ChatSnapshot, ComposerContext, ModeState, ModelState, SlashCommands};
 
 #[vmux_api::ui_state_patch]
 pub enum ChatUiStatePatch {
@@ -7,6 +7,7 @@ pub enum ChatUiStatePatch {
     Mode(ModeState),
     Model(ModelState),
     SlashCommands(SlashCommands),
+    Key(ChatKey),
 }
 
 impl From<ChatSnapshot> for ChatUiStatePatch {

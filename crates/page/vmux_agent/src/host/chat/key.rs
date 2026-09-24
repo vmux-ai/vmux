@@ -1,9 +1,10 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::BinHostEmitEvent;
 use vmux_chat::event::ChatKey;
 use vmux_command::{
     CommandDispatch, CommandManifest, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
+
+use super::ChatUiStateUpdates;
 
 pub(crate) struct ChatKeyPlugin;
 
@@ -35,29 +36,25 @@ fn echo_key_command(
     let Ok(key) = keys.get(trigger.event().command()) else {
         return;
     };
-    commands.trigger(BinHostEmitEvent::from_event(
-        trigger.event().invocation().caller,
-        &key.0,
-    ));
+    ChatUiStateUpdates::write(&mut commands, trigger.event().invocation().caller, &key.0);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::BinEvent;
+    use vmux_chat::state::{ChatUiState, ChatUiStatePatch};
     use vmux_command::CommandInvocation;
+    use vmux_core::host::UiStateWrite;
 
     #[derive(Resource, Default)]
-    struct Echoed(Vec<(Entity, String)>);
+    struct Echoed(Vec<(Entity, ChatKey)>);
 
     impl Echoed {
-        fn record(trigger: On<BinHostEmitEvent>, mut echoed: ResMut<Self>) {
-            let decoded = rkyv::from_bytes::<ChatKey, rkyv::rancor::Error>(trigger.payload())
-                .map(|key| format!("{key:?}"))
-                .unwrap_or_else(|_| "undecodable".to_string());
-            echoed
-                .0
-                .push((trigger.webview(), format!("{}:{decoded}", trigger.id())));
+        fn record(trigger: On<UiStateWrite<ChatUiState>>, mut echoed: ResMut<Self>) {
+            let ChatUiStatePatch::Key(key) = trigger.event().patch() else {
+                return;
+            };
+            echoed.0.push((trigger.event().webview(), *key));
         }
     }
 
@@ -91,7 +88,7 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
-            vec![(pressed, format!("{}:ListChoose", ChatKey::id()))]
+            vec![(pressed, ChatKey::ListChoose)]
         );
         assert!(
             !app.world()
