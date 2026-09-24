@@ -15,13 +15,19 @@ use vmux_core::host::{UiState, UiStatePlugin};
 use vmux_core::page::PageManifest;
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tool::{
-    ToolAction, ToolCategory, ToolItem, ToolOpenRequest, ToolOperationKey, ToolOperationNotice,
-    ToolProvider, ToolRequest, ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest,
-    ToolsSnapshot, ToolsUiState,
+    ToolAction, ToolAdoptRequest, ToolApplyRequest, ToolCategory, ToolForgetRequest,
+    ToolImportRequest, ToolInstallRequest, ToolItem, ToolLinkRequest, ToolOpenRequest,
+    ToolOperationKey, ToolOperationNotice, ToolProvider, ToolRequest, ToolStatus,
+    ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest, ToolsNavigateRequest,
+    ToolsRefreshRequest, ToolsSnapshot, ToolsUiState,
 };
 use vmux_core::vault::{
-    VaultAction, VaultAuthorization, VaultCompletion, VaultOperation, VaultOperationState,
-    VaultRefreshRequest, VaultRepository, VaultRequest, VaultSnapshot, VaultUiState,
+    VaultAction, VaultAuthorization, VaultChooseCloudFolderRequest, VaultCompletion,
+    VaultConnectCloudRequest, VaultConnectFolderRequest, VaultConnectGithubRequest,
+    VaultConnectRequest, VaultCreateCloudFolderRequest, VaultCreateRecoveryKeyRequest,
+    VaultCreateRequest, VaultGenerateRecoveryKeyRequest, VaultOperation, VaultOperationState,
+    VaultRefreshRequest, VaultRepository, VaultRequest, VaultSnapshot, VaultSyncRequest,
+    VaultUiState, VaultUnlockRecoveryKeyRequest,
 };
 use vmux_tool::{
     ExternalToolAction, ToolActionCompletion, ToolActionRequest, ToolStore, ToolStoreAction,
@@ -139,18 +145,58 @@ impl Plugin for ToolPlugin {
                 UiStatePlugin::<ToolsUiState>::default(),
                 UiStatePlugin::<VaultUiState>::default(),
             ))
-            .add_plugins(UiEventPlugin::<(
-                ToolsRefreshRequest,
-                ToolRequest,
-                ToolOpenRequest,
-                ToolsNavigateRequest,
-                VaultRequest,
-                VaultRefreshRequest,
-            )>::default())
+            .add_plugins((
+                UiEventPlugin::<(
+                    ToolsRefreshRequest,
+                    ToolInstallRequest,
+                    ToolUpdateRequest,
+                    ToolUninstallRequest,
+                    ToolForgetRequest,
+                    ToolAdoptRequest,
+                    ToolLinkRequest,
+                    ToolUnlinkRequest,
+                    ToolApplyRequest,
+                    ToolImportRequest,
+                    ToolOpenRequest,
+                    ToolsNavigateRequest,
+                )>::default(),
+                UiEventPlugin::<(
+                    VaultCreateRequest,
+                    VaultConnectRequest,
+                    VaultSyncRequest,
+                    VaultConnectGithubRequest,
+                    VaultConnectFolderRequest,
+                    VaultGenerateRecoveryKeyRequest,
+                    VaultCreateRecoveryKeyRequest,
+                    VaultUnlockRecoveryKeyRequest,
+                    VaultConnectCloudRequest,
+                    VaultCreateCloudFolderRequest,
+                    VaultChooseCloudFolderRequest,
+                    VaultRefreshRequest,
+                )>::default(),
+            ))
             .add_observer(on_refresh_request)
-            .add_observer(on_action_request)
+            .add_observer(on_install_request)
+            .add_observer(on_update_request)
+            .add_observer(on_uninstall_request)
+            .add_observer(on_forget_request)
+            .add_observer(on_adopt_request)
+            .add_observer(on_link_request)
+            .add_observer(on_unlink_request)
+            .add_observer(on_apply_request)
+            .add_observer(on_import_request)
             .add_observer(on_navigate_request)
-            .add_observer(on_vault_action_request)
+            .add_observer(on_vault_create_request)
+            .add_observer(on_vault_connect_request)
+            .add_observer(on_vault_sync_request)
+            .add_observer(on_vault_connect_github_request)
+            .add_observer(on_vault_connect_folder_request)
+            .add_observer(on_vault_generate_recovery_key_request)
+            .add_observer(on_vault_create_recovery_key_request)
+            .add_observer(on_vault_unlock_recovery_key_request)
+            .add_observer(on_vault_connect_cloud_request)
+            .add_observer(on_vault_create_cloud_folder_request)
+            .add_observer(on_vault_choose_cloud_folder_request)
             .add_observer(on_vault_refresh_request)
             .add_observer(on_open_request)
             .add_systems(
@@ -574,14 +620,13 @@ fn on_refresh_request(
     }
 }
 
-fn on_action_request(
-    trigger: On<BinReceive<ToolRequest>>,
+fn queue_tool_action(
+    target: Entity,
+    request: ToolRequest,
     mut sequence: ResMut<ActionRequestSequence>,
     mut subscribers: Query<&mut ToolSubscriber>,
     mut commands: Commands,
 ) {
-    let target = trigger.event().webview;
-    let request = trigger.event().payload.clone();
     let operation_id = sequence.next();
     if let Ok(mut subscriber) = subscribers.get_mut(target) {
         subscriber.begin(operation_id, &request);
@@ -597,16 +642,44 @@ fn on_action_request(
     });
 }
 
-fn on_vault_action_request(
-    trigger: On<BinReceive<VaultRequest>>,
+macro_rules! tool_action_observer {
+    ($name:ident, $request:ty) => {
+        fn $name(
+            trigger: On<BinReceive<$request>>,
+            sequence: ResMut<ActionRequestSequence>,
+            subscribers: Query<&mut ToolSubscriber>,
+            commands: Commands,
+        ) {
+            queue_tool_action(
+                trigger.event().webview,
+                trigger.event().payload.clone().into(),
+                sequence,
+                subscribers,
+                commands,
+            );
+        }
+    };
+}
+
+tool_action_observer!(on_install_request, ToolInstallRequest);
+tool_action_observer!(on_update_request, ToolUpdateRequest);
+tool_action_observer!(on_uninstall_request, ToolUninstallRequest);
+tool_action_observer!(on_forget_request, ToolForgetRequest);
+tool_action_observer!(on_adopt_request, ToolAdoptRequest);
+tool_action_observer!(on_link_request, ToolLinkRequest);
+tool_action_observer!(on_unlink_request, ToolUnlinkRequest);
+tool_action_observer!(on_apply_request, ToolApplyRequest);
+tool_action_observer!(on_import_request, ToolImportRequest);
+
+fn queue_vault_action(
+    target: Entity,
+    request: VaultRequest,
     mut sequence: ResMut<ActionRequestSequence>,
     pending: Query<(Entity, &PendingVaultAction)>,
     tasks: Query<&VaultActionTask>,
     mut subscribers: Query<&mut VaultSubscriber>,
     mut commands: Commands,
 ) {
-    let target = trigger.event().webview;
-    let request = trigger.event().payload.clone();
     let operation_id = sequence.next();
     if let Ok(mut subscriber) = subscribers.get_mut(target) {
         subscriber.begin(operation_id, request.action);
@@ -640,6 +713,62 @@ fn on_vault_action_request(
         request,
     });
 }
+
+macro_rules! vault_action_observer {
+    ($name:ident, $request:ty) => {
+        fn $name(
+            trigger: On<BinReceive<$request>>,
+            sequence: ResMut<ActionRequestSequence>,
+            pending: Query<(Entity, &PendingVaultAction)>,
+            tasks: Query<&VaultActionTask>,
+            subscribers: Query<&mut VaultSubscriber>,
+            commands: Commands,
+        ) {
+            queue_vault_action(
+                trigger.event().webview,
+                trigger.event().payload.clone().into(),
+                sequence,
+                pending,
+                tasks,
+                subscribers,
+                commands,
+            );
+        }
+    };
+}
+
+vault_action_observer!(on_vault_create_request, VaultCreateRequest);
+vault_action_observer!(on_vault_connect_request, VaultConnectRequest);
+vault_action_observer!(on_vault_sync_request, VaultSyncRequest);
+vault_action_observer!(
+    on_vault_connect_github_request,
+    VaultConnectGithubRequest
+);
+vault_action_observer!(
+    on_vault_connect_folder_request,
+    VaultConnectFolderRequest
+);
+vault_action_observer!(
+    on_vault_generate_recovery_key_request,
+    VaultGenerateRecoveryKeyRequest
+);
+vault_action_observer!(
+    on_vault_create_recovery_key_request,
+    VaultCreateRecoveryKeyRequest
+);
+vault_action_observer!(
+    on_vault_unlock_recovery_key_request,
+    VaultUnlockRecoveryKeyRequest
+);
+vault_action_observer!(on_vault_connect_cloud_request, VaultConnectCloudRequest);
+vault_action_observer!(
+    on_vault_create_cloud_folder_request,
+    VaultCreateCloudFolderRequest
+);
+vault_action_observer!(
+    on_vault_choose_cloud_folder_request,
+    VaultChooseCloudFolderRequest
+);
 
 fn on_vault_refresh_request(
     trigger: On<BinReceive<VaultRefreshRequest>>,

@@ -160,11 +160,118 @@ impl ToolsNavigateRequest {
     }
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::contract(Eq)]
 pub struct ToolRequest {
     pub provider: ToolProvider,
     pub action: ToolAction,
     pub id: String,
     #[serde(default)]
     pub value: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "tools")]
+pub struct ToolInstallRequest {
+    pub provider: ToolProvider,
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "tools")]
+pub struct ToolUpdateRequest {
+    pub provider: ToolProvider,
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "tools")]
+pub struct ToolUninstallRequest {
+    pub provider: ToolProvider,
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "tools")]
+pub struct ToolForgetRequest {
+    pub provider: ToolProvider,
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "tools")]
+pub struct ToolAdoptRequest {
+    pub provider: ToolProvider,
+    pub id: String,
+    pub value: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "tools")]
+pub struct ToolLinkRequest {
+    pub provider: ToolProvider,
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "tools")]
+pub struct ToolUnlinkRequest {
+    pub provider: ToolProvider,
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Default, Eq, target = "tools")]
+pub struct ToolApplyRequest;
+
+#[vmux_api::ui_event(Eq, target = "tools")]
+pub struct ToolImportRequest {
+    pub provider: ToolProvider,
+    pub value: String,
+}
+
+macro_rules! tool_item_request {
+    ($request:ty, $action:expr) => {
+        impl From<$request> for ToolRequest {
+            fn from(request: $request) -> Self {
+                Self {
+                    provider: request.provider,
+                    action: $action,
+                    id: request.id,
+                    value: String::new(),
+                }
+            }
+        }
+    };
+}
+
+tool_item_request!(ToolInstallRequest, ToolAction::Install);
+tool_item_request!(ToolUpdateRequest, ToolAction::Update);
+tool_item_request!(ToolUninstallRequest, ToolAction::Uninstall);
+tool_item_request!(ToolForgetRequest, ToolAction::Forget);
+tool_item_request!(ToolLinkRequest, ToolAction::Link);
+tool_item_request!(ToolUnlinkRequest, ToolAction::Unlink);
+
+impl From<ToolAdoptRequest> for ToolRequest {
+    fn from(request: ToolAdoptRequest) -> Self {
+        Self {
+            provider: request.provider,
+            action: ToolAction::Adopt,
+            id: request.id,
+            value: request.value,
+        }
+    }
+}
+
+impl From<ToolApplyRequest> for ToolRequest {
+    fn from(_: ToolApplyRequest) -> Self {
+        Self {
+            provider: ToolProvider::Dotfiles,
+            action: ToolAction::Apply,
+            id: String::new(),
+            value: String::new(),
+        }
+    }
+}
+
+impl From<ToolImportRequest> for ToolRequest {
+    fn from(request: ToolImportRequest) -> Self {
+        Self {
+            provider: request.provider,
+            action: ToolAction::Import,
+            id: String::new(),
+            value: request.value,
+        }
+    }
 }

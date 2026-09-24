@@ -4,8 +4,10 @@ use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
 use vmux_core::tool::{
-    ToolAction, ToolItem, ToolOpenRequest, ToolOperationKey, ToolOperationNotice, ToolProvider,
-    ToolRequest, ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
+    ToolAction, ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest,
+    ToolInstallRequest, ToolItem, ToolLinkRequest, ToolOpenRequest, ToolOperationKey,
+    ToolOperationNotice, ToolProvider, ToolStatus, ToolUninstallRequest, ToolUnlinkRequest,
+    ToolUpdateRequest, ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
 };
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
@@ -348,12 +350,21 @@ fn request_snapshot(refresh: bool) {
 }
 
 fn send_action(provider: ToolProvider, action: ToolAction, id: String, value: String) {
-    let _ = send(&ToolRequest {
-        provider,
-        action,
-        id,
-        value,
-    });
+    match action {
+        ToolAction::Install => send(&ToolInstallRequest { provider, id }),
+        ToolAction::Update => send(&ToolUpdateRequest { provider, id }),
+        ToolAction::Uninstall => send(&ToolUninstallRequest { provider, id }),
+        ToolAction::Forget => send(&ToolForgetRequest { provider, id }),
+        ToolAction::Adopt => send(&ToolAdoptRequest {
+            provider,
+            id,
+            value,
+        }),
+        ToolAction::Link => send(&ToolLinkRequest { provider, id }),
+        ToolAction::Unlink => send(&ToolUnlinkRequest { provider, id }),
+        ToolAction::Apply => send(&ToolApplyRequest),
+        ToolAction::Import => send(&ToolImportRequest { provider, value }),
+    };
 }
 
 fn item_matches(item: &ToolItem, query: &str) -> bool {
