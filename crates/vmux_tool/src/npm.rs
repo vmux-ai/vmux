@@ -1,13 +1,20 @@
 use std::path::Path;
 
 use crate::manifest::{
-    add_packages, expand_user_path, load_manifest_from, manifest_path, migrate_legacy_storage,
-    normalize_names, write_manifest_to,
+    ToolStore, add_packages, expand_user_path, load_manifest_from, normalize_names,
+    write_manifest_to,
 };
 
 pub fn import_npm_manifest(path: &Path) -> Result<usize, String> {
-    migrate_legacy_storage()?;
-    import_npm_manifest_to(path, &manifest_path())
+    ToolStore::current().import_npm_manifest(path)
+}
+
+impl ToolStore {
+    pub fn import_npm_manifest(&self, path: &Path) -> Result<usize, String> {
+        self.migrate_legacy_storage()?;
+        let path = self.expand_user_path(path)?;
+        import_npm_manifest_to(&path, &self.manifest_path())
+    }
 }
 
 pub fn import_npm_manifest_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {

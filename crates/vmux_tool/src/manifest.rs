@@ -1,15 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
 
 use crate::dotfiles::DotfilesManifest;
-use crate::homebrew::{brewfile_path, sync_manifest_from_brewfile, write_managed_brewfile};
 use crate::mcp::McpManifest;
 
 const MANIFEST_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Component, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolsManifest {
     #[serde(default = "manifest_version")]
     pub version: u32,
@@ -65,6 +65,39 @@ impl ToolsManifest {
         self.normalize();
     }
 
+    pub fn managed_packages(&self, provider: &str) -> BTreeSet<String> {
+        self.packages
+            .get(provider)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect()
+    }
+
+    pub fn read(path: &Path) -> Result<Self, String> {
+        if !path.is_file() {
+            return Ok(Self::default());
+        }
+        let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let mut manifest: Self = toml::from_str(&source).map_err(|error| error.to_string())?;
+        if manifest.version != MANIFEST_VERSION {
+            return Err(format!(
+                "unsupported tools manifest version: {}",
+                manifest.version
+            ));
+        }
+        manifest.normalize();
+        Ok(manifest)
+    }
+
+    pub fn write_to(&self, path: &Path) -> Result<(), String> {
+        let mut manifest = self.clone();
+        manifest.version = MANIFEST_VERSION;
+        manifest.normalize();
+        let source = toml::to_string_pretty(&manifest).map_err(|error| error.to_string())?;
+        vmux_path::AtomicFile::write(path, source.as_bytes()).map_err(|error| error.to_string())
+    }
+
     pub(crate) fn normalize(&mut self) {
         self.packages.retain(|_, packages| {
             packages.sort_by_key(|package| package.to_ascii_lowercase());
@@ -79,16 +112,92 @@ impl ToolsManifest {
     }
 }
 
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct ToolStore {
+    config_dir: PathBuf,
+    home: PathBuf,
+}
+
+impl Default for ToolStore {
+    fn default() -> Self {
+        Self::current()
+    }
+}
+
+impl ToolStore {
+    pub fn current() -> Self {
+        Self::new(vmux_profile::config_dir(), home_dir())
+    }
+
+    pub fn new(config_dir: impl Into<PathBuf>, home: impl Into<PathBuf>) -> Self {
+        Self {
+            config_dir: config_dir.into(),
+            home: home.into(),
+        }
+    }
+
+    pub fn root(&self) -> PathBuf {
+        self.config_dir.join("tools")
+    }
+
+    pub fn manifest_path(&self) -> PathBuf {
+        self.root().join("tools.toml")
+    }
+
+    pub fn brewfile_path(&self) -> PathBuf {
+        self.root().join("Brewfile")
+    }
+
+    pub fn dotfiles_dir(&self) -> PathBuf {
+        self.root().join("dotfiles")
+    }
+
+    pub fn home(&self) -> &Path {
+        &self.home
+    }
+
+    pub fn expand_user_path(&self, path: &Path) -> Result<PathBuf, String> {
+        if let Ok(relative) = path.strip_prefix("~") {
+            return Ok(self.home.join(relative));
+        }
+        if path.is_absolute() {
+            Ok(path.to_path_buf())
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(path))
+                .map_err(|error| error.to_string())
+        }
+    }
+
+    pub fn load(&self) -> Result<ToolsManifest, String> {
+        self.migrate_legacy_storage()?;
+        let mut manifest = ToolsManifest::read(&self.manifest_path())?;
+        let brewfile = self.brewfile_path();
+        if brewfile.is_file() {
+            self.sync_manifest_from_brewfile(&mut manifest, &brewfile)?;
+        } else {
+            self.write_managed_brewfile(&manifest)?;
+        }
+        Ok(manifest)
+    }
+
+    pub fn save(&self, manifest: &ToolsManifest) -> Result<(), String> {
+        self.migrate_legacy_storage()?;
+        manifest.write_to(&self.manifest_path())?;
+        self.write_managed_brewfile(manifest)
+    }
+
+    pub(crate) fn migrate_legacy_storage(&self) -> Result<(), String> {
+        migrate_legacy_storage_in(&self.config_dir)
+    }
+}
+
 pub fn root_dir() -> PathBuf {
-    vmux_profile::config_dir().join("tools")
+    ToolStore::current().root()
 }
 
 pub fn manifest_path() -> PathBuf {
-    root_dir().join("tools.toml")
-}
-
-pub(crate) fn migrate_legacy_storage() -> Result<(), String> {
-    migrate_legacy_storage_in(&vmux_profile::config_dir())
+    ToolStore::current().manifest_path()
 }
 
 pub(crate) fn migrate_legacy_storage_in(config_dir: &Path) -> Result<(), String> {
@@ -130,45 +239,19 @@ fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String>
 }
 
 pub fn load_manifest() -> Result<ToolsManifest, String> {
-    migrate_legacy_storage()?;
-    let mut manifest = load_manifest_from(&manifest_path())?;
-    let brewfile = brewfile_path();
-    if brewfile.is_file() {
-        sync_manifest_from_brewfile(&mut manifest, &brewfile)?;
-    } else {
-        write_managed_brewfile(&manifest)?;
-    }
-    Ok(manifest)
+    ToolStore::current().load()
 }
 
 pub fn load_manifest_from(path: &Path) -> Result<ToolsManifest, String> {
-    if !path.is_file() {
-        return Ok(ToolsManifest::default());
-    }
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let mut manifest: ToolsManifest = toml::from_str(&source).map_err(|error| error.to_string())?;
-    if manifest.version != MANIFEST_VERSION {
-        return Err(format!(
-            "unsupported tools manifest version: {}",
-            manifest.version
-        ));
-    }
-    manifest.normalize();
-    Ok(manifest)
+    ToolsManifest::read(path)
 }
 
 pub fn write_manifest(manifest: &ToolsManifest) -> Result<(), String> {
-    migrate_legacy_storage()?;
-    write_manifest_to(&manifest_path(), manifest)?;
-    write_managed_brewfile(manifest)
+    ToolStore::current().save(manifest)
 }
 
 pub fn write_manifest_to(path: &Path, manifest: &ToolsManifest) -> Result<(), String> {
-    let mut manifest = manifest.clone();
-    manifest.version = MANIFEST_VERSION;
-    manifest.normalize();
-    let source = toml::to_string_pretty(&manifest).map_err(|error| error.to_string())?;
-    vmux_path::AtomicFile::write(path, source.as_bytes()).map_err(|error| error.to_string())
+    manifest.write_to(path)
 }
 
 pub(crate) fn add_packages(
@@ -214,11 +297,5 @@ fn manifest_version() -> u32 {
 }
 
 pub fn managed_package_set(manifest: &ToolsManifest, provider: &str) -> BTreeSet<String> {
-    manifest
-        .packages
-        .get(provider)
-        .into_iter()
-        .flatten()
-        .cloned()
-        .collect()
+    manifest.managed_packages(provider)
 }

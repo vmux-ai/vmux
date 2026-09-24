@@ -3,10 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::manifest::{
-    expand_user_path, home_dir, load_manifest, load_manifest_from, manifest_path,
-    migrate_legacy_storage, write_manifest, write_manifest_to,
-};
+use crate::manifest::{ToolStore, expand_user_path, load_manifest_from, write_manifest_to};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpManifest {
@@ -75,52 +72,117 @@ pub struct DiscoveredMcpServer {
 }
 
 pub fn default_mcp_config_paths() -> Vec<PathBuf> {
-    let home = home_dir();
-    [
-        home.join(".codex/config.toml"),
-        home.join(".claude.json"),
-        home.join(".vibe/config.toml"),
-        home.join(".mcp.json"),
-    ]
-    .into_iter()
-    .filter(|path| path.is_file())
-    .collect()
+    ToolStore::current().default_mcp_config_paths()
 }
 
-pub fn discover_mcp_servers() -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
-    let mut discovered = BTreeMap::<String, DiscoveredMcpServer>::new();
-    let mut errors = Vec::new();
-    for path in default_mcp_config_paths() {
-        match parse_mcp_config_file(&path) {
-            Ok(servers) => {
-                for (name, definition) in servers {
-                    match discovered.get_mut(&name) {
-                        Some(existing) => {
-                            existing.conflict |= existing.definition != definition;
-                            existing.sources.push(path.clone());
-                        }
-                        None => {
-                            discovered.insert(
-                                name,
-                                DiscoveredMcpServer {
-                                    definition,
-                                    sources: vec![path.clone()],
-                                    conflict: false,
-                                },
-                            );
+impl ToolStore {
+    pub fn default_mcp_config_paths(&self) -> Vec<PathBuf> {
+        let home = self.home();
+        [
+            home.join(".codex/config.toml"),
+            home.join(".claude.json"),
+            home.join(".vibe/config.toml"),
+            home.join(".mcp.json"),
+        ]
+        .into_iter()
+        .filter(|path| path.is_file())
+        .collect()
+    }
+
+    pub fn discover_mcp_servers(&self) -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
+        let mut discovered = BTreeMap::<String, DiscoveredMcpServer>::new();
+        let mut errors = Vec::new();
+        for path in self.default_mcp_config_paths() {
+            match parse_mcp_config_file(&path) {
+                Ok(servers) => {
+                    for (name, definition) in servers {
+                        match discovered.get_mut(&name) {
+                            Some(existing) => {
+                                existing.conflict |= existing.definition != definition;
+                                existing.sources.push(path.clone());
+                            }
+                            None => {
+                                discovered.insert(
+                                    name,
+                                    DiscoveredMcpServer {
+                                        definition,
+                                        sources: vec![path.clone()],
+                                        conflict: false,
+                                    },
+                                );
+                            }
                         }
                     }
                 }
+                Err(error) => errors.push(format!("{}: {error}", path.display())),
             }
-            Err(error) => errors.push(format!("{}: {error}", path.display())),
         }
+        (discovered, errors)
     }
-    (discovered, errors)
+
+    pub fn import_mcp_config(&self, path: &Path) -> Result<usize, String> {
+        self.migrate_legacy_storage()?;
+        let path = self.expand_user_path(path)?;
+        import_mcp_config_to(&path, &self.manifest_path())
+    }
+
+    pub fn import_default_mcp_configs(&self) -> Result<usize, String> {
+        let (discovered, errors) = self.discover_mcp_servers();
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
+        }
+        let conflicts = discovered
+            .iter()
+            .filter(|(_, server)| server.conflict)
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "conflicting MCP definitions: {}",
+                conflicts.join(", ")
+            ));
+        }
+        let mut manifest = self.load()?;
+        let mut imported = 0;
+        for (name, server) in discovered {
+            if name == "vmux" {
+                continue;
+            }
+            imported += usize::from(manifest.mcp.servers.get(&name) != Some(&server.definition));
+            manifest.mcp.servers.insert(name, server.definition);
+        }
+        self.save(&manifest)?;
+        Ok(imported)
+    }
+
+    pub fn import_discovered_mcp_server(&self, name: &str) -> Result<(), String> {
+        let (discovered, errors) = self.discover_mcp_servers();
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
+        }
+        let server = discovered
+            .get(name)
+            .ok_or_else(|| format!("MCP server not found: {name}"))?;
+        if server.conflict {
+            return Err(format!(
+                "MCP server {name} has conflicting definitions; import an explicit config path"
+            ));
+        }
+        let mut manifest = self.load()?;
+        manifest
+            .mcp
+            .servers
+            .insert(name.to_string(), server.definition.clone());
+        self.save(&manifest)
+    }
+}
+
+pub fn discover_mcp_servers() -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
+    ToolStore::current().discover_mcp_servers()
 }
 
 pub fn import_mcp_config(path: &Path) -> Result<usize, String> {
-    migrate_legacy_storage()?;
-    import_mcp_config_to(path, &manifest_path())
+    ToolStore::current().import_mcp_config(path)
 }
 
 pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
@@ -143,53 +205,11 @@ pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, 
 }
 
 pub fn import_default_mcp_configs() -> Result<usize, String> {
-    let (discovered, errors) = discover_mcp_servers();
-    if !errors.is_empty() {
-        return Err(errors.join("\n"));
-    }
-    let conflicts = discovered
-        .iter()
-        .filter(|(_, server)| server.conflict)
-        .map(|(name, _)| name.as_str())
-        .collect::<Vec<_>>();
-    if !conflicts.is_empty() {
-        return Err(format!(
-            "conflicting MCP definitions: {}",
-            conflicts.join(", ")
-        ));
-    }
-    let mut manifest = load_manifest()?;
-    let mut imported = 0;
-    for (name, server) in discovered {
-        if name == "vmux" {
-            continue;
-        }
-        imported += usize::from(manifest.mcp.servers.get(&name) != Some(&server.definition));
-        manifest.mcp.servers.insert(name, server.definition);
-    }
-    write_manifest(&manifest)?;
-    Ok(imported)
+    ToolStore::current().import_default_mcp_configs()
 }
 
 pub fn import_discovered_mcp_server(name: &str) -> Result<(), String> {
-    let (discovered, errors) = discover_mcp_servers();
-    if !errors.is_empty() {
-        return Err(errors.join("\n"));
-    }
-    let server = discovered
-        .get(name)
-        .ok_or_else(|| format!("MCP server not found: {name}"))?;
-    if server.conflict {
-        return Err(format!(
-            "MCP server {name} has conflicting definitions; import an explicit config path"
-        ));
-    }
-    let mut manifest = load_manifest()?;
-    manifest
-        .mcp
-        .servers
-        .insert(name.to_string(), server.definition.clone());
-    write_manifest(&manifest)
+    ToolStore::current().import_discovered_mcp_server(name)
 }
 
 pub fn parse_mcp_config_file(path: &Path) -> Result<BTreeMap<String, McpServerManifest>, String> {
