@@ -4,14 +4,14 @@ use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
 use vmux_core::tool::{
-    ToolAction, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolResult, ToolStatus,
-    ToolsNavigateRequest, ToolsRefreshRequest, ToolsSnapshot,
+    ToolAction, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolStatus, ToolUiOperation,
+    ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
 };
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
     ManagerRow, ManagerSpinner, ManagerTab, ManagerTabs, ManagerThumbnail,
 };
-use vmux_ui::hooks::{send, use_listener, use_theme, use_ui_state};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -136,27 +136,30 @@ pub(crate) fn ToolsManagerTabs(mut active_route: Signal<ToolsRoute>) -> Element 
 #[component]
 fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
     let locale = use_theme();
-    let snapshot = use_ui_state::<ToolsSnapshot>();
+    let state = use_ui_state::<ToolsUiState>();
     let mut query = use_signal(String::new);
-    let mut pending = use_signal(BTreeSet::<String>::new);
-    let mut notice = use_signal(|| None::<ToolResult>);
-
-    let _result_listener = use_listener::<ToolResult, _>(move |result| {
-        pending
-            .write()
-            .remove(&action_key(result.provider, result.action, &result.id));
-        notice.set(Some(result));
-        request_snapshot(false);
-    });
 
     use_effect(move || {
         locale();
         request_snapshot(false);
     });
 
-    let current = snapshot();
+    let current = state();
+    let pending = current
+        .operations
+        .iter()
+        .filter(|operation| operation.is_pending())
+        .map(|operation| action_key(operation.provider, operation.action, &operation.item_id))
+        .collect::<BTreeSet<_>>();
+    let notice = current
+        .operations
+        .iter()
+        .rev()
+        .find(|operation| operation.completion().is_some())
+        .cloned();
+    let snapshot = &current.snapshot;
     let search = query().trim().to_ascii_lowercase();
-    let visible_count = current
+    let visible_count = snapshot
         .categories
         .iter()
         .filter(|category| route.matches(category.provider))
@@ -176,14 +179,13 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
                 actions: rsx! {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
-                        disabled: pending().contains(&action_key(
+                        disabled: pending.contains(&action_key(
                             ToolProvider::Dotfiles,
                             ToolAction::Apply,
                             "",
                         )),
                         onclick: move |_| {
                             send_action(
-                                pending,
                                 ToolProvider::Dotfiles,
                                 ToolAction::Apply,
                                 String::new(),
@@ -204,29 +206,34 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
             ManagerList {
                 if route == ToolsRoute::Homebrew {
                     HomebrewSourceCard {
-                        root: current.root.clone(),
+                        root: snapshot.root.clone(),
                     }
                 }
-                if let Some(result) = notice() {
+                if let Some(result) = notice {
+                    {
+                        let (success, message) = result.completion().unwrap();
+                        rsx! {
                     div {
-                        class: if result.success {
+                        class: if success {
                             "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
                         } else {
                             "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                         },
-                        if result.success {
+                        if success {
                             {action_result_message(&result)}
                         } else {
-                            "{result.message}"
+                            "{message}"
+                        }
+                    }
                         }
                     }
                 }
-                if !current.error.is_empty() {
+                if !snapshot.error.is_empty() {
                     div { class: "whitespace-pre-wrap rounded-xl bg-amber-400/10 px-4 py-3 text-xs text-amber-700 ring-1 ring-inset ring-amber-400/20 dark:text-amber-300",
-                        "{current.error}"
+                        "{snapshot.error}"
                     }
                 }
-                if !current.loaded {
+                if !snapshot.loaded {
                     ManagerSpinner { detail: translate("tools-scanning") }
                 } else if visible_count == 0 {
                     ManagerEmpty {
@@ -234,7 +241,7 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
                         detail: translate("tools-empty-detail"),
                     }
                 } else {
-                    for category in current.categories.iter() {
+                    for category in snapshot.categories.iter() {
                         if route.matches(category.provider) && category.items.iter().any(|item| item_matches(item, &search)) {
                             div { class: "mt-3 flex items-center gap-2 px-1 first:mt-0",
                                 h2 { class: "text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", {provider_title(category.provider)} }
@@ -243,7 +250,7 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
                                 }
                             }
                             for item in category.items.iter().filter(|item| item_matches(item, &search)) {
-                                ToolRow { key: "{category.provider.id()}:{item.id}", item: item.clone(), pending }
+                                ToolRow { key: "{category.provider.id()}:{item.id}", item: item.clone(), pending: pending.clone() }
                             }
                         }
                     }
@@ -286,7 +293,7 @@ fn HomebrewSourceCard(root: String) -> Element {
 }
 
 #[component]
-fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
+fn ToolRow(item: ToolItem, pending: BTreeSet<String>) -> Element {
     let version = item.version.clone().unwrap_or_default();
     let provider = item.provider;
     let id = item.id.clone();
@@ -318,10 +325,9 @@ fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
                             ManagerButton {
                                 key: "{key}",
                                 variant: action_variant(action),
-                                disabled: pending().contains(&key),
+                                disabled: pending.contains(&key),
                                 onclick: move |_| {
                                     send_action(
-                                        pending,
                                         provider,
                                         action,
                                         action_id.clone(),
@@ -342,14 +348,7 @@ fn request_snapshot(refresh: bool) {
     let _ = send(&ToolsRefreshRequest { refresh });
 }
 
-fn send_action(
-    mut pending: Signal<BTreeSet<String>>,
-    provider: ToolProvider,
-    action: ToolAction,
-    id: String,
-    value: String,
-) {
-    pending.write().insert(action_key(provider, action, &id));
+fn send_action(provider: ToolProvider, action: ToolAction, id: String, value: String) {
     let _ = send(&ToolRequest {
         provider,
         action,
@@ -426,8 +425,8 @@ fn action_label(action: ToolAction) -> String {
     })
 }
 
-fn action_result_message(result: &ToolResult) -> String {
-    let id = result.id.as_str();
+fn action_result_message(result: &ToolUiOperation) -> String {
+    let id = result.item_id.as_str();
     match result.action {
         ToolAction::Apply => translate("tools-result-applied"),
         ToolAction::Import => translate("tools-result-imported"),
