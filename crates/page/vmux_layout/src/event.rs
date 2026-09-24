@@ -746,7 +746,24 @@ pub struct RemoteStateEvent {
     pub pairing_url: String,
     pub pairing_deep_link: String,
     pub paired: bool,
+    pub devices: Vec<RemoteDevice>,
     pub error: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RemoteDevice {
+    pub id: String,
 }
 
 #[derive(
@@ -800,6 +817,23 @@ pub struct LayoutOverlayEvent {
 )]
 #[vmux_api::ui_event(target = "layout")]
 pub struct RemoteCopyEvent;
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[vmux_api::ui_event(target = "layout")]
+pub struct RemoteRevokeRequest {
+    pub client_id: String,
+}
 
 #[derive(
     Clone,

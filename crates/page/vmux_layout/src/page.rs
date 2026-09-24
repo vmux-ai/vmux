@@ -4,8 +4,9 @@ use std::rc::Rc;
 
 use crate::event::{
     HeaderRequest, LayoutOverlayEvent, LayoutStateEvent, PaneNode, PaneTreeEvent, ReloadEvent,
-    RemoteCopyEvent, RemotePhase, RemoteRequest, RemoteStateEvent, StackNode, StackRow,
-    StacksHostEvent, TabDropPlacement, TabRow, TabsHostEvent, TabsRequest, WindowDragRegionEvent,
+    RemoteCopyEvent, RemotePhase, RemoteRequest, RemoteRevokeRequest, RemoteStateEvent, StackNode,
+    StackRow, StacksHostEvent, TabDropPlacement, TabRow, TabsHostEvent, TabsRequest,
+    WindowDragRegionEvent,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
@@ -1542,6 +1543,28 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                                 });
                             },
                             if remote.paired { "Show QR" } else { "Connect device" }
+                        }
+                    }
+                }
+                if !remote.devices.is_empty() {
+                    div { class: "mt-2 space-y-1",
+                        for device in remote.devices.iter() {
+                            div { class: "flex items-center gap-2 rounded-md bg-foreground/5 px-2 py-1.5",
+                                div { class: "min-w-0 flex-1 truncate font-mono text-[9px] text-muted-foreground", "{device.id}" }
+                                button {
+                                    r#type: "button",
+                                    class: "shrink-0 rounded px-1.5 py-1 text-[9px] font-semibold text-destructive hover:bg-destructive/10",
+                                    onclick: {
+                                        let client_id = device.id.clone();
+                                        move |_| {
+                                            let _ = send(&RemoteRevokeRequest {
+                                                client_id: client_id.clone(),
+                                            });
+                                        }
+                                    },
+                                    {translate("common-remove")}
+                                }
+                            }
                         }
                     }
                 }

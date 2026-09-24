@@ -14,6 +14,7 @@ clap = { version = "4", features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 vmux_mcp = { path = "../../host/vmux_mcp" }
+vmux_remote = { path = "../../host/vmux_remote" }
 vmux_tool = { path = "../../vmux_tool" }
 vmux_client = { path = "../../host/vmux_client" }
 

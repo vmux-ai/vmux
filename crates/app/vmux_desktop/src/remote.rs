@@ -6,8 +6,11 @@ use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
-use vmux_layout::event::{RemoteCopyEvent, RemotePhase, RemoteRequest, RemoteStateEvent};
-use vmux_service::RemotePaths;
+use vmux_layout::event::{
+    RemoteCopyEvent, RemoteDevice, RemotePhase, RemoteRequest, RemoteRevokeRequest,
+    RemoteStateEvent,
+};
+use vmux_service::{RelayToken, RemoteAuthorizationStore, RemotePaths};
 
 pub(crate) struct RemotePlugin;
 
@@ -16,12 +19,13 @@ impl Plugin for RemotePlugin {
         app.init_resource::<RemoteState>()
             .add_observer(on_remote_request)
             .add_observer(on_remote_copy)
+            .add_observer(on_remote_revoke)
             .add_systems(Startup, reconcile_remote_on_startup)
             .add_systems(
                 Update,
                 (
                     poll_remote_worker,
-                    poll_paired_marker,
+                    poll_remote_authorizations,
                     push_remote_state_emit,
                 )
                     .chain(),
@@ -35,19 +39,40 @@ fn on_remote_copy(_trigger: On<BinReceive<RemoteCopyEvent>>, state: Res<RemoteSt
     }
 }
 
+fn on_remote_revoke(trigger: On<BinReceive<RemoteRevokeRequest>>, mut state: ResMut<RemoteState>) {
+    let client_id = vmux_service::DeviceId::new(&trigger.event().payload.client_id);
+    match RemoteAuthorizationStore::current().revoke(&client_id) {
+        Ok(true) => {
+            state.devices.retain(|device| device.id != client_id);
+            state.paired = !state.devices.is_empty();
+            state.error.clear();
+        }
+        Ok(false) => {}
+        Err(error) => {
+            state.error = error.to_string();
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct RemotePairingInfo {
     pairing_url: String,
     pairing_deep_link: String,
+    relay_token: String,
+    pairing_token: String,
 }
 
 impl RemotePairingInfo {
     const REGISTRATION_TIMEOUT: Duration = Duration::from_secs(20);
 
-    fn wait(relay: &vmux_service::pairing::Relay, token: &str) -> Result<Self, String> {
+    fn wait(
+        relay: &vmux_service::pairing::Relay,
+        relay_token: &str,
+        pairing_token: &str,
+    ) -> Result<Self, String> {
         let deadline = Instant::now() + Self::REGISTRATION_TIMEOUT;
         loop {
-            if let Some(pairing) = Self::ready(relay, token)? {
+            if let Some(pairing) = Self::ready(relay, relay_token, pairing_token)? {
                 return Ok(pairing);
             }
             if Instant::now() >= deadline {
@@ -60,7 +85,11 @@ impl RemotePairingInfo {
         }
     }
 
-    fn ready(relay: &vmux_service::pairing::Relay, token: &str) -> Result<Option<Self>, String> {
+    fn ready(
+        relay: &vmux_service::pairing::Relay,
+        relay_token: &str,
+        pairing_token: &str,
+    ) -> Result<Option<Self>, String> {
         let (Some(base_url), Some(device), Some(fingerprint)) = (
             relay.base_url()?,
             relay.registered_device(),
@@ -68,11 +97,18 @@ impl RemotePairingInfo {
         ) else {
             return Ok(None);
         };
-        let pairing =
-            vmux_service::pairing::PairingInfo::new(&base_url, token, &fingerprint, &device)?;
+        let pairing = vmux_service::pairing::PairingInfo::new(
+            &base_url,
+            relay_token,
+            pairing_token,
+            &fingerprint,
+            &device,
+        )?;
         Ok(Some(Self {
             pairing_url: pairing.url,
             pairing_deep_link: pairing.deep_link,
+            relay_token: relay_token.to_string(),
+            pairing_token: pairing_token.to_string(),
         }))
     }
 }
@@ -88,11 +124,14 @@ struct RemoteState {
     phase: RemotePhase,
     pairing_url: String,
     pairing_deep_link: String,
+    relay_token: String,
+    pairing_token: String,
     paired: bool,
+    devices: Vec<vmux_service::AuthorizedDevice>,
     error: String,
     command_tx: Sender<bool>,
     result_rx: Receiver<RemoteWorkerResult>,
-    paired_checked_at: Instant,
+    authorization_checked_at: Instant,
     reconcile_on_startup: bool,
 }
 
@@ -107,6 +146,9 @@ impl Default for RemoteState {
             .name("vmux-remote-control".to_string())
             .spawn(move || remote_worker(command_rx, result_tx))
             .expect("spawn remote control worker");
+        let devices = RemoteAuthorizationStore::current()
+            .devices()
+            .unwrap_or_default();
         Self {
             enabled,
             phase: if reconcile_on_startup {
@@ -116,11 +158,14 @@ impl Default for RemoteState {
             },
             pairing_url: String::new(),
             pairing_deep_link: String::new(),
-            paired: RemotePaths::current().paired().exists(),
+            relay_token: String::new(),
+            pairing_token: String::new(),
+            paired: !devices.is_empty(),
+            devices,
             error: String::new(),
             command_tx,
             result_rx,
-            paired_checked_at: Instant::now(),
+            authorization_checked_at: Instant::now(),
             reconcile_on_startup,
         }
     }
@@ -163,11 +208,15 @@ fn poll_remote_worker(mut state: ResMut<RemoteState>) {
                 state.phase = RemotePhase::Enabled;
                 state.pairing_url = pairing.pairing_url;
                 state.pairing_deep_link = pairing.pairing_deep_link;
+                state.relay_token = pairing.relay_token;
+                state.pairing_token = pairing.pairing_token;
                 state.error.clear();
             }
             Ok(None) => {
                 state.pairing_url.clear();
                 state.pairing_deep_link.clear();
+                state.relay_token.clear();
+                state.pairing_token.clear();
                 if let Err(error) = remove_if_exists(&RemotePaths::current().state()) {
                     state.phase = RemotePhase::Error;
                     state.error =
@@ -185,12 +234,36 @@ fn poll_remote_worker(mut state: ResMut<RemoteState>) {
     }
 }
 
-fn poll_paired_marker(mut state: ResMut<RemoteState>) {
-    if state.paired_checked_at.elapsed() < Duration::from_secs(1) {
+fn poll_remote_authorizations(mut state: ResMut<RemoteState>) {
+    if state.authorization_checked_at.elapsed() < Duration::from_secs(1) {
         return;
     }
-    state.paired_checked_at = Instant::now();
-    state.paired = RemotePaths::current().paired().exists();
+    state.authorization_checked_at = Instant::now();
+    let store = RemoteAuthorizationStore::current();
+    let Ok(devices) = store.devices() else {
+        return;
+    };
+    let paired = !devices.is_empty();
+    let Ok(pairing_token) = store.pairing_token() else {
+        return;
+    };
+    if state.paired != paired {
+        state.paired = paired;
+    }
+    if state.devices != devices {
+        state.devices = devices;
+    }
+    if state.phase != RemotePhase::Enabled || state.pairing_token == pairing_token {
+        return;
+    }
+    let relay = vmux_service::pairing::Relay::configured();
+    let Ok(Some(pairing)) = RemotePairingInfo::ready(&relay, &state.relay_token, &pairing_token)
+    else {
+        return;
+    };
+    state.pairing_url = pairing.pairing_url;
+    state.pairing_deep_link = pairing.pairing_deep_link;
+    state.pairing_token = pairing.pairing_token;
 }
 
 fn push_remote_state_emit(
@@ -206,6 +279,13 @@ fn push_remote_state_emit(
         pairing_url: state.pairing_url.clone(),
         pairing_deep_link: state.pairing_deep_link.clone(),
         paired: state.paired,
+        devices: state
+            .devices
+            .iter()
+            .map(|device| RemoteDevice {
+                id: device.id.as_str().to_string(),
+            })
+            .collect(),
         error: state.error.clone(),
     };
     for (cef_e, page_ready) in &cef_q {
@@ -237,9 +317,13 @@ fn remote_worker(command_rx: Receiver<bool>, result_tx: Sender<RemoteWorkerResul
 }
 
 fn enable_remote() -> Result<RemotePairingInfo, String> {
-    let token = wait_for_token().map_err(|error| error.to_string())?;
+    let relay_token =
+        RelayToken::wait(Duration::from_secs(5)).map_err(|error| error.to_string())?;
+    let pairing_token = RemoteAuthorizationStore::current()
+        .pairing_token()
+        .map_err(|error| error.to_string())?;
     let relay = configured_relay()?;
-    RemotePairingInfo::wait(&relay, &token)
+    RemotePairingInfo::wait(&relay, relay_token.as_str(), &pairing_token)
 }
 
 fn disable_remote() -> Result<(), String> {
@@ -272,26 +356,6 @@ fn ensure_relay_device_id() -> std::io::Result<String> {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(device_id)
-}
-
-fn wait_for_token() -> std::io::Result<String> {
-    let path = RemotePaths::current().token();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Ok(token) = std::fs::read_to_string(&path) {
-            let token = token.trim();
-            if token.len() >= 32 {
-                return Ok(token.to_string());
-            }
-        }
-        if Instant::now() >= deadline {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                format!("Remote token was not created at {}", path.display()),
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
 }
 
 fn persist_enabled(enabled: bool) -> std::io::Result<()> {

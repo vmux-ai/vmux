@@ -1,6 +1,8 @@
 pub use vmux_client::{
-    pairing, read_message, read_message_blocking, write_message, write_message_blocking,
+    AuthorizedDevice, RelayToken, RemoteAuthorizationStore, pairing, read_message,
+    read_message_blocking, write_message, write_message_blocking,
 };
+pub use vmux_remote::DeviceId;
 
 pub mod acp;
 pub mod agent;

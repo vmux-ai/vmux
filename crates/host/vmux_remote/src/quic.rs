@@ -48,8 +48,28 @@ impl MessageType {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ClientSetup {
-    pub device_id: DeviceId,
-    pub token: String,
+    pub client_id: DeviceId,
+    pub credential: ClientCredential,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "token", rename_all = "snake_case")]
+pub enum ClientCredential {
+    Pairing(String),
+    Device(String),
+}
+
+impl ClientCredential {
+    pub fn token(&self) -> &str {
+        match self {
+            Self::Pairing(token) | Self::Device(token) => token,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct SessionAccepted {
+    pub device_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

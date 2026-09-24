@@ -85,16 +85,16 @@ impl RemotePaths {
         ServicePaths::current().remote()
     }
 
-    pub fn token(&self) -> PathBuf {
+    pub fn relay_token(&self) -> PathBuf {
         self.service.runtime_file("remote-token")
+    }
+
+    pub fn authorizations(&self) -> PathBuf {
+        self.service.runtime_file("remote-authorizations")
     }
 
     pub fn state(&self) -> PathBuf {
         self.service.runtime_file("remote-state")
-    }
-
-    pub fn paired(&self) -> PathBuf {
-        self.service.runtime_file("remote-paired")
     }
 
     pub fn certificate(&self) -> PathBuf {
@@ -119,32 +119,6 @@ impl RemotePaths {
 
     pub fn relay_registration(&self) -> PathBuf {
         self.service.runtime_file("remote-relay-registration")
-    }
-}
-
-pub struct RemoteToken(pub String);
-
-impl RemoteToken {
-    const MIN_LEN: usize = 32;
-
-    pub fn wait(timeout: std::time::Duration) -> std::io::Result<Self> {
-        let path = RemotePaths::current().token();
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            if let Ok(token) = std::fs::read_to_string(&path) {
-                let token = token.trim();
-                if token.len() >= Self::MIN_LEN {
-                    return Ok(Self(token.to_string()));
-                }
-            }
-            if std::time::Instant::now() >= deadline {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    format!("remote token not created: {}", path.display()),
-                ));
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
     }
 }
 
@@ -227,10 +201,19 @@ mod tests {
 
     #[test]
     fn remote_token_uses_profile_file_name() {
-        let path = RemotePaths::current().token();
+        let path = RemotePaths::current().relay_token();
         assert_eq!(
             path.extension().and_then(|value| value.to_str()),
             Some("remote-token")
+        );
+    }
+
+    #[test]
+    fn remote_authorizations_use_profile_file_name() {
+        let path = RemotePaths::current().authorizations();
+        assert_eq!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("remote-authorizations")
         );
     }
 

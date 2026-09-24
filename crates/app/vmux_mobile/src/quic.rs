@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use vmux_api::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
-use vmux_remote::DeviceId;
-use vmux_remote::PeerRole;
 use vmux_remote::framing::{Frame, FrameStream};
 use vmux_remote::quic::endpoint::Trust;
 use vmux_remote::quic::tunnel::{DESKTOP_TAG, TunnelSocket, relayed_peer};
-use vmux_remote::quic::{Accepted, ClientSetup, CloseCode, MessageType, RelaySetup};
+use vmux_remote::quic::{
+    Accepted, ClientSetup, CloseCode, MessageType, RelaySetup, SessionAccepted,
+};
+use vmux_remote::{ClientCredential, DeviceId, PeerRole};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
@@ -74,7 +75,9 @@ impl QuicError {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Endpoint {
     pub address: String,
-    pub token: String,
+    pub relay_token: String,
+    pub credential: ClientCredential,
+    pub client_id: DeviceId,
     pub fingerprint: String,
     pub desktop: DeviceId,
 }
@@ -82,6 +85,7 @@ pub struct Endpoint {
 #[derive(Clone)]
 pub struct QuicApi {
     endpoint: Endpoint,
+    credential: Arc<Mutex<ClientCredential>>,
     connection: Arc<Mutex<Option<Dialled>>>,
 }
 
@@ -93,8 +97,10 @@ struct Dialled {
 
 impl QuicApi {
     pub fn new(endpoint: Endpoint) -> Self {
+        let credential = endpoint.credential.clone();
         Self {
             endpoint,
+            credential: Arc::new(Mutex::new(credential)),
             connection: Arc::new(Mutex::new(None)),
         }
     }
@@ -116,6 +122,10 @@ impl QuicApi {
                 .connection
                 .close(CloseCode::Normal.as_u32().into(), b"suspended");
         }
+    }
+
+    pub async fn credential(&self) -> ClientCredential {
+        self.credential.lock().await.clone()
     }
 
     async fn connected(&self) -> Result<quinn::Connection, QuicError> {
@@ -198,8 +208,8 @@ impl QuicApi {
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         let setup = ClientSetup {
-            device_id: self.endpoint.desktop.clone(),
-            token: self.endpoint.token.clone(),
+            client_id: self.endpoint.client_id.clone(),
+            credential: self.credential.lock().await.clone(),
         };
         let frame = Frame::json(MessageType::CLIENT_SETUP, &setup)
             .map_err(|error| QuicError::Transport(error.to_string()))?;
@@ -210,12 +220,15 @@ impl QuicApi {
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
 
-        SETUP
+        let accepted = SETUP
             .accept(&mut recv)
             .await
             .map_err(|_| QuicError::from_close(&connection))?
-            .read_json::<Accepted>(MessageType::SESSION_ACCEPTED)
+            .read_json::<SessionAccepted>(MessageType::SESSION_ACCEPTED)
             .map_err(|_| QuicError::from_close(&connection))?;
+        if let Some(device_token) = accepted.device_token {
+            *self.credential.lock().await = ClientCredential::Device(device_token);
+        }
         Ok(Dialled {
             connection,
             _relay: relay_endpoint,
@@ -231,7 +244,7 @@ impl QuicApi {
         let setup = RelaySetup {
             device_id: self.endpoint.desktop.clone(),
             role: PeerRole::Client,
-            token: self.endpoint.token.clone(),
+            token: self.endpoint.relay_token.clone(),
         };
         let frame = Frame::json(MessageType::RELAY_SETUP, &setup)
             .map_err(|error| QuicError::Transport(error.to_string()))?;

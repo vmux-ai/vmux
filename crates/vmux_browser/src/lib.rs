@@ -46,7 +46,8 @@ use vmux_core::{
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::{
-    RemoteCopyEvent, RemoteRequest, SideSheetRequest, SideSheetResizeEvent, WindowDragRegionEvent,
+    RemoteCopyEvent, RemoteRequest, RemoteRevokeRequest, SideSheetRequest, SideSheetResizeEvent,
+    WindowDragRegionEvent,
 };
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
@@ -196,6 +197,7 @@ impl Plugin for BrowserPlugin {
                     WindowDragRegionEvent,
                     RemoteRequest,
                     RemoteCopyEvent,
+                    RemoteRevokeRequest,
                 )>::default(),
             ))
             .add_systems(Update, (vmux_layout::apply_cef_state_from_webview,))

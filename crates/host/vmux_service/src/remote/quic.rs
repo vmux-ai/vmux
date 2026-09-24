@@ -13,10 +13,13 @@ use vmux_remote::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
 
 use vmux_api::protocol::{ServiceMessage, SharedMessage};
 
+use vmux_client::AuthorizationOutcome;
+use vmux_remote::DeviceId;
 use vmux_remote::framing::{Frame, FrameError, FrameStream};
-use vmux_remote::quic::{Accepted, ClientSetup, CloseCode, MessageType};
+use vmux_remote::quic::{ClientCredential, ClientSetup, CloseCode, MessageType, SessionAccepted};
 
 const REMOTE_STATE_POLL: Duration = Duration::from_secs(1);
+const AUTHORIZATION_POLL: Duration = Duration::from_secs(1);
 
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 
@@ -95,18 +98,70 @@ impl From<FrameError> for Rejection {
     }
 }
 
-pub fn admit(
-    presented_token: &str,
-    expected_token: &str,
+async fn admit(
+    setup: ClientSetup,
+    state: &super::server::RemoteState,
     remote_enabled: bool,
-) -> Result<Accepted, Rejection> {
+) -> Result<(SessionAccepted, ActiveAuthorization), Rejection> {
     if !remote_enabled {
         return Err(Rejection::RemoteDisabled);
     }
-    if !super::server::secure_eq(presented_token, expected_token) {
-        return Err(Rejection::Unauthorized);
+    let credential = setup.credential.clone();
+    let outcome = state
+        .authorizations
+        .lock()
+        .await
+        .authenticate(&setup.client_id, &credential)
+        .map_err(|error| {
+            tracing::warn!(%error, "remote quic: authorization store failed");
+            Rejection::Unauthorized
+        })?
+        .ok_or(Rejection::Unauthorized)?;
+    match outcome {
+        AuthorizationOutcome::Accepted => {
+            let ClientCredential::Device(device_token) = credential else {
+                return Err(Rejection::Unauthorized);
+            };
+            Ok((
+                SessionAccepted::default(),
+                ActiveAuthorization {
+                    client_id: setup.client_id,
+                    device_token,
+                },
+            ))
+        }
+        AuthorizationOutcome::Paired { device_token } => Ok((
+            SessionAccepted {
+                device_token: Some(device_token.clone()),
+            },
+            ActiveAuthorization {
+                client_id: setup.client_id,
+                device_token,
+            },
+        )),
     }
-    Ok(Accepted {})
+}
+
+struct ActiveAuthorization {
+    client_id: DeviceId,
+    device_token: String,
+}
+
+impl ActiveAuthorization {
+    async fn is_current(&self, state: &super::server::RemoteState) -> bool {
+        match state
+            .authorizations
+            .lock()
+            .await
+            .authorizes(&self.client_id, &self.device_token)
+        {
+            Ok(authorized) => authorized,
+            Err(error) => {
+                tracing::warn!(%error, "remote quic: authorization revalidation failed");
+                false
+            }
+        }
+    }
 }
 
 pub fn spawn_liveness_watch() -> watch::Receiver<bool> {
@@ -146,17 +201,16 @@ async fn serve(
     state: super::server::RemoteState,
     mut liveness: watch::Receiver<bool>,
 ) {
-    let token = state.token.clone();
-    let paired = state.paired.clone();
     let Ok((mut send, mut recv)) = connection.accept_bi().await else {
         return;
     };
+    let remote_enabled = *liveness.borrow();
     let admitted = match read_setup(&mut recv).await {
-        Ok(setup) => admit(&setup.token, &token, *liveness.borrow()),
+        Ok(setup) => admit(setup, &state, remote_enabled).await,
         Err(rejection) => Err(rejection),
     };
 
-    let accepted = match admitted {
+    let (accepted, authorization) = match admitted {
         Ok(accepted) => accepted,
         Err(rejection) => {
             tracing::info!(?rejection, "remote quic: connection refused");
@@ -172,13 +226,21 @@ async fn serve(
     if SETUP.open(&mut send, &frame).await.is_err() || send.finish().is_err() {
         return;
     }
-    super::server::mark_paired(&paired);
+    let mut authorization_poll = tokio::time::interval(AUTHORIZATION_POLL);
+    authorization_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    authorization_poll.tick().await;
 
     loop {
         tokio::select! {
             changed = liveness.changed() => {
                 if changed.is_err() || !*liveness.borrow() {
                     connection.close(CloseCode::RemoteDisabled.as_u32().into(), b"remote off");
+                    return;
+                }
+            }
+            _ = authorization_poll.tick() => {
+                if !authorization.is_current(&state).await {
+                    connection.close(CloseCode::Unauthorized.as_u32().into(), b"revoked");
                     return;
                 }
             }
@@ -437,83 +499,104 @@ mod live {
     use super::*;
     use std::net::Ipv4Addr;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
     use tokio::sync::{Mutex, broadcast};
     use vmux_api::protocol::SharedResponse;
+    use vmux_client::RemoteAuthorizationStore;
     use vmux_remote::DeviceId;
     use vmux_remote::quic::endpoint::{SelfSignedIdentity, Trust};
 
     struct Harness {
+        _directory: tempfile::TempDir,
         address: std::net::SocketAddr,
         fingerprint: String,
+        authorizations: RemoteAuthorizationStore,
     }
 
-    fn start(token: &str) -> Harness {
-        let (agent_tx, _) = broadcast::channel(8);
-        let state = super::super::server::RemoteState {
-            token: Arc::from(token),
-            paired: Arc::new(AtomicBool::new(false)),
-            agents: Arc::new(Mutex::new(Default::default())),
-            acp: Arc::new(Mutex::new(Default::default())),
-            broker: crate::agent_broker::AgentBroker::new(
-                agent_tx,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            ),
-            client_ops: Arc::new(Mutex::new(Default::default())),
-        };
-        let identity = SelfSignedIdentity::generate(vec!["localhost".into()]).expect("identity");
-        let fingerprint = identity.fingerprint.clone();
-        let (_liveness_tx, liveness_rx) = tokio::sync::watch::channel(true);
-        std::mem::forget(_liveness_tx);
-        let (handle, address) = spawn_with_identity(
-            state,
-            (Ipv4Addr::LOCALHOST, 0).into(),
-            identity,
-            liveness_rx,
-        )
-        .expect("listener");
-        std::mem::forget(handle);
-        Harness {
-            address,
-            fingerprint,
-        }
-    }
-
-    async fn connect(
-        harness: &Harness,
-        token: &str,
-    ) -> Result<quinn::Connection, quinn::ConnectionError> {
-        let endpoint = Trust::Desktop {
-            fingerprint: harness.fingerprint.clone(),
-        }
-        .endpoint(harness.address)
-        .expect("client endpoint");
-        let connection = endpoint
-            .connect(harness.address, "localhost")
-            .expect("dial")
-            .await?;
-
-        let (mut send, mut recv) = connection.open_bi().await.expect("setup stream");
-        let setup = ClientSetup {
-            device_id: DeviceId::new("test-device"),
-            token: token.to_string(),
-        };
-        let frame = Frame::json(MessageType::CLIENT_SETUP, &setup).expect("encode");
-        SETUP.open(&mut send, &frame).await.expect("write setup");
-        send.finish().expect("finish setup");
-
-        match SETUP.accept(&mut recv).await {
-            Ok(frame) => {
-                frame
-                    .read_json::<Accepted>(MessageType::SESSION_ACCEPTED)
-                    .expect("accepted");
-                Ok(connection)
+    impl Harness {
+        fn start() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let authorizations =
+                RemoteAuthorizationStore::new(directory.path().join("authorizations.json"));
+            authorizations.ensure().unwrap();
+            let (agent_tx, _) = broadcast::channel(8);
+            let state = super::super::server::RemoteState {
+                relay_token: Arc::from("relay-token"),
+                authorizations: Arc::new(Mutex::new(authorizations.clone())),
+                agents: Arc::new(Mutex::new(Default::default())),
+                acp: Arc::new(Mutex::new(Default::default())),
+                broker: crate::agent_broker::AgentBroker::new(
+                    agent_tx,
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                ),
+                client_ops: Arc::new(Mutex::new(Default::default())),
+            };
+            let identity =
+                SelfSignedIdentity::generate(vec!["localhost".into()]).expect("identity");
+            let fingerprint = identity.fingerprint.clone();
+            let (liveness_tx, liveness_rx) = tokio::sync::watch::channel(true);
+            std::mem::forget(liveness_tx);
+            let (handle, address) = spawn_with_identity(
+                state,
+                (Ipv4Addr::LOCALHOST, 0).into(),
+                identity,
+                liveness_rx,
+            )
+            .expect("listener");
+            std::mem::forget(handle);
+            Self {
+                _directory: directory,
+                address,
+                fingerprint,
+                authorizations,
             }
-            Err(_) => Err(connection
-                .close_reason()
-                .unwrap_or(quinn::ConnectionError::LocallyClosed)),
+        }
+
+        async fn connect(
+            &self,
+            client_id: &DeviceId,
+            credential: ClientCredential,
+        ) -> Result<(quinn::Connection, SessionAccepted), quinn::ConnectionError> {
+            let endpoint = Trust::Desktop {
+                fingerprint: self.fingerprint.clone(),
+            }
+            .endpoint(self.address)
+            .expect("client endpoint");
+            let connection = endpoint
+                .connect(self.address, "localhost")
+                .expect("dial")
+                .await?;
+
+            let (mut send, mut recv) = connection.open_bi().await.expect("setup stream");
+            let setup = ClientSetup {
+                client_id: client_id.clone(),
+                credential,
+            };
+            let frame = Frame::json(MessageType::CLIENT_SETUP, &setup).expect("encode");
+            SETUP.open(&mut send, &frame).await.expect("write setup");
+            send.finish().expect("finish setup");
+
+            match SETUP.accept(&mut recv).await {
+                Ok(frame) => {
+                    let accepted = frame
+                        .read_json::<SessionAccepted>(MessageType::SESSION_ACCEPTED)
+                        .expect("accepted");
+                    Ok((connection, accepted))
+                }
+                Err(_) => Err(connection
+                    .close_reason()
+                    .unwrap_or(quinn::ConnectionError::LocallyClosed)),
+            }
+        }
+
+        async fn pair(&self, client_id: &DeviceId) -> (quinn::Connection, String) {
+            let pairing_token = self.authorizations.pairing_token().unwrap();
+            let (connection, accepted) = self
+                .connect(client_id, ClientCredential::Pairing(pairing_token))
+                .await
+                .expect("pairing handshake");
+            (connection, accepted.device_token.expect("device token"))
         }
     }
 
@@ -542,8 +625,8 @@ mod live {
 
     #[tokio::test]
     async fn subscribing_to_an_unknown_session_closes_rather_than_hangs() {
-        let harness = start("correct-token");
-        let connection = connect(&harness, "correct-token").await.expect("handshake");
+        let harness = Harness::start();
+        let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
 
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::agent(
@@ -573,8 +656,8 @@ mod live {
 
     #[tokio::test]
     async fn a_frame_of_a_foreign_type_is_not_answered_as_a_control_request() {
-        let harness = start("correct-token");
-        let connection = connect(&harness, "correct-token").await.expect("handshake");
+        let harness = Harness::start();
+        let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
 
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::ListSessions)
@@ -606,11 +689,9 @@ mod live {
 
     #[tokio::test]
     async fn a_paired_client_can_list_sessions() {
-        let harness = start("correct-token");
+        let harness = Harness::start();
 
-        let connection = connect(&harness, "correct-token")
-            .await
-            .expect("handshake should succeed");
+        let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
         let response = request(&connection, SharedMessage::ListSessions).await;
 
         assert!(
@@ -621,9 +702,15 @@ mod live {
 
     #[tokio::test]
     async fn a_wrong_token_is_closed_with_unauthorized() {
-        let harness = start("correct-token");
+        let harness = Harness::start();
 
-        match connect(&harness, "wrong-token").await {
+        match harness
+            .connect(
+                &DeviceId::new("test-device"),
+                ClientCredential::Pairing("wrong-token".to_string()),
+            )
+            .await
+        {
             Err(quinn::ConnectionError::ApplicationClosed(closed)) => assert_eq!(
                 closed.error_code.into_inner(),
                 CloseCode::Unauthorized.as_u32() as u64,
@@ -635,38 +722,54 @@ mod live {
 
     #[tokio::test]
     async fn one_connection_serves_repeated_requests() {
-        let harness = start("correct-token");
+        let harness = Harness::start();
 
-        let connection = connect(&harness, "correct-token").await.expect("handshake");
+        let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
 
         for _ in 0..3 {
             let response = request(&connection, SharedMessage::ListSessions).await;
             assert!(matches!(response, SharedResponse::Sessions(_)));
         }
     }
+
+    #[tokio::test]
+    async fn a_device_token_reconnects_after_the_pairing_token_rotates() {
+        let harness = Harness::start();
+        let client = DeviceId::new("test-device");
+        let (_, device_token) = harness.pair(&client).await;
+
+        let (_, accepted) = harness
+            .connect(&client, ClientCredential::Device(device_token))
+            .await
+            .expect("device handshake");
+
+        assert_eq!(accepted.device_token, None);
+    }
+
+    #[tokio::test]
+    async fn revocation_closes_an_existing_connection() {
+        let harness = Harness::start();
+        let client = DeviceId::new("test-device");
+        let (connection, _) = harness.pair(&client).await;
+
+        assert!(harness.authorizations.revoke(&client).unwrap());
+        let closed = tokio::time::timeout(Duration::from_secs(5), connection.closed())
+            .await
+            .expect("revocation close timeout");
+
+        let quinn::ConnectionError::ApplicationClosed(closed) = closed else {
+            panic!("expected application close, got {closed:?}")
+        };
+        assert_eq!(
+            closed.error_code.into_inner(),
+            CloseCode::Unauthorized.as_u32() as u64
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_matching_token_is_admitted() {
-        assert_eq!(admit("secret", "secret", true), Ok(Accepted {}));
-    }
-
-    #[test]
-    fn a_wrong_token_is_refused() {
-        assert_eq!(admit("guess", "secret", true), Err(Rejection::Unauthorized));
-    }
-
-    #[test]
-    fn remote_switched_off_outranks_a_valid_token() {
-        assert_eq!(
-            admit("secret", "secret", false),
-            Err(Rejection::RemoteDisabled)
-        );
-    }
 
     #[test]
     fn each_rejection_carries_a_distinct_close_code() {
