@@ -1,6 +1,7 @@
 mod command;
 pub mod component;
 pub mod contract;
+mod input_queue;
 pub mod launch;
 mod loading;
 mod mouse;

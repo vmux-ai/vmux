@@ -639,6 +639,18 @@ mod tests {
     use vmux_service::protocol::ProcessId;
     use vmux_terminal::Terminal;
 
+    #[derive(Resource, Default)]
+    struct CapturedTerminalSends(Vec<vmux_terminal::TerminalSendRequest>);
+
+    impl CapturedTerminalSends {
+        fn capture(
+            mut requests: MessageReader<vmux_terminal::TerminalSendRequest>,
+            mut captured: ResMut<Self>,
+        ) {
+            captured.0.extend(requests.read().cloned());
+        }
+    }
+
     #[test]
     pub(crate) fn update_settings_via_apply_mutates_resource_and_returns_ron() {
         let mut settings = test_settings();
@@ -729,6 +741,11 @@ mod tests {
         .add_message::<vmux_setting::SettingsWriteRequest>()
         .add_message::<vmux_space::SpaceRequest>()
         .add_message::<vmux_history::query::HistoryOpenIntent>()
+        .init_resource::<CapturedTerminalSends>()
+        .add_systems(
+            Update,
+            CapturedTerminalSends::capture.after(CommandSet::Commands),
+        )
         .insert_resource(FocusedStack::default())
         .insert_resource(test_settings());
 
@@ -738,7 +755,7 @@ mod tests {
             .spawn(vmux_layout::stack::stack_bundle())
             .insert(ChildOf(pane))
             .id();
-        let terminal = app
+        let _terminal = app
             .world_mut()
             .spawn((Terminal, ProcessId::new()))
             .insert(ChildOf(stack))
@@ -761,11 +778,10 @@ mod tests {
         app.update();
         app.update();
 
-        let pending = app
-            .world()
-            .get::<vmux_terminal::PendingTerminalInput>(terminal)
-            .expect("PendingTerminalInput inserted");
-        assert_eq!(pending.data, b"ls".to_vec());
+        let captured = &app.world().resource::<CapturedTerminalSends>().0;
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].text, "ls");
+        assert_eq!(captured[0].terminal, None);
     }
 
     #[test]

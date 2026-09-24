@@ -892,9 +892,9 @@ fn respond_spaces_spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_command::CommandRequest;
     use crate::model::{SpaceRecord, bootstrap_profile_name};
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_command::CommandRequest;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
