@@ -1,16 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{
-    BinHostEmitEvent, BinReceive, Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin,
+    BinReceive, Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin,
     WebviewCommittedNavigationEvent,
 };
 use vmux_core::KeyboardOwner;
 use vmux_core::event::{
     EXTENSIONS_PAGE_URL, ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress,
-    ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtStatus, ExtStatusEvent,
-    ExtToggleRequest, ExtUninstallRequest, ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest,
+    ExtListRequest, ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtStatus, ExtToggleRequest,
+    ExtUninstallRequest, ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest,
     ExtensionPopupEvent, ExtensionPopupOpenRequest, ExtensionPopupSizeEvent, ExtensionsEvent,
 };
 use vmux_core::extension::store;
@@ -32,9 +32,9 @@ pub struct ExtensionsPlugin;
 impl Plugin for ExtensionsPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
+        app.world_mut().spawn(ExtensionCatalog::default());
         app.add_plugins(vmux_layout::native_open::HostedPagePlugin::<Extensions>::default());
         app.init_resource::<ExtOutbox>()
-            .init_resource::<ExtSubscribers>()
             .init_resource::<WebStoreInjectors>()
             .add_plugins(UiEventPlugin::<(
                 ExtToggleRequest,
@@ -71,7 +71,7 @@ impl Plugin for ExtensionsPlugin {
                     inject_on_cws_nav,
                     inject_on_cws_load_complete.after(crate::page_life::drain_loading_state),
                     inject_popup_sizing.after(crate::page_life::drain_loading_state),
-                    drain_outbox,
+                    (drain_outbox, emit_extensions_snapshot).chain(),
                 ),
             );
     }
@@ -126,16 +126,57 @@ const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManife
 
 enum OutMsg {
     Progress(ExtInstallProgress),
-    Status(ExtStatusEvent),
     List(ExtensionsEvent),
-    WebStoreInstallResult { id: String, success: bool },
+    WebStoreInstallResult {
+        entity: Entity,
+        id: String,
+        success: bool,
+    },
 }
 
 #[derive(Resource, Clone, Default)]
-struct ExtOutbox(Arc<Mutex<Vec<(Entity, OutMsg)>>>);
+struct ExtOutbox(Arc<Mutex<Vec<OutMsg>>>);
 
-#[derive(Resource, Default)]
-struct ExtSubscribers(HashSet<Entity>);
+#[derive(Component, Default)]
+struct ExtensionCatalog {
+    snapshot: ExtensionsEvent,
+    revision: u64,
+}
+
+impl ExtensionCatalog {
+    fn replace(&mut self, mut snapshot: ExtensionsEvent) {
+        snapshot.loaded = true;
+        snapshot.installing = std::mem::take(&mut self.snapshot.installing);
+        self.snapshot = snapshot;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    fn update_progress(&mut self, progress: ExtInstallProgress) {
+        let current = self
+            .snapshot
+            .installing
+            .iter()
+            .position(|item| item.key == progress.key);
+        if matches!(
+            progress.phase,
+            ExtInstallPhase::Done | ExtInstallPhase::Failed
+        ) {
+            if let Some(index) = current {
+                self.snapshot.installing.remove(index);
+            }
+        } else if let Some(index) = current {
+            self.snapshot.installing[index] = progress;
+        } else {
+            self.snapshot.installing.push(progress);
+        }
+        self.revision = self.revision.wrapping_add(1);
+    }
+}
+
+#[derive(Component, Default)]
+struct ExtensionSubscriber {
+    revision: u64,
+}
 
 #[derive(Clone)]
 struct WebStoreInjector {
@@ -146,12 +187,8 @@ struct WebStoreInjector {
 #[derive(Resource, Default)]
 struct WebStoreInjectors(HashMap<Entity, WebStoreInjector>);
 
-fn push(outbox: &ExtOutbox, entity: Entity, msg: OutMsg) {
-    outbox
-        .0
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .push((entity, msg));
+fn push(outbox: &ExtOutbox, msg: OutMsg) {
+    outbox.0.lock().unwrap_or_else(|e| e.into_inner()).push(msg);
 }
 
 fn snapshot() -> ExtensionsEvent {
@@ -192,68 +229,44 @@ fn snapshot_from_index(idx: &store::Index, profile: &str, loaded: &[String]) -> 
         })
         .collect();
     ExtensionsEvent {
+        loaded: true,
         extensions,
+        installing: Vec::new(),
         pending: idx.is_dirty_for(profile, loaded),
     }
 }
 
-fn broadcast_list(outbox: &ExtOutbox, subs: &ExtSubscribers) {
-    broadcast_snapshot(outbox, subs, snapshot());
+fn broadcast_list(outbox: &ExtOutbox) {
+    push(outbox, OutMsg::List(snapshot()));
 }
 
-fn broadcast_snapshot(outbox: &ExtOutbox, subs: &ExtSubscribers, event: ExtensionsEvent) {
-    for &entity in &subs.0 {
-        push(outbox, entity, OutMsg::List(event.clone()));
-    }
-}
-
-fn spawn_install(outbox: &ExtOutbox, subs: Vec<Entity>, source: String, requester: Option<Entity>) {
+fn spawn_install(outbox: &ExtOutbox, source: String, requester: Option<Entity>) {
     let sink = outbox.clone();
     std::thread::spawn(move || {
         let key = source.clone();
         let prog_sink = sink.clone();
-        let prog_subs = subs.clone();
         let result = super::install::install(
             &source,
             super::install::DEFAULT_PRODVERSION,
             |phase, pct, m| {
-                for &entity in &prog_subs {
-                    push(
-                        &prog_sink,
-                        entity,
-                        OutMsg::Progress(ExtInstallProgress {
-                            key: key.clone(),
-                            phase,
-                            pct,
-                            message: m.to_string(),
-                        }),
-                    );
-                }
+                push(
+                    &prog_sink,
+                    OutMsg::Progress(ExtInstallProgress {
+                        key: key.clone(),
+                        phase,
+                        pct,
+                        message: m.to_string(),
+                    }),
+                );
             },
         );
         match result {
             Ok(entry) => {
-                for &entity in &subs {
-                    push(
-                        &sink,
-                        entity,
-                        OutMsg::Status(ExtStatusEvent {
-                            id: entry.id.clone(),
-                            status: if entry.enabled_for(&vmux_core::profile::active_profile_name())
-                            {
-                                ExtStatus::Installed
-                            } else {
-                                ExtStatus::Disabled
-                            },
-                            version: Some(entry.version.clone()),
-                        }),
-                    );
-                }
                 if let Some(entity) = requester {
                     push(
                         &sink,
-                        entity,
                         OutMsg::WebStoreInstallResult {
+                            entity,
                             id: entry.id,
                             success: true,
                         },
@@ -261,68 +274,59 @@ fn spawn_install(outbox: &ExtOutbox, subs: Vec<Entity>, source: String, requeste
                 }
             }
             Err(e) => {
-                for &entity in &subs {
-                    push(
-                        &sink,
-                        entity,
-                        OutMsg::Progress(ExtInstallProgress {
-                            key: key.clone(),
-                            phase: ExtInstallPhase::Failed,
-                            pct: None,
-                            message: e.clone(),
-                        }),
-                    );
-                }
+                push(
+                    &sink,
+                    OutMsg::Progress(ExtInstallProgress {
+                        key: key.clone(),
+                        phase: ExtInstallPhase::Failed,
+                        pct: None,
+                        message: e,
+                    }),
+                );
                 if let Some(entity) = requester {
                     push(
                         &sink,
-                        entity,
                         OutMsg::WebStoreInstallResult {
-                            id: key.clone(),
+                            entity,
+                            id: key,
                             success: false,
                         },
                     );
                 }
             }
         }
-        let ev = snapshot();
-        for &entity in &subs {
-            push(&sink, entity, OutMsg::List(ev.clone()));
-        }
+        push(&sink, OutMsg::List(snapshot()));
     });
 }
 
 fn on_list_request(
     trigger: On<BinReceive<ExtListRequest>>,
-    mut subs: ResMut<ExtSubscribers>,
-    outbox: Res<ExtOutbox>,
+    mut catalog: Query<&mut ExtensionCatalog>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    subs.0.insert(entity);
-    push(&outbox, entity, OutMsg::List(snapshot()));
+    commands
+        .entity(entity)
+        .insert(ExtensionSubscriber::default());
+    let Ok(mut catalog) = catalog.single_mut() else {
+        return;
+    };
+    catalog.replace(snapshot());
 }
 
-fn on_toggle_request(
-    trigger: On<BinReceive<ExtToggleRequest>>,
-    subs: Res<ExtSubscribers>,
-    outbox: Res<ExtOutbox>,
-) {
+fn on_toggle_request(trigger: On<BinReceive<ExtToggleRequest>>, outbox: Res<ExtOutbox>) {
     let req = trigger.event().payload.clone();
     let profile = vmux_core::profile::active_profile_name();
     let _ = store::update_index(&store::root(), |idx| {
         idx.set_enabled_for(&profile, &req.id, req.enabled, req.approve_permissions);
     });
-    broadcast_list(&outbox, &subs);
+    broadcast_list(&outbox);
 }
 
-fn on_uninstall_request(
-    trigger: On<BinReceive<ExtUninstallRequest>>,
-    subs: Res<ExtSubscribers>,
-    outbox: Res<ExtOutbox>,
-) {
+fn on_uninstall_request(trigger: On<BinReceive<ExtUninstallRequest>>, outbox: Res<ExtOutbox>) {
     let profile = vmux_core::profile::active_profile_name();
     let _ = store::uninstall_for_profile(&store::root(), &profile, &trigger.event().payload.id);
-    broadcast_list(&outbox, &subs);
+    broadcast_list(&outbox);
 }
 
 fn on_popup_open_request(
@@ -424,13 +428,8 @@ fn close_popup(
     }
 }
 
-fn on_pin_request(
-    trigger: On<BinReceive<ExtPinRequest>>,
-    subs: Res<ExtSubscribers>,
-    outbox: Res<ExtOutbox>,
-) {
+fn on_pin_request(trigger: On<BinReceive<ExtPinRequest>>, outbox: Res<ExtOutbox>) {
     let request = trigger.event().payload.clone();
-    let recipients = subs.0.iter().copied().collect::<Vec<_>>();
     let outbox = outbox.clone();
     std::thread::spawn(move || {
         let profile = vmux_core::profile::active_profile_name();
@@ -441,29 +440,22 @@ fn on_pin_request(
                 .then(|| snapshot_from_index(index, &profile, &loaded))
         });
         match result {
-            Ok(Some(snapshot)) => {
-                for entity in recipients {
-                    push(&outbox, entity, OutMsg::List(snapshot.clone()));
-                }
-            }
+            Ok(Some(snapshot)) => push(&outbox, OutMsg::List(snapshot)),
             Ok(None) => {}
             Err(error) => {
                 bevy::log::warn!(
                     extension = request.id,
                     "extension pin update failed: {error}"
                 );
-                for entity in recipients {
-                    push(
-                        &outbox,
-                        entity,
-                        OutMsg::Progress(ExtInstallProgress {
-                            key: request.id.clone(),
-                            phase: ExtInstallPhase::Failed,
-                            pct: None,
-                            message: error.clone(),
-                        }),
-                    );
-                }
+                push(
+                    &outbox,
+                    OutMsg::Progress(ExtInstallProgress {
+                        key: request.id,
+                        phase: ExtInstallPhase::Failed,
+                        pct: None,
+                        message: error,
+                    }),
+                );
             }
         }
     });
@@ -511,16 +503,10 @@ fn on_browse_store_request(
 
 fn run_agent_installs(
     mut reader: MessageReader<vmux_layout::ExtensionInstallRequest>,
-    subs: Res<ExtSubscribers>,
     outbox: Res<ExtOutbox>,
 ) {
     for req in reader.read() {
-        spawn_install(
-            &outbox,
-            subs.0.iter().copied().collect(),
-            req.source.clone(),
-            None,
-        );
+        spawn_install(&outbox, req.source.clone(), None);
     }
 }
 
@@ -734,7 +720,6 @@ fn inject_on_cws_load_complete(
 
 fn on_add_extension(
     trigger: On<Receive<AddExtensionRequest>>,
-    subs: Res<ExtSubscribers>,
     outbox: Res<ExtOutbox>,
     injectors: Res<WebStoreInjectors>,
     mut requests: MessageWriter<vmux_layout::stack::StackRequest>,
@@ -751,12 +736,7 @@ fn on_add_extension(
     }
     match req.channel.as_str() {
         ADD_CHANNEL => {
-            spawn_install(
-                &outbox,
-                subs.0.iter().copied().collect(),
-                id,
-                Some(trigger.event().webview),
-            );
+            spawn_install(&outbox, id, Some(trigger.event().webview));
         }
         MANAGE_CHANNEL => {
             requests.write(vmux_layout::stack::StackRequest::Open {
@@ -770,24 +750,27 @@ fn on_add_extension(
 fn drain_outbox(
     outbox: Res<ExtOutbox>,
     browsers: NonSend<Browsers>,
-    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
-    mut commands: Commands,
+    mut catalog: Query<&mut ExtensionCatalog>,
 ) {
-    let drained: Vec<(Entity, OutMsg)> = {
+    let drained: Vec<OutMsg> = {
         let mut q = outbox.0.lock().unwrap_or_else(|e| e.into_inner());
         q.drain(..).collect()
     };
-    for (entity, msg) in drained {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
+    let Ok(mut catalog) = catalog.single_mut() else {
+        return;
+    };
+    for msg in drained {
         match msg {
-            OutMsg::List(ev) => {
-                LayoutUiStateUpdates::deliver(&layout_ui, &mut commands, entity, &ev)
-            }
-            OutMsg::Progress(ev) => commands.trigger(BinHostEmitEvent::from_event(entity, &ev)),
-            OutMsg::Status(ev) => commands.trigger(BinHostEmitEvent::from_event(entity, &ev)),
-            OutMsg::WebStoreInstallResult { id, success } => {
+            OutMsg::List(event) => catalog.replace(event),
+            OutMsg::Progress(progress) => catalog.update_progress(progress),
+            OutMsg::WebStoreInstallResult {
+                entity,
+                id,
+                success,
+            } => {
+                if !browsers.can_emit_to(&entity) {
+                    continue;
+                }
                 let detail = serde_json::json!({ "id": id, "success": success });
                 let script = format!(
                     "globalThis.dispatchEvent(new CustomEvent('__vmuxWebStoreInstallResult',{{detail:{detail}}}));"
@@ -795,6 +778,25 @@ fn drain_outbox(
                 browsers.execute_js(&entity, &script);
             }
         }
+    }
+}
+
+fn emit_extensions_snapshot(
+    catalog: Query<&ExtensionCatalog>,
+    mut subscribers: Query<(Entity, &mut ExtensionSubscriber)>,
+    browsers: NonSend<Browsers>,
+    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
+    mut commands: Commands,
+) {
+    let Ok(catalog) = catalog.single() else {
+        return;
+    };
+    for (entity, mut subscriber) in &mut subscribers {
+        if subscriber.revision == catalog.revision || !browsers.can_emit_to(&entity) {
+            continue;
+        }
+        LayoutUiStateUpdates::deliver(&layout_ui, &mut commands, entity, &catalog.snapshot);
+        subscriber.revision = catalog.revision;
     }
 }
 

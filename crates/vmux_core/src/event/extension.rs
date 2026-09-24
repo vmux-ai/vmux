@@ -79,9 +79,11 @@ pub struct ExtRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[vmux_api::host_event(targets = ["extensions", "layout", "tools"])]
+#[vmux_api::host_event(version = 2, targets = ["extensions", "layout", "tools"])]
 pub struct ExtensionsEvent {
+    pub loaded: bool,
     pub extensions: Vec<ExtRow>,
+    pub installing: Vec<ExtInstallProgress>,
     pub pending: bool,
 }
 
@@ -102,24 +104,6 @@ pub struct ExtInstallProgress {
     pub phase: ExtInstallPhase,
     pub pct: Option<u8>,
     pub message: String,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["extensions", "layout", "tools"])]
-pub struct ExtStatusEvent {
-    pub id: String,
-    pub status: ExtStatus,
-    pub version: Option<String>,
 }
 
 #[derive(
