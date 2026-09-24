@@ -34,16 +34,26 @@ pub(crate) struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CommandTypePlugin::<BrowserRequest>::default())
-            .add_message::<NavigationRequest>()
-            .add_message::<OpenRequest>()
-            .add_message::<ViewRequest>()
-            .add_observer(on_header_request)
-            .add_observer(on_side_sheet_request)
-            .add_observer(on_side_sheet_resize)
-            .add_observer(on_reload_notify_header)
-            .add_observer(on_hard_reload_notify_header)
-            .add_systems(Update, handle_browser_commands.in_set(ReadCommandRequests));
+        app.add_plugins((
+            CommandTypePlugin::<NavigationRequest>::default(),
+            CommandTypePlugin::<OpenRequest>::default(),
+            CommandTypePlugin::<ViewRequest>::default(),
+        ))
+        .add_observer(on_header_request)
+        .add_observer(on_side_sheet_request)
+        .add_observer(on_side_sheet_resize)
+        .add_observer(on_reload_notify_header)
+        .add_observer(on_hard_reload_notify_header)
+        .add_systems(
+            Update,
+            (
+                handle_navigation_requests,
+                handle_open_requests,
+                handle_view_requests,
+            )
+                .chain()
+                .in_set(ReadCommandRequests),
+        );
     }
 }
 
@@ -56,7 +66,7 @@ pub enum NavigationRequest {
     Stop,
 }
 
-impl NavigationRequest {
+impl CommandRequest for NavigationRequest {
     fn definitions() -> Vec<CommandDefinition> {
         vec![
             CommandDefinition::new("browser_prev_page", "Back", "Browser > Navigation")
@@ -113,7 +123,7 @@ impl OpenRequest {
     }
 }
 
-impl OpenRequest {
+impl CommandRequest for OpenRequest {
     fn definitions() -> Vec<CommandDefinition> {
         vec![
             CommandDefinition::new("open_in_place", "Open Here", "Browser > Open").mcp(
@@ -153,7 +163,7 @@ pub enum ViewRequest {
     Print,
 }
 
-impl ViewRequest {
+impl CommandRequest for ViewRequest {
     fn definitions() -> Vec<CommandDefinition> {
         vec![
             CommandDefinition::new("browser_zoom_in", "Zoom In", "Browser > View")
@@ -196,65 +206,15 @@ impl TryFrom<&CommandInvocation> for ViewRequest {
     }
 }
 
-#[derive(Message, Clone, Debug, PartialEq, Eq)]
-enum BrowserRequest {
-    Navigate(NavigationRequest),
-    Open(OpenRequest),
-    View(ViewRequest),
-}
-
-impl CommandRequest for BrowserRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        let mut definitions = NavigationRequest::definitions();
-        definitions.extend(OpenRequest::definitions());
-        definitions.extend(ViewRequest::definitions());
-        definitions
-    }
-}
-
-impl TryFrom<&CommandInvocation> for BrowserRequest {
-    type Error = ();
-
-    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
-        if let Ok(request) = NavigationRequest::try_from(invocation) {
-            return Ok(Self::Navigate(request));
-        }
-        if let Ok(request) = OpenRequest::try_from(invocation) {
-            return Ok(Self::Open(request));
-        }
-        ViewRequest::try_from(invocation).map(Self::View)
-    }
-}
-
-fn handle_browser_commands(
-    mut command_requests: MessageReader<BrowserRequest>,
+fn handle_navigation_requests(
     mut navigation_requests: MessageReader<NavigationRequest>,
-    mut open_requests: MessageReader<OpenRequest>,
-    mut view_requests: MessageReader<ViewRequest>,
     active_stack: ActiveStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
-    mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
-    mut meta_q: Query<&mut PageMetadata, With<Browser>>,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
-    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
-    native_pages: Query<&NativelyHosted>,
-    host_spawn_routes: Query<&HostSpawnRoute>,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
     mut host_history: HostHistoryNavigation,
     mut commands: Commands,
 ) {
-    let mut requests = command_requests.read().cloned().collect::<Vec<_>>();
-    requests.extend(
-        navigation_requests
-            .read()
-            .copied()
-            .map(BrowserRequest::Navigate),
-    );
-    requests.extend(open_requests.read().cloned().map(BrowserRequest::Open));
-    requests.extend(view_requests.read().copied().map(BrowserRequest::View));
-
-    for request in requests {
+    for request in navigation_requests.read() {
         let Some(active) = active_stack.get() else {
             continue;
         };
@@ -265,113 +225,160 @@ fn handle_browser_commands(
         else {
             continue;
         };
+        let (is_terminal, _) = kind_q.get(webview).unwrap_or((false, false));
+        match request {
+            NavigationRequest::Back => {
+                if is_terminal || host_history.stepped(webview, HostHistoryDelta::Back) {
+                    continue;
+                }
+                commands.trigger(RequestGoBack { webview });
+            }
+            NavigationRequest::Forward => {
+                if is_terminal || host_history.stepped(webview, HostHistoryDelta::Forward) {
+                    continue;
+                }
+                commands.trigger(RequestGoForward { webview });
+            }
+            NavigationRequest::Reload => {
+                if is_terminal {
+                    commands.trigger(RestartPty { entity: webview });
+                } else {
+                    commands.trigger(RequestReload { webview });
+                }
+            }
+            NavigationRequest::HardReload => {
+                if is_terminal {
+                    commands.trigger(RestartPty { entity: webview });
+                } else {
+                    commands.trigger(RequestReloadIgnoreCache { webview });
+                }
+            }
+            NavigationRequest::Stop => {}
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_open_requests(
+    mut open_requests: MessageReader<OpenRequest>,
+    active_stack: ActiveStack,
+    browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
+    kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
+    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
+    native_pages: Query<&NativelyHosted>,
+    host_spawn_routes: Query<&HostSpawnRoute>,
+    mut meta_q: Query<&mut PageMetadata, With<Browser>>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut commands: Commands,
+) {
+    for request in open_requests.read() {
+        let Some(active) = active_stack.get() else {
+            continue;
+        };
+        let Some(webview) = browsers
+            .iter()
+            .find(|(_, child_of)| child_of.get() == active)
+            .map(|(entity, _)| entity)
+        else {
+            continue;
+        };
+        let (is_terminal, _) = kind_q.get(webview).unwrap_or((false, false));
+        let resolved = request.resolved_url(
+            effective_startup_url
+                .as_ref()
+                .map(|startup| startup.0.as_str()),
+        );
+        if resolved.is_empty() {
+            continue;
+        }
+        let resolved =
+            VmuxRoute::canonical(&resolved).unwrap_or_else(|| resolved.trim().to_string());
+        let current_url = meta_q
+            .get(webview)
+            .map(|metadata| metadata.url.clone())
+            .unwrap_or_default();
+        let current_is_hosted = native_pages
+            .iter()
+            .any(|page| page.answers_for(&current_url))
+            || host_spawn_routes
+                .iter()
+                .any(|route| route.answers_for(&current_url));
+        let resolved_is_hosted = native_pages.iter().any(|page| page.answers_for(&resolved))
+            || host_spawn_routes
+                .iter()
+                .any(|route| route.answers_for(&resolved));
+        if is_terminal || current_is_hosted || resolved_is_hosted {
+            page_open_requests.write(PageOpenRequest {
+                target: PageOpenTarget::Stack(active),
+                url: resolved,
+                request_id: None,
+            });
+            continue;
+        }
+        if let Ok(mut metadata) = meta_q.get_mut(webview) {
+            metadata.url = resolved.clone();
+            metadata.title = resolved.clone();
+            metadata.icon = vmux_core::PageIcon::None;
+        }
+        commands
+            .entity(webview)
+            .insert(WebviewSource::new(&resolved));
+        commands.trigger(RequestNavigate {
+            webview,
+            url: resolved,
+        });
+    }
+}
+
+fn handle_view_requests(
+    mut view_requests: MessageReader<ViewRequest>,
+    active_stack: ActiveStack,
+    browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
+    kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
+    mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
+    mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
+    mut commands: Commands,
+) {
+    for request in view_requests.read() {
+        let Some(active) = active_stack.get() else {
+            continue;
+        };
+        let Some(webview) = browsers
+            .iter()
+            .find(|(_, child_of)| child_of.get() == active)
+            .map(|(entity, _)| entity)
+        else {
+            continue;
+        };
         let (is_terminal, is_file) = kind_q.get(webview).unwrap_or((false, false));
         let is_text_grid = is_terminal || is_file;
         match request {
-            BrowserRequest::Navigate(request) => match request {
-                NavigationRequest::Back => {
-                    if is_terminal || host_history.stepped(webview, HostHistoryDelta::Back) {
-                        continue;
-                    }
-                    commands.trigger(RequestGoBack { webview });
+            ViewRequest::ZoomIn => {
+                if is_text_grid {
+                    font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Increase);
+                } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
+                    zoom.0 += 0.5;
                 }
-                NavigationRequest::Forward => {
-                    if is_terminal || host_history.stepped(webview, HostHistoryDelta::Forward) {
-                        continue;
-                    }
-                    commands.trigger(RequestGoForward { webview });
-                }
-                NavigationRequest::Reload => {
-                    if is_terminal {
-                        commands.trigger(RestartPty { entity: webview });
-                    } else {
-                        commands.trigger(RequestReload { webview });
-                    }
-                }
-                NavigationRequest::HardReload => {
-                    if is_terminal {
-                        commands.trigger(RestartPty { entity: webview });
-                    } else {
-                        commands.trigger(RequestReloadIgnoreCache { webview });
-                    }
-                }
-                NavigationRequest::Stop => {}
-            },
-            BrowserRequest::Open(request) => {
-                let resolved = request.resolved_url(
-                    effective_startup_url
-                        .as_ref()
-                        .map(|startup| startup.0.as_str()),
-                );
-                if resolved.is_empty() {
-                    continue;
-                }
-                let resolved =
-                    VmuxRoute::canonical(&resolved).unwrap_or_else(|| resolved.trim().to_string());
-                let current_url = meta_q
-                    .get(webview)
-                    .map(|metadata| metadata.url.clone())
-                    .unwrap_or_default();
-                let current_is_hosted = native_pages
-                    .iter()
-                    .any(|page| page.answers_for(&current_url))
-                    || host_spawn_routes
-                        .iter()
-                        .any(|route| route.answers_for(&current_url));
-                let resolved_is_hosted =
-                    native_pages.iter().any(|page| page.answers_for(&resolved))
-                        || host_spawn_routes
-                            .iter()
-                            .any(|route| route.answers_for(&resolved));
-                if is_terminal || current_is_hosted || resolved_is_hosted {
-                    page_open_requests.write(PageOpenRequest {
-                        target: PageOpenTarget::Stack(active),
-                        url: resolved,
-                        request_id: None,
-                    });
-                    continue;
-                }
-                if let Ok(mut metadata) = meta_q.get_mut(webview) {
-                    metadata.url = resolved.clone();
-                    metadata.title = resolved.clone();
-                    metadata.icon = vmux_core::PageIcon::None;
-                }
-                commands
-                    .entity(webview)
-                    .insert(WebviewSource::new(&resolved));
-                commands.trigger(RequestNavigate {
-                    webview,
-                    url: resolved,
-                });
             }
-            BrowserRequest::View(request) => match request {
-                ViewRequest::ZoomIn => {
-                    if is_text_grid {
-                        font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Increase);
-                    } else if let Ok(mut z) = zoom_q.get_mut(webview) {
-                        z.0 += 0.5;
-                    }
+            ViewRequest::ZoomOut => {
+                if is_text_grid {
+                    font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Decrease);
+                } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
+                    zoom.0 -= 0.5;
                 }
-                ViewRequest::ZoomOut => {
-                    if is_text_grid {
-                        font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Decrease);
-                    } else if let Ok(mut z) = zoom_q.get_mut(webview) {
-                        z.0 -= 0.5;
-                    }
+            }
+            ViewRequest::ZoomReset => {
+                if is_text_grid {
+                    font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Reset);
+                } else if let Ok(mut zoom) = zoom_q.get_mut(webview) {
+                    zoom.0 = 0.0;
                 }
-                ViewRequest::ZoomReset => {
-                    if is_text_grid {
-                        font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Reset);
-                    } else if let Ok(mut z) = zoom_q.get_mut(webview) {
-                        z.0 = 0.0;
-                    }
-                }
-                ViewRequest::DevTools => {
-                    commands.trigger(RequestShowDevTool { webview });
-                }
-                ViewRequest::ViewSource => {}
-                ViewRequest::Print => {}
-            },
+            }
+            ViewRequest::DevTools => {
+                commands.trigger(RequestShowDevTool { webview });
+            }
+            ViewRequest::ViewSource => {}
+            ViewRequest::Print => {}
         }
     }
 }
@@ -627,7 +634,11 @@ mod tests {
 
     #[test]
     fn browser_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions = BrowserRequest::definitions();
+        let definitions = NavigationRequest::definitions()
+            .into_iter()
+            .chain(OpenRequest::definitions())
+            .chain(ViewRequest::definitions())
+            .collect::<Vec<_>>();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)
@@ -659,7 +670,11 @@ mod tests {
             };
             let invocation =
                 CommandInvocation::new(Entity::PLACEHOLDER, tool.name).with_arguments(arguments);
-            assert!(BrowserRequest::try_from(&invocation).is_ok());
+            assert!(
+                NavigationRequest::try_from(&invocation).is_ok()
+                    || OpenRequest::try_from(&invocation).is_ok()
+                    || ViewRequest::try_from(&invocation).is_ok()
+            );
         }
     }
 
@@ -723,10 +738,14 @@ mod tests {
     }
 
     #[test]
-    fn command_invocations_keep_their_original_order() {
+    fn command_invocations_dispatch_to_concrete_requests() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandTypePlugin::<BrowserRequest>::default());
+        app.add_plugins((
+            CommandTypePlugin::<NavigationRequest>::default(),
+            CommandTypePlugin::<OpenRequest>::default(),
+            CommandTypePlugin::<ViewRequest>::default(),
+        ));
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
             .write_batch([
@@ -737,20 +756,23 @@ mod tests {
 
         app.update();
 
-        let requests = app
+        let open_requests = app
             .world_mut()
-            .resource_mut::<Messages<BrowserRequest>>()
+            .resource_mut::<Messages<OpenRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        let navigation_requests = app
+            .world_mut()
+            .resource_mut::<Messages<NavigationRequest>>()
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(
-            requests,
-            [
-                BrowserRequest::Open(OpenRequest {
-                    url: Some("https://vmux.ai".to_string()),
-                }),
-                BrowserRequest::Navigate(NavigationRequest::Reload),
-            ]
+            open_requests,
+            [OpenRequest {
+                url: Some("https://vmux.ai".to_string()),
+            }]
         );
+        assert_eq!(navigation_requests, [NavigationRequest::Reload]);
     }
 
     #[test]
