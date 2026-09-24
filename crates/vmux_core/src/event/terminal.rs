@@ -4,31 +4,11 @@ use super::{AnsiPalette, RgbColor, TermCursor, TermLine, TermSelectionRange};
 
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
 #[vmux_api::host_event(target = "terminal")]
 pub struct ServiceUnavailableEvent {
     pub message: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
 #[vmux_api::host_event(target = "terminal")]
 pub struct TermThemeEvent {
     pub foreground: RgbColor,
@@ -49,36 +29,14 @@ pub struct TermThemeEvent {
     pub cursor_blink: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "terminal")]
+#[vmux_api::host_event(Eq, target = "terminal")]
 pub struct TermLoadingEvent {
     pub loading: bool,
     pub label: String,
     pub segment: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "terminal")]
+#[vmux_api::host_event(Eq, target = "terminal")]
 pub struct AgentPromptDraftEvent {
     pub draft: String,
     pub skipped: bool,
@@ -97,16 +55,6 @@ pub struct TermViewportEvent {
     pub selection: Option<TermSelectionRange>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
 #[vmux_api::host_event(target = "terminal")]
 pub struct TermViewportPatch {
     pub changed_lines: Vec<(u32, TermLine)>,
@@ -139,20 +87,7 @@ impl TermViewportPatch {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "terminal")]
+#[vmux_api::ui_event(Eq, Default, target = "terminal")]
 pub struct TermScrollEvent {
     pub top_row: u32,
     pub follow: bool,
@@ -178,19 +113,7 @@ pub const MOD_ALT: u8 = 2;
 pub const MOD_SHIFT: u8 = 4;
 pub const MOD_SUPER: u8 = 8;
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "terminal")]
+#[vmux_api::ui_event(Default, target = "terminal")]
 pub struct TermMouseEvent {
     pub button: u8,
     pub col: u16,
@@ -201,37 +124,12 @@ pub struct TermMouseEvent {
     pub moving: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    Eq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "terminal")]
+#[vmux_api::ui_event(Default, Eq, target = "terminal")]
 pub struct TermLinkOpenRequest {
     pub url: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "terminal")]
+#[vmux_api::ui_event(Default, target = "terminal")]
 pub struct TermResizeEvent {
     pub char_width: f32,
     pub char_height: f32,
@@ -241,23 +139,12 @@ pub struct TermResizeEvent {
     pub viewport_height: f32,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "terminal")]
+#[vmux_api::host_event(Eq, target = "terminal")]
 pub struct TermTitleEvent {
     pub title: String,
 }
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 #[derive(vmux_api::UiStatePatch)]
 pub enum TerminalUiStatePatch {
     ServiceUnavailable(ServiceUnavailableEvent),
@@ -268,9 +155,7 @@ pub enum TerminalUiStatePatch {
     PromptDraft(AgentPromptDraftEvent),
 }
 
-#[vmux_api::payload(Default)]
-#[vmux_api::host_event(target = "terminal")]
-#[derive(vmux_api::UiState)]
+#[vmux_api::host_event(Default, vmux_api::UiState, target = "terminal")]
 pub struct TerminalUiStateEvent {
     pub sequence: u64,
     pub patches: Vec<TerminalUiStatePatch>,

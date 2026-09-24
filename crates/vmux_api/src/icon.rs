@@ -1,19 +1,6 @@
-use serde::{Deserialize, Serialize};
-
 #[cfg_attr(bevy_linked, derive(bevy_reflect::Reflect))]
 #[cfg_attr(bevy_linked, type_path = "vmux_core::icon")]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum BuiltinIcon {
     Terminal,
     Files,
@@ -55,18 +42,7 @@ impl BuiltinIcon {
 
 #[cfg_attr(bevy_linked, derive(bevy_reflect::Reflect))]
 #[cfg_attr(bevy_linked, type_path = "vmux_core::icon")]
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub enum PageIcon {
     #[default]
     None,

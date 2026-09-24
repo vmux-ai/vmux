@@ -1,6 +1,6 @@
 use crate::event::{ChatSnapshot, ComposerContext, ModeState, ModelState, SlashCommands};
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 #[derive(vmux_api::UiStatePatch)]
 pub enum ChatUiStatePatch {
     Snapshot(Box<ChatSnapshot>),
@@ -16,8 +16,7 @@ impl From<ChatSnapshot> for ChatUiStatePatch {
     }
 }
 
-#[vmux_api::payload(Default)]
-#[vmux_api::host_event(targets = ["sessions", "agent", "start"])]
+#[vmux_api::host_event(Default, targets = ["sessions", "agent", "start"])]
 #[derive(vmux_api::UiState)]
 pub struct ChatUiStateEvent {
     pub sequence: u64,

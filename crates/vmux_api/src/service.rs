@@ -1,31 +1,10 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
 #[vmux_api::host_event(target = "services")]
 pub struct ProcessesListEvent {
     pub connected: bool,
     pub processes: Vec<ProcessEntry>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct ProcessEntry {
     pub id: String,
     pub managed: bool,
@@ -41,16 +20,7 @@ pub struct ProcessEntry {
     pub preview_lines: Vec<PreviewLine>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct PreviewLine {
     pub text: String,
 }
@@ -70,49 +40,19 @@ pub fn format_mem(bytes: u64) -> String {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "services")]
+#[vmux_api::ui_event(target = "services")]
 pub struct ProcessNavigateEvent {
     pub process_id: String,
     pub navigate: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "services")]
+#[vmux_api::ui_event(target = "services")]
 pub struct ProcessKillEvent {
     pub process_id: String,
     pub kill: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "services")]
+#[vmux_api::ui_event(target = "services")]
 pub struct ProcessKillAllEvent {
     pub kill_all: bool,
 }

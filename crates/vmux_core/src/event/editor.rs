@@ -1,17 +1,6 @@
-use serde::{Deserialize, Serialize};
-
 use super::CommandBarPicker;
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct StyledSpan {
     pub text: String,
     pub fg: [u8; 3],
@@ -19,19 +8,7 @@ pub struct StyledSpan {
     pub italic: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub enum FoldGutter {
     #[default]
     None,
@@ -39,17 +16,7 @@ pub enum FoldGutter {
     Collapsed,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct FileLine {
     pub line_no: u32,
     pub fold: FoldGutter,
@@ -58,16 +25,7 @@ pub struct FileLine {
     pub indent_levels: u16,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct FileMetaEvent {
     pub path: String,
     pub abs_path: String,
@@ -81,57 +39,20 @@ pub struct FileMetaEvent {
     pub encoding: FileEncoding,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub struct FileIndent {
     pub spaces: bool,
     pub width: u16,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub enum FileLineEnding {
     #[default]
     Lf,
     Crlf,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Hash, Default)]
 pub enum FileEncoding {
     #[default]
     Utf8,
@@ -204,16 +125,7 @@ impl TryFrom<&str> for FileEncoding {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct FileViewportPatch {
     pub first_row: u32,
     pub total_rows: u32,
@@ -225,35 +137,14 @@ pub struct FileViewportPatch {
     pub sticky: Vec<FileLine>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub struct FileLineLayout {
     pub line_no: u32,
     pub row: u32,
     pub rows: u16,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy)]
 pub enum MdTableAlign {
     None,
     Left,
@@ -261,16 +152,7 @@ pub enum MdTableAlign {
     Right,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
 #[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
@@ -301,16 +183,7 @@ pub enum MdInline {
     },
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
 #[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
@@ -321,16 +194,7 @@ pub struct MdListItem {
     pub blocks: Vec<MdBlock>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
 #[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
@@ -367,16 +231,7 @@ pub enum MdBlock {
     },
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct NoteBlock {
     pub start_line: u32,
     pub end_line: u32,
@@ -384,16 +239,7 @@ pub struct NoteBlock {
     pub block: MdBlock,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct FileNoteEvent {
     pub title: String,
     pub properties: Vec<crate::knowledge::KnowledgeProperty>,
@@ -403,19 +249,7 @@ pub struct FileNoteEvent {
     pub reveal_line: Option<u32>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, target = "files")]
 pub struct FilePropertyEdit {
     pub original_key: String,
     pub key: String,
@@ -424,19 +258,7 @@ pub struct FilePropertyEdit {
     pub remove: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, target = "files")]
 pub struct KnowledgeLinkOpen {
     pub path: String,
     pub title: String,
@@ -444,53 +266,21 @@ pub struct KnowledgeLinkOpen {
     pub create: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct FileErrorEvent {
     pub message: String,
     #[serde(default)]
     pub undecodable: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Default, target = "files")]
 pub struct FileResizeEvent {
     pub char_height: f32,
     pub viewport_height: f32,
     pub wrap_columns: u16,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(target = "files")]
 pub struct FileVideoRect {
     pub path: String,
     pub x: f32,
@@ -499,91 +289,32 @@ pub struct FileVideoRect {
     pub h: f32,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, Default, target = "files")]
 pub struct FileScrollEvent {
     pub top_row: u32,
     pub needs_rows: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub struct FileScrollByEvent {
     pub lines: i32,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, Default, target = "files")]
 pub struct FileFoldToggle {
     pub line: u32,
 }
 
 pub use vmux_api::space::{ProjectBranch, ProjectRow, ProjectRowKind, ProjectTreeToggle};
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct FileDirEntry {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct FileDirEvent {
     pub path: String,
     pub abs_path: String,
@@ -592,51 +323,20 @@ pub struct FileDirEvent {
     pub parent_entries: Vec<FileDirEntry>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct FileThemeEvent {
     pub font_family: String,
     pub font_size: f32,
     pub line_height: f32,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, target = "files")]
 pub struct FilePreviewRequest {
     pub path: String,
     pub thumb: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub enum PreviewKind {
     Dir(Vec<FileDirEntry>),
     Text(Vec<FileLine>),
@@ -657,50 +357,19 @@ pub enum PreviewKind {
     Error(String),
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct FilePreviewEvent {
     pub path: String,
     pub thumb: bool,
     pub kind: PreviewKind,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, target = "files")]
 pub struct FileOpenEvent {
     pub path: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct FileMediaEvent {
     pub kind: crate::media::MediaKind,
     pub mime: String,
@@ -708,54 +377,17 @@ pub struct FileMediaEvent {
     pub abs_path: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, target = "files")]
 pub struct FileOpenExternalRequest {
     pub path: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Eq, target = "files")]
 pub struct FileTextInput {
     pub text: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FilePointerEvent {
     pub line: u32,
     pub col: u32,
@@ -763,17 +395,7 @@ pub struct FilePointerEvent {
     pub add: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct FileCursorEvent {
     pub mode: crate::editor::EditMode,
     pub mode_label: String,
@@ -788,35 +410,12 @@ pub struct FileCursorEvent {
     pub search_index: u32,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub struct FileDirtyEvent {
     pub dirty: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub enum FileViewMode {
     #[default]
     Editor,
@@ -824,176 +423,56 @@ pub enum FileViewMode {
     Diff,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub struct FileViewModeEvent {
     pub mode: FileViewMode,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileViewModeSet {
     pub mode: FileViewMode,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub struct FileKeymapEvent {
     pub keymap: crate::editor::KeymapKind,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileKeymapSet {
     pub keymap: crate::editor::KeymapKind,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub struct FileShapeEvent {
     pub indent: FileIndent,
     pub line_ending: FileLineEnding,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileShapeSet {
     pub indent: FileIndent,
     pub line_ending: FileLineEnding,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub struct FileEncodingEvent {
     pub encoding: FileEncoding,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum FileEncodingAction {
     Reopen,
     Save,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileEncodingSet {
     pub encoding: FileEncoding,
     pub action: FileEncodingAction,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileStatusPickerOpen {
     pub picker: CommandBarPicker,
 }
@@ -1004,19 +483,7 @@ impl From<CommandBarPicker> for FileStatusPickerOpen {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "files")]
+#[vmux_api::host_event(Copy, Eq, target = "files")]
 pub enum FileKey {
     ToggleExplorer,
     RevealInExplorer,
@@ -1029,72 +496,24 @@ pub enum FileKey {
     FindInFiles,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub struct FileTidyPromptEvent {
     pub count: u32,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum TidyChoice {
     Tidy,
     Always,
     Dismiss,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileTidyRequest {
     pub choice: TidyChoice,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "files")]
+#[vmux_api::ui_event(Default, Eq, target = "files")]
 pub struct FileFindRequest {
     pub query: String,
     pub step: bool,

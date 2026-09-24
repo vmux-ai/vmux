@@ -2,14 +2,14 @@ use crate::event::{
     GitBranchLogEvent, GitDiffViewportEvent, GitDirectoryEvent, GitRepositoryEvent, GitResultEvent,
 };
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 pub struct GitCommandLogEntry {
     pub action: String,
     pub message: String,
     pub ok: bool,
 }
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 pub struct GitPageSnapshot {
     pub workspace: String,
     pub repository: Option<GitRepositoryEvent>,
@@ -46,7 +46,7 @@ impl Default for GitPageSnapshot {
     }
 }
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 #[derive(vmux_api::UiStatePatch)]
 pub enum GitUiStatePatch {
     Snapshot(Box<GitPageSnapshot>),
@@ -58,9 +58,7 @@ impl From<GitPageSnapshot> for GitUiStatePatch {
     }
 }
 
-#[vmux_api::payload(Default)]
-#[vmux_api::host_event(target = "git")]
-#[derive(vmux_api::UiState)]
+#[vmux_api::host_event(Default, vmux_api::UiState, target = "git")]
 pub struct GitUiStateEvent {
     pub sequence: u64,
     pub patches: Vec<GitUiStatePatch>,

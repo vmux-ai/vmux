@@ -334,17 +334,7 @@ pub struct AcpModelOption {
     pub description: Option<String>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct AcpModeOption {
     pub id: String,
     pub name: String,

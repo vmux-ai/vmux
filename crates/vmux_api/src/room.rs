@@ -35,18 +35,7 @@ pub struct EventId(pub String);
 
 #[string_id]
 pub struct ClientOpId(pub String);
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RoomRole {
     Owner,
@@ -54,18 +43,7 @@ pub enum RoomRole {
     Observer,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MemberKind {
     Human,
@@ -73,17 +51,7 @@ pub enum MemberKind {
     System,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct RoomMember {
     pub room_id: RoomId,
     pub member_id: MemberId,
@@ -92,16 +60,7 @@ pub struct RoomMember {
     pub kind: MemberKind,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub enum Message {
     User {
         text: String,
@@ -118,16 +77,7 @@ pub enum Message {
     },
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct RoomEvent {
     pub event_id: EventId,
     pub room_id: RoomId,
@@ -267,16 +217,7 @@ fn is_disallowed_title_char(character: char) -> bool {
         )
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub enum AssistantBlock {
     Text(String),
     Thinking(String),
@@ -299,16 +240,7 @@ pub enum AssistantBlock {
     },
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct SubagentBlock {
     pub call_id: String,
     pub provider: String,
@@ -326,31 +258,13 @@ pub struct SubagentBlock {
     pub raw_input: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct PlanStep {
     pub content: String,
     pub status: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteStatus {
     Idle,
@@ -370,32 +284,14 @@ impl From<&AgentRunStatus> for RemoteStatus {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct RemoteApproval {
     pub call_id: String,
     pub name: String,
     pub args: crate::json::JsonValue,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct RemoteMediaEntry {
     pub path: String,
     pub name: String,
@@ -429,16 +325,7 @@ impl RemoteMediaEntry {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct RemoteSession {
     pub sid: String,
     pub room_id: RoomId,
@@ -488,17 +375,7 @@ impl RemoteEvent {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct ModelOptionEntry {
     pub id: String,
     pub name: String,
@@ -530,16 +407,7 @@ pub struct NewChatRequest {
     pub agent_url: Option<String>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    PartialEq,
-    Serialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct RemoteAgent {
     pub id: String,
     pub name: String,

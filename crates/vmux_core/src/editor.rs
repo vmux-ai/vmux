@@ -1,18 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub enum EditMode {
     #[default]
     Normal,
@@ -57,19 +45,7 @@ pub struct KeyMapping {
     pub rhs: String,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub struct CursorPos {
     pub line: u32,
     pub row: u32,
@@ -78,19 +54,7 @@ pub struct CursorPos {
     pub char_col: u32,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub struct SelSpan {
     pub line: u32,
     pub row: u32,
@@ -98,19 +62,7 @@ pub struct SelSpan {
     pub end: u32,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum KeymapKind {
     #[default]
@@ -119,19 +71,7 @@ pub enum KeymapKind {
     Vim,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    Default,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum WordWrap {
     Off,

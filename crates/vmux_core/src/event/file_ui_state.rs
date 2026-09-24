@@ -12,7 +12,7 @@ use vmux_api::git::{
     GitStatusEvent,
 };
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 #[derive(vmux_api::UiStatePatch)]
 pub enum FileUiStatePatch {
     Meta(FileMetaEvent),
@@ -56,9 +56,7 @@ pub enum FileUiStatePatch {
     GitChanged(GitChangedEvent),
 }
 
-#[vmux_api::payload(Default)]
-#[vmux_api::host_event(target = "files")]
-#[derive(vmux_api::UiState)]
+#[vmux_api::host_event(Default, vmux_api::UiState, target = "files")]
 pub struct FileUiStateEvent {
     pub sequence: u64,
     pub patches: Vec<FileUiStatePatch>,

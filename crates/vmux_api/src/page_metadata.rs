@@ -8,18 +8,7 @@ use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 #[cfg_attr(bevy_linked, derive(Component, Reflect))]
 #[cfg_attr(bevy_linked, reflect(Component, Default))]
 #[cfg_attr(bevy_linked, type_path = "vmux_header::system")]
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct PageMetadata {
     pub title: String,
     pub url: String,

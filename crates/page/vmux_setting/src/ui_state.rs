@@ -1,6 +1,6 @@
 use crate::event::{SettingsListEvent, SettingsSchemaEvent, UpdateCheckStatusEvent};
 
-#[vmux_api::payload]
+#[vmux_api::contract]
 #[derive(vmux_api::UiStatePatch)]
 pub enum SettingsUiStatePatch {
     Settings(SettingsListEvent),
@@ -8,9 +8,7 @@ pub enum SettingsUiStatePatch {
     UpdateStatus(UpdateCheckStatusEvent),
 }
 
-#[vmux_api::payload(Default)]
-#[vmux_api::host_event(target = "settings")]
-#[derive(vmux_api::UiState)]
+#[vmux_api::host_event(Default, vmux_api::UiState, target = "settings")]
 pub struct SettingsUiStateEvent {
     pub sequence: u64,
     pub patches: Vec<SettingsUiStatePatch>,

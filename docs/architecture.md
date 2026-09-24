@@ -198,13 +198,14 @@ the past tense or uses `Event`. Current state is a `Snapshot`; an operation outc
 actual Bevy world commands. `Message` is reserved for protocol envelopes and conversation
 content.
 
-Binary events name their direction. `UiEvent` marks an event emitted by Dioxus and consumed by the
-Bevy host; `HostEvent` marks the reverse direction. The payload type determines the complete wire
-name, while the event family owns its allowed page hosts. `BookmarkMenuPinRequest` therefore has
-the wire id `bookmark_menu_pin@1`, with its module-local `Events` family supplying the `layout`
-target. A namespace
-would duplicate the target and the type prefix. Both UI-to-host decoding and host-to-UI delivery
-reject a mismatched host before touching the payload.
+Shared API values use `#[vmux_api::contract]`, which supplies the serde and rkyv representation
+plus the common value derives. Binary events use one directional attribute instead:
+`#[vmux_api::ui_event]` marks an event emitted by Dioxus and consumed by the Bevy host, while
+`#[vmux_api::host_event]` marks the reverse direction. Both event attributes include the contract
+derives and define the complete wire name, version, and allowed page hosts. `BookmarkMenuPinRequest`
+therefore has the wire id `bookmark_menu_pin@1`, with its module-local `Events` family supplying
+the `layout` target. A namespace would duplicate the target and the type prefix. Both UI-to-host
+decoding and host-to-UI delivery reject a mismatched host before decoding the data.
 
 Command-bar requests implement `CommandRequest` and are registered through `CommandTypePlugin`.
 Their definitions become ECS entities with targeted dispatch observers; no callback registry owns

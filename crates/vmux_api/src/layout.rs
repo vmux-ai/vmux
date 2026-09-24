@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
     Tab,
@@ -48,36 +46,14 @@ impl std::error::Error for LayoutIdParseError {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SplitDirection {
     Row,
     Column,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct Focus {
     #[serde(default)]
     pub tab: Option<String>,
@@ -87,18 +63,7 @@ pub struct Focus {
     pub stack: Option<String>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct Stack {
     #[serde(default)]
     pub id: Option<String>,
@@ -118,16 +83,7 @@ pub struct Stack {
     pub process_id: Option<String>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 #[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator))]
 #[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext)))]
@@ -152,16 +108,7 @@ pub enum LayoutNode {
     },
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct Tab {
     pub id: Option<String>,
     pub name: String,
@@ -170,16 +117,7 @@ pub struct Tab {
     pub root: LayoutNode,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct LayoutSnapshot {
     pub tabs: Vec<Tab>,
     pub focused: Focus,

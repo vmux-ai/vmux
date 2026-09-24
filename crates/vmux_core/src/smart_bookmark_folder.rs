@@ -3,18 +3,7 @@ use bevy::ecs::reflect::ReflectComponent;
 #[cfg(host)]
 use bevy::prelude::{Component, Reflect};
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 #[cfg_attr(host, derive(Component, Reflect))]
 #[cfg_attr(host, reflect(Component))]
 #[cfg_attr(host, type_path = "vmux_core")]

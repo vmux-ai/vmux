@@ -1,54 +1,20 @@
 pub const TEAM_PAGE_URL: &str = "vmux://team/";
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["team", "layout", "spaces"])]
+#[vmux_api::host_event(Default, Eq, targets = ["team", "layout", "spaces"])]
 pub struct TeamEvent {
     pub members: Vec<TeamMemberRow>,
     #[serde(default)]
     pub profiles: Vec<ProfileRow>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ProfileRow {
     pub id: String,
     pub name: String,
     pub is_active: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct TeamMemberRow {
     pub id: String,
     pub name: String,
@@ -68,20 +34,7 @@ pub struct TeamMemberRow {
     pub is_done_unseen: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["team", "layout", "spaces"])]
+#[vmux_api::ui_event(Default, Eq, targets = ["team", "layout", "spaces"])]
 pub struct TeamRequest {
     pub command: String,
     #[serde(default)]

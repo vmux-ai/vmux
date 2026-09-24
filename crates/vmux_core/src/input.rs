@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 #[cfg(host)]
 pub struct KeyStrokePlugin;
 
@@ -28,20 +26,7 @@ impl bevy::prelude::Plugin for KeyStrokePlugin {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = [
+#[vmux_api::ui_event(Default, Eq, targets = [
         "terminal",
         "files",
         "projects",
@@ -56,19 +41,7 @@ pub struct PageKeyContext {
     pub keys: Vec<String>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = [
+#[vmux_api::host_event(Default, Eq, targets = [
     "terminal",
     "files",
     "projects",
@@ -123,37 +96,13 @@ pub enum Unclaimed {
     Forwards,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ClaimedKey {
     pub code: String,
     pub mods: KeyModifiers,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq, Hash)]
 pub struct KeyModifiers {
     pub ctrl: bool,
     pub shift: bool,
@@ -167,20 +116,7 @@ impl KeyModifiers {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = [
+#[vmux_api::ui_event(Default, Eq, targets = [
         "terminal",
         "files",
         "projects",

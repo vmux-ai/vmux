@@ -1,16 +1,4 @@
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PaneDirection {
     #[default]
@@ -20,19 +8,7 @@ pub enum PaneDirection {
     Left,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PaneTarget {
     Existing,
@@ -40,19 +16,7 @@ pub enum PaneTarget {
     NewSplit,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PaneOpenMode {
     InPlace,
@@ -60,19 +24,7 @@ pub enum PaneOpenMode {
     NewStack,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq, Default)]
 pub enum OpenTarget {
     #[default]
     InPlace,

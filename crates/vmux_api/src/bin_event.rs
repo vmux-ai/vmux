@@ -38,10 +38,8 @@ pub trait HostEvent: BinEvent {}
 
 pub trait UiEvent: BinEvent {}
 
-#[derive(Clone, Copy, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[vmux_api::ui_event(Copy, Default, target = any)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::component::Component))]
-#[derive(vmux_api::UiEvent)]
-#[event(target = any)]
 pub struct PageReady;
 
 #[cfg(test)]
@@ -54,17 +52,13 @@ mod tests {
         const TARGET: BinEventTarget = BinEventTarget::Host("layout");
     }
 
-    #[derive(vmux_api::UiEvent)]
+    #[vmux_api::ui_event]
     struct DerivedOpenRequest;
 
-    #[derive(vmux_api::UiEvent)]
-    #[event(version = 2, targets = ["one", "two"])]
+    #[vmux_api::ui_event(version = 2, targets = ["one", "two"])]
     struct ExplicitOpenRequest;
 
-    #[vmux_api::host_event(
-        version = 3,
-        targets = ["one", "two"]
-    )]
+    #[vmux_api::host_event(version = 3, targets = ["one", "two"])]
     struct TestEvent;
 
     #[vmux_api::host_event(target = any)]

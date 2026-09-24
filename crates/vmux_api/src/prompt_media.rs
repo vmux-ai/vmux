@@ -1,15 +1,4 @@
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ChatAttachment {
     pub path: String,
     pub name: String,
@@ -18,18 +7,7 @@ pub struct ChatAttachment {
     pub preview_data_url: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ChatSubmitAttachment {
     pub path: String,
     pub name: String,
@@ -37,48 +15,17 @@ pub struct ChatSubmitAttachment {
     pub size: u64,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::host_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatAttachments {
     pub attachments: Vec<ChatAttachment>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::host_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatAttachmentPreviews {
     pub attachments: Vec<ChatAttachment>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ChatMediaEntry {
     pub path: String,
     pub name: String,
@@ -111,96 +58,31 @@ impl ChatMediaEntry {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::host_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatMediaEntries {
     pub request_id: u64,
     pub query: String,
     pub entries: Vec<ChatMediaEntry>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::ui_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatPickFiles;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::ui_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatPasteMedia;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::ui_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatMediaListRequest {
     pub request_id: u64,
     pub query: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::ui_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatAttachPaths {
     pub paths: Vec<String>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["command-bar", "start", "layout", "sessions", "agent"])]
+#[vmux_api::ui_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
 pub struct ChatAttachmentPreviewRequest {
     pub paths: Vec<String>,
 }

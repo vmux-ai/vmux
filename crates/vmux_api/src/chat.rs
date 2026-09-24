@@ -1,16 +1,6 @@
 use crate::prompt_media::ChatSubmitAttachment;
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub enum ChatBlock {
     Text(String),
     Thinking(String),
@@ -41,17 +31,7 @@ pub enum ChatBlock {
     },
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct ChatSubagent {
     pub call_id: String,
     pub provider: String,
@@ -69,33 +49,13 @@ pub struct ChatSubagent {
     pub raw_input: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct ChatPlanStep {
     pub content: String,
     pub status: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub enum ChatItem {
     User {
         text: String,
@@ -120,18 +80,7 @@ impl ChatItem {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ChatTurn {
     pub blocks: Vec<ChatBlock>,
     pub running: bool,
@@ -290,19 +239,7 @@ pub const WORKING_VERB_IDS: &[&str] = &[
     "agent-working-spelunking",
 ];
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["sessions", "agent", "start"])]
+#[vmux_api::host_event(Copy, Eq, targets = ["sessions", "agent", "start"])]
 pub enum ChatKey {
     ListNext,
     ListPrevious,
@@ -389,54 +326,18 @@ mod activity_counts_tests {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["sessions", "agent", "start"])]
+#[vmux_api::ui_event(Default, Eq, targets = ["sessions", "agent", "start"])]
 pub struct PromptHistoryRequest {
     pub agent: String,
     pub cwd: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["sessions", "agent", "start"])]
+#[vmux_api::host_event(Default, Eq, targets = ["sessions", "agent", "start"])]
 pub struct PromptHistory {
     pub prompts: Vec<String>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ResumableSessionEntry {
     pub kind: String,
     pub sid: String,
@@ -453,17 +354,7 @@ pub struct ResumableSessionEntry {
     pub branch: String,
     pub cross_runtime: bool,
 }
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["sessions", "agent", "start"])]
+#[vmux_api::host_event(Default, targets = ["sessions", "agent", "start"])]
 pub struct ResumableSessions {
     pub sessions: Vec<ResumableSessionEntry>,
     pub offset: u32,
@@ -481,64 +372,20 @@ impl ResumableSessions {
         self.reaches() < self.total
     }
 }
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct SlashCommandEntry {
     pub name: String,
     pub description: String,
 }
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(targets = ["sessions", "agent", "start"])]
+#[vmux_api::host_event(Default, targets = ["sessions", "agent", "start"])]
 pub struct SlashCommands {
     pub commands: Vec<SlashCommandEntry>,
 }
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["sessions", "agent", "start"])]
+#[vmux_api::ui_event(Default, targets = ["sessions", "agent", "start"])]
 pub struct ResumeListRequest {
     pub offset: u32,
 }
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(targets = ["sessions", "agent", "start"])]
+#[vmux_api::ui_event(Default, targets = ["sessions", "agent", "start"])]
 pub struct ResumeSession {
     pub kind: String,
     pub sid: String,

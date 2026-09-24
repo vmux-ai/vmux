@@ -1,15 +1,4 @@
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = any)]
+#[vmux_api::host_event(Default, target = any)]
 pub struct ThemeEvent {
     pub radius: f32,
     pub locale: String,

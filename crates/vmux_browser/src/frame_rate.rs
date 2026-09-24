@@ -342,7 +342,6 @@ mod tests {
     use super::*;
     use vmux_layout::event::{PaneTreeEvent, TabsHostEvent};
 
-    #[derive(rkyv::Archive, rkyv::Serialize)]
     #[vmux_api::host_event(target = any)]
     struct OtherEvent;
 

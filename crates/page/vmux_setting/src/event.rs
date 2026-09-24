@@ -1,33 +1,8 @@
 pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(target = "settings")]
+#[vmux_api::ui_event(Copy, Default, Eq, target = "settings")]
 pub struct CheckForUpdatesEvent;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub enum UpdateCheckStatus {
     #[default]
     Idle,
@@ -46,19 +21,7 @@ pub enum UpdateCheckStatus {
     Unavailable,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(target = "settings")]
+#[vmux_api::host_event(Default, Eq, target = "settings")]
 pub struct UpdateCheckStatusEvent {
     pub status: UpdateCheckStatus,
 }
@@ -71,54 +34,18 @@ pub struct CheckForUpdatesRequest;
 #[derive(bevy::prelude::Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(version = 2, target = "settings")]
+#[vmux_api::host_event(Default, Eq, version = 2, target = "settings")]
 pub struct SettingsListEvent {
     pub value: vmux_api::json::JsonValue,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    vmux_api::UiEvent,
-)]
-#[event(version = 2, target = "settings")]
+#[vmux_api::ui_event(Default, Eq, version = 2, target = "settings")]
 pub struct SettingsRequest {
     pub path: String,
     pub value: vmux_api::json::JsonValue,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-#[vmux_api::host_event(version = 2, target = "settings")]
+#[vmux_api::host_event(Default, version = 2, target = "settings")]
 pub struct SettingsSchemaEvent {
     pub schema: crate::schema::SettingsSchema,
 }
