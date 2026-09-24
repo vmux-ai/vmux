@@ -18,6 +18,9 @@ pub mod page;
 mod active_session;
 
 #[cfg(ui)]
+mod extension;
+
+#[cfg(ui)]
 mod remote;
 
 #[cfg(ui)]
