@@ -7,6 +7,7 @@
 pub mod event;
 pub mod schema;
 pub mod themes;
+pub mod ui_state;
 
 #[cfg(ui)]
 pub mod page;

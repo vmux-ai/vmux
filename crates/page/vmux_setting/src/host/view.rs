@@ -15,6 +15,7 @@ use crate::event::{
     SettingsListEvent, SettingsRequest, SettingsSchemaEvent, UpdateCheckStatusEvent,
 };
 use crate::schema::{FieldSpec, SectionSpec, SelectOption, SettingsSchema, WidgetKind};
+use crate::ui_state::SettingsUiStateEvent;
 use crate::{AppSettings, SettingsWriteRequest};
 use vmux_flex::prelude::*;
 
@@ -36,18 +37,14 @@ impl Plugin for SettingsViewPlugin {
             .add_plugins((
                 vmux_layout::native_open::HostedPagePlugin::<Settings>::default(),
                 UiEventPlugin::<(SettingsRequest, CheckForUpdatesEvent)>::default(),
+                vmux_core::host::UiStatePlugin::<SettingsUiStateEvent>::default(),
             ))
             .add_observer(on_settings_request)
             .add_observer(on_check_for_updates)
             .add_observer(reset_sent_markers_on_page_ready)
             .add_systems(
                 Update,
-                (
-                    localize_settings_metadata,
-                    broadcast_schema_to_views,
-                    broadcast_settings_to_views,
-                    broadcast_update_status_to_views,
-                ),
+                (localize_settings_metadata, publish_settings_ui_state),
             )
             .add_systems(
                 Update,
@@ -59,7 +56,10 @@ impl Plugin for SettingsViewPlugin {
 }
 
 #[derive(Component, Default)]
+#[require(SettingsUiStateUpdates)]
 pub struct Settings;
+
+type SettingsUiStateUpdates = vmux_core::host::UiStateUpdates<SettingsUiStateEvent>;
 
 #[derive(Message)]
 struct OpenSettingsRequest;
@@ -133,21 +133,11 @@ fn reset_sent_markers_on_page_ready(
     if !views.contains(entity) {
         return;
     }
-    commands
-        .entity(entity)
-        .remove::<SettingsListSent>()
-        .remove::<SettingsSchemaSent>()
-        .remove::<UpdateCheckStatusSent>();
+    commands.entity(entity).remove::<SettingsUiStateSent>();
 }
 
 #[derive(Component)]
-pub(crate) struct SettingsListSent;
-
-#[derive(Component)]
-pub(crate) struct SettingsSchemaSent;
-
-#[derive(Component)]
-pub(crate) struct UpdateCheckStatusSent;
+struct SettingsUiStateSent;
 
 fn localize_settings_metadata(
     settings: Res<AppSettings>,
@@ -162,96 +152,39 @@ fn localize_settings_metadata(
     }
 }
 
-fn broadcast_settings_to_views(
+fn publish_settings_ui_state(
     settings: Res<AppSettings>,
-    pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsListSent>)>,
-    sent: Query<Entity, (With<Settings>, With<PageReady>, With<SettingsListSent>)>,
-    browsers: NonSend<Browsers>,
+    status: Res<CurrentUpdateCheckStatus>,
+    views: Query<(Entity, Has<SettingsUiStateSent>), (With<Settings>, With<PageReady>)>,
     mut commands: Commands,
 ) {
-    let payload = SettingsListEvent {
+    let has_unsent = views.iter().any(|(_, sent)| !sent);
+    if !has_unsent && !settings.is_changed() && !status.is_changed() {
+        return;
+    }
+    let settings_event = SettingsListEvent {
         value: serde_json::to_value(&*settings)
             .unwrap_or(serde_json::Value::Null)
             .into(),
     };
-    for entity in &pending {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
-        commands.entity(entity).insert(SettingsListSent);
-    }
-    if settings.is_changed() {
-        for entity in &sent {
-            if !browsers.can_emit_to(&entity) {
-                continue;
-            }
-            commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
-        }
-    }
-}
-
-fn broadcast_schema_to_views(
-    settings: Res<AppSettings>,
-    pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsSchemaSent>)>,
-    sent: Query<Entity, (With<Settings>, With<PageReady>, With<SettingsSchemaSent>)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    if pending.is_empty() && (!settings.is_changed() || sent.is_empty()) {
-        return;
-    }
     let locale = Locale::requested(Some(&settings.appearance.locale));
-    let payload = SettingsSchemaEvent {
+    let schema_event = SettingsSchemaEvent {
         schema: build_settings_schema_for(&locale),
     };
-    for entity in &pending {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
-        commands.entity(entity).insert(SettingsSchemaSent);
-    }
-    if settings.is_changed() {
-        for entity in &sent {
-            if !browsers.can_emit_to(&entity) {
-                continue;
-            }
-            commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
-        }
-    }
-}
-
-fn broadcast_update_status_to_views(
-    status: Res<CurrentUpdateCheckStatus>,
-    pending: Query<
-        Entity,
-        (
-            With<Settings>,
-            With<PageReady>,
-            Without<UpdateCheckStatusSent>,
-        ),
-    >,
-    sent: Query<Entity, (With<Settings>, With<PageReady>, With<UpdateCheckStatusSent>)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let payload = UpdateCheckStatusEvent {
+    let update_event = UpdateCheckStatusEvent {
         status: status.0.clone(),
     };
-    for entity in &pending {
-        if !browsers.can_emit_to(&entity) {
-            continue;
+
+    for (entity, sent) in &views {
+        if !sent || settings.is_changed() {
+            SettingsUiStateUpdates::write(&mut commands, entity, &settings_event);
+            SettingsUiStateUpdates::write(&mut commands, entity, &schema_event);
         }
-        commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
-        commands.entity(entity).insert(UpdateCheckStatusSent);
-    }
-    if status.is_changed() {
-        for entity in &sent {
-            if !browsers.can_emit_to(&entity) {
-                continue;
-            }
-            commands.trigger(BinHostEmitEvent::from_event(entity, &payload));
+        if !sent || status.is_changed() {
+            SettingsUiStateUpdates::write(&mut commands, entity, &update_event);
+        }
+        if !sent {
+            commands.entity(entity).insert(SettingsUiStateSent);
         }
     }
 }
@@ -1000,5 +933,59 @@ mod page_open_tests {
         app.update();
         let mut q = app.world_mut().query_filtered::<(), With<Settings>>();
         assert_eq!(q.iter(app.world()).count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod ui_state_tests {
+    use super::*;
+    use crate::ui_state::{SettingsUiStateEvent, SettingsUiStatePatch};
+    use vmux_api::BinEvent;
+
+    #[derive(Resource, Default)]
+    struct Emitted(Vec<SettingsUiStateEvent>);
+
+    impl Emitted {
+        fn record(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<Self>) {
+            if trigger.event().id() != SettingsUiStateEvent::id() {
+                return;
+            }
+            let event = rkyv::from_bytes::<SettingsUiStateEvent, rkyv::rancor::Error>(
+                trigger.event().payload(),
+            )
+            .unwrap();
+            emitted.0.push(event);
+        }
+    }
+
+    #[test]
+    fn initial_settings_state_is_one_ordered_batch() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_core::host::UiStatePlugin::<SettingsUiStateEvent>::default(),
+        ))
+        .insert_resource(AppSettings::embedded())
+        .init_resource::<CurrentUpdateCheckStatus>()
+        .init_resource::<Emitted>()
+        .add_observer(Emitted::record)
+        .add_systems(Update, publish_settings_ui_state);
+        let entity = app.world_mut().spawn((Settings, PageReady)).id();
+        let mut browsers = Browsers::default();
+        browsers.set_externally_hosted(entity);
+        app.world_mut().insert_non_send(browsers);
+
+        app.update();
+
+        let emitted = &app.world().resource::<Emitted>().0;
+        assert_eq!(emitted.len(), 1);
+        assert!(matches!(
+            emitted[0].patches.as_slice(),
+            [
+                SettingsUiStatePatch::Settings(_),
+                SettingsUiStatePatch::Schema(_),
+                SettingsUiStatePatch::UpdateStatus(_)
+            ]
+        ));
     }
 }

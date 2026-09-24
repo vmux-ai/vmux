@@ -1,10 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::event::{
-    CheckForUpdatesEvent, SettingsListEvent, SettingsRequest, SettingsSchemaEvent,
-    UpdateCheckStatus, UpdateCheckStatusEvent,
-};
+use crate::event::{CheckForUpdatesEvent, SettingsRequest, UpdateCheckStatus};
 use crate::schema::{SettingsSchema, WidgetKind};
+use crate::ui_state::{SettingsUiStateEvent, SettingsUiStatePatch};
 use dioxus::prelude::*;
 use serde_json::{Map, Value};
 use vmux_ui::components::button::{Button, ButtonVariant};
@@ -16,25 +14,16 @@ use vmux_ui::components::select::{
 use vmux_ui::components::switch::{Switch, SwitchThumb};
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut snapshot = use_signal(|| Value::Null);
-    let mut schema = use_signal(SettingsSchema::default);
+    let state = SettingsPageState::use_state()();
     let mut search = use_signal(String::new);
 
-    let _values = use_listener::<SettingsListEvent, _>(move |data| {
-        snapshot.set(serde_json::Value::try_from(&data.value).unwrap_or(Value::Null));
-    });
-
-    let _schema = use_listener::<SettingsSchemaEvent, _>(move |data| {
-        schema.set(data.schema);
-    });
-
-    let s = snapshot.read().clone();
+    let s = state.settings;
     if s.is_null() {
         return rsx! {
             div { class: "flex h-full items-center justify-center text-sm text-muted-foreground",
@@ -42,7 +31,7 @@ pub fn Page() -> Element {
             }
         };
     }
-    let sch = schema.read().clone();
+    let sch = state.schema;
 
     let top = match s.as_object() {
         Some(obj) => obj.clone(),
@@ -94,11 +83,50 @@ pub fn Page() -> Element {
                                 root_path: sec.root_path,
                                 value: sec.value,
                                 schema: sch.clone(),
+                                update_status: state.update_status.clone(),
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct SettingsPageState {
+    settings: Value,
+    schema: SettingsSchema,
+    update_status: UpdateCheckStatus,
+}
+
+impl SettingsPageState {
+    fn use_state() -> Signal<Self> {
+        let root = use_ui_state_root::<SettingsUiStateEvent>();
+        let mut state = use_signal(Self::default);
+        let mut handled_sequence = use_signal(|| 0);
+        use_effect(move || {
+            let event = root.state.read();
+            if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
+                return;
+            }
+            handled_sequence.set(event.sequence);
+            state.with_mut(|state| {
+                for patch in &event.patches {
+                    state.apply(patch);
+                }
+            });
+        });
+        state
+    }
+
+    fn apply(&mut self, patch: &SettingsUiStatePatch) {
+        match patch {
+            SettingsUiStatePatch::Settings(event) => {
+                self.settings = serde_json::Value::try_from(&event.value).unwrap_or(Value::Null);
+            }
+            SettingsUiStatePatch::Schema(event) => self.schema = event.schema.clone(),
+            SettingsUiStatePatch::UpdateStatus(event) => self.update_status = event.status.clone(),
         }
     }
 }
@@ -275,6 +303,7 @@ fn SectionView(
     root_path: String,
     value: Value,
     schema: SettingsSchema,
+    update_status: UpdateCheckStatus,
 ) -> Element {
     let show_update_check = id == "general";
     rsx! {
@@ -289,7 +318,7 @@ fn SectionView(
                 CardContent {
                     div { class: "flex flex-col divide-y divide-border",
                         if show_update_check {
-                            GeneralSectionBody { value, root_path, schema }
+                            GeneralSectionBody { value, root_path, schema, update_status }
                         } else {
                             ObjectBody { value, parent_path: root_path, depth: 0, schema }
                         }
@@ -301,27 +330,22 @@ fn SectionView(
 }
 
 #[component]
-fn GeneralSectionBody(value: Value, root_path: String, schema: SettingsSchema) -> Element {
-    let mut status = use_signal(UpdateCheckStatus::default);
-    let mut updater_unavailable = use_signal(|| false);
-    let _status_listener = use_listener::<UpdateCheckStatusEvent, _>(move |event| {
-        let unavailable = matches!(&event.status, UpdateCheckStatus::Unavailable);
-        if updater_unavailable() != unavailable {
-            updater_unavailable.set(unavailable);
-        }
-        status.set(event.status);
-    });
+fn GeneralSectionBody(
+    value: Value,
+    root_path: String,
+    schema: SettingsSchema,
+    update_status: UpdateCheckStatus,
+) -> Element {
+    let updater_unavailable = matches!(update_status, UpdateCheckStatus::Unavailable);
     let mut visible_value = value;
-    if updater_unavailable()
-        && let Some(object) = visible_value.as_object_mut()
-    {
+    if updater_unavailable && let Some(object) = visible_value.as_object_mut() {
         object.remove("auto_update");
         object.remove("update_channel");
     }
 
     rsx! {
         ObjectBody { value: visible_value, parent_path: root_path, depth: 0, schema }
-        UpdateCheckRow { status }
+        UpdateCheckRow { status: update_status }
     }
 }
 
@@ -405,9 +429,8 @@ fn update_check_presentation(status: &UpdateCheckStatus) -> (String, String, boo
 }
 
 #[component]
-fn UpdateCheckRow(mut status: Signal<UpdateCheckStatus>) -> Element {
-    let current = status();
-    let (button_label, hint, disabled) = update_check_presentation(&current);
+fn UpdateCheckRow(status: UpdateCheckStatus) -> Element {
+    let (button_label, hint, disabled) = update_check_presentation(&status);
 
     rsx! {
         Row {
@@ -418,7 +441,6 @@ fn UpdateCheckRow(mut status: Signal<UpdateCheckStatus>) -> Element {
                     variant: ButtonVariant::Outline,
                     disabled,
                     onclick: move |_| {
-                        status.set(UpdateCheckStatus::Checking);
                         let _ = send(&CheckForUpdatesEvent);
                     },
                     "{button_label}"
