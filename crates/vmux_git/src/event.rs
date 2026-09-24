@@ -166,10 +166,6 @@ pub struct GitBranchLogEvent {
 }
 
 #[vmux_api::host_event(Eq, target = "git")]
-pub struct GitRepositoryPickedEvent {
-    pub path: String,
-}
-#[vmux_api::host_event(Eq, target = "git")]
 pub struct GitDirectoryEvent {
     pub path: String,
     pub parent_path: String,

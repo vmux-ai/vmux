@@ -3,9 +3,12 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
+use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
-use crate::event::{GitRepositoryPickedEvent, GitRepositoryPickerRequest};
+use crate::event::GitRepositoryPickerRequest;
+use crate::state::{GitRepositoryPicked, GitUiState};
+
+type GitUiStateUpdates = vmux_core::host::UiStateUpdates<GitUiState>;
 
 pub(super) struct RepositoryPickerPlugin;
 
@@ -85,12 +88,13 @@ fn poll_repository_pickers(
             continue;
         };
         if let Some(path) = selected {
-            commands.trigger(BinHostEmitEvent::from_event(
+            GitUiStateUpdates::write(
+                &mut commands,
                 picker.webview,
-                &GitRepositoryPickedEvent {
+                &GitRepositoryPicked {
                     path: path.to_string_lossy().into_owned(),
                 },
-            ));
+            );
         }
         commands.entity(entity).despawn();
     }

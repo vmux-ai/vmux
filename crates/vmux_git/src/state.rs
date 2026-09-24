@@ -3,6 +3,24 @@ use crate::event::{
 };
 
 #[vmux_api::contract]
+pub struct GitPageContext {
+    pub working_directory: String,
+    pub page_url: String,
+}
+
+#[vmux_api::contract]
+pub struct GitRepositoryPicked {
+    pub path: String,
+}
+
+#[vmux_api::contract]
+pub struct GitWorkspaceChanged {
+    pub path: String,
+    pub branch: String,
+    pub error: String,
+}
+
+#[vmux_api::contract]
 pub struct GitCommandLogEntry {
     pub action: String,
     pub message: String,
@@ -48,6 +66,9 @@ impl Default for GitPageSnapshot {
 
 #[vmux_api::ui_state_patch]
 pub enum GitUiStatePatch {
+    Context(GitPageContext),
+    RepositoryPicked(GitRepositoryPicked),
+    Workspace(GitWorkspaceChanged),
     Snapshot(Box<GitPageSnapshot>),
 }
 
@@ -72,6 +93,11 @@ mod tests {
         let event = GitUiState {
             sequence: 2,
             patches: vec![
+                GitPageContext {
+                    working_directory: "/tmp".to_string(),
+                    page_url: "git://tmp/repo".to_string(),
+                }
+                .into(),
                 GitPageSnapshot {
                     workspace: "/tmp/repo".to_string(),
                     ..Default::default()
@@ -85,7 +111,10 @@ mod tests {
         assert_eq!(decoded.sequence, 2);
         assert!(matches!(
             decoded.patches.as_slice(),
-            [GitUiStatePatch::Snapshot(snapshot)] if snapshot.workspace == "/tmp/repo"
+            [
+                GitUiStatePatch::Context(GitPageContext { working_directory, .. }),
+                GitUiStatePatch::Snapshot(snapshot),
+            ] if working_directory == "/tmp" && snapshot.workspace == "/tmp/repo"
         ));
     }
 }
