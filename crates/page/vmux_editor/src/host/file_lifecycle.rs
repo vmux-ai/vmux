@@ -53,6 +53,7 @@ impl Plugin for FileLifecyclePlugin {
             .add_systems(
                 Update,
                 (
+                    sync_file_git,
                     reconcile_file_watches,
                     drain_file_changes,
                     reload_changed_files,
@@ -62,6 +63,19 @@ impl Plugin for FileLifecyclePlugin {
                     .chain(),
             )
             .add_observer(reset_file_sent_markers_on_page_ready);
+    }
+}
+
+type ChangedFileViews<'w, 's> =
+    Query<'w, 's, (Entity, &'static FileView), Or<(Added<FileView>, Changed<FileView>)>>;
+
+fn sync_file_git(views: ChangedFileViews, mut document: Local<u64>, mut commands: Commands) {
+    for (entity, view) in &views {
+        *document = document.wrapping_add(1).max(1);
+        commands
+            .entity(entity)
+            .remove::<vmux_git::FileGit>()
+            .insert(vmux_git::FileGit::new(&view.path, *document));
     }
 }
 

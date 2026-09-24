@@ -70,13 +70,25 @@ pub struct GitResultEvent {
     pub message: String,
 }
 
+#[vmux_api::contract(Eq, Default)]
+pub struct FileGitState {
+    pub path: String,
+    pub repo_root: String,
+    pub has_diff: bool,
+    pub branch: String,
+    pub ahead: u32,
+    pub behind: u32,
+    pub staged_count: u32,
+    pub message: String,
+    pub result: Option<GitResultEvent>,
+    pub result_sequence: u64,
+    pub refresh_revision: u64,
+}
+
 #[vmux_api::contract(Eq)]
 pub struct GitErrorEvent {
     pub message: String,
 }
-
-#[vmux_api::contract(Eq, Default)]
-pub struct GitChangedEvent {}
 
 #[cfg(test)]
 mod tests {

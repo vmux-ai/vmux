@@ -19,6 +19,7 @@ use vmux_core::host::page::NativelyHosted;
 
 pub use app::GitCheckForUpdatesRequest;
 pub use changes::GitDiffSource;
+pub use status::FileGit;
 pub use watch::RepoInfoCache;
 
 use crate::host::app::AppPlugin;

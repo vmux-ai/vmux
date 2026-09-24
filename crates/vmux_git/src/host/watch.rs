@@ -3,15 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use super::GitUpdateSet;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use vmux_core::host::FileUiStateUpdates;
-
-use crate::event::GitChangedEvent;
-
-use super::GitUpdateSet;
 
 pub(super) struct WatchPlugin;
 
@@ -540,8 +536,9 @@ impl GitWatch {
 fn drain_git_watch(
     watch: Option<NonSendMut<GitWatch>>,
     mut repo_info: ResMut<RepoInfoCache>,
-    file_pages: Query<(), With<FileUiStateUpdates>>,
     mut views: Query<&mut super::state::GitState>,
+    mut files: Query<&mut super::status::FileGit>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let Some(watch) = watch else {
@@ -591,8 +588,11 @@ fn drain_git_watch(
                     super::job::JobKind::Repository { path: path.into() },
                 );
             }
-        } else {
-            FileUiStateUpdates::deliver(&file_pages, &mut commands, entity, &GitChangedEvent {});
+        } else if let Ok(mut file) = files.get_mut(entity) {
+            let refresh = file
+                .bypass_change_detection()
+                .changed(wake.as_deref().map(|wake| (**wake).clone()));
+            commands.entity(entity).insert(refresh);
         }
     }
     let affected_repo_info: Vec<PathBuf> = watch

@@ -15,17 +15,6 @@ use crate::event::*;
 
 const DIFF_WINDOW_ROWS: u32 = 200_000;
 
-fn status_has_diff(s: FileStatus) -> bool {
-    matches!(
-        s,
-        FileStatus::Modified
-            | FileStatus::Staged
-            | FileStatus::StagedModified
-            | FileStatus::Conflicted
-            | FileStatus::Deleted
-    )
-}
-
 fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;
     let mut s = format!("color:rgb({r},{g},{b});");
@@ -65,90 +54,23 @@ fn text_class(kind: DiffKind) -> &'static str {
         .unwrap_or("text-muted-foreground")
 }
 
-#[derive(Clone, Copy)]
-pub struct GitStatusFeed {
-    pub path: ReadSignal<String>,
-    pub nonce: Signal<u32>,
-    pub repo_root: Signal<String>,
-    pub has_diff: Signal<bool>,
-    pub branch: Signal<String>,
-    pub ahead: Signal<u32>,
-    pub behind: Signal<u32>,
-    pub staged_count: Signal<u32>,
-    pub message: Signal<String>,
-}
-
-impl GitStatusFeed {
-    pub fn request(self) {
-        let Self { path, nonce, .. } = self;
-
-        use_effect(move || {
-            let p = path();
-            let _ = nonce();
-            if !p.is_empty() {
-                let _ = send(&GitStatusRequest { path: p });
-            }
-        });
-    }
-
-    pub fn apply_status(self, status: GitStatusEvent) {
-        let Self {
-            path,
-            mut repo_root,
-            mut has_diff,
-            mut branch,
-            mut ahead,
-            mut behind,
-            mut staged_count,
-            mut message,
-            ..
-        } = self;
-        if status.path != path() {
-            return;
-        }
-        message.set(String::new());
-        repo_root.set(status.repo_root);
-        branch.set(status.branch);
-        ahead.set(status.ahead);
-        behind.set(status.behind);
-        staged_count.set(status.staged_count);
-        has_diff.set(status_has_diff(status.file_status));
-    }
-
-    pub fn apply_result(self, result: GitResultEvent) {
-        let mut nonce = self.nonce;
-        let mut message = self.message;
-        message.set(if result.ok {
-            String::new()
-        } else {
-            result.message
-        });
-        nonce.set(nonce() + 1);
-    }
-
-    pub fn apply_error(self, error: GitErrorEvent) {
-        let mut message = self.message;
-        message.set(error.message);
-    }
-}
-
 #[component]
 pub fn GitFooter(
-    path: ReadSignal<String>,
-    branch: ReadSignal<String>,
-    ahead: ReadSignal<u32>,
-    behind: ReadSignal<u32>,
-    staged_count: ReadSignal<u32>,
-    message: ReadSignal<String>,
-    result: ReadSignal<Option<GitResultEvent>>,
+    git_state: ReadSignal<FileGitState>,
     leading: Element,
     always_visible: bool,
     children: Element,
 ) -> Element {
     let mut commit_msg = use_signal(String::new);
     let mut pending_commit_msg = use_signal(String::new);
+    let mut result_sequence = use_signal(|| 0u64);
     use_effect(move || {
-        let Some(result) = result() else {
+        let state = git_state();
+        if state.result_sequence == 0 || state.result_sequence == result_sequence() {
+            return;
+        }
+        result_sequence.set(state.result_sequence);
+        let Some(result) = state.result else {
             return;
         };
         if result.action != "commit" {
@@ -160,12 +82,13 @@ pub fn GitFooter(
         pending_commit_msg.set(String::new());
     });
 
-    let has_branch = !branch().is_empty();
+    let state = git_state();
+    let has_branch = !state.branch.is_empty();
     if !has_branch && !always_visible {
         return rsx! {};
     }
-    let can_commit = has_branch && staged_count() > 0;
-    let can_push = has_branch && ahead() > 0;
+    let can_commit = has_branch && state.staged_count > 0;
+    let can_push = has_branch && state.ahead > 0;
 
     rsx! {
         div {
@@ -175,19 +98,19 @@ pub fn GitFooter(
             if has_branch {
                 span {
                     class: "flex min-w-0 max-w-[35%] shrink items-center gap-1.5 text-term-fg",
-                    title: "{branch}",
+                    title: "{state.branch}",
                     LineIconView { icon: LineIcon::GitBranch, class: "h-3.5 w-3.5 shrink-0 opacity-80" }
-                    span { class: "truncate", "{branch}" }
+                    span { class: "truncate", "{state.branch}" }
                 }
-                if ahead() > 0 || behind() > 0 {
+                if state.ahead > 0 || state.behind > 0 {
                     span { class: "flex shrink-0 items-center gap-2 opacity-70",
                         span { class: "flex items-center gap-0.5",
                             LineIconView { icon: LineIcon::ArrowUp, class: "h-3 w-3" }
-                            "{ahead}"
+                            "{state.ahead}"
                         }
                         span { class: "flex items-center gap-0.5",
                             LineIconView { icon: LineIcon::ArrowDown, class: "h-3 w-3" }
-                            "{behind}"
+                            "{state.behind}"
                         }
                     }
                 }
@@ -210,7 +133,7 @@ pub fn GitFooter(
                             let m = commit_msg().trim().to_string();
                             if !m.is_empty()
                                 && send(&GitCommitRequest {
-                                    path: path(),
+                                    path: git_state().path,
                                     message: m.clone(),
                                 })
                                 .is_ok()
@@ -220,15 +143,15 @@ pub fn GitFooter(
                         },
                         {translate_with(
                             "git-commit",
-                            &[("count", TranslationValue::Number(staged_count() as i64))],
+                            &[("count", TranslationValue::Number(state.staged_count as i64))],
                         )}
                     }
                 }
-                if !message().is_empty() {
+                if !state.message.is_empty() {
                     span {
                         class: "min-w-0 flex-1 truncate text-ansi-1",
-                        title: "{message}",
-                        "{message}"
+                        title: "{state.message}",
+                        "{state.message}"
                     }
                 }
             }
@@ -238,7 +161,7 @@ pub fn GitFooter(
                     variant: ButtonVariant::Ghost,
                     class: "h-auto shrink-0 gap-1 px-2 py-0.5 text-xs hover:bg-white/10",
                     onclick: move |_| {
-                        let _ = send(&GitPushRequest { path: path() });
+                        let _ = send(&GitPushRequest { path: git_state().path });
                     },
                     LineIconView { icon: LineIcon::Upload, class: "h-3 w-3" }
                     {translate("git-push")}
