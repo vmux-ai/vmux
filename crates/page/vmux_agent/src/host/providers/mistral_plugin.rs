@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use vmux_setting::SettingsLoadSet;
 
-use crate::client::provider::index::ProviderStrategyIndex;
-use crate::client::provider::strategy::{
+use crate::runtime::provider::index::ProviderStrategyIndex;
+use crate::runtime::provider::strategy::{
     BuildRequestFn, Endpoint, EnvVarName, ParseSseFn, Strategy, StrategyKey, StrategyKind,
     StrategyVariant,
 };
@@ -48,7 +48,7 @@ fn register_mistral_strategy(mut commands: Commands, idx: Option<Res<ProviderStr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::provider::indexer::{on_strategy_added, on_strategy_removed};
+    use crate::runtime::provider::indexer::{on_strategy_added, on_strategy_removed};
     use serial_test::serial;
 
     fn test_app() -> App {

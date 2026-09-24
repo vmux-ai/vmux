@@ -6,7 +6,7 @@ use vmux_command::snapshot::{
 use vmux_core::agent::AgentProviderTargetKind;
 use vmux_core::{ArchivedPage, LastActivatedAt, Ready};
 
-use crate::client::provider::index::ProviderStrategyIndex;
+use crate::runtime::provider::index::ProviderStrategyIndex;
 
 pub(super) struct SnapshotPlugin;
 
@@ -43,7 +43,7 @@ fn update_agents_snapshot(
         ),
     >,
     provider_idx: Option<Res<ProviderStrategyIndex>>,
-    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
     mut state: ResMut<CommandBarUiState>,
 ) {

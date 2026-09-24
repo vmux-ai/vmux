@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::client::provider::strategy::StrategyKey;
+use crate::runtime::provider::strategy::StrategyKey;
 
 #[derive(Resource, Default, Debug)]
 pub struct ProviderStrategyIndex {
@@ -47,12 +47,12 @@ impl ProviderStrategyIndex {
         &self,
         provider: &str,
         model: &str,
-        build_q: &Query<&crate::client::provider::strategy::BuildRequestFn>,
-        parse_q: &Query<&crate::client::provider::strategy::ParseSseFn>,
-        env_q: &Query<&crate::client::provider::strategy::EnvVarName>,
+        build_q: &Query<&crate::runtime::provider::strategy::BuildRequestFn>,
+        parse_q: &Query<&crate::runtime::provider::strategy::ParseSseFn>,
+        env_q: &Query<&crate::runtime::provider::strategy::EnvVarName>,
     ) -> Option<(
-        crate::client::provider::strategy::BuildRequest,
-        crate::client::provider::strategy::ParseSse,
+        crate::runtime::provider::strategy::BuildRequest,
+        crate::runtime::provider::strategy::ParseSse,
         &'static str,
     )> {
         let e = self.get_by_strs(provider, model)?;

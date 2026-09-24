@@ -38,8 +38,8 @@ pub fn attach_page_agent_to_stack(
     model: &str,
     sid: &str,
     commands: &mut Commands,
-    idx: &crate::client::provider::index::ProviderStrategyIndex,
-    kind_q: &Query<&crate::client::provider::strategy::StrategyKind>,
+    idx: &crate::runtime::provider::index::ProviderStrategyIndex,
+    kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) -> Option<()> {
     attach_page_agent_to_stack_with_webview(
         stack, provider, model, sid, None, commands, idx, kind_q,
@@ -54,8 +54,8 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
     sid: &str,
     webview: Option<Entity>,
     commands: &mut Commands,
-    idx: &crate::client::provider::index::ProviderStrategyIndex,
-    kind_q: &Query<&crate::client::provider::strategy::StrategyKind>,
+    idx: &crate::runtime::provider::index::ProviderStrategyIndex,
+    kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) -> Option<()> {
     let entity = idx.get_by_strs(provider, model)?;
     let kind = kind_q.get(entity).ok()?.0;
@@ -207,7 +207,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
 }
 
 pub(crate) fn acp_registry_agent_for_id<'a>(
-    catalog: Option<&'a crate::client::acp::AcpCatalog>,
+    catalog: Option<&'a crate::runtime::acp::AcpCatalog>,
     id: &str,
 ) -> Option<&'a crate::acp_registry::RegistryAgent> {
     catalog?
@@ -217,7 +217,7 @@ pub(crate) fn acp_registry_agent_for_id<'a>(
 }
 
 pub(crate) fn acp_icon_for_id(
-    catalog: Option<&crate::client::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::acp::AcpCatalog>,
     id: &str,
 ) -> Option<String> {
     acp_registry_agent_for_id(catalog, id).and_then(|agent| agent.icon.clone())
@@ -226,7 +226,7 @@ pub(crate) fn acp_icon_for_id(
 pub(crate) fn acp_profile_name_for_id(
     id: &str,
     config: Option<&vmux_setting::AcpAgentConfig>,
-    catalog: Option<&crate::client::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::acp::AcpCatalog>,
 ) -> String {
     acp_registry_agent_for_id(catalog, id)
         .map(|agent| agent.name.trim())
@@ -242,7 +242,7 @@ pub(crate) fn acp_profile_name_for_id(
 fn acp_target_id_for_kind(
     kind: AgentKind,
     configs: &[vmux_setting::AcpAgentConfig],
-    catalog: Option<&crate::client::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::acp::AcpCatalog>,
 ) -> Option<String> {
     configs
         .iter()
@@ -286,7 +286,7 @@ fn handle_resume_in_acp(
         With<Terminal>,
     >,
     settings: Res<AppSettings>,
-    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     mut swap: MessageWriter<vmux_core::agent::SwapStackSession>,
     service: Option<Res<ServiceClient>>,
 ) {
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     pub(crate) fn acp_icon_for_id_reads_catalog() {
         use crate::acp_registry::{Distribution, RegistryAgent};
-        let catalog = crate::client::acp::AcpCatalog {
+        let catalog = crate::runtime::acp::AcpCatalog {
             agents: vec![
                 RegistryAgent {
                     id: "mistral-vibe".to_string(),
@@ -441,7 +441,7 @@ mod tests {
             cwd: None,
             version: None,
         };
-        let catalog = crate::client::acp::AcpCatalog {
+        let catalog = crate::runtime::acp::AcpCatalog {
             agents: vec![RegistryAgent {
                 id: "claude-acp".into(),
                 name: "Claude".into(),

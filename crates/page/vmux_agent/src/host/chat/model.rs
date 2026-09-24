@@ -3,8 +3,8 @@ use bevy_cef::prelude::{BinReceive, Browsers, UiEventPlugin};
 
 use super::ChatUiStateUpdates;
 
-use crate::client::acp::{AcpModeState, AcpModelState};
 use crate::events::AgentCommandRequest;
+use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
 use vmux_api::room::RemoteModelState;
 use vmux_chat::event::{
@@ -56,7 +56,7 @@ impl Plugin for ChatModelPlugin {
                     push_removed_acp_model_state_to_page,
                     push_acp_mode_state_to_page,
                     push_removed_acp_mode_state_to_page,
-                    apply_last_used_acp_model.after(crate::client::acp::AcpModelInfoSet),
+                    apply_last_used_acp_model.after(crate::runtime::acp::AcpModelInfoSet),
                     send_acp_model_requests,
                     send_acp_mode_requests,
                     remember_acp_model_lists,
@@ -199,7 +199,7 @@ fn apply_model_selection(
             config_id: model_state.config_id.clone(),
             model_id: model_id.clone(),
         });
-        model_state.pending = Some(crate::client::acp::PendingAcpModelSelection {
+        model_state.pending = Some(crate::runtime::acp::PendingAcpModelSelection {
             request_id,
             model_id,
         });
@@ -726,7 +726,7 @@ fn apply_mode_selection(
             config_id: state.config_id.clone(),
             mode_id: selection.mode_id.clone(),
         });
-        state.pending = Some(crate::client::acp::PendingAcpModeSelection {
+        state.pending = Some(crate::runtime::acp::PendingAcpModeSelection {
             request_id,
             mode_id: selection.mode_id.clone(),
         });
@@ -812,7 +812,7 @@ fn apply_last_used_acp_model(
             config_id: state.config_id.clone(),
             model_id: model_id.clone(),
         });
-        state.pending = Some(crate::client::acp::PendingAcpModelSelection {
+        state.pending = Some(crate::runtime::acp::PendingAcpModelSelection {
             request_id,
             model_id: model_id.clone(),
         });

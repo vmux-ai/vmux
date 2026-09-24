@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use serde_json::{Map, Value};
 
-use crate::client::cli::strategy::{
+use crate::runtime::cli::strategy::{
     CliAgentStrategy, CliModelCatalog, PromptHistory, ResumableSession, SameProject,
     lines_skipping_invalid_utf8,
 };
@@ -418,7 +418,7 @@ impl ClaudeHead {
 }
 
 fn claude_latest_message(path: &Path) -> String {
-    for line in crate::client::cli::strategy::SessionTail::lines_of(path)
+    for line in crate::runtime::cli::strategy::SessionTail::lines_of(path)
         .iter()
         .rev()
     {

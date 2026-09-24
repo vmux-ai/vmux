@@ -8,7 +8,6 @@ pub mod attach;
 pub mod attention;
 pub mod browser_pane;
 pub mod chat;
-pub mod client;
 pub mod command;
 pub mod command_bar;
 pub mod echo;
@@ -27,6 +26,7 @@ pub mod query;
 pub mod run_state;
 pub mod run_state_kind;
 pub mod run_terminal;
+pub mod runtime;
 pub mod self_command;
 pub mod session;
 pub mod snapshot_updater;
@@ -55,7 +55,6 @@ pub(crate) use self::workspace::{
 
 pub use vmux_service::{http, message, stream};
 
-pub use client::cli::strategy::CliAgentStrategy;
 pub use events::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
@@ -65,6 +64,7 @@ pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 pub use run_state::AgentRunState;
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
+pub use runtime::cli::strategy::CliAgentStrategy;
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
 pub use url::{AgentKind, AgentUrl};

@@ -414,8 +414,8 @@ fn drain_agent_launches(
 fn respond_page_agent_attach(
     mut reader: MessageReader<PageAgentAttachRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -437,8 +437,8 @@ fn respond_page_agent_attach(
 fn respond_page_agent_spawn_stack(
     mut reader: MessageReader<PageAgentSpawnStackRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -467,8 +467,8 @@ fn respond_page_agent_spawn_stack(
 fn respond_page_agent_spawn_default(
     mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -512,8 +512,8 @@ fn respond_page_agent_spawn_default(
 fn respond_page_agent_attach_default(
     mut reader: MessageReader<PageAgentAttachDefaultRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::client::provider::strategy::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -549,7 +549,7 @@ fn respond_page_agent_attach_default(
 
 fn rebuilt_args_env_for_restart(
     launch: &TerminalLaunch,
-    strategy: &dyn crate::client::cli::strategy::CliAgentStrategy,
+    strategy: &dyn crate::runtime::cli::strategy::CliAgentStrategy,
     session_id: Option<&str>,
     new_id: ProcessId,
 ) -> Result<(Vec<String>, Vec<(String, String)>, u64), String> {
@@ -766,7 +766,7 @@ mod tests {
         let new_id = ProcessId::new();
         let (args, _env, _) = rebuilt_args_env_for_restart(
             &launch,
-            &crate::client::cli::claude::ClaudeStrategy,
+            &crate::runtime::cli::claude::ClaudeStrategy,
             None,
             new_id,
         )
@@ -798,7 +798,7 @@ mod tests {
 
         let (_, env, _) = rebuilt_args_env_for_restart(
             &launch,
-            &crate::client::cli::codex::CodexStrategy,
+            &crate::runtime::cli::codex::CodexStrategy,
             None,
             ProcessId::new(),
         )
@@ -824,7 +824,7 @@ mod tests {
         assert!(
             rebuilt_args_env_for_restart(
                 &launch,
-                &crate::client::cli::codex::CodexStrategy,
+                &crate::runtime::cli::codex::CodexStrategy,
                 None,
                 ProcessId::new(),
             )
