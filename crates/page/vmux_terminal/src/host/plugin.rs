@@ -49,6 +49,7 @@ impl Plugin for TerminalPlugin {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         vmux_core::register_host_spawn(app, "terminal");
         app.add_plugins((
+            vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiStateEvent>::default(),
             vmux_command::CommandTypePlugin::<super::command::CloseRequest>::default(),
             vmux_command::CommandTypePlugin::<super::command::NextRequest>::default(),
             vmux_command::CommandTypePlugin::<super::command::PrevRequest>::default(),
@@ -852,15 +853,12 @@ fn spawn_detached_service(binary: &std::path::Path) {
 
 fn broadcast_service_unavailable(
     terminals: &Query<Entity, With<Terminal>>,
-    browsers: &NonSend<Browsers>,
     commands: &mut Commands,
     message: String,
 ) {
     let evt = ServiceUnavailableEvent { message };
     for entity in terminals.iter() {
-        if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_event(entity, &evt));
-        }
+        crate::TerminalUiStateUpdates::write(commands, entity, &evt);
     }
 }
 
@@ -870,7 +868,6 @@ fn try_connect_service(
     mut commands: Commands,
     wake: Res<ServiceWakeCallback>,
     terminal_webviews: Query<Entity, With<Terminal>>,
-    browsers: NonSend<Browsers>,
 ) {
     retry.timer.tick(time.delta());
     if !retry.timer.just_finished() {
@@ -886,7 +883,6 @@ fn try_connect_service(
             commands.remove_resource::<ServiceConnectRetry>();
             broadcast_service_unavailable(
                 &terminal_webviews,
-                &browsers,
                 &mut commands,
                 "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
             );
@@ -906,12 +902,7 @@ fn try_connect_service(
             handle.send(ClientMessage::SubscribeAgentCommands);
             commands.insert_resource(ServiceClient(handle));
             commands.remove_resource::<ServiceConnectRetry>();
-            broadcast_service_unavailable(
-                &terminal_webviews,
-                &browsers,
-                &mut commands,
-                String::new(),
-            );
+            broadcast_service_unavailable(&terminal_webviews, &mut commands, String::new());
         }
         None => {
             if retry.remaining_attempts == 0 {
@@ -925,7 +916,6 @@ fn try_connect_service(
                 commands.remove_resource::<ServiceConnectRetry>();
                 broadcast_service_unavailable(
                     &terminal_webviews,
-                    &browsers,
                     &mut commands,
                     "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
                 );
@@ -1220,7 +1210,7 @@ fn poll_service_messages(
                     mouse,
                     evicted_total,
                 };
-                commands.trigger(BinHostEmitEvent::from_event(entity, &patch));
+                crate::TerminalUiStateUpdates::write(&mut commands, entity, &patch);
             }
             ServiceMessage::Bell { process_id } => {
                 writers
@@ -1239,7 +1229,7 @@ fn poll_service_messages(
                     continue;
                 }
                 let evt = TermTitleEvent { title };
-                commands.trigger(BinHostEmitEvent::from_event(entity, &evt));
+                crate::TerminalUiStateUpdates::write(&mut commands, entity, &evt);
             }
             ServiceMessage::Snapshot {
                 process_id,
@@ -1285,7 +1275,7 @@ fn poll_service_messages(
                     mouse: false,
                     evicted_total: 0,
                 };
-                commands.trigger(BinHostEmitEvent::from_event(entity, &patch));
+                crate::TerminalUiStateUpdates::write(&mut commands, entity, &patch);
             }
             ServiceMessage::ProcessExited { process_id, .. } => {
                 writers
@@ -1306,14 +1296,15 @@ fn poll_service_messages(
                     .remove::<CloseRequiresConfirmation>()
                     .remove::<AgentLoading>();
                 let is_agent = if let Ok(session) = agent_sessions.get(entity) {
-                    commands.trigger(BinHostEmitEvent::from_event(
+                    crate::TerminalUiStateUpdates::write(
+                        &mut commands,
                         entity,
                         &crate::event::TermLoadingEvent {
                             loading: false,
                             label: session.kind.display_name().to_string(),
                             segment: session.kind.as_url_segment().to_string(),
                         },
-                    ));
+                    );
                     true
                 } else {
                     false
@@ -2217,10 +2208,11 @@ fn on_term_key(
             .flatten();
         if capture.apply(event, pasted) {
             let (draft, skipped) = (capture.draft.clone(), capture.skipped);
-            commands.trigger(BinHostEmitEvent::from_event(
+            crate::TerminalUiStateUpdates::write(
+                &mut commands,
                 entity,
                 &AgentPromptDraftEvent { draft, skipped },
-            ));
+            );
         }
         return;
     }
