@@ -8,11 +8,10 @@ use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
 use crate::edit::Selection;
 use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::{FileBuffer, FileDir, canon};
-use crate::host::keymap::EditorKeymap;
 use crate::host::note::NoteRevealLine;
 use crate::host::note::NoteSent;
 use crate::host::status::FileInitialMetaSent;
-use crate::host::viewport::{EditorCursor, EditorWindow, FileViewport};
+use crate::host::viewport::{CursorRenderRequest, FileViewport, ViewportRenderRequest};
 use crate::media::FileMedia;
 
 pub(crate) struct NavigationPlugin;
@@ -207,7 +206,6 @@ fn apply_goto(
         &mut FileViewport,
         &mut FileView,
         &mut PageMetadata,
-        &EditorKeymap,
     )>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     browsers: Option<NonSend<Browsers>>,
@@ -217,8 +215,7 @@ fn apply_goto(
         return;
     };
     for goto in messages.read() {
-        let Ok((mut edit, mut viewport, mut view, mut metadata, keymap)) =
-            views.get_mut(goto.entity)
+        let Ok((mut edit, mut viewport, mut view, mut metadata)) = views.get_mut(goto.entity)
         else {
             continue;
         };
@@ -232,16 +229,8 @@ fn apply_goto(
                 browsers,
                 &mut commands,
             );
-            let viewport = *viewport;
-            EditorWindow::emit(goto.entity, &mut edit, &viewport, browsers, &mut commands);
-            EditorCursor::emit(
-                goto.entity,
-                &mut edit,
-                keymap.0.as_ref(),
-                &viewport,
-                browsers,
-                &mut commands,
-            );
+            commands.trigger(ViewportRenderRequest::new(goto.entity));
+            commands.trigger(CursorRenderRequest::new(goto.entity));
             continue;
         }
         manager.close(&view.path);
@@ -275,20 +264,14 @@ fn apply_goto(
 }
 
 fn apply_pending_goto(
-    mut views: Query<(
-        Entity,
-        &mut Editor,
-        &mut FileViewport,
-        &EditorKeymap,
-        &PendingGoto,
-    )>,
+    mut views: Query<(Entity, &mut Editor, &mut FileViewport, &PendingGoto)>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
     let Some(browsers) = browsers.as_deref() else {
         return;
     };
-    for (entity, mut edit, mut viewport, keymap, pending) in &mut views {
+    for (entity, mut edit, mut viewport, pending) in &mut views {
         goto_caret(
             entity,
             &mut edit,
@@ -315,16 +298,8 @@ fn apply_pending_goto(
             let head = edit.core.buffer.coords_to_char(line, end);
             edit.core.selections = vec![Selection { anchor, head }];
         }
-        let viewport = *viewport;
-        EditorWindow::emit(entity, &mut edit, &viewport, browsers, &mut commands);
-        EditorCursor::emit(
-            entity,
-            &mut edit,
-            keymap.0.as_ref(),
-            &viewport,
-            browsers,
-            &mut commands,
-        );
+        commands.trigger(ViewportRenderRequest::new(entity));
+        commands.trigger(CursorRenderRequest::new(entity));
         commands.entity(entity).remove::<PendingGoto>();
     }
 }
@@ -336,6 +311,7 @@ mod tests {
     use super::*;
     use crate::edit::EditCore;
     use crate::edit::highlight_cache::HighlightCache;
+    use crate::keymap::EditorKeymap;
     use crate::keymap::KeymapKindExt;
     use vmux_api::BinEvent;
     use vmux_core::event::{FileUiStateEvent, FileUiStatePatch};

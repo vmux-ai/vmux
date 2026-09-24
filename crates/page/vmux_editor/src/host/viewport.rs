@@ -9,7 +9,7 @@ use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
 use crate::host::edit::Selection;
 use crate::host::editor::{Editor, FileView};
 use crate::host::file_lifecycle::{EditorFileLoadedSet, canon};
-use crate::host::keymap::{EditorKeymap, Keymap};
+use crate::host::keymap::EditorKeymap;
 
 const STICKY_SCROLL_DEPTH: usize = 5;
 
@@ -29,7 +29,9 @@ impl Plugin for ViewportPlugin {
             )
             .add_observer(on_file_resize)
             .add_observer(on_file_scroll)
-            .add_observer(on_file_fold_toggle);
+            .add_observer(on_file_fold_toggle)
+            .add_observer(render_viewport)
+            .add_observer(render_cursor);
     }
 }
 
@@ -92,37 +94,14 @@ impl FileViewport {
     pub(crate) fn left_render_band(&self, previous_top: u32) -> bool {
         DriftedWindow::between(previous_top, self).left_the_band()
     }
-}
 
-#[derive(Component)]
-pub(crate) struct FoldsDirty;
-
-pub(crate) struct EditorWindow;
-
-impl EditorWindow {
-    pub(crate) fn emit(
-        entity: Entity,
-        edit: &mut Editor,
-        viewport: &FileViewport,
-        browsers: &Browsers,
-        commands: &mut Commands,
-    ) {
-        if !browsers.can_emit_to(&entity) {
-            return;
-        }
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            entity,
-            &Self::render(edit, viewport),
-        ));
-    }
-
-    fn render(edit: &mut Editor, viewport: &FileViewport) -> FileViewportPatch {
+    fn patch(&self, edit: &mut Editor) -> FileViewportPatch {
         let total = edit.core.buffer.len_lines() as u32;
-        let wrap = edit.wrapped_view(viewport);
+        let wrap = edit.wrapped_view(self);
         let (visible, wrap_columns) = (wrap.total_rows(), wrap.columns());
-        let (visible_first, visible_end) = window_range(visible, viewport.top_row, viewport.rows);
+        let (visible_first, visible_end) = window_range(visible, self.top_row, self.rows);
         let overscan = vmux_core::scroll::overscan_for(
-            viewport.rows,
+            self.rows,
             vmux_core::scroll::EDITOR_OVERSCAN_K,
             vmux_core::scroll::OVERSCAN_FLOOR,
             vmux_core::scroll::OVERSCAN_CAP,
@@ -183,84 +162,128 @@ impl EditorWindow {
     }
 }
 
-pub(crate) struct EditorCursor;
+#[derive(Component)]
+pub(crate) struct FoldsDirty;
 
-impl EditorCursor {
-    pub(crate) fn emit(
-        entity: Entity,
-        edit: &mut Editor,
-        keymap: &dyn Keymap,
-        viewport: &FileViewport,
-        browsers: &Browsers,
-        commands: &mut Commands,
-    ) {
-        if !browsers.can_emit_to(&entity) {
-            return;
-        }
-        let total = edit.core.buffer.len_lines() as u32;
-        let view = edit.folds.view(total);
-        let source_primary = edit.core.cursor_pos();
-        let mut primary = source_primary;
-        let (span_first, span_rows) = HighlightedLines::window(edit, viewport);
-        let raw_selections = edit
-            .core
-            .sel_spans(span_first, span_rows)
-            .into_iter()
-            .filter(|selection| !view.is_hidden(selection.line))
-            .collect::<Vec<_>>();
-        let raw_word_highlights = edit
-            .core
-            .word_highlight_spans(span_first, span_rows)
-            .into_iter()
-            .filter(|span| !view.is_hidden(span.line))
-            .collect::<Vec<_>>();
-        edit.core.refresh_search_matches();
-        let matches = edit.core.cached_search_matches();
-        let raw_search = edit
-            .core
-            .search_spans(matches, span_first, span_rows)
-            .into_iter()
-            .filter(|span| !view.is_hidden(span.line))
-            .collect::<Vec<_>>();
-        let caret = edit.core.primary().head;
-        let search_index = matches
-            .iter()
-            .position(|found| found.contains(&caret) || found.start == caret)
-            .map(|at| at as u32 + 1)
-            .unwrap_or_default();
-        let search_total = matches.len() as u32;
-        let raw_carets: Vec<_> = edit
-            .core
-            .cursor_positions()
-            .into_iter()
-            .filter(|caret| !view.is_hidden(caret.line))
-            .collect();
-        let wrap = edit.wrapped_view(viewport);
-        (primary.row, primary.col) = wrap.position(primary.line, primary.col);
-        let mut carets = raw_carets;
-        for caret in &mut carets {
-            (caret.row, caret.col) = wrap.position(caret.line, caret.col);
-        }
-        let selections = wrap.selections(raw_selections.iter().copied());
-        let search = wrap.selections(raw_search.iter().copied());
-        let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            entity,
-            &FileCursorEvent {
-                search_total,
-                search_index,
-                mode: keymap.mode(),
-                mode_label: keymap.mode_label(),
-                primary,
-                carets,
-                selections,
-                source_primary,
-                source_selections: raw_selections,
-                search,
-                word_highlights,
-            },
-        ));
+#[derive(EntityEvent)]
+pub(crate) struct ViewportRenderRequest {
+    #[event_target]
+    entity: Entity,
+}
+
+impl ViewportRenderRequest {
+    pub(crate) fn new(entity: Entity) -> Self {
+        Self { entity }
     }
+}
+
+fn render_viewport(
+    trigger: On<ViewportRenderRequest>,
+    mut views: Query<(&mut Editor, &FileViewport)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.entity;
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    let Ok((mut edit, viewport)) = views.get_mut(entity) else {
+        return;
+    };
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &viewport.patch(&mut edit),
+    ));
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct CursorRenderRequest {
+    #[event_target]
+    entity: Entity,
+}
+
+impl CursorRenderRequest {
+    pub(crate) fn new(entity: Entity) -> Self {
+        Self { entity }
+    }
+}
+
+fn render_cursor(
+    trigger: On<CursorRenderRequest>,
+    mut views: Query<(&mut Editor, &EditorKeymap, &FileViewport)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.entity;
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    let Ok((mut edit, keymap, viewport)) = views.get_mut(entity) else {
+        return;
+    };
+    let total = edit.core.buffer.len_lines() as u32;
+    let view = edit.folds.view(total);
+    let source_primary = edit.core.cursor_pos();
+    let mut primary = source_primary;
+    let (span_first, span_rows) = HighlightedLines::window(&mut edit, viewport);
+    let raw_selections = edit
+        .core
+        .sel_spans(span_first, span_rows)
+        .into_iter()
+        .filter(|selection| !view.is_hidden(selection.line))
+        .collect::<Vec<_>>();
+    let raw_word_highlights = edit
+        .core
+        .word_highlight_spans(span_first, span_rows)
+        .into_iter()
+        .filter(|span| !view.is_hidden(span.line))
+        .collect::<Vec<_>>();
+    edit.core.refresh_search_matches();
+    let matches = edit.core.cached_search_matches();
+    let raw_search = edit
+        .core
+        .search_spans(matches, span_first, span_rows)
+        .into_iter()
+        .filter(|span| !view.is_hidden(span.line))
+        .collect::<Vec<_>>();
+    let caret = edit.core.primary().head;
+    let search_index = matches
+        .iter()
+        .position(|found| found.contains(&caret) || found.start == caret)
+        .map(|at| at as u32 + 1)
+        .unwrap_or_default();
+    let search_total = matches.len() as u32;
+    let raw_carets: Vec<_> = edit
+        .core
+        .cursor_positions()
+        .into_iter()
+        .filter(|caret| !view.is_hidden(caret.line))
+        .collect();
+    let wrap = edit.wrapped_view(viewport);
+    (primary.row, primary.col) = wrap.position(primary.line, primary.col);
+    let mut carets = raw_carets;
+    for caret in &mut carets {
+        (caret.row, caret.col) = wrap.position(caret.line, caret.col);
+    }
+    let selections = wrap.selections(raw_selections.iter().copied());
+    let search = wrap.selections(raw_search.iter().copied());
+    let word_highlights = wrap.selections(raw_word_highlights.iter().copied());
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &FileCursorEvent {
+            search_total,
+            search_index,
+            mode: keymap.0.mode(),
+            mode_label: keymap.0.mode_label(),
+            primary,
+            carets,
+            selections,
+            source_primary,
+            source_selections: raw_selections,
+            search,
+            word_highlights,
+        },
+    ));
 }
 
 struct HighlightedLines;
@@ -350,16 +373,15 @@ impl ScrolledCursor {
 
 fn rehighlight_on_color_scheme(
     mut changes: MessageReader<vmux_setting::ColorSchemeChanged>,
-    mut views: Query<(Entity, &mut Editor, &FileViewport)>,
-    browsers: NonSend<Browsers>,
+    views: Query<Entity, (With<Editor>, With<FileViewport>)>,
     mut commands: Commands,
 ) {
     let Some(change) = changes.read().last().copied() else {
         return;
     };
     crate::host::highlight::set_dark_theme(matches!(change.0, vmux_setting::ResolvedScheme::Dark));
-    for (entity, mut edit, viewport) in &mut views {
-        EditorWindow::emit(entity, &mut edit, viewport, &browsers, &mut commands);
+    for entity in &views {
+        commands.trigger(ViewportRenderRequest::new(entity));
     }
 }
 
@@ -369,12 +391,12 @@ fn sync_editor_wrap_settings(
         Entity,
         &mut FileViewport,
         Option<&mut Editor>,
-        Option<&EditorKeymap>,
+        Has<EditorKeymap>,
     )>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, mut viewport, edit, keymap) in &mut views {
+    for (entity, mut viewport, edit, has_keymap) in &mut views {
         let wanted_column = settings.editor.word_wrap_column.max(1);
         if viewport.word_wrap == settings.editor.word_wrap
             && viewport.word_wrap_column == wanted_column
@@ -392,16 +414,9 @@ fn sync_editor_wrap_settings(
                 viewport.scroll_to(wanted.unwrap_or(0), entity, &browsers, &mut commands);
                 edit.core.top_row = viewport.top_row;
             }
-            EditorWindow::emit(entity, &mut edit, &viewport, &browsers, &mut commands);
-            if let Some(keymap) = keymap {
-                EditorCursor::emit(
-                    entity,
-                    &mut edit,
-                    keymap.0.as_ref(),
-                    &viewport,
-                    &browsers,
-                    &mut commands,
-                );
+            commands.trigger(ViewportRenderRequest::new(entity));
+            if has_keymap {
+                commands.trigger(CursorRenderRequest::new(entity));
             }
         }
     }
@@ -409,17 +424,12 @@ fn sync_editor_wrap_settings(
 
 fn on_file_resize(
     trigger: On<BinReceive<FileResizeEvent>>,
-    mut views: Query<(
-        &mut FileViewport,
-        Option<&mut Editor>,
-        Option<&EditorKeymap>,
-    )>,
-    browsers: NonSend<Browsers>,
+    mut views: Query<(&mut FileViewport, Option<&mut Editor>, Has<EditorKeymap>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let event = &trigger.event().payload;
-    let Ok((mut viewport, edit, keymap)) = views.get_mut(entity) else {
+    let Ok((mut viewport, edit, has_keymap)) = views.get_mut(entity) else {
         return;
     };
     let rows = rows_from_viewport(event.char_height, event.viewport_height);
@@ -431,29 +441,21 @@ fn on_file_resize(
     if let Some(mut edit) = edit {
         edit.core.rows = viewport.rows;
         edit.core.top_row = viewport.top_row;
-        EditorWindow::emit(entity, &mut edit, &viewport, &browsers, &mut commands);
-        if let Some(keymap) = keymap {
-            EditorCursor::emit(
-                entity,
-                &mut edit,
-                keymap.0.as_ref(),
-                &viewport,
-                &browsers,
-                &mut commands,
-            );
+        commands.trigger(ViewportRenderRequest::new(entity));
+        if has_keymap {
+            commands.trigger(CursorRenderRequest::new(entity));
         }
     }
 }
 
 fn on_file_scroll(
     trigger: On<BinReceive<FileScrollEvent>>,
-    mut views: Query<(&mut Editor, &mut FileViewport, &EditorKeymap)>,
-    browsers: NonSend<Browsers>,
+    mut views: Query<(&mut Editor, &mut FileViewport), With<EditorKeymap>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let event = &trigger.event().payload;
-    let Ok((mut edit, mut viewport, keymap)) = views.get_mut(entity) else {
+    let Ok((mut edit, mut viewport)) = views.get_mut(entity) else {
         return;
     };
     let visible = viewport.visible_rows(&mut edit);
@@ -462,39 +464,24 @@ fn on_file_scroll(
     if !event.needs_rows {
         return;
     }
-    EditorWindow::emit(entity, &mut edit, &viewport, &browsers, &mut commands);
-    EditorCursor::emit(
-        entity,
-        &mut edit,
-        keymap.0.as_ref(),
-        &viewport,
-        &browsers,
-        &mut commands,
-    );
+    commands.trigger(ViewportRenderRequest::new(entity));
+    commands.trigger(CursorRenderRequest::new(entity));
 }
 
 fn on_file_fold_toggle(
     trigger: On<BinReceive<FileFoldToggle>>,
-    mut views: Query<(&mut Editor, &EditorKeymap, &FileViewport)>,
-    browsers: NonSend<Browsers>,
+    mut views: Query<&mut Editor, (With<EditorKeymap>, With<FileViewport>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let line = trigger.event().payload.line;
-    let Ok((mut edit, keymap, viewport)) = views.get_mut(entity) else {
+    let Ok(mut edit) = views.get_mut(entity) else {
         return;
     };
     edit.folds.toggle_header(line);
     edit.sync_fold_view();
-    EditorWindow::emit(entity, &mut edit, viewport, &browsers, &mut commands);
-    EditorCursor::emit(
-        entity,
-        &mut edit,
-        keymap.0.as_ref(),
-        viewport,
-        &browsers,
-        &mut commands,
-    );
+    commands.trigger(ViewportRenderRequest::new(entity));
+    commands.trigger(CursorRenderRequest::new(entity));
     commands.entity(entity).insert(FoldsDirty);
 }
 
@@ -519,11 +506,10 @@ fn persist_folds(
 fn apply_lsp_folds(
     mut folds: MessageReader<crate::host::lsp::manager::LspFolds>,
     mut views: Query<(&mut Editor, &FileView, &EditorKeymap, &FileViewport)>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     for fold in folds.read() {
-        let Ok((mut edit, file, keymap, viewport)) = views.get_mut(fold.entity) else {
+        let Ok((mut edit, file, _, _)) = views.get_mut(fold.entity) else {
             continue;
         };
         if canon(&file.path) != canon(&fold.path) {
@@ -536,15 +522,8 @@ fn apply_lsp_folds(
         };
         edit.folds.set_regions(regions);
         edit.sync_fold_view();
-        EditorWindow::emit(fold.entity, &mut edit, viewport, &browsers, &mut commands);
-        EditorCursor::emit(
-            fold.entity,
-            &mut edit,
-            keymap.0.as_ref(),
-            viewport,
-            &browsers,
-            &mut commands,
-        );
+        commands.trigger(ViewportRenderRequest::new(fold.entity));
+        commands.trigger(CursorRenderRequest::new(fold.entity));
     }
 }
 
@@ -625,7 +604,9 @@ mod tests {
         }
     }
 
-    impl EditorWindow {
+    struct TestEditorWindow;
+
+    impl TestEditorWindow {
         fn nested_file(lines: usize) -> Editor {
             let mut text = String::new();
             for i in 0..lines {
@@ -751,21 +732,20 @@ mod tests {
     fn every_laid_out_row_carries_its_line_however_the_window_is_placed() {
         for wrap_columns in [0u16, 12, 100] {
             for collapsed in [false, true] {
-                let mut edit = EditorWindow::nested_file(400);
+                let mut edit = TestEditorWindow::nested_file(400);
                 if collapsed {
                     for header in (0..400).step_by(8) {
                         edit.folds.close(header as u32);
                     }
                     edit.sync_fold_view();
                 }
-                let rows =
-                    EditorWindow::render(&mut edit, &EditorWindow::scrolled(0, wrap_columns))
-                        .total_rows;
+                let rows = TestEditorWindow::scrolled(0, wrap_columns)
+                    .patch(&mut edit)
+                    .total_rows;
                 for top in (0..rows + 40).step_by(11) {
-                    let patch =
-                        EditorWindow::render(&mut edit, &EditorWindow::scrolled(top, wrap_columns));
+                    let patch = TestEditorWindow::scrolled(top, wrap_columns).patch(&mut edit);
                     assert!(
-                        EditorWindow::paired(&patch),
+                        TestEditorWindow::paired(&patch),
                         "cols {wrap_columns} collapsed {collapsed} top {top}: {} layouts against {} lines",
                         patch.layouts.len(),
                         patch.lines.len()
@@ -777,8 +757,8 @@ mod tests {
 
     #[test]
     fn opening_a_line_deep_in_the_file_keeps_the_window_whole() {
-        let mut edit = EditorWindow::nested_file(400);
-        let viewport = EditorWindow::scrolled(300, 100);
+        let mut edit = TestEditorWindow::nested_file(400);
+        let viewport = TestEditorWindow::scrolled(300, 100);
         let at = edit.core.buffer.coords_to_char(316, 0);
         edit.core.set_caret(at);
 
@@ -792,9 +772,7 @@ mod tests {
             edit.folds
                 .set_regions(crate::host::fold::indent_regions(&edit.core.buffer.rope));
             edit.sync_fold_view();
-            assert!(EditorWindow::paired(&EditorWindow::render(
-                &mut edit, &viewport
-            )));
+            assert!(TestEditorWindow::paired(&viewport.patch(&mut edit)));
         }
     }
 }

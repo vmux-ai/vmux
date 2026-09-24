@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, ParsedToolCall, ProtocolTool, ToolCalls, ToolDispatchSet, ToolExecution,
-    ToolManifest, ToolRegistrationSet, ToolRequestSet, ToolSpawner,
+    DispatchTarget, NextToolOrder, ParsedToolCall, ProtocolTool, ToolCalls, ToolDispatchSet,
+    ToolExecution, ToolManifest, ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -39,9 +39,9 @@ enum KnowledgeTool {
     WriteKnowledge,
 }
 
-fn register(mut tools: ToolSpawner) {
-    let manifest = ToolManifest::<KnowledgeTool>::from_ron(include_str!("knowledge.ron"));
-    tools.spawn_manifest(manifest);
+fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
+    ToolManifest::<KnowledgeTool>::from_ron(include_str!("knowledge.ron"))
+        .spawn(&mut commands, &mut next_order);
 }
 
 #[derive(Deserialize)]

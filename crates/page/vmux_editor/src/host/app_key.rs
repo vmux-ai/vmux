@@ -3,7 +3,7 @@ use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, UiEventPlugin};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
 use vmux_command::host::FileStatusPicked;
 use vmux_command::{
-    CommandDefinition, CommandDispatch, CommandIssuer, CommandRuntimePlugin,
+    CommandDefinition, CommandDispatch, CommandInvocation, CommandRuntimePlugin,
     RegisterCommandDefinitions,
 };
 use vmux_core::event::{
@@ -105,7 +105,7 @@ fn echo_key_command(
 fn open_status_picker(
     trigger: On<BinReceive<FileStatusPickerOpen>>,
     views: Query<(), With<FileView>>,
-    mut issuer: CommandIssuer,
+    mut invocations: MessageWriter<CommandInvocation>,
 ) {
     let caller = trigger.event().webview;
     if !views.contains(caller) {
@@ -120,7 +120,7 @@ fn open_status_picker(
         CommandBarPicker::EncodingSave => "browser_open_save_with_encoding",
         CommandBarPicker::Space => return,
     };
-    issuer.issue_id(caller, id);
+    invocations.write(CommandInvocation::new(caller, id));
 }
 
 fn apply_status_picks(

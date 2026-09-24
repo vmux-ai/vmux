@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::AgentCommand;
 
 use super::{
-    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolRequestSet, ToolSpawner,
+    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
+    ToolRegistrationSet, ToolRequestSet,
 };
 
 pub(super) struct TerminalToolPlugin;
@@ -32,9 +32,9 @@ struct TerminalSendArgs {
     enter: Option<bool>,
 }
 
-fn register(mut tools: ToolSpawner) {
-    let manifest = ToolManifest::<TerminalTool>::from_ron(include_str!("terminal.ron"));
-    tools.spawn_manifest(manifest);
+fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
+    ToolManifest::<TerminalTool>::from_ron(include_str!("terminal.ron"))
+        .spawn(&mut commands, &mut next_order);
 }
 
 fn parse(mut commands: Commands, calls: ToolCalls<TerminalTool>) {

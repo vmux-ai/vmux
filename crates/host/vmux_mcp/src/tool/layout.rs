@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolRequestSet, ToolSpawner,
+    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
+    ToolRegistrationSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -38,9 +38,9 @@ struct SelectTabArgs {
 #[serde(transparent)]
 struct UpdateLayoutArgs(layout::LayoutSnapshot);
 
-fn register(mut tools: ToolSpawner) {
-    let manifest = ToolManifest::<LayoutTool>::from_ron(include_str!("layout.ron"));
-    tools.spawn_manifest(manifest);
+fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
+    ToolManifest::<LayoutTool>::from_ron(include_str!("layout.ron"))
+        .spawn(&mut commands, &mut next_order);
 }
 
 fn parse(mut commands: Commands, calls: ToolCalls<LayoutTool>) {

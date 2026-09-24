@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery};
 
 use super::{
-    DispatchTarget, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest, ToolRegistrationSet,
-    ToolRequestSet, ToolSpawner,
+    DispatchTarget, NextToolOrder, ParsedToolCall, ToolCalls, ToolDispatchSet, ToolManifest,
+    ToolRegistrationSet, ToolRequestSet,
 };
 
 pub(super) struct BrowserToolPlugin;
@@ -141,10 +141,9 @@ impl From<BrowserPane> for Option<String> {
     }
 }
 
-fn register(mut tools: ToolSpawner) {
-    tools.spawn_manifest(ToolManifest::<BrowserTool>::from_ron(include_str!(
-        "browser.ron"
-    )));
+fn register(mut commands: Commands, mut next_order: ResMut<NextToolOrder>) {
+    ToolManifest::<BrowserTool>::from_ron(include_str!("browser.ron"))
+        .spawn(&mut commands, &mut next_order);
 }
 
 fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
