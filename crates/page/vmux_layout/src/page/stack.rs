@@ -1,24 +1,16 @@
 use dioxus::prelude::*;
 use vmux_core::{PageIcon, PageMetadata};
-use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
+use vmux_ui::components::context_menu::{ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 
-use super::side_sheet::{
+use super::bookmark::{
     BookmarkDragItem, BookmarkDragState, BookmarkFolderChoice, BookmarkPageCommand,
-    LayoutContextMenu, add_to_bookmarks, begin_bookmark_drag, bookmark_drag_blocks_click,
+    LayoutContextMenu, SideSheetContextMenuContent,
 };
 use crate::event::StackNode;
-
-pub(super) fn dir_truncate_class(title: &str) -> &'static str {
-    if title.contains('/') {
-        "truncate-start"
-    } else {
-        "truncate"
-    }
-}
 
 #[component]
 pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
@@ -48,12 +40,12 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let title_class = if is_active {
         format!(
             "min-w-0 flex-1 {} text-ui font-medium text-foreground",
-            dir_truncate_class(&display_title)
+            StackTitle::truncate_class(&display_title)
         )
     } else {
         format!(
             "min-w-0 flex-1 {} text-ui",
-            dir_truncate_class(&display_title)
+            StackTitle::truncate_class(&display_title)
         )
     };
 
@@ -65,7 +57,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     "data-bookmark-drag-source": "true",
                     onpointerdown: {
                         let item = drag_item.clone();
-                        move |event| begin_bookmark_drag(drag_state, &event, item.clone())
+                        move |event| BookmarkDragState::begin(drag_state, &event, item.clone())
                     },
                     id: "sidesheet-stack-{pane_id}-{stack_id}",
                     class: if is_active {
@@ -76,7 +68,7 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     onmouseenter: move |_| hovered.set(true),
                     onmouseleave: move |_| hovered.set(false),
                     onclick: move |event| {
-                        if bookmark_drag_blocks_click(drag_state) {
+                        if BookmarkDragState::blocks_click(drag_state) {
                             event.prevent_default();
                             event.stop_propagation();
                             return;
@@ -118,11 +110,9 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 ContextMenuItem {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks(
-                        BookmarkPageCommand::Add,
-                        bookmark_metadata.clone(),
-                        None,
-                    ),
+                    on_select: move |_: String| {
+                        BookmarkPageCommand::Add.send(bookmark_metadata.clone(), None)
+                    },
                     attributes: vec![],
                     {translate("layout-bookmark")}
                 }
@@ -139,11 +129,10 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                                 bg_color: stack.bg_color.clone(),
                             };
                             let folder_uuid = folder.uuid.clone();
-                            move |_: String| add_to_bookmarks(
-                                BookmarkPageCommand::Add,
-                                metadata.clone(),
-                                Some(folder_uuid.clone()),
-                            )
+                            move |_: String| {
+                                BookmarkPageCommand::Add
+                                    .send(metadata.clone(), Some(folder_uuid.clone()))
+                            }
                         },
                         attributes: vec![],
                     {translate_with(
@@ -155,11 +144,9 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 ContextMenuItem {
                     index: pin_index,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks(
-                        BookmarkPageCommand::Pin,
-                        pin_metadata.clone(),
-                        None,
-                    ),
+                    on_select: move |_: String| {
+                        BookmarkPageCommand::Pin.send(pin_metadata.clone(), None)
+                    },
                     attributes: vec![],
                     {translate("layout-pin")}
                 }
@@ -206,13 +193,6 @@ pub(super) fn StackIcon(icon: PageIcon, url: String, title: String) -> Element {
     }
 }
 
-#[component]
-pub(super) fn SideSheetContextMenuContent(children: Element) -> Element {
-    rsx! {
-        ContextMenuContent { attributes: vec![], {children} }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq)]
 struct StackCommand {
     pane_id: u64,
@@ -239,9 +219,17 @@ impl StackCommand {
     }
 }
 
-struct StackTitle;
+pub(super) struct StackTitle;
 
 impl StackTitle {
+    pub(super) fn truncate_class(title: &str) -> &'static str {
+        if title.contains('/') {
+            "truncate-start"
+        } else {
+            "truncate"
+        }
+    }
+
     fn resolve(stack: &StackNode) -> String {
         let title = localized_stack_title(stack);
         if !title.trim().is_empty() {

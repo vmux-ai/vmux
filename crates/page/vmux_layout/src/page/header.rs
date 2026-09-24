@@ -14,11 +14,8 @@ use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::util::cn;
 
-use super::side_sheet::{
-    BookmarkIdCommand, BookmarkPageCommand, LayoutContextMenu, add_to_bookmarks, bookmark_cmd,
-    bookmark_nodes_contain_url,
-};
-use super::stack::{StackIcon, dir_truncate_class};
+use super::bookmark::{BookmarkIdCommand, BookmarkPageCommand, BookmarkTree, LayoutContextMenu};
+use super::stack::{StackIcon, StackTitle};
 use super::tab_drag::TabDrag;
 use super::window_drag::WindowDragRegion;
 use crate::event::{
@@ -75,7 +72,7 @@ pub(crate) fn HeaderView(
         .unwrap_or_default();
     let show_bookmark = !active_url.is_empty();
     let is_bookmarked = show_bookmark
-        && (bookmark_nodes_contain_url(&bookmarks.roots, &active_url)
+        && (BookmarkTree::contains_url(&bookmarks.roots, &active_url)
             || bookmarks
                 .pins
                 .iter()
@@ -203,9 +200,9 @@ pub(crate) fn HeaderView(
                             },
                             onclick: move |_| {
                                 if let Some(uuid) = pinned_uuid.clone() {
-                                    bookmark_cmd(BookmarkIdCommand::Unpin, uuid);
+                                    BookmarkIdCommand::Unpin.send(uuid);
                                 } else if let Some(metadata) = active_metadata.clone() {
-                                    add_to_bookmarks(BookmarkPageCommand::Pin, metadata, None);
+                                    BookmarkPageCommand::Pin.send(metadata, None);
                                 }
                             },
                             Icon { class: "h-4 w-4",
@@ -269,7 +266,7 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
         "hover:bg-glass-hover hover:text-foreground"
     };
 
-    let trunc = dir_truncate_class(&display_title);
+    let trunc = StackTitle::truncate_class(&display_title);
     let (surface_style, surface_class, title_class, close_class) = if is_active {
         (
             "--tab-bg:var(--glass);background-color:var(--glass);border-bottom-width:0;"
@@ -389,14 +386,14 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
                 ContextMenuItem {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks(BookmarkPageCommand::Add, bookmark_metadata.clone(), None),
+                    on_select: move |_: String| BookmarkPageCommand::Add.send(bookmark_metadata.clone(), None),
                     attributes: vec![],
                     {translate("layout-bookmark")}
                 }
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks(BookmarkPageCommand::Pin, pin_metadata.clone(), None),
+                    on_select: move |_: String| BookmarkPageCommand::Pin.send(pin_metadata.clone(), None),
                     attributes: vec![],
                     {translate("layout-pin")}
                 }

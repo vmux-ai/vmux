@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+mod bookmark;
 mod header;
 mod side_sheet;
 mod stack;
@@ -9,10 +10,7 @@ mod update;
 mod window_drag;
 
 use self::header::HeaderView;
-use self::side_sheet::{
-    ActiveStack, SideSheetGrab, SideSheetView, StackReveal, layout_overlay_ready, listener_ready,
-    set_root_radius_px,
-};
+use self::side_sheet::{ActiveStack, OverlayReadiness, SideSheetGrab, SideSheetView, StackReveal};
 use self::state::LayoutPageState;
 use self::update::UpdateNoticeFooter;
 use self::window_drag::WindowDragRegion;
@@ -61,17 +59,15 @@ pub fn Page() -> Element {
     let extension_popup_size = ui.extension_popup_size;
     let update_phase = ui.update;
     let ui_error = layout_ui.error();
-    let overlay_ready = layout_overlay_ready(
+    let overlay_ready = OverlayReadiness::is_ready(
         &state,
-        listener_ready(layout_ready, &ui_error),
-        listener_ready(stacks_ready, &ui_error),
-        listener_ready(tabs_ready, &ui_error),
-        listener_ready(pane_tree_ready, &ui_error),
-        listener_ready(spaces_ready, &ui_error),
+        OverlayReadiness::listener(layout_ready, &ui_error),
+        OverlayReadiness::listener(stacks_ready, &ui_error),
+        OverlayReadiness::listener(tabs_ready, &ui_error),
+        OverlayReadiness::listener(pane_tree_ready, &ui_error),
+        OverlayReadiness::listener(spaces_ready, &ui_error),
     );
-    let radius_px = state.radius;
     let reveal = StackReveal::side_sheet(use_signal(|| None::<(u64, u64)>));
-    use_effect(move || set_root_radius_px(radius_px));
     use_effect(move || {
         let state = layout_ui.value();
         if !state.layout.unwrap_or_default().side_sheet_open {
