@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
-use vmux_core::event::{PageContextRequest, TabWorkspaceRequest};
+use vmux_core::event::PageContextRequest;
+use vmux_core::event::space::ProjectRequest;
 use vmux_git::state::{GitPageContext, GitUiState, GitWorkspaceChanged};
 
 use crate::settings::EffectiveStartupDir;
@@ -15,9 +16,9 @@ pub struct PageContextPlugin;
 
 impl Plugin for PageContextPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(PageContextRequest, TabWorkspaceRequest)>::default())
+        app.add_plugins(UiEventPlugin::<(PageContextRequest, ProjectRequest)>::default())
             .add_observer(on_page_context_request)
-            .add_observer(on_tab_workspace_request);
+            .add_observer(on_project_activate);
     }
 }
 
@@ -29,22 +30,24 @@ struct TabWorkspaceSelection {
 
 impl TabWorkspaceSelection {
     fn resolve(
-        request: &TabWorkspaceRequest,
+        path: &str,
+        branch: &str,
+        checkout: &str,
         managed_root: &std::path::Path,
     ) -> Result<Self, String> {
-        let project_dir = std::path::Path::new(request.path.trim())
+        let project_dir = std::path::Path::new(path.trim())
             .canonicalize()
             .map_err(|error| format!("invalid project directory: {error}"))?;
         if !project_dir.is_dir() {
             return Err("project path is not a directory".to_string());
         }
-        if !request.checkout.trim().is_empty() {
-            return Self::from_checkout(&project_dir, std::path::Path::new(&request.checkout));
+        if !checkout.trim().is_empty() {
+            return Self::from_checkout(&project_dir, std::path::Path::new(checkout));
         }
-        if !request.branch.trim().is_empty() {
+        if !branch.trim().is_empty() {
             let activation = crate::worktree::create_worktree_for_existing_branch_blocking(
                 &project_dir,
-                request.branch.trim(),
+                branch.trim(),
                 managed_root,
             )?;
             return Ok(Self {
@@ -168,8 +171,8 @@ fn on_page_context_request(
     );
 }
 
-fn on_tab_workspace_request(
-    trigger: On<BinReceive<TabWorkspaceRequest>>,
+fn on_project_activate(
+    trigger: On<BinReceive<ProjectRequest>>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<Tab>>,
     pane_entities: Query<Entity, With<crate::pane::Pane>>,
@@ -179,11 +182,16 @@ fn on_tab_workspace_request(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let mut current = request
-        .pane_id
-        .parse::<u64>()
-        .ok()
+    let ProjectRequest::Activate {
+        path,
+        branch,
+        checkout,
+        pane_id,
+    } = &trigger.event().payload
+    else {
+        return;
+    };
+    let mut current = pane_id
         .and_then(|pane_id| {
             pane_entities
                 .iter()
@@ -201,7 +209,7 @@ fn on_tab_workspace_request(
     };
     let result = match tab_entity {
         Some(tab_entity) => match tabs.get_mut(tab_entity) {
-            Ok(mut tab) => TabWorkspaceSelection::resolve(request, &managed_root.0)
+            Ok(mut tab) => TabWorkspaceSelection::resolve(path, branch, checkout, &managed_root.0)
                 .map(|selection| selection.apply(tab_entity, &mut tab, &mut commands)),
             Err(error) => Err(error.to_string()),
         },
@@ -213,7 +221,7 @@ fn on_tab_workspace_request(
     };
     let event = GitWorkspaceChanged {
         path,
-        branch: request.branch.clone(),
+        branch: branch.clone(),
         error,
     };
     let Some(tab_entity) = tab_entity else {
@@ -232,5 +240,46 @@ fn on_tab_workspace_request(
             };
             current = parent.parent();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_activation_updates_the_owning_tab_workspace() {
+        let project = tempfile::tempdir().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
+            .add_observer(on_project_activate);
+        let tab = app.world_mut().spawn(Tab::default()).id();
+        let webview = app.world_mut().spawn(ChildOf(tab)).id();
+
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: ProjectRequest::Activate {
+                path: project.path().to_string_lossy().into_owned(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: None,
+            },
+        });
+        app.update();
+
+        let expected = project.path().canonicalize().unwrap();
+        let tab_state = app.world().get::<Tab>(tab).unwrap();
+        let workspace = app.world().get::<TabWorkspace>(tab).unwrap();
+        assert_eq!(
+            tab_state.startup_dir.as_deref(),
+            Some(expected.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            workspace.project_dir,
+            expected.to_string_lossy().into_owned()
+        );
+        assert!(app.world().get::<TabDirDecided>(tab).is_some());
     }
 }

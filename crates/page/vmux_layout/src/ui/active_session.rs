@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::event::{ProjectRow, ProjectTreeToggle, TabWorkspaceRequest};
+use vmux_core::event::{ProjectRow, ProjectTreeToggle};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::badge::Badge;
 use vmux_ui::components::composer_bar::StatusDot;
@@ -244,8 +244,6 @@ fn ActiveWorkspaceProjectTree(project: ActiveWorkspaceProject, pane_id: u64) -> 
 #[component]
 fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandler<()>) -> Element {
     let path = project.path.clone();
-    let activate_path = path.clone();
-    let workspace_path = path.clone();
     rsx! {
         button {
             r#type: "button",
@@ -257,15 +255,11 @@ fn ActiveWorkspaceChoice(project: ProjectRow, pane_id: u64, on_pick: EventHandle
             title: "{project.display_path}",
             onclick: move |_| {
                 on_pick.call(());
-                let _ = send(&vmux_core::event::space::ProjectRequest {
-                    command: "activate".to_string(),
-                    path: Some(activate_path.clone()),
-                });
-                let _ = send(&TabWorkspaceRequest {
-                    path: workspace_path.clone(),
+                let _ = send(&vmux_core::event::space::ProjectRequest::Activate {
+                    path: path.clone(),
                     branch: String::new(),
                     checkout: String::new(),
-                    pane_id: pane_id.to_string(),
+                    pane_id: Some(pane_id),
                 });
             },
             BuiltinIconView {
