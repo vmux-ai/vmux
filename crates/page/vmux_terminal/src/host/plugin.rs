@@ -1992,16 +1992,11 @@ enum TerminalWebShortcutAction {
 
 fn resolve_terminal_web_shortcut(
     event: &KeyStroke,
-    settings: Option<&AppSettings>,
-    definitions: &[vmux_command::CommandDefinition],
+    map: &Keymap,
     state: &mut TerminalWebShortcutState,
 ) -> TerminalWebShortcutAction {
     let Some(combo) = term_key_event_to_shortcut_combo(event) else {
         return TerminalWebShortcutAction::PassThrough;
-    };
-    let map = match settings {
-        Some(settings) => settings.shortcuts.keymap_with(definitions),
-        None => Keymap::defaults_with(definitions),
     };
     let now = Instant::now();
     if let Some((_, started)) = state.pending_prefix.as_ref()
@@ -2149,8 +2144,7 @@ fn on_term_key(
     service: Option<Res<ServiceClient>>,
     mode_map: Res<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
-    settings: Option<Res<AppSettings>>,
-    definitions: Query<&vmux_command::CommandDefinition>,
+    keymap: Res<Keymap>,
     mut web_shortcuts: ResMut<TerminalWebShortcutState>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
@@ -2163,13 +2157,7 @@ fn on_term_key(
     if terminals.get(entity).is_err() {
         return;
     }
-    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
-    match resolve_terminal_web_shortcut(
-        event,
-        settings.as_deref(),
-        &definitions,
-        &mut web_shortcuts,
-    ) {
+    match resolve_terminal_web_shortcut(event, &keymap, &mut web_shortcuts) {
         TerminalWebShortcutAction::Command(id) => {
             let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
             command_invocations.write(vmux_command::CommandInvocation::new(caller, id));
@@ -3153,9 +3141,10 @@ mod tests {
             "Browser > Bar",
         )
         .direct("Super+l")];
+        let keymap = Keymap::defaults_with(&definitions);
 
         assert_eq!(
-            resolve_terminal_web_shortcut(&event, None, &definitions, &mut state),
+            resolve_terminal_web_shortcut(&event, &keymap, &mut state),
             TerminalWebShortcutAction::Command("browser_open_page_in_command_bar".to_string())
         );
     }
@@ -3180,9 +3169,10 @@ mod tests {
             "Layout > Layout",
         )
         .direct("Super+Shift+S")];
+        let keymap = Keymap::defaults_with(&definitions);
 
         assert_eq!(
-            resolve_terminal_web_shortcut(&event, None, &definitions, &mut state),
+            resolve_terminal_web_shortcut(&event, &keymap, &mut state),
             TerminalWebShortcutAction::Command("toggle_layout".to_string())
         );
     }

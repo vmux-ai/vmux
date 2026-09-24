@@ -573,6 +573,7 @@ pub struct CommandRuntimePlugin;
 impl Plugin for CommandRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CommandCatalog>()
+            .init_resource::<crate::shortcut::Keymap>()
             .add_message::<CommandInvocation>()
             .configure_sets(
                 Update,

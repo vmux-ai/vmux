@@ -2,6 +2,7 @@ use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
 use vmux_command::WriteCommandRequests;
+use vmux_command::shortcut::{Binding, Source, When};
 pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Keymap, Modifiers};
 use vmux_setting::{AppSettings, SettingsLoadSet};
 
@@ -12,14 +13,16 @@ pub(crate) struct ShortcutInit;
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::key_claim::KeyClaimPlugin)
+        app.init_resource::<ChordState>()
+            .add_plugins(crate::key_claim::KeyClaimPlugin)
             .add_systems(
                 Startup,
-                init_shortcuts
+                sync_keymap
                     .in_set(ShortcutInit)
                     .after(SettingsLoadSet)
                     .after(vmux_command::RegisterCommandDefinitions),
             )
+            .add_systems(Update, sync_keymap)
             .add_systems(Update, process_key_input.in_set(WriteCommandRequests));
 
         #[cfg(target_os = "macos")]
@@ -27,19 +30,50 @@ impl Plugin for ShortcutPlugin {
     }
 }
 
-fn init_shortcuts(
-    mut commands: Commands,
+fn sync_keymap(
     settings: Option<Res<AppSettings>>,
-    definitions: Query<&vmux_command::CommandDefinition>,
+    definitions: Query<Ref<vmux_command::CommandDefinition>>,
+    mut keymap: ResMut<Keymap>,
 ) {
-    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
-    let map = match settings {
-        Some(settings) => settings.shortcuts.keymap_with(&definitions),
-        None => Keymap::defaults_with(&definitions),
-    };
+    let definitions_changed = definitions
+        .iter()
+        .any(|definition| definition.is_added() || definition.is_changed());
+    let settings_changed = settings
+        .as_ref()
+        .is_some_and(|settings| settings.is_changed());
+    if !keymap.is_added() && !definitions_changed && !settings_changed {
+        return;
+    }
 
-    commands.insert_resource(map);
-    commands.insert_resource(ChordState::default());
+    let definitions = definitions
+        .iter()
+        .map(|definition| (*definition).clone())
+        .collect::<Vec<_>>();
+    let mut next = Keymap::defaults_with(&definitions);
+    if let Some(settings) = settings {
+        let leader = settings.shortcuts.leader.to_key_combo();
+        next.chord_timeout_ms = settings.shortcuts.chord_timeout_ms;
+        if let Some(leader) = &leader {
+            next.set_leader(leader);
+        }
+
+        let mut configured = Vec::new();
+        for entry in &settings.shortcuts.bindings {
+            let shortcut = match leader.as_ref() {
+                Some(leader) => entry.binding.to_shortcut_with_leader(leader),
+                None => entry.binding.to_shortcut(),
+            };
+            let Some(shortcut) = shortcut else { continue };
+            configured.push(Binding {
+                shortcut,
+                command: entry.command.clone(),
+                when: entry.when.as_deref().and_then(When::parse),
+            });
+        }
+        next.extend(Source::Settings, configured);
+    }
+
+    *keymap = next;
 }
 
 fn process_key_input(
