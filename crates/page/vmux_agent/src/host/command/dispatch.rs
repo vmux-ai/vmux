@@ -493,31 +493,32 @@ fn handle_desktop_commands(
 
 fn handle_space_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    mut space_requests: MessageWriter<vmux_space::SpaceRequest>,
+    mut create_requests: MessageWriter<vmux_space::SpaceCreateRequest>,
+    mut rename_requests: MessageWriter<vmux_space::SpaceRenameRequest>,
+    mut delete_requests: MessageWriter<vmux_space::SpaceDeleteRequest>,
     service: Option<Res<ServiceClient>>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
             ServiceAgentCommand::SpaceCommand(command) => {
-                let command = match command {
+                match command {
                     AgentSpaceCommand::Create { name } => {
-                        vmux_core::event::space::SpaceRequest::Create {
+                        create_requests.write(vmux_core::event::space::SpaceCreateRequest {
                             name: name.clone().unwrap_or_default(),
-                        }
+                        });
                     }
                     AgentSpaceCommand::Rename { space_id, name } => {
-                        vmux_core::event::space::SpaceRequest::Rename {
+                        rename_requests.write(vmux_core::event::space::SpaceRenameRequest {
                             space_id: space_id.clone(),
                             name: name.clone(),
-                        }
+                        });
                     }
                     AgentSpaceCommand::Delete { space_id } => {
-                        vmux_core::event::space::SpaceRequest::Delete {
+                        delete_requests.write(vmux_core::event::space::SpaceDeleteRequest {
                             space_id: space_id.clone(),
-                        }
+                        });
                     }
-                };
-                space_requests.write(command);
+                }
                 AgentCommandResult::Ok
             }
             _ => continue,
@@ -695,7 +696,9 @@ mod tests {
             AgentSessionPlugin,
         ))
         .add_message::<vmux_setting::SettingsWriteRequest>()
-        .add_message::<vmux_space::SpaceRequest>()
+        .add_message::<vmux_space::SpaceCreateRequest>()
+        .add_message::<vmux_space::SpaceRenameRequest>()
+        .add_message::<vmux_space::SpaceDeleteRequest>()
         .add_message::<vmux_history::query::HistoryOpenIntent>()
         .insert_resource(FocusedStack::default())
         .insert_resource(test_settings());
@@ -761,7 +764,9 @@ mod tests {
             vmux_terminal::TerminalRequestPlugin,
         ))
         .add_message::<vmux_setting::SettingsWriteRequest>()
-        .add_message::<vmux_space::SpaceRequest>()
+        .add_message::<vmux_space::SpaceCreateRequest>()
+        .add_message::<vmux_space::SpaceRenameRequest>()
+        .add_message::<vmux_space::SpaceDeleteRequest>()
         .add_message::<vmux_history::query::HistoryOpenIntent>()
         .init_resource::<CapturedTerminalSends>()
         .add_systems(

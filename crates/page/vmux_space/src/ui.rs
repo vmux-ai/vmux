@@ -1,7 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    SpaceKey, SpaceRequest, SpaceRow, SpacesListEvent, SpacesUiState, SpacesUiStatePatch,
+    SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceKey, SpaceRenameRequest,
+    SpaceRow, SpacesListEvent, SpacesUiState, SpacesUiStatePatch,
 };
 use dioxus::prelude::*;
 use vmux_core::event::team::{TeamEvent, TeamRequest};
@@ -177,7 +178,7 @@ impl SpaceKeys {
         let Some(id) = self.selected_id() else {
             return;
         };
-        emit_command(SpaceRequest::Attach { space_id: id });
+        let _ = send(&SpaceAttachRequest { space_id: id });
     }
 
     fn delete(&self) {
@@ -187,7 +188,7 @@ impl SpaceKeys {
         let Some(id) = self.selected_id() else {
             return;
         };
-        emit_command(SpaceRequest::Delete { space_id: id });
+        let _ = send(&SpaceDeleteRequest { space_id: id });
     }
 
     fn row(&self) -> usize {
@@ -212,10 +213,6 @@ fn new_space_name(typed: &str, count: usize) -> String {
     } else {
         trimmed.to_string()
     }
-}
-
-fn emit_command(command: SpaceRequest) {
-    let _ = send(&command);
 }
 
 #[component]
@@ -252,7 +249,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                         aria_label: space.name.clone(),
                         disabled: editing(),
                         onclick: move |_| {
-                        emit_command(SpaceRequest::Attach { space_id: nav_id.clone() });
+                        let _ = send(&SpaceAttachRequest { space_id: nav_id.clone() });
                         },
                     }
                     div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center justify-between",
@@ -266,10 +263,10 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                                     input_class: "pointer-events-auto min-w-0 flex-1 rounded-md bg-background/70 px-2 py-1 text-sm font-medium text-foreground outline-none ring-1 ring-inset ring-primary/40".to_string(),
                                     title: translate("common-rename"),
                                     placeholder: translate("spaces-new-placeholder"),
-                                    on_commit: move |name| emit_command(SpaceRequest::Rename {
+                                    on_commit: move |name| { let _ = send(&SpaceRenameRequest {
                                         space_id: rename_id.clone(),
                                         name,
-                                    }),
+                                    }); },
                                 }
                             if space.is_active {
                                 span { class: "rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary", {translate("common-active")} }
@@ -286,7 +283,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                                 "aria-label": translate("spaces-delete"),
                                 onclick: move |e| {
                                     e.stop_propagation();
-                                    emit_command(SpaceRequest::Delete { space_id: delete_id.clone() });
+                                    let _ = send(&SpaceDeleteRequest { space_id: delete_id.clone() });
                                 },
                                 span { class: "text-base leading-none", "\u{00d7}" }
                             }
@@ -310,7 +307,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_value),
                     disabled: !deletable,
-                    on_select: move |_: String| emit_command(SpaceRequest::Delete { space_id: space.id.clone() }),
+                    on_select: move |_: String| { let _ = send(&SpaceDeleteRequest { space_id: space.id.clone() }); },
                     attributes: vec![],
                     {translate("spaces-delete")}
                 }
@@ -336,7 +333,7 @@ fn NewSpaceCard(count: usize) -> Element {
                     restore_focus_id: "new-space".to_string(),
                     on_commit: move |name: String| {
                         creating.set(false);
-                        emit_command(SpaceRequest::Create { name: new_space_name(&name, count) });
+                        let _ = send(&SpaceCreateRequest { name: new_space_name(&name, count) });
                     },
                     on_cancel: move |_| creating.set(false),
                 }

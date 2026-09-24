@@ -10,7 +10,8 @@ use vmux_layout::{LayoutUiStateUpdates, TabLayoutSpawnContent, TabLayoutSpawnReq
 
 use super::SpacesUiStateUpdates;
 use crate::event::{
-    ProjectActivateRequest, ProjectForgetRequest, SPACES_PAGE_URL, SpaceRequest, SpaceRow,
+    ProjectActivateRequest, ProjectForgetRequest, SPACES_PAGE_URL, SpaceAttachRequest,
+    SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
     SpacesListEvent, SpacesUiState,
 };
 use crate::spaces::{ActiveSpace, Spaces};
@@ -29,8 +30,21 @@ impl Plugin for SpacePlugin {
             .init_resource::<vmux_layout::space::ActiveSpaceEntity>()
             .init_resource::<vmux_layout::window::FocusedWindow>()
             .add_message::<SaveSpaceRequest>()
-            .add_message::<SpaceRequest>()
-            .add_systems(Update, relay_space_requests)
+            .add_message::<SpaceAttachRequest>()
+            .add_message::<SpaceCreateRequest>()
+            .add_message::<SpaceDeleteRequest>()
+            .add_message::<SpaceOpenPageRequest>()
+            .add_message::<SpaceRenameRequest>()
+            .add_systems(
+                Update,
+                (
+                    relay_space_requests::<SpaceAttachRequest>,
+                    relay_space_requests::<SpaceCreateRequest>,
+                    relay_space_requests::<SpaceDeleteRequest>,
+                    relay_space_requests::<SpaceOpenPageRequest>,
+                    relay_space_requests::<SpaceRenameRequest>,
+                ),
+            )
             .add_systems(
                 Update,
                 (sync_active_space_record, update_effective_startup_url).chain(),
@@ -66,13 +80,21 @@ impl Plugin for SpacePlugin {
                 super::project::SpaceProjectPlugin,
                 crate::snapshot_updater::SnapshotPlugin,
                 UiEventPlugin::<(
-                    SpaceRequest,
+                    SpaceAttachRequest,
+                    SpaceCreateRequest,
+                    SpaceDeleteRequest,
+                    SpaceOpenPageRequest,
+                    SpaceRenameRequest,
                     ProjectActivateRequest,
                     ProjectForgetRequest,
                     vmux_core::event::ProjectTreeToggle,
                 )>::default(),
             ))
-            .add_observer(on_space_request)
+            .add_observer(on_space_request::<SpaceAttachRequest>)
+            .add_observer(on_space_request::<SpaceCreateRequest>)
+            .add_observer(on_space_request::<SpaceDeleteRequest>)
+            .add_observer(on_space_request::<SpaceOpenPageRequest>)
+            .add_observer(on_space_request::<SpaceRenameRequest>)
             .add_observer(on_project_activate)
             .add_observer(on_project_forget)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
@@ -404,7 +426,10 @@ fn on_project_forget(
     }
 }
 
-fn relay_space_requests(mut reader: MessageReader<SpaceRequest>, mut commands: Commands) {
+fn relay_space_requests<T: Message + Clone>(
+    mut reader: MessageReader<T>,
+    mut commands: Commands,
+) {
     for request in reader.read() {
         commands.trigger(BinReceive {
             webview: Entity::PLACEHOLDER,
@@ -559,9 +584,61 @@ fn sync_space_name_to_id(
     }
 }
 
+trait SpaceRequestPayload: Clone + Send + Sync + 'static {
+    fn open_page(&self) -> bool {
+        false
+    }
+
+    fn attach_space_id(&self) -> Option<&str> {
+        None
+    }
+
+    fn delete_space_id(&self) -> Option<&str> {
+        None
+    }
+
+    fn rename(&self) -> Option<(&str, &str)> {
+        None
+    }
+
+    fn create_name(&self) -> Option<&str> {
+        None
+    }
+}
+
+impl SpaceRequestPayload for SpaceOpenPageRequest {
+    fn open_page(&self) -> bool {
+        true
+    }
+}
+
+impl SpaceRequestPayload for SpaceAttachRequest {
+    fn attach_space_id(&self) -> Option<&str> {
+        Some(&self.space_id)
+    }
+}
+
+impl SpaceRequestPayload for SpaceDeleteRequest {
+    fn delete_space_id(&self) -> Option<&str> {
+        Some(&self.space_id)
+    }
+}
+
+impl SpaceRequestPayload for SpaceRenameRequest {
+    fn rename(&self) -> Option<(&str, &str)> {
+        Some((&self.space_id, &self.name))
+    }
+}
+
+impl SpaceRequestPayload for SpaceCreateRequest {
+    fn create_name(&self) -> Option<&str> {
+        Some(&self.name)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-fn on_space_request(
-    trigger: On<BinReceive<SpaceRequest>>,
+fn on_space_request<T: SpaceRequestPayload>(
+    trigger: On<BinReceive<T>>,
     spaces: SpaceQuery,
     space_list: SpaceListQuery,
     tabs: SpaceTabQuery,
@@ -578,17 +655,17 @@ fn on_space_request(
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
-    if let SpaceRequest::Rename { space_id, name } = evt {
+    if let Some((space_id, name)) = evt.rename() {
         let name = name.trim();
         if name.is_empty() {
             return;
         }
-        if !spaces.iter().any(|(_, sid, _, _, _)| sid.0 == *space_id) {
+        if !spaces.iter().any(|(_, sid, _, _, _)| sid.0 == space_id) {
             return;
         }
         let existing: std::collections::HashSet<String> = spaces
             .iter()
-            .filter(|(_, sid, _, _, _)| sid.0 != *space_id)
+            .filter(|(_, sid, _, _, _)| sid.0 != space_id)
             .map(|(_, sid, _, _, _)| sid.0.clone())
             .collect();
         let new_id = crate::model::unique_space_id_among(&existing, name);
@@ -597,7 +674,7 @@ fn on_space_request(
                 .iter()
                 .any(|(_, sid, is_active, _, _)| sid.0 == *space_id && is_active);
         for (entity, sid, _, _, _) in spaces.iter() {
-            if sid.0 != *space_id {
+            if sid.0 != space_id {
                 continue;
             }
             commands.entity(entity).insert((
@@ -605,9 +682,9 @@ fn on_space_request(
                 vmux_layout::space::SpaceId(new_id.clone()),
             ));
         }
-        if new_id != *space_id {
+        if new_id != space_id {
             for (tab, sid, _, _) in tabs.iter() {
-                if sid.0 != *space_id {
+                if sid.0 != space_id {
                     continue;
                 }
                 commands
@@ -631,7 +708,7 @@ fn on_space_request(
         return;
     };
 
-    if matches!(evt, SpaceRequest::OpenPage) {
+    if evt.open_page() {
         if let Some((existing, _)) = stack_q.iter().find(|(stack, meta)| {
             meta.url == SPACES_PAGE_URL
                 && vmux_layout::window::host_window_of(*stack, &child_of_q, &host_windows)
@@ -664,8 +741,8 @@ fn on_space_request(
         return;
     }
 
-    if let SpaceRequest::Delete { space_id } = evt {
-        let id = space_id.as_str();
+    if let Some(space_id) = evt.delete_space_id() {
+        let id = space_id;
         let logical_ids: std::collections::HashSet<&str> = spaces
             .iter()
             .map(|(_, id, _, _, _)| id.0.as_str())
@@ -724,9 +801,8 @@ fn on_space_request(
         return;
     }
 
-    match evt {
-        SpaceRequest::Attach { space_id } => {
-            let id = space_id.as_str();
+    if let Some(space_id) = evt.attach_space_id() {
+            let id = space_id;
             let local = spaces
                 .iter()
                 .find(|(_, sid, _, _, parent)| sid.0 == id && parent.parent() == main);
@@ -753,8 +829,9 @@ fn on_space_request(
                 active_id.0 = Some(id.to_string());
                 bump_space_tab(&tabs, entity, &mut commands);
             }
-        }
-        SpaceRequest::Create { name } => {
+        return;
+    }
+    if let Some(name) = evt.create_name() {
             let count = spaces
                 .iter()
                 .filter(|(_, _, _, _, parent)| parent.parent() == main)
@@ -805,8 +882,6 @@ fn on_space_request(
                 clear_pending_stack: true,
                 focus: true,
             });
-        }
-        SpaceRequest::OpenPage | SpaceRequest::Delete { .. } | SpaceRequest::Rename { .. } => {}
     }
 }
 
@@ -1091,7 +1166,7 @@ mod tests {
 
         app.world_mut().trigger(BinReceive {
             webview,
-            payload: SpaceRequest::Attach {
+            payload: SpaceAttachRequest {
                 space_id: "shared".to_string(),
             },
         });
@@ -1167,7 +1242,7 @@ mod tests {
 
         app.world_mut().trigger(BinReceive {
             webview,
-            payload: SpaceRequest::Delete {
+            payload: SpaceDeleteRequest {
                 space_id: "shared".to_string(),
             },
         });
@@ -1646,7 +1721,7 @@ mod tests {
 
         app.world_mut().trigger(BinReceive {
             webview: Entity::PLACEHOLDER,
-            payload: SpaceRequest::Rename {
+            payload: SpaceRenameRequest {
                 space_id: "rename-src-test".to_string(),
                 name: "Vmux Ai/Vmux".to_string(),
             },
