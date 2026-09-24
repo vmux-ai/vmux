@@ -177,42 +177,12 @@ pub fn command_list(
         }
         entries.push(CommandBarEntry {
             id: definition.id.to_string(),
-            name: localized_command_name(
-                locale.as_str(),
-                &definition.id,
-                definition.command_bar_name(),
-            ),
+            name: definition.localized_name(locale.as_str()),
             shortcut: definition.shortcut_label(),
         });
     }
     entries.extend(contributed);
     entries
-}
-
-pub fn localized_command_name(locale: &str, id: &str, fallback: String) -> String {
-    let locale = Locale::from(locale);
-    let message_id = format!("command-{}", id.replace('_', "-"));
-    let translated = locale.translate(&message_id);
-    if translated == message_id {
-        return fallback;
-    }
-    let Some((root_id, group_id)) = command_hierarchy_ids(id) else {
-        return translated;
-    };
-    let mut segments = translated
-        .split(" > ")
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if segments.is_empty() {
-        return translated;
-    }
-    segments[0] = locale.translate(root_id);
-    if let Some(group_id) = group_id
-        && segments.len() > 2
-    {
-        segments[1] = locale.translate(group_id);
-    }
-    segments.join(" > ")
 }
 
 pub(crate) fn command_shortcut(id: &str, definitions: &[CommandDefinition]) -> String {
@@ -258,47 +228,5 @@ pub fn command_bar_open_payload(
         target,
         picker: None,
         picks: Vec::new(),
-    }
-}
-
-pub(crate) fn command_hierarchy_ids(id: &str) -> Option<(&'static str, Option<&'static str>)> {
-    if id == "minimize_window" {
-        Some(("menu-layout", Some("command-group-window")))
-    } else if id == "toggle_layout" {
-        Some(("menu-layout", Some("menu-layout")))
-    } else if matches!(
-        id,
-        "close_tab" | "new_task" | "next_tab" | "prev_tab" | "rename_tab"
-    ) || id.starts_with("tab_select_")
-    {
-        Some(("menu-layout", Some("command-group-tab")))
-    } else if id.starts_with("open_in_") {
-        Some(("menu-browser", Some("command-group-open")))
-    } else if id.contains("pane") {
-        Some(("menu-layout", Some("command-group-pane")))
-    } else if id.starts_with("stack_") {
-        Some(("menu-layout", Some("command-group-stack")))
-    } else if id == "space_open" {
-        Some(("menu-layout", Some("command-group-space")))
-    } else if id.starts_with("terminal_") {
-        Some(("menu-terminal", None))
-    } else if matches!(
-        id,
-        "browser_prev_page" | "browser_next_page" | "browser_reload" | "browser_hard_reload"
-    ) {
-        Some(("menu-browser", Some("command-group-navigation")))
-    } else if matches!(
-        id,
-        "browser_zoom_in" | "browser_zoom_out" | "browser_zoom_reset" | "browser_dev_tools"
-    ) {
-        Some(("menu-browser", Some("command-group-view")))
-    } else if id.starts_with("browser_open_") {
-        Some(("menu-browser", Some("command-group-bar")))
-    } else if id == "service_open" {
-        Some(("menu-service", None))
-    } else if id.starts_with("bookmark_") {
-        Some(("menu-bookmark", None))
-    } else {
-        None
     }
 }

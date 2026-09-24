@@ -25,7 +25,7 @@ pub use issued::{ExLineSubmitted, FileStatusPicked};
 pub use page_key::KeyPlugin;
 pub use payload::{
     CommandBarEntry, CommandBarPicks, build_command_bar_open_payload, command_bar_open_payload,
-    command_list, localized_command_name,
+    command_list,
 };
 pub use settings::ResolvedLocale;
 pub use snapshot::*;

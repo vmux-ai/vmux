@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 #[cfg(test)]
 use vmux_command::CommandRequest;
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
-use vmux_command::{CommandDefinition, ResolvedLocale, localized_command_name};
+use vmux_command::{CommandDefinition, ResolvedLocale};
 use vmux_core::page::PageReady;
 use vmux_core::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
@@ -224,11 +224,7 @@ impl ShortcutsEvent {
         for definition in definitions {
             labels.insert(
                 definition.id.as_str(),
-                localized_command_name(
-                    locale.as_str(),
-                    &definition.id,
-                    definition.command_bar_name(),
-                ),
+                definition.localized_name(locale.as_str()),
             );
         }
 

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
+use vmux_ui::i18n::Locale;
 
 use crate::shortcut::{Binding, KeyCombo, Modifiers, Shortcut, Source, When, resolve_key};
 
@@ -335,6 +336,40 @@ impl CommandDefinition {
 
     pub fn command_bar_name(&self) -> String {
         format!("{} > {}", self.group, self.label)
+    }
+
+    pub fn localized_name(&self, locale: &str) -> String {
+        let locale = Locale::from(locale);
+        let message_id = format!("command-{}", self.id.replace('_', "-"));
+        let translated = locale.translate(&message_id);
+        if translated == message_id {
+            return self.command_bar_name();
+        }
+        let mut segments = translated
+            .split(" > ")
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let group_count = self.group.split(" > ").count();
+        if segments.len() <= group_count {
+            return translated;
+        }
+        for (index, group) in self.group.split(" > ").enumerate() {
+            let prefix = if index == 0 { "menu" } else { "command-group" };
+            let group_id = format!("{prefix}-{}", Self::kebab_case(group));
+            let localized = locale.translate(&group_id);
+            if localized != group_id {
+                segments[index] = localized;
+            }
+        }
+        segments.join(" > ")
+    }
+
+    fn kebab_case(value: &str) -> String {
+        value
+            .split_whitespace()
+            .map(str::to_ascii_lowercase)
+            .collect::<Vec<_>>()
+            .join("-")
     }
 
     pub fn shortcut_label(&self) -> String {
