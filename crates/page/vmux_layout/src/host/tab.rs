@@ -1,6 +1,6 @@
 #[cfg(test)]
 use crate::event::TabDropPlacement;
-use crate::event::TabsRequest;
+use crate::event::{TabActivateRequest, TabCloseRequest, TabCreateRequest, TabReorderRequest};
 use crate::{
     TabLayoutSpawnContent, TabLayoutSpawnRequest,
     host::swap::{find_kind_index, move_sibling, resolve_next, resolve_prev, swap_siblings},
@@ -36,8 +36,16 @@ impl Plugin for TabPlugin {
             .init_resource::<crate::window::FocusedWindow>()
             .add_message::<CloseTabRequest>()
             .add_message::<crate::NewTabRequest>()
-            .add_plugins(UiEventPlugin::<(TabsRequest,)>::default())
-            .add_observer(on_tabs_request)
+            .add_plugins(UiEventPlugin::<(
+                TabCreateRequest,
+                TabCloseRequest,
+                TabActivateRequest,
+                TabReorderRequest,
+            )>::default())
+            .add_observer(on_tab_create_request)
+            .add_observer(on_tab_close_request)
+            .add_observer(on_tab_activate_request)
+            .add_observer(on_tab_reorder_request)
             .add_systems(
                 Update,
                 handle_tab_requests
@@ -502,92 +510,102 @@ fn sync_tab_order(
     }
 }
 
-fn on_tabs_request(
-    trigger: On<BinReceive<TabsRequest>>,
+fn on_tab_create_request(
+    _trigger: On<BinReceive<TabCreateRequest>>,
+    mut requests: MessageWriter<TabRequest>,
+) {
+    requests.write(TabRequest::Open { url: None });
+}
+
+fn on_tab_close_request(
+    trigger: On<BinReceive<TabCloseRequest>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: crate::stack::ActiveTabParam,
+    mut close_requests: MessageWriter<CloseTabRequest>,
+) {
+    let active_tab = active_tab_param.get();
+    let target = tab_target(
+        trigger.event().payload.tab_id.as_deref(),
+        tabs.iter().map(|(entity, _)| entity),
+    )
+    .or(active_tab);
+    let Some(target) = target else { return };
+    close_requests.write(CloseTabRequest { tab: target });
+}
+
+fn on_tab_activate_request(
+    trigger: On<BinReceive<TabActivateRequest>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    mut commands: Commands,
+) {
+    let Ok(bits) = trigger.event().payload.tab_id.parse::<u64>() else {
+        return;
+    };
+    let Some((target, _)) = tabs.iter().find(|(entity, _)| entity.to_bits() == bits) else {
+        return;
+    };
+    commands.entity(target).insert(LastActivatedAt::now());
+}
+
+fn on_tab_reorder_request(
+    trigger: On<BinReceive<TabReorderRequest>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
-    active_tab_param: crate::stack::ActiveTabParam,
-    mut tab_requests: MessageWriter<TabRequest>,
-    mut close_requests: MessageWriter<CloseTabRequest>,
     mut commands: Commands,
 ) {
-    let evt = &trigger.event().payload;
-    let active_tab = active_tab_param.get();
-    match evt {
-        TabsRequest::New => {
-            tab_requests.write(TabRequest::Open { url: None });
-        }
-        TabsRequest::Close { tab_id } => {
-            let target =
-                tab_target(tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity)).or(active_tab);
-            let Some(target) = target else { return };
-            close_requests.write(CloseTabRequest { tab: target });
-        }
-        TabsRequest::Switch { tab_id } => {
-            let Ok(bits) = tab_id.parse::<u64>() else {
-                return;
-            };
-            let Some((target, _)) = tabs.iter().find(|(e, _)| e.to_bits() == bits) else {
-                return;
-            };
-            commands.entity(target).insert(LastActivatedAt::now());
-        }
-        TabsRequest::Reorder {
-            tab_id,
-            target_tab_id,
-            drop_placement,
-        } => {
-            let Some(source) =
-                tab_target(Some(tab_id.as_str()), tabs.iter().map(|(entity, _)| entity))
-            else {
-                return;
-            };
-            let Some(target) = tab_target(
-                Some(target_tab_id.as_str()),
-                tabs.iter().map(|(entity, _)| entity),
-            ) else {
-                return;
-            };
-            if source == target {
-                return;
-            }
-            let Ok(source_parent) = child_of.get(source) else {
-                return;
-            };
-            let Ok(target_parent) = child_of.get(target) else {
-                return;
-            };
-            if source_parent.parent() != target_parent.parent() {
-                return;
-            }
-            let parent = source_parent.parent();
-            let Ok(siblings) = children.get(parent) else {
-                return;
-            };
-            let kind_positions = siblings
-                .iter()
-                .enumerate()
-                .filter(|(_, entity)| tabs.contains(*entity))
-                .map(|(index, _)| index)
-                .collect::<Vec<_>>();
-            let Some(from) = find_kind_index(source, siblings, &kind_positions) else {
-                return;
-            };
-            let Some(to) = find_kind_index(target, siblings, &kind_positions) else {
-                return;
-            };
-            let destination = drop_placement.destination(from, to, kind_positions.len());
-            move_sibling(
-                &mut commands,
-                parent,
-                siblings,
-                &kind_positions,
-                from,
-                destination,
-            );
-        }
+    let request = &trigger.event().payload;
+    let Some(source) = tab_target(
+        Some(request.tab_id.as_str()),
+        tabs.iter().map(|(entity, _)| entity),
+    ) else {
+        return;
+    };
+    let Some(target) = tab_target(
+        Some(request.target_tab_id.as_str()),
+        tabs.iter().map(|(entity, _)| entity),
+    ) else {
+        return;
+    };
+    if source == target {
+        return;
     }
+    let Ok(source_parent) = child_of.get(source) else {
+        return;
+    };
+    let Ok(target_parent) = child_of.get(target) else {
+        return;
+    };
+    if source_parent.parent() != target_parent.parent() {
+        return;
+    }
+    let parent = source_parent.parent();
+    let Ok(siblings) = children.get(parent) else {
+        return;
+    };
+    let kind_positions = siblings
+        .iter()
+        .enumerate()
+        .filter(|(_, entity)| tabs.contains(*entity))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let Some(from) = find_kind_index(source, siblings, &kind_positions) else {
+        return;
+    };
+    let Some(to) = find_kind_index(target, siblings, &kind_positions) else {
+        return;
+    };
+    let destination = request
+        .drop_placement
+        .destination(from, to, kind_positions.len());
+    move_sibling(
+        &mut commands,
+        parent,
+        siblings,
+        &kind_positions,
+        from,
+        destination,
+    );
 }
 
 fn tab_target(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Option<Entity> {
@@ -1171,9 +1189,9 @@ mod tests {
             .id();
         app.world_mut().spawn(PrimaryWindow);
 
-        app.world_mut().trigger(BinReceive::<TabsRequest> {
+        app.world_mut().trigger(BinReceive::<TabCloseRequest> {
             webview,
-            payload: TabsRequest::Close {
+            payload: TabCloseRequest {
                 tab_id: Some(tab.to_bits().to_string()),
             },
         });
@@ -1193,9 +1211,9 @@ mod tests {
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(PrimaryWindow);
 
-        app.world_mut().trigger(BinReceive::<TabsRequest> {
+        app.world_mut().trigger(BinReceive::<TabCloseRequest> {
             webview,
-            payload: TabsRequest::Close { tab_id: None },
+            payload: TabCloseRequest { tab_id: None },
         });
         app.update();
 
@@ -1223,9 +1241,9 @@ mod tests {
             .spawn((tab_bundle(), LastActivatedAt(3), ChildOf(space)))
             .id();
 
-        app.world_mut().trigger(BinReceive::<TabsRequest> {
+        app.world_mut().trigger(BinReceive::<TabReorderRequest> {
             webview,
-            payload: TabsRequest::Reorder {
+            payload: TabReorderRequest {
                 tab_id: first.to_bits().to_string(),
                 target_tab_id: third.to_bits().to_string(),
                 drop_placement: TabDropPlacement::After,
@@ -1317,7 +1335,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .init_resource::<LastTabCloseAt>()
             .add_systems(Update, crate::archive::handle_close_tab_requests)
-            .add_observer(on_tabs_request);
+            .add_observer(on_tab_close_request);
 
         let webview = app.world_mut().spawn_empty().id();
         let window = app.world_mut().spawn(PrimaryWindow).id();
@@ -1345,9 +1363,9 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive::<TabsRequest> {
+        app.world_mut().trigger(BinReceive::<TabCloseRequest> {
             webview,
-            payload: TabsRequest::Close {
+            payload: TabCloseRequest {
                 tab_id: Some(d.to_bits().to_string()),
             },
         });

@@ -20,7 +20,7 @@ use super::tab_drag::TabDrag;
 use super::window_drag::WindowDragRegion;
 use crate::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
-    StackNavigationState, StackRow, TabListState, TabRow, TabsRequest,
+    StackNavigationState, StackRow, TabCloseRequest, TabCreateRequest, TabListState, TabRow,
 };
 use crate::extension::ExtensionBar;
 use crate::remote::RemoteControl;
@@ -389,7 +389,7 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
                     onclick: move |evt| {
                         evt.prevent_default();
                         evt.stop_propagation();
-                        let _ = send(&TabsRequest::Close {
+                        let _ = send(&TabCloseRequest {
                             tab_id: Some(id_close.clone()),
                         });
                     },
@@ -482,7 +482,7 @@ fn NewTabButton() -> Element {
                 title: translate("layout-new-tab"),
                 class: "absolute inset-0 flex cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
                 onclick: move |_| {
-                    let _ = send(&TabsRequest::New);
+                    let _ = send(&TabCreateRequest);
                 },
                 Icon { class: "h-3.5 w-3.5",
                     path { d: "M12 5v14" }
