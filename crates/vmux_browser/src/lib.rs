@@ -1003,7 +1003,11 @@ mod tests {
                     crate::page::PagePlugin,
                 ))
                 .add_message::<vmux_setting::SettingsWriteRequest>()
-                .add_message::<vmux_space::SpaceRequest>()
+                .add_message::<vmux_space::SpaceAttachRequest>()
+                .add_message::<vmux_space::SpaceCreateRequest>()
+                .add_message::<vmux_space::SpaceDeleteRequest>()
+                .add_message::<vmux_space::SpaceOpenPageRequest>()
+                .add_message::<vmux_space::SpaceRenameRequest>()
                 .add_message::<vmux_history::query::HistoryOpenIntent>()
                 .init_resource::<crate::PendingNavSnapshots>()
                 .init_resource::<crate::input::RecentBrowserInteraction>()

@@ -29,7 +29,7 @@ use crate::{
 };
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_core::event::space::SpaceRequest;
+use vmux_core::event::space::SpaceAttachRequest;
 use vmux_core::host::page::HostsPage;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
@@ -1032,9 +1032,9 @@ fn on_switch_space_request(
     if !id.is_empty() {
         commands.trigger(BinReceive {
             webview,
-            payload: SpaceRequest::Attach {
+            payload: SpaceAttachRequest {
                 space_id: id.clone(),
-            }
+            },
         });
     }
     commands.trigger(CloseCommandBar::after(webview, true));

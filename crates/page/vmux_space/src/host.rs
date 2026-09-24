@@ -20,4 +20,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 pub use plugin::{SaveSpaceRequest, SpacePlugin};
 pub use project::{ExpandedProjectDirs, SpaceProjects};
 pub use spaces::{ActiveSpace, Spaces};
-pub use vmux_api::space::SpaceRequest;
+pub use vmux_api::space::{
+    SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest,
+    SpaceRenameRequest,
+};

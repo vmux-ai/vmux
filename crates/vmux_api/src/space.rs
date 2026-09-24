@@ -38,12 +38,31 @@ pub struct SpaceRow {
 
 #[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
-pub enum SpaceRequest {
-    OpenPage,
-    Attach { space_id: String },
-    Delete { space_id: String },
-    Rename { space_id: String, name: String },
-    Create { name: String },
+pub struct SpaceOpenPageRequest;
+
+#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
+pub struct SpaceAttachRequest {
+    pub space_id: String,
+}
+
+#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
+pub struct SpaceDeleteRequest {
+    pub space_id: String,
+}
+
+#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
+pub struct SpaceRenameRequest {
+    pub space_id: String,
+    pub name: String,
+}
+
+#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
+#[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
+pub struct SpaceCreateRequest {
+    pub name: String,
 }
 
 #[vmux_api::ui_event(Eq, targets = ["spaces", "layout", "git"])]
@@ -140,12 +159,12 @@ mod tests {
 
     #[test]
     fn attach_event_carries_target_space_id() {
-        let event = SpaceRequest::Attach {
+        let event = SpaceAttachRequest {
             space_id: "work".to_string(),
         };
         assert_eq!(
             event,
-            SpaceRequest::Attach {
+            SpaceAttachRequest {
                 space_id: "work".to_string()
             }
         );
@@ -153,13 +172,13 @@ mod tests {
 
     #[test]
     fn space_request_rkyv_roundtrip() {
-        let original = SpaceRequest::Rename {
+        let original = SpaceRenameRequest {
             space_id: "work".to_string(),
             name: "Work".to_string(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
-        let recovered =
-            rkyv::from_bytes::<SpaceRequest, rkyv::rancor::Error>(&bytes).expect("deserialize");
+        let recovered = rkyv::from_bytes::<SpaceRenameRequest, rkyv::rancor::Error>(&bytes)
+            .expect("deserialize");
         assert_eq!(original, recovered);
     }
 

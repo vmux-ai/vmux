@@ -271,7 +271,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
                         aria_label: space.name.clone(),
                         disabled: editing(),
                         onclick: move |_| {
-                            let _ = send(&vmux_core::event::space::SpaceRequest::OpenPage);
+                            let _ = send(&vmux_core::event::space::SpaceOpenPageRequest);
                         },
                     },
                     div { class: "pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2",
@@ -290,7 +290,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
                             title: translate("common-rename"),
                             on_active_change: BookmarkInput::set_active,
                             on_commit: move |name| {
-                                let _ = send(&vmux_core::event::space::SpaceRequest::Rename {
+                                let _ = send(&vmux_core::event::space::SpaceRenameRequest {
                                     space_id: rename_id.clone(),
                                     name,
                                 });
