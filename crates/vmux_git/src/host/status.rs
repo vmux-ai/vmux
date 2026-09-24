@@ -8,9 +8,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use vmux_core::host::FileUiStateUpdates;
 
-use crate::event::{
-    FileGitState, FileStatus, GitDiffViewportEvent, GitResultEvent, GitStatusEvent,
-};
+use crate::event::{FileGitState, FileStatus, GitDiffViewport, GitFileStatus, GitOperationResult};
 
 use super::GitDiffSource;
 use super::GitUpdateSet;
@@ -65,7 +63,7 @@ impl FileGit {
         GitStatusRefresh::new(self.generation, delay, wake)
     }
 
-    pub(super) fn apply_status(&mut self, event: GitStatusEvent) {
+    pub(super) fn apply_status(&mut self, event: GitFileStatus) {
         if event.path != self.state.path {
             return;
         }
@@ -90,7 +88,7 @@ impl FileGit {
 
     pub(super) fn apply_result(
         &mut self,
-        event: GitResultEvent,
+        event: GitOperationResult,
         wake: Option<EventLoopProxy<WinitUserEvent>>,
     ) -> GitStatusRefresh {
         self.state.message = if event.ok {
@@ -122,7 +120,7 @@ impl FileGit {
         }
     }
 
-    pub(super) fn apply_diff(&mut self, event: GitDiffViewportEvent) {
+    pub(super) fn apply_diff(&mut self, event: GitDiffViewport) {
         self.state.diff_loading = false;
         self.state.diff_viewport = Some(event);
     }
@@ -209,7 +207,7 @@ struct GitStatusRequestIdentity {
 
 struct GitStatusResult {
     identity: GitStatusRequestIdentity,
-    status: Result<GitStatusEvent, String>,
+    status: Result<GitFileStatus, String>,
 }
 
 struct GitStatusResults(Vec<GitStatusResult>);

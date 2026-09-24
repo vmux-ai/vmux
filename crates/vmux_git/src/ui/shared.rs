@@ -173,7 +173,7 @@ pub fn DiffView(
     repo_root: ReadSignal<String>,
     path: ReadSignal<String>,
     #[props(default)] path_bytes: Vec<u8>,
-    viewport: ReadSignal<Option<GitDiffViewportEvent>>,
+    viewport: ReadSignal<Option<GitDiffViewport>>,
     loading: bool,
     visible: bool,
 ) -> Element {

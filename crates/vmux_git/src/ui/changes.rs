@@ -17,7 +17,7 @@ use super::workspace::GitWorkspace;
 
 #[component]
 pub(super) fn ChangesCard(
-    repository: GitRepositoryEvent,
+    repository: GitRepositorySnapshot,
     selected_path: Signal<String>,
     selected_path_bytes: Signal<Vec<u8>>,
     selected_abs_path: Signal<String>,

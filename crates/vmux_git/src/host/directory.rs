@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, UiEventPlugin};
 
-use crate::event::{GitDirectoryEvent, GitDirectoryRequest};
+use crate::event::{GitDirectoryRequest, GitDirectorySnapshot};
 
 pub(super) struct DirectoryPlugin;
 
@@ -61,7 +61,7 @@ impl GitDirectory {
         entries
     }
 
-    fn event(path: &Path, preview: bool) -> GitDirectoryEvent {
+    fn event(path: &Path, preview: bool) -> GitDirectorySnapshot {
         let path = Self::initial_path(path);
         let parent = path.parent().map(Path::to_path_buf);
         let parent_path = parent
@@ -72,7 +72,7 @@ impl GitDirectory {
         let repo_root = super::runner::repo_root(&path)
             .map(|root| root.to_string_lossy().into_owned())
             .unwrap_or_default();
-        GitDirectoryEvent {
+        GitDirectorySnapshot {
             entries: Self::entries(&path),
             path: path.to_string_lossy().into_owned(),
             parent_path,

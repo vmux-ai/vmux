@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use vmux_ui::i18n::translate;
 use vmux_ui::list_nav::MenuDirection;
 
-use crate::event::{FileStatus, GitFileEntry, GitRepositoryEvent};
+use crate::event::{FileStatus, GitFileEntry, GitRepositorySnapshot};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum BranchPrompt {
@@ -19,7 +19,7 @@ pub(super) enum BranchCollection {
 }
 
 impl BranchCollection {
-    pub(super) fn references(self, repository: &GitRepositoryEvent) -> Vec<String> {
+    pub(super) fn references(self, repository: &GitRepositorySnapshot) -> Vec<String> {
         match self {
             Self::Local => repository
                 .branches
@@ -41,7 +41,7 @@ impl BranchCollection {
 
     pub(super) fn selected_reference(
         self,
-        repository: &GitRepositoryEvent,
+        repository: &GitRepositorySnapshot,
         selected: &str,
     ) -> String {
         let references = self.references(repository);

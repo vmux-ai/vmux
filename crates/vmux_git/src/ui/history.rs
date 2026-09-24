@@ -14,7 +14,7 @@ use super::workspace::GitWorkspace;
 
 #[component]
 pub(super) fn HistoryCard(
-    repository: GitRepositoryEvent,
+    repository: GitRepositorySnapshot,
     selected_commit: Signal<String>,
     focused_panel: Signal<GitPanel>,
 ) -> Element {
@@ -120,7 +120,7 @@ pub(super) fn HistoryCard(
 
 #[component]
 pub(super) fn StashCard(
-    repository: GitRepositoryEvent,
+    repository: GitRepositorySnapshot,
     mut selected_stash: Signal<String>,
     mut focused_panel: Signal<GitPanel>,
 ) -> Element {

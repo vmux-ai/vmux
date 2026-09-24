@@ -120,8 +120,8 @@ pub fn has_repository(file: &Path) -> bool {
         .any(|directory| directory.join(".git").exists())
 }
 
-pub(crate) fn non_repository_status(path: &Path) -> GitStatusEvent {
-    GitStatusEvent {
+pub(crate) fn non_repository_status(path: &Path) -> GitFileStatus {
+    GitFileStatus {
         path: path.to_string_lossy().into_owned(),
         branch: String::new(),
         ahead: 0,
@@ -193,12 +193,12 @@ impl<'a> RequestPath<'a> {
     }
 }
 
-pub fn status(file: &Path) -> Result<GitStatusEvent, GitError> {
+pub fn status(file: &Path) -> Result<GitFileStatus, GitError> {
     let root = repo_root(file)?;
     status_at(&root, file)
 }
 
-pub fn status_at(root: &Path, file: &Path) -> Result<GitStatusEvent, GitError> {
+pub fn status_at(root: &Path, file: &Path) -> Result<GitFileStatus, GitError> {
     statuses(root, &[file.to_path_buf()])?
         .pop()
         .ok_or_else(|| GitError("missing git status result".into()))
@@ -521,7 +521,7 @@ impl GitOperation {
     }
 }
 
-impl GitRepositoryEvent {
+impl GitRepositorySnapshot {
     pub fn load(path: &Path) -> Result<Self, GitError> {
         let requested_path = path.to_string_lossy().into_owned();
         let repo_root = repo_root(path)?;
@@ -572,7 +572,7 @@ impl GitRepositoryEvent {
     }
 }
 
-pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEvent>, GitError> {
+pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitFileStatus>, GitError> {
     let (stdout, stderr, ok) = git_read_bytes(
         root,
         &[
@@ -592,7 +592,7 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEv
         .iter()
         .map(|file| {
             let target = rel(root, file);
-            GitStatusEvent {
+            GitFileStatus {
                 path: file.to_string_lossy().into_owned(),
                 branch: parsed.branch.clone(),
                 ahead: parsed.ahead,
@@ -1128,7 +1128,7 @@ mod tests {
         test_repo::write(repo.path(), "tracked.txt", "two\n");
         test_repo::write(repo.path(), "untracked.txt", "new\n");
 
-        let repository = GitRepositoryEvent::load(repo.path()).unwrap();
+        let repository = GitRepositorySnapshot::load(repo.path()).unwrap();
 
         assert_eq!(repository.branch, "main");
         assert!(
@@ -1231,7 +1231,7 @@ mod tests {
 
         GitOperation::StashPush.run(repo.path()).unwrap();
 
-        let repository = GitRepositoryEvent::load(repo.path()).unwrap();
+        let repository = GitRepositorySnapshot::load(repo.path()).unwrap();
         assert!(repository.files.is_empty());
         assert_eq!(repository.stashes.len(), 1);
         let reference = repository.stashes[0].reference.clone();
@@ -1249,21 +1249,21 @@ mod tests {
             "new\n"
         );
         assert!(
-            GitRepositoryEvent::load(repo.path())
+            GitRepositorySnapshot::load(repo.path())
                 .unwrap()
                 .stashes
                 .is_empty()
         );
 
         GitOperation::StashPush.run(repo.path()).unwrap();
-        let reference = GitRepositoryEvent::load(repo.path()).unwrap().stashes[0]
+        let reference = GitRepositorySnapshot::load(repo.path()).unwrap().stashes[0]
             .reference
             .clone();
         GitOperation::StashDrop { reference }
             .run(repo.path())
             .unwrap();
         assert!(
-            GitRepositoryEvent::load(repo.path())
+            GitRepositorySnapshot::load(repo.path())
                 .unwrap()
                 .stashes
                 .is_empty()
@@ -1421,7 +1421,7 @@ mod tests {
         let name = "tab\tline\nquote\"slash\\name.txt";
         test_repo::write(repo.path(), name, "new\n");
 
-        let repository = GitRepositoryEvent::load(repo.path()).unwrap();
+        let repository = GitRepositorySnapshot::load(repo.path()).unwrap();
 
         assert!(repository.files.iter().any(|entry| entry.path == name));
     }
@@ -1439,7 +1439,7 @@ mod tests {
         commit(&file, "initial").unwrap();
         std::fs::write(&file, "two\n").unwrap();
 
-        let repository = GitRepositoryEvent::load(repo.path()).unwrap();
+        let repository = GitRepositorySnapshot::load(repo.path()).unwrap();
         let entry = repository
             .files
             .iter()

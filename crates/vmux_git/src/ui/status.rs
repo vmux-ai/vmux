@@ -15,7 +15,7 @@ use super::panel::{PanelHeader, PanelIcon};
 
 #[component]
 pub(super) fn StatusCard(
-    repository: GitRepositoryEvent,
+    repository: GitRepositorySnapshot,
     focused_panel: Signal<GitPanel>,
     fetching: bool,
 ) -> Element {
@@ -66,7 +66,7 @@ pub(super) fn StatusCard(
 }
 
 #[component]
-pub(super) fn StatusDetailCard(repository: GitRepositoryEvent, fetching: bool) -> Element {
+pub(super) fn StatusDetailCard(repository: GitRepositorySnapshot, fetching: bool) -> Element {
     let changed = repository.files.len();
     let staged = repository.files.iter().filter(|entry| entry.staged).count();
     let clean = changed == 0;
