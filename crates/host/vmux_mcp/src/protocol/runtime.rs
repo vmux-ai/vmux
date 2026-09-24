@@ -113,6 +113,9 @@ impl McpServer {
     }
 
     pub async fn handle(&mut self, message: Value) -> Option<Value> {
+        self.app
+            .world_mut()
+            .insert_resource(McpRuntime(tokio::runtime::Handle::current()));
         let id = message.get("id").cloned()?;
         let method = message
             .get("method")
@@ -175,6 +178,9 @@ struct McpConfig {
     shell: String,
 }
 
+#[derive(Resource, Clone)]
+struct McpRuntime(tokio::runtime::Handle);
+
 #[derive(Resource, Default)]
 struct NextRequestSequence(u64);
 
@@ -202,11 +208,12 @@ struct McpTask(tokio::sync::oneshot::Receiver<Result<Value, String>>);
 impl McpTask {
     fn start(
         commands: &mut Commands,
+        runtime: &McpRuntime,
         entity: Entity,
         future: impl Future<Output = Result<Value, String>> + Send + 'static,
     ) {
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        drop(tokio::spawn(async move {
+        drop(runtime.0.spawn(async move {
             let _ = sender.send(future.await);
         }));
         commands.entity(entity).insert(Self(receiver));
@@ -502,6 +509,7 @@ fn route_tool_outcomes(
 
 fn start_list_tools(
     mut commands: Commands,
+    runtime: Res<McpRuntime>,
     requests: Query<(Entity, &ListToolsExecution), Added<ListToolsExecution>>,
 ) {
     for (entity, request) in &requests {
@@ -509,12 +517,13 @@ fn start_list_tools(
             definitions: request.definitions.clone(),
         };
         commands.entity(entity).remove::<ListToolsExecution>();
-        McpTask::start(&mut commands, entity, execution.run());
+        McpTask::start(&mut commands, &runtime, entity, execution.run());
     }
 }
 
 fn start_commands(
     mut commands: Commands,
+    runtime: Res<McpRuntime>,
     requests: Query<(Entity, &CommandExecution), Added<CommandExecution>>,
 ) {
     for (entity, request) in &requests {
@@ -524,12 +533,13 @@ fn start_commands(
             anchor: request.anchor,
         };
         commands.entity(entity).remove::<CommandExecution>();
-        McpTask::start(&mut commands, entity, execution.run());
+        McpTask::start(&mut commands, &runtime, entity, execution.run());
     }
 }
 
 fn start_protocol_tools(
     mut commands: Commands,
+    runtime: Res<McpRuntime>,
     requests: Query<(Entity, &ProtocolExecution), Added<ProtocolExecution>>,
 ) {
     for (entity, request) in &requests {
@@ -539,12 +549,13 @@ fn start_protocol_tools(
             anchor: request.anchor,
         };
         commands.entity(entity).remove::<ProtocolExecution>();
-        McpTask::start(&mut commands, entity, execution.run());
+        McpTask::start(&mut commands, &runtime, entity, execution.run());
     }
 }
 
 fn start_dispatches(
     mut commands: Commands,
+    runtime: Res<McpRuntime>,
     requests: Query<(Entity, &DispatchExecution), Added<DispatchExecution>>,
     config: Res<McpConfig>,
 ) {
@@ -556,7 +567,12 @@ fn start_dispatches(
             anchor: request.anchor,
         };
         commands.entity(entity).remove::<DispatchExecution>();
-        McpTask::start(&mut commands, entity, execution.run(config.clone()));
+        McpTask::start(
+            &mut commands,
+            &runtime,
+            entity,
+            execution.run(config.clone()),
+        );
     }
 }
 
