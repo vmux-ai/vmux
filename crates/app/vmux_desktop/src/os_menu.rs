@@ -166,13 +166,15 @@ fn localize_menu_items(
         if let Some(menu_item) = item.as_menuitem() {
             if id == "app_quit" {
                 menu_item.set_text(locale.translate("menu-close-vmux"));
-            } else if definitions.iter().any(|definition| definition.id == id) {
+            } else if let Some(definition) =
+                definitions.iter().find(|definition| definition.id == id)
+            {
                 let current = menu_item.text();
                 let suffix = current
                     .split_once('\t')
                     .map(|(_, suffix)| format!("\t{suffix}"))
                     .unwrap_or_default();
-                let localized = vmux_command::localized_command_name(locale.as_str(), &id, current);
+                let localized = definition.localized_name(locale.as_str());
                 let leaf = localized.rsplit(" > ").next().unwrap_or(&localized);
                 menu_item.set_text(format!("{leaf}{suffix}"));
             }

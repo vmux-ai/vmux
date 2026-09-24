@@ -1156,10 +1156,10 @@ fn mirror_project_roots(mut state: ResMut<CommandBarUiState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command_bar_open_payload;
     use crate::event::CommandBarOpenEvent;
     use crate::event::CommandBarSpace;
     use crate::{CommandPlugin, ReadCommandRequests};
-    use crate::{command_bar_open_payload, localized_command_name};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
     use vmux_api::BinEvent;
@@ -1241,12 +1241,14 @@ mod tests {
 
     #[test]
     fn command_names_localize_every_hierarchy_segment() {
+        let browser = CommandDefinition::new("browser_prev_page", "Back", "Browser > Navigation");
+        let pane = CommandDefinition::new("close_pane", "Close Pane", "Layout > Pane");
         assert_eq!(
-            localized_command_name("ja", "browser_prev_page", "fallback".to_string()),
+            browser.localized_name("ja"),
             "ブラウザ > ナビゲーション > 戻る"
         );
         assert_eq!(
-            localized_command_name("ja", "close_pane", "fallback".to_string()),
+            pane.localized_name("ja"),
             "レイアウト > ペイン > ペインを閉じる"
         );
     }
