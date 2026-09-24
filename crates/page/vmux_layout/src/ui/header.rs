@@ -1,8 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_api::bookmark::{BookmarkStateEvent, BookmarkToggleRequest};
-use vmux_core::event::ExtRow;
+use vmux_api::bookmark::BookmarkToggleRequest;
 use vmux_core::event::team::{TeamMemberRow, TeamRequest};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
@@ -16,26 +15,52 @@ use vmux_ui::util::cn;
 
 use super::bookmark::{BookmarkIdCommand, BookmarkPageCommand, BookmarkTree, LayoutContextMenu};
 use super::stack::{StackIcon, StackTitle};
+use super::state::LayoutUi;
 use super::tab_drag::TabDrag;
 use super::window_drag::WindowDragRegion;
-use crate::event::{
-    HeaderRequest, RemoteStateEvent, StackRow, StacksHostEvent, TabRow, TabsHostEvent, TabsRequest,
-};
+use crate::event::{HeaderRequest, StackRow, StacksHostEvent, TabRow, TabsHostEvent, TabsRequest};
 use crate::extension::ExtensionBar;
 use crate::remote::RemoteControl;
 
 #[component]
-pub(crate) fn HeaderView(
-    stacks_state: StacksHostEvent,
-    tabs_state: TabsHostEvent,
-    bookmarks: BookmarkStateEvent,
-    team: Vec<TeamMemberRow>,
-    extensions: Vec<ExtRow>,
-    remote: RemoteStateEvent,
-    reload_key: u32,
-    stacks_error: Option<String>,
-    tabs_error: Option<String>,
-) -> Element {
+pub(crate) fn HeaderView() -> Element {
+    let layout = LayoutUi::current();
+    let ui = layout.value();
+    let state = ui.layout.unwrap_or_default();
+    if !ui.overlay_ready(&layout.error()) || !state.header_visible() {
+        return rsx! {};
+    }
+    let header_vars = format!(
+        "--vmux-header-top:{}px;--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
+        state.header_top(),
+        state.header_left(),
+        state.header_right(),
+        state.header_height,
+        state.tab_row_pad_left(),
+    );
+
+    rsx! {
+        div {
+            class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
+            style: "{header_vars}",
+            HeaderContent {}
+        }
+    }
+}
+
+#[component]
+fn HeaderContent() -> Element {
+    let layout = LayoutUi::current();
+    let ui = layout.value();
+    let stacks_state = ui.stacks.unwrap_or_default();
+    let tabs_state = ui.tabs.unwrap_or_default();
+    let bookmarks = ui.bookmarks;
+    let team = ui.team.members;
+    let extensions = ui.extensions.extensions;
+    let remote = ui.remote;
+    let reload_key = ui.reload_revision;
+    let stacks_error = layout.error();
+    let tabs_error = stacks_error.clone();
     let tab_drag = TabDrag::use_state();
     let StacksHostEvent {
         stacks,
