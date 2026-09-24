@@ -500,6 +500,7 @@ pub struct SlashCommandEntry {
     Clone,
     Debug,
     Default,
+    PartialEq,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,

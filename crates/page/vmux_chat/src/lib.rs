@@ -4,6 +4,7 @@ pub mod activity;
 pub mod event;
 pub mod tab;
 pub mod transcript;
+pub mod ui_state;
 
 pub mod model;
 pub mod prompt;

@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, UiEventPlugin};
 
 use super::model::{effort_current_for, emit_mode_state, emit_model_state};
+use super::ui_state::ChatUiStateUpdates;
 use super::{AgentChatView, ChatSynced};
 use crate::client::acp::{AcpModeState, AcpModelState};
 use crate::handoff::ImportedConversation;
@@ -151,7 +152,7 @@ fn push_chat_to_page(
                 "chat snapshot pushed"
             );
         }
-        commands.trigger(BinHostEmitEvent::from_event(webview, &snapshot));
+        ChatUiStateUpdates::write(&mut commands, webview, &snapshot);
         last_push.insert(stack, now);
     }
 }
@@ -322,7 +323,8 @@ fn sync_chat_to_ready_views(
         if !browsers.can_emit_to(&webview) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_event(
+        ChatUiStateUpdates::write(
+            &mut commands,
             webview,
             &snapshot_of(
                 messages,
@@ -337,7 +339,7 @@ fn sync_chat_to_ready_views(
                 title,
                 choices.get(webview).ok(),
             ),
-        ));
+        );
         let (cross, model_state, mode_state, agent_key) = acp_sessions
             .get(stack)
             .ok()

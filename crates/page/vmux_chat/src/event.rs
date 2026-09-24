@@ -391,6 +391,7 @@ pub struct ChatGoToBranch {
     rkyv::Serialize,
     rkyv::Deserialize,
     vmux_api::HostEvent,
+    PartialEq,
 )]
 pub struct ModelState {
     pub current_model_id: String,

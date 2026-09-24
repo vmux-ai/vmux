@@ -7,16 +7,16 @@ use crate::event::{
     ChatBranchesRequest, ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage,
     ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
     ChatPickFiles, ChatProjectBranches, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
-    ComposerContext, ModeState, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
-    RuntimeSwitchRequest, SelectMode, SelectModel, SlashCommandEntry,
-    SlashCommands as SlashCommandsEvent, latest_tool_location,
+    ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry,
+    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SelectMode,
+    SelectModel, SlashCommandEntry, latest_tool_location,
 };
 use crate::format::composer::{
     ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
     resume_menu_state, selector_mode, should_clear_draft_on_escape, should_fetch_resume,
 };
 use crate::tab::Accent;
+use crate::ui_state::{ChatUiStateEvent, ChatUiStatePatch};
 use dioxus::prelude::*;
 use vmux_api::prompt_media::{
     inline_media_query, merge_chat_attachments, replace_inline_media_query,
@@ -31,7 +31,7 @@ use vmux_ui::components::composer_bar::{
 use vmux_ui::components::mcp_menu::{McpConnections, McpQuery, use_mcp_connections};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{send, use_listener, use_selector, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_selector, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -90,8 +90,17 @@ pub fn use_chat() -> Chat {
 impl Chat {
     fn listen(&self) {
         let chat = *self;
-        let _snapshot = use_listener::<ChatSnapshot, _>(move |snapshot| {
-            chat.apply_snapshot(snapshot);
+        let root = use_ui_state_root::<ChatUiStateEvent>();
+        let mut handled_sequence = use_signal(|| 0);
+        use_effect(move || {
+            let event = root.state.read();
+            if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
+                return;
+            }
+            handled_sequence.set(event.sequence);
+            for patch in &event.patches {
+                chat.apply_ui_state(patch);
+            }
         });
         let _history = use_listener::<ChatHistoryPage, _>(move |page| {
             chat.apply_history_page(page);
@@ -121,44 +130,6 @@ impl Chat {
             loading.set(false);
             menu_sel.set(0);
         });
-        let _commands = use_listener::<SlashCommandsEvent, _>(move |incoming| {
-            let mut commands = chat.slash.commands;
-            commands.set(incoming.commands.clone());
-        });
-        let _models = use_listener::<ModelState, _>(move |state| {
-            let mut models = chat.models.models;
-            let mut current_model_id = chat.models.current_model_id;
-            let mut default_model_id = chat.models.default_model_id;
-            let mut current_model = chat.models.current_model;
-            let mut loaded = chat.models.loaded;
-            let mut levels = chat.effort.levels;
-            let mut current = chat.effort.current;
-            let mut default_level = chat.effort.default_level;
-            let mut agent_key = chat.effort.agent_key;
-            let mut menu_sel = chat.slash.menu_sel;
-            models.set(state.models.clone());
-            current_model_id.set(state.current_model_id.clone());
-            default_model_id.set(state.default_model_id.clone());
-            current_model.set(state.current_model_name.clone());
-            levels.set(state.effort_levels.clone());
-            current.set(state.effort_current.clone());
-            default_level.set(state.effort_default.clone());
-            agent_key.set(state.agent_key.clone());
-            menu_sel.set(0);
-            loaded.set(true);
-        });
-        let _modes = use_listener::<ModeState, _>(move |state| {
-            let mut modes = chat.permissions.modes;
-            let mut current_mode_id = chat.permissions.current_mode_id;
-            modes.set(state.modes.clone());
-            current_mode_id.set(state.current_mode_id.clone());
-        });
-        let _context = use_listener::<ComposerContext, _>(move |context| {
-            let mut composer_context = chat.slash.composer_context;
-            let mut loaded = chat.projects.loaded;
-            composer_context.set(context.clone());
-            loaded.set(true);
-        });
         let _branches = use_listener::<ChatProjectBranches, _>(move |incoming| {
             chat.projects
                 .remember(incoming.project.clone(), incoming.branches.clone());
@@ -171,6 +142,50 @@ impl Chat {
             menu_sel.set(0);
             loading.set(false);
         });
+    }
+
+    fn apply_ui_state(&self, patch: &ChatUiStatePatch) {
+        match patch {
+            ChatUiStatePatch::Snapshot(snapshot) => self.apply_snapshot(*snapshot.clone()),
+            ChatUiStatePatch::Composer(context) => {
+                let mut composer_context = self.slash.composer_context;
+                let mut loaded = self.projects.loaded;
+                composer_context.set(context.clone());
+                loaded.set(true);
+            }
+            ChatUiStatePatch::Mode(state) => {
+                let mut modes = self.permissions.modes;
+                let mut current_mode_id = self.permissions.current_mode_id;
+                modes.set(state.modes.clone());
+                current_mode_id.set(state.current_mode_id.clone());
+            }
+            ChatUiStatePatch::Model(state) => {
+                let mut models = self.models.models;
+                let mut current_model_id = self.models.current_model_id;
+                let mut default_model_id = self.models.default_model_id;
+                let mut current_model = self.models.current_model;
+                let mut loaded = self.models.loaded;
+                let mut levels = self.effort.levels;
+                let mut current = self.effort.current;
+                let mut default_level = self.effort.default_level;
+                let mut agent_key = self.effort.agent_key;
+                let mut menu_sel = self.slash.menu_sel;
+                models.set(state.models.clone());
+                current_model_id.set(state.current_model_id.clone());
+                default_model_id.set(state.default_model_id.clone());
+                current_model.set(state.current_model_name.clone());
+                levels.set(state.effort_levels.clone());
+                current.set(state.effort_current.clone());
+                default_level.set(state.effort_default.clone());
+                agent_key.set(state.agent_key.clone());
+                menu_sel.set(0);
+                loaded.set(true);
+            }
+            ChatUiStatePatch::SlashCommands(incoming) => {
+                let mut commands = self.slash.commands;
+                commands.set(incoming.commands.clone());
+            }
+        }
     }
 
     fn watch(&self) {
