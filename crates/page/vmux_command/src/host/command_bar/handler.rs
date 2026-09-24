@@ -1941,7 +1941,6 @@ mod tests {
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
-            .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
 

@@ -21,6 +21,24 @@ use vmux_command::panel::CommandBarPanel;
 
 use vmux_ui::hooks::{send, use_theme};
 
+#[vmux_native::page(
+    url = crate::event::LAYOUT_PAGE_URL,
+    title = "vmux",
+    component = Page,
+    placement = layout,
+    document_url = crate::event::LAYOUT_PAGE_URL,
+    transparent,
+    head = r#"<base href="/"/>
+<style>
+html, body { height: 100%; margin: 0; min-height: 0; }
+body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: transparent; }
+</style>
+<link rel="stylesheet" href="./assets/index.css"/>
+<link rel="stylesheet" href="./assets/theme.css"/>"#,
+    body_class = "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 text-foreground antialiased"
+)]
+pub struct LayoutPage;
+
 #[component]
 pub fn Page() -> Element {
     use_theme();

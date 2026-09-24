@@ -4,7 +4,6 @@ use vmux_core::PageIcon;
 
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
-pub const SERVICES_PAGE_URL: &str = "vmux://services/";
 #[vmux_api::contract(Default, Eq)]
 pub struct ReloadEvent;
 #[vmux_api::contract(Copy, Default)]

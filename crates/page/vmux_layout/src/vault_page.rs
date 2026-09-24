@@ -12,6 +12,15 @@ use vmux_ui::components::manager::{
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
+#[vmux_native::page(
+    url = "vmux://vault/",
+    title = "Vault",
+    component = Page,
+    subtree,
+    takes = vmux_core::PageMetadata
+)]
+pub struct VaultPage;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RemoteProvider {
     Github,
