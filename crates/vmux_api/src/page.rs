@@ -7,9 +7,9 @@ pub struct PageEmit {
 }
 
 impl PageEmit {
-    pub fn from_event<T>(payload: &T) -> Option<Self>
+    pub fn from_state<T>(state: &T) -> Option<Self>
     where
-        T: crate::HostEvent
+        T: crate::UiState
             + for<'a> rkyv::Serialize<
                 rkyv::api::high::HighSerializer<
                     rkyv::util::AlignedVec,
@@ -18,7 +18,7 @@ impl PageEmit {
                 >,
             >,
     {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload).ok()?;
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(state).ok()?;
         Some(Self {
             id: T::id().to_string(),
             bytes: bytes.to_vec(),

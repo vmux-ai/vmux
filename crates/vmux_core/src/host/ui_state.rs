@@ -5,7 +5,7 @@ use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
 use rkyv::api::high::HighSerializer;
 use rkyv::ser::allocator::ArenaHandle;
 use rkyv::util::AlignedVec;
-use vmux_api::{BatchedUiState, HostEvent, UiState as UiStateContract};
+use vmux_api::{BatchedUiState, UiState as UiStateContract};
 
 pub struct UiStatePlugin<S>(PhantomData<fn() -> S>);
 
@@ -18,7 +18,6 @@ impl<S> Default for UiStatePlugin<S> {
 impl<S> Plugin for UiStatePlugin<S>
 where
     S: UiStateContract
-        + HostEvent
         + for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>>,
 {
     fn build(&self, app: &mut App) {
@@ -123,8 +122,7 @@ impl<S: UiStateContract> UiState<S> {
         browsers: Option<NonSend<Browsers>>,
         mut commands: Commands,
     ) where
-        S: HostEvent
-            + for<'a> rkyv::Serialize<
+        S: for<'a> rkyv::Serialize<
                 HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>,
             >,
     {

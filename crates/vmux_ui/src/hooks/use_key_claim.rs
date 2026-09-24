@@ -1,4 +1,3 @@
-use crate::hooks::use_listener::use_listener;
 use crate::hooks::use_ui_state::use_ui_state;
 use crate::key_stroke::PressedKey;
 use crate::transport::event_listener::send;
@@ -24,22 +23,6 @@ pub fn use_key_claim(
         unclaimed,
         resolves,
     }
-}
-
-pub fn use_key_handler<T, F>(
-    unclaimed: Unclaimed,
-    context: impl Fn() -> Vec<String> + 'static,
-    on_key: F,
-) -> KeyClaim
-where
-    T: vmux_api::HostEvent + rkyv::Archive + 'static,
-    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-    F: FnMut(T) + 'static,
-{
-    let claim = use_key_claim(unclaimed, context);
-    let _handler = use_listener::<T, _>(on_key);
-    claim
 }
 
 #[derive(Clone, Copy)]

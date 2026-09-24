@@ -42,7 +42,7 @@ impl Team {
     }
 
     fn emit(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::from_event(&team.0) else {
+        let Some(emit) = PageEmit::from_state(&team.0) else {
             return;
         };
         emits.write(emit);

@@ -55,7 +55,7 @@ impl Launcher {
             sequence: launcher.sequence,
             patches: vec![launcher.snapshot.clone().into()],
         };
-        let Some(emit) = PageEmit::from_event(&state) else {
+        let Some(emit) = PageEmit::from_state(&state) else {
             return;
         };
         emits.write(emit);
