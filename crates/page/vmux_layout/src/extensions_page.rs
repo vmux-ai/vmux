@@ -1,7 +1,5 @@
 #![allow(non_snake_case)]
 
-use std::collections::HashMap;
-
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::components::alert_dialog::{
@@ -12,7 +10,7 @@ use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSkeleton, ManagerThumbnail, ManagerTone,
 };
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, PartialEq)]
@@ -47,23 +45,8 @@ pub fn Page() -> Element {
 #[component]
 pub(crate) fn ExtensionsManager(active_route: Signal<crate::tool_page::ToolsRoute>) -> Element {
     let locale = use_theme();
-    let mut state = use_signal(ExtensionsEvent::default);
-    let mut progress = use_signal(HashMap::<String, ExtInstallProgress>::new);
-    let mut loaded = use_signal(|| false);
+    let state = use_ui_state::<ExtensionsEvent>();
     let mut search = use_signal(String::new);
-
-    let _list = use_listener::<ExtensionsEvent, _>(move |event| {
-        state.set(event);
-        loaded.set(true);
-    });
-    let _progress = use_listener::<ExtInstallProgress, _>(move |item| {
-        if matches!(item.phase, ExtInstallPhase::Done | ExtInstallPhase::Failed) {
-            progress.write().remove(&item.key);
-        } else {
-            progress.write().insert(item.key.clone(), item);
-        }
-    });
-    let _status = use_listener::<ExtStatusEvent, _>(move |_| {});
 
     use_effect(move || {
         locale();
@@ -83,7 +66,7 @@ pub(crate) fn ExtensionsManager(active_route: Signal<crate::tool_page::ToolsRout
         })
         .cloned()
         .collect();
-    let installing: Vec<ExtInstallProgress> = progress().values().cloned().collect();
+    let installing = &snapshot.installing;
 
     rsx! {
         ManagerPage {
@@ -129,7 +112,7 @@ pub(crate) fn ExtensionsManager(active_route: Signal<crate::tool_page::ToolsRout
                 }
             }
             ManagerList {
-                if !loaded() {
+                if !snapshot.loaded {
                     ManagerSkeleton {}
                 } else if visible.is_empty() {
                     ManagerEmpty {
