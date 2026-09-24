@@ -283,7 +283,7 @@ impl WikiCompletion {
             .collect();
         commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
-            &FileCompletionEvent {
+            &FileCompletions {
                 items,
                 replace_from_col: self.replace_from_col,
                 line: self.line,
@@ -364,7 +364,7 @@ fn on_editor_rename(
     }
     commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
         entity,
-        &FileRenameBeginEvent {
+        &FileRenamePrompt {
             line: position.line,
             col: position.char_col as u32,
             current,

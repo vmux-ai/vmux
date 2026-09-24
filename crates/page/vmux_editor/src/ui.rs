@@ -101,7 +101,7 @@ pub fn Page() -> Element {
     let mut wrap_columns = use_signal(|| 0u16);
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
-    let mut lsp_status = use_signal(|| Option::<FileLspStatusEvent>::None);
+    let mut lsp_status = use_signal(|| Option::<FileLspStatus>::None);
     let mut lsp_actions = use_signal(Vec::<EditorAction>::new);
     let mut lsp_install_notice = use_signal(|| Option::<LspInstallProgress>::None);
     let mut lsp_install_request = use_signal(|| Option::<(String, String)>::None);
@@ -187,7 +187,7 @@ pub fn Page() -> Element {
     let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let ime = use_ime_guard();
     let typed = use_signal(String::new);
-    let mut lsp_hover = use_signal(|| Option::<FileHoverEvent>::None);
+    let mut lsp_hover = use_signal(|| Option::<FileHover>::None);
     let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
     let ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
     let mut refs = use_signal(Vec::<RefItem>::new);
@@ -509,14 +509,14 @@ pub fn Page() -> Element {
         })
     });
 
-    let hover_event = use_file_ui::<FileHoverEvent>();
+    let hover_event = use_file_ui::<FileHover>();
     use_effect(move || {
         hover_event.for_each(|h| {
             lsp_hover.set(Some(h));
         })
     });
 
-    let references_event = use_file_ui::<FileReferencesEvent>();
+    let references_event = use_file_ui::<FileReferences>();
     use_effect(move || {
         references_event.for_each(|e| {
             refs.set(e.items);
@@ -526,7 +526,7 @@ pub fn Page() -> Element {
         })
     });
 
-    let completion_event = use_file_ui::<FileCompletionEvent>();
+    let completion_event = use_file_ui::<FileCompletions>();
     use_effect(move || {
         completion_event.for_each(|e| {
             comp_open.set(!e.items.is_empty());
@@ -536,7 +536,7 @@ pub fn Page() -> Element {
         })
     });
 
-    let diagnostics_event = use_file_ui::<FileDiagnosticsEvent>();
+    let diagnostics_event = use_file_ui::<FileDiagnostics>();
     use_effect(move || {
         diagnostics_event.for_each(|d| {
             if d.path != git_path() {
@@ -546,7 +546,7 @@ pub fn Page() -> Element {
         })
     });
 
-    let lsp_status_event = use_file_ui::<FileLspStatusEvent>();
+    let lsp_status_event = use_file_ui::<FileLspStatus>();
     use_effect(move || {
         lsp_status_event.for_each(|s| {
             if s.path != git_path() {
@@ -597,7 +597,7 @@ pub fn Page() -> Element {
         })
     });
 
-    let package_status = use_file_ui::<LspPkgStatusEvent>();
+    let package_status = use_file_ui::<LspPackageStatus>();
     use_effect(move || {
         package_status.for_each(|status| {
             if status.status != LspPkgStatus::Installed
@@ -628,7 +628,7 @@ pub fn Page() -> Element {
         })
     });
 
-    let code_actions_event = use_file_ui::<FileCodeActionsEvent>();
+    let code_actions_event = use_file_ui::<FileCodeActions>();
     use_effect(move || {
         code_actions_event.for_each(|e| {
             code_action_sel.set(0);
@@ -636,7 +636,7 @@ pub fn Page() -> Element {
         })
     });
 
-    let rename_event = use_file_ui::<FileRenameBeginEvent>();
+    let rename_event = use_file_ui::<FileRenamePrompt>();
     use_effect(move || {
         rename_event.for_each(|e| {
             rename_failed.set(String::new());
@@ -644,7 +644,7 @@ pub fn Page() -> Element {
         })
     });
 
-    let edit_failed = use_file_ui::<FileEditFailedEvent>();
+    let edit_failed = use_file_ui::<FileEditFailure>();
     use_effect(move || {
         edit_failed.for_each(|e| {
             rename_failed.set(e.reason);

@@ -1000,9 +1000,7 @@ fn drain_lsp_requests(
     mut edit_w: MessageWriter<LspRequestedEdit>,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{
-        FileCompletionEvent, FileHoverEvent, FileReferencesEvent, OutlineEvent, RefItem,
-    };
+    use vmux_core::event::{FileCompletions, FileHover, FileReferences, OutlineEvent, RefItem};
     let drained = std::mem::take(&mut manager.inflight);
     let mut still = Vec::new();
     for f in drained {
@@ -1021,7 +1019,7 @@ fn drain_lsp_requests(
                 if !blocks.is_empty() && ready {
                     commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                         f.entity,
-                        &FileHoverEvent { line, col, blocks },
+                        &FileHover { line, col, blocks },
                     ));
                 }
             }
@@ -1065,7 +1063,7 @@ fn drain_lsp_requests(
                 if titles.is_empty() {
                     commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                         f.entity,
-                        &vmux_core::event::FileEditFailedEvent {
+                        &vmux_core::event::FileEditFailure {
                             reason: "no code actions here".to_string(),
                         },
                     ));
@@ -1073,7 +1071,7 @@ fn drain_lsp_requests(
                 }
                 commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                     f.entity,
-                    &vmux_core::event::FileCodeActionsEvent { titles },
+                    &vmux_core::event::FileCodeActions { titles },
                 ));
             }
             ReqKind::Formatting { path, root } => {
@@ -1107,7 +1105,7 @@ fn drain_lsp_requests(
                 if !items.is_empty() && ready {
                     commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                         f.entity,
-                        &FileReferencesEvent { items },
+                        &FileReferences { items },
                     ));
                 }
             }
@@ -1119,7 +1117,7 @@ fn drain_lsp_requests(
                 if ready {
                     commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
                         f.entity,
-                        &FileCompletionEvent {
+                        &FileCompletions {
                             items,
                             replace_from_col,
                             line,
@@ -1229,7 +1227,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
 }
 
 use bevy_cef::prelude::Browsers;
-use vmux_core::event::FileDiagnosticsEvent;
+use vmux_core::event::FileDiagnostics;
 
 use crate::lsp::LintOutbox;
 
@@ -1272,7 +1270,7 @@ fn emit_diagnostics_system(
         }
         commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
-            &FileDiagnosticsEvent {
+            &FileDiagnostics {
                 path: fv.path.to_string_lossy().into_owned(),
                 diagnostics: merged.clone(),
             },
@@ -1388,7 +1386,7 @@ fn lsp_status_system(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{FileLspStatusEvent, LspServerState};
+    use vmux_core::event::{FileLspStatus, LspServerState};
     let overrides = server_overrides(&settings);
     for (entity, fv, sent) in &q {
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
@@ -1410,7 +1408,7 @@ fn lsp_status_system(
         }
         commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
-            &FileLspStatusEvent {
+            &FileLspStatus {
                 path: fv.path.to_string_lossy().into_owned(),
                 server: spec.command.clone(),
                 package: (!overrides.contains_key(ext))

@@ -4,13 +4,13 @@ use super::{
 };
 
 #[vmux_api::contract(Eq)]
-pub struct FileDiagnosticsEvent {
+pub struct FileDiagnostics {
     pub path: String,
     pub diagnostics: Vec<FileDiagnostic>,
 }
 
 #[vmux_api::contract(Eq)]
-pub struct FileLspStatusEvent {
+pub struct FileLspStatus {
     pub path: String,
     pub server: String,
     pub package: Option<String>,
@@ -19,7 +19,7 @@ pub struct FileLspStatusEvent {
 }
 
 #[vmux_api::contract(Eq)]
-pub struct LspCatalogEvent {
+pub struct LspCatalog {
     pub packages: Vec<LspPackage>,
 }
 
@@ -32,20 +32,20 @@ pub struct LspInstallProgress {
 }
 
 #[vmux_api::contract(Eq)]
-pub struct LspPkgStatusEvent {
+pub struct LspPackageStatus {
     pub name: String,
     pub status: LspPkgStatus,
     pub version: Option<String>,
 }
 
 #[vmux_api::ui_state(Eq, target = "lsp")]
-pub struct LspManagerStateEvent {
+pub struct LspManagerUiState {
     pub packages: Vec<LspPackage>,
     pub progress: Vec<LspInstallProgress>,
     pub loading: bool,
 }
 
-impl Default for LspManagerStateEvent {
+impl Default for LspManagerUiState {
     fn default() -> Self {
         Self {
             packages: Vec::new(),
@@ -56,36 +56,36 @@ impl Default for LspManagerStateEvent {
 }
 
 #[vmux_api::contract]
-pub struct FileHoverEvent {
+pub struct FileHover {
     pub line: u32,
     pub col: u32,
     pub blocks: Vec<HoverBlock>,
 }
 
 #[vmux_api::contract(Eq)]
-pub struct FileCodeActionsEvent {
+pub struct FileCodeActions {
     pub titles: Vec<String>,
 }
 
 #[vmux_api::contract(Eq)]
-pub struct FileEditFailedEvent {
+pub struct FileEditFailure {
     pub reason: String,
 }
 
 #[vmux_api::contract(Eq)]
-pub struct FileRenameBeginEvent {
+pub struct FileRenamePrompt {
     pub line: u32,
     pub col: u32,
     pub current: String,
 }
 
 #[vmux_api::contract(Eq)]
-pub struct FileReferencesEvent {
+pub struct FileReferences {
     pub items: Vec<RefItem>,
 }
 
 #[vmux_api::contract(Eq)]
-pub struct FileCompletionEvent {
+pub struct FileCompletions {
     pub items: Vec<CompletionItem>,
     pub replace_from_col: u32,
     pub line: u32,
