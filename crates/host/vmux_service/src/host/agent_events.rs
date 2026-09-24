@@ -15,6 +15,16 @@ pub enum CommandOrigin {
     },
 }
 
+impl CommandOrigin {
+    pub fn is_agent(&self) -> bool {
+        matches!(self, Self::Agent { .. })
+    }
+
+    pub fn allows_focus(&self, requested: bool) -> bool {
+        requested && !self.is_agent()
+    }
+}
+
 #[derive(Message)]
 pub struct AgentCommandRequest {
     pub request_id: AgentRequestId,

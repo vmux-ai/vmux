@@ -15,7 +15,6 @@ use vmux_terminal::{
 use crate::events::AgentCommandRequest;
 use crate::session::AgentSession;
 
-use super::command::requested_focus_for_origin;
 use super::follow::file_touch_url;
 use super::run_terminal::{
     AgentCwd, AgentPane, AgentTerminalRegions, PagerEnv, PendingRunTerminalSpawn,
@@ -263,7 +262,7 @@ fn handle_agent_self_commands(
             } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("self process not found".to_string()),
                 Some((_, pane)) => {
-                    let focus = requested_focus_for_origin(&request.origin, *focus);
+                    let focus = request.origin.allows_focus(*focus);
                     writers.open_beside.write(vmux_layout::OpenBesideRequest {
                         pane,
                         direction: direction.as_ref().map(AgentPane::direction),
@@ -304,7 +303,7 @@ fn handle_agent_self_commands(
                 {
                     break 'run AgentCommandResult::Error(error.to_string());
                 }
-                let focus = requested_focus_for_origin(&request.origin, *focus);
+                let focus = request.origin.allows_focus(*focus);
                 let run = RunCommand::new(command, done_marker.as_deref());
                 match terminal {
                     Some(pid) => match RunTerminal::new(*pid).launch(&term_pids, &launch_q) {
