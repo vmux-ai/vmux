@@ -79,87 +79,116 @@ fn apply_planned_documents(
     manager: &crate::lsp::manager::LspManager,
     commands: &mut Commands,
 ) -> Option<String> {
-    for document in plan.documents {
-        let wanted = canon(document.path.as_path());
+    let prepared = match PreparedWorkspaceEdit::new(plan, views, manager) {
+        Ok(prepared) => prepared,
+        Err(reason) => return Some(reason),
+    };
+    prepared.apply(self_writes, commands).err()
+}
+
+struct PreparedWorkspaceEdit {
+    documents: Vec<PreparedDocument>,
+}
+
+impl PreparedWorkspaceEdit {
+    fn new(
+        plan: WorkspaceEditPlan,
+        views: &Query<(Entity, &FileView, &Editor)>,
+        manager: &crate::lsp::manager::LspManager,
+    ) -> Result<Self, String> {
+        let mut documents = Vec::with_capacity(plan.documents.len());
+        for document in plan.documents {
+            documents.push(PreparedDocument::new(document, views, manager)?);
+        }
+        Ok(Self { documents })
+    }
+
+    fn apply(self, self_writes: &mut SelfWrites, commands: &mut Commands) -> Result<(), String> {
+        for document in self.documents {
+            document.apply(self_writes, commands)?;
+        }
+        Ok(())
+    }
+}
+
+struct PreparedDocument {
+    path: vmux_path::ScopedPath,
+    targets: Vec<Entity>,
+    updated: String,
+}
+
+impl PreparedDocument {
+    fn new(
+        document: crate::lsp::workspace_edit::PlannedDocument,
+        views: &Query<(Entity, &FileView, &Editor)>,
+        manager: &crate::lsp::manager::LspManager,
+    ) -> Result<Self, String> {
         if let (Some(expected), Some(actual)) = (
             document.version,
             manager.document_version(document.path.as_path()),
         ) && expected != actual
         {
-            return Some(format!(
+            return Err(format!(
                 "{} changed since the edit was computed",
                 document.path.as_path().display()
             ));
         }
 
-        let open: Vec<Entity> = views
+        let wanted = canon(document.path.as_path());
+        let targets: Vec<Entity> = views
             .iter()
             .filter(|(_, view, ..)| canon(&view.path) == wanted)
             .map(|(entity, ..)| entity)
             .collect();
-
-        if open.is_empty() {
-            if let Err(reason) = edit_closed_file(&document, self_writes) {
-                return Some(reason);
+        let source = if targets.is_empty() {
+            std::fs::read_to_string(document.path.as_path())
+                .map_err(|_| format!("{} could not be read", document.path.as_path().display()))?
+        } else {
+            let mut texts = targets
+                .iter()
+                .filter_map(|entity| views.get(*entity).ok())
+                .map(|(_, _, editor)| editor.core.buffer.text());
+            let first = texts.next().unwrap_or_default();
+            if texts.any(|text| text != first) {
+                return Err(format!(
+                    "{} is open more than once with different contents",
+                    document.path.as_path().display()
+                ));
             }
-            continue;
-        }
+            first
+        };
+        let buffer = crate::edit::buffer::TextBuffer::from_text(
+            document.path.as_path().to_path_buf(),
+            String::new(),
+            &source,
+        );
+        let updated = buffer
+            .with_lsp_edits(&document.edits)
+            .map_err(|error| format!("{}: {error}", document.path.as_path().display()))?;
+        Ok(Self {
+            path: document.path,
+            targets,
+            updated,
+        })
+    }
 
-        let mut texts = open
-            .iter()
-            .filter_map(|entity| views.get(*entity).ok())
-            .map(|(_, _, edit, ..)| edit.core.buffer.text());
-        let first = texts.next().unwrap_or_default();
-        if texts.any(|text| text != first) {
-            return Some(format!(
-                "{} is open more than once with different contents",
-                document.path.as_path().display()
-            ));
+    fn apply(self, self_writes: &mut SelfWrites, commands: &mut Commands) -> Result<(), String> {
+        if self.targets.is_empty() {
+            vmux_path::AtomicFile::write(self.path.as_path(), self.updated.as_bytes())
+                .map_err(|error| format!("{}: {error}", self.path.as_path().display()))?;
+            self_writes
+                .0
+                .insert(canon(self.path.as_path()), std::time::Instant::now());
+            return Ok(());
         }
-
-        for entity in open {
-            let Ok((_, _, edit)) = views.get(entity) else {
-                continue;
-            };
-            let updated = match edit.core.buffer.with_lsp_edits(&document.edits) {
-                Ok(updated) => updated,
-                Err(error) => {
-                    return Some(format!("{}: {error}", document.path.as_path().display()));
-                }
-            };
+        for entity in self.targets {
             commands.trigger(EditRequest::new(
                 entity,
-                vec![EditCommand::ReplaceText(updated)],
+                vec![EditCommand::ReplaceText(self.updated.clone())],
             ));
         }
+        Ok(())
     }
-    None
-}
-
-fn edit_closed_file(
-    document: &crate::lsp::workspace_edit::PlannedDocument,
-    self_writes: &mut SelfWrites,
-) -> Result<(), String> {
-    let Ok(text) = std::fs::read_to_string(document.path.as_path()) else {
-        return Err(format!(
-            "{} could not be read",
-            document.path.as_path().display()
-        ));
-    };
-    let buffer = crate::edit::buffer::TextBuffer::from_text(
-        document.path.as_path().to_path_buf(),
-        String::new(),
-        &text,
-    );
-    let updated = match buffer.with_lsp_edits(&document.edits) {
-        Ok(updated) => updated,
-        Err(error) => return Err(format!("{}: {error}", document.path.as_path().display())),
-    };
-    self_writes
-        .0
-        .insert(canon(document.path.as_path()), std::time::Instant::now());
-    vmux_path::AtomicFile::write(document.path.as_path(), updated.as_bytes())
-        .map_err(|error| format!("{}: {error}", document.path.as_path().display()))
 }
 
 #[cfg(test)]
@@ -196,6 +225,10 @@ mod tests {
         }
 
         fn with_edit(path: &Path, panes: usize) -> Self {
+            Self::with_workspace_edit(path, panes, Self::renaming(path))
+        }
+
+        fn with_workspace_edit(path: &Path, panes: usize, edit: lsp_types::WorkspaceEdit) -> Self {
             let (app, views) = Self::bare(path, panes);
             let (outgoing, sent) = std::sync::mpsc::channel();
             let events = app
@@ -209,10 +242,7 @@ mod tests {
                         outgoing,
                     ),
                     root: path.parent().unwrap_or(path).to_path_buf(),
-                    params: lsp_types::ApplyWorkspaceEditParams {
-                        label: None,
-                        edit: Self::renaming(path),
-                    },
+                    params: lsp_types::ApplyWorkspaceEditParams { label: None, edit },
                 })
                 .unwrap();
             Self { app, views, sent }
@@ -428,5 +458,85 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "1 two 3\n");
         assert_eq!(edit.sent.try_recv().unwrap()["result"]["applied"], true);
+    }
+
+    #[test]
+    #[allow(clippy::mutable_key_type)]
+    fn a_later_invalid_document_leaves_earlier_documents_untouched() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = temp.path().join("a.rs");
+        let invalid = temp.path().join("z.rs");
+        std::fs::write(&first, ApplyEdit::BEFORE).unwrap();
+        std::fs::write(&invalid, ApplyEdit::BEFORE).unwrap();
+
+        let uri = |path: &Path| -> lsp_types::Uri {
+            format!("file://{}", path.display()).parse().unwrap()
+        };
+        let mut changes = std::collections::HashMap::new();
+        changes.insert(
+            uri(&first),
+            vec![lsp_types::TextEdit {
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: lsp_types::Position {
+                        line: 0,
+                        character: 3,
+                    },
+                },
+                new_text: "1".to_string(),
+            }],
+        );
+        changes.insert(
+            uri(&invalid),
+            vec![
+                lsp_types::TextEdit {
+                    range: lsp_types::Range {
+                        start: lsp_types::Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: lsp_types::Position {
+                            line: 0,
+                            character: 4,
+                        },
+                    },
+                    new_text: "invalid".to_string(),
+                },
+                lsp_types::TextEdit {
+                    range: lsp_types::Range {
+                        start: lsp_types::Position {
+                            line: 0,
+                            character: 2,
+                        },
+                        end: lsp_types::Position {
+                            line: 0,
+                            character: 6,
+                        },
+                    },
+                    new_text: "overlap".to_string(),
+                },
+            ],
+        );
+        let mut edit = ApplyEdit::with_workspace_edit(
+            &first,
+            0,
+            lsp_types::WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            },
+        );
+
+        edit.app.update();
+
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), ApplyEdit::BEFORE);
+        assert_eq!(
+            std::fs::read_to_string(&invalid).unwrap(),
+            ApplyEdit::BEFORE
+        );
+        let reply = edit.sent.try_recv().unwrap();
+        assert_eq!(reply["result"]["applied"], false);
     }
 }
