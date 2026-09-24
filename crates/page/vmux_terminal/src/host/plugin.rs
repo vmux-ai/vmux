@@ -34,7 +34,7 @@ use super::input_queue::{NextTerminalInputSequence, TerminalInput};
 use super::loading::AgentLoading;
 use super::mouse::MouseSelectionState;
 use super::prompt::PromptCapture;
-use super::view::{OwedSnapshot, TerminalGridSize};
+use super::screen::{PendingScreenSnapshot, ScreenPlugin, TerminalGridSize};
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::process_index::TerminalProcessIndex;
@@ -116,7 +116,7 @@ impl Plugin for TerminalInputPlugin {
             .init_resource::<LocalCopyModeState>()
             .init_resource::<TerminalWebShortcutState>()
             .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
-            .add_plugins((super::mouse::MousePlugin, super::view::ViewPlugin))
+            .add_plugins((super::mouse::MousePlugin, ScreenPlugin))
             .add_observer(on_term_key);
     }
 }
@@ -1190,7 +1190,7 @@ fn poll_service_messages(
                     }
                 }
                 if !browsers.can_emit_to(&entity) {
-                    commands.entity(entity).insert(OwedSnapshot);
+                    commands.entity(entity).insert(PendingScreenSnapshot);
                     continue;
                 }
                 let mut changed_lines = changed_lines;
