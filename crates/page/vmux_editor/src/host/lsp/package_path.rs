@@ -1,17 +1,62 @@
 use std::path::{Component, Path, PathBuf};
 
+struct PortableComponent;
+
+impl PortableComponent {
+    fn accepts(value: &str) -> bool {
+        if value.is_empty()
+            || value == "."
+            || value == ".."
+            || value.ends_with(['.', ' '])
+            || value.chars().any(|character| {
+                character.is_control()
+                    || matches!(
+                        character,
+                        '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+                    )
+            })
+        {
+            return false;
+        }
+        let stem = value
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        !matches!(
+            stem.as_str(),
+            "CON"
+                | "PRN"
+                | "AUX"
+                | "NUL"
+                | "COM1"
+                | "COM2"
+                | "COM3"
+                | "COM4"
+                | "COM5"
+                | "COM6"
+                | "COM7"
+                | "COM8"
+                | "COM9"
+                | "LPT1"
+                | "LPT2"
+                | "LPT3"
+                | "LPT4"
+                | "LPT5"
+                | "LPT6"
+                | "LPT7"
+                | "LPT8"
+                | "LPT9"
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackageName(String);
 
 impl PackageName {
     pub fn parse(value: &str) -> Result<Self, String> {
-        if value.is_empty()
-            || value == "."
-            || value == ".."
-            || value.contains('/')
-            || value.contains('\\')
-            || value.contains('\0')
-        {
+        if !PortableComponent::accepts(value) {
             return Err(format!("invalid package name: {value}"));
         }
         Ok(Self(value.to_string()))
@@ -28,6 +73,25 @@ impl std::fmt::Display for PackageName {
     }
 }
 
+impl serde::Serialize for PackageName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PackageName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackagePath(PathBuf);
 
@@ -39,7 +103,13 @@ impl PackagePath {
         }
         let mut count = 0usize;
         for component in path.components() {
-            if !matches!(component, Component::Normal(_)) {
+            let Component::Normal(component) = component else {
+                return Err(format!("invalid package path: {value}"));
+            };
+            let Some(component) = component.to_str() else {
+                return Err(format!("invalid package path: {value}"));
+            };
+            if !PortableComponent::accepts(component) {
                 return Err(format!("invalid package path: {value}"));
             }
             count += 1;
@@ -62,6 +132,25 @@ impl PackagePath {
 impl std::fmt::Display for PackagePath {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.display().fmt(formatter)
+    }
+}
+
+impl serde::Serialize for PackagePath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PackagePath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -94,7 +183,19 @@ mod tests {
 
     #[test]
     fn names_reject_path_syntax() {
-        for value in ["", ".", "..", "a/b", "a\\b"] {
+        for value in [
+            "",
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "a:b",
+            "name.",
+            "name ",
+            "CON",
+            "com1.exe",
+            "line\nbreak",
+        ] {
             assert!(PackageName::parse(value).is_err(), "{value}");
         }
         assert_eq!(
@@ -111,6 +212,8 @@ mod tests {
             "../server",
             "bin/../server",
             "bin\\server",
+            "bin/server.",
+            "bin/NUL",
         ] {
             assert!(PackagePath::parse(value).is_err(), "{value}");
         }
@@ -129,6 +232,16 @@ mod tests {
             PackagePath::from(&name).as_path(),
             Path::new("rust-analyzer")
         );
+    }
+
+    #[test]
+    fn serde_revalidates_names_and_paths() {
+        assert!(serde_json::from_str::<PackageName>(r#""../escape""#).is_err());
+        assert!(serde_json::from_str::<PackagePath>(r#""bin/../../escape""#).is_err());
+        let name = serde_json::from_str::<PackageName>(r#""rust-analyzer""#).unwrap();
+        let path = serde_json::from_str::<PackagePath>(r#""node_modules/.bin/server""#).unwrap();
+        assert_eq!(name.as_str(), "rust-analyzer");
+        assert_eq!(path.as_str(), "node_modules/.bin/server");
     }
 
     #[test]

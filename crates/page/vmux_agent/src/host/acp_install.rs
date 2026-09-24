@@ -919,7 +919,7 @@ fn write_agent_receipt(
         root,
         &name,
         &store::Receipt {
-            name: agent.id.clone(),
+            name: name.clone(),
             version: version
                 .map(str::to_string)
                 .or_else(|| agent.version.clone()),
@@ -1075,7 +1075,7 @@ fn ensure_node(
     store::write_receipt_in(
         &staged_package,
         &store::Receipt {
-            name: name.as_str().to_string(),
+            name: name.clone(),
             version: Some(NODE_VERSION.to_string()),
             source_id: url,
             bin: Default::default(),
@@ -1194,7 +1194,7 @@ fn ensure_uv(
     store::write_receipt_in(
         &staged_package,
         &store::Receipt {
-            name: name.as_str().to_string(),
+            name: name.clone(),
             version: Some(UV_VERSION.to_string()),
             source_id: url,
             bin: Default::default(),
@@ -1470,7 +1470,7 @@ fn install_binary(
     store::write_receipt_in(
         &staged_package,
         &store::Receipt {
-            name: agent.id.clone(),
+            name: name.clone(),
             version: agent.version.clone(),
             source_id: format!("acp:{}", agent.id),
             bin: Default::default(),
