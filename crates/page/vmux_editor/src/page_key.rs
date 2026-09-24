@@ -6,17 +6,15 @@ use vmux_core::event::{
 };
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_handler};
+use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_claim};
 use vmux_ui::platform::sleep_ms;
 
 pub(crate) fn use_file_keys(page: FilePage) -> FileKeys {
     let actions = FileKeyActions(page);
+    let events = crate::state::use_file_ui::<FileKey>();
+    use_effect(move || events.for_each(|key| actions.apply(key)));
     let keys = FileKeys {
-        claim: use_key_handler::<FileKey, _>(
-            Unclaimed::Types,
-            move || page.key_context(),
-            move |key| actions.apply(key),
-        ),
+        claim: use_key_claim(Unclaimed::Types, move || page.key_context()),
     };
     use_drop(move || {
         let _ = send(&PageKeyContext { keys: Vec::new() });

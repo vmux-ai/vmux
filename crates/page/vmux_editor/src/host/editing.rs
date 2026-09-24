@@ -283,17 +283,19 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::ClearSearchHighlight => {
-                commands.trigger(BinHostEmitEvent::from_event(
+                vmux_core::host::FileUiStateUpdates::write(
+                    &mut commands,
                     entity,
                     &vmux_core::event::FileKey::FindClose,
-                ));
+                );
                 cursor_stale = true;
             }
             EditCommand::OpenFind { forward } => {
-                commands.trigger(BinHostEmitEvent::from_event(
+                vmux_core::host::FileUiStateUpdates::write(
+                    &mut commands,
                     entity,
                     &vmux_core::event::FileKey::Find { forward: *forward },
-                ));
+                );
                 continue;
             }
             EditCommand::OpenCommandLine => {

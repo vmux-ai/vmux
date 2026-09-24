@@ -492,7 +492,7 @@ impl From<CommandBarPicker> for FileStatusPickerOpen {
     }
 }
 
-#[vmux_api::host_event(Copy, Eq, target = "files")]
+#[vmux_api::contract(Copy, Eq)]
 pub enum FileKey {
     ToggleExplorer,
     RevealInExplorer,
