@@ -1,13 +1,171 @@
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use bevy_ecs::prelude::Component as EcsComponent;
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::prelude::{Added, Commands, Component as EcsComponent, Entity, Query, With, Without};
+use bevy_ecs::schedule::IntoScheduleConfigs;
 use serde::{Deserialize, Serialize};
+use vmux_core::tool::{ToolAction, ToolProvider};
 
-use crate::ToolOperation;
 use crate::manifest::{
     ToolStore, ToolsManifest, expand_user_path, load_manifest_from, write_manifest_to,
 };
+use crate::{
+    ToolActionCompletion, ToolActionRequest, ToolActionRouteSet, ToolOperation,
+    ToolOperationPlugin, ToolStoreAction, ToolStoreTarget,
+};
+
+pub(crate) struct DotfileToolPlugin;
+
+impl Plugin for DotfileToolPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            ToolOperationPlugin::<DiscoverDotfilePackages>::default(),
+            ToolOperationPlugin::<PlanDotfilePackage>::default(),
+            ToolOperationPlugin::<ImportDotfiles>::default(),
+            ToolOperationPlugin::<ImportAvailableDotfiles>::default(),
+            ToolOperationPlugin::<LinkDotfilePackage>::default(),
+        ))
+        .add_plugins((
+            ToolOperationPlugin::<DisableDotfilePackage>::default(),
+            ToolOperationPlugin::<UnlinkDotfilePackage>::default(),
+            ToolOperationPlugin::<ApplyEnabledDotfiles>::default(),
+            ToolOperationPlugin::<AdoptDotfile>::default(),
+        ))
+        .add_systems(Update, route.in_set(ToolActionRouteSet))
+        .add_systems(
+            Update,
+            (
+                complete_import,
+                complete_available_import,
+                complete_link,
+                complete_disable,
+                complete_adoption,
+            ),
+        );
+    }
+}
+
+fn route(
+    requests: Query<
+        (Entity, &ToolActionRequest),
+        (Added<ToolActionRequest>, With<ToolStoreTarget>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, action) in &requests {
+        let request = action.request();
+        if request.provider != ToolProvider::Dotfiles {
+            continue;
+        }
+        let id = request.id.trim();
+        let value = request.value.trim();
+        let mut entity = commands.entity(entity);
+        match request.action {
+            ToolAction::Import if value.is_empty() => {
+                entity.insert((ToolStoreAction, ImportAvailableDotfiles));
+            }
+            ToolAction::Import => {
+                entity.insert((ToolStoreAction, ImportDotfiles::new(value)));
+            }
+            ToolAction::Adopt if !id.is_empty() && !value.is_empty() => {
+                entity.insert((ToolStoreAction, AdoptDotfile::new(value, id)));
+            }
+            ToolAction::Install | ToolAction::Update | ToolAction::Link if !id.is_empty() => {
+                entity.insert((ToolStoreAction, LinkDotfilePackage::new(id)));
+            }
+            ToolAction::Uninstall | ToolAction::Unlink if !id.is_empty() => {
+                entity.insert((ToolStoreAction, DisableDotfilePackage::new(id)));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn complete_import(
+    actions: Query<
+        (Entity, &ImportedDotfiles),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::succeeded(format!(
+                "imported {} dotfile package(s)",
+                output.packages
+            )));
+    }
+}
+
+fn complete_available_import(
+    actions: Query<
+        (Entity, &ImportedAvailableDotfiles),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::succeeded(format!(
+                "imported {} dotfile package(s)",
+                output.packages
+            )));
+    }
+}
+
+fn complete_link(
+    actions: Query<
+        (Entity, &LinkedDotfilePackage),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::succeeded(format!(
+                "linked {} file(s)",
+                output.files
+            )));
+    }
+}
+
+fn complete_disable(
+    actions: Query<
+        (Entity, &DisabledDotfilePackage),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::succeeded(format!(
+                "unlinked {} file(s)",
+                output.files
+            )));
+    }
+}
+
+fn complete_adoption(
+    actions: Query<
+        (Entity, &AdoptedDotfile),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::succeeded(format!(
+                "adopted {}",
+                output.path.display()
+            )));
+    }
+}
 
 #[derive(EcsComponent, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DiscoverDotfilePackages;

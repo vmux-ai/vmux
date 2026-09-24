@@ -4,15 +4,15 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery};
 
 use super::{
-    DispatchTarget, NextToolOrder, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
-    ToolManifest, ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, RegisterTools, ToolCall, ToolCalls, ToolDispatchResult,
+    ToolDispatchSet, ToolManifest, ToolRequestSet,
 };
 
 pub(super) struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(ToolRegistrationSet::Browser))
+        app.add_systems(Startup, register.in_set(RegisterTools))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,

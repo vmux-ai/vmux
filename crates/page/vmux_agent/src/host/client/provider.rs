@@ -357,7 +357,7 @@ mod tests {
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_systems(Update, consume_page_agent_stream);
+            .add_systems(Update, consume_provider_agent_stream);
         let mut policy = AgentApprovalPolicy::default();
         policy.allow("run");
         let entity = app
@@ -409,7 +409,7 @@ mod tests {
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_systems(Update, consume_page_agent_stream);
+            .add_systems(Update, consume_provider_agent_stream);
 
         let mut queue = PromptQueue::default();
         queue.enqueue("next".into());
@@ -461,7 +461,7 @@ mod tests {
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_systems(Update, consume_page_agent_stream);
+            .add_systems(Update, consume_provider_agent_stream);
 
         let mut queue = PromptQueue::default();
         queue.enqueue("a".into());
@@ -522,7 +522,7 @@ mod tests {
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_systems(Update, consume_page_agent_stream);
+            .add_systems(Update, consume_provider_agent_stream);
 
         let mut queue = PromptQueue::default();
         queue.enqueue("retry".into());
@@ -571,7 +571,7 @@ mod tests {
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_systems(Update, consume_page_agent_stream);
+            .add_systems(Update, consume_provider_agent_stream);
         let entity = app
             .world_mut()
             .spawn((
@@ -615,7 +615,7 @@ mod tests {
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_systems(Update, consume_page_agent_stream);
+            .add_systems(Update, consume_provider_agent_stream);
         app.world_mut().spawn((
             AcpSession {
                 agent_id: "mistral-vibe".into(),
@@ -654,7 +654,7 @@ mod tests {
             .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
-            .add_systems(Update, consume_page_agent_stream);
+            .add_systems(Update, consume_provider_agent_stream);
         let entity = app
             .world_mut()
             .spawn((

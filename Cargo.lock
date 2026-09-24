@@ -10994,6 +10994,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
+ "vmux_core",
  "vmux_path",
  "vmux_profile",
 ]

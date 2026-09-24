@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, NextToolOrder, ProtocolTool, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolExecution, ToolManifest, ToolOutcome, ToolRegistrationSet, ToolRequestSet,
+    DispatchTarget, NextToolOrder, ProtocolTool, RegisterTools, ToolCall, ToolCalls,
+    ToolDispatchResult, ToolDispatchSet, ToolExecution, ToolManifest, ToolOutcome, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
@@ -11,7 +11,7 @@ pub(super) struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register.in_set(ToolRegistrationSet::Knowledge))
+        app.add_systems(Startup, register.in_set(RegisterTools))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,

@@ -40,8 +40,8 @@ impl McpPlugin {
 
 impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<crate::tool::ToolPlugin>() {
-            app.add_plugins(crate::tool::ToolPlugin);
+        if !app.is_plugin_added::<crate::tool::ToolRuntimePlugin>() {
+            app.add_plugins(crate::tool::ToolRuntimePlugin);
         }
         app.insert_resource(self.config.clone())
             .init_resource::<NextRequestSequence>()
@@ -105,12 +105,9 @@ impl McpServer {
         shell: String,
     ) -> Self {
         let mut app = App::new();
-        app.add_plugins(McpPlugin::new(
-            anchor,
-            acp_session,
-            acp_terminals,
-            run_block_timeout,
-            shell,
+        app.add_plugins((
+            crate::tool::BuiltinToolPlugin,
+            McpPlugin::new(anchor, acp_session, acp_terminals, run_block_timeout, shell),
         ));
         Self::from(app)
     }

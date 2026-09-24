@@ -1,12 +1,66 @@
 use std::path::{Path, PathBuf};
 
-use bevy_ecs::prelude::Component;
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::prelude::*;
+use vmux_core::tool::{ToolAction, ToolProvider};
 
-use crate::ToolOperation;
 use crate::manifest::{
     ToolStore, add_packages, expand_user_path, load_manifest_from, normalize_names,
     write_manifest_to,
 };
+use crate::{
+    ToolActionCompletion, ToolActionRequest, ToolActionRouteSet, ToolOperation,
+    ToolOperationPlugin, ToolStoreAction, ToolStoreTarget,
+};
+
+pub(crate) struct NpmToolPlugin;
+
+impl Plugin for NpmToolPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(ToolOperationPlugin::<ImportNpmManifest>::default())
+            .add_systems(Update, route.in_set(ToolActionRouteSet))
+            .add_systems(Update, complete);
+    }
+}
+
+fn route(
+    requests: Query<
+        (Entity, &ToolActionRequest),
+        (Added<ToolActionRequest>, With<ToolStoreTarget>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, action) in &requests {
+        let request = action.request();
+        if request.provider != ToolProvider::Npm || request.action != ToolAction::Import {
+            continue;
+        }
+        let path = request.value.trim();
+        if path.is_empty() {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .insert((ToolStoreAction, ImportNpmManifest::new(path)));
+    }
+}
+
+fn complete(
+    actions: Query<
+        (Entity, &ImportedNpmManifest),
+        (With<ToolStoreAction>, Without<ToolActionCompletion>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, output) in &actions {
+        commands
+            .entity(entity)
+            .insert(ToolActionCompletion::succeeded(format!(
+                "imported {} NPM package(s)",
+                output.packages
+            )));
+    }
+}
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ImportNpmManifest {
