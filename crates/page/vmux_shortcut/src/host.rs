@@ -7,10 +7,10 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers, HostWindow, UiEventPlugin};
 use std::collections::{BTreeMap, HashMap};
-use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
-use vmux_command::{CommandDefinition, ResolvedLocale, localized_command_name};
 #[cfg(test)]
 use vmux_command::CommandRequest;
+use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
+use vmux_command::{CommandDefinition, ResolvedLocale, localized_command_name};
 use vmux_core::page::PageReady;
 use vmux_core::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};

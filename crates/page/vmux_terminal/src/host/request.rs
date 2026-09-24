@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use vmux_service::protocol::ProcessId;
 
-use crate::host::plugin::{PendingTerminalInput, ServiceMessageSet, TerminalStackSpawnRequest};
+use crate::host::input_queue::{InputQueuePlugin, NextTerminalInputSequence, TerminalInput};
+use crate::host::plugin::{ServiceMessageSet, TerminalStackSpawnRequest};
 use crate::host::process_index::TerminalProcessIndex;
 use crate::{ProcessExited, Terminal};
 
@@ -12,8 +13,11 @@ impl Plugin for TerminalRequestPlugin {
         app.add_plugins((
             crate::contract::TerminalContractPlugin,
             crate::host::process_index::TerminalProcessIndexPlugin,
-        ))
-        .add_systems(
+        ));
+        if !app.is_plugin_added::<InputQueuePlugin>() {
+            app.add_plugins(InputQueuePlugin);
+        }
+        app.add_systems(
             Update,
             (handle_terminal_send_requests, handle_run_shell_requests).after(ServiceMessageSet),
         );
@@ -44,6 +48,7 @@ fn handle_terminal_send_requests(
     focus: Res<vmux_layout::stack::FocusedStack>,
     process_index: Res<TerminalProcessIndex>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    mut sequence: ResMut<NextTerminalInputSequence>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -57,9 +62,7 @@ fn handle_terminal_send_requests(
         let Some(terminal) = target else {
             continue;
         };
-        commands.entity(terminal).insert(PendingTerminalInput {
-            data: text.into_bytes(),
-        });
+        TerminalInput::enqueue(&mut commands, &mut sequence, terminal, text.into_bytes());
     }
 }
 
@@ -74,6 +77,7 @@ fn handle_run_shell_requests(
         ),
     >,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    mut sequence: ResMut<NextTerminalInputSequence>,
     mut commands: Commands,
     mut terminal_stack_spawns: Option<MessageWriter<TerminalStackSpawnRequest>>,
 ) {
@@ -83,9 +87,7 @@ fn handle_run_shell_requests(
         if matches!(mode, ShellMode::Active)
             && let Some(terminal) = crate::target::active_terminal_for_tab(focus.stack, &terminals)
         {
-            commands
-                .entity(terminal)
-                .insert(PendingTerminalInput { data: input });
+            TerminalInput::enqueue(&mut commands, &mut sequence, terminal, input);
             continue;
         }
         let Some(terminal_stack_spawns) = terminal_stack_spawns.as_mut() else {

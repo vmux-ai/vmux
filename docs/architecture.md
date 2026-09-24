@@ -525,6 +525,8 @@ output through `alacritty_terminal`'s VTE engine into a cell grid. Each poll dif
 by row hash and broadcasts only the **changed lines**. The page applies each patch to
 per-row signals, so only those lines repaint. The daemon also owns what should outlive a
 frame: OSC 133 command tracking, per-shell integration, copy-mode motions.
+Host input is one ordered ECS entity per write, related to its terminal until the process is
+ready. Multiple producers cannot overwrite one another through a singleton mailbox.
 
 **Editor.** `syntect` plus `two-face` — the ~200 grammars from `bat` — highlight line by
 line into `StyledSpan`s. The file viewer, the preview and git diffs all emit the same

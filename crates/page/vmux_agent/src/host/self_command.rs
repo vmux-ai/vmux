@@ -10,6 +10,7 @@ use vmux_space::ActiveSpace;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{
     AgentRunTerminal, ProcessExited, ServiceMessageSet, Terminal, TerminalStackSpawnRequest,
+    TerminalStackSpawnSet,
 };
 
 use crate::events::AgentCommandRequest;
@@ -43,7 +44,7 @@ impl Plugin for SelfCommandPlugin {
                 .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
                 .after(vmux_layout::worktree::TabDirectoryRebindSet)
-                .before(vmux_terminal::plugin::respond_terminal_stack_spawn),
+                .before(TerminalStackSpawnSet),
         );
     }
 }
@@ -1222,12 +1223,8 @@ mod tests {
             .expect("handle_agent_self_commands is registered");
         let terminal_spawn = graph
             .system_sets
-            .get_key(
-                vmux_terminal::plugin::respond_terminal_stack_spawn
-                    .into_system_set()
-                    .intern(),
-            )
-            .expect("the ordering names respond_terminal_stack_spawn");
+            .get_key(TerminalStackSpawnSet.intern())
+            .expect("the terminal spawn ordering set is registered");
 
         assert!(
             graph

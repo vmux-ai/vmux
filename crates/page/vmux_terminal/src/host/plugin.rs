@@ -28,6 +28,9 @@ use vmux_service::{
 };
 use vmux_setting::AppSettings;
 
+#[cfg(test)]
+use super::input_queue::InputQueuePlugin;
+use super::input_queue::{NextTerminalInputSequence, TerminalInput};
 use super::loading::AgentLoading;
 use super::mouse::MouseSelectionState;
 use super::prompt::PromptCapture;
@@ -85,7 +88,9 @@ impl Plugin for TerminalServicePlugin {
             .add_plugins(TerminalUpdatePlugin)
             .add_systems(
                 Update,
-                respond_terminal_stack_spawn.after(ServiceMessageSet),
+                respond_terminal_stack_spawn
+                    .in_set(TerminalStackSpawnSet)
+                    .after(ServiceMessageSet),
             )
             .add_systems(
                 Update,
@@ -127,12 +132,6 @@ impl Plugin for TerminalUpdatePlugin {
             .add_message::<CommandLifecycleEvent>()
             .add_message::<OscTitleChanged>()
             .add_message::<vmux_core::notify::BellReceived>()
-            .add_systems(
-                Update,
-                handle_terminal_reinput_requests
-                    .after(poll_service_messages)
-                    .before(flush_pending_terminal_input),
-            )
             .add_systems(Update, apply_osc_title.after(poll_service_messages))
             .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
             .add_systems(Update, sync_agent_focus.after(poll_service_messages))
@@ -152,7 +151,6 @@ impl Plugin for TerminalUpdatePlugin {
                     poll_service_messages
                         .in_set(WriteCommandRequests)
                         .in_set(ServiceMessageSet),
-                    flush_pending_terminal_input,
                     handle_terminal_navigation_commands.in_set(vmux_command::ReadCommandRequests),
                     handle_terminal_clear_command.in_set(vmux_command::ReadCommandRequests),
                     handle_terminal_copy_mode_command.in_set(vmux_command::ReadCommandRequests),
@@ -308,6 +306,9 @@ pub struct TerminalStackSpawnRequest {
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ServiceMessageSet;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TerminalStackSpawnSet;
 
 pub fn format_terminal_url(
     mut q: Query<
@@ -609,9 +610,10 @@ fn new_terminal_bundle_with_cwd_and_shell(
     )
 }
 
-pub fn respond_terminal_stack_spawn(
+fn respond_terminal_stack_spawn(
     mut reader: MessageReader<TerminalStackSpawnRequest>,
     settings: Res<AppSettings>,
+    mut sequence: ResMut<NextTerminalInputSequence>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -656,9 +658,7 @@ pub fn respond_terminal_stack_spawn(
             commands.entity(terminal).insert(pid);
         }
         if let Some(data) = request.pending_input.clone() {
-            commands
-                .entity(terminal)
-                .insert(PendingTerminalInput { data });
+            TerminalInput::enqueue(&mut commands, &mut sequence, terminal, data);
         }
     }
 }
@@ -703,11 +703,6 @@ pub struct PendingServiceCreate;
 
 #[derive(Component)]
 struct PendingServiceAttach;
-
-#[derive(Component)]
-pub struct PendingTerminalInput {
-    pub data: Vec<u8>,
-}
 
 #[derive(Component)]
 pub(crate) struct ShellOutputSeen;
@@ -1614,61 +1609,6 @@ fn should_close_terminal_stack_on_exit(is_agent: bool, retain_on_exit: bool) -> 
     !is_agent && !retain_on_exit
 }
 
-fn flush_pending_terminal_input(
-    pending: Query<
-        (Entity, &ProcessId, &PendingTerminalInput),
-        (
-            With<Terminal>,
-            With<ShellOutputSeen>,
-            Without<PendingServiceCreate>,
-            Without<AwaitingProcessCreated>,
-            Without<ProcessExited>,
-        ),
-    >,
-    service: Option<Res<ServiceClient>>,
-    mut commands: Commands,
-) {
-    let Some(service) = service else { return };
-    for (entity, pid, input) in &pending {
-        service.0.send(ClientMessage::ProcessInput {
-            process_id: *pid,
-            data: input.data.clone(),
-        });
-        commands.entity(entity).remove::<PendingTerminalInput>();
-    }
-}
-
-fn handle_terminal_reinput_requests(
-    mut requests: MessageReader<TerminalReinputRequest>,
-    process_index: Res<TerminalProcessIndex>,
-    terminals: Query<(), With<Terminal>>,
-    mut pending_inputs: Query<&mut PendingTerminalInput>,
-    mut commands: Commands,
-) {
-    let mut queued = std::collections::HashMap::<Entity, Vec<u8>>::new();
-    for req in requests.read() {
-        let Some(entity) = process_index.get(&req.process_id) else {
-            continue;
-        };
-        if !terminals.contains(entity) {
-            continue;
-        }
-        queued
-            .entry(entity)
-            .or_default()
-            .extend_from_slice(&req.data);
-    }
-    for (entity, data) in queued {
-        if let Ok(mut pending) = pending_inputs.get_mut(entity) {
-            pending.data.extend(data);
-        } else {
-            commands
-                .entity(entity)
-                .insert(PendingTerminalInput { data });
-        }
-    }
-}
-
 #[cfg(test)]
 fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_service::protocol::CopyModeKey> {
     map_copy_mode_key_from_input(CopyModeKeyInput {
@@ -2484,7 +2424,7 @@ fn handle_terminal_clear_command(
     mut requests: MessageReader<super::command::ClearRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    mut pending_inputs: Query<&mut PendingTerminalInput>,
+    mut sequence: ResMut<NextTerminalInputSequence>,
     mut commands: Commands,
 ) {
     let terminal = crate::target::active_terminal_for_tab(focus.stack, &terminals);
@@ -2492,13 +2432,7 @@ fn handle_terminal_clear_command(
         let Some(terminal) = terminal else {
             continue;
         };
-        if let Ok(mut pending) = pending_inputs.get_mut(terminal) {
-            pending.data.push(0x0c);
-        } else {
-            commands
-                .entity(terminal)
-                .insert(PendingTerminalInput { data: vec![0x0c] });
-        }
+        TerminalInput::enqueue(&mut commands, &mut sequence, terminal, vec![0x0c]);
     }
 }
 
@@ -2623,22 +2557,21 @@ mod tests {
     }
 
     #[test]
-    fn terminal_reinput_appends_to_existing_pending_input() {
+    fn terminal_reinput_preserves_existing_queued_input() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
-            .add_message::<TerminalReinputRequest>()
-            .add_systems(Update, handle_terminal_reinput_requests);
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin, InputQueuePlugin));
         let pid = process_id(7);
-        let terminal = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                pid,
-                PendingTerminalInput {
-                    data: b"initial\r".to_vec(),
+        let terminal = app.world_mut().spawn((Terminal, pid)).id();
+        app.world_mut()
+            .run_system_cached_with(
+                |In((terminal, data)): In<(Entity, Vec<u8>)>,
+                 mut sequence: ResMut<NextTerminalInputSequence>,
+                 mut commands: Commands| {
+                    TerminalInput::enqueue(&mut commands, &mut sequence, terminal, data);
                 },
-            ))
-            .id();
+                (terminal, b"initial\r".to_vec()),
+            )
+            .unwrap();
 
         app.world_mut()
             .resource_mut::<Messages<TerminalReinputRequest>>()
@@ -2649,20 +2582,15 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<PendingTerminalInput>(terminal)
-                .unwrap()
-                .data,
-            b"initial\rnext\r"
+            TerminalInput::pending(app.world_mut(), terminal),
+            [b"initial\r".to_vec(), b"next\r".to_vec()]
         );
     }
 
     #[test]
     fn terminal_reinput_preserves_multiple_messages_in_order() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
-            .add_message::<TerminalReinputRequest>()
-            .add_systems(Update, handle_terminal_reinput_requests);
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin, InputQueuePlugin));
         let pid = process_id(8);
         let terminal = app.world_mut().spawn((Terminal, pid)).id();
 
@@ -2681,11 +2609,8 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<PendingTerminalInput>(terminal)
-                .unwrap()
-                .data,
-            b"one\rtwo\r"
+            TerminalInput::pending(app.world_mut(), terminal),
+            [b"one\r".to_vec(), b"two\r".to_vec()]
         );
     }
 
@@ -2737,17 +2662,17 @@ mod tests {
             });
         app.update();
 
-        let pending = app
-            .world()
-            .get::<PendingTerminalInput>(terminal)
-            .expect("input routed to terminal by process id uuid");
-        assert_eq!(pending.data, b"hi".to_vec());
+        assert_eq!(
+            TerminalInput::pending(app.world_mut(), terminal),
+            [b"hi".to_vec()]
+        );
     }
 
     #[test]
     fn terminal_stack_spawn_uses_requested_shell() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .add_plugins(InputQueuePlugin)
             .add_message::<TerminalStackSpawnRequest>()
             .insert_resource(test_settings())
             .add_systems(Update, respond_terminal_stack_spawn);
@@ -3515,17 +3440,18 @@ mod tests {
     #[test]
     fn restart_state_clears_shell_output_seen_and_preserves_pending_input() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        let entity = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                ShellOutputSeen,
-                PendingTerminalInput {
-                    data: b"queued\r".to_vec(),
+        app.add_plugins((MinimalPlugins, InputQueuePlugin));
+        let entity = app.world_mut().spawn((Terminal, ShellOutputSeen)).id();
+        app.world_mut()
+            .run_system_cached_with(
+                |In((terminal, data)): In<(Entity, Vec<u8>)>,
+                 mut sequence: ResMut<NextTerminalInputSequence>,
+                 mut commands: Commands| {
+                    TerminalInput::enqueue(&mut commands, &mut sequence, terminal, data);
                 },
-            ))
-            .id();
+                (entity, b"queued\r".to_vec()),
+            )
+            .unwrap();
 
         app.world_mut()
             .run_system_cached_with(
@@ -3539,11 +3465,8 @@ mod tests {
         assert!(app.world().get::<ShellOutputSeen>(entity).is_none());
         assert!(app.world().get::<AwaitingProcessCreated>(entity).is_some());
         assert_eq!(
-            app.world()
-                .get::<PendingTerminalInput>(entity)
-                .unwrap()
-                .data,
-            b"queued\r"
+            TerminalInput::pending(app.world_mut(), entity),
+            [b"queued\r".to_vec()]
         );
     }
 
