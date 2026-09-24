@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use vmux_ui::hooks::send;
 use vmux_ui::platform::sleep_ms;
 
-use crate::event::{TabDropPlacement, TabRow, TabsRequest};
+use crate::event::{TabActivateRequest, TabDropPlacement, TabReorderRequest, TabRow};
 
 #[derive(Clone, PartialEq)]
 struct TabDragState {
@@ -206,7 +206,7 @@ impl TabDrag {
             .cloned()
             .unwrap_or_else(|| state.source_id.clone());
         if state.source_index != state.target_index {
-            let _ = send(&TabsRequest::Reorder {
+            let _ = send(&TabReorderRequest {
                 tab_id: state.source_id.clone(),
                 target_tab_id: target_id.clone(),
                 drop_placement: if state.target_index < state.source_index {
@@ -278,7 +278,7 @@ impl TabDrag {
                 }
             });
         }
-        let _ = send(&TabsRequest::Switch { tab_id });
+        let _ = send(&TabActivateRequest { tab_id });
     }
 
     pub(crate) fn acknowledge_host(

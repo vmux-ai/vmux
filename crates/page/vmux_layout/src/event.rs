@@ -324,18 +324,6 @@ mod tests {
     }
 
     #[test]
-    fn tabs_request_rkyv_roundtrip() {
-        let original = TabsRequest::Reorder {
-            tab_id: "work".into(),
-            target_tab_id: "home".into(),
-            drop_placement: TabDropPlacement::Before,
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        let recovered = rkyv::from_bytes::<TabsRequest, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(recovered, original);
-    }
-
-    #[test]
     fn tab_drop_placement_stays_relative_when_the_source_is_removed() {
         assert_eq!(TabDropPlacement::Before.destination(0, 2, 3), 1);
         assert_eq!(TabDropPlacement::After.destination(2, 0, 3), 1);
@@ -451,19 +439,23 @@ pub struct TabRow {
 }
 
 #[vmux_api::ui_event(Eq, target = "layout")]
-pub enum TabsRequest {
-    New,
-    Close {
-        tab_id: Option<String>,
-    },
-    Switch {
-        tab_id: String,
-    },
-    Reorder {
-        tab_id: String,
-        target_tab_id: String,
-        drop_placement: TabDropPlacement,
-    },
+pub struct TabCreateRequest;
+
+#[vmux_api::ui_event(Eq, target = "layout")]
+pub struct TabCloseRequest {
+    pub tab_id: Option<String>,
+}
+
+#[vmux_api::ui_event(Eq, target = "layout")]
+pub struct TabActivateRequest {
+    pub tab_id: String,
+}
+
+#[vmux_api::ui_event(Eq, target = "layout")]
+pub struct TabReorderRequest {
+    pub tab_id: String,
+    pub target_tab_id: String,
+    pub drop_placement: TabDropPlacement,
 }
 
 #[vmux_api::contract(Copy, Eq)]
