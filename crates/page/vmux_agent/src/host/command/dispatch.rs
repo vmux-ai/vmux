@@ -36,6 +36,7 @@ impl Plugin for DispatchPlugin {
                     handle_browser_commands,
                     handle_desktop_commands,
                     handle_space_commands,
+                    handle_bookmark_commands,
                     handle_shared_commands,
                 )
                     .in_set(CommandSet::Commands),
@@ -493,7 +494,6 @@ fn handle_desktop_commands(
 fn handle_space_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut space_requests: MessageWriter<vmux_space::SpaceRequest>,
-    mut bookmark_mutations: MessageWriter<vmux_layout::bookmark::BookmarkMutation>,
     service: Option<Res<ServiceClient>>,
 ) {
     for request in reader.read() {
@@ -520,50 +520,72 @@ fn handle_space_commands(
                 space_requests.write(command);
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::BookmarkCommand(command) => {
-                use vmux_layout::bookmark::BookmarkMutation;
-                let mutation = match command {
-                    AgentBookmarkCommand::Add { page, folder } => BookmarkMutation::Add {
-                        metadata: vmux_core::PageMetadata {
-                            title: page.title.clone().unwrap_or_default(),
-                            url: page.url.clone(),
-                            icon: vmux_core::PageIcon::favicon(
-                                page.favicon_url.clone().unwrap_or_default(),
-                            ),
-                            bg_color: None,
-                        },
-                        folder: folder.clone(),
-                    },
-                    AgentBookmarkCommand::Remove { uuid } => {
-                        BookmarkMutation::Remove { uuid: uuid.clone() }
-                    }
-                    AgentBookmarkCommand::Pin { uuid } => {
-                        BookmarkMutation::Pin { uuid: uuid.clone() }
-                    }
-                    AgentBookmarkCommand::PinUrl { page } => BookmarkMutation::PinUrl {
-                        metadata: vmux_core::PageMetadata {
-                            title: page.title.clone().unwrap_or_default(),
-                            url: page.url.clone(),
-                            icon: vmux_core::PageIcon::favicon(
-                                page.favicon_url.clone().unwrap_or_default(),
-                            ),
-                            bg_color: None,
-                        },
-                    },
-                    AgentBookmarkCommand::Unpin { uuid } => {
-                        BookmarkMutation::Unpin { uuid: uuid.clone() }
-                    }
-                    AgentBookmarkCommand::CreateFolder { name } => {
-                        BookmarkMutation::AddFolder { name: name.clone() }
-                    }
-                };
-                bookmark_mutations.write(mutation);
-                AgentCommandResult::Ok
-            }
             _ => continue,
         };
         if let Some(service) = service.as_ref() {
             service.0.send(request.response(result));
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_bookmark_commands(
+    mut reader: MessageReader<AgentCommandRequest>,
+    mut add_requests: MessageWriter<vmux_layout::bookmark::AddRequest>,
+    mut remove_requests: MessageWriter<vmux_layout::bookmark::RemoveRequest>,
+    mut pin_requests: MessageWriter<vmux_layout::bookmark::PinRequest>,
+    mut pin_url_requests: MessageWriter<vmux_layout::bookmark::PinUrlRequest>,
+    mut unpin_requests: MessageWriter<vmux_layout::bookmark::UnpinRequest>,
+    mut create_folder_requests: MessageWriter<vmux_layout::bookmark::CreateFolderRequest>,
+    service: Option<Res<ServiceClient>>,
+) {
+    for request in reader.read() {
+        let ServiceAgentCommand::BookmarkCommand(command) = &request.command else {
+            continue;
+        };
+        match command {
+            AgentBookmarkCommand::Add { page, folder } => {
+                add_requests.write(vmux_layout::bookmark::AddRequest {
+                    metadata: vmux_core::PageMetadata {
+                        title: page.title.clone().unwrap_or_default(),
+                        url: page.url.clone(),
+                        icon: vmux_core::PageIcon::favicon(
+                            page.favicon_url.clone().unwrap_or_default(),
+                        ),
+                        bg_color: None,
+                    },
+                    folder: folder.clone(),
+                });
+            }
+            AgentBookmarkCommand::Remove { uuid } => {
+                remove_requests.write(vmux_layout::bookmark::RemoveRequest { uuid: uuid.clone() });
+            }
+            AgentBookmarkCommand::Pin { uuid } => {
+                pin_requests.write(vmux_layout::bookmark::PinRequest { uuid: uuid.clone() });
+            }
+            AgentBookmarkCommand::PinUrl { page } => {
+                pin_url_requests.write(vmux_layout::bookmark::PinUrlRequest {
+                    metadata: vmux_core::PageMetadata {
+                        title: page.title.clone().unwrap_or_default(),
+                        url: page.url.clone(),
+                        icon: vmux_core::PageIcon::favicon(
+                            page.favicon_url.clone().unwrap_or_default(),
+                        ),
+                        bg_color: None,
+                    },
+                });
+            }
+            AgentBookmarkCommand::Unpin { uuid } => {
+                unpin_requests.write(vmux_layout::bookmark::UnpinRequest { uuid: uuid.clone() });
+            }
+            AgentBookmarkCommand::CreateFolder { name } => {
+                create_folder_requests.write(vmux_layout::bookmark::CreateFolderRequest::root(
+                    name.clone(),
+                ));
+            }
+        }
+        if let Some(service) = service.as_ref() {
+            service.0.send(request.response(AgentCommandResult::Ok));
         }
     }
 }
