@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
 use vmux_core::tool::{
-    ToolAction, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolStatus, ToolUiOperation,
-    ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
+    ToolAction, ToolItem, ToolOpenRequest, ToolOperationKey, ToolOperationNotice, ToolProvider,
+    ToolRequest, ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest, ToolsUiState,
 };
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
@@ -154,18 +154,8 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
     });
 
     let current = state();
-    let pending = current
-        .operations
-        .iter()
-        .filter(|operation| operation.is_pending())
-        .map(|operation| action_key(operation.provider, operation.action, &operation.item_id))
-        .collect::<BTreeSet<_>>();
-    let notice = current
-        .operations
-        .iter()
-        .rev()
-        .find(|operation| operation.completion().is_some())
-        .cloned();
+    let pending = current.pending.into_iter().collect::<BTreeSet<_>>();
+    let notice = current.notice;
     let snapshot = &current.snapshot;
     let search = query().trim().to_ascii_lowercase();
     let visible_count = snapshot
@@ -188,7 +178,7 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
                 actions: rsx! {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
-                        disabled: pending.contains(&action_key(
+                        disabled: pending.contains(&ToolOperationKey::new(
                             ToolProvider::Dotfiles,
                             ToolAction::Apply,
                             "",
@@ -220,18 +210,17 @@ fn ToolManager(route: ToolsRoute, active_route: Signal<ToolsRoute>) -> Element {
                 }
                 if let Some(result) = notice {
                     {
-                        let (success, message) = result.completion().unwrap();
                         rsx! {
                     div {
-                        class: if success {
+                        class: if result.success {
                             "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
                         } else {
                             "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                         },
-                        if success {
+                        if result.success {
                             {action_result_message(&result)}
                         } else {
-                            "{message}"
+                            "{result.message}"
                         }
                     }
                         }
@@ -302,7 +291,7 @@ fn HomebrewSourceCard(root: String) -> Element {
 }
 
 #[component]
-fn ToolRow(item: ToolItem, pending: BTreeSet<String>) -> Element {
+fn ToolRow(item: ToolItem, pending: BTreeSet<ToolOperationKey>) -> Element {
     let version = item.version.clone().unwrap_or_default();
     let provider = item.provider;
     let id = item.id.clone();
@@ -329,12 +318,13 @@ fn ToolRow(item: ToolItem, pending: BTreeSet<String>) -> Element {
                 for action in item.actions.iter().copied() {
                     {
                         let action_id = id.clone();
-                        let key = action_key(provider, action, &action_id);
+                        let operation = ToolOperationKey::new(provider, action, action_id.clone());
+                        let key = format!("{}:{action:?}:{action_id}", provider.id());
                         rsx! {
                             ManagerButton {
                                 key: "{key}",
                                 variant: action_variant(action),
-                                disabled: pending.contains(&key),
+                                disabled: pending.contains(&operation),
                                 onclick: move |_| {
                                     send_action(
                                         provider,
@@ -434,9 +424,9 @@ fn action_label(action: ToolAction) -> String {
     })
 }
 
-fn action_result_message(result: &ToolUiOperation) -> String {
-    let id = result.item_id.as_str();
-    match result.action {
+fn action_result_message(result: &ToolOperationNotice) -> String {
+    let id = result.operation.item_id.as_str();
+    match result.operation.action {
         ToolAction::Apply => translate("tools-result-applied"),
         ToolAction::Import => translate("tools-result-imported"),
         action => translate_with(
@@ -463,10 +453,6 @@ fn action_variant(action: ToolAction) -> ManagerButtonVariant {
         }
         _ => ManagerButtonVariant::Secondary,
     }
-}
-
-fn action_key(provider: ToolProvider, action: ToolAction, id: &str) -> String {
-    format!("{}:{action:?}:{id}", provider.id())
 }
 
 fn open_tool_file(path: String) {

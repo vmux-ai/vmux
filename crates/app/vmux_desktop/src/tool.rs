@@ -15,8 +15,8 @@ use vmux_core::host::{UiState, UiStatePlugin};
 use vmux_core::page::PageManifest;
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tool::{
-    ToolAction, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolRequest, ToolStatus,
-    ToolUiOperation, ToolUiOperationState, ToolsNavigateRequest, ToolsRefreshRequest,
+    ToolAction, ToolCategory, ToolItem, ToolOpenRequest, ToolOperationKey, ToolOperationNotice,
+    ToolProvider, ToolRequest, ToolStatus, ToolsNavigateRequest, ToolsRefreshRequest,
     ToolsSnapshot, ToolsUiState,
 };
 use vmux_core::vault::{
@@ -233,6 +233,7 @@ struct ToolSubscriber {
     snapshot_revision: u64,
     revision: u64,
     emitted_revision: u64,
+    pending: BTreeMap<u64, ToolOperationKey>,
     state: ToolsUiState,
 }
 
@@ -244,13 +245,12 @@ impl ToolSubscriber {
     }
 
     fn begin(&mut self, operation_id: u64, request: &ToolRequest) {
-        self.state.operations.retain(ToolUiOperation::is_pending);
-        self.state.operations.push(ToolUiOperation::pending(
+        self.pending.insert(
             operation_id,
-            request.provider,
-            request.action,
-            request.id.clone(),
-        ));
+            ToolOperationKey::new(request.provider, request.action, request.id.clone()),
+        );
+        self.state.pending = self.pending.values().cloned().collect();
+        self.state.notice = None;
         self.touch();
     }
 
@@ -261,25 +261,15 @@ impl ToolSubscriber {
         success: bool,
         message: String,
     ) {
-        self.state
-            .operations
-            .retain(|operation| operation.is_pending() || operation.operation_id == operation_id);
-        let operation = self
-            .state
-            .operations
-            .iter_mut()
-            .find(|operation| operation.operation_id == operation_id);
-        if let Some(operation) = operation {
-            operation.state = ToolUiOperationState::Completed { success, message };
-        } else {
-            self.state.operations.push(ToolUiOperation {
-                operation_id,
-                provider: request.provider,
-                action: request.action,
-                item_id: request.id.clone(),
-                state: ToolUiOperationState::Completed { success, message },
-            });
-        }
+        let operation = self.pending.remove(&operation_id).unwrap_or_else(|| {
+            ToolOperationKey::new(request.provider, request.action, request.id.clone())
+        });
+        self.state.pending = self.pending.values().cloned().collect();
+        self.state.notice = Some(ToolOperationNotice {
+            operation,
+            success,
+            message,
+        });
         self.touch();
     }
 
@@ -2289,14 +2279,21 @@ mod tests {
         };
         let mut subscriber = ToolSubscriber::pending(7, &request);
 
-        assert!(subscriber.state.operations[0].is_pending());
+        assert_eq!(
+            subscriber.state.pending,
+            vec![ToolOperationKey::new(
+                ToolProvider::Npm,
+                ToolAction::Install,
+                "typescript",
+            )]
+        );
 
         subscriber.complete(7, &request, true, "installed".to_string());
 
-        assert_eq!(
-            subscriber.state.operations[0].completion(),
-            Some((true, "installed"))
-        );
+        assert!(subscriber.state.pending.is_empty());
+        let notice = subscriber.state.notice.as_ref().unwrap();
+        assert!(notice.success);
+        assert_eq!(notice.message, "installed");
     }
 
     #[test]
