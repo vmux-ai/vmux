@@ -16,11 +16,11 @@ use crate::event::LayoutOverlayEvent;
 
 #[component]
 pub(crate) fn ExtensionPopupModal(
-    popup: Signal<ExtensionPopupEvent>,
+    popup: ExtensionPopupEvent,
     preferred_size: ExtensionPopupSizeEvent,
 ) -> Element {
-    let current = popup();
-    let state = ExtensionPopupState { popup };
+    let current = popup;
+    let state = ExtensionPopupState;
     let placement = ExtensionPopupPlacement::from(current.anchor);
     let size = if preferred_size.id == current.id {
         preferred_size
@@ -108,18 +108,15 @@ impl ExtensionPopupPlacement {
 }
 
 #[derive(Clone, Copy)]
-struct ExtensionPopupState {
-    popup: Signal<ExtensionPopupEvent>,
-}
+struct ExtensionPopupState;
 
 impl ExtensionPopupState {
-    fn close(mut self) {
+    fn close(self) {
         let _ = send(&LayoutOverlayEvent {
             id: "extension-popup".to_string(),
             active: false,
         });
         let _ = send(&ExtensionPopupCloseRequest);
-        self.popup.set(ExtensionPopupEvent::default());
     }
 }
 
