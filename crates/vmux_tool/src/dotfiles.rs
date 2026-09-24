@@ -1,11 +1,232 @@
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use bevy_ecs::prelude::Component as EcsComponent;
 use serde::{Deserialize, Serialize};
 
+use crate::ToolOperation;
 use crate::manifest::{
     ToolStore, ToolsManifest, expand_user_path, load_manifest_from, write_manifest_to,
 };
+
+#[derive(EcsComponent, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DiscoverDotfilePackages;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiscoveredDotfilePackages {
+    pub packages: Vec<String>,
+}
+
+impl ToolOperation for DiscoverDotfilePackages {
+    type Output = DiscoveredDotfilePackages;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        Ok(DiscoveredDotfilePackages {
+            packages: store.dotfile_packages()?,
+        })
+    }
+}
+
+#[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
+pub struct PlanDotfilePackage {
+    package: String,
+}
+
+impl PlanDotfilePackage {
+    pub fn new(package: impl Into<String>) -> Self {
+        Self {
+            package: package.into(),
+        }
+    }
+}
+
+impl ToolOperation for PlanDotfilePackage {
+    type Output = DotfilePlan;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        store.plan_dotfile_package(&self.package)
+    }
+}
+
+#[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
+pub struct ImportDotfiles {
+    path: PathBuf,
+}
+
+impl ImportDotfiles {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportedDotfiles {
+    pub packages: usize,
+}
+
+impl ToolOperation for ImportDotfiles {
+    type Output = ImportedDotfiles;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let packages = store.import_dotfiles(&self.path)?;
+        Ok(ImportedDotfiles { packages })
+    }
+}
+
+#[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
+pub struct ImportAvailableDotfiles;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImportedAvailableDotfiles {
+    pub packages: usize,
+}
+
+impl ToolOperation for ImportAvailableDotfiles {
+    type Output = ImportedAvailableDotfiles;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let packages = store.dotfile_packages()?;
+        let mut manifest = store.load()?;
+        let mut imported = 0;
+        for package in packages {
+            imported += usize::from(!manifest.dotfiles.packages.contains(&package));
+            manifest.set_dotfile_package(&package, true);
+        }
+        store.save(&manifest)?;
+        Ok(ImportedAvailableDotfiles { packages: imported })
+    }
+}
+
+#[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
+pub struct LinkDotfilePackage {
+    package: String,
+}
+
+impl LinkDotfilePackage {
+    pub fn new(package: impl Into<String>) -> Self {
+        Self {
+            package: package.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkedDotfilePackage {
+    pub files: usize,
+}
+
+impl ToolOperation for LinkDotfilePackage {
+    type Output = LinkedDotfilePackage;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let mut manifest = store.load()?;
+        manifest.set_dotfile_package(&self.package, true);
+        store.save(&manifest)?;
+        let files = store.apply_dotfile_package(&self.package)?;
+        Ok(LinkedDotfilePackage { files })
+    }
+}
+
+#[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
+pub struct DisableDotfilePackage {
+    package: String,
+}
+
+impl DisableDotfilePackage {
+    pub fn new(package: impl Into<String>) -> Self {
+        Self {
+            package: package.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DisabledDotfilePackage {
+    pub files: usize,
+}
+
+impl ToolOperation for DisableDotfilePackage {
+    type Output = DisabledDotfilePackage;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let files = store.disable_and_unlink_dotfile_package(&self.package)?;
+        Ok(DisabledDotfilePackage { files })
+    }
+}
+
+#[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
+pub struct UnlinkDotfilePackage {
+    package: String,
+}
+
+impl UnlinkDotfilePackage {
+    pub fn new(package: impl Into<String>) -> Self {
+        Self {
+            package: package.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnlinkedDotfilePackage {
+    pub files: usize,
+}
+
+impl ToolOperation for UnlinkDotfilePackage {
+    type Output = UnlinkedDotfilePackage;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let files = store.unlink_dotfile_package(&self.package)?;
+        Ok(UnlinkedDotfilePackage { files })
+    }
+}
+
+#[derive(EcsComponent, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ApplyEnabledDotfiles;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AppliedEnabledDotfiles {
+    pub files: usize,
+}
+
+impl ToolOperation for ApplyEnabledDotfiles {
+    type Output = AppliedEnabledDotfiles;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let manifest = store.load()?;
+        let files = store.apply_enabled_dotfiles(&manifest)?;
+        Ok(AppliedEnabledDotfiles { files })
+    }
+}
+
+#[derive(EcsComponent, Clone, Debug, PartialEq, Eq)]
+pub struct AdoptDotfile {
+    path: PathBuf,
+    package: String,
+}
+
+impl AdoptDotfile {
+    pub fn new(path: impl Into<PathBuf>, package: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            package: package.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdoptedDotfile {
+    pub path: PathBuf,
+}
+
+impl ToolOperation for AdoptDotfile {
+    type Output = AdoptedDotfile;
+
+    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
+        let path = store.adopt_dotfile(&self.path, &self.package)?;
+        Ok(AdoptedDotfile { path })
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DotfilesManifest {
