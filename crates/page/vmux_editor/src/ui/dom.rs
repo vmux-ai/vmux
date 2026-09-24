@@ -1,51 +1,30 @@
 use std::rc::Rc;
 
-use dioxus::html::geometry::ElementPoint;
 use dioxus::prelude::*;
-use vmux_core::event::{FileLine, FileLineLayout, FileResizeEvent, FileViewMode};
+use vmux_core::event::{FileDocumentKind, FileResizeEvent, FileViewMode};
 use vmux_ui::hooks::send;
 use vmux_ui::scroll::ScrollIntoView;
 
-use super::document::is_markdown_file;
+use super::text_geometry::gutter_px;
 use super::{INPUT_ID, SCROLL_ID};
-use crate::page_model::{CellMetrics, ColumnRuler, centered_scroll_top, gutter_width};
+use crate::page_model::{CellMetrics, centered_scroll_top};
 
 pub(super) struct ScrolledLineHeight;
 
 impl ScrolledLineHeight {
     const NOTE: f64 = 28.0;
 
-    pub(super) fn resolve(mode: FileViewMode, path: &str, cell_height: f64) -> Option<f64> {
-        let height = match mode == FileViewMode::Note && is_markdown_file(path) {
+    pub(super) fn resolve(
+        mode: FileViewMode,
+        kind: FileDocumentKind,
+        cell_height: f64,
+    ) -> Option<f64> {
+        let height = match mode == FileViewMode::Note && kind == FileDocumentKind::Markdown {
             true => Self::NOTE,
             false => cell_height,
         };
         (height > 0.0).then_some(height)
     }
-}
-
-pub(super) fn column_in_line(
-    at: ElementPoint,
-    gutter: f64,
-    cell: CellMetrics,
-    text: &str,
-    wrap_columns: u16,
-    snap: bool,
-) -> (f64, u32) {
-    let x = at.x - gutter;
-    if !cell.measured() {
-        return (x, 0);
-    }
-    if wrap_columns == 0 {
-        return (x, ColumnRuler::new(text, cell).col_at(x, snap));
-    }
-    let segment = (at.y.max(0.0) / cell.height).floor() as u32;
-    let local = ColumnRuler::wrapped_row(text, cell, wrap_columns, segment).col_at(x, snap);
-
-    (
-        x,
-        segment * u32::from(wrap_columns) + local.min(u32::from(wrap_columns)),
-    )
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -78,100 +57,15 @@ impl ScrollBox {
     }
 }
 
-pub(super) fn gutter_px(total_lines: u32, char_width: f64) -> f64 {
-    gutter_width(total_lines) as f64 * char_width + 48.0
-}
-
-pub(super) struct RowRuler<'a> {
-    lines: &'a [FileLine],
-    layouts: &'a [FileLineLayout],
-    metrics: CellMetrics,
-    wrap_columns: u16,
-}
-
-impl<'a> RowRuler<'a> {
-    pub(super) fn new(
-        lines: &'a [FileLine],
-        layouts: &'a [FileLineLayout],
-        metrics: CellMetrics,
-        wrap_columns: u16,
-    ) -> Self {
-        Self {
-            lines,
-            layouts,
-            metrics,
-            wrap_columns,
-        }
-    }
-
-    fn segment_of(&self, row: u32) -> Option<(String, u32)> {
-        let mut owner = None;
-        for layout in self.layouts {
-            if row >= layout.row && row < layout.row + u32::from(layout.rows) {
-                owner = Some(layout);
-                break;
-            }
-        }
-        let layout = owner?;
-        for line in self.lines {
-            if line.line_no != layout.line_no {
-                continue;
-            }
-            let mut text = String::new();
-            for span in &line.spans {
-                text.push_str(&span.text);
-            }
-            return Some((text, row - layout.row));
-        }
-        None
-    }
-
-    pub(super) fn x_of(&self, row: u32, col: u32) -> f64 {
-        let Some((text, segment)) = self.segment_of(row) else {
-            return f64::from(col) * self.metrics.narrow;
-        };
-        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment).x_of(col)
-    }
-
-    pub(super) fn width_between(&self, row: u32, start: u32, end: u32) -> f64 {
-        let Some((text, segment)) = self.segment_of(row) else {
-            return f64::from(end.saturating_sub(start)) * self.metrics.narrow;
-        };
-        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment)
-            .width_between(start, end)
-    }
-
-    pub(super) fn advance_at(&self, row: u32, col: u32) -> f64 {
-        let Some((text, segment)) = self.segment_of(row) else {
-            return self.metrics.narrow;
-        };
-        ColumnRuler::wrapped_row(&text, self.metrics, self.wrap_columns, segment).advance_at(col)
-    }
-
-    pub(super) fn x_of_char(&self, line_no: u32, char_col: u32) -> f64 {
-        for line in self.lines {
-            if line.line_no != line_no {
-                continue;
-            }
-            let mut text = String::new();
-            for span in &line.spans {
-                text.push_str(&span.text);
-            }
-            return ColumnRuler::new(&text, self.metrics).x_of_char(char_col);
-        }
-        f64::from(char_col) * self.metrics.narrow
-    }
-}
-
 #[derive(Clone, Copy)]
-pub(super) struct FileViewport {
+pub(super) struct EditorDom {
     element: Signal<Option<Rc<MountedData>>>,
     field: Signal<Option<Rc<MountedData>>>,
     geometry: Signal<ScrollBox>,
     offset: Signal<(f64, f64)>,
 }
 
-impl FileViewport {
+impl EditorDom {
     pub(super) fn new() -> Self {
         Self {
             element: use_signal(|| None),
@@ -263,15 +157,15 @@ mod tests {
     #[test]
     fn a_code_file_scrolls_by_the_cell_height_its_rows_are_drawn_at() {
         assert_eq!(
-            ScrolledLineHeight::resolve(FileViewMode::Note, "/w/src/main.rs", 18.0),
+            ScrolledLineHeight::resolve(FileViewMode::Note, FileDocumentKind::Text, 18.0),
             Some(18.0)
         );
         assert_eq!(
-            ScrolledLineHeight::resolve(FileViewMode::Editor, "/w/notes/a.md", 18.0),
+            ScrolledLineHeight::resolve(FileViewMode::Editor, FileDocumentKind::Markdown, 18.0),
             Some(18.0)
         );
         assert_eq!(
-            ScrolledLineHeight::resolve(FileViewMode::Note, "/w/notes/a.md", 18.0),
+            ScrolledLineHeight::resolve(FileViewMode::Note, FileDocumentKind::Markdown, 18.0),
             Some(ScrolledLineHeight::NOTE)
         );
     }
@@ -279,7 +173,7 @@ mod tests {
     #[test]
     fn an_unmeasured_cell_refuses_the_scroll_rather_than_landing_at_zero() {
         assert_eq!(
-            ScrolledLineHeight::resolve(FileViewMode::Note, "/w/src/main.rs", 0.0),
+            ScrolledLineHeight::resolve(FileViewMode::Note, FileDocumentKind::Text, 0.0),
             None
         );
     }

@@ -71,8 +71,10 @@ mod tests {
             sequence: 1,
             patches: vec![
                 FileMetaEvent {
+                    revision: 1,
                     path: "src/lib.rs".into(),
                     abs_path: "/repo/src/lib.rs".into(),
+                    kind: FileDocumentKind::Text,
                     language: "Rust".into(),
                     total_lines: 12,
                     indent: Default::default(),

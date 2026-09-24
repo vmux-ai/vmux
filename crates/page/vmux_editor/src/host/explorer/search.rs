@@ -7,7 +7,7 @@ use vmux_core::event::{ExplorerGoto, ExplorerSearchEvent, ExplorerSearchFile, Ex
 
 use super::panel::StackExplorerVisibility;
 use super::{ExplorerPanelDefaults, ExplorerPanelSent};
-use crate::host::editor::FileView;
+use crate::host::editor::{FileDocumentRevision, FileView};
 use crate::host::navigation::PendingGoto;
 use crate::host::viewport::FileViewport;
 
@@ -164,19 +164,25 @@ fn emit_global_search(
 
 fn on_explorer_search_open(
     trigger: On<BinReceive<ExplorerSearchOpen>>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<(
+        &mut FileView,
+        &mut FileDocumentRevision,
+        &mut FileViewport,
+        &mut PageMetadata,
+    )>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let request = &trigger.event().payload;
-    let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(entity) else {
+    let Ok((mut view, mut revision, mut viewport, mut metadata)) = views.get_mut(entity) else {
         return;
     };
     view.navigate(
         entity,
         PathBuf::from(&request.path),
         request.line.saturating_sub(1),
+        &mut revision,
         &mut viewport,
         &mut metadata,
         &mut manager,

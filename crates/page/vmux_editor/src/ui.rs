@@ -1,21 +1,21 @@
 #![allow(non_snake_case)]
 
 mod directory;
-mod document;
+mod dom;
 mod editor;
 mod input;
 mod menu;
 mod note;
 mod sidebar;
 mod status;
+mod text_geometry;
 mod toolbar;
-mod viewport;
 
 use directory::{
     DirColumns, DirWindow, Preview, apply_dir, clear_preview, image_data_url, open_path, parent_of,
     request_preview, scroll_row_into_view, toggle_video, visible_entries,
 };
-use document::{FileArrival, is_markdown_file};
+use dom::{EditorDom, ScrolledLineHeight};
 use editor::{EditorLines, StickyScope};
 use input::{
     CONTAINER_ID, INPUT_ID, PreeditField, focus_container, forward_file_key, send_committed_text,
@@ -27,8 +27,8 @@ pub(crate) use sidebar::ExplorerPane;
 use sidebar::{ExplorerSidebar, ExplorerToggleButton, PaneWidth};
 use status::{EncodingRecovery, FileStatusInfo, FileStatusScope};
 use std::collections::HashMap;
+use text_geometry::RowRuler;
 use toolbar::{EditorTabStrip, FindBar, VimStatus};
-use viewport::{FileViewport, RowRuler, ScrolledLineHeight};
 
 use crate::breadcrumb::EditorBreadcrumbs;
 use crate::explorer::{EditorTabCommand, SidebarView};
@@ -61,6 +61,8 @@ pub fn Page() -> Element {
     use_ui_state_root::<FileUiState>();
     let git_status = use_file_ui::<GitStatusEvent>();
     let mut path = use_signal(String::new);
+    let mut document_revision = use_signal(|| 0u64);
+    let mut document_kind = use_signal(FileDocumentKind::default);
     let mut total_lines = use_signal(|| 0u32);
     let mut total_rows = use_signal(|| 0u32);
     let mut first_row = use_signal(|| 0u32);
@@ -101,7 +103,7 @@ pub fn Page() -> Element {
     let mut thumbs = use_signal(HashMap::<String, String>::new);
     let mut theme_style = use_signal(String::new);
     let mut cell_dims = use_signal(CellMetrics::default);
-    let viewport = FileViewport::new();
+    let dom = EditorDom::new();
     let page_width = use_signal(|| 0u32);
     let last_resize = use_signal(FileResizeEvent::default);
     let mut git_path = use_signal(String::new);
@@ -171,6 +173,7 @@ pub fn Page() -> Element {
     let explorer = ExplorerPane::new(page_width);
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
     let mut doc_title = use_signal(String::new);
+    let is_markdown = use_memo(move || document_kind() == FileDocumentKind::Markdown);
 
     let completions = Completions {
         open: comp_open,
@@ -214,7 +217,9 @@ pub fn Page() -> Element {
     let file_meta = use_file_ui::<FileMetaEvent>();
     use_effect(move || {
         file_meta.for_each(|m| {
-            let arrival = FileArrival::new(&m.abs_path, &git_path.peek());
+            let reset_view = *document_revision.peek() != m.revision;
+            document_revision.set(m.revision);
+            document_kind.set(m.kind);
             doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
             path.set(m.path);
             git_path.set(m.abs_path);
@@ -224,13 +229,13 @@ pub fn Page() -> Element {
             line_ending.set(m.line_ending);
             encoding.set(m.encoding);
             mode.set(Mode::Text);
-            if !arrival.resets_view() {
+            if !reset_view {
                 return;
             }
             error.set(String::new());
             clear_preview(preview, thumbs);
             media.set(None);
-            viewport.reset();
+            dom.reset();
             last_scroll_req.set(0);
             let _ = send(&FileScrollEvent {
                 top_row: 0,
@@ -335,8 +340,7 @@ pub fn Page() -> Element {
             if *find_index.peek() != c.search_index {
                 find_index.set(c.search_index);
             }
-            let note_mode = *file_view_mode.peek() == FileViewMode::Note
-                && is_markdown_file(git_path.peek().as_str());
+            let note_mode = *file_view_mode.peek() == FileViewMode::Note && *is_markdown.peek();
             if note_mode {
                 let active = note_blocks
                     .peek()
@@ -366,7 +370,7 @@ pub fn Page() -> Element {
                 }
             }
             if moved && !note_mode {
-                viewport.reveal_caret();
+                dom.reveal_caret();
             }
         })
     });
@@ -375,11 +379,11 @@ pub fn Page() -> Element {
     use_effect(move || {
         scroll_by.for_each(|event| {
             let Some(line_height) =
-                ScrolledLineHeight::resolve(file_view_mode(), &git_path(), cell_dims().height)
+                ScrolledLineHeight::resolve(file_view_mode(), document_kind(), cell_dims().height)
             else {
                 return;
             };
-            viewport.scroll_by(event.lines, line_height);
+            dom.scroll_by(event.lines, line_height);
         })
     });
 
@@ -450,14 +454,14 @@ pub fn Page() -> Element {
             }
             file_view_mode.set(event.mode);
             match event.mode {
-                FileViewMode::Note if is_markdown_file(&git_path()) => {
+                FileViewMode::Note if is_markdown() => {
                     let line = source_cursor().line;
                     if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
                         note_cursor.activate_centered(index, line);
                     }
                 }
                 FileViewMode::Editor => {
-                    viewport.center_row(cursor().row, cell_dims().height);
+                    dom.center_row(cursor().row, cell_dims().height);
                 }
                 _ => {}
             }
@@ -470,7 +474,7 @@ pub fn Page() -> Element {
             keymap.set(event.keymap);
             if event.keymap == vmux_core::KeymapKind::Vim
                 && file_view_mode() == FileViewMode::Note
-                && is_markdown_file(&git_path())
+                && is_markdown()
             {
                 let line = source_cursor().line;
                 if let Some(index) = note_blocks.read().as_slice().block_index_for_line(line) {
@@ -794,11 +798,11 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         explorer.sync();
-        viewport.announce(cell_dims(), total_lines(), last_resize);
+        dom.announce(cell_dims(), total_lines(), last_resize);
     });
 
     use_effect(move || match mode() {
-        Mode::Text if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) => {
+        Mode::Text if file_view_mode() == FileViewMode::Note && is_markdown() => {
             if note_cursor.editing() {
                 focus_file_input();
             } else {
@@ -819,17 +823,12 @@ pub fn Page() -> Element {
         Mode::Text => outline(),
         Mode::Dir | Mode::Media(_) => Vec::new(),
     };
-    let breadcrumb_caret_line =
-        match file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) {
-            true => source_cursor().line,
-            false => cursor().line,
-        };
-    let status_scope = FileStatusScope::new(
-        mode(),
-        file_view_mode(),
-        is_markdown_file(&git_path()),
-        git_has_diff(),
-    );
+    let breadcrumb_caret_line = match file_view_mode() == FileViewMode::Note && is_markdown() {
+        true => source_cursor().line,
+        false => cursor().line,
+    };
+    let status_scope =
+        FileStatusScope::new(mode(), file_view_mode(), is_markdown(), git_has_diff());
     let status_caret = match status_scope.reading_note() {
         true => source_cursor(),
         false => cursor(),
@@ -877,7 +876,7 @@ pub fn Page() -> Element {
                     Mode::Text => {
                         e.prevent_default();
                         if file_view_mode() == FileViewMode::Note
-                            && is_markdown_file(&git_path())
+                            && is_markdown()
                         {
                             if note_cursor.editing() {
                                 focus_file_input();
@@ -904,7 +903,7 @@ pub fn Page() -> Element {
                 let key = e.key().to_string();
                 if current_mode == Mode::Text
                     && file_view_mode() == FileViewMode::Note
-                    && is_markdown_file(&git_path())
+                    && is_markdown()
                     && !note_cursor.editing()
                 {
                     let _ = forward_file_key(&e, ed_mode());
@@ -1081,9 +1080,9 @@ pub fn Page() -> Element {
                     }
                 }
                 if mode() == Mode::Text {
-                    if is_markdown_file(&git_path()) || git_has_diff() {
+                    if is_markdown() || git_has_diff() {
                         div { class: "flex shrink-0 items-center gap-0.5 rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
-                            if is_markdown_file(&git_path()) {
+                            if is_markdown() {
                                 button {
                                     class: file_mode_class(file_view_mode() == FileViewMode::Note),
                                     title: translate("editor-rendered-markdown"),
@@ -1102,13 +1101,13 @@ pub fn Page() -> Element {
                                 class: file_mode_class(
                                     file_view_mode() == FileViewMode::Editor
                                         || (file_view_mode() == FileViewMode::Note
-                                            && !is_markdown_file(&git_path())),
+                                            && !is_markdown()),
                                 ),
                                 title: translate("editor-source-editor"),
                                 onclick: move |_| {
                                     note_cursor.set_editing(false);
                                     file_view_mode.set(FileViewMode::Editor);
-                                    viewport.center_row(cursor().row, cell_dims().height);
+                                    dom.center_row(cursor().row, cell_dims().height);
                                     let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
                                     focus_file_input();
                                 },
@@ -1140,7 +1139,7 @@ pub fn Page() -> Element {
                                 ed_label.set(String::new());
                                 let _ = send(&FileKeymapSet { keymap: next });
                                 if file_view_mode() == FileViewMode::Note
-                                    && is_markdown_file(&git_path())
+                                    && is_markdown()
                                     && !note_cursor.editing()
                                 {
                                     focus_container();
@@ -1160,7 +1159,7 @@ pub fn Page() -> Element {
                                 ed_label.set(next_mode.label().to_string());
                                 let _ = send(&FileKeymapSet { keymap: next });
                                 if file_view_mode() == FileViewMode::Note
-                                    && is_markdown_file(&git_path())
+                                    && is_markdown()
                                     && !note_cursor.editing()
                                 {
                                     focus_container();
@@ -1313,7 +1312,7 @@ pub fn Page() -> Element {
                             markers: git_line_markers,
                         }
                     }
-                    if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) {
+                    if file_view_mode() == FileViewMode::Note && is_markdown() {
                         {
                             let active = note_cursor.active();
                             let source_position = source_cursor();
@@ -1412,7 +1411,7 @@ pub fn Page() -> Element {
                                             id: INPUT_ID,
                                             value: "{typed}",
                                             onmounted: move |event: Event<MountedData>| {
-                                                viewport.field_mounted(event.data());
+                                                dom.field_mounted(event.data());
                                             },
                                             class: "pointer-events-none absolute left-0 top-0 h-px w-px resize-none overflow-hidden border-0 bg-transparent p-0 opacity-0 outline-none",
                                             autocomplete: "off",
@@ -1563,16 +1562,16 @@ pub fn Page() -> Element {
                                         editor_drag_origin.set(None);
                                     },
                                     onmounted: move |event: Event<MountedData>| {
-                                        viewport.mounted(event.data());
+                                        dom.mounted(event.data());
                                     },
                                     onresize: move |event: Event<ResizeData>| {
                                         let Ok(size) = event.get_border_box_size() else {
                                             return;
                                         };
-                                        viewport.resized((size.width, size.height));
+                                        dom.resized((size.width, size.height));
                                     },
                                     onscroll: move |event: Event<ScrollData>| {
-                                        viewport.scrolled_to((
+                                        dom.scrolled_to((
                                             event.scroll_left(),
                                             event.scroll_top(),
                                         ));
@@ -1608,7 +1607,7 @@ pub fn Page() -> Element {
                                         lines: sticky_lines(),
                                         cell_height: ch,
                                         gutter_chars: gw,
-                                        on_pick: move |row: u32| viewport.center_row(row, ch),
+                                        on_pick: move |row: u32| dom.center_row(row, ch),
                                     }
                                     div { class: "relative", style: "height:{spacer}px;",
                                         EditorLines {
@@ -1739,7 +1738,7 @@ pub fn Page() -> Element {
                                             id: INPUT_ID,
                                             value: "{typed}",
                                             onmounted: move |event: Event<MountedData>| {
-                                                viewport.field_mounted(event.data());
+                                                dom.field_mounted(event.data());
                                             },
                                             class: "absolute z-10 min-w-[2ch] resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-0 outline-none {field_caret}",
                                             style: "left:{cx}px;top:{cy}px;height:{ch}px;color:{txtcol};",

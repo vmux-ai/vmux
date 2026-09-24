@@ -6,7 +6,7 @@ use vmux_core::PageMetadata;
 use vmux_core::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
 use super::{ExplorerState, OpenEditorsDirty, TabsPlugin};
-use crate::host::editor::{Editor, FileView, ParkedEdits};
+use crate::host::editor::{Editor, FileDocumentRevision, FileView, ParkedEdits};
 use crate::host::viewport::FileViewport;
 
 impl Plugin for TabsPlugin {
@@ -119,7 +119,12 @@ impl EditorPageClose {
 fn on_explorer_close_editor(
     trigger: On<BinReceive<ExplorerCloseEditor>>,
     mut states: Query<&mut ExplorerState>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<(
+        &mut FileView,
+        &mut FileDocumentRevision,
+        &mut FileViewport,
+        &mut PageMetadata,
+    )>,
     child_of: Query<&ChildOf>,
     stacks: Query<(), With<vmux_layout::stack::Stack>>,
     mut closing: MessageWriter<vmux_layout::CloseStackRequest>,
@@ -137,7 +142,8 @@ fn on_explorer_close_editor(
         EditorPageClose::holding(entity, &child_of, &stacks, &mut closing);
         return;
     };
-    let Ok((mut file_view, mut viewport, mut metadata)) = views.get_mut(entity) else {
+    let Ok((mut file_view, mut revision, mut viewport, mut metadata)) = views.get_mut(entity)
+    else {
         return;
     };
     if file_view.path != path {
@@ -147,6 +153,7 @@ fn on_explorer_close_editor(
         entity,
         next,
         0,
+        &mut revision,
         &mut viewport,
         &mut metadata,
         &mut manager,

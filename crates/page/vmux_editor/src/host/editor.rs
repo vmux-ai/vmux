@@ -16,16 +16,40 @@ use crate::media::FileMedia;
 use crate::wrap::WrapView;
 
 #[derive(Component, Clone, Debug)]
-#[require(vmux_core::host::FileUiStateUpdates)]
+#[require(vmux_core::host::FileUiStateUpdates, FileDocumentRevision)]
 pub struct FileView {
     pub path: PathBuf,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FileDocumentRevision(u64);
+
+impl Default for FileDocumentRevision {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+impl FileDocumentRevision {
+    fn advance(&mut self) {
+        self.0 = self.0.wrapping_add(1).max(1);
+    }
+
+    pub(crate) fn get(self) -> u64 {
+        self.0
+    }
 }
 
 impl FileView {
     pub(super) fn in_stack(
         stack: Entity,
         children_q: &Query<&Children>,
-        views: &Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+        views: &Query<(
+            &mut FileView,
+            &mut FileDocumentRevision,
+            &mut FileViewport,
+            &mut PageMetadata,
+        )>,
     ) -> Option<Entity> {
         let Ok(children) = children_q.get(stack) else {
             return None;
@@ -39,12 +63,13 @@ impl FileView {
         entity: Entity,
         path: PathBuf,
         top_line: u32,
+        revision: &mut FileDocumentRevision,
         viewport: &mut FileViewport,
         metadata: &mut PageMetadata,
         manager: &mut crate::lsp::manager::LspManager,
         commands: &mut Commands,
     ) {
-        let previous = std::mem::replace(&mut self.path, path);
+        let previous = self.replace_path(path, revision);
         manager.close(&previous);
         metadata.title = self
             .path
@@ -97,6 +122,20 @@ impl FileView {
         let mut url = self.url();
         url.push_str("?vmux-raw=1");
         url
+    }
+
+    pub(crate) fn document_kind(&self) -> vmux_core::event::FileDocumentKind {
+        match crate::markdown::is_markdown_path(&self.path) {
+            true => vmux_core::event::FileDocumentKind::Markdown,
+            false => vmux_core::event::FileDocumentKind::Text,
+        }
+    }
+
+    fn replace_path(&mut self, path: PathBuf, revision: &mut FileDocumentRevision) -> PathBuf {
+        if self.path != path {
+            revision.advance();
+        }
+        std::mem::replace(&mut self.path, path)
     }
 }
 
@@ -277,6 +316,39 @@ mod tests {
     use crate::host::explorer::ExplorerTrees;
     use crate::host::file_lifecycle::{FileBuffer, FileLifecyclePlugin, FileLoadTask, LoadFailure};
     use crate::host::navigation::NavigationPlugin;
+
+    #[test]
+    fn document_revision_changes_only_when_the_path_changes() {
+        let mut view = FileView {
+            path: PathBuf::from("/w/src/main.rs"),
+        };
+        let mut revision = FileDocumentRevision::default();
+
+        view.replace_path(PathBuf::from("/w/src/main.rs"), &mut revision);
+        assert_eq!(revision.get(), 1);
+
+        view.replace_path(PathBuf::from("/w/src/lib.rs"), &mut revision);
+        assert_eq!(revision.get(), 2);
+    }
+
+    #[test]
+    fn document_kind_is_owned_by_the_file_view() {
+        let markdown = FileView {
+            path: PathBuf::from("/w/notes/readme.MDX"),
+        };
+        let source = FileView {
+            path: PathBuf::from("/w/src/main.rs"),
+        };
+
+        assert_eq!(
+            markdown.document_kind(),
+            vmux_core::event::FileDocumentKind::Markdown
+        );
+        assert_eq!(
+            source.document_kind(),
+            vmux_core::event::FileDocumentKind::Text
+        );
+    }
 
     struct Session {
         app: App,

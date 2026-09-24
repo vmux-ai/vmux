@@ -6,7 +6,7 @@ use vmux_core::PageMetadata;
 use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
 
 use crate::edit::Selection;
-use crate::host::editor::{Editor, FileView};
+use crate::host::editor::{Editor, FileDocumentRevision, FileView};
 use crate::host::file_lifecycle::{FileBuffer, FileDir, canon};
 use crate::host::note::NoteRevealLine;
 use crate::host::note::NoteSent;
@@ -67,19 +67,25 @@ impl PendingGoto {
 
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut views: Query<(
+        &mut FileView,
+        &mut FileDocumentRevision,
+        &mut FileViewport,
+        &mut PageMetadata,
+    )>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(entity) else {
+    let Ok((mut view, mut revision, mut viewport, mut metadata)) = views.get_mut(entity) else {
         return;
     };
     view.navigate(
         entity,
         path,
         0,
+        &mut revision,
         &mut viewport,
         &mut metadata,
         &mut manager,

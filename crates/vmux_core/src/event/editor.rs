@@ -27,8 +27,10 @@ pub struct FileLine {
 
 #[vmux_api::contract]
 pub struct FileMetaEvent {
+    pub revision: u64,
     pub path: String,
     pub abs_path: String,
+    pub kind: FileDocumentKind,
     pub language: String,
     pub total_lines: u32,
     #[serde(default)]
@@ -37,6 +39,13 @@ pub struct FileMetaEvent {
     pub line_ending: FileLineEnding,
     #[serde(default)]
     pub encoding: FileEncoding,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub enum FileDocumentKind {
+    #[default]
+    Text,
+    Markdown,
 }
 
 #[vmux_api::contract(Copy, Eq, Default)]
