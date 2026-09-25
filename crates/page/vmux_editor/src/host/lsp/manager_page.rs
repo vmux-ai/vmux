@@ -33,13 +33,20 @@ impl Plugin for ManagerPlugin {
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_update_request)
+            .add_systems(Update, (start_install_jobs, start_uninstall_jobs).chain())
             .add_systems(
                 Update,
-                (start_package_jobs, poll_catalog_jobs, poll_package_jobs),
+                (poll_catalog_jobs, poll_install_jobs, poll_uninstall_jobs),
             )
             .add_systems(
                 PostUpdate,
-                (deliver_manager_outputs, publish_manager_state).chain(),
+                (
+                    deliver_catalog_outputs,
+                    deliver_progress_outputs,
+                    deliver_status_outputs,
+                    publish_manager_state,
+                )
+                    .chain(),
             );
     }
 }
@@ -134,36 +141,48 @@ impl ManagerState {
     }
 }
 
-enum ManagerMsg {
-    Catalog(LspCatalog),
-    Progress(LspInstallProgress),
-    Status(LspPackageStatus),
+#[derive(Component)]
+struct CatalogOutput {
+    target: Entity,
+    catalog: LspCatalog,
 }
 
 #[derive(Component)]
-struct ManagerOutput {
+struct PackageProgressOutput {
     target: Entity,
-    message: ManagerMsg,
+    progress: LspInstallProgress,
 }
 
-impl ManagerOutput {
-    fn new(target: Entity, message: ManagerMsg) -> Self {
-        Self { target, message }
-    }
+#[derive(Component)]
+struct PackageStatusOutput {
+    target: Entity,
+    status: LspPackageStatus,
+}
 
-    fn targets(&self, views: &Query<(Entity, &crate::host::editor::FileView)>) -> Vec<Entity> {
-        let package = match &self.message {
-            ManagerMsg::Catalog(_) => return vec![self.target],
-            ManagerMsg::Progress(event) => event.name.as_str(),
-            ManagerMsg::Status(event) => event.name.as_str(),
-        };
-        let mut targets = vec![self.target];
-        for (entity, view) in views {
+#[derive(bevy::ecs::system::SystemParam)]
+struct PackageTargets<'w, 's> {
+    views: Query<'w, 's, (Entity, &'static crate::host::editor::FileView)>,
+}
+
+impl PackageTargets<'_, '_> {
+    fn matching(&self, target: Entity, package: &str) -> Vec<Entity> {
+        let mut targets = vec![target];
+        for (entity, view) in &self.views {
             if view.uses_lsp_package(package) && !targets.contains(&entity) {
                 targets.push(entity);
             }
         }
         targets
+    }
+
+    fn contains(&self, entity: Entity) -> bool {
+        self.views.contains(entity)
+    }
+
+    fn uses_package(&self, entity: Entity, package: &str) -> bool {
+        self.views
+            .get(entity)
+            .is_ok_and(|(_, view)| view.uses_lsp_package(package))
     }
 }
 
@@ -201,145 +220,168 @@ impl CatalogJob {
     }
 }
 
-#[derive(Clone, Copy)]
-enum PackageOperation {
-    Install,
-    Uninstall,
-}
-
 #[derive(Component)]
-struct PendingPackageOperation {
+struct PendingPackageInstall {
     target: Entity,
     name: String,
-    operation: PackageOperation,
-}
-
-impl PackageOperation {
-    fn run(self, name: String, progress: Sender<LspInstallProgress>) -> ManagerMsg {
-        match self {
-            Self::Install => Self::install(name, progress),
-            Self::Uninstall => Self::uninstall(name),
-        }
-    }
-
-    fn install(name: String, progress: Sender<LspInstallProgress>) -> ManagerMsg {
-        let root = store::default_root();
-        let packages = catalog::ensure_catalog(&root, false).unwrap_or_default();
-        let Some(package) = packages
-            .iter()
-            .find(|package| package.name.as_str() == name)
-            .cloned()
-        else {
-            return ManagerMsg::Progress(LspInstallProgress {
-                name,
-                phase: InstallPhase::Failed,
-                pct: None,
-                message: "package not found in catalog".into(),
-            });
-        };
-        let target = target::host_target();
-        let progress_name = name.clone();
-        let result = install::install(&package, &root, target, |phase, pct, message| {
-            let _ = progress.send(LspInstallProgress {
-                name: progress_name.clone(),
-                phase,
-                pct,
-                message: message.to_string(),
-            });
-        });
-        match result {
-            Ok(receipt) => ManagerMsg::Status(LspPackageStatus {
-                name,
-                status: LspPkgStatus::Installed,
-                version: receipt.version,
-            }),
-            Err(error) => ManagerMsg::Progress(LspInstallProgress {
-                name,
-                phase: InstallPhase::Failed,
-                pct: None,
-                message: error,
-            }),
-        }
-    }
-
-    fn uninstall(name: String) -> ManagerMsg {
-        let root = store::default_root();
-        let Ok(package) = crate::lsp::package_path::PackageName::parse(&name) else {
-            return ManagerMsg::Progress(LspInstallProgress {
-                name,
-                phase: InstallPhase::Failed,
-                pct: None,
-                message: "invalid package name".to_string(),
-            });
-        };
-        if let Err(error) = store::remove(&root, &package) {
-            return ManagerMsg::Progress(LspInstallProgress {
-                name,
-                phase: InstallPhase::Failed,
-                pct: None,
-                message: format!("uninstall failed: {error}"),
-            });
-        }
-        let status = if matches!(
-            store::resolved_command(&root, &name),
-            store::Resolution::OnPath
-        ) {
-            LspPkgStatus::OnPath
-        } else {
-            LspPkgStatus::Available
-        };
-        ManagerMsg::Status(LspPackageStatus {
-            name,
-            status,
-            version: None,
-        })
-    }
 }
 
 #[derive(Component)]
-struct PackageJob {
+struct PendingPackageUninstall {
+    target: Entity,
+    name: String,
+}
+
+#[derive(Component)]
+struct PackageInstallJob {
     target: Entity,
     name: String,
     progress: Receiver<LspInstallProgress>,
-    task: Task<ManagerMsg>,
+    task: Task<Result<LspPackageStatus, LspInstallProgress>>,
 }
 
-impl PackageJob {
-    fn spawn(target: Entity, name: String, operation: PackageOperation) -> Self {
-        let (progress_sender, progress) = crossbeam_channel::unbounded();
-        let task_name = name.clone();
-        let task =
-            IoTaskPool::get().spawn(async move { operation.run(task_name, progress_sender) });
-        Self {
-            target,
+#[derive(Component)]
+struct PackageUninstallJob {
+    target: Entity,
+    name: String,
+    task: Task<Result<LspPackageStatus, LspInstallProgress>>,
+}
+
+fn install_package(
+    name: String,
+    progress: Sender<LspInstallProgress>,
+) -> Result<LspPackageStatus, LspInstallProgress> {
+    let root = store::default_root();
+    let packages = catalog::ensure_catalog(&root, false).unwrap_or_default();
+    let Some(package) = packages
+        .iter()
+        .find(|package| package.name.as_str() == name)
+        .cloned()
+    else {
+        return Err(LspInstallProgress {
             name,
-            progress,
-            task,
-        }
+            phase: InstallPhase::Failed,
+            pct: None,
+            message: "package not found in catalog".into(),
+        });
+    };
+    let target = target::host_target();
+    let progress_name = name.clone();
+    let result = install::install(&package, &root, target, |phase, pct, message| {
+        let _ = progress.send(LspInstallProgress {
+            name: progress_name.clone(),
+            phase,
+            pct,
+            message: message.to_string(),
+        });
+    });
+    match result {
+        Ok(receipt) => Ok(LspPackageStatus {
+            name,
+            status: LspPkgStatus::Installed,
+            version: receipt.version,
+        }),
+        Err(error) => Err(LspInstallProgress {
+            name,
+            phase: InstallPhase::Failed,
+            pct: None,
+            message: error,
+        }),
     }
 }
 
-fn start_package_jobs(
-    pending: Query<(Entity, &PendingPackageOperation), Added<PendingPackageOperation>>,
-    jobs: Query<&PackageJob>,
+fn uninstall_package(name: String) -> Result<LspPackageStatus, LspInstallProgress> {
+    let root = store::default_root();
+    let Ok(package) = crate::lsp::package_path::PackageName::parse(&name) else {
+        return Err(LspInstallProgress {
+            name,
+            phase: InstallPhase::Failed,
+            pct: None,
+            message: "invalid package name".to_string(),
+        });
+    };
+    if let Err(error) = store::remove(&root, &package) {
+        return Err(LspInstallProgress {
+            name,
+            phase: InstallPhase::Failed,
+            pct: None,
+            message: format!("uninstall failed: {error}"),
+        });
+    }
+    let status = if matches!(
+        store::resolved_command(&root, &name),
+        store::Resolution::OnPath
+    ) {
+        LspPkgStatus::OnPath
+    } else {
+        LspPkgStatus::Available
+    };
+    Ok(LspPackageStatus {
+        name,
+        status,
+        version: None,
+    })
+}
+
+fn start_install_jobs(
+    pending: Query<(Entity, &PendingPackageInstall), Added<PendingPackageInstall>>,
+    install_jobs: Query<&PackageInstallJob>,
+    uninstall_jobs: Query<&PackageUninstallJob>,
     mut commands: Commands,
 ) {
-    let mut names = jobs
+    let mut names = install_jobs
         .iter()
         .map(|job| job.name.clone())
         .collect::<HashSet<_>>();
+    names.extend(uninstall_jobs.iter().map(|job| job.name.clone()));
     for (entity, request) in &pending {
         commands.entity(entity).despawn();
         if !names.insert(request.name.clone()) {
             continue;
         }
-        let operation_name = match request.operation {
-            PackageOperation::Install => "install",
-            PackageOperation::Uninstall => "uninstall",
-        };
+        let (progress_sender, progress) = crossbeam_channel::unbounded();
+        let name = request.name.clone();
+        let task_name = name.clone();
+        let task =
+            IoTaskPool::get().spawn(async move { install_package(task_name, progress_sender) });
         commands.spawn((
-            Name::new(format!("LSP {operation_name}: {}", request.name)),
-            PackageJob::spawn(request.target, request.name.clone(), request.operation),
+            Name::new(format!("LSP install: {name}")),
+            PackageInstallJob {
+                target: request.target,
+                name,
+                progress,
+                task,
+            },
+        ));
+    }
+}
+
+fn start_uninstall_jobs(
+    pending: Query<(Entity, &PendingPackageUninstall), Added<PendingPackageUninstall>>,
+    install_jobs: Query<&PackageInstallJob>,
+    uninstall_jobs: Query<&PackageUninstallJob>,
+    mut commands: Commands,
+) {
+    let mut names = install_jobs
+        .iter()
+        .map(|job| job.name.clone())
+        .collect::<HashSet<_>>();
+    names.extend(uninstall_jobs.iter().map(|job| job.name.clone()));
+    for (entity, request) in &pending {
+        commands.entity(entity).despawn();
+        if !names.insert(request.name.clone()) {
+            continue;
+        }
+        let name = request.name.clone();
+        let task_name = name.clone();
+        let task = IoTaskPool::get().spawn(async move { uninstall_package(task_name) });
+        commands.spawn((
+            Name::new(format!("LSP uninstall: {name}")),
+            PackageUninstallJob {
+                target: request.target,
+                name,
+                task,
+            },
         ));
     }
 }
@@ -419,26 +461,23 @@ fn on_catalog_request(
 }
 
 fn on_install_request(trigger: On<UiInput<LspInstallRequest>>, mut commands: Commands) {
-    commands.spawn(PendingPackageOperation {
+    commands.spawn(PendingPackageInstall {
         target: trigger.event().webview,
         name: trigger.event().payload.name.clone(),
-        operation: PackageOperation::Install,
     });
 }
 
 fn on_update_request(trigger: On<UiInput<LspUpdateRequest>>, mut commands: Commands) {
-    commands.spawn(PendingPackageOperation {
+    commands.spawn(PendingPackageInstall {
         target: trigger.event().webview,
         name: trigger.event().payload.name.clone(),
-        operation: PackageOperation::Install,
     });
 }
 
 fn on_uninstall_request(trigger: On<UiInput<LspUninstallRequest>>, mut commands: Commands) {
-    commands.spawn(PendingPackageOperation {
+    commands.spawn(PendingPackageUninstall {
         target: trigger.event().webview,
         name: trigger.event().payload.name.clone(),
-        operation: PackageOperation::Uninstall,
     });
 }
 
@@ -454,73 +493,134 @@ impl crate::host::editor::FileView {
 
 fn poll_catalog_jobs(mut jobs: Query<(Entity, &mut CatalogJob)>, mut commands: Commands) {
     for (entity, mut job) in &mut jobs {
-        let Some(event) = block_on(future::poll_once(&mut job.task)) else {
+        let Some(catalog) = block_on(future::poll_once(&mut job.task)) else {
             continue;
         };
-        commands.spawn(ManagerOutput::new(job.target, ManagerMsg::Catalog(event)));
+        commands.spawn(CatalogOutput {
+            target: job.target,
+            catalog,
+        });
         commands.entity(entity).despawn();
     }
 }
 
-fn poll_package_jobs(mut jobs: Query<(Entity, &mut PackageJob)>, mut commands: Commands) {
+fn poll_install_jobs(mut jobs: Query<(Entity, &mut PackageInstallJob)>, mut commands: Commands) {
     for (entity, mut job) in &mut jobs {
-        for event in job.progress.try_iter() {
-            commands.spawn(ManagerOutput::new(job.target, ManagerMsg::Progress(event)));
+        for progress in job.progress.try_iter() {
+            commands.spawn(PackageProgressOutput {
+                target: job.target,
+                progress,
+            });
         }
-        let Some(message) = block_on(future::poll_once(&mut job.task)) else {
+        let Some(result) = block_on(future::poll_once(&mut job.task)) else {
             continue;
         };
-        commands.spawn(ManagerOutput::new(job.target, message));
+        match result {
+            Ok(status) => {
+                commands.spawn(PackageStatusOutput {
+                    target: job.target,
+                    status,
+                });
+            }
+            Err(progress) => {
+                commands.spawn(PackageProgressOutput {
+                    target: job.target,
+                    progress,
+                });
+            }
+        }
         commands.entity(entity).despawn();
     }
 }
 
-fn deliver_manager_outputs(
-    outputs: Query<(Entity, &ManagerOutput)>,
-    views: Query<(Entity, &crate::host::editor::FileView)>,
+fn poll_uninstall_jobs(
+    mut jobs: Query<(Entity, &mut PackageUninstallJob)>,
+    mut commands: Commands,
+) {
+    for (entity, mut job) in &mut jobs {
+        let Some(result) = block_on(future::poll_once(&mut job.task)) else {
+            continue;
+        };
+        match result {
+            Ok(status) => {
+                commands.spawn(PackageStatusOutput {
+                    target: job.target,
+                    status,
+                });
+            }
+            Err(progress) => {
+                commands.spawn(PackageProgressOutput {
+                    target: job.target,
+                    progress,
+                });
+            }
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn deliver_catalog_outputs(
+    outputs: Query<(Entity, &CatalogOutput)>,
     mut managers: Query<&mut ManagerState>,
     mut commands: Commands,
 ) {
     for (output_entity, output) in &outputs {
-        match &output.message {
-            ManagerMsg::Catalog(ev) => {
-                if let Ok(mut state) = managers.get_mut(output.target) {
-                    state.apply_catalog(ev.clone());
+        if let Ok(mut state) = managers.get_mut(output.target) {
+            state.apply_catalog(output.catalog.clone());
+        }
+        commands.entity(output_entity).despawn();
+    }
+}
+
+fn deliver_progress_outputs(
+    outputs: Query<(Entity, &PackageProgressOutput)>,
+    targets: PackageTargets,
+    mut managers: Query<&mut ManagerState>,
+    mut commands: Commands,
+) {
+    for (output_entity, output) in &outputs {
+        if let Ok(mut state) = managers.get_mut(output.target) {
+            state.apply_progress(output.progress.clone());
+        }
+        for target in targets.matching(output.target, &output.progress.name) {
+            if targets.contains(target) {
+                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    target,
+                    &output.progress,
+                ));
+            }
+        }
+        commands.entity(output_entity).despawn();
+    }
+}
+
+fn deliver_status_outputs(
+    outputs: Query<(Entity, &PackageStatusOutput)>,
+    targets: PackageTargets,
+    mut managers: Query<&mut ManagerState>,
+    mut commands: Commands,
+) {
+    for (output_entity, output) in &outputs {
+        if let Ok(mut state) = managers.get_mut(output.target) {
+            state.apply_status(output.status.clone());
+        }
+        let matching = targets.matching(output.target, &output.status.name);
+        if output.status.status == LspPkgStatus::Installed {
+            for target in matching.iter().copied() {
+                if targets.uses_package(target, &output.status.name) {
+                    commands
+                        .entity(target)
+                        .remove::<crate::lsp::manager::LspOpened>()
+                        .remove::<crate::lsp::manager::LspStatusSent>();
                 }
             }
-            ManagerMsg::Progress(ev) => {
-                if let Ok(mut state) = managers.get_mut(output.target) {
-                    state.apply_progress(ev.clone());
-                }
-                for target in output.targets(&views) {
-                    if views.contains(target) {
-                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(target, ev));
-                    }
-                }
-            }
-            ManagerMsg::Status(ev) => {
-                if let Ok(mut state) = managers.get_mut(output.target) {
-                    state.apply_status(ev.clone());
-                }
-                let targets = output.targets(&views);
-                if ev.status == LspPkgStatus::Installed {
-                    for target in targets.iter().copied() {
-                        if views
-                            .get(target)
-                            .is_ok_and(|(_, view)| view.uses_lsp_package(&ev.name))
-                        {
-                            commands
-                                .entity(target)
-                                .remove::<crate::lsp::manager::LspOpened>()
-                                .remove::<crate::lsp::manager::LspStatusSent>();
-                        }
-                    }
-                }
-                for target in targets {
-                    if views.contains(target) {
-                        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(target, ev));
-                    }
-                }
+        }
+        for target in matching {
+            if targets.contains(target) {
+                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    target,
+                    &output.status,
+                ));
             }
         }
         commands.entity(output_entity).despawn();
