@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{Data, DeriveInput, Expr, Fields, Ident, LitStr, Path, Token, Type};
+use syn::{Data, DeriveInput, Expr, ExprArray, Fields, Ident, LitStr, Path, Token, Type};
 
 struct Args {
     url: Expr,
@@ -21,6 +21,12 @@ struct Args {
     owns_subtree: bool,
     takes: Option<Type>,
     claims: Option<Type>,
+    manifest: bool,
+    title_message_id: Option<LitStr>,
+    replaces_command: Option<LitStr>,
+    keywords: Option<ExprArray>,
+    icon: Option<Expr>,
+    command_bar: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -49,6 +55,12 @@ impl Parse for Args {
         let mut owns_subtree = false;
         let mut takes = None;
         let mut claims = None;
+        let mut manifest = false;
+        let mut title_message_id = None;
+        let mut replaces_command = None;
+        let mut keywords = None;
+        let mut icon = None;
+        let mut command_bar = false;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -57,6 +69,8 @@ impl Parse for Args {
                 "preserve_title" => reports_title = false,
                 "no_favicon" => favicon = false,
                 "transparent" => transparent = true,
+                "manifest" => manifest = true,
+                "command_bar" => command_bar = true,
                 "url" => {
                     input.parse::<Token![=]>()?;
                     url = Some(input.parse()?);
@@ -120,6 +134,22 @@ impl Parse for Args {
                     input.parse::<Token![=]>()?;
                     claims = Some(input.parse()?);
                 }
+                "title_message_id" => {
+                    input.parse::<Token![=]>()?;
+                    title_message_id = Some(input.parse()?);
+                }
+                "replaces_command" => {
+                    input.parse::<Token![=]>()?;
+                    replaces_command = Some(input.parse()?);
+                }
+                "keywords" => {
+                    input.parse::<Token![=]>()?;
+                    keywords = Some(input.parse()?);
+                }
+                "icon" => {
+                    input.parse::<Token![=]>()?;
+                    icon = Some(input.parse()?);
+                }
                 _ => return Err(syn::Error::new_spanned(key, "unknown page option")),
             }
             if !input.is_empty() {
@@ -166,6 +196,12 @@ impl Parse for Args {
             owns_subtree,
             takes,
             claims,
+            manifest,
+            title_message_id,
+            replaces_command,
+            keywords,
+            icon,
+            command_bar,
         })
     }
 }
@@ -186,6 +222,34 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
     }
 
     let ident = &input.ident;
+    let manifest_host = if args.manifest {
+        let Expr::Lit(url) = &args.url else {
+            return Err(syn::Error::new_spanned(
+                &args.url,
+                "page manifest requires a literal vmux:// URL",
+            ));
+        };
+        let syn::Lit::Str(url) = &url.lit else {
+            return Err(syn::Error::new_spanned(
+                &url.lit,
+                "page manifest requires a literal vmux:// URL",
+            ));
+        };
+        let value = url.value();
+        let Some(host) = value
+            .strip_prefix("vmux://")
+            .and_then(|url| url.split('/').next())
+            .filter(|host| !host.is_empty())
+        else {
+            return Err(syn::Error::new_spanned(
+                url,
+                "page manifest requires a vmux:// URL with a host",
+            ));
+        };
+        Some(LitStr::new(host, url.span()))
+    } else {
+        None
+    };
     let url = args.url;
     let title = args.title;
     let component = args.component;
@@ -219,6 +283,37 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
         Some(claims) => quote! { (#plugin).claims::<#claims>() },
         None => plugin,
     };
+    let manifest = manifest_host.map(|host| {
+        let title_message_id = match args.title_message_id {
+            Some(value) => quote! { ::core::option::Option::Some(#value) },
+            None => quote! { ::core::option::Option::None },
+        };
+        let replaces_command = match args.replaces_command {
+            Some(value) => quote! { ::core::option::Option::Some(#value) },
+            None => quote! { ::core::option::Option::None },
+        };
+        let keywords = match args.keywords {
+            Some(value) => quote! { &#value },
+            None => quote! { &[] },
+        };
+        let icon = match args.icon {
+            Some(value) => quote! { ::core::option::Option::Some(#value) },
+            None => quote! { ::core::option::Option::None },
+        };
+        let command_bar = args.command_bar;
+        quote! {
+            pub const MANIFEST: ::vmux_core::page::PageManifest =
+                ::vmux_core::page::PageManifest {
+                    host: #host,
+                    title: #title,
+                    title_message_id: #title_message_id,
+                    replaces_command: #replaces_command,
+                    keywords: #keywords,
+                    icon: #icon,
+                    command_bar: #command_bar,
+                };
+        }
+    });
 
     Ok(quote! {
         #input
@@ -242,6 +337,8 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
                 transparent: #transparent,
                 owns_subtree: #owns_subtree,
             };
+
+            #manifest
 
             pub fn plugin() -> ::vmux_native::NativePagePlugin {
                 #plugin

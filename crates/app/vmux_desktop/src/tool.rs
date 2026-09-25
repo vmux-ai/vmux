@@ -14,7 +14,6 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
-use vmux_core::page::PageManifest;
 use vmux_core::profile::vault::{GeneratedRecoveryKey, VaultRecovery};
 use vmux_core::tool::{
     ToolAdoptRequest, ToolApplyRequest, ToolCategory, ToolForgetRequest, ToolImportRequest,
@@ -132,10 +131,19 @@ impl Plugin for ToolPlugin {
             }
             Err(error) => bevy::log::warn!("Vault watcher init failed: {error}"),
         }
-        app.world_mut().spawn((PAGE_MANIFEST, TOOLS_HOSTED_PAGE));
         app.world_mut().spawn((
-            VAULT_PAGE_MANIFEST,
-            vmux_core::host::page::NativelyHosted::page("vmux://vault/", "Vault"),
+            vmux_layout::tool_page::ToolsPage::MANIFEST,
+            vmux_core::host::page::NativelyHosted::subtree(
+                vmux_layout::tool_page::ToolsPage::URL,
+                vmux_layout::tool_page::ToolsPage::NATIVE.title,
+            ),
+        ));
+        app.world_mut().spawn((
+            vmux_layout::vault_page::VaultPage::MANIFEST,
+            vmux_core::host::page::NativelyHosted::page(
+                vmux_layout::vault_page::VaultPage::URL,
+                vmux_layout::vault_page::VaultPage::NATIVE.title,
+            ),
         ));
         app.world_mut().spawn((
             Name::new("Tool registry"),
@@ -147,176 +155,151 @@ impl Plugin for ToolPlugin {
             VaultRecoveryState::default(),
         ));
         app.add_plugins((
-                vmux_app::extension::McpConnectionPlugin,
-                vmux_tool::ToolPlugin,
-                UiStatePlugin::<ToolsUiState>::default(),
-                UiStatePlugin::<VaultUiState>::default(),
-            ))
-            .add_plugins((
-                UiEventPlugin::<(
-                    ToolsRefreshRequest,
-                    ToolInstallRequest,
-                    ToolUpdateRequest,
-                    ToolUninstallRequest,
-                    ToolForgetRequest,
-                    ToolAdoptRequest,
-                    ToolLinkRequest,
-                    ToolUnlinkRequest,
-                    ToolApplyRequest,
-                    ToolImportRequest,
-                    ToolOpenRequest,
-                    ToolsNavigateRequest,
-                )>::default(),
-                UiEventPlugin::<(
-                    VaultCreateRequest,
-                    VaultConnectRequest,
-                    VaultSyncRequest,
-                    VaultConnectGithubRequest,
-                    VaultConnectFolderRequest,
-                    VaultGenerateRecoveryKeyRequest,
-                    VaultCreateRecoveryKeyRequest,
-                    VaultUnlockRecoveryKeyRequest,
-                    VaultConnectCloudRequest,
-                    VaultCreateCloudFolderRequest,
-                    VaultChooseCloudFolderRequest,
-                    VaultRefreshRequest,
-                )>::default(),
-                UiEventPlugin::<(
-                    VaultProviderSelectRequest,
-                    VaultDestinationSelectRequest,
-                    VaultOwnerSelectRequest,
-                    VaultRepositoryNameRequest,
-                    VaultRepositorySelectRequest,
-                    VaultPrivacyRequest,
-                    VaultWorkflowCreateRequest,
-                    VaultWorkflowConnectRequest,
-                    VaultRecoveryConfirmationRequest,
-                    VaultRecoveryInputRequest,
-                )>::default(),
-            ))
-            .add_observer(on_refresh_request)
-            .add_observer(on_install_request)
-            .add_observer(on_update_request)
-            .add_observer(on_uninstall_request)
-            .add_observer(on_forget_request)
-            .add_observer(on_adopt_request)
-            .add_observer(on_link_request)
-            .add_observer(on_unlink_request)
-            .add_observer(on_apply_request)
-            .add_observer(on_import_request)
-            .add_observer(on_navigate_request)
-            .add_observer(on_vault_create_request)
-            .add_observer(on_vault_connect_request)
-            .add_observer(on_vault_sync_request)
-            .add_observer(on_vault_connect_github_request)
-            .add_observer(on_vault_connect_folder_request)
-            .add_observer(on_vault_generate_recovery_key_request)
-            .add_observer(on_vault_create_recovery_key_request)
-            .add_observer(on_vault_unlock_recovery_key_request)
-            .add_observer(on_vault_connect_cloud_request)
-            .add_observer(on_vault_create_cloud_folder_request)
-            .add_observer(on_vault_choose_cloud_folder_request)
-            .add_observer(on_vault_refresh_request)
-            .add_observer(on_vault_provider_select_request)
-            .add_observer(on_vault_destination_select_request)
-            .add_observer(on_vault_owner_select_request)
-            .add_observer(on_vault_repository_name_request)
-            .add_observer(on_vault_repository_select_request)
-            .add_observer(on_vault_privacy_request)
-            .add_observer(on_vault_workflow_create_request)
-            .add_observer(on_vault_workflow_connect_request)
-            .add_observer(on_vault_recovery_confirmation_request)
-            .add_observer(on_vault_recovery_input_request)
-            .add_observer(on_open_request)
-            .add_systems(
-                Update,
-                (
-                    drain_vault_watch,
-                    start_tools_scan,
-                    drain_tools_scan,
-                    queue_vault_auto_sync,
-                    start_tool_operation,
-                    drain_tool_operations,
-                    start_vault_operation,
-                    emit_tools_state,
-                    emit_vault_state,
-                )
-                    .chain(),
+            vmux_app::extension::McpConnectionPlugin,
+            vmux_tool::ToolPlugin,
+            UiStatePlugin::<ToolsUiState>::default(),
+            UiStatePlugin::<VaultUiState>::default(),
+        ))
+        .add_plugins((
+            UiEventPlugin::<(
+                ToolsRefreshRequest,
+                ToolInstallRequest,
+                ToolUpdateRequest,
+                ToolUninstallRequest,
+                ToolForgetRequest,
+                ToolAdoptRequest,
+                ToolLinkRequest,
+                ToolUnlinkRequest,
+                ToolApplyRequest,
+                ToolImportRequest,
+                ToolOpenRequest,
+                ToolsNavigateRequest,
+            )>::default(),
+            UiEventPlugin::<(
+                VaultCreateRequest,
+                VaultConnectRequest,
+                VaultSyncRequest,
+                VaultConnectGithubRequest,
+                VaultConnectFolderRequest,
+                VaultGenerateRecoveryKeyRequest,
+                VaultCreateRecoveryKeyRequest,
+                VaultUnlockRecoveryKeyRequest,
+                VaultConnectCloudRequest,
+                VaultCreateCloudFolderRequest,
+                VaultChooseCloudFolderRequest,
+                VaultRefreshRequest,
+            )>::default(),
+            UiEventPlugin::<(
+                VaultProviderSelectRequest,
+                VaultDestinationSelectRequest,
+                VaultOwnerSelectRequest,
+                VaultRepositoryNameRequest,
+                VaultRepositorySelectRequest,
+                VaultPrivacyRequest,
+                VaultWorkflowCreateRequest,
+                VaultWorkflowConnectRequest,
+                VaultRecoveryConfirmationRequest,
+                VaultRecoveryInputRequest,
+            )>::default(),
+        ))
+        .add_observer(on_refresh_request)
+        .add_observer(on_install_request)
+        .add_observer(on_update_request)
+        .add_observer(on_uninstall_request)
+        .add_observer(on_forget_request)
+        .add_observer(on_adopt_request)
+        .add_observer(on_link_request)
+        .add_observer(on_unlink_request)
+        .add_observer(on_apply_request)
+        .add_observer(on_import_request)
+        .add_observer(on_navigate_request)
+        .add_observer(on_vault_create_request)
+        .add_observer(on_vault_connect_request)
+        .add_observer(on_vault_sync_request)
+        .add_observer(on_vault_connect_github_request)
+        .add_observer(on_vault_connect_folder_request)
+        .add_observer(on_vault_generate_recovery_key_request)
+        .add_observer(on_vault_create_recovery_key_request)
+        .add_observer(on_vault_unlock_recovery_key_request)
+        .add_observer(on_vault_connect_cloud_request)
+        .add_observer(on_vault_create_cloud_folder_request)
+        .add_observer(on_vault_choose_cloud_folder_request)
+        .add_observer(on_vault_refresh_request)
+        .add_observer(on_vault_provider_select_request)
+        .add_observer(on_vault_destination_select_request)
+        .add_observer(on_vault_owner_select_request)
+        .add_observer(on_vault_repository_name_request)
+        .add_observer(on_vault_repository_select_request)
+        .add_observer(on_vault_privacy_request)
+        .add_observer(on_vault_workflow_create_request)
+        .add_observer(on_vault_workflow_connect_request)
+        .add_observer(on_vault_recovery_confirmation_request)
+        .add_observer(on_vault_recovery_input_request)
+        .add_observer(on_open_request)
+        .add_systems(
+            Update,
+            (
+                drain_vault_watch,
+                start_tools_scan,
+                drain_tools_scan,
+                queue_vault_auto_sync,
+                start_tool_operation,
+                drain_tool_operations,
+                start_vault_operation,
+                emit_tools_state,
+                emit_vault_state,
             )
-            .add_systems(
-                Update,
-                (
-                    start_external_tool_operation::<ToolInstallRequest>,
-                    start_external_tool_operation::<ToolUpdateRequest>,
-                    start_external_tool_operation::<ToolUninstallRequest>,
-                    start_external_tool_operation::<ToolForgetRequest>,
-                    start_external_tool_operation::<ToolAdoptRequest>,
-                    start_external_tool_operation::<ToolLinkRequest>,
-                    start_external_tool_operation::<ToolUnlinkRequest>,
-                    start_external_tool_operation::<ToolApplyRequest>,
-                    start_external_tool_operation::<ToolImportRequest>,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
-                    launch_vault_operation::<VaultCreateRequest>,
-                    launch_vault_operation::<VaultConnectRequest>,
-                    launch_vault_operation::<VaultSyncRequest>,
-                    launch_vault_operation::<VaultConnectGithubRequest>,
-                    launch_vault_operation::<VaultConnectFolderRequest>,
-                    launch_vault_operation::<VaultGenerateRecoveryKeyRequest>,
-                    launch_vault_operation::<VaultCreateRecoveryKeyRequest>,
-                    launch_vault_operation::<VaultUnlockRecoveryKeyRequest>,
-                    launch_vault_operation::<VaultConnectCloudRequest>,
-                    launch_vault_operation::<VaultCreateCloudFolderRequest>,
-                    launch_vault_operation::<VaultChooseCloudFolderRequest>,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
-                    drain_vault_operation::<VaultCreateRequest>,
-                    drain_vault_operation::<VaultConnectRequest>,
-                    drain_vault_operation::<VaultSyncRequest>,
-                    drain_vault_operation::<VaultConnectGithubRequest>,
-                    drain_vault_operation::<VaultConnectFolderRequest>,
-                    drain_vault_operation::<VaultGenerateRecoveryKeyRequest>,
-                    drain_vault_operation::<VaultCreateRecoveryKeyRequest>,
-                    drain_vault_operation::<VaultUnlockRecoveryKeyRequest>,
-                    drain_vault_operation::<VaultConnectCloudRequest>,
-                    drain_vault_operation::<VaultCreateCloudFolderRequest>,
-                    drain_vault_operation::<VaultChooseCloudFolderRequest>,
-                ),
-            )
-            .add_systems(Update, drain_tool_store_operations.before(emit_tools_state));
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                start_external_tool_operation::<ToolInstallRequest>,
+                start_external_tool_operation::<ToolUpdateRequest>,
+                start_external_tool_operation::<ToolUninstallRequest>,
+                start_external_tool_operation::<ToolForgetRequest>,
+                start_external_tool_operation::<ToolAdoptRequest>,
+                start_external_tool_operation::<ToolLinkRequest>,
+                start_external_tool_operation::<ToolUnlinkRequest>,
+                start_external_tool_operation::<ToolApplyRequest>,
+                start_external_tool_operation::<ToolImportRequest>,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                launch_vault_operation::<VaultCreateRequest>,
+                launch_vault_operation::<VaultConnectRequest>,
+                launch_vault_operation::<VaultSyncRequest>,
+                launch_vault_operation::<VaultConnectGithubRequest>,
+                launch_vault_operation::<VaultConnectFolderRequest>,
+                launch_vault_operation::<VaultGenerateRecoveryKeyRequest>,
+                launch_vault_operation::<VaultCreateRecoveryKeyRequest>,
+                launch_vault_operation::<VaultUnlockRecoveryKeyRequest>,
+                launch_vault_operation::<VaultConnectCloudRequest>,
+                launch_vault_operation::<VaultCreateCloudFolderRequest>,
+                launch_vault_operation::<VaultChooseCloudFolderRequest>,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                drain_vault_operation::<VaultCreateRequest>,
+                drain_vault_operation::<VaultConnectRequest>,
+                drain_vault_operation::<VaultSyncRequest>,
+                drain_vault_operation::<VaultConnectGithubRequest>,
+                drain_vault_operation::<VaultConnectFolderRequest>,
+                drain_vault_operation::<VaultGenerateRecoveryKeyRequest>,
+                drain_vault_operation::<VaultCreateRecoveryKeyRequest>,
+                drain_vault_operation::<VaultUnlockRecoveryKeyRequest>,
+                drain_vault_operation::<VaultConnectCloudRequest>,
+                drain_vault_operation::<VaultCreateCloudFolderRequest>,
+                drain_vault_operation::<VaultChooseCloudFolderRequest>,
+            ),
+        )
+        .add_systems(Update, drain_tool_store_operations.before(emit_tools_state));
     }
 }
-
-const PAGE_MANIFEST: PageManifest = PageManifest {
-    host: "tools",
-    title: "Tools",
-    title_message_id: Some("tools-title"),
-    replaces_command: None,
-    keywords: &[
-        "packages", "tools", "dotfiles", "homebrew", "npm", "mcp", "import",
-    ],
-    icon: Some(vmux_core::BuiltinIcon::Hammer),
-    command_bar: true,
-};
-
-const TOOLS_HOSTED_PAGE: vmux_core::host::page::NativelyHosted =
-    vmux_core::host::page::NativelyHosted::subtree("vmux://tools/", "Tools");
-
-const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
-    host: "vault",
-    title: "Vault",
-    title_message_id: Some("vault-title"),
-    replaces_command: None,
-    keywords: &["vault", "sync", "git", "backup", "dotfiles", "knowledge"],
-    icon: Some(vmux_core::BuiltinIcon::Vault),
-    command_bar: true,
-};
 
 const VAULT_AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
 const VAULT_REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
@@ -3311,9 +3294,13 @@ mod tests {
 
     #[test]
     fn tools_page_owns_provider_routes() {
-        assert!(TOOLS_HOSTED_PAGE.answers_for("vmux://tools/extensions"));
-        assert!(TOOLS_HOSTED_PAGE.answers_for("vmux://tools/homebrew"));
-        assert!(!TOOLS_HOSTED_PAGE.answers_for("vmux://toolbox/"));
+        let hosted = vmux_core::host::page::NativelyHosted::subtree(
+            vmux_layout::tool_page::ToolsPage::URL,
+            vmux_layout::tool_page::ToolsPage::NATIVE.title,
+        );
+        assert!(hosted.answers_for("vmux://tools/extensions"));
+        assert!(hosted.answers_for("vmux://tools/homebrew"));
+        assert!(!hosted.answers_for("vmux://toolbox/"));
     }
 
     #[test]

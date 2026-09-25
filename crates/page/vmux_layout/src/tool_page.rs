@@ -21,7 +21,20 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
     title = "Tools",
     component = Page,
     subtree,
-    takes = vmux_core::PageMetadata
+    takes = vmux_core::PageMetadata,
+    manifest,
+    title_message_id = "tools-title",
+    keywords = [
+        "packages",
+        "tools",
+        "dotfiles",
+        "homebrew",
+        "npm",
+        "mcp",
+        "import"
+    ],
+    icon = vmux_core::BuiltinIcon::Hammer,
+    command_bar
 )]
 pub struct ToolsPage;
 
