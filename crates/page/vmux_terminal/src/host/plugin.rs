@@ -31,9 +31,12 @@ use super::input_queue::InputQueuePlugin;
 use super::input_queue::pending_terminal_input;
 use super::input_queue::{NextTerminalInputSequence, enqueue_terminal_input};
 use super::loading::AgentLoading;
-use super::mouse::MouseSelectionState;
+use super::mouse::TerminalMouseState;
 use super::process_control::{PendingTerminalSnapshot, ProcessControlPlugin, TerminalGridSize};
 use super::prompt::PromptCapture;
+use super::state::{
+    CopyModeInputState, CopyModePendingKey, TerminalCopyMode, TerminalMode, TerminalShortcutState,
+};
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::process_index::TerminalProcessIndex;
@@ -111,9 +114,7 @@ struct TerminalInputPlugin;
 
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TerminalModeMap>()
-            .init_resource::<LocalCopyModeState>()
-            .init_resource::<TerminalWebShortcutState>()
+        app.add_systems(PreUpdate, initialize_terminal_state)
             .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
             .add_plugins((
                 super::mouse::MousePlugin,
@@ -126,6 +127,17 @@ impl Plugin for TerminalInputPlugin {
 
 fn prewarm_login_shell_env(settings: Res<AppSettings>) {
     crate::shell_env::prewarm_login_shell_env(terminal_shell(&settings));
+}
+
+fn initialize_terminal_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Commands) {
+    for entity in &terminals {
+        commands.entity(entity).insert((
+            TerminalMode::default(),
+            TerminalCopyMode::default(),
+            TerminalShortcutState::default(),
+            TerminalMouseState::default(),
+        ));
+    }
 }
 
 struct TerminalUpdatePlugin;
@@ -188,56 +200,6 @@ pub use vmux_service::client::ServiceClient;
 #[derive(Resource, Clone)]
 struct ServiceWakeCallback(Option<ServiceWake>);
 
-#[derive(Resource, Default)]
-pub struct TerminalModeMap {
-    pub modes: std::collections::HashMap<ProcessId, TerminalModeFlags>,
-}
-
-impl TerminalModeMap {
-    pub(crate) fn agent_ready(&self, process_id: &ProcessId) -> bool {
-        self.modes
-            .get(process_id)
-            .is_some_and(|mode| mode.alt_screen || mode.mouse_capture || mode.focus_reporting)
-    }
-}
-
-#[derive(Resource, Default)]
-pub(super) struct LocalCopyModeState {
-    active: std::collections::HashSet<ProcessId>,
-    input_states: std::collections::HashMap<ProcessId, CopyModeInputState>,
-}
-
-impl LocalCopyModeState {
-    pub(super) fn set(&mut self, process_id: ProcessId, active: bool) {
-        if active {
-            self.active.insert(process_id);
-        } else {
-            self.active.remove(&process_id);
-            self.input_states.remove(&process_id);
-        }
-    }
-}
-
-#[derive(Resource, Default)]
-struct TerminalWebShortcutState {
-    pending_prefix: Option<(KeyCombo, Instant)>,
-}
-
-#[derive(Default)]
-struct CopyModeInputState {
-    pending_key: Option<CopyModePendingKey>,
-    count: Option<u16>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CopyModePendingKey {
-    G,
-    FindForward,
-    FindBackward,
-    TillForward,
-    TillBackward,
-}
-
 #[derive(Clone, Copy)]
 struct CopyModeKeyInput<'a> {
     key: &'a Key,
@@ -263,14 +225,6 @@ impl<'a> CopyModeKeyInput<'a> {
             ..Self::new(key, key_code)
         }
     }
-}
-
-#[derive(Default, Clone, Copy, Debug)]
-pub struct TerminalModeFlags {
-    pub mouse_capture: bool,
-    pub copy_mode: bool,
-    pub alt_screen: bool,
-    pub focus_reporting: bool,
 }
 
 #[derive(Component)]
@@ -428,7 +382,7 @@ fn open_terminal_page(
         match path.parse::<u32>() {
             Ok(pid) => {
                 if let Some(map) = pid_to_entity
-                    && let Some(&entity) = map.0.get(&pid)
+                    && let Some(entity) = map.get(pid)
                 {
                     pid::focus_pane_entity(entity, commands, child_of_q);
                     return Ok(());
@@ -702,10 +656,13 @@ fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
 pub struct AwaitingProcessCreated;
 
 pub fn mark_terminal_restarting(commands: &mut Commands, entity: Entity) {
-    commands
-        .entity(entity)
-        .remove::<ShellOutputSeen>()
-        .insert(AwaitingProcessCreated);
+    commands.entity(entity).remove::<ShellOutputSeen>().insert((
+        AwaitingProcessCreated,
+        TerminalMode::default(),
+        TerminalCopyMode::default(),
+        TerminalShortcutState::default(),
+        TerminalMouseState::default(),
+    ));
 }
 
 pub fn apply_process_created(
@@ -951,14 +908,6 @@ struct PollServiceWriters<'w> {
     bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-struct PollServiceState<'w> {
-    process_index: Res<'w, TerminalProcessIndex>,
-    mode_map: ResMut<'w, TerminalModeMap>,
-    local_copy_mode: ResMut<'w, LocalCopyModeState>,
-    mouse_state: ResMut<'w, MouseSelectionState>,
-}
-
 fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
@@ -988,25 +937,20 @@ fn agent_focus_transition(
 #[allow(clippy::type_complexity)]
 fn sync_agent_focus(
     agents: Query<
-        (Entity, &ProcessId, Has<AgentFocusBlurred>),
+        (Entity, &ProcessId, &TerminalMode, Has<AgentFocusBlurred>),
         With<vmux_core::agent::AgentSession>,
     >,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    mode_map: Res<TerminalModeMap>,
     service: Option<Res<ServiceClient>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
     let active_pid = crate::target::active_terminal_for_tab(focus.stack, &terminals)
-        .and_then(|entity| agents.get(entity).ok().map(|(_, pid, _)| *pid));
-    for (entity, process_id, blurred) in &agents {
-        let focus_reporting = mode_map
-            .modes
-            .get(process_id)
-            .is_some_and(|m| m.focus_reporting);
+        .and_then(|entity| agents.get(entity).ok().map(|(_, pid, _, _)| *pid));
+    for (entity, process_id, mode, blurred) in &agents {
         let active = Some(*process_id) == active_pid;
-        match agent_focus_transition(focus_reporting, active, blurred) {
+        match agent_focus_transition(mode.focus_reporting, active, blurred) {
             Some(AgentFocusTransition::FocusIn) => {
                 service.0.send(ClientMessage::ProcessInput {
                     process_id: *process_id,
@@ -1071,11 +1015,20 @@ fn poll_service_messages(
         (Entity, &ProcessId, &ChildOf, Has<RetainOnProcessExit>),
         ServiceTerminalFilter,
     >,
+    mut terminal_states: Query<
+        (
+            &mut TerminalMode,
+            &mut TerminalCopyMode,
+            &mut TerminalShortcutState,
+            &mut TerminalMouseState,
+        ),
+        With<Terminal>,
+    >,
     service: Option<Res<ServiceClient>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writers: PollServiceWriters,
-    mut state: PollServiceState,
+    process_index: Res<TerminalProcessIndex>,
     settings: Res<AppSettings>,
     launches: Query<&crate::launch::TerminalLaunch>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
@@ -1126,8 +1079,7 @@ fn poll_service_messages(
     for msg in messages {
         match msg {
             ServiceMessage::ProcessCreated { process_id, pid } => {
-                let entity = state
-                    .process_index
+                let entity = process_index
                     .get(&process_id)
                     .filter(|entity| awaiting_create.contains(*entity));
                 if let Some(entity) = entity {
@@ -1141,8 +1093,7 @@ fn poll_service_messages(
             }
             ServiceMessage::ProcessCreateFailed { process_id, reason } => {
                 bevy::log::warn!("service failed to create process: {reason}");
-                if let Some(entity) = state
-                    .process_index
+                if let Some(entity) = process_index
                     .get(&process_id)
                     .filter(|entity| awaiting_create.contains(*entity))
                 {
@@ -1164,7 +1115,7 @@ fn poll_service_messages(
                 mouse,
                 evicted_total,
             } => {
-                let Some(entity) = state.process_index.get(&process_id) else {
+                let Some(entity) = process_index.get(&process_id) else {
                     continue;
                 };
                 if !terminals.contains(entity) {
@@ -1212,7 +1163,7 @@ fn poll_service_messages(
                     process_id,
                     title: title.clone(),
                 });
-                let Some(entity) = state.process_index.get(&process_id) else {
+                let Some(entity) = process_index.get(&process_id) else {
                     continue;
                 };
                 if !terminals.contains(entity) || !browsers.can_emit_to(&entity) {
@@ -1230,7 +1181,7 @@ fn poll_service_messages(
                 cols,
                 rows,
             } => {
-                let Some(entity) = state.process_index.get(&process_id) else {
+                let Some(entity) = process_index.get(&process_id) else {
                     continue;
                 };
                 if !terminals.contains(entity) {
@@ -1275,12 +1226,17 @@ fn poll_service_messages(
                 writers
                     .process_exited
                     .write(ProcessExitedEvent { process_id });
-                state.mode_map.modes.remove(&process_id);
-                state.local_copy_mode.set(process_id, false);
-                state.mouse_state.remove(&process_id);
-                let Some(entity) = state.process_index.get(&process_id) else {
+                let Some(entity) = process_index.get(&process_id) else {
                     continue;
                 };
+                if let Ok((mut mode, mut copy_mode, mut shortcut, mut mouse)) =
+                    terminal_states.get_mut(entity)
+                {
+                    *mode = TerminalMode::default();
+                    *copy_mode = TerminalCopyMode::default();
+                    *shortcut = TerminalShortcutState::default();
+                    *mouse = TerminalMouseState::default();
+                }
                 let Ok((_, _, child_of, retain_on_exit)) = terminals.get(entity) else {
                     continue;
                 };
@@ -1317,7 +1273,7 @@ fn poll_service_messages(
             ServiceMessage::Error { message } => {
                 if let Some(stale_pid) = missing_process_id(&message)
                     && !restarted_missing_processes.contains(&stale_pid)
-                    && let Some(entity) = state.process_index.get(&stale_pid)
+                    && let Some(entity) = process_index.get(&stale_pid)
                     && terminals.contains(entity)
                 {
                     let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
@@ -1358,16 +1314,18 @@ fn poll_service_messages(
                 alt_screen,
                 focus_reporting,
             } => {
-                state.mode_map.modes.insert(
-                    process_id,
-                    TerminalModeFlags {
+                let Some(entity) = process_index.get(&process_id) else {
+                    continue;
+                };
+                if let Ok((mut mode, mut local_copy_mode, _, _)) = terminal_states.get_mut(entity) {
+                    *mode = TerminalMode {
                         mouse_capture,
                         copy_mode,
                         alt_screen,
                         focus_reporting,
-                    },
-                );
-                state.local_copy_mode.set(process_id, copy_mode);
+                    };
+                    local_copy_mode.set(copy_mode);
+                }
             }
             ServiceMessage::SelectionText {
                 process_id: _,
@@ -1659,14 +1617,12 @@ fn map_copy_mode_key_from_input(
 
 #[cfg(test)]
 fn map_copy_mode_key_with_state(
-    local_copy_mode: &mut LocalCopyModeState,
-    process_id: ProcessId,
+    copy_mode: &mut TerminalCopyMode,
     key: &Key,
     ctrl: bool,
 ) -> Option<vmux_service::protocol::CopyModeKey> {
     map_copy_mode_keys_with_state(
-        local_copy_mode,
-        process_id,
+        copy_mode,
         CopyModeKeyInput {
             key,
             key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
@@ -1679,13 +1635,12 @@ fn map_copy_mode_key_with_state(
 }
 
 fn map_copy_mode_keys_with_state(
-    local_copy_mode: &mut LocalCopyModeState,
-    process_id: ProcessId,
+    copy_mode: &mut TerminalCopyMode,
     input: CopyModeKeyInput<'_>,
 ) -> Vec<vmux_service::protocol::CopyModeKey> {
     use vmux_service::protocol::CopyModeKey as K;
 
-    let state = local_copy_mode.input_states.entry(process_id).or_default();
+    let state = &mut copy_mode.input;
     if let Some(pending) = state.pending_key.take() {
         let key = match pending {
             CopyModePendingKey::G if !input.ctrl && key_char_eq(input, '_') => {
@@ -1999,7 +1954,7 @@ enum TerminalWebShortcutResolution {
 fn resolve_terminal_web_shortcut(
     event: &KeyStroke,
     map: &Keymap,
-    state: &mut TerminalWebShortcutState,
+    state: &mut TerminalShortcutState,
 ) -> TerminalWebShortcutResolution {
     let Some(combo) = term_key_event_to_shortcut_combo(event) else {
         return TerminalWebShortcutResolution::PassThrough;
@@ -2143,15 +2098,19 @@ fn key_code_from_web_code(code: &str) -> KeyCode {
 
 fn on_term_key(
     trigger: On<UiInput<KeyStroke>>,
-    terminals: Query<(), With<Terminal>>,
-    q: Query<&ProcessId, With<Terminal>>,
+    mut terminals: Query<
+        (
+            &ProcessId,
+            &TerminalMode,
+            &mut TerminalCopyMode,
+            &mut TerminalShortcutState,
+        ),
+        With<Terminal>,
+    >,
     agents: Query<&vmux_core::agent::AgentSession>,
     launches: Query<&crate::launch::TerminalLaunch>,
     service: Option<Res<ServiceClient>>,
-    mode_map: Res<TerminalModeMap>,
-    mut local_copy_mode: ResMut<LocalCopyModeState>,
     keymap: Res<Keymap>,
-    mut web_shortcuts: ResMut<TerminalWebShortcutState>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -2160,10 +2119,10 @@ fn on_term_key(
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
-    if terminals.get(entity).is_err() {
+    let Ok((pid, mode, mut copy_mode, mut shortcuts)) = terminals.get_mut(entity) else {
         return;
-    }
-    match resolve_terminal_web_shortcut(event, &keymap, &mut web_shortcuts) {
+    };
+    match resolve_terminal_web_shortcut(event, &keymap, &mut shortcuts) {
         TerminalWebShortcutResolution::Command(id) => {
             let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
             command_invocations.write(vmux_command::CommandInvocation::new(caller, id));
@@ -2179,7 +2138,6 @@ fn on_term_key(
         return;
     }
     let Some(service) = service else { return };
-    let Ok(pid) = q.get(entity) else { return };
     let process_id = *pid;
     let is_vibe = agents.get(entity).ok().map(|session| session.kind)
         == Some(vmux_core::agent::AgentKind::Vibe)
@@ -2224,11 +2182,10 @@ fn on_term_key(
         }
     }
 
-    if is_copy_mode_active(&mode_map, &local_copy_mode, process_id) {
+    if is_copy_mode_active(mode, &copy_mode) {
         let key = term_key_event_to_key(event);
         let mapped = map_copy_mode_keys_with_state(
-            &mut local_copy_mode,
-            process_id,
+            &mut copy_mode,
             CopyModeKeyInput {
                 key: &key,
                 key_code: key_code_from_web_code(&event.code),
@@ -2238,7 +2195,7 @@ fn on_term_key(
         );
         for k in mapped {
             if copy_mode_key_exits(k) {
-                local_copy_mode.set(process_id, false);
+                copy_mode.set(false);
             }
             service
                 .0
@@ -2338,7 +2295,8 @@ fn handle_terminal_copy_mode_command(
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     service: Option<Res<ServiceClient>>,
-    mut local_copy_mode: ResMut<LocalCopyModeState>,
+    process_index: Res<TerminalProcessIndex>,
+    mut copy_modes: Query<&mut TerminalCopyMode, With<Terminal>>,
 ) {
     let Some(service) = service else {
         for _ in requests.read() {}
@@ -2357,7 +2315,11 @@ fn handle_terminal_copy_mode_command(
     let active_process_id = target_processes.first().copied();
     for _ in requests.read() {
         if let Some(process_id) = active_process_id {
-            local_copy_mode.set(process_id, true);
+            if let Some(entity) = process_index.get(&process_id)
+                && let Ok(mut copy_mode) = copy_modes.get_mut(entity)
+            {
+                copy_mode.set(true);
+            }
             service.0.send(ClientMessage::EnterCopyMode { process_id });
         }
     }
@@ -2410,17 +2372,8 @@ fn handle_terminal_clear_command(
     }
 }
 
-fn is_copy_mode_active(
-    mode_map: &TerminalModeMap,
-    local_copy_mode: &LocalCopyModeState,
-    process_id: ProcessId,
-) -> bool {
-    mode_map
-        .modes
-        .get(&process_id)
-        .map(|m| m.copy_mode)
-        .unwrap_or(false)
-        || local_copy_mode.active.contains(&process_id)
+fn is_copy_mode_active(mode: &TerminalMode, copy_mode: &TerminalCopyMode) -> bool {
+    mode.copy_mode || copy_mode.active
 }
 
 fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
@@ -3139,7 +3092,7 @@ mod tests {
             text: Some("l".to_string()),
             ..Default::default()
         };
-        let mut state = TerminalWebShortcutState::default();
+        let mut state = TerminalShortcutState::default();
         let definitions = [vmux_command::CommandDefinition::new(
             "browser_open_page_in_command_bar",
             "Edit Page",
@@ -3167,7 +3120,7 @@ mod tests {
             text: Some("S".to_string()),
             ..Default::default()
         };
-        let mut state = TerminalWebShortcutState::default();
+        let mut state = TerminalShortcutState::default();
         let definitions = [vmux_command::CommandDefinition::new(
             "toggle_layout",
             "Toggle Layout",
@@ -3233,25 +3186,14 @@ mod tests {
     fn vim_g_ends_visual_selection_at_last_non_blank() {
         use vmux_service::protocol::CopyModeKey as K;
 
-        let process_id = ProcessId::new();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
-            map_copy_mode_key_with_state(
-                &mut local_copy_mode,
-                process_id,
-                &Key::Character("g".into()),
-                false
-            ),
+            map_copy_mode_key_with_state(&mut copy_mode, &Key::Character("g".into()), false),
             None
         );
         assert_eq!(
-            map_copy_mode_key_with_state(
-                &mut local_copy_mode,
-                process_id,
-                &Key::Character("_".into()),
-                false
-            ),
+            map_copy_mode_key_with_state(&mut copy_mode, &Key::Character("_".into()), false),
             Some(K::LastNonBlank)
         );
     }
@@ -3260,37 +3202,32 @@ mod tests {
     fn vim_visual_motion_keys_map_to_copy_mode_actions() {
         use vmux_service::protocol::CopyModeKey as K;
 
-        let process_id = ProcessId::new();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("w".into()), KeyCode::KeyW)
             ),
             vec![K::WordForward]
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::shift(&Key::Character("W".into()), KeyCode::KeyW)
             ),
             vec![K::BigWordForward]
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("b".into()), KeyCode::KeyB)
             ),
             vec![K::WordBackward]
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("e".into()), KeyCode::KeyE)
             ),
             vec![K::WordEndForward]
@@ -3298,16 +3235,14 @@ mod tests {
 
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("g".into()), KeyCode::KeyG)
             ),
             Vec::<K>::new()
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("e".into()), KeyCode::KeyE)
             ),
             vec![K::WordEndBackward]
@@ -3315,16 +3250,14 @@ mod tests {
 
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("3".into()), KeyCode::Digit3)
             ),
             Vec::<K>::new()
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("w".into()), KeyCode::KeyW)
             ),
             vec![K::WordForward, K::WordForward, K::WordForward]
@@ -3335,21 +3268,18 @@ mod tests {
     fn shifted_minus_resolves_g_() {
         use vmux_service::protocol::CopyModeKey as K;
 
-        let process_id = ProcessId::new();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("g".into()), KeyCode::KeyG)
             ),
             Vec::<K>::new()
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::shift(&Key::Character("-".into()), KeyCode::Minus)
             ),
             vec![K::LastNonBlank]
@@ -3358,59 +3288,39 @@ mod tests {
 
     #[test]
     fn local_copy_mode_is_active_before_service_broadcast() {
-        let process_id = ProcessId::new();
-        let mode_map = TerminalModeMap::default();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mode = TerminalMode::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
-        assert!(!is_copy_mode_active(
-            &mode_map,
-            &local_copy_mode,
-            process_id
-        ));
+        assert!(!is_copy_mode_active(&mode, &copy_mode));
 
-        local_copy_mode.set(process_id, true);
+        copy_mode.set(true);
 
-        assert!(is_copy_mode_active(&mode_map, &local_copy_mode, process_id));
+        assert!(is_copy_mode_active(&mode, &copy_mode));
     }
 
     #[test]
     fn service_copy_mode_broadcast_reconciles_local_latch() {
-        let process_id = ProcessId::new();
-        let mut mode_map = TerminalModeMap::default();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mode = TerminalMode::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
-        local_copy_mode.set(process_id, true);
-        mode_map.modes.insert(
-            process_id,
-            TerminalModeFlags {
-                mouse_capture: false,
-                copy_mode: false,
-                alt_screen: false,
-                focus_reporting: false,
-            },
-        );
-        local_copy_mode.set(process_id, false);
+        copy_mode.set(true);
+        copy_mode.set(false);
 
-        assert!(!is_copy_mode_active(
-            &mode_map,
-            &local_copy_mode,
-            process_id
-        ));
+        assert!(!is_copy_mode_active(&mode, &copy_mode));
     }
 
     #[test]
     fn exiting_copy_mode_clears_local_latch() {
         use vmux_service::protocol::CopyModeKey as K;
 
-        let process_id = ProcessId::new();
-        let mut local_copy_mode = LocalCopyModeState::default();
-        local_copy_mode.set(process_id, true);
+        let mut copy_mode = TerminalCopyMode::default();
+        copy_mode.set(true);
 
         if copy_mode_key_exits(K::Exit) {
-            local_copy_mode.set(process_id, false);
+            copy_mode.set(false);
         }
 
-        assert!(!local_copy_mode.active.contains(&process_id));
+        assert!(!copy_mode.active);
     }
 
     #[test]

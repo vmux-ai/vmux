@@ -7,14 +7,15 @@ use vmux_service::protocol::ProcessId;
 use crate::Terminal;
 use crate::event::{AgentPromptDraftEvent, TermLoadingEvent};
 
-use super::plugin::{ServiceMessageSet, ShellOutputSeen, TerminalModeMap};
+use super::plugin::{ServiceMessageSet, ShellOutputSeen};
 use super::prompt::{BufferedAgentPrompt, PromptCapture};
+use super::state::TerminalMode;
 
 pub(crate) struct LoadingPlugin;
 
 impl Plugin for LoadingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TerminalModeMap>().add_systems(
+        app.add_systems(
             Update,
             (
                 arm_agent_loading,
@@ -212,20 +213,19 @@ fn clear_agent_loading(
     loading: Query<
         (
             Entity,
-            &ProcessId,
             Option<&vmux_core::agent::AgentSession>,
             &AgentLoading,
             Option<&PromptCapture>,
             Has<ShellOutputSeen>,
+            Option<&TerminalMode>,
         ),
         With<Terminal>,
     >,
-    modes: Res<TerminalModeMap>,
     mut commands: Commands,
 ) {
-    for (entity, process_id, session, state, capture, output_seen) in &loading {
+    for (entity, session, state, capture, output_seen, mode) in &loading {
         let ready = match session {
-            Some(_) => modes.agent_ready(process_id),
+            Some(_) => mode.is_some_and(TerminalMode::agent_ready),
             None => output_seen,
         };
         if !ready && state.since.elapsed() < AGENT_LOADING_TIMEOUT {
@@ -420,20 +420,12 @@ mod tests {
                     since: Instant::now(),
                     announced: true,
                 },
+                TerminalMode {
+                    alt_screen: true,
+                    ..default()
+                },
             ))
             .id();
-        app.world_mut()
-            .resource_mut::<TerminalModeMap>()
-            .modes
-            .insert(
-                process_id,
-                super::super::plugin::TerminalModeFlags {
-                    mouse_capture: false,
-                    copy_mode: false,
-                    alt_screen: true,
-                    focus_reporting: false,
-                },
-            );
 
         app.update();
 
@@ -457,20 +449,12 @@ mod tests {
                     announced: true,
                 },
                 capture,
+                TerminalMode {
+                    alt_screen: true,
+                    ..default()
+                },
             ))
             .id();
-        app.world_mut()
-            .resource_mut::<TerminalModeMap>()
-            .modes
-            .insert(
-                process_id,
-                super::super::plugin::TerminalModeFlags {
-                    mouse_capture: false,
-                    copy_mode: false,
-                    alt_screen: true,
-                    focus_reporting: false,
-                },
-            );
         app.update();
         (app, entity)
     }

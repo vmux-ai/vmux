@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::Instant;
 
 use bevy::prelude::*;
@@ -9,14 +8,13 @@ use vmux_service::protocol::{ClientMessage, ProcessId};
 use crate::Terminal;
 use crate::event::{MOD_ALT, MOD_CTRL, MOD_SHIFT, TermMouseEvent, TermSelectionRange};
 
-use super::plugin::{LocalCopyModeState, TerminalModeMap};
+use super::state::{TerminalCopyMode, TerminalMode};
 
 pub(super) struct MousePlugin;
 
 impl Plugin for MousePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MouseSelectionState>()
-            .add_plugins(UiEventPlugin::<(TermMouseEvent,)>::default())
+        app.add_plugins(UiEventPlugin::<(TermMouseEvent,)>::default())
             .add_observer(on_term_mouse);
     }
 }
@@ -24,19 +22,8 @@ impl Plugin for MousePlugin {
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
 
-#[derive(Resource, Default)]
-pub(super) struct MouseSelectionState {
-    per_process: HashMap<ProcessId, MouseSessionState>,
-}
-
-impl MouseSelectionState {
-    pub(super) fn remove(&mut self, process_id: &ProcessId) {
-        self.per_process.remove(process_id);
-    }
-}
-
-#[derive(Default, Clone, Debug)]
-struct MouseSessionState {
+#[derive(Component, Default, Clone, Debug)]
+pub(crate) struct TerminalMouseState {
     last_click: Option<MouseClickRecord>,
     drag_active: bool,
     drag_visual_active: bool,
@@ -63,7 +50,7 @@ enum MouseTerminalEffect {
     SelectLineAt { row: u16 },
 }
 
-impl MouseSessionState {
+impl TerminalMouseState {
     fn apply(
         &mut self,
         event: &TermMouseEvent,
@@ -220,14 +207,10 @@ fn send_mouse_effect(effect: MouseTerminalEffect, service: &ServiceHandle, proce
     }
 }
 
-fn update_copy_mode(
-    effect: &MouseTerminalEffect,
-    state: &mut LocalCopyModeState,
-    process_id: ProcessId,
-) {
+fn update_copy_mode(effect: &MouseTerminalEffect, state: &mut TerminalCopyMode) {
     match effect {
-        MouseTerminalEffect::EnterCopyMode => state.set(process_id, true),
-        MouseTerminalEffect::ExitCopyMode => state.set(process_id, false),
+        MouseTerminalEffect::EnterCopyMode => state.set(true),
+        MouseTerminalEffect::ExitCopyMode => state.set(false),
         _ => {}
     }
 }
@@ -249,18 +232,24 @@ fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bo
 
 fn on_term_mouse(
     trigger: On<UiInput<TermMouseEvent>>,
-    terminals: Query<&ProcessId, With<Terminal>>,
+    mut terminals: Query<
+        (
+            &ProcessId,
+            &TerminalMode,
+            &mut TerminalMouseState,
+            &mut TerminalCopyMode,
+        ),
+        With<Terminal>,
+    >,
     service: Option<Res<ServiceClient>>,
-    modes: Res<TerminalModeMap>,
-    mut selections: ResMut<MouseSelectionState>,
-    mut copy_mode: ResMut<LocalCopyModeState>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
     let Some(service) = service else { return };
-    let Ok(process_id) = terminals.get(entity).copied() else {
+    let Ok((process_id, mode, mut selection, mut copy_mode)) = terminals.get_mut(entity) else {
         return;
     };
+    let process_id = *process_id;
 
     if event.button == 64 || event.button == 65 {
         service.0.send(ClientMessage::MouseWheel {
@@ -273,13 +262,8 @@ fn on_term_mouse(
         return;
     }
 
-    let mouse_capture = modes
-        .modes
-        .get(&process_id)
-        .is_some_and(|mode| mode.mouse_capture);
-    let selection = selections.per_process.entry(process_id).or_default();
-    for effect in selection.apply(event, mouse_capture, Instant::now()) {
-        update_copy_mode(&effect, &mut copy_mode, process_id);
+    for effect in selection.apply(event, mode.mouse_capture, Instant::now()) {
+        update_copy_mode(&effect, &mut copy_mode);
         send_mouse_effect(effect, &service.0, process_id);
     }
 }
@@ -301,7 +285,7 @@ mod tests {
 
     #[test]
     fn drag_enters_visual_mode_on_first_motion_and_exits_on_release() {
-        let mut state = MouseSessionState::default();
+        let mut state = TerminalMouseState::default();
         let now = Instant::now();
 
         let down = mouse_event(0, 2, 3, true, false);
@@ -334,7 +318,7 @@ mod tests {
 
     #[test]
     fn single_click_never_enters_visual_mode() {
-        let mut state = MouseSessionState::default();
+        let mut state = TerminalMouseState::default();
         let now = Instant::now();
 
         let down = mouse_event(0, 2, 3, true, false);
@@ -352,7 +336,7 @@ mod tests {
 
     #[test]
     fn captured_mouse_without_shift_still_forwards_drag_motion() {
-        let mut state = MouseSessionState::default();
+        let mut state = TerminalMouseState::default();
         let event = mouse_event(0, 4, 5, true, true);
 
         assert_eq!(
@@ -365,7 +349,7 @@ mod tests {
 
     #[test]
     fn hover_motion_without_app_capture_is_not_forwarded() {
-        let mut state = MouseSessionState::default();
+        let mut state = TerminalMouseState::default();
         let hover = mouse_event(3, 9, 4, true, true);
 
         assert_eq!(
@@ -376,7 +360,7 @@ mod tests {
 
     #[test]
     fn hover_motion_with_app_capture_is_forwarded() {
-        let mut state = MouseSessionState::default();
+        let mut state = TerminalMouseState::default();
         let hover = mouse_event(3, 9, 4, true, true);
 
         assert_eq!(

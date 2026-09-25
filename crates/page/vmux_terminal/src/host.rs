@@ -15,6 +15,7 @@ mod request;
 pub mod shell_env;
 pub mod shell_input;
 pub mod snapshot_updater;
+mod state;
 pub mod target;
 pub mod theme;
 
