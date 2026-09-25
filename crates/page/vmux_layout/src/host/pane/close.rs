@@ -79,27 +79,6 @@ struct CloseDialogOperation {
     task: Task<bool>,
 }
 
-impl CloseDialogOperation {
-    fn new(
-        target: CloseTarget,
-        wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
-    ) -> Self {
-        let task = IoTaskPool::get().spawn(async move {
-            let result = rfd::AsyncMessageDialog::new()
-                .set_title("Close terminal?")
-                .set_description("A process is still running in this terminal. Close anyway?")
-                .set_buttons(rfd::MessageButtons::YesNo)
-                .show()
-                .await;
-            if let Some(wake) = wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            matches!(result, rfd::MessageDialogResult::Yes)
-        });
-        Self { target, task }
-    }
-}
-
 fn request_pane_close(
     mut reader: MessageReader<CloseRequest>,
     active_tab: ActiveTabParam,
@@ -405,7 +384,19 @@ fn start_close_dialogs(
         .remove::<PendingPaneClose>()
         .remove::<PendingStackClose>();
     let wake = wake.as_deref().map(|proxy| (**proxy).clone());
-    commands.spawn(CloseDialogOperation::new(target, wake));
+    let task = IoTaskPool::get().spawn(async move {
+        let result = rfd::AsyncMessageDialog::new()
+            .set_title("Close terminal?")
+            .set_description("A process is still running in this terminal. Close anyway?")
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show()
+            .await;
+        if let Some(wake) = wake {
+            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+        }
+        matches!(result, rfd::MessageDialogResult::Yes)
+    });
+    commands.spawn(CloseDialogOperation { target, task });
 }
 
 #[cfg(test)]

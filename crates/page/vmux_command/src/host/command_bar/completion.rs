@@ -22,7 +22,8 @@ impl Plugin for CompletionPlugin {
                 (
                     warm_project_index.after(WriteCommandBarSnapshots),
                     answer_settled_project_index.after(warm_project_index),
-                    answer_path_completions.after(answer_settled_project_index),
+                    start_path_completions.after(answer_settled_project_index),
+                    answer_path_completions.after(start_path_completions),
                 ),
             );
     }
@@ -48,11 +49,10 @@ fn on_path_complete_request(
     let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
     if roots.is_empty() {
         index.forget(asking);
-        commands.entity(asking).insert(PathCompletionOperation::new(
+        commands.entity(asking).insert(PathCompletionRequest {
             request_id,
-            query,
-            vmux_core::host::wake::Wake::from_resource(proxy),
-        ));
+            query: query.to_string(),
+        });
         return;
     }
     let bias = RankBias::new(
@@ -65,14 +65,16 @@ fn on_path_complete_request(
     let Some(completions) =
         index.matches(&roots, &bias, request_id, query, asking, proxy.as_deref())
     else {
-        commands.entity(asking).insert(PathCompletionOperation::new(
+        commands.entity(asking).insert(PathCompletionRequest {
             request_id,
-            query,
-            vmux_core::host::wake::Wake::from_resource(proxy),
-        ));
+            query: query.to_string(),
+        });
         return;
     };
-    commands.entity(asking).remove::<PathCompletionOperation>();
+    commands
+        .entity(asking)
+        .remove::<PathCompletionRequest>()
+        .remove::<PathCompletionOperation>();
     commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
         asking,
         &completions.response(request_id),
@@ -122,6 +124,7 @@ fn answer_settled_project_index(
             index.forget(asked.webview);
             commands
                 .entity(asked.webview)
+                .remove::<PathCompletionRequest>()
                 .remove::<PathCompletionOperation>();
             continue;
         }
@@ -139,11 +142,34 @@ fn answer_settled_project_index(
         };
         commands
             .entity(asked.webview)
+            .remove::<PathCompletionRequest>()
             .remove::<PathCompletionOperation>();
         commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
             asked.webview,
             &completions.response(asked.request_id),
         ));
+    }
+}
+
+fn start_path_completions(
+    requests: Query<(Entity, &PathCompletionRequest), Changed<PathCompletionRequest>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (webview, request) in &requests {
+        let query = PathQuery(request.query.clone());
+        let wake = vmux_core::host::wake::Wake::beside(proxy.as_deref());
+        let task = IoTaskPool::get().spawn(async move {
+            let _wake = wake;
+            query.complete()
+        });
+        commands
+            .entity(webview)
+            .remove::<PathCompletionRequest>()
+            .insert(PathCompletionOperation {
+                request_id: request.request_id,
+                task,
+            });
     }
 }
 
@@ -153,7 +179,7 @@ fn answer_path_completions(
     mut commands: Commands,
 ) {
     for (webview, mut pending) in &mut paths {
-        let Some(completions) = pending.poll() else {
+        let Some(completions) = block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
         if browsers.can_emit_to(&webview) {
@@ -211,24 +237,15 @@ impl ProjectQuery {
 }
 
 #[derive(Component)]
+struct PathCompletionRequest {
+    request_id: u64,
+    query: String,
+}
+
+#[derive(Component)]
 struct PathCompletionOperation {
     request_id: u64,
     task: Task<ProjectCompletions>,
-}
-
-impl PathCompletionOperation {
-    fn new(request_id: u64, query: &str, wake: vmux_core::host::wake::Wake) -> Self {
-        let query = PathQuery(query.to_string());
-        let task = IoTaskPool::get().spawn(async move {
-            let _wake = wake;
-            query.complete()
-        });
-        Self { request_id, task }
-    }
-
-    fn poll(&mut self) -> Option<ProjectCompletions> {
-        block_on(future::poll_once(&mut self.task))
-    }
 }
 
 struct PathQuery(String);
