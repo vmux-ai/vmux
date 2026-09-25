@@ -11,7 +11,6 @@ use vmux_ui::scroll::ScrollIntoView;
 use super::active_session::ActiveSessionPanel;
 use super::bookmark::{
     BookmarkContext, BookmarkDragState, BookmarkInput, BookmarksSection, LayoutContextMenu,
-    OptimisticPinOrder,
 };
 use super::stack::{NewStackRow, SideSheetStackRow};
 use super::state::LayoutUi;
@@ -171,10 +170,8 @@ fn SideSheetContent() -> Element {
     let initial_folders = folders.clone();
     let mut folder_context = use_signal(|| initial_folders);
     let drag_state = use_signal(|| None::<BookmarkDragState>);
-    let optimistic_pin_order = use_signal(|| None::<OptimisticPinOrder>);
     use_context_provider(|| folder_context);
     use_context_provider(|| drag_state);
-    use_context_provider(|| optimistic_pin_order);
     use_effect(move || folder_context.set(folders.clone()));
     use_drop(move || {
         BookmarkContext::set_active(false);
@@ -194,7 +191,7 @@ fn SideSheetContent() -> Element {
             div { class: "flex h-full min-h-0 flex-col",
                 div {
                     class: "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2 text-foreground [scrollbar-gutter:stable]",
-                    ..BookmarkDragState::listeners(drag_state, optimistic_pin_order),
+                    ..BookmarkDragState::listeners(drag_state),
                     if let Some(space) = active_space {
                         div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                             SideSheetSpaceRow { key: "{space.id}", space: space.clone() }

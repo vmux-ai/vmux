@@ -1,16 +1,14 @@
-use std::rc::Rc;
-
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_api::bookmark::{
-    BookmarkAddRequest, BookmarkContextMenuRequest, BookmarkFolderChoice,
-    BookmarkFolderCreateRequest, BookmarkFolderMoveRequest, BookmarkFolderRemoveRequest,
-    BookmarkFolderRenameRequest, BookmarkFolderRow, BookmarkFolderToggleRequest,
-    BookmarkMenuEffect, BookmarkMenuEntryRequest, BookmarkMenuFolderRequest, BookmarkMenuInput,
-    BookmarkMenuPinRequest, BookmarkMenuRootRequest, BookmarkMovePinRequest, BookmarkMoveRequest,
-    BookmarkNode, BookmarkOpenRequest, BookmarkPinRequest, BookmarkPinUrlRequest,
-    BookmarkRemoveRequest, BookmarkRenameRequest, BookmarkReorderPinRequest, BookmarkRow,
-    BookmarkStateEvent, BookmarkTextInputRequest, BookmarkUnpinRequest,
+    BookmarkAddRequest, BookmarkContextMenuRequest, BookmarkDropRequest, BookmarkDropSource,
+    BookmarkDropTarget, BookmarkFolderChoice, BookmarkFolderCreateRequest,
+    BookmarkFolderMoveRequest, BookmarkFolderRemoveRequest, BookmarkFolderRenameRequest,
+    BookmarkFolderRow, BookmarkFolderToggleRequest, BookmarkMenuEffect, BookmarkMenuEntryRequest,
+    BookmarkMenuFolderRequest, BookmarkMenuInput, BookmarkMenuPinRequest, BookmarkMenuRootRequest,
+    BookmarkMoveRequest, BookmarkNode, BookmarkOpenRequest, BookmarkPinRequest,
+    BookmarkRemoveRequest, BookmarkRenameRequest, BookmarkRow, BookmarkStateEvent,
+    BookmarkTextInputRequest, BookmarkUnpinRequest,
 };
 use vmux_core::PageMetadata;
 use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, ContextMenuItem};
@@ -41,7 +39,6 @@ pub(super) fn BookmarksSection(
         folders,
     } = bookmarks;
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
-    let mut optimistic_pin_order: Signal<Option<OptimisticPinOrder>> = use_context();
     let mut creating_folder = use_signal(|| false);
     let new_folder_draft = use_signal(|| translate("layout-new-folder"));
     let bookmark_menu: Memo<BookmarkMenuEffect> = use_context();
@@ -61,25 +58,8 @@ pub(super) fn BookmarksSection(
         }
     });
     let folder_rows = bookmark_folder_rows(&roots);
-    let host_pin_order = pins.iter().map(|pin| pin.uuid.clone()).collect::<Vec<_>>();
-    let observed_host_pin_order = host_pin_order.clone();
-    use_effect(use_reactive!(|observed_host_pin_order| {
-        let Some(optimistic) = optimistic_pin_order() else {
-            return;
-        };
-        if observed_host_pin_order == optimistic.expected
-            || observed_host_pin_order != optimistic.baseline
-        {
-            optimistic_pin_order.set(None);
-        }
-    }));
-    let pins = optimistic_pin_order()
-        .as_ref()
-        .map(|optimistic| optimistic.apply(&pins))
-        .unwrap_or(pins);
     let active_url = active_page.as_ref().map(|page| page.url.clone());
-    let rendered_pin_order = Rc::new(pins.iter().map(|pin| pin.uuid.clone()).collect::<Vec<_>>());
-    let root_targeted = bookmark_drop_targeted(drag_state, &BookmarkDropTarget::Root);
+    let root_targeted = bookmark_drop_targeted(drag_state, &BookmarkDragTarget::Root);
     let root_drop_label = drag_state()
         .filter(|drag| drag.active)
         .map(|drag| match drag.item {
@@ -101,8 +81,8 @@ pub(super) fn BookmarksSection(
             },
             div {
                 "data-bookmark-drop": "root",
-                onpointerenter: move |_| set_bookmark_drop_target(drag_state, BookmarkDropTarget::Root),
-                onpointerleave: move |_| clear_bookmark_drop_target(drag_state, &BookmarkDropTarget::Root),
+                onpointerenter: move |_| set_bookmark_drop_target(drag_state, BookmarkDragTarget::Root),
+                onpointerleave: move |_| clear_bookmark_drop_target(drag_state, &BookmarkDragTarget::Root),
                 class: if root_targeted {
                     "flex items-center bg-foreground/10 ring-1 ring-inset ring-ring"
                 } else {
@@ -174,7 +154,6 @@ pub(super) fn BookmarksSection(
                                         key: "{pin.uuid}",
                                         row: pin.clone(),
                                         index,
-                                        pin_order: rendered_pin_order.clone(),
                                         active: active_url.as_ref().is_some_and(|active_url| {
                                             let Some(active) = vmux_api::VmuxRoute::parse(active_url) else {
                                                 return false;
@@ -245,24 +224,14 @@ pub(super) fn BookmarksSection(
 
 #[derive(Clone, PartialEq)]
 pub(super) enum BookmarkDragItem {
-    Page {
-        metadata: PageMetadata,
-    },
-    Bookmark {
-        uuid: String,
-    },
-    Pin {
-        uuid: String,
-        source_index: usize,
-        order: Rc<Vec<String>>,
-    },
-    Folder {
-        uuid: String,
-    },
+    Page { metadata: PageMetadata },
+    Bookmark { uuid: String },
+    Pin { uuid: String, source_index: usize },
+    Folder { uuid: String },
 }
 
 #[derive(Clone, PartialEq)]
-enum BookmarkDropTarget {
+enum BookmarkDragTarget {
     Root,
     Folder(String),
     Pin { uuid: String, index: usize },
@@ -276,45 +245,27 @@ pub(super) struct BookmarkDragState {
     current_x: f64,
     current_y: f64,
     active: bool,
-    target: Option<BookmarkDropTarget>,
+    target: Option<BookmarkDragTarget>,
 }
 
-#[derive(Clone, PartialEq)]
-pub(super) struct OptimisticPinOrder {
-    baseline: Vec<String>,
-    expected: Vec<String>,
-}
-
-impl OptimisticPinOrder {
-    fn after_drop(order: &[String], source_index: usize, target_index: usize) -> Option<Self> {
-        if source_index == target_index
-            || source_index >= order.len()
-            || target_index >= order.len()
-        {
-            return None;
+impl From<BookmarkDragItem> for BookmarkDropSource {
+    fn from(item: BookmarkDragItem) -> Self {
+        match item {
+            BookmarkDragItem::Page { metadata } => Self::Page { metadata },
+            BookmarkDragItem::Bookmark { uuid } => Self::Bookmark { uuid },
+            BookmarkDragItem::Pin { uuid, .. } => Self::Pin { uuid },
+            BookmarkDragItem::Folder { uuid } => Self::Folder { uuid },
         }
-        let mut expected = order.to_vec();
-        let moved = expected.remove(source_index);
-        expected.insert(target_index, moved);
-        Some(Self {
-            baseline: order.to_vec(),
-            expected,
-        })
     }
+}
 
-    fn apply(&self, pins: &[BookmarkRow]) -> Vec<BookmarkRow> {
-        let mut ordered = Vec::with_capacity(pins.len());
-        for uuid in &self.expected {
-            if let Some(pin) = pins.iter().find(|pin| &pin.uuid == uuid) {
-                ordered.push(pin.clone());
-            }
+impl From<BookmarkDragTarget> for BookmarkDropTarget {
+    fn from(target: BookmarkDragTarget) -> Self {
+        match target {
+            BookmarkDragTarget::Root => Self::Root,
+            BookmarkDragTarget::Folder(uuid) => Self::Folder { uuid },
+            BookmarkDragTarget::Pin { uuid, .. } => Self::Pin { uuid },
         }
-        for pin in pins {
-            if !self.expected.contains(&pin.uuid) {
-                ordered.push(pin.clone());
-            }
-        }
-        ordered
     }
 }
 
@@ -341,7 +292,7 @@ impl PinDragVisual {
             return Self::default();
         };
         let target_index = match state.target.as_ref() {
-            Some(BookmarkDropTarget::Pin { index, .. }) => Some(*index),
+            Some(BookmarkDragTarget::Pin { index, .. }) => Some(*index),
             _ => None,
         };
         if source_uuid == uuid {
@@ -429,10 +380,7 @@ impl BookmarkDragState {
         bookmark_drag_blocks_click(state)
     }
 
-    pub(super) fn listeners(
-        state: Signal<Option<Self>>,
-        optimistic_pin_order: Signal<Option<OptimisticPinOrder>>,
-    ) -> Vec<Attribute> {
+    pub(super) fn listeners(state: Signal<Option<Self>>) -> Vec<Attribute> {
         if state.read().is_none() {
             return Vec::new();
         }
@@ -441,9 +389,7 @@ impl BookmarkDragState {
             dioxus_elements::events::onpointermove(move |event| {
                 update_bookmark_drag(state, &event)
             }),
-            dioxus_elements::events::onpointerup(move |event| {
-                end_bookmark_drag(state, optimistic_pin_order, &event)
-            }),
+            dioxus_elements::events::onpointerup(move |event| end_bookmark_drag(state, &event)),
             dioxus_elements::events::onpointercancel(move |event| {
                 cancel_bookmark_drag(state, &event)
             }),
@@ -482,12 +428,12 @@ fn bookmark_folder_rows(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderRow> {
 }
 
 #[component]
-fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: bool) -> Element {
+fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let url_open = row.metadata.url.clone();
     let uuid_unpin = row.uuid.clone();
     let menu_val = use_signal(|| row.uuid.clone());
-    let drop_target = BookmarkDropTarget::Pin {
+    let drop_target = BookmarkDragTarget::Pin {
         uuid: row.uuid.clone(),
         index,
     };
@@ -497,7 +443,6 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
     let drag_item = BookmarkDragItem::Pin {
         uuid: row.uuid.clone(),
         source_index: index,
-        order: pin_order,
     };
     rsx! {
         div {
@@ -532,7 +477,7 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
                                     event.stop_propagation();
                                     return;
                                 }
-                                open_bookmark(u.clone());
+                                let _ = send(&BookmarkOpenRequest { url: u.clone() });
                             }
                         },
                         title: "{row.metadata.title}",
@@ -558,14 +503,14 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
                         ContextMenuItem {
                             index: 0usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let u = url_open.clone(); move |_: String| open_bookmark(u.clone()) },
+                            on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone() }); } },
                             attributes: vec![],
                             {translate("common-open")}
                         }
                         ContextMenuItem {
                             index: 1usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let id = uuid_unpin.clone(); move |_: String| BookmarkIdCommand::Unpin.send(id.clone()) },
+                            on_select: { let id = uuid_unpin.clone(); move |_: String| { let _ = send(&BookmarkUnpinRequest { uuid: id.clone() }); } },
                             attributes: vec![],
                             {translate("layout-unpin-page")}
                         }
@@ -573,7 +518,7 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
                             ContextMenuItem {
                                 index: 2usize,
                                 value: Into::<ReadSignal<String>>::into(menu_val),
-                                on_select: { let id = row.uuid.clone(); move |_: String| BookmarkIdCommand::Remove.send(id.clone()) },
+                                on_select: { let id = row.uuid.clone(); move |_: String| { let _ = send(&BookmarkRemoveRequest { uuid: id.clone() }); } },
                                 attributes: vec![],
                                 {translate("layout-remove-bookmark")}
                             }
@@ -583,79 +528,6 @@ fn PinTile(row: BookmarkRow, index: usize, pin_order: Rc<Vec<String>>, active: b
             }
         }
     }
-}
-
-fn open_bookmark(url: String) {
-    let _ = send(&BookmarkOpenRequest { url });
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum BookmarkIdCommand {
-    Remove,
-    Pin,
-    Unpin,
-    ToggleFolder,
-    RemoveFolder,
-}
-
-impl BookmarkIdCommand {
-    pub(super) fn send(self, uuid: String) {
-        match self {
-            Self::Remove => {
-                let _ = send(&BookmarkRemoveRequest { uuid });
-            }
-            Self::Pin => {
-                let _ = send(&BookmarkPinRequest { uuid });
-            }
-            Self::Unpin => {
-                let _ = send(&BookmarkUnpinRequest { uuid });
-            }
-            Self::ToggleFolder => {
-                let _ = send(&BookmarkFolderToggleRequest { uuid });
-            }
-            Self::RemoveFolder => {
-                let _ = send(&BookmarkFolderRemoveRequest { uuid });
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum BookmarkPageCommand {
-    Add,
-    Pin,
-}
-
-impl BookmarkPageCommand {
-    pub(super) fn send(self, metadata: PageMetadata, folder: Option<String>) {
-        match self {
-            Self::Add => {
-                let _ = send(&BookmarkAddRequest { metadata, folder });
-            }
-            Self::Pin => {
-                let _ = send(&BookmarkPinUrlRequest { metadata });
-            }
-        }
-    }
-}
-
-fn move_bookmark(uuid: String, folder: Option<String>) {
-    let _ = send(&BookmarkMoveRequest { uuid, folder });
-}
-
-fn move_pin(uuid: String, folder: Option<String>) {
-    let _ = send(&BookmarkMovePinRequest { uuid, folder });
-}
-
-fn reorder_pin(uuid: String, target_uuid: String) -> bool {
-    send(&BookmarkReorderPinRequest { uuid, target_uuid }).is_ok()
-}
-
-fn move_bookmark_folder(uuid: String, folder: Option<String>) {
-    let _ = send(&BookmarkFolderMoveRequest {
-        uuid,
-        parent: folder,
-    });
 }
 
 fn commit_bookmark_rename(uuid: String, name: String) {
@@ -687,7 +559,7 @@ fn begin_bookmark_drag(
     let target = match &item {
         BookmarkDragItem::Pin {
             uuid, source_index, ..
-        } => Some(BookmarkDropTarget::Pin {
+        } => Some(BookmarkDragTarget::Pin {
             uuid: uuid.clone(),
             index: *source_index,
         }),
@@ -723,66 +595,11 @@ fn update_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Ev
     state.set(Some(drag));
 }
 
-fn perform_bookmark_drop(
-    item: BookmarkDragItem,
-    target: BookmarkDropTarget,
-    mut optimistic_pin_order: Signal<Option<OptimisticPinOrder>>,
-) {
-    match (item, target) {
-        (
-            BookmarkDragItem::Pin {
-                uuid,
-                source_index,
-                order,
-            },
-            BookmarkDropTarget::Pin {
-                uuid: target_uuid,
-                index: target_index,
-            },
-        ) => {
-            if uuid != target_uuid {
-                let optimistic = OptimisticPinOrder::after_drop(&order, source_index, target_index);
-                if !reorder_pin(uuid, target_uuid) {
-                    optimistic_pin_order.set(None);
-                    return;
-                }
-                optimistic_pin_order.set(optimistic.clone());
-                spawn(async move {
-                    sleep_ms(1_000).await;
-                    if optimistic_pin_order() == optimistic {
-                        optimistic_pin_order.set(None);
-                    }
-                });
-            }
-        }
-        (BookmarkDragItem::Page { metadata }, BookmarkDropTarget::Root) => {
-            BookmarkPageCommand::Add.send(metadata, None)
-        }
-        (BookmarkDragItem::Page { metadata }, BookmarkDropTarget::Folder(folder)) => {
-            BookmarkPageCommand::Add.send(metadata, Some(folder))
-        }
-        (BookmarkDragItem::Bookmark { uuid }, BookmarkDropTarget::Root) => {
-            move_bookmark(uuid, None)
-        }
-        (BookmarkDragItem::Bookmark { uuid }, BookmarkDropTarget::Folder(folder)) => {
-            move_bookmark(uuid, Some(folder))
-        }
-        (BookmarkDragItem::Pin { uuid, .. }, BookmarkDropTarget::Root) => move_pin(uuid, None),
-        (BookmarkDragItem::Pin { uuid, .. }, BookmarkDropTarget::Folder(folder)) => {
-            move_pin(uuid, Some(folder))
-        }
-        (BookmarkDragItem::Folder { uuid }, BookmarkDropTarget::Root) => {
-            move_bookmark_folder(uuid, None)
-        }
-        (BookmarkDragItem::Folder { uuid }, BookmarkDropTarget::Folder(folder)) => {
-            if uuid != folder {
-                move_bookmark_folder(uuid, Some(folder));
-            }
-        }
-        (BookmarkDragItem::Page { .. }, BookmarkDropTarget::Pin { .. })
-        | (BookmarkDragItem::Bookmark { .. }, BookmarkDropTarget::Pin { .. })
-        | (BookmarkDragItem::Folder { .. }, BookmarkDropTarget::Pin { .. }) => {}
-    }
+fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDragTarget) {
+    let _ = send(&BookmarkDropRequest {
+        source: item.into(),
+        target: target.into(),
+    });
 }
 
 fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
@@ -792,11 +609,7 @@ fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>)
     });
 }
 
-fn end_bookmark_drag(
-    mut state: Signal<Option<BookmarkDragState>>,
-    optimistic_pin_order: Signal<Option<OptimisticPinOrder>>,
-    event: &Event<PointerData>,
-) {
+fn end_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Event<PointerData>) {
     let Some(mut drag) = state() else {
         return;
     };
@@ -812,7 +625,7 @@ fn end_bookmark_drag(
     drag.active = true;
     set_bookmark_context_menu_active(false);
     if let Some(target) = drag.target.clone() {
-        perform_bookmark_drop(drag.item.clone(), target, optimistic_pin_order);
+        perform_bookmark_drop(drag.item.clone(), target);
     }
     state.set(Some(drag));
     clear_bookmark_drag_after_click(state);
@@ -826,7 +639,7 @@ fn cancel_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Ev
 
 fn set_bookmark_drop_target(
     mut state: Signal<Option<BookmarkDragState>>,
-    target: BookmarkDropTarget,
+    target: BookmarkDragTarget,
 ) {
     let Some(mut drag) = state() else {
         return;
@@ -840,7 +653,7 @@ fn set_bookmark_drop_target(
 
 fn clear_bookmark_drop_target(
     mut state: Signal<Option<BookmarkDragState>>,
-    target: &BookmarkDropTarget,
+    target: &BookmarkDragTarget,
 ) {
     let Some(mut drag) = state() else {
         return;
@@ -858,7 +671,7 @@ fn bookmark_drag_blocks_click(state: Signal<Option<BookmarkDragState>>) -> bool 
 
 fn bookmark_drop_targeted(
     state: Signal<Option<BookmarkDragState>>,
-    target: &BookmarkDropTarget,
+    target: &BookmarkDragTarget,
 ) -> bool {
     state().is_some_and(|drag| drag.active && drag.target.as_ref() == Some(target))
 }
@@ -938,7 +751,7 @@ fn BookmarkFolder(
             }),
     );
     let remove_index = 4 + move_targets.len();
-    let drop_target = BookmarkDropTarget::Folder(uuid.clone());
+    let drop_target = BookmarkDragTarget::Folder(uuid.clone());
     let leave_target = drop_target.clone();
     let folder_targeted = bookmark_drop_targeted(drag_state, &drop_target);
     let drag_item = BookmarkDragItem::Folder { uuid: uuid.clone() };
@@ -1017,7 +830,9 @@ fn BookmarkFolder(
                                             if bookmark_drag_blocks_click(drag_state) {
                                                 return;
                                             }
-                                            BookmarkIdCommand::ToggleFolder.send(id.clone());
+                                            let _ = send(&BookmarkFolderToggleRequest {
+                                                uuid: id.clone(),
+                                            });
                                         }
                                     },
                                     trailing: rsx! {
@@ -1036,7 +851,7 @@ fn BookmarkFolder(
                         ContextMenuItem {
                             index: 0usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let id = uuid.clone(); move |_: String| BookmarkIdCommand::ToggleFolder.send(id.clone()) },
+                            on_select: { let id = uuid.clone(); move |_: String| { let _ = send(&BookmarkFolderToggleRequest { uuid: id.clone() }); } },
                             attributes: vec![],
                             {if collapsed { translate("common-expand") } else { translate("common-collapse") }}
                         }
@@ -1049,15 +864,15 @@ fn BookmarkFolder(
                                 let page = active_page.clone();
                                 move |_: String| {
                                     if let Some(page) = page.clone() {
-                                        BookmarkPageCommand::Add.send(
-                                            PageMetadata {
+                                        let _ = send(&BookmarkAddRequest {
+                                            metadata: PageMetadata {
                                                 title: page.title,
                                                 url: page.url,
                                                 icon: page.icon,
                                                 bg_color: page.bg_color,
                                             },
-                                            Some(id.clone()),
-                                        );
+                                            folder: Some(id.clone()),
+                                        });
                                     }
                                 }
                             },
@@ -1069,7 +884,9 @@ fn BookmarkFolder(
                             value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: move |_: String| {
                                 if collapsed {
-                                    BookmarkIdCommand::ToggleFolder.send(new_folder_uuid.clone());
+                                    let _ = send(&BookmarkFolderToggleRequest {
+                                        uuid: new_folder_uuid.clone(),
+                                    });
                                 }
                                 begin_new_folder(creating_child, child_draft);
                             },
@@ -1094,7 +911,12 @@ fn BookmarkFolder(
                                 on_select: {
                                     let id = uuid.clone();
                                     let folder = target_folder.clone();
-                                    move |_: String| move_bookmark_folder(id.clone(), folder.clone())
+                                    move |_: String| {
+                                        let _ = send(&BookmarkFolderMoveRequest {
+                                            uuid: id.clone(),
+                                            parent: folder.clone(),
+                                        });
+                                    }
                                 },
                                 attributes: vec![],
                                 "{label}"
@@ -1103,7 +925,7 @@ fn BookmarkFolder(
                         ContextMenuItem {
                             index: remove_index,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: { let id = uuid.clone(); move |_: String| BookmarkIdCommand::RemoveFolder.send(id.clone()) },
+                            on_select: { let id = uuid.clone(); move |_: String| { let _ = send(&BookmarkFolderRemoveRequest { uuid: id.clone() }); } },
                             attributes: vec![],
                             {translate("layout-remove-folder")}
                         }
@@ -1283,7 +1105,7 @@ fn BookmarkEntry(
                                         if bookmark_drag_blocks_click(drag_state) {
                                             return;
                                         }
-                                        open_bookmark(u.clone());
+                                        let _ = send(&BookmarkOpenRequest { url: u.clone() });
                                     }
                                 },
                             }
@@ -1295,7 +1117,7 @@ fn BookmarkEntry(
                     ContextMenuItem {
                         index: 0usize,
                         value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let u = url_open.clone(); move |_: String| open_bookmark(u.clone()) },
+                        on_select: { let u = url_open.clone(); move |_: String| { let _ = send(&BookmarkOpenRequest { url: u.clone() }); } },
                         attributes: vec![],
                         {translate("common-open")}
                     }
@@ -1314,12 +1136,14 @@ fn BookmarkEntry(
                         value: Into::<ReadSignal<String>>::into(menu_val),
                         on_select: {
                             let id = uuid_pin.clone();
-                            let command = if row.pinned {
-                                BookmarkIdCommand::Unpin
-                            } else {
-                                BookmarkIdCommand::Pin
-                            };
-                            move |_: String| command.send(id.clone())
+                            let pinned = row.pinned;
+                            move |_: String| {
+                                if pinned {
+                                    let _ = send(&BookmarkUnpinRequest { uuid: id.clone() });
+                                } else {
+                                    let _ = send(&BookmarkPinRequest { uuid: id.clone() });
+                                }
+                            }
                         },
                         attributes: vec![],
                         {if row.pinned { translate("layout-unpin-page") } else { translate("layout-pin") }}
@@ -1332,7 +1156,12 @@ fn BookmarkEntry(
                             on_select: {
                                 let id = row.uuid.clone();
                                 let folder = target_folder.clone();
-                                move |_: String| move_bookmark(id.clone(), folder.clone())
+                                move |_: String| {
+                                    let _ = send(&BookmarkMoveRequest {
+                                        uuid: id.clone(),
+                                        folder: folder.clone(),
+                                    });
+                                }
                             },
                             attributes: vec![],
                             "{label}"
@@ -1341,7 +1170,7 @@ fn BookmarkEntry(
                     ContextMenuItem {
                         index: remove_index,
                         value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let id = uuid_remove.clone(); move |_: String| BookmarkIdCommand::Remove.send(id.clone()) },
+                        on_select: { let id = uuid_remove.clone(); move |_: String| { let _ = send(&BookmarkRemoveRequest { uuid: id.clone() }); } },
                         attributes: vec![],
                         {translate("common-remove")}
                     }
@@ -1448,27 +1277,5 @@ impl BookmarkContextTarget {
                 });
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn optimistic_pin_order_moves_the_source_to_the_target_slot() {
-        let order = vec!["a".into(), "b".into(), "c".into(), "d".into()];
-
-        let optimistic = OptimisticPinOrder::after_drop(&order, 0, 2).unwrap();
-
-        assert_eq!(optimistic.baseline, order);
-        assert_eq!(optimistic.expected, ["b", "c", "a", "d"]);
-    }
-
-    #[test]
-    fn optimistic_pin_order_ignores_a_drop_on_the_same_slot() {
-        let order = vec!["a".into(), "b".into()];
-
-        assert!(OptimisticPinOrder::after_drop(&order, 1, 1).is_none());
     }
 }

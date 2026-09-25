@@ -1,7 +1,9 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_api::bookmark::BookmarkToggleRequest;
+use vmux_api::bookmark::{
+    BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
+};
 use vmux_core::event::team::{TeamMemberRow, TeamRequest};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
@@ -13,7 +15,7 @@ use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::util::cn;
 
-use super::bookmark::{BookmarkIdCommand, BookmarkPageCommand, LayoutContextMenu};
+use super::bookmark::LayoutContextMenu;
 use super::stack::{StackIcon, StackTitle};
 use super::state::LayoutUi;
 use super::tab_drag::TabDrag;
@@ -219,9 +221,9 @@ fn HeaderContent() -> Element {
                             },
                             onclick: move |_| {
                                 if let Some(uuid) = pinned_uuid.clone() {
-                                    BookmarkIdCommand::Unpin.send(uuid);
+                                    let _ = send(&BookmarkUnpinRequest { uuid });
                                 } else if let Some(metadata) = active_metadata.clone() {
-                                    BookmarkPageCommand::Pin.send(metadata, None);
+                                    let _ = send(&BookmarkPinUrlRequest { metadata });
                                 }
                             },
                             Icon { class: "h-4 w-4",
@@ -405,14 +407,14 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
                 ContextMenuItem {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| BookmarkPageCommand::Add.send(bookmark_metadata.clone(), None),
+                    on_select: move |_: String| { let _ = send(&BookmarkAddRequest { metadata: bookmark_metadata.clone(), folder: None }); },
                     attributes: vec![],
                     {translate("layout-bookmark")}
                 }
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| BookmarkPageCommand::Pin.send(pin_metadata.clone(), None),
+                    on_select: move |_: String| { let _ = send(&BookmarkPinUrlRequest { metadata: pin_metadata.clone() }); },
                     attributes: vec![],
                     {translate("layout-pin")}
                 }
