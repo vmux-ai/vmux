@@ -531,26 +531,25 @@ impl SpaceViewTemplate {
             })
     }
 
-    fn spawn(
+    fn bundle(&self, main: Entity) -> impl Bundle {
+        (
+            vmux_layout::space::Space,
+            vmux_layout::space::SpaceId(self.id.clone()),
+            Name::new(self.name.clone()),
+            vmux_core::Order(self.order),
+            vmux_core::Active,
+            vmux_history::LastActivatedAt::now(),
+            vmux_layout::space::space_view_bundle(),
+            ChildOf(main),
+        )
+    }
+
+    fn layout_request(
         &self,
-        main: Entity,
+        space: Entity,
         window: Entity,
         settings: Option<&vmux_setting::AppSettings>,
-        layout_requests: &mut MessageWriter<TabLayoutSpawnRequest>,
-        commands: &mut Commands,
-    ) -> Entity {
-        let space = commands
-            .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId(self.id.clone()),
-                Name::new(self.name.clone()),
-                vmux_core::Order(self.order),
-                vmux_core::Active,
-                vmux_history::LastActivatedAt::now(),
-                vmux_layout::space::space_view_bundle(),
-                ChildOf(main),
-            ))
-            .id();
+    ) -> TabLayoutSpawnRequest {
         let startup_dir = settings.and_then(|settings| settings.startup_dir(&self.id));
         let content = settings
             .map(|settings| settings.startup_url(&self.id))
@@ -560,7 +559,7 @@ impl SpaceViewTemplate {
                 pending_prompt: None,
             })
             .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
-        layout_requests.write(TabLayoutSpawnRequest {
+        TabLayoutSpawnRequest {
             space,
             primary_window: window,
             name: None,
@@ -568,8 +567,7 @@ impl SpaceViewTemplate {
             content,
             clear_pending_stack: true,
             focus: true,
-        });
-        space
+        }
     }
 }
 
@@ -759,13 +757,8 @@ fn on_space_delete(
         else {
             continue;
         };
-        fallback.spawn(
-            affected_main,
-            affected_window,
-            settings.as_deref(),
-            &mut layout_requests,
-            &mut commands,
-        );
+        let space = commands.spawn(fallback.bundle(affected_main)).id();
+        layout_requests.write(fallback.layout_request(space, affected_window, settings.as_deref()));
         if affected_main == main {
             active_id.0 = Some(fallback.id.clone());
         }
@@ -805,13 +798,8 @@ fn on_space_attach(
             return;
         };
         deactivate_spaces_in_main(&spaces, main, &mut commands);
-        template.spawn(
-            main,
-            window,
-            settings.as_deref(),
-            &mut layout_requests,
-            &mut commands,
-        );
+        let space = commands.spawn(template.bundle(main)).id();
+        layout_requests.write(template.layout_request(space, window, settings.as_deref()));
         active_id.0 = Some(id.to_string());
         return;
     };

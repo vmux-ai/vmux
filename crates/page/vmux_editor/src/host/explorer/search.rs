@@ -2,14 +2,12 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::PageMetadata;
 use vmux_core::event::{ExplorerGoto, ExplorerSearchEvent, ExplorerSearchFile, ExplorerSearchOpen};
 
 use super::panel::StackExplorerVisibility;
 use super::{ExplorerPanelDefaults, ExplorerPanelSent};
-use crate::host::editor::{FileDocumentRevision, FileView};
+use crate::host::editor::{FileNavigateRequest, FileView};
 use crate::host::navigation::PendingGoto;
-use crate::host::viewport::FileViewport;
 
 pub(super) struct SearchPlugin;
 
@@ -162,32 +160,14 @@ fn emit_global_search(
     }
 }
 
-fn on_explorer_search_open(
-    trigger: On<UiInput<ExplorerSearchOpen>>,
-    mut views: Query<(
-        &mut FileView,
-        &mut FileDocumentRevision,
-        &mut FileViewport,
-        &mut PageMetadata,
-    )>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
-) {
+fn on_explorer_search_open(trigger: On<UiInput<ExplorerSearchOpen>>, mut commands: Commands) {
     let entity = trigger.event().webview;
     let request = &trigger.event().payload;
-    let Ok((mut view, mut revision, mut viewport, mut metadata)) = views.get_mut(entity) else {
-        return;
-    };
-    view.navigate(
+    commands.trigger(FileNavigateRequest::new(
         entity,
         PathBuf::from(&request.path),
         request.line.saturating_sub(1),
-        &mut revision,
-        &mut viewport,
-        &mut metadata,
-        &mut manager,
-        &mut commands,
-    );
+    ));
     commands.entity(entity).insert(PendingGoto::selection(
         request.line.saturating_sub(1),
         request.col,

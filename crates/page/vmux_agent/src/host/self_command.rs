@@ -18,9 +18,9 @@ use crate::session::AgentSession;
 
 use super::follow::file_touch_url;
 use super::run_terminal::{
-    AgentCwd, AgentPane, AgentTerminalRegions, PagerEnv, PendingRunTerminalSpawn,
-    PendingRunTerminalSpawns, ProjectsDirectory, RunCommand, RunPlacementPolicy, RunTerminal,
-    RunTerminalBucketPanes, RunTerminalCandidate,
+    AgentCwd, AgentPane, AgentTerminalRegions, NextPaneSpawnSequence, PagerEnv,
+    PendingRunTerminalSpawn, PendingRunTerminalSpawns, ProjectsDirectory, RunCommand,
+    RunPlacementPolicy, RunTerminal, RunTerminalBucketPanes, RunTerminalCandidate,
 };
 use super::workspace::{
     AgentTabWorktreeContext, PendingAgentChoice, PendingAgentChoiceOperation,
@@ -309,12 +309,11 @@ fn handle_agent_self_commands(
                 match terminal {
                     Some(pid) => match RunTerminal::new(*pid).launch(&term_pids, &launch_q) {
                         Ok(launch) => {
-                            run.queue(
-                                &mut writers.terminal_reinput,
+                            writers.terminal_reinput.write(run.reinput(
                                 *pid,
                                 &launch,
                                 PagerEnv::Inherited,
-                            );
+                            ));
                             AgentCommandResult::Text(pid.to_string())
                         }
                         Err(error) => AgentCommandResult::Error(error),
@@ -397,21 +396,24 @@ fn handle_agent_self_commands(
                                     candidate.pid
                                 ));
                             };
-                            run.queue(
-                                &mut writers.terminal_reinput,
+                            writers.terminal_reinput.write(run.reinput(
                                 candidate.pid,
                                 launch,
                                 PagerEnv::Set,
-                            );
+                            ));
                             regions.run_terminals.insert(*anchor, candidate.pid);
                             regions.run_panes.insert(*anchor, candidate.pane);
-                            AgentPane::new(candidate.pane).touch_spawn_seq(
-                                &mut commands,
-                                &mut spawn_counter,
-                                &ctx.seq_q,
-                            );
+                            let sequence =
+                                NextPaneSpawnSequence::take(&mut spawn_counter, &ctx.seq_q);
+                            commands.entity(candidate.pane).insert(sequence);
                             if focus {
-                                candidate.focus(&mut commands, &ctx.child_of_q, &ctx.tab_q);
+                                for entity in
+                                    candidate.activation_entities(&ctx.child_of_q, &ctx.tab_q)
+                                {
+                                    commands
+                                        .entity(entity)
+                                        .insert(vmux_core::LastActivatedAt::now());
+                                }
                             }
                             break 'spawn AgentCommandResult::Text(candidate.pid.to_string());
                         }
@@ -453,14 +455,21 @@ fn handle_agent_self_commands(
                                             self_pane, &ctx,
                                         )
                                     });
-                                    AgentPane::new(anchor_pane).split_off(
-                                        &mut commands,
+                                    let split = AgentPane::new(anchor_pane).split(
                                         direction,
                                         focus,
                                         &ctx.pane_children,
                                         &ctx.tab_filter,
                                         &ctx.split_dir_q,
                                         &mut split_this_batch,
+                                    );
+                                    vmux_layout::pane::split_or_extend(
+                                        &mut commands,
+                                        split.pane,
+                                        split.direction,
+                                        &split.existing_tabs,
+                                        split.focus,
+                                        split.already_split,
                                     )
                                 }
                             }
@@ -474,11 +483,8 @@ fn handle_agent_self_commands(
                                 &ctx,
                             ),
                         };
-                        AgentPane::new(target_pane).touch_spawn_seq(
-                            &mut commands,
-                            &mut spawn_counter,
-                            &ctx.seq_q,
-                        );
+                        let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &ctx.seq_q);
+                        commands.entity(target_pane).insert(sequence);
                         let new_pid = ProcessId::new();
                         let request_index = terminal_spawns.len();
                         terminal_spawns.push(TerminalStackSpawnRequest {

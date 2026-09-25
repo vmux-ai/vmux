@@ -7,7 +7,7 @@ use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpen
 use vmux_flex::prelude::*;
 use vmux_layout::Browser;
 
-use super::editor::{FileDocumentRevision, FileView};
+use super::editor::{FileNavigateRequest, FileView};
 use super::explorer::ExplorerState;
 use super::navigation::PendingGoto;
 use super::viewport::FileViewport;
@@ -83,13 +83,7 @@ pub fn restore_file_view_bundle(url: &str) -> Option<impl Bundle> {
 fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children: Query<&Children>,
-    mut views: Query<(
-        &mut FileView,
-        &mut FileDocumentRevision,
-        &mut FileViewport,
-        &mut PageMetadata,
-    )>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut views: Query<(&FileView, &mut PageMetadata)>,
     effective_startup_dir: Option<Res<vmux_layout::settings::EffectiveStartupDir>>,
     mut commands: Commands,
     mut record_writer: MessageWriter<vmux_core::event::RecordVisitRequest>,
@@ -130,27 +124,20 @@ fn handle_file_page_open(
         let pending = PendingGoto::from_url(&task.url);
         let view = match FileView::in_stack(task.stack, &children, &views) {
             Some(view) => {
-                if let Ok((mut file_view, mut revision, mut viewport, mut metadata)) =
-                    views.get_mut(view)
-                    && file_view.path != path
-                {
-                    file_view.navigate(
-                        view,
-                        path,
-                        0,
-                        &mut revision,
-                        &mut viewport,
-                        &mut metadata,
-                        &mut manager,
-                        &mut commands,
-                    );
-                }
-                if let Ok((_, _, _, mut metadata)) = views.get_mut(view)
-                    && page_url.starts_with("vmux://")
-                {
-                    metadata.title.clone_from(&page_url);
-                    metadata.url = page_url.clone();
-                    metadata.icon = vmux_core::PageIcon::None;
+                if let Ok((file_view, mut metadata)) = views.get_mut(view) {
+                    if file_view.path != path {
+                        let request = FileNavigateRequest::new(view, path, 0);
+                        let request = if page_url.starts_with("vmux://") {
+                            request.with_page_url(page_url.clone())
+                        } else {
+                            request
+                        };
+                        commands.trigger(request);
+                    } else if page_url.starts_with("vmux://") {
+                        metadata.title.clone_from(&page_url);
+                        metadata.url = page_url.clone();
+                        metadata.icon = vmux_core::PageIcon::None;
+                    }
                 }
                 view
             }

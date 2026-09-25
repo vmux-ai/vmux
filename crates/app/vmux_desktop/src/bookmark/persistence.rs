@@ -16,6 +16,7 @@ impl Plugin for BookmarkPersistencePlugin {
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_default_bookmarks_after_load)
+            .add_observer(seed_bookmark_defaults)
             .add_systems(
                 Startup,
                 load_bookmarks_on_startup.after(LayoutStartupSet::Persistence),
@@ -73,34 +74,13 @@ fn save_bookmarks_to_path(commands: &mut Commands, path: PathBuf) {
     commands.trigger_save(save);
 }
 
-fn load_bookmarks_on_startup(
-    settings: Res<vmux_setting::AppSettings>,
-    pins: Query<&PageMetadata, With<Pin>>,
-    bookmarks: Query<(Entity, &PageMetadata, Has<Pin>, Option<&ChildOf>), With<Bookmark>>,
-    folders: Query<(Entity, &Name, Option<&vmux_core::SmartBookmarkFolder>), With<Folder>>,
-    orders: Query<&BookmarkOrder, BookmarkFilter>,
-    mut offered: ResMut<OfferedBookmarkDefaults>,
-    mut auto: ResMut<BookmarkAutoSave>,
-    mut commands: Commands,
-) {
+fn load_bookmarks_on_startup(mut commands: Commands) {
     if vmux_core::profile::is_test_session() {
         return;
     }
     let path = bookmarks_path();
     if !path.exists() {
-        BookmarkDefaults::new(
-            &settings.browser.bookmarks,
-            &settings.browser.bookmark_folders,
-        )
-        .seed(
-            &pins,
-            &bookmarks,
-            &folders,
-            &orders,
-            &mut offered,
-            &mut auto,
-            &mut commands,
-        );
+        commands.trigger(SeedBookmarkDefaults);
         return;
     }
     commands.insert_resource(BookmarkLoadPending);
@@ -110,33 +90,17 @@ fn load_bookmarks_on_startup(
 fn seed_default_bookmarks_after_load(
     _trigger: On<Loaded>,
     pending: Option<Res<BookmarkLoadPending>>,
-    settings: Res<vmux_setting::AppSettings>,
-    pins: Query<&PageMetadata, With<Pin>>,
-    bookmarks: Query<(Entity, &PageMetadata, Has<Pin>, Option<&ChildOf>), With<Bookmark>>,
-    folders: Query<(Entity, &Name, Option<&vmux_core::SmartBookmarkFolder>), With<Folder>>,
-    orders: Query<&BookmarkOrder, BookmarkFilter>,
-    mut offered: ResMut<OfferedBookmarkDefaults>,
-    mut auto: ResMut<BookmarkAutoSave>,
     mut commands: Commands,
 ) {
     if pending.is_none() {
         return;
     }
-    BookmarkDefaults::new(
-        &settings.browser.bookmarks,
-        &settings.browser.bookmark_folders,
-    )
-    .seed(
-        &pins,
-        &bookmarks,
-        &folders,
-        &orders,
-        &mut offered,
-        &mut auto,
-        &mut commands,
-    );
+    commands.trigger(SeedBookmarkDefaults);
     commands.remove_resource::<BookmarkLoadPending>();
 }
+
+#[derive(Event)]
+struct SeedBookmarkDefaults;
 
 #[derive(Resource)]
 struct BookmarkLoadPending;
@@ -208,123 +172,134 @@ impl<'a> BookmarkDefaults<'a> {
         }
         url.trim().trim_end_matches('/').to_ascii_lowercase()
     }
+}
 
-    fn seed(
-        self,
-        pins: &Query<&PageMetadata, With<Pin>>,
-        bookmarks: &Query<(Entity, &PageMetadata, Has<Pin>, Option<&ChildOf>), With<Bookmark>>,
-        folders: &Query<(Entity, &Name, Option<&vmux_core::SmartBookmarkFolder>), With<Folder>>,
-        orders: &Query<&BookmarkOrder, BookmarkFilter>,
-        offered: &mut OfferedBookmarkDefaults,
-        auto: &mut BookmarkAutoSave,
-        commands: &mut Commands,
-    ) {
-        let claimed_urls = offered.claim_new_urls(self.urls);
-        let claimed_folders = offered.claim_new_folders(self.folders);
-        let mut changed = !claimed_urls.is_empty() || !claimed_folders.is_empty();
-        let mut pinned = pins
-            .iter()
-            .map(|metadata| Self::key(&metadata.url))
-            .collect::<HashSet<_>>();
-        let mut next_order = orders
-            .iter()
-            .map(|order| order.0)
-            .max()
-            .map_or(0, |order| order.saturating_add(1));
-        for url in claimed_urls {
-            if !pinned.insert(Self::key(&url)) {
-                continue;
-            }
-            commands.spawn((
-                Pin,
-                Uuid(uuid::Uuid::new_v4().to_string()),
-                PageMetadata {
-                    title: url.clone(),
-                    url,
-                    icon: vmux_core::PageIcon::None,
-                    bg_color: None,
-                },
-                BookmarkOrder(next_order),
-            ));
-            next_order = next_order.saturating_add(1);
+#[allow(clippy::too_many_arguments)]
+fn seed_bookmark_defaults(
+    _trigger: On<SeedBookmarkDefaults>,
+    settings: Res<vmux_setting::AppSettings>,
+    pins: Query<&PageMetadata, With<Pin>>,
+    bookmarks: Query<(Entity, &PageMetadata, Has<Pin>, Option<&ChildOf>), With<Bookmark>>,
+    folders: Query<(Entity, &Name, Option<&vmux_core::SmartBookmarkFolder>), With<Folder>>,
+    orders: Query<&BookmarkOrder, BookmarkFilter>,
+    mut offered: ResMut<OfferedBookmarkDefaults>,
+    mut auto: ResMut<BookmarkAutoSave>,
+    mut commands: Commands,
+) {
+    let defaults = BookmarkDefaults::new(
+        &settings.browser.bookmarks,
+        &settings.browser.bookmark_folders,
+    );
+    let claimed_urls = offered.claim_new_urls(defaults.urls);
+    let claimed_folders = offered.claim_new_folders(defaults.folders);
+    let mut changed = !claimed_urls.is_empty() || !claimed_folders.is_empty();
+    let mut pinned = pins
+        .iter()
+        .map(|metadata| BookmarkDefaults::key(&metadata.url))
+        .collect::<HashSet<_>>();
+    let mut next_order = orders
+        .iter()
+        .map(|order| order.0)
+        .max()
+        .map_or(0, |order| order.saturating_add(1));
+    for url in claimed_urls {
+        if !pinned.insert(BookmarkDefaults::key(&url)) {
+            continue;
         }
-        let mut existing_folders = folders
-            .iter()
-            .map(|(entity, name, smart)| (Self::key(name.as_str()), (entity, smart.copied())))
-            .collect::<HashMap<_, _>>();
-        for name in claimed_folders {
-            let key = Self::key(&name);
-            if existing_folders.contains_key(&key) {
-                continue;
-            }
-            let setting = self
-                .folders
-                .iter()
-                .find(|folder| Self::key(&folder.name) == key);
-            let mut entity = commands.spawn((
-                Folder,
-                Uuid(uuid::Uuid::new_v4().to_string()),
-                Name::new(name),
-                BookmarkOrder(next_order),
-            ));
-            if let Some(smart) = setting.and_then(|folder| folder.smart) {
-                entity.insert(smart);
-            }
-            let entity = entity.id();
-            existing_folders.insert(key, (entity, setting.and_then(|folder| folder.smart)));
-            next_order = next_order.saturating_add(1);
+        commands.spawn((
+            Pin,
+            Uuid(uuid::Uuid::new_v4().to_string()),
+            PageMetadata {
+                title: url.clone(),
+                url,
+                icon: vmux_core::PageIcon::None,
+                bg_color: None,
+            },
+            BookmarkOrder(next_order),
+        ));
+        next_order = next_order.saturating_add(1);
+    }
+    let mut existing_folders = folders
+        .iter()
+        .map(|(entity, name, smart)| {
+            (
+                BookmarkDefaults::key(name.as_str()),
+                (entity, smart.copied()),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    for name in claimed_folders {
+        let key = BookmarkDefaults::key(&name);
+        if existing_folders.contains_key(&key) {
+            continue;
         }
-        for setting in self.folders {
-            let Some(smart) = setting.smart else {
+        let setting = defaults
+            .folders
+            .iter()
+            .find(|folder| BookmarkDefaults::key(&folder.name) == key);
+        let mut entity = commands.spawn((
+            Folder,
+            Uuid(uuid::Uuid::new_v4().to_string()),
+            Name::new(name),
+            BookmarkOrder(next_order),
+        ));
+        if let Some(smart) = setting.and_then(|folder| folder.smart) {
+            entity.insert(smart);
+        }
+        let entity = entity.id();
+        existing_folders.insert(key, (entity, setting.and_then(|folder| folder.smart)));
+        next_order = next_order.saturating_add(1);
+    }
+    for setting in defaults.folders {
+        let Some(smart) = setting.smart else {
+            continue;
+        };
+        let Some((entity, current)) = existing_folders.get(&BookmarkDefaults::key(&setting.name))
+        else {
+            continue;
+        };
+        if *current != Some(smart) {
+            commands.entity(*entity).insert(smart);
+            changed = true;
+        }
+    }
+    if !offered.folder_bookmarks.is_empty() {
+        let legacy = std::mem::take(&mut offered.folder_bookmarks);
+        for encoded in legacy {
+            let Some((folder_key, url_key)) = encoded.split_once('\n') else {
                 continue;
             };
-            let Some((entity, current)) = existing_folders.get(&Self::key(&setting.name)) else {
+            let is_smart = defaults.folders.iter().any(|folder| {
+                folder.smart.is_some() && BookmarkDefaults::key(&folder.name) == folder_key
+            });
+            if !is_smart {
+                offered.folder_bookmarks.push(encoded);
+                continue;
+            }
+            let Some((folder, _)) = existing_folders.get(folder_key) else {
+                changed = true;
                 continue;
             };
-            if *current != Some(smart) {
-                commands.entity(*entity).insert(smart);
-                changed = true;
-            }
-        }
-        if !offered.folder_bookmarks.is_empty() {
-            let legacy = std::mem::take(&mut offered.folder_bookmarks);
-            for encoded in legacy {
-                let Some((folder_key, url_key)) = encoded.split_once('\n') else {
-                    continue;
-                };
-                let is_smart = self
-                    .folders
-                    .iter()
-                    .any(|folder| folder.smart.is_some() && Self::key(&folder.name) == folder_key);
-                if !is_smart {
-                    offered.folder_bookmarks.push(encoded);
+            for (entity, metadata, pinned, parent) in bookmarks.iter() {
+                if BookmarkDefaults::key(&metadata.url) != url_key
+                    || parent.is_none_or(|parent| parent.parent() != *folder)
+                {
                     continue;
                 }
-                let Some((folder, _)) = existing_folders.get(folder_key) else {
-                    changed = true;
-                    continue;
-                };
-                for (entity, metadata, pinned, parent) in bookmarks.iter() {
-                    if Self::key(&metadata.url) != url_key
-                        || parent.is_none_or(|parent| parent.parent() != *folder)
-                    {
-                        continue;
-                    }
-                    if pinned {
-                        commands
-                            .entity(entity)
-                            .remove::<Bookmark>()
-                            .remove::<ChildOf>();
-                    } else {
-                        commands.entity(entity).despawn();
-                    }
+                if pinned {
+                    commands
+                        .entity(entity)
+                        .remove::<Bookmark>()
+                        .remove::<ChildOf>();
+                } else {
+                    commands.entity(entity).despawn();
                 }
-                changed = true;
             }
+            changed = true;
         }
-        if changed {
-            auto.dirty = true;
-        }
+    }
+    if changed {
+        auto.dirty = true;
     }
 }
 
@@ -935,7 +910,8 @@ mod tests {
             .init_resource::<OfferedBookmarkDefaults>()
             .init_resource::<BookmarkAutoSave>()
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
-            .add_observer(seed_default_bookmarks_after_load);
+            .add_observer(seed_default_bookmarks_after_load)
+            .add_observer(seed_bookmark_defaults);
         load_app.world_mut().insert_resource(BookmarkLoadPending);
         load_app
             .world_mut()

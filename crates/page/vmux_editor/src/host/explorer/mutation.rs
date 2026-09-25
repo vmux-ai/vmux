@@ -322,7 +322,9 @@ fn drain_explorer_mutations(
                 trees.touch(&root);
             }
         }
-        trees.start_dir_load(&root, outcome.refresh_dir.clone(), &mut commands, true);
+        if let Some(task) = trees.request_dir_load(&root, outcome.refresh_dir.clone(), true) {
+            commands.spawn(task);
+        }
         commands
             .entity(webview)
             .insert((ExplorerTreeDirty, OpenEditorsDirty));

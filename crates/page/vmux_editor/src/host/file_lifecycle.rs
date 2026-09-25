@@ -517,7 +517,9 @@ fn drain_file_changes(
             changed_dirs.insert(canon(parent));
         }
     }
-    trees.refresh_changed(&changed_dirs, &mut commands);
+    for task in trees.refresh_changed(&changed_dirs) {
+        commands.spawn(task);
+    }
 }
 
 fn reload_changed_files(

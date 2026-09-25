@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use vmux_core::{LastActivatedAt, PageMetadata};
+use vmux_core::PageMetadata;
 use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_service::protocol::ProcessId;
 use vmux_setting::AppSettings;
@@ -122,17 +122,16 @@ impl RunTerminalCandidate {
             .collect()
     }
 
-    pub(crate) fn focus(
+    pub(crate) fn activation_entities(
         &self,
-        commands: &mut Commands,
         child_of_q: &Query<&ChildOf>,
         tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
-    ) {
-        commands.entity(self.stack).insert(LastActivatedAt::now());
-        commands.entity(self.pane).insert(LastActivatedAt::now());
+    ) -> Vec<Entity> {
+        let mut entities = vec![self.stack, self.pane];
         if let Some(tab) = AgentPane::new(self.pane).tab(child_of_q, tab_q) {
-            commands.entity(tab).insert(LastActivatedAt::now());
+            entities.push(tab);
         }
+        entities
     }
 
     fn launch_matches_canonical_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
@@ -177,46 +176,28 @@ impl AgentPane {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn split_off(
+    pub(crate) fn split(
         &self,
-        commands: &mut Commands,
         direction: &vmux_service::protocol::AgentPaneDirection,
         focus: bool,
         pane_children: &Query<&Children, With<Pane>>,
         tab_filter: &Query<Entity, With<vmux_layout::stack::Stack>>,
         split_dir_q: &Query<&PaneSplit>,
         split_this_batch: &mut std::collections::HashSet<Entity>,
-    ) -> Entity {
+    ) -> AgentPaneSplit {
         let existing_tabs: Vec<Entity> = pane_children
             .get(self.0)
             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
             .unwrap_or_default();
         let split_dir = vmux_layout::pane::direction_to_split(&Self::direction(direction));
         let already_split = !split_this_batch.insert(self.0) || split_dir_q.contains(self.0);
-        vmux_layout::pane::split_or_extend(
-            commands,
-            self.0,
-            split_dir,
-            &existing_tabs,
+        AgentPaneSplit {
+            pane: self.0,
+            direction: split_dir,
+            existing_tabs,
             focus,
             already_split,
-        )
-    }
-
-    pub(crate) fn touch_spawn_seq(
-        &self,
-        commands: &mut Commands,
-        spawn_counter: &mut vmux_layout::pane::SpawnCounter,
-        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
-    ) {
-        let max_existing = seq_q.iter().map(|s| s.0).max().unwrap_or(0);
-        if spawn_counter.0 <= max_existing {
-            spawn_counter.0 = max_existing;
         }
-        spawn_counter.0 += 1;
-        commands
-            .entity(self.0)
-            .insert(vmux_layout::pane::SpawnSeq(spawn_counter.0));
     }
 
     pub(crate) fn direction(
@@ -230,6 +211,30 @@ impl AgentPane {
             D::Bottom => PaneDirection::Bottom,
             D::Left => PaneDirection::Left,
         }
+    }
+}
+
+pub(crate) struct AgentPaneSplit {
+    pub(crate) pane: Entity,
+    pub(crate) direction: vmux_layout::pane::PaneSplitDirection,
+    pub(crate) existing_tabs: Vec<Entity>,
+    pub(crate) focus: bool,
+    pub(crate) already_split: bool,
+}
+
+pub(crate) struct NextPaneSpawnSequence;
+
+impl NextPaneSpawnSequence {
+    pub(crate) fn take(
+        spawn_counter: &mut vmux_layout::pane::SpawnCounter,
+        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+    ) -> vmux_layout::pane::SpawnSeq {
+        let max_existing = seq_q.iter().map(|sequence| sequence.0).max().unwrap_or(0);
+        if spawn_counter.0 <= max_existing {
+            spawn_counter.0 = max_existing;
+        }
+        spawn_counter.0 += 1;
+        vmux_layout::pane::SpawnSeq(spawn_counter.0)
     }
 }
 
@@ -401,17 +406,16 @@ impl<'a> RunCommand<'a> {
         data
     }
 
-    pub(crate) fn queue(
+    pub(crate) fn reinput(
         &self,
-        writer: &mut MessageWriter<vmux_terminal::TerminalReinputRequest>,
         process_id: ProcessId,
         launch: &TerminalLaunch,
         pager: PagerEnv,
-    ) {
-        writer.write(vmux_terminal::TerminalReinputRequest {
+    ) -> vmux_terminal::TerminalReinputRequest {
+        vmux_terminal::TerminalReinputRequest {
             process_id,
             data: self.input(&launch.command, pager),
-        });
+        }
     }
 
     pub(crate) fn for_new_terminal(&self, settings: &AppSettings) -> (AgentTerminalShell, Vec<u8>) {
@@ -618,6 +622,7 @@ impl<'a> AgentCwd<'a> {
 mod tests {
     use super::*;
     use crate::host::test_support::{spawn_stack_in_pane, test_settings};
+    use vmux_core::LastActivatedAt;
     use vmux_terminal::Terminal;
 
     #[test]
@@ -874,12 +879,11 @@ mod tests {
             input: Res<Input>,
             mut writer: MessageWriter<vmux_terminal::TerminalReinputRequest>,
         ) {
-            RunCommand::new("pwd", Some("tok4")).queue(
-                &mut writer,
+            writer.write(RunCommand::new("pwd", Some("tok4")).reinput(
                 input.process_id,
                 &input.launch,
                 PagerEnv::Inherited,
-            );
+            ));
         }
 
         fn capture(
@@ -1297,7 +1301,8 @@ mod tests {
         mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
     ) {
-        AgentPane::new(input.pane).touch_spawn_seq(&mut commands, &mut spawn_counter, &seq_q);
+        let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &seq_q);
+        commands.entity(input.pane).insert(sequence);
     }
 
     #[test]
@@ -1343,8 +1348,7 @@ mod tests {
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
     ) {
         let mut split_batch = std::collections::HashSet::new();
-        let target = AgentPane::new(input.pane).split_off(
-            &mut commands,
+        let split = AgentPane::new(input.pane).split(
             &vmux_service::protocol::AgentPaneDirection::Bottom,
             false,
             &pane_children,
@@ -1352,7 +1356,16 @@ mod tests {
             &split_dir_q,
             &mut split_batch,
         );
-        AgentPane::new(target).touch_spawn_seq(&mut commands, &mut spawn_counter, &seq_q);
+        let target = vmux_layout::pane::split_or_extend(
+            &mut commands,
+            split.pane,
+            split.direction,
+            &split.existing_tabs,
+            split.focus,
+            split.already_split,
+        );
+        let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &seq_q);
+        commands.entity(target).insert(sequence);
         out.0 = Some(target);
     }
 
@@ -1486,7 +1499,9 @@ mod tests {
         child_of_q: Query<&ChildOf>,
         tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
     ) {
-        input.candidate.focus(&mut commands, &child_of_q, &tab_q);
+        for entity in input.candidate.activation_entities(&child_of_q, &tab_q) {
+            commands.entity(entity).insert(LastActivatedAt::now());
+        }
     }
 
     #[test]

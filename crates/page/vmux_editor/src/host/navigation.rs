@@ -6,7 +6,9 @@ use vmux_core::PageMetadata;
 use vmux_core::event::{FileErrorEvent, FileOpenEvent, FileScrollByEvent, KnowledgeLinkOpen};
 
 use crate::edit::Selection;
-use crate::host::editor::{Editor, FileDocumentRevision, FileView};
+use crate::host::editor::{
+    Editor, FileDocumentRevision, FileNavigateRequest, FileView, ParkedEdit, ParkedEdits,
+};
 use crate::host::file_lifecycle::{FileBuffer, FileDir, canon};
 use crate::host::note::NoteRevealLine;
 use crate::host::note::NoteSent;
@@ -21,6 +23,7 @@ impl Plugin for NavigationPlugin {
         app.add_message::<crate::lsp::manager::LspGoto>()
             .add_observer(on_file_open)
             .add_observer(on_knowledge_link_open)
+            .add_observer(apply_file_navigation)
             .add_systems(Update, (apply_goto, apply_pending_goto));
     }
 }
@@ -65,8 +68,14 @@ impl PendingGoto {
     }
 }
 
-fn on_file_open(
-    trigger: On<UiInput<FileOpenEvent>>,
+fn on_file_open(trigger: On<UiInput<FileOpenEvent>>, mut commands: Commands) {
+    let entity = trigger.event().webview;
+    let path = PathBuf::from(&trigger.event().payload.path);
+    commands.trigger(FileNavigateRequest::new(entity, path, 0));
+}
+
+fn apply_file_navigation(
+    trigger: On<FileNavigateRequest>,
     mut views: Query<(
         &mut FileView,
         &mut FileDocumentRevision,
@@ -76,21 +85,60 @@ fn on_file_open(
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview;
-    let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok((mut view, mut revision, mut viewport, mut metadata)) = views.get_mut(entity) else {
+    let request = trigger.event();
+    let Ok((mut view, mut revision, mut viewport, mut metadata)) = views.get_mut(request.entity)
+    else {
         return;
     };
-    view.navigate(
-        entity,
-        path,
-        0,
-        &mut revision,
-        &mut viewport,
-        &mut metadata,
-        &mut manager,
-        &mut commands,
-    );
+    let previous = view.replace_path(request.path.clone(), &mut revision);
+    manager.close(&previous);
+    metadata.title = view
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| view.path.to_string_lossy().to_string());
+    metadata.url = view.url();
+    if let Some(page_url) = &request.page_url {
+        metadata.title.clone_from(page_url);
+        metadata.url.clone_from(page_url);
+        metadata.icon = vmux_core::PageIcon::None;
+    }
+    viewport.top_row = request.top_line;
+    let entity = request.entity;
+    commands.queue(move |world: &mut World| {
+        let Ok(mut entity) = world.get_entity_mut(entity) else {
+            return;
+        };
+        if !entity.contains::<Editor>() || !entity.contains::<vmux_git::GitDiffSource>() {
+            return;
+        }
+        let Some(edit) = entity.take::<Editor>() else {
+            return;
+        };
+        let Some(diff) = entity.take::<vmux_git::GitDiffSource>() else {
+            return;
+        };
+        let parked = ParkedEdit {
+            edit,
+            diff,
+            modified: ParkedEdits::modified_at(&previous),
+        };
+        let mut edits = entity.take::<ParkedEdits>().unwrap_or_default();
+        edits.insert(previous, parked);
+        entity.insert(edits);
+    });
+    commands
+        .entity(entity)
+        .remove::<FileDir>()
+        .remove::<FileBuffer>()
+        .remove::<FileMedia>()
+        .remove::<crate::host::file_lifecycle::FileLoadTask>()
+        .remove::<crate::host::keymap::EditorKeymap>()
+        .remove::<NoteSent>()
+        .remove::<crate::host::language::LspEditDirty>()
+        .remove::<FileInitialMetaSent>()
+        .remove::<crate::lsp::manager::LspOpened>()
+        .remove::<crate::lsp::manager::LintRan>();
 }
 
 fn on_knowledge_link_open(
