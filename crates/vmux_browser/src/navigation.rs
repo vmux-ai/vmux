@@ -294,7 +294,7 @@ pub(crate) fn handle_browser_navigate_requests(
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &vmux_core::LastActivatedAt), With<vmux_layout::stack::Stack>>,
     stack_metadata: Query<&PageMetadata, With<Stack>>,
-    recent_interaction: Res<RecentBrowserInteraction>,
+    recent_interactions: Query<&RecentBrowserInteraction>,
     mut activate: MessageWriter<vmux_layout::active_panes::ActivatePane>,
 ) {
     for request in reader.read() {
@@ -321,8 +321,12 @@ pub(crate) fn handle_browser_navigate_requests(
                         })
                     });
                 if new_stack && !is_vmux_route && !url.starts_with("file:") {
-                    let activate_new =
-                        active_stack.is_none_or(|stack| !recent_interaction.active(stack));
+                    let activate_new = active_stack.is_none_or(|stack| {
+                        let Ok(interaction) = recent_interactions.get(stack) else {
+                            return true;
+                        };
+                        !interaction.active()
+                    });
                     let stack = commands
                         .spawn((
                             vmux_layout::stack::stack_bundle(),

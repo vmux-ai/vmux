@@ -543,10 +543,11 @@ struct WindowedHoverRefreshState {
 
 const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
 
-#[derive(Default)]
+#[derive(Component, Default)]
 struct LayoutFrameRateState {
     native_sequence: u64,
     last_input: Option<std::time::Instant>,
+    last_emit: Option<std::time::Instant>,
     dragging_layout: bool,
 }
 
@@ -1010,7 +1011,6 @@ mod tests {
                 .add_message::<vmux_space::SpaceRenameRequest>()
                 .add_message::<vmux_history::query::HistoryOpenIntent>()
                 .init_resource::<crate::PendingNavSnapshots>()
-                .init_resource::<crate::input::RecentBrowserInteraction>()
                 .add_systems(
                     Update,
                     (
@@ -1238,10 +1238,9 @@ mod tests {
                 ))
                 .id();
             app.world_mut().spawn((Browser, ChildOf(first_stack)));
-            app.insert_resource(RecentBrowserInteraction {
-                stack: Some(first_stack),
-                at: Some(std::time::Instant::now()),
-            });
+            app.world_mut()
+                .entity_mut(first_stack)
+                .insert(RecentBrowserInteraction::now());
             app.world_mut()
                 .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
                 .write(vmux_layout::BrowserNavigateRequest {

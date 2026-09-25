@@ -10,7 +10,7 @@ use crate::LayoutPointerCapture;
 
 impl Plugin for WindowDragPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ReportedWindowDragRegions>()
+        app.add_systems(PreUpdate, initialize_window_drag_regions)
             .add_observer(on_window_drag_region)
             .add_systems(
                 PostUpdate,
@@ -92,14 +92,12 @@ impl WindowDragRegion {
     }
 }
 
-#[derive(Resource, Default)]
-struct ReportedWindowDragRegions(
-    std::collections::BTreeMap<(Entity, String), WindowDragRegionEvent>,
-);
+#[derive(Component, Default)]
+struct ReportedWindowDragRegions(std::collections::BTreeMap<String, WindowDragRegionEvent>);
 
 impl ReportedWindowDragRegions {
-    fn update(&mut self, webview: Entity, region: WindowDragRegionEvent) {
-        let key = (webview, region.id.clone());
+    fn update(&mut self, region: WindowDragRegionEvent) {
+        let key = region.id.clone();
         if region.removed {
             self.0.remove(&key);
         } else {
@@ -108,16 +106,35 @@ impl ReportedWindowDragRegions {
     }
 }
 
+fn initialize_window_drag_regions(
+    webviews: Query<
+        Entity,
+        (
+            Added<bevy_cef::prelude::WebviewSource>,
+            Without<ReportedWindowDragRegions>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for entity in &webviews {
+        commands
+            .entity(entity)
+            .insert(ReportedWindowDragRegions::default());
+    }
+}
+
 fn on_window_drag_region(
     trigger: On<UiInput<WindowDragRegionEvent>>,
-    mut reported: ResMut<ReportedWindowDragRegions>,
+    mut reported: Query<&mut ReportedWindowDragRegions>,
 ) {
-    let region = trigger.event().payload.clone();
-    reported.update(trigger.event().webview, region);
+    let Ok(mut reported) = reported.get_mut(trigger.event().webview) else {
+        return;
+    };
+    reported.update(trigger.event().payload.clone());
 }
 
 fn publish_window_drag_region(
-    reported: Res<ReportedWindowDragRegions>,
+    reported: Query<(Entity, &ReportedWindowDragRegions)>,
     window_q: Query<(Entity, &ComputedNode), With<VmuxWindow>>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
@@ -138,17 +155,20 @@ fn publish_window_drag_region(
             {
                 continue;
             }
-            for ((webview, _), reported) in reported.0.iter() {
-                if vmux_layout::window::host_window_of(*webview, &child_of, &host_windows)
+            for (webview, reported) in &reported {
+                if vmux_layout::window::host_window_of(webview, &child_of, &host_windows)
                     != focused_window.0
                 {
                     continue;
                 }
-                if let Some(region) = WindowDragRegion::from_report(reported.clone(), *viewport) {
-                    if reported.blocked {
-                        regions.blocked.push(region);
-                    } else {
-                        regions.allowed.push(region);
+                for reported in reported.0.values() {
+                    if let Some(region) = WindowDragRegion::from_report(reported.clone(), *viewport)
+                    {
+                        if reported.blocked {
+                            regions.blocked.push(region);
+                        } else {
+                            regions.allowed.push(region);
+                        }
                     }
                 }
             }
@@ -265,44 +285,35 @@ mod tests {
     #[test]
     fn removing_a_reported_region_preserves_the_same_region_in_another_window() {
         let mut reported = ReportedWindowDragRegions::default();
-        let webview = Entity::from_bits(1);
-        let other_webview = Entity::from_bits(2);
-        reported.update(
-            webview,
-            WindowDragRegionEvent {
-                id: "leading".to_string(),
-                removed: false,
-                blocked: false,
-                left: 10.0,
-                top: 0.0,
-                width: 20.0,
-                height: 40.0,
-            },
-        );
-        reported.update(
-            other_webview,
-            WindowDragRegionEvent {
-                id: "leading".to_string(),
-                removed: false,
-                blocked: false,
-                left: 30.0,
-                top: 0.0,
-                width: 20.0,
-                height: 40.0,
-            },
-        );
+        let mut other = ReportedWindowDragRegions::default();
+        reported.update(WindowDragRegionEvent {
+            id: "leading".to_string(),
+            removed: false,
+            blocked: false,
+            left: 10.0,
+            top: 0.0,
+            width: 20.0,
+            height: 40.0,
+        });
+        other.update(WindowDragRegionEvent {
+            id: "leading".to_string(),
+            removed: false,
+            blocked: false,
+            left: 30.0,
+            top: 0.0,
+            width: 20.0,
+            height: 40.0,
+        });
 
-        reported.update(
-            webview,
-            WindowDragRegionEvent {
-                id: "leading".to_string(),
-                removed: true,
-                ..Default::default()
-            },
-        );
+        reported.update(WindowDragRegionEvent {
+            id: "leading".to_string(),
+            removed: true,
+            ..Default::default()
+        });
 
-        assert_eq!(reported.0.len(), 1);
-        assert!(reported.0.contains_key(&(other_webview, "leading".into())));
+        assert!(reported.0.is_empty());
+        assert_eq!(other.0.len(), 1);
+        assert!(other.0.contains_key("leading"));
     }
 
     #[test]

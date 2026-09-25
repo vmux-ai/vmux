@@ -1,26 +1,12 @@
 use std::time::Duration;
 
 use bevy_app::prelude::*;
-use bevy_ecs::prelude::*;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 
 use crate::protocol::ProcessId;
 
 const HOUSEKEEPING_FLOOR: Duration = Duration::from_secs(1);
-
-#[derive(Resource, Clone)]
-pub struct ServiceRuntime(pub Handle);
-
-pub struct ServiceHostPlugin {
-    pub runtime: Handle,
-}
-
-impl Plugin for ServiceHostPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(ServiceRuntime(self.runtime.clone()));
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParkOutcome {
@@ -165,10 +151,7 @@ mod tests {
         signal_tx.try_send(()).unwrap();
 
         let mut app = App::new();
-        app.add_plugins(ServiceHostPlugin {
-            runtime: rt.handle().clone(),
-        })
-        .set_runner(wake_driven_runner(rt.handle().clone(), wake_rx, signal_rx));
+        app.set_runner(wake_driven_runner(rt.handle().clone(), wake_rx, signal_rx));
 
         assert_eq!(app.run(), AppExit::Success);
         drop(wake_tx);

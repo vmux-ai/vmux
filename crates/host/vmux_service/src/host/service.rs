@@ -2,7 +2,7 @@ use bevy_app::prelude::*;
 use tokio::sync::mpsc;
 use tracing_subscriber::{EnvFilter, fmt};
 
-use crate::runner::{ServiceHostPlugin, wake_driven_runner};
+use crate::runner::wake_driven_runner;
 use crate::{DaemonBinary, ServicePaths};
 
 pub fn run() {
@@ -19,9 +19,6 @@ pub fn run() {
 
     let handle = rt.handle().clone();
     App::new()
-        .add_plugins(ServiceHostPlugin {
-            runtime: handle.clone(),
-        })
         .set_runner(wake_driven_runner(handle, wake_rx, signal_rx))
         .run();
 }
