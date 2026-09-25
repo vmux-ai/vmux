@@ -18,10 +18,10 @@ impl Plugin for StartRosterPlugin {
             .add_systems(
                 Update,
                 (
-                    Launcher::project
+                    project_launcher
                         .in_set(LauncherProjection)
                         .run_if(resource_changed::<Roster>),
-                    Launcher::emit
+                    emit_launcher
                         .after(LauncherProjection)
                         .run_if(resource_changed::<Launcher>),
                 ),
@@ -44,23 +44,23 @@ pub struct Launcher {
     sequence: u64,
 }
 
+fn project_launcher(roster: Res<Roster>, mut launcher: ResMut<Launcher>) {
+    launcher.snapshot = Launcher::snapshot(&roster);
+}
+
+fn emit_launcher(mut launcher: ResMut<Launcher>, mut emits: MessageWriter<PageEmit>) {
+    launcher.sequence = launcher.sequence.wrapping_add(1).max(1);
+    let state = CommandBarUiState {
+        sequence: launcher.sequence,
+        patches: vec![launcher.snapshot.clone().into()],
+    };
+    let Some(emit) = PageEmit::from_state(&state) else {
+        return;
+    };
+    emits.write(emit);
+}
+
 impl Launcher {
-    fn project(roster: Res<Roster>, mut launcher: ResMut<Launcher>) {
-        launcher.snapshot = Self::snapshot(&roster);
-    }
-
-    fn emit(mut launcher: ResMut<Launcher>, mut emits: MessageWriter<PageEmit>) {
-        launcher.sequence = launcher.sequence.wrapping_add(1).max(1);
-        let state = CommandBarUiState {
-            sequence: launcher.sequence,
-            patches: vec![launcher.snapshot.clone().into()],
-        };
-        let Some(emit) = PageEmit::from_state(&state) else {
-            return;
-        };
-        emits.write(emit);
-    }
-
     fn snapshot(roster: &Roster) -> CommandBarOpenEvent {
         let mut tabs = Vec::with_capacity(roster.sessions.len());
         for (index, session) in roster.sessions.iter().enumerate() {

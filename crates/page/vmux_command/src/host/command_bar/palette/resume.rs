@@ -80,7 +80,9 @@ fn update_palette_resume_draft(
     snapshot.0.sessions.clear();
     snapshot.0.sessions_total = 0;
     snapshot.0.sessions_loading = true;
-    resume.request_page(target, 0, &mut snapshot, &mut commands);
+    if let Some(request) = resume.request_page(target, 0, &mut snapshot) {
+        commands.trigger(request);
+    }
 }
 
 fn update_palette_resume_selection(
@@ -97,7 +99,9 @@ fn update_palette_resume_selection(
         return;
     }
     resume.selected = request.selected;
-    resume.maybe_request_page(target, &mut snapshot, &mut commands);
+    if let Some(request) = resume.maybe_request_page(target, &mut snapshot) {
+        commands.trigger(request);
+    }
 }
 
 fn receive_palette_resume_page(
@@ -116,7 +120,9 @@ fn receive_palette_resume_page(
     let Ok((mut resume, mut snapshot)) = palettes.get_mut(target) else {
         return;
     };
-    resume.apply_page(target, response, &mut snapshot, &mut commands);
+    if let Some(request) = resume.apply_page(target, response, &mut snapshot) {
+        commands.trigger(request);
+    }
 }
 
 impl PaletteResume {
@@ -125,10 +131,9 @@ impl PaletteResume {
         target: Entity,
         offset: u32,
         snapshot: &mut PaletteSnapshot,
-        commands: &mut Commands,
-    ) {
+    ) -> Option<UiInput<ResumeListRequest>> {
         if !self.active || self.inflight.is_some() {
-            return;
+            return None;
         }
         snapshot.0.sessions_loading = true;
         self.inflight = Some(ResumeFlight {
@@ -136,10 +141,10 @@ impl PaletteResume {
             generation: self.generation.current(),
             offset,
         });
-        commands.trigger(UiInput {
+        Some(UiInput {
             webview: target,
             payload: ResumeListRequest { offset },
-        });
+        })
     }
 
     fn apply_page(
@@ -147,11 +152,8 @@ impl PaletteResume {
         target: Entity,
         response: &ResumableSessions,
         snapshot: &mut PaletteSnapshot,
-        commands: &mut Commands,
-    ) {
-        let Some(flight) = self.inflight.take() else {
-            return;
-        };
+    ) -> Option<UiInput<ResumeListRequest>> {
+        let flight = self.inflight.take()?;
         let accepted = flight.open_generation == self.open.generation()
             && self.generation.matches(flight.generation)
             && self.active
@@ -164,32 +166,31 @@ impl PaletteResume {
             } else {
                 snapshot.0.sessions.extend(response.sessions.clone());
             }
-            self.maybe_request_page(target, snapshot, commands);
-            return;
+            return self.maybe_request_page(target, snapshot);
         }
         if self.active {
             let offset = snapshot.0.sessions.len() as u32;
-            self.request_page(target, offset, snapshot, commands);
+            return self.request_page(target, offset, snapshot);
         }
+        None
     }
 
     fn maybe_request_page(
         &mut self,
         target: Entity,
         snapshot: &mut PaletteSnapshot,
-        commands: &mut Commands,
-    ) {
+    ) -> Option<UiInput<ResumeListRequest>> {
         if !self.active || self.inflight.is_some() {
-            return;
+            return None;
         }
         let loaded = snapshot.0.sessions.len() as u32;
         if loaded == 0 || loaded >= snapshot.0.sessions_total {
-            return;
+            return None;
         }
         if self.selected.saturating_add(10) < loaded {
-            return;
+            return None;
         }
-        self.request_page(target, loaded, snapshot, commands);
+        self.request_page(target, loaded, snapshot)
     }
 }
 

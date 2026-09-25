@@ -6,19 +6,38 @@ use vmux_core::PageMetadata;
 
 use crate::host::edit::EditCore;
 use crate::host::edit::highlight_cache::HighlightCache;
-use crate::host::file_lifecycle::{FileBuffer, FileDir, FileLoadTask};
-use crate::host::keymap::EditorKeymap;
-use crate::host::language::LspEditDirty;
-use crate::host::note::NoteSent;
-use crate::host::status::FileInitialMetaSent;
 use crate::host::viewport::FileViewport;
-use crate::media::FileMedia;
 use crate::wrap::WrapView;
 
 #[derive(Component, Clone, Debug)]
 #[require(vmux_core::host::FileUiStateUpdates, FileDocumentRevision)]
 pub struct FileView {
     pub path: PathBuf,
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct FileNavigateRequest {
+    #[event_target]
+    pub(crate) entity: Entity,
+    pub(crate) path: PathBuf,
+    pub(crate) top_line: u32,
+    pub(crate) page_url: Option<String>,
+}
+
+impl FileNavigateRequest {
+    pub(crate) fn new(entity: Entity, path: PathBuf, top_line: u32) -> Self {
+        Self {
+            entity,
+            path,
+            top_line,
+            page_url: None,
+        }
+    }
+
+    pub(crate) fn with_page_url(mut self, page_url: String) -> Self {
+        self.page_url = Some(page_url);
+        self
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,58 +63,12 @@ impl FileView {
     pub(super) fn in_stack(
         stack: Entity,
         children_q: &Query<&Children>,
-        views: &Query<(
-            &mut FileView,
-            &mut FileDocumentRevision,
-            &mut FileViewport,
-            &mut PageMetadata,
-        )>,
+        views: &Query<(&FileView, &mut PageMetadata)>,
     ) -> Option<Entity> {
         let Ok(children) = children_q.get(stack) else {
             return None;
         };
         children.iter().find(|&child| views.contains(child))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn navigate(
-        &mut self,
-        entity: Entity,
-        path: PathBuf,
-        top_line: u32,
-        revision: &mut FileDocumentRevision,
-        viewport: &mut FileViewport,
-        metadata: &mut PageMetadata,
-        manager: &mut crate::lsp::manager::LspManager,
-        commands: &mut Commands,
-    ) {
-        let previous = self.replace_path(path, revision);
-        manager.close(&previous);
-        metadata.title = self
-            .path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| self.path.to_string_lossy().to_string());
-        metadata.url = self.url();
-        viewport.top_row = top_line;
-        commands.queue(move |world: &mut World| {
-            let Ok(mut entity) = world.get_entity_mut(entity) else {
-                return;
-            };
-            ParkedEdits::park(&mut entity, previous);
-        });
-        commands
-            .entity(entity)
-            .remove::<FileDir>()
-            .remove::<FileBuffer>()
-            .remove::<FileMedia>()
-            .remove::<FileLoadTask>()
-            .remove::<EditorKeymap>()
-            .remove::<NoteSent>()
-            .remove::<LspEditDirty>()
-            .remove::<FileInitialMetaSent>()
-            .remove::<crate::lsp::manager::LspOpened>()
-            .remove::<crate::lsp::manager::LintRan>();
     }
 
     pub(super) fn url(&self) -> String {
@@ -131,7 +104,11 @@ impl FileView {
         }
     }
 
-    fn replace_path(&mut self, path: PathBuf, revision: &mut FileDocumentRevision) -> PathBuf {
+    pub(crate) fn replace_path(
+        &mut self,
+        path: PathBuf,
+        revision: &mut FileDocumentRevision,
+    ) -> PathBuf {
         if self.path != path {
             revision.advance();
         }
@@ -246,26 +223,6 @@ pub(super) struct ParkedEdit {
 impl ParkedEdits {
     pub(super) const CAPACITY: usize = 8;
 
-    fn park(entity: &mut EntityWorldMut, path: PathBuf) {
-        if !entity.contains::<Editor>() || !entity.contains::<vmux_git::GitDiffSource>() {
-            return;
-        }
-        let Some(edit) = entity.take::<Editor>() else {
-            return;
-        };
-        let Some(diff) = entity.take::<vmux_git::GitDiffSource>() else {
-            return;
-        };
-        let parked = ParkedEdit {
-            edit,
-            diff,
-            modified: Self::modified_at(&path),
-        };
-        let mut edits = entity.take::<ParkedEdits>().unwrap_or_default();
-        edits.insert(path, parked);
-        entity.insert(edits);
-    }
-
     pub(super) fn insert(&mut self, path: PathBuf, edit: ParkedEdit) {
         self.recent.retain(|recent| recent != &path);
         self.recent.push(path.clone());
@@ -291,7 +248,7 @@ impl ParkedEdits {
             .is_some_and(|parked| parked.edit.core.dirty)
     }
 
-    fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
+    pub(crate) fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
         std::fs::metadata(path).ok()?.modified().ok()
     }
 }

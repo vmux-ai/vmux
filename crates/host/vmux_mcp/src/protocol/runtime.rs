@@ -206,17 +206,15 @@ struct McpRouted;
 struct McpTask(tokio::sync::oneshot::Receiver<Result<Value, String>>);
 
 impl McpTask {
-    fn start(
-        commands: &mut Commands,
+    fn spawn(
         runtime: &McpRuntime,
-        entity: Entity,
         future: impl Future<Output = Result<Value, String>> + Send + 'static,
-    ) {
+    ) -> Self {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         drop(runtime.0.spawn(async move {
             let _ = sender.send(future.await);
         }));
-        commands.entity(entity).insert(Self(receiver));
+        Self(receiver)
     }
 }
 
@@ -447,16 +445,19 @@ fn start_list_tools(
 ) {
     for (entity, request) in &requests {
         let mut definitions = request.definitions.clone();
-        commands.entity(entity).remove::<ListToolsExecution>();
-        McpTask::start(&mut commands, &runtime, entity, async move {
-            if let Ok(connection) = vmux_client::client::ServiceConnection::connect().await
-                && let Ok(AgentQueryResult::Commands(commands)) =
-                    agent_query(&connection, AgentQuery::ListCommands).await
-            {
-                definitions = crate::tool::ToolDefinition::merge_commands(definitions, commands)?;
-            }
-            Ok(json!({ "tools": definitions }))
-        });
+        commands
+            .entity(entity)
+            .remove::<ListToolsExecution>()
+            .insert(McpTask::spawn(&runtime, async move {
+                if let Ok(connection) = vmux_client::client::ServiceConnection::connect().await
+                    && let Ok(AgentQueryResult::Commands(commands)) =
+                        agent_query(&connection, AgentQuery::ListCommands).await
+                {
+                    definitions =
+                        crate::tool::ToolDefinition::merge_commands(definitions, commands)?;
+                }
+                Ok(json!({ "tools": definitions }))
+            }));
     }
 }
 
@@ -471,13 +472,10 @@ fn start_commands(
             args: vmux_client::protocol::JsonValue::from(request.arguments.clone()),
         };
         let anchor = request.anchor;
-        commands.entity(entity).remove::<CommandExecution>();
-        McpTask::start(
-            &mut commands,
-            &runtime,
-            entity,
-            run_agent_command(command, anchor),
-        );
+        commands
+            .entity(entity)
+            .remove::<CommandExecution>()
+            .insert(McpTask::spawn(&runtime, run_agent_command(command, anchor)));
     }
 }
 
@@ -490,16 +488,20 @@ fn start_protocol_tools(
         let tool = request.tool;
         let arguments = request.arguments.clone();
         let anchor = request.anchor;
-        commands.entity(entity).remove::<ProtocolExecution>();
-        McpTask::start(&mut commands, &runtime, entity, async move {
-            match tool {
-                crate::tool::ProtocolTool::ReadFile => read_file_result(&arguments, anchor).await,
-                crate::tool::ProtocolTool::Grep => grep_result(&arguments, anchor).await,
-                crate::tool::ProtocolTool::VaultStatus => {
-                    run_agent_query(AgentQuery::VaultStatus).await
+        commands
+            .entity(entity)
+            .remove::<ProtocolExecution>()
+            .insert(McpTask::spawn(&runtime, async move {
+                match tool {
+                    crate::tool::ProtocolTool::ReadFile => {
+                        read_file_result(&arguments, anchor).await
+                    }
+                    crate::tool::ProtocolTool::Grep => grep_result(&arguments, anchor).await,
+                    crate::tool::ProtocolTool::VaultStatus => {
+                        run_agent_query(AgentQuery::VaultStatus).await
+                    }
                 }
-            }
-        });
+            }));
     }
 }
 
@@ -515,30 +517,32 @@ fn start_dispatches(
         let arguments = request.arguments.clone();
         let anchor = request.anchor;
         let run_block_timeout = config.run_block_timeout;
-        commands.entity(entity).remove::<DispatchExecution>();
-        McpTask::start(&mut commands, &runtime, entity, async move {
-            if name == "open_file" {
-                let path = arguments
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .ok_or("open_file.path is required")?;
-                if !Path::new(path).is_absolute() {
-                    return Err("open_file.path must be an absolute path".to_string());
+        commands
+            .entity(entity)
+            .remove::<DispatchExecution>()
+            .insert(McpTask::spawn(&runtime, async move {
+                if name == "open_file" {
+                    let path = arguments
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .ok_or("open_file.path is required")?;
+                    if !Path::new(path).is_absolute() {
+                        return Err("open_file.path must be an absolute path".to_string());
+                    }
+                    scoped_existing_path(anchor, Path::new(path), "open_file").await?;
                 }
-                scoped_existing_path(anchor, Path::new(path), "open_file").await?;
-            }
 
-            match target {
-                crate::tool::DispatchTarget::Command(command @ AgentCommand::Run { .. })
-                | crate::tool::DispatchTarget::Command(
-                    command @ AgentCommand::RunWithPlacementOverride { .. },
-                ) => run_blocking(command, run_block_timeout).await,
-                crate::tool::DispatchTarget::Command(command) => {
-                    run_agent_command(command, anchor).await
+                match target {
+                    crate::tool::DispatchTarget::Command(command @ AgentCommand::Run { .. })
+                    | crate::tool::DispatchTarget::Command(
+                        command @ AgentCommand::RunWithPlacementOverride { .. },
+                    ) => run_blocking(command, run_block_timeout).await,
+                    crate::tool::DispatchTarget::Command(command) => {
+                        run_agent_command(command, anchor).await
+                    }
+                    crate::tool::DispatchTarget::Query(query) => run_agent_query(query).await,
                 }
-                crate::tool::DispatchTarget::Query(query) => run_agent_query(query).await,
-            }
-        });
+            }));
     }
 }
 

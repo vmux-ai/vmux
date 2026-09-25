@@ -13,10 +13,10 @@ impl Plugin for TeamRosterPlugin {
             .add_systems(
                 Update,
                 (
-                    Team::project
+                    project_team
                         .in_set(TeamProjection)
                         .run_if(resource_changed::<Members>),
-                    Team::emit
+                    emit_team
                         .after(TeamProjection)
                         .run_if(resource_changed::<Team>),
                 ),
@@ -33,17 +33,15 @@ pub struct Members(pub Vec<TeamMemberRow>);
 #[derive(Resource, Default)]
 pub struct Team(pub TeamEvent);
 
-impl Team {
-    fn project(members: Res<Members>, mut team: ResMut<Team>) {
-        team.0 = TeamEvent::project(members.0.clone(), Vec::new());
-    }
+fn project_team(members: Res<Members>, mut team: ResMut<Team>) {
+    team.0 = TeamEvent::project(members.0.clone(), Vec::new());
+}
 
-    fn emit(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::from_state(&team.0) else {
-            return;
-        };
-        emits.write(emit);
-    }
+fn emit_team(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {
+    let Some(emit) = PageEmit::from_state(&team.0) else {
+        return;
+    };
+    emits.write(emit);
 }
 
 #[cfg(test)]

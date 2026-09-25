@@ -331,37 +331,30 @@ impl GitController {
 
     fn discard_file(
         &mut self,
-        webview: Entity,
         path_bytes: &[u8],
         repository: &GitRepositorySnapshot,
-        commands: &mut Commands,
-    ) -> bool {
-        let Some(entry) = repository
+    ) -> Option<GitDiscardRequest> {
+        let entry = repository
             .files
             .iter()
-            .find(|entry| entry.path_bytes == path_bytes && entry.can_discard())
-        else {
-            return false;
-        };
+            .find(|entry| entry.path_bytes == path_bytes && entry.can_discard())?;
         self.state.focused_panel = GitPanel::Files;
-        if self.state.confirm_discard == entry.path_bytes {
-            commands.trigger(UiInput {
-                webview,
-                payload: GitDiscardRequest {
-                    repo_root: repository.repo_root.clone(),
-                    path: Path::new(&repository.repo_root)
-                        .join(&entry.path)
-                        .to_string_lossy()
-                        .into_owned(),
-                    path_bytes: entry.path_bytes.clone(),
-                },
-            });
+        let request = if self.state.confirm_discard == entry.path_bytes {
             self.state.confirm_discard.clear();
+            Some(GitDiscardRequest {
+                repo_root: repository.repo_root.clone(),
+                path: Path::new(&repository.repo_root)
+                    .join(&entry.path)
+                    .to_string_lossy()
+                    .into_owned(),
+                path_bytes: entry.path_bytes.clone(),
+            })
         } else {
             self.state.confirm_discard.clone_from(&entry.path_bytes);
-        }
+            None
+        };
         self.refresh_operations(repository);
-        true
+        request
     }
 }
 
@@ -486,7 +479,9 @@ fn dispatch_git_key(
         }
         (GitPanel::Files, "x") if controller.state.operations.discard => {
             let selected = controller.state.selected_path_bytes.clone();
-            controller.discard_file(webview, &selected, repository, commands);
+            if let Some(payload) = controller.discard_file(&selected, repository) {
+                commands.trigger(UiInput { webview, payload });
+            }
         }
         (GitPanel::Branches, "Enter" | " " | "Space" | "c")
             if controller.state.operations.checkout_branch =>
@@ -891,10 +886,8 @@ fn on_discard_file_request(
     let Some(repository) = state.repository() else {
         return;
     };
-    controller.discard_file(
-        webview,
-        &trigger.event().payload.path_bytes,
-        repository,
-        &mut commands,
-    );
+    if let Some(payload) = controller.discard_file(&trigger.event().payload.path_bytes, repository)
+    {
+        commands.trigger(UiInput { webview, payload });
+    }
 }

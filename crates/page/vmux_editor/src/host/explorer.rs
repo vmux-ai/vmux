@@ -26,7 +26,7 @@ use panel::PanelPlugin;
 pub use panel::StackExplorerVisibility;
 pub use search::GlobalSearchRequest;
 use search::SearchPlugin;
-use tree::TreePlugin;
+use tree::{ExplorerDirLoadTask, TreePlugin};
 
 #[derive(Component)]
 pub(super) struct OutlineDirty;
@@ -77,18 +77,21 @@ impl ExplorerTrees {
     pub(super) fn refresh_changed(
         &mut self,
         changed_dirs: &HashSet<PathBuf>,
-        commands: &mut Commands,
-    ) {
+    ) -> Vec<ExplorerDirLoadTask> {
+        let mut tasks = Vec::new();
         let roots: Vec<PathBuf> = self.by_root.keys().cloned().collect();
         for root in roots {
             let cached: Vec<PathBuf> = self.by_root[&root].children.keys().cloned().collect();
             for dir in cached {
                 let canonical = vmux_path::PathIdentity::resolve(&dir).into_path_buf();
-                if changed_dirs.contains(&canonical) {
-                    self.start_dir_load(&root, dir, commands, true);
+                if changed_dirs.contains(&canonical)
+                    && let Some(task) = self.request_dir_load(&root, dir, true)
+                {
+                    tasks.push(task);
                 }
             }
         }
+        tasks
     }
 }
 

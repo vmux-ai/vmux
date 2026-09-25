@@ -2,12 +2,10 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::PageMetadata;
 use vmux_core::event::{ExplorerCloseEditor, OpenEditorItem, OpenEditorsEvent};
 
 use super::{ExplorerState, OpenEditorsDirty, TabsPlugin};
-use crate::host::editor::{Editor, FileDocumentRevision, FileView, ParkedEdits};
-use crate::host::viewport::FileViewport;
+use crate::host::editor::{Editor, FileNavigateRequest, FileView, ParkedEdits};
 
 impl Plugin for TabsPlugin {
     fn build(&self, app: &mut App) {
@@ -92,26 +90,25 @@ impl OpenEditorPath {
     }
 }
 
-struct EditorPageClose;
+struct EditorPageClose(Entity);
 
 impl EditorPageClose {
     fn holding(
         webview: Entity,
         child_of: &Query<&ChildOf>,
         stacks: &Query<(), With<vmux_layout::stack::Stack>>,
-        closing: &mut MessageWriter<vmux_layout::CloseStackRequest>,
-    ) {
+    ) -> Option<Self> {
         let mut current = webview;
         for _ in 0..8 {
             if stacks.contains(current) {
-                closing.write(vmux_layout::CloseStackRequest::by_user(current));
-                return;
+                return Some(Self(current));
             }
             let Ok(parent) = child_of.get(current) else {
-                return;
+                return None;
             };
             current = parent.parent();
         }
+        None
     }
 }
 
@@ -119,16 +116,10 @@ impl EditorPageClose {
 fn on_explorer_close_editor(
     trigger: On<UiInput<ExplorerCloseEditor>>,
     mut states: Query<&mut ExplorerState>,
-    mut views: Query<(
-        &mut FileView,
-        &mut FileDocumentRevision,
-        &mut FileViewport,
-        &mut PageMetadata,
-    )>,
+    views: Query<&FileView>,
     child_of: Query<&ChildOf>,
     stacks: Query<(), With<vmux_layout::stack::Stack>>,
     mut closing: MessageWriter<vmux_layout::CloseStackRequest>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -139,24 +130,16 @@ fn on_explorer_close_editor(
     let next = state.close_editor(&path);
     commands.entity(entity).insert(OpenEditorsDirty);
     let Some(next) = next else {
-        EditorPageClose::holding(entity, &child_of, &stacks, &mut closing);
+        if let Some(close) = EditorPageClose::holding(entity, &child_of, &stacks) {
+            closing.write(vmux_layout::CloseStackRequest::by_user(close.0));
+        }
         return;
     };
-    let Ok((mut file_view, mut revision, mut viewport, mut metadata)) = views.get_mut(entity)
-    else {
+    let Ok(file_view) = views.get(entity) else {
         return;
     };
     if file_view.path != path {
         return;
     }
-    file_view.navigate(
-        entity,
-        next,
-        0,
-        &mut revision,
-        &mut viewport,
-        &mut metadata,
-        &mut manager,
-        &mut commands,
-    );
+    commands.trigger(FileNavigateRequest::new(entity, next, 0));
 }

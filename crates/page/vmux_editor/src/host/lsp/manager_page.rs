@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use bevy::prelude::*;
@@ -32,7 +33,10 @@ impl Plugin for ManagerPlugin {
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_update_request)
-            .add_systems(Update, (poll_catalog_jobs, poll_package_jobs))
+            .add_systems(
+                Update,
+                (start_package_jobs, poll_catalog_jobs, poll_package_jobs),
+            )
             .add_systems(
                 PostUpdate,
                 (deliver_manager_outputs, publish_manager_state).chain(),
@@ -203,6 +207,13 @@ enum PackageOperation {
     Uninstall,
 }
 
+#[derive(Component)]
+struct PendingPackageOperation {
+    target: Entity,
+    name: String,
+    operation: PackageOperation,
+}
+
 impl PackageOperation {
     fn run(self, name: String, progress: Sender<LspInstallProgress>) -> ManagerMsg {
         match self {
@@ -306,24 +317,29 @@ impl PackageJob {
             task,
         }
     }
+}
 
-    fn start(
-        target: Entity,
-        name: String,
-        operation: PackageOperation,
-        jobs: &Query<&Self>,
-        commands: &mut Commands,
-    ) {
-        if jobs.iter().any(|job| job.name == name) {
-            return;
+fn start_package_jobs(
+    pending: Query<(Entity, &PendingPackageOperation), Added<PendingPackageOperation>>,
+    jobs: Query<&PackageJob>,
+    mut commands: Commands,
+) {
+    let mut names = jobs
+        .iter()
+        .map(|job| job.name.clone())
+        .collect::<HashSet<_>>();
+    for (entity, request) in &pending {
+        commands.entity(entity).despawn();
+        if !names.insert(request.name.clone()) {
+            continue;
         }
-        let operation_name = match operation {
+        let operation_name = match request.operation {
             PackageOperation::Install => "install",
             PackageOperation::Uninstall => "uninstall",
         };
         commands.spawn((
-            Name::new(format!("LSP {operation_name}: {name}")),
-            Self::spawn(target, name, operation),
+            Name::new(format!("LSP {operation_name}: {}", request.name)),
+            PackageJob::spawn(request.target, request.name.clone(), request.operation),
         ));
     }
 }
@@ -402,46 +418,28 @@ fn on_catalog_request(
     ));
 }
 
-fn on_install_request(
-    trigger: On<UiInput<LspInstallRequest>>,
-    jobs: Query<&PackageJob>,
-    mut commands: Commands,
-) {
-    PackageJob::start(
-        trigger.event().webview,
-        trigger.event().payload.name.clone(),
-        PackageOperation::Install,
-        &jobs,
-        &mut commands,
-    );
+fn on_install_request(trigger: On<UiInput<LspInstallRequest>>, mut commands: Commands) {
+    commands.spawn(PendingPackageOperation {
+        target: trigger.event().webview,
+        name: trigger.event().payload.name.clone(),
+        operation: PackageOperation::Install,
+    });
 }
 
-fn on_update_request(
-    trigger: On<UiInput<LspUpdateRequest>>,
-    jobs: Query<&PackageJob>,
-    mut commands: Commands,
-) {
-    PackageJob::start(
-        trigger.event().webview,
-        trigger.event().payload.name.clone(),
-        PackageOperation::Install,
-        &jobs,
-        &mut commands,
-    );
+fn on_update_request(trigger: On<UiInput<LspUpdateRequest>>, mut commands: Commands) {
+    commands.spawn(PendingPackageOperation {
+        target: trigger.event().webview,
+        name: trigger.event().payload.name.clone(),
+        operation: PackageOperation::Install,
+    });
 }
 
-fn on_uninstall_request(
-    trigger: On<UiInput<LspUninstallRequest>>,
-    jobs: Query<&PackageJob>,
-    mut commands: Commands,
-) {
-    PackageJob::start(
-        trigger.event().webview,
-        trigger.event().payload.name.clone(),
-        PackageOperation::Uninstall,
-        &jobs,
-        &mut commands,
-    );
+fn on_uninstall_request(trigger: On<UiInput<LspUninstallRequest>>, mut commands: Commands) {
+    commands.spawn(PendingPackageOperation {
+        target: trigger.event().webview,
+        name: trigger.event().payload.name.clone(),
+        operation: PackageOperation::Uninstall,
+    });
 }
 
 impl crate::host::editor::FileView {
