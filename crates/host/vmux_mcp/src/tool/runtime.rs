@@ -37,26 +37,27 @@ pub struct ToolRuntimePlugin;
 
 impl Plugin for ToolRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NextToolOrder>()
-            .configure_sets(
-                Update,
-                (
-                    ToolRequestSet,
-                    ToolRequestFlush,
-                    ToolDispatchSet,
-                    ToolDispatchFlush,
-                )
-                    .chain(),
+        app.world_mut()
+            .spawn((Name::new("MCP tool registry"), NextToolOrder::default()));
+        app.configure_sets(
+            Update,
+            (
+                ToolRequestSet,
+                ToolRequestFlush,
+                ToolDispatchSet,
+                ToolDispatchFlush,
             )
-            .add_systems(
-                Update,
-                bevy_ecs::schedule::ApplyDeferred.in_set(ToolRequestFlush),
-            )
-            .add_systems(Update, dispatch_command_calls.in_set(ToolDispatchSet))
-            .add_systems(
-                Update,
-                bevy_ecs::schedule::ApplyDeferred.in_set(ToolDispatchFlush),
-            );
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            bevy_ecs::schedule::ApplyDeferred.in_set(ToolRequestFlush),
+        )
+        .add_systems(Update, dispatch_command_calls.in_set(ToolDispatchSet))
+        .add_systems(
+            Update,
+            bevy_ecs::schedule::ApplyDeferred.in_set(ToolDispatchFlush),
+        );
     }
 }
 
@@ -107,7 +108,7 @@ impl<T> McpToolManifest<T> {
 fn register_mcp_tools<T>(
     manifests: Query<(Entity, &McpToolManifest<T>)>,
     mut commands: Commands,
-    mut next_order: ResMut<NextToolOrder>,
+    mut next_order: Single<&mut NextToolOrder>,
 ) where
     T: Component + serde::de::DeserializeOwned + Serialize,
 {
@@ -365,7 +366,7 @@ impl ToolDispatchError {
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub(super) struct NextToolOrder(u32);
 
 #[derive(Clone, Component)]

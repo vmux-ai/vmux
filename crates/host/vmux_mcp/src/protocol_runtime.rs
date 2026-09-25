@@ -43,40 +43,43 @@ impl Plugin for McpPlugin {
         if !app.is_plugin_added::<crate::tool::ToolRuntimePlugin>() {
             app.add_plugins(crate::tool::ToolRuntimePlugin);
         }
-        app.insert_resource(self.config.clone())
-            .init_resource::<NextRequestSequence>()
-            .configure_sets(
-                Update,
-                (
-                    McpSet::Route,
-                    crate::tool::ToolRequestSet,
-                    crate::tool::ToolDispatchSet,
-                    crate::tool::ToolDispatchFlush,
-                    McpSet::StartTasks,
-                    McpSet::BuildResponses,
-                )
-                    .chain(),
+        app.world_mut().spawn((
+            Name::new("MCP protocol runtime"),
+            self.config.clone(),
+            NextRequestSequence::default(),
+        ));
+        app.configure_sets(
+            Update,
+            (
+                McpSet::Route,
+                crate::tool::ToolRequestSet,
+                crate::tool::ToolDispatchSet,
+                crate::tool::ToolDispatchFlush,
+                McpSet::StartTasks,
+                McpSet::BuildResponses,
             )
-            .add_systems(
-                Update,
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                route_request.in_set(McpSet::Route),
                 (
-                    route_request.in_set(McpSet::Route),
-                    (
-                        finish_tool_errors,
-                        start_list_tools,
-                        start_read_file_tools,
-                        start_grep_tools,
-                        start_vault_status_tools,
-                        start_tool_commands,
-                        start_tool_queries,
-                        bevy_ecs::schedule::ApplyDeferred,
-                        poll_tool_tasks,
-                    )
-                        .chain()
-                        .in_set(McpSet::StartTasks),
-                    build_responses.in_set(McpSet::BuildResponses),
-                ),
-            );
+                    finish_tool_errors,
+                    start_list_tools,
+                    start_read_file_tools,
+                    start_grep_tools,
+                    start_vault_status_tools,
+                    start_tool_commands,
+                    start_tool_queries,
+                    bevy_ecs::schedule::ApplyDeferred,
+                    poll_tool_tasks,
+                )
+                    .chain()
+                    .in_set(McpSet::StartTasks),
+                build_responses.in_set(McpSet::BuildResponses),
+            ),
+        );
     }
 }
 
@@ -89,11 +92,17 @@ enum McpSet {
 
 pub struct McpServer {
     app: App,
+    runtime: Entity,
 }
 
 impl From<App> for McpServer {
-    fn from(app: App) -> Self {
-        Self { app }
+    fn from(mut app: App) -> Self {
+        let runtime = app
+            .world_mut()
+            .query_filtered::<Entity, With<McpConfig>>()
+            .single(app.world())
+            .expect("MCP server requires exactly one protocol runtime");
+        Self { app, runtime }
     }
 }
 
@@ -116,7 +125,8 @@ impl McpServer {
     pub async fn handle(&mut self, message: Value) -> Option<Value> {
         self.app
             .world_mut()
-            .insert_resource(McpRuntime(tokio::runtime::Handle::current()));
+            .entity_mut(self.runtime)
+            .insert(McpRuntime(tokio::runtime::Handle::current()));
         let id = message.get("id").cloned()?;
         let method = message
             .get("method")
@@ -125,7 +135,10 @@ impl McpServer {
             .to_string();
         let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
         let sequence = {
-            let mut next = self.app.world_mut().resource_mut::<NextRequestSequence>();
+            let mut runtime = self.app.world_mut().entity_mut(self.runtime);
+            let mut next = runtime
+                .get_mut::<NextRequestSequence>()
+                .expect("MCP protocol runtime must own its request sequence");
             let sequence = next.0;
             next.0 += 1;
             sequence
@@ -170,7 +183,7 @@ impl McpServer {
     }
 }
 
-#[derive(Resource, Clone)]
+#[derive(Component, Clone)]
 struct McpConfig {
     anchor: Option<vmux_client::protocol::ProcessId>,
     acp_session: bool,
@@ -179,10 +192,10 @@ struct McpConfig {
     shell: String,
 }
 
-#[derive(Resource, Clone)]
+#[derive(Component, Clone)]
 struct McpRuntime(tokio::runtime::Handle);
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct NextRequestSequence(u64);
 
 #[derive(Component)]
@@ -303,7 +316,7 @@ fn route_request(
     mut commands: Commands,
     requests: PendingRequests,
     tools: crate::tool::ToolRegistry,
-    config: Res<McpConfig>,
+    config: Single<&McpConfig>,
 ) {
     let Some((entity, method, params, _)) =
         requests.iter().min_by_key(|(_, _, _, sequence)| sequence.0)
@@ -379,7 +392,7 @@ fn finish_tool_errors(
 
 fn start_list_tools(
     mut commands: Commands,
-    runtime: Res<McpRuntime>,
+    runtime: Single<&McpRuntime>,
     requests: Query<(Entity, &ListToolsExecution), Added<ListToolsExecution>>,
 ) {
     for (entity, request) in &requests {
@@ -402,7 +415,7 @@ fn start_list_tools(
 
 fn start_read_file_tools(
     mut commands: Commands,
-    runtime: Res<McpRuntime>,
+    runtime: Single<&McpRuntime>,
     requests: Query<
         (Entity, &crate::tool::ReadFileExecution),
         Added<crate::tool::ReadFileExecution>,
@@ -426,7 +439,7 @@ fn start_read_file_tools(
 
 fn start_grep_tools(
     mut commands: Commands,
-    runtime: Res<McpRuntime>,
+    runtime: Single<&McpRuntime>,
     requests: Query<(Entity, &crate::tool::GrepExecution), Added<crate::tool::GrepExecution>>,
 ) {
     for (entity, request) in &requests {
@@ -443,7 +456,7 @@ fn start_grep_tools(
 
 fn start_vault_status_tools(
     mut commands: Commands,
-    runtime: Res<McpRuntime>,
+    runtime: Single<&McpRuntime>,
     requests: Query<Entity, Added<crate::tool::VaultStatusExecution>>,
 ) {
     for entity in &requests {
@@ -460,12 +473,12 @@ fn start_vault_status_tools(
 
 fn start_tool_commands(
     mut commands: Commands,
-    runtime: Res<McpRuntime>,
+    runtime: Single<&McpRuntime>,
     requests: Query<
         (Entity, &crate::tool::ToolCall, &crate::tool::ToolCommand),
         Added<crate::tool::ToolCommand>,
     >,
-    config: Res<McpConfig>,
+    config: Single<&McpConfig>,
 ) {
     for (entity, call, result) in &requests {
         let mut request = commands.entity(entity);
@@ -508,7 +521,7 @@ fn start_tool_commands(
 
 fn start_tool_queries(
     mut commands: Commands,
-    runtime: Res<McpRuntime>,
+    runtime: Single<&McpRuntime>,
     requests: Query<(Entity, &crate::tool::ToolQuery), Added<crate::tool::ToolQuery>>,
 ) {
     for (entity, result) in &requests {
