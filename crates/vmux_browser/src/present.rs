@@ -435,7 +435,9 @@ fn agent_brand_rgb(kind: vmux_core::agent::AgentKind) -> [f32; 3] {
 pub(crate) fn sync_windowed_frames(
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
-    layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
+    hidden_windows: Query<(), With<vmux_layout::toggle::LayoutHidden>>,
+    added_hidden_windows: Query<(), Added<vmux_layout::toggle::LayoutHidden>>,
+    mut removed_hidden_windows: RemovedComponents<vmux_layout::toggle::LayoutHidden>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     active_panes: Res<vmux_layout::active_panes::ActivePanes>,
     clear_color: Res<vmux_layout::window::WindowBackground>,
@@ -464,7 +466,8 @@ pub(crate) fn sync_windowed_frames(
     pane_frames.frames.clear();
     pane_frames.rings.clear();
     pane_frames.all_corners.clear();
-    let force_raise = layout_hidden.is_changed();
+    let force_raise =
+        !added_hidden_windows.is_empty() || removed_hidden_windows.read().next().is_some();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
     memory.visible_frames.clear();
@@ -521,7 +524,7 @@ pub(crate) fn sync_windowed_frames(
         }
         visible.push(entity);
         let host_window = queries.hierarchy.host_of(entity);
-        let layout_is_hidden = host_window.is_some_and(|window| layout_hidden.is_hidden(window));
+        let layout_is_hidden = host_window.is_some_and(|window| hidden_windows.contains(window));
         let header_frame = host_window.and_then(|host_window| {
             queries.header_rect.iter().find_map(|(header, rect)| {
                 if queries.hierarchy.host_of(header) == Some(host_window) {
