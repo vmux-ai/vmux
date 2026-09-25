@@ -43,9 +43,6 @@ impl QueuedPromptSnapshot {
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ChatSnapshot {
-    pub messages: Vec<ChatItem>,
-    pub messages_start: u32,
-    pub messages_total: u32,
     pub status: String,
     pub error: String,
     pub approval: Option<PendingApproval>,
@@ -104,16 +101,19 @@ pub struct SelectMode {
 
 #[vmux_api::ui_event(Default)]
 pub struct ChatHistoryRequest {
-    pub before: u32,
-    pub limit: u32,
+    pub generation: u64,
+    pub request_id: u64,
 }
 
-#[vmux_api::contract(Default)]
-pub struct ChatHistoryPage {
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatTranscriptState {
+    pub generation: u64,
+    pub request_id: u64,
+    pub prepend_revision: u64,
     pub items: Vec<ChatItem>,
-    pub start: u32,
-    pub end: u32,
+    pub loaded_start: u32,
     pub total: u32,
+    pub loading: bool,
 }
 
 #[vmux_api::ui_event(Default)]
@@ -219,9 +219,6 @@ mod tests {
     #[test]
     fn chat_snapshot_rkyv_roundtrip() {
         let v = ChatSnapshot {
-            messages: vec![ChatItem::user("hello")],
-            messages_start: 12,
-            messages_total: 60,
             status: "streaming".to_string(),
             conversation_title: "Refine generated summaries".to_string(),
             handoff_source: "Codex".to_string(),
@@ -250,9 +247,6 @@ mod tests {
         let back = rkyv::from_bytes::<ChatSnapshot, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.status, "streaming");
         assert_eq!(back.conversation_title, "Refine generated summaries");
-        assert_eq!(back.messages_start, 12);
-        assert_eq!(back.messages_total, 60);
-        assert_eq!(back.messages, vec![ChatItem::user("hello")]);
         assert_eq!(back.queued.len(), 2);
         assert_eq!(back.queued[0].id, 4);
         assert_eq!(back.queued[0].text, "a");
@@ -267,16 +261,22 @@ mod tests {
     }
 
     #[test]
-    fn chat_history_page_rkyv_roundtrip() {
-        let value = ChatHistoryPage {
+    fn chat_transcript_state_rkyv_roundtrip() {
+        let value = ChatTranscriptState {
+            generation: 3,
+            request_id: 7,
+            prepend_revision: 2,
             items: vec![ChatItem::user("older")],
-            start: 4,
-            end: 44,
+            loaded_start: 4,
             total: 92,
+            loading: true,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
-        let back = rkyv::from_bytes::<ChatHistoryPage, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!((back.start, back.end, back.total), (4, 44, 92));
+        let back = rkyv::from_bytes::<ChatTranscriptState, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!((back.generation, back.request_id), (3, 7));
+        assert_eq!((back.loaded_start, back.total), (4, 92));
+        assert_eq!(back.prepend_revision, 2);
+        assert!(back.loading);
         assert_eq!(back.items, vec![ChatItem::user("older")]);
     }
 

@@ -7,7 +7,7 @@ use vmux_api::room::{
 };
 use vmux_service::chat::group_turns_tail;
 
-use crate::event::{ChatSnapshot, PendingApproval};
+use crate::event::{ChatSnapshot, ChatTranscriptState, PendingApproval};
 use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
 
 pub struct ChatRoomPlugin;
@@ -26,6 +26,7 @@ impl Plugin for ChatRoomPlugin {
             .init_resource::<LiveTurn>()
             .init_resource::<Agents>()
             .init_resource::<Snapshot>()
+            .init_resource::<RoomTranscript>()
             .add_systems(
                 Update,
                 (
@@ -36,9 +37,9 @@ impl Plugin for ChatRoomPlugin {
                             .or_else(resource_changed::<LiveTurn>)
                             .or_else(resource_changed::<Agents>),
                     ),
-                    emit_snapshot
-                        .after(RoomProjection)
-                        .run_if(resource_changed::<Snapshot>),
+                    emit_snapshot.after(RoomProjection).run_if(
+                        resource_changed::<Snapshot>.or_else(resource_changed::<RoomTranscript>),
+                    ),
                 ),
             );
     }
@@ -155,8 +156,19 @@ pub struct Agents(pub Vec<RemoteAgent>);
 #[derive(Resource, Default)]
 pub struct Snapshot(pub ChatSnapshot);
 
-fn emit_snapshot(snapshot: Res<Snapshot>, mut projection: ResMut<ChatUiStateProjection>) {
+#[derive(Resource, Default)]
+struct RoomTranscript {
+    room_id: Option<RoomId>,
+    state: ChatTranscriptState,
+}
+
+fn emit_snapshot(
+    snapshot: Res<Snapshot>,
+    transcript: Res<RoomTranscript>,
+    mut projection: ResMut<ChatUiStateProjection>,
+) {
     projection.write(&snapshot.0);
+    projection.write(&transcript.state);
 }
 
 fn project_snapshot(
@@ -165,9 +177,12 @@ fn project_snapshot(
     live: Res<LiveTurn>,
     agents: Res<Agents>,
     mut snapshot: ResMut<Snapshot>,
+    mut transcript: ResMut<RoomTranscript>,
 ) {
     let Some(session) = conversation.session.as_ref() else {
         snapshot.0 = ChatSnapshot::default();
+        transcript.room_id = None;
+        transcript.state = ChatTranscriptState::default();
         return;
     };
     let running = matches!(session.status, RemoteStatus::Streaming);
@@ -190,10 +205,20 @@ fn project_snapshot(
         Some(agent) => (agent.icon.clone(), agent.id.as_str()),
         None => (String::new(), ""),
     };
+    let generation = if transcript.room_id.as_ref() == Some(&session.room_id) {
+        transcript.state.generation.max(1)
+    } else {
+        transcript.state.generation.wrapping_add(1).max(1)
+    };
+    transcript.room_id = Some(session.room_id.clone());
+    transcript.state = ChatTranscriptState {
+        generation,
+        items,
+        loaded_start: 0,
+        total,
+        ..ChatTranscriptState::default()
+    };
     snapshot.0 = ChatSnapshot {
-        messages: items,
-        messages_start: 0,
-        messages_total: total,
         status: conversation.status.page_status().to_string(),
         error,
         approval,
@@ -265,8 +290,12 @@ mod tests {
             &self.0.world().resource::<Snapshot>().0
         }
 
+        fn transcript(&self) -> &ChatTranscriptState {
+            &self.0.world().resource::<RoomTranscript>().state
+        }
+
         fn items(&self) -> Vec<ChatItem> {
-            self.snapshot().messages.clone()
+            self.transcript().items.clone()
         }
 
         fn insert(&mut self, resource: impl Resource) {
@@ -439,8 +468,8 @@ mod tests {
 
         started.insert(Conversation::default());
         assert!(started.snapshot().agent_name.is_empty());
-        assert_eq!(started.snapshot().messages_total, 0);
-        assert!(started.snapshot().messages.is_empty());
+        assert_eq!(started.transcript().total, 0);
+        assert!(started.transcript().items.is_empty());
     }
 
     #[test]
