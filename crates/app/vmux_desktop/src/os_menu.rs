@@ -25,16 +25,14 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut()
+            .spawn((Name::new("OS menu runtime"), OsMenuState::default()));
         app.add_plugins(crate::bookmark::BookmarkMenuPlugin)
             .add_message::<crate::window_manager::CloseVmuxWindow>()
             .add_message::<CloseRequest>()
             .add_message::<vmux_browser::OpenRequest>()
             .add_observer(dispatch_command_menu_selection)
             .add_observer(hide_windows_from_menu)
-            .init_resource::<LastMenuCommandAt>()
-            .init_resource::<LastStackCloseAt>()
-            .init_resource::<LastNativePageOpenAt>()
-            .init_resource::<CloseMenuItemEnabled>()
             .add_systems(
                 Startup,
                 setup
@@ -61,21 +59,22 @@ impl Plugin for OsMenuPlugin {
     }
 }
 
-#[derive(Resource, Default)]
-pub(crate) struct LastMenuCommandAt(pub Option<std::time::Instant>);
+#[derive(Component)]
+struct OsMenuState {
+    last_menu_command_at: Option<std::time::Instant>,
+    last_stack_close_at: Option<std::time::Instant>,
+    last_native_page_open_at: Option<std::time::Instant>,
+    close_item_enabled: bool,
+}
 
-#[derive(Resource, Default)]
-pub(crate) struct LastStackCloseAt(pub Option<std::time::Instant>);
-
-#[derive(Resource, Default)]
-pub(crate) struct LastNativePageOpenAt(pub Option<std::time::Instant>);
-
-#[derive(Resource)]
-pub(crate) struct CloseMenuItemEnabled(pub bool);
-
-impl Default for CloseMenuItemEnabled {
+impl Default for OsMenuState {
     fn default() -> Self {
-        Self(true)
+        Self {
+            last_menu_command_at: None,
+            last_stack_close_at: None,
+            last_native_page_open_at: None,
+            close_item_enabled: true,
+        }
     }
 }
 
@@ -189,7 +188,9 @@ fn setup(world: &mut World) {
         }
     }));
 
-    world.spawn((Name::new("OS menu runtime"), inbox));
+    let mut runtime = world.query_filtered::<Entity, With<OsMenuState>>();
+    let runtime = runtime.single(world).unwrap();
+    world.entity_mut(runtime).insert(inbox);
     world.spawn((
         Name::new("Close Vmux menu item"),
         OsMenuEntry::identified("app_quit".to_string()),
@@ -495,13 +496,13 @@ fn find_menu_item(items: Vec<MenuItemKind>, id: &str) -> Option<MenuItem> {
 fn sync_close_menu_item(
     menu: Option<NonSend<OsMenuResource>>,
     windows: Query<&Window>,
-    mut enabled: ResMut<CloseMenuItemEnabled>,
+    mut state: Single<&mut OsMenuState>,
 ) {
     let any_visible = windows.iter().any(|w| w.visible);
-    if enabled.0 == any_visible {
+    if state.close_item_enabled == any_visible {
         return;
     }
-    enabled.0 = any_visible;
+    state.close_item_enabled = any_visible;
     if let Some(menu) = menu
         && let Some(item) = &menu.close_window
     {
@@ -513,7 +514,7 @@ fn forward_menu_events(
     mut commands: Commands,
     inbox: Option<Single<&OsMenuInbox>>,
     menu_entries: Query<(Entity, &OsMenuEntry, Has<TransientOsMenuEntry>)>,
-    mut last_menu_command: ResMut<LastMenuCommandAt>,
+    mut state: Single<&mut OsMenuState>,
 ) {
     let drained = {
         let Some(inbox) = inbox else {
@@ -527,7 +528,7 @@ fn forward_menu_events(
     };
 
     if !drained.is_empty() {
-        last_menu_command.0 = Some(std::time::Instant::now());
+        state.last_menu_command_at = Some(std::time::Instant::now());
     }
     for event_id in drained {
         let selected = menu_entries.iter().find_map(|(entity, entry, transient)| {
@@ -567,16 +568,16 @@ fn hide_windows_from_menu(
 
 fn remember_stack_close_commands(
     mut reader: MessageReader<CloseRequest>,
-    mut last_stack_close: ResMut<LastStackCloseAt>,
+    mut state: Single<&mut OsMenuState>,
 ) {
     for _ in reader.read() {
-        last_stack_close.0 = Some(std::time::Instant::now());
+        state.last_stack_close_at = Some(std::time::Instant::now());
     }
 }
 
 fn remember_native_page_open_requests(
     mut reader: MessageReader<vmux_browser::OpenRequest>,
-    mut last_native_page_open: ResMut<LastNativePageOpenAt>,
+    mut state: Single<&mut OsMenuState>,
 ) {
     for request in reader.read() {
         if request
@@ -584,7 +585,7 @@ fn remember_native_page_open_requests(
             .as_deref()
             .is_some_and(|url| url.starts_with("vmux://"))
         {
-            last_native_page_open.0 = Some(std::time::Instant::now());
+            state.last_native_page_open_at = Some(std::time::Instant::now());
         }
     }
 }
@@ -593,23 +594,21 @@ fn hide_window_on_close_request(
     mut closed: MessageReader<WindowCloseRequested>,
     mut windows: Query<&mut Window>,
     mut close_windows: MessageWriter<crate::window_manager::CloseVmuxWindow>,
-    last_menu_command: Res<LastMenuCommandAt>,
-    last_stack_close: Res<LastStackCloseAt>,
-    last_native_page_open: Res<LastNativePageOpenAt>,
+    state: Single<&OsMenuState>,
     last_tab_close: Option<Res<vmux_layout::tab::LastTabCloseAt>>,
 ) {
-    let from_menu_key_equivalent = last_menu_command
-        .0
+    let from_menu_key_equivalent = state
+        .last_menu_command_at
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
     let from_tab_close = last_tab_close
         .as_deref()
         .and_then(|last| last.0)
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
-    let from_stack_close = last_stack_close
-        .0
+    let from_stack_close = state
+        .last_stack_close_at
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
-    let from_native_page_open = last_native_page_open
-        .0
+    let from_native_page_open = state
+        .last_native_page_open_at
         .is_some_and(|t| t.elapsed() < NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW);
     let window_count = windows.iter().count();
     for event in closed.read() {
@@ -832,8 +831,12 @@ mod tests {
             .insert_resource(test_settings());
 
         let window = app.world_mut().spawn(Window::default()).id();
-        app.world_mut().resource_mut::<LastNativePageOpenAt>().0 =
-            Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));
+        {
+            let world = app.world_mut();
+            let mut state = world.query::<&mut OsMenuState>();
+            state.single_mut(world).unwrap().last_native_page_open_at =
+                Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));
+        }
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });
@@ -853,23 +856,29 @@ mod tests {
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut().run_schedule(Update);
-        assert!(
-            app.world().resource::<CloseMenuItemEnabled>().0,
-            "a visible window means Close is enabled"
-        );
+        let enabled = {
+            let world = app.world_mut();
+            let mut state = world.query::<&OsMenuState>();
+            state.single(world).unwrap().close_item_enabled
+        };
+        assert!(enabled, "a visible window means Close is enabled");
 
         app.world_mut().get_mut::<Window>(window).unwrap().visible = false;
         app.world_mut().run_schedule(Update);
-        assert!(
-            !app.world().resource::<CloseMenuItemEnabled>().0,
-            "all windows hidden means Close is disabled"
-        );
+        let enabled = {
+            let world = app.world_mut();
+            let mut state = world.query::<&OsMenuState>();
+            state.single(world).unwrap().close_item_enabled
+        };
+        assert!(!enabled, "all windows hidden means Close is disabled");
 
         app.world_mut().get_mut::<Window>(window).unwrap().visible = true;
         app.world_mut().run_schedule(Update);
-        assert!(
-            app.world().resource::<CloseMenuItemEnabled>().0,
-            "showing a window re-enables Close"
-        );
+        let enabled = {
+            let world = app.world_mut();
+            let mut state = world.query::<&OsMenuState>();
+            state.single(world).unwrap().close_item_enabled
+        };
+        assert!(enabled, "showing a window re-enables Close");
     }
 }
