@@ -1,9 +1,8 @@
 use bevy::prelude::*;
-use parking_lot::Mutex;
-use std::sync::LazyLock;
 use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
+use crate::os_menu::{OsMenuEntry, OsMenuSelect};
 #[cfg(feature = "recording")]
 use crate::recording::{RecordingControl, RecordingStatus};
 use crate::runtime::{HideAllWindowsRequest, QuitRequest, ShowAllWindowsRequest};
@@ -15,34 +14,41 @@ pub(crate) struct TrayPlugin;
 impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
-            .add_systems(
-                Update,
-                (drain_tray_events, sync_tray_menu_state, sync_tray_recording),
-            );
+            .add_observer(toggle_tray_visibility)
+            .add_observer(quit_from_tray)
+            .add_observer(control_recording_from_tray)
+            .add_systems(Update, (sync_tray_menu_state, sync_tray_recording));
     }
 }
 
-pub(crate) static PENDING_TRAY_EVENTS: LazyLock<Mutex<Vec<String>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
+#[derive(Component)]
+struct ToggleTrayVisibility;
+
+#[derive(Component)]
+struct QuitFromTray;
+
+#[cfg(feature = "recording")]
+#[derive(Component)]
+struct PauseRecordingFromTray;
+
+#[cfg(feature = "recording")]
+#[derive(Component)]
+struct ResumeRecordingFromTray;
+
+#[cfg(feature = "recording")]
+#[derive(Component)]
+struct FinishRecordingFromTray;
 
 struct TrayHandle {
     _tray: TrayIcon,
     toggle: MenuItem,
     quit: MenuItem,
-    toggle_id: String,
-    quit_id: String,
     #[cfg(feature = "recording")]
     pause: MenuItem,
     #[cfg(feature = "recording")]
-    pause_id: String,
-    #[cfg(feature = "recording")]
     resume: MenuItem,
     #[cfg(feature = "recording")]
-    resume_id: String,
-    #[cfg(feature = "recording")]
     done: MenuItem,
-    #[cfg(feature = "recording")]
-    done_id: String,
     last_any_visible: Option<bool>,
     last_locale: Locale,
     #[cfg(feature = "recording")]
@@ -105,63 +111,95 @@ fn setup_tray(world: &mut World) {
         _tray: tray,
         toggle,
         quit,
-        toggle_id,
-        quit_id,
         #[cfg(feature = "recording")]
         pause,
         #[cfg(feature = "recording")]
-        pause_id,
-        #[cfg(feature = "recording")]
         resume,
         #[cfg(feature = "recording")]
-        resume_id,
-        #[cfg(feature = "recording")]
         done,
-        #[cfg(feature = "recording")]
-        done_id,
         last_any_visible: None,
         last_locale: locale,
         #[cfg(feature = "recording")]
         last_status: None,
     });
+    world.spawn((
+        Name::new("Toggle tray visibility"),
+        OsMenuEntry::identified(toggle_id),
+        ToggleTrayVisibility,
+    ));
+    world.spawn((
+        Name::new("Quit from tray"),
+        OsMenuEntry::identified(quit_id),
+        QuitFromTray,
+    ));
+    #[cfg(feature = "recording")]
+    world.spawn((
+        Name::new("Pause recording from tray"),
+        OsMenuEntry::identified(pause_id),
+        PauseRecordingFromTray,
+    ));
+    #[cfg(feature = "recording")]
+    world.spawn((
+        Name::new("Resume recording from tray"),
+        OsMenuEntry::identified(resume_id),
+        ResumeRecordingFromTray,
+    ));
+    #[cfg(feature = "recording")]
+    world.spawn((
+        Name::new("Finish recording from tray"),
+        OsMenuEntry::identified(done_id),
+        FinishRecordingFromTray,
+    ));
 }
 
-fn drain_tray_events(
-    handle: Option<NonSend<TrayHandle>>,
+fn toggle_tray_visibility(
+    trigger: On<OsMenuSelect>,
+    menu_items: Query<(), With<ToggleTrayVisibility>>,
     windows: Query<&Window>,
     mut hide_windows: MessageWriter<HideAllWindowsRequest>,
     mut show_windows: MessageWriter<ShowAllWindowsRequest>,
-    mut quit: MessageWriter<QuitRequest>,
-    #[cfg(feature = "recording")] mut controls: MessageWriter<RecordingControl>,
 ) {
-    let Some(handle) = handle else { return };
-    let drained = std::mem::take(&mut *PENDING_TRAY_EVENTS.lock());
+    if !menu_items.contains(trigger.event_target()) {
+        return;
+    }
     let any_visible = windows.iter().any(|w| w.visible);
-    for event_id in drained {
-        if event_id == handle.toggle_id {
-            if any_visible {
-                hide_windows.write(HideAllWindowsRequest);
-            } else {
-                show_windows.write(ShowAllWindowsRequest);
-            }
-        } else if event_id == handle.quit_id {
-            quit.write(QuitRequest);
-        } else {
-            #[cfg(feature = "recording")]
-            if event_id == handle.pause_id {
-                controls.write(RecordingControl::Pause);
-                continue;
-            } else if event_id == handle.resume_id {
-                controls.write(RecordingControl::Resume);
-                continue;
-            } else if event_id == handle.done_id {
-                controls.write(RecordingControl::Done);
-                continue;
-            }
-            tracing::debug!(id = %event_id, "unhandled tray menu event id");
-        }
+    if any_visible {
+        hide_windows.write(HideAllWindowsRequest);
+    } else {
+        show_windows.write(ShowAllWindowsRequest);
     }
 }
+
+fn quit_from_tray(
+    trigger: On<OsMenuSelect>,
+    menu_items: Query<(), With<QuitFromTray>>,
+    mut quit: MessageWriter<QuitRequest>,
+) {
+    if menu_items.contains(trigger.event_target()) {
+        quit.write(QuitRequest);
+    }
+}
+
+#[cfg(feature = "recording")]
+fn control_recording_from_tray(
+    trigger: On<OsMenuSelect>,
+    pause: Query<(), With<PauseRecordingFromTray>>,
+    resume: Query<(), With<ResumeRecordingFromTray>>,
+    finish: Query<(), With<FinishRecordingFromTray>>,
+    mut controls: MessageWriter<RecordingControl>,
+) {
+    let target = trigger.event_target();
+    if pause.contains(target) {
+        controls.write(RecordingControl::Pause);
+    } else if resume.contains(target) {
+        controls.write(RecordingControl::Resume);
+    } else if finish.contains(target) {
+        controls.write(RecordingControl::Done);
+    }
+}
+
+#[cfg(not(feature = "recording"))]
+fn control_recording_from_tray(_trigger: On<OsMenuSelect>) {}
 
 fn sync_tray_menu_state(
     handle: Option<NonSendMut<TrayHandle>>,
