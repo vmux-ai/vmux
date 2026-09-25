@@ -151,6 +151,7 @@ fn group_turns_page_with_total(
     {
         last.running = true;
         last.duration_secs = None;
+        crate::chat_projection::project_turn(last);
     }
     ChatItemPage {
         items: builder.items,
@@ -252,10 +253,12 @@ impl<'a> PageBuilder<'a> {
                 .iter()
                 .enumerate()
                 .filter(|(index, block)| {
-                    !matches!(block, ChatBlock::Text(_)) && turn.parent_tool_index(*index).is_none()
+                    !matches!(block, ChatBlock::Text(_))
+                        && crate::chat_projection::parent_tool_index(&turn, *index).is_none()
                 })
                 .count() as u32;
             turn.duration_secs = self.durations.get(self.turn_ordinal).copied();
+            crate::chat_projection::project_turn(&mut turn);
             self.items.push(ChatItem::Turn(turn));
         }
         self.current_exists = false;
@@ -742,9 +745,9 @@ mod tests {
         };
         assert_eq!(turn.step_count, 1);
         assert!(matches!(&turn.blocks[0], ChatBlock::Subagent(_)));
-        assert_eq!(turn.parent_tool_index(1), Some(0));
-        assert_eq!(turn.parent_tool_index(2), Some(0));
-        assert_eq!(turn.parent_tool_index(3), Some(0));
+        assert_eq!(crate::chat_projection::parent_tool_index(turn, 1), Some(0));
+        assert_eq!(crate::chat_projection::parent_tool_index(turn, 2), Some(0));
+        assert_eq!(crate::chat_projection::parent_tool_index(turn, 3), Some(0));
     }
 
     #[test]

@@ -108,8 +108,8 @@ fn ComposerFooter(chat: Chat) -> Element {
             uncommitted: context.uncommitted,
             ahead: context.ahead,
             status: chat.status(),
-            active_subagents: (chat.activity_counts)().0,
-            active_tasks: (chat.activity_counts)().1,
+            active_subagents: (chat.transcript.active_subagents)() as usize,
+            active_tasks: (chat.transcript.active_tasks)() as usize,
             queued_count: chat.queue.queued.read().len(),
         }
     }

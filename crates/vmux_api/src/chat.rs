@@ -56,6 +56,248 @@ pub struct ChatPlanStep {
 }
 
 #[vmux_api::contract(Eq)]
+pub enum ChatTurnRow {
+    Text {
+        index: u32,
+        text: String,
+    },
+    Thinking {
+        index: u32,
+        text: String,
+        latest: bool,
+    },
+    Tool(ChatToolCall),
+    FinishedTools {
+        index: u32,
+        calls: Vec<ChatToolCall>,
+    },
+    Subagent(ChatSubagentState),
+    Plan {
+        index: u32,
+        steps: Vec<ChatPlanItem>,
+    },
+    Diff(ChatDiff),
+    ToolResult {
+        index: u32,
+        content: String,
+        is_error: bool,
+    },
+    Reconnect {
+        index: u32,
+        attempt: u32,
+        total: u32,
+    },
+}
+
+impl ChatTurnRow {
+    pub fn index(&self) -> u32 {
+        match self {
+            Self::Text { index, .. }
+            | Self::Thinking { index, .. }
+            | Self::FinishedTools { index, .. }
+            | Self::Plan { index, .. }
+            | Self::ToolResult { index, .. }
+            | Self::Reconnect { index, .. } => *index,
+            Self::Tool(call) => call.index,
+            Self::Subagent(subagent) => subagent.index,
+            Self::Diff(diff) => diff.index,
+        }
+    }
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatToolCall {
+    pub index: u32,
+    pub name: String,
+    pub kind: ChatToolKind,
+    pub activity: ChatActivityKind,
+    pub fallback_label: String,
+    pub file_path: Option<String>,
+    pub arguments: ChatToolArguments,
+    pub children: Vec<ChatToolChild>,
+    pub live: bool,
+}
+
+#[vmux_api::contract(Eq)]
+pub enum ChatToolChild {
+    Tool(ChatToolChildCall),
+    Subagent(ChatSubagentSummary),
+    Result {
+        index: u32,
+        content: String,
+        is_error: bool,
+    },
+}
+
+impl ChatToolChild {
+    pub fn index(&self) -> u32 {
+        match self {
+            Self::Tool(call) => call.index,
+            Self::Subagent(subagent) => subagent.index,
+            Self::Result { index, .. } => *index,
+        }
+    }
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatToolChildCall {
+    pub index: u32,
+    pub name: String,
+    pub kind: ChatToolKind,
+    pub activity: ChatActivityKind,
+    pub fallback_label: String,
+    pub file_path: Option<String>,
+    pub arguments: ChatToolArguments,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatSubagentState {
+    pub index: u32,
+    pub call_id: String,
+    pub provider: String,
+    pub title: String,
+    pub status: ChatSubagentStatus,
+    pub activity: String,
+    pub agent_name: Option<String>,
+    pub thread_id: Option<String>,
+    pub parent_thread_id: Option<String>,
+    pub child_threads: String,
+    pub prompt: Option<String>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub raw_input: String,
+    pub children: Vec<ChatToolChild>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatSubagentSummary {
+    pub index: u32,
+    pub title: String,
+    pub status: ChatSubagentStatus,
+    pub provider: String,
+    pub agent_name: Option<String>,
+    pub prompt: Option<String>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatDiff {
+    pub index: u32,
+    pub path: String,
+    pub name: String,
+    pub lines: Vec<ChatDiffLine>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct ChatDiffLine {
+    pub kind: ChatDiffLineKind,
+    pub text: String,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub enum ChatDiffLineKind {
+    Removed,
+    Added,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct ChatPlanItem {
+    pub content: String,
+    pub status: ChatPlanStatus,
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum ChatPlanStatus {
+    Complete,
+    Active,
+    #[default]
+    Pending,
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum ChatSubagentStatus {
+    Running,
+    Complete,
+    Failed,
+    #[default]
+    Pending,
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum ChatToolKind {
+    Guardian,
+    ReadFile,
+    ReadSkill,
+    WriteFile,
+    Layout,
+    Worktree,
+    Image,
+    Screenshot,
+    OpenPage,
+    Browser,
+    Search,
+    Command,
+    #[default]
+    Other,
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum ChatActivityKind {
+    #[default]
+    None,
+    Thinking,
+    Writing,
+    Installing,
+    Awaiting,
+    Python,
+    ReadFile,
+    WriteFile,
+    Layout,
+    Worktree,
+    Search,
+    Image,
+    Screenshot,
+    OpenPage,
+    Command,
+    Browser,
+    Guardian,
+    Subagent,
+    Tool,
+    Output,
+    Error,
+    Plan,
+    Diff,
+    Reconnect,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub enum ChatToolArguments {
+    #[default]
+    None,
+    Fields(Vec<ChatToolArgument>),
+    Value(ChatToolArgumentValue),
+    Raw(String),
+}
+
+#[vmux_api::contract(recursive, Eq)]
+pub struct ChatToolArgument {
+    pub name: String,
+    pub label: String,
+    pub value: ChatToolArgumentValue,
+}
+
+#[vmux_api::contract(recursive, Eq)]
+pub enum ChatToolArgumentValue {
+    Path(String),
+    Code(String),
+    Text(String),
+    Bool(bool),
+    Number(String),
+    List(Vec<ChatToolArgument>),
+    Object(Vec<ChatToolArgument>),
+    Null,
+}
+
+#[vmux_api::contract(Eq)]
 pub enum ChatItem {
     User {
         text: String,
@@ -83,6 +325,16 @@ impl ChatItem {
 #[vmux_api::contract(Default, Eq)]
 pub struct ChatTurn {
     pub blocks: Vec<ChatBlock>,
+    #[serde(default)]
+    pub rows: Vec<ChatTurnRow>,
+    #[serde(default)]
+    pub copy_text: String,
+    #[serde(default)]
+    pub activity: ChatActivityKind,
+    #[serde(default)]
+    pub active_subagents: u32,
+    #[serde(default)]
+    pub active_tasks: u32,
     pub running: bool,
     pub duration_secs: Option<u32>,
     pub step_count: u32,
@@ -92,128 +344,6 @@ pub struct ChatTurn {
 
 fn is_zero(value: &u64) -> bool {
     *value == 0
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct ToolName<'a>(pub &'a str);
-
-impl ToolName<'_> {
-    pub fn is_guardian(&self) -> bool {
-        let lower = self.0.to_ascii_lowercase();
-        lower.contains("guardian")
-            || lower.contains("approval")
-            || lower == "review"
-            || lower.ends_with("_review")
-            || lower.ends_with(".review")
-            || lower.ends_with(":review")
-    }
-}
-
-impl ChatTurn {
-    pub fn latest_top_level_tool_index(&self) -> Option<usize> {
-        self.blocks
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(index, block)| match block {
-                ChatBlock::ToolUse { .. } if self.parent_tool_index(index).is_none() => Some(index),
-                _ => None,
-            })
-    }
-
-    pub fn parent_tool_index(&self, index: usize) -> Option<usize> {
-        let mut parent = self.direct_parent_index(index)?;
-        for _ in 0..self.blocks.len() {
-            let Some(next) = self.direct_parent_index(parent) else {
-                break;
-            };
-            if next == parent {
-                break;
-            }
-            parent = next;
-        }
-        Some(parent)
-    }
-
-    fn direct_parent_index(&self, index: usize) -> Option<usize> {
-        match self.blocks.get(index)? {
-            ChatBlock::ToolUse {
-                parent_call_id: Some(parent_call_id),
-                ..
-            } => self.call_index(parent_call_id),
-            ChatBlock::Subagent(subagent) => subagent
-                .parent_call_id
-                .as_deref()
-                .and_then(|parent_call_id| self.call_index(parent_call_id)),
-            ChatBlock::ToolUse { name, .. } if ToolName(name).is_guardian() => {
-                self.guardian_parent_index(index)
-            }
-            ChatBlock::ToolResult { call_id, .. } if !call_id.is_empty() => {
-                self.call_index(call_id)
-            }
-            _ => None,
-        }
-    }
-
-    fn call_index(&self, call_id: &str) -> Option<usize> {
-        self.blocks.iter().position(|block| match block {
-            ChatBlock::ToolUse {
-                call_id: block_call_id,
-                ..
-            } => block_call_id == call_id,
-            ChatBlock::Subagent(subagent) => subagent.call_id == call_id,
-            _ => false,
-        })
-    }
-
-    fn guardian_parent_index(&self, index: usize) -> Option<usize> {
-        for (candidate, block) in self.blocks[..index].iter().enumerate().rev() {
-            match block {
-                ChatBlock::ToolUse { name, .. } if ToolName(name).is_guardian() => {}
-                ChatBlock::ToolUse { .. } | ChatBlock::Subagent(_) => return Some(candidate),
-                _ => return None,
-            }
-        }
-        None
-    }
-}
-
-pub fn activity_counts(items: &[ChatItem]) -> (usize, usize) {
-    let mut subagents = 0usize;
-    let mut tasks = 0usize;
-    for item in items {
-        let ChatItem::Turn(turn) = item else {
-            continue;
-        };
-        for block in &turn.blocks {
-            match block {
-                ChatBlock::Subagent(subagent) if subagent.status == "in_progress" => {
-                    subagents += 1;
-                }
-                ChatBlock::Plan { steps } => {
-                    tasks += steps
-                        .iter()
-                        .filter(|step| step.status != "completed")
-                        .count();
-                }
-                _ => {}
-            }
-        }
-    }
-    (subagents, tasks)
-}
-
-pub fn latest_tool_location(items: &[ChatItem]) -> Option<(usize, usize)> {
-    items
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(item_index, item)| match item {
-            ChatItem::Turn(turn) => turn
-                .latest_top_level_tool_index()
-                .map(|block_index| (item_index, block_index)),
-            ChatItem::User { .. } => None,
-        })
 }
 
 pub const WORKING_VERB_IDS: &[&str] = &[
@@ -250,80 +380,6 @@ pub enum ChatKey {
     DismissSelector,
     Interrupt,
     Cancel,
-}
-
-#[cfg(test)]
-mod activity_counts_tests {
-    use super::*;
-
-    fn subagent(status: &str) -> ChatBlock {
-        ChatBlock::Subagent(Box::new(ChatSubagent {
-            call_id: String::new(),
-            provider: String::new(),
-            title: String::new(),
-            status: status.to_string(),
-            activity: String::new(),
-            agent_name: None,
-            thread_id: None,
-            parent_thread_id: None,
-            child_thread_ids: Vec::new(),
-            parent_call_id: None,
-            prompt: None,
-            model: None,
-            reasoning_effort: None,
-            raw_input: String::new(),
-        }))
-    }
-
-    fn turn(blocks: Vec<ChatBlock>) -> ChatItem {
-        ChatItem::Turn(ChatTurn {
-            blocks,
-            running: false,
-            duration_secs: None,
-            step_count: 0,
-            created_at_ms: 0,
-        })
-    }
-
-    #[test]
-    fn only_unfinished_work_counts() {
-        let items = vec![
-            turn(vec![
-                subagent("in_progress"),
-                subagent("completed"),
-                ChatBlock::Plan {
-                    steps: vec![
-                        ChatPlanStep {
-                            content: "a".into(),
-                            status: "completed".into(),
-                        },
-                        ChatPlanStep {
-                            content: "b".into(),
-                            status: "in_progress".into(),
-                        },
-                        ChatPlanStep {
-                            content: "c".into(),
-                            status: "pending".into(),
-                        },
-                    ],
-                },
-            ]),
-            turn(vec![subagent("in_progress")]),
-            ChatItem::User {
-                text: "ignored".into(),
-                context: None,
-                attachments: Vec::new(),
-                created_at_ms: 0,
-            },
-        ];
-
-        assert_eq!(activity_counts(&items), (2, 2));
-    }
-
-    #[test]
-    fn an_empty_transcript_has_nothing_outstanding() {
-        assert_eq!(activity_counts(&[]), (0, 0));
-    }
 }
 
 #[vmux_api::ui_event(Default, Eq, targets = ["sessions", "agent", "start"])]

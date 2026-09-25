@@ -216,11 +216,14 @@ fn project_snapshot(
         transcript.state.generation.wrapping_add(1).max(1)
     };
     transcript.room_id = Some(session.room_id.clone());
+    let (active_subagents, active_tasks) = vmux_service::chat_projection::activity_counts(&items);
     transcript.state = ChatTranscriptState {
         generation,
         items,
         loaded_start: 0,
         total,
+        active_subagents,
+        active_tasks,
         ..ChatTranscriptState::default()
     };
     snapshot.0 = ChatSnapshot {

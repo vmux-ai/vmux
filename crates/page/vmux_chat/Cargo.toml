@@ -26,7 +26,6 @@ pulldown-cmark = { version = "0.12", default-features = false, features = [
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-similar = "2"
 unicode-segmentation = "1"
 vmux_core = { path = "../../vmux_core" }
 vmux_native = { path = "../../vmux_native" }

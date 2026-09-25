@@ -183,6 +183,10 @@ pub struct ChatTranscriptState {
     pub loaded_start: u32,
     pub total: u32,
     pub loading: bool,
+    #[serde(default)]
+    pub active_subagents: u32,
+    #[serde(default)]
+    pub active_tasks: u32,
 }
 
 #[vmux_api::ui_event(Default)]
@@ -312,8 +316,7 @@ pub struct RuntimeSwitchRequest {
 }
 
 pub use vmux_api::chat::{
-    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, ToolName, WORKING_VERB_IDS,
-    latest_tool_location,
+    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, WORKING_VERB_IDS,
 };
 
 #[cfg(test)]
@@ -378,6 +381,8 @@ mod tests {
             loaded_start: 4,
             total: 92,
             loading: true,
+            active_subagents: 2,
+            active_tasks: 3,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
         let back = rkyv::from_bytes::<ChatTranscriptState, rkyv::rancor::Error>(&bytes).unwrap();
@@ -385,6 +390,7 @@ mod tests {
         assert_eq!((back.loaded_start, back.total), (4, 92));
         assert_eq!(back.prepend_revision, 2);
         assert!(back.loading);
+        assert_eq!((back.active_subagents, back.active_tasks), (2, 3));
         assert_eq!(back.items, vec![ChatItem::user("older")]);
     }
 
@@ -481,6 +487,7 @@ mod tests {
                 duration_secs: Some(12),
                 step_count: 2,
                 created_at_ms: 200,
+                ..Default::default()
             }),
         ];
         let json = serde_json::to_string(&items).unwrap();
@@ -510,150 +517,6 @@ mod tests {
     #[test]
     fn working_verbs_nonempty() {
         assert!(!WORKING_VERB_IDS.is_empty());
-    }
-
-    #[test]
-    fn tool_children_associate_with_their_parent_call() {
-        let turn = ChatTurn {
-            blocks: vec![
-                ChatBlock::ToolUse {
-                    call_id: "read-1".into(),
-                    name: "read_file".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolUse {
-                    call_id: "review-1".into(),
-                    name: "guardian_review".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolResult {
-                    call_id: "read-1".into(),
-                    content: "file contents".into(),
-                    is_error: false,
-                },
-                ChatBlock::ToolResult {
-                    call_id: "review-1".into(),
-                    content: "review complete".into(),
-                    is_error: false,
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert_eq!(turn.parent_tool_index(0), None);
-        assert_eq!(turn.parent_tool_index(1), Some(0));
-        assert_eq!(turn.parent_tool_index(2), Some(0));
-        assert_eq!(turn.parent_tool_index(3), Some(0));
-    }
-
-    #[test]
-    fn latest_top_level_tool_ignores_results_and_nested_tools() {
-        let turn = ChatTurn {
-            blocks: vec![
-                ChatBlock::ToolUse {
-                    call_id: "first".into(),
-                    name: "read_file".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolResult {
-                    call_id: "first".into(),
-                    content: "done".into(),
-                    is_error: false,
-                },
-                ChatBlock::ToolUse {
-                    call_id: "nested".into(),
-                    name: "guardian_review".into(),
-                    args: "{}".into(),
-                    parent_call_id: Some("first".into()),
-                },
-                ChatBlock::ToolUse {
-                    call_id: "second".into(),
-                    name: "run".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert_eq!(turn.latest_top_level_tool_index(), Some(3));
-    }
-
-    #[test]
-    fn latest_tool_location_selects_only_the_newest_turn_tool() {
-        let tool = |call_id: &str| ChatBlock::ToolUse {
-            call_id: call_id.into(),
-            name: "run".into(),
-            args: "{}".into(),
-            parent_call_id: None,
-        };
-        let items = vec![
-            ChatItem::Turn(ChatTurn {
-                blocks: vec![tool("old")],
-                ..Default::default()
-            }),
-            ChatItem::User {
-                text: "next".into(),
-                context: None,
-                attachments: Vec::new(),
-                created_at_ms: 0,
-            },
-            ChatItem::Turn(ChatTurn {
-                blocks: vec![ChatBlock::Text("working".into()), tool("new")],
-                ..Default::default()
-            }),
-        ];
-
-        assert_eq!(latest_tool_location(&items), Some((2, 1)));
-    }
-
-    #[test]
-    fn empty_call_ids_do_not_associate() {
-        let turn = ChatTurn {
-            blocks: vec![
-                ChatBlock::ToolUse {
-                    call_id: String::new(),
-                    name: "read_file".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolResult {
-                    call_id: String::new(),
-                    content: "file contents".into(),
-                    is_error: false,
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert_eq!(turn.parent_tool_index(0), None);
-        assert_eq!(turn.parent_tool_index(1), None);
-    }
-
-    #[test]
-    fn standalone_guardian_owns_its_result() {
-        let turn = ChatTurn {
-            blocks: vec![
-                ChatBlock::ToolUse {
-                    call_id: "review-1".into(),
-                    name: "guardian_review".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolResult {
-                    call_id: "review-1".into(),
-                    content: "review complete".into(),
-                    is_error: false,
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert_eq!(turn.parent_tool_index(0), None);
-        assert_eq!(turn.parent_tool_index(1), Some(0));
     }
 
     #[test]
