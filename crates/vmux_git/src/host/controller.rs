@@ -20,6 +20,7 @@ use crate::state::{
     GitShortcutHelpToggle, GitUiState, GitUiStatePatch, GitWorkspaceChanged,
 };
 
+use super::directory::GitDirectoryNavigation;
 use super::state::GitState;
 
 pub(super) struct ControllerPlugin;
@@ -704,11 +705,15 @@ impl SelectionDirection {
 
 fn on_git_ui_state_write(
     trigger: On<UiStateWrite<GitUiState>>,
-    mut pages: Query<(&mut GitState, &mut GitController)>,
+    mut pages: Query<(
+        &mut GitState,
+        &mut GitController,
+        &mut GitDirectoryNavigation,
+    )>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview();
-    let Ok((mut state, mut controller)) = pages.get_mut(webview) else {
+    let Ok((mut state, mut controller, mut directory)) = pages.get_mut(webview) else {
         return;
     };
     match trigger.event().patch() {
@@ -721,22 +726,18 @@ fn on_git_ui_state_write(
                 .unwrap_or_else(|| working_directory.clone());
             state.reset(path.clone());
             controller.reset(String::new());
+            *directory = GitDirectoryNavigation::default();
             commands.trigger(UiInput {
                 webview,
-                payload: crate::event::GitDirectoryRequest {
-                    path,
-                    preview: false,
-                },
+                payload: crate::event::GitDirectoryOpenRequest { path },
             });
         }
         GitUiStatePatch::RepositoryPicked(GitRepositoryPicked { path }) => {
             if !path.is_empty() {
+                *directory = GitDirectoryNavigation::default();
                 commands.trigger(UiInput {
                     webview,
-                    payload: crate::event::GitDirectoryRequest {
-                        path: path.clone(),
-                        preview: false,
-                    },
+                    payload: crate::event::GitDirectoryOpenRequest { path: path.clone() },
                 });
             }
         }
@@ -754,12 +755,14 @@ fn on_git_ui_state_write(
             }
             state.reset(path.clone());
             controller.reset(branch.clone());
+            *directory = GitDirectoryNavigation::default();
             commands.trigger(UiInput {
                 webview,
                 payload: GitRepositoryRequest { path: path.clone() },
             });
         }
         GitUiStatePatch::Snapshot(_)
+        | GitUiStatePatch::Directory(_)
         | GitUiStatePatch::Controller(_)
         | GitUiStatePatch::BranchPrompt(_)
         | GitUiStatePatch::SelectionReveal(_)
