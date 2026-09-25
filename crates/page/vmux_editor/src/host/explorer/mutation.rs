@@ -204,8 +204,11 @@ fn drain_explorer_creates(
                 continue;
             }
         };
-        if let Some(task) = trees.request_dir_load(&root, outcome.parent, true) {
-            commands.spawn(task);
+        if trees.begin_dir_load(&root, &outcome.parent, true) {
+            commands.spawn(super::tree::ExplorerDirLoadRequest::new(
+                root.clone(),
+                outcome.parent,
+            ));
         }
         commands
             .entity(webview)
@@ -283,8 +286,11 @@ fn drain_explorer_renames(
             trees.at(&root).evict_subtree(&outcome.old_path);
             trees.touch(&root);
         }
-        if let Some(task) = trees.request_dir_load(&root, outcome.parent, true) {
-            commands.spawn(task);
+        if trees.begin_dir_load(&root, &outcome.parent, true) {
+            commands.spawn(super::tree::ExplorerDirLoadRequest::new(
+                root.clone(),
+                outcome.parent,
+            ));
         }
         commands
             .entity(webview)
@@ -354,8 +360,11 @@ fn drain_explorer_deletes(
             trees.at(&root).evict_subtree(&outcome.path);
             trees.touch(&root);
         }
-        if let Some(task) = trees.request_dir_load(&root, outcome.parent, true) {
-            commands.spawn(task);
+        if trees.begin_dir_load(&root, &outcome.parent, true) {
+            commands.spawn(super::tree::ExplorerDirLoadRequest::new(
+                root.clone(),
+                outcome.parent,
+            ));
         }
         commands
             .entity(webview)
