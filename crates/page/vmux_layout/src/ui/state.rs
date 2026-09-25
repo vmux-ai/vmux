@@ -32,7 +32,7 @@ pub(crate) struct LayoutPageState {
     pub extension_popup_size: ExtensionPopupSizeEvent,
     pub update: Option<UpdatePhase>,
     pub bookmark_menu: BookmarkMenuEffect,
-    pub reload_revision: u32,
+    pub reload_revision: u64,
 }
 
 impl LayoutPageState {
@@ -85,8 +85,8 @@ impl LayoutPageState {
             LayoutUiStatePatch::UpdateReady(event) => self.update = Some(UpdatePhase::from(event)),
             LayoutUiStatePatch::UpdateCleared(_) => self.update = None,
             LayoutUiStatePatch::BookmarkMenu(event) => self.bookmark_menu = event.clone(),
-            LayoutUiStatePatch::Reload(_) => {
-                self.reload_revision = self.reload_revision.wrapping_add(1)
+            LayoutUiStatePatch::Reload(effect) => {
+                self.reload_revision = self.reload_revision.max(effect.revision)
             }
         }
     }
@@ -167,7 +167,7 @@ mod tests {
                 uuid: "bookmark".to_string(),
             }),
         }));
-        state.apply(&LayoutUiStatePatch::Reload(ReloadEffect));
+        state.apply(&LayoutUiStatePatch::Reload(ReloadEffect { revision: 7 }));
 
         assert_eq!(state.bookmark_menu.revision, 4);
         assert_eq!(
@@ -176,7 +176,7 @@ mod tests {
                 uuid: "bookmark".to_string(),
             })
         );
-        assert_eq!(state.reload_revision, 1);
+        assert_eq!(state.reload_revision, 7);
     }
 
     #[test]

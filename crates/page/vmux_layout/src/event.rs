@@ -5,7 +5,9 @@ use vmux_core::PageIcon;
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 #[vmux_api::contract(Default, Eq)]
-pub struct ReloadEffect;
+pub struct ReloadEffect {
+    pub revision: u64,
+}
 #[vmux_api::contract(Copy, Default)]
 pub struct LayoutGeometry {
     #[serde(default)]
