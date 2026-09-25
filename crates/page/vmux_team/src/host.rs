@@ -15,7 +15,7 @@ use vmux_layout::LayoutUiStateUpdates;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
-use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
+use vmux_layout::space::{CurrentSpace, Space, space_of};
 use vmux_layout::stack::Stack;
 use vmux_service::agent_events::AgentCommandRequest;
 use vmux_service::client::ServiceClient;
@@ -284,7 +284,7 @@ fn build_profiles(
 fn answer_list_team(
     mut reader: MessageReader<AgentCommandRequest>,
     service: Option<Res<ServiceClient>>,
-    active_space: Res<ActiveSpaceEntity>,
+    current_space: Query<Entity, With<CurrentSpace>>,
     user_q: Query<(Entity, &Profile), With<User>>,
     agent_q: Query<(
         Entity,
@@ -310,7 +310,7 @@ fn answer_list_team(
             continue;
         };
         let members = build_team_members(
-            active_space.0,
+            current_space.iter().next(),
             &user_q,
             &agent_q,
             &child_of,
@@ -332,7 +332,7 @@ fn answer_list_team(
 fn project_team(
     views: Query<Entity, Or<(With<LayoutCef>, With<Team>, With<vmux_space::Spaces>)>>,
     presentations: Query<&TeamPresentation>,
-    active_space: Res<ActiveSpaceEntity>,
+    current_space: Query<Entity, With<CurrentSpace>>,
     active_spaces: Query<Entity, (With<Space>, With<vmux_core::Active>)>,
     user_q: Query<(Entity, &Profile), With<User>>,
     agent_q: Query<(
@@ -361,7 +361,7 @@ fn project_team(
         });
         let presentation = TeamPresentation(TeamEvent::project(
             build_team_members(
-                target_space.or(active_space.0),
+                target_space.or_else(|| current_space.iter().next()),
                 &user_q,
                 &agent_q,
                 &child_of,
@@ -551,13 +551,13 @@ fn forward_legacy_team_profile_update_request(
 fn on_team_open_request(
     _trigger: On<UiInput<TeamOpenRequest>>,
     mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
-    active_space: Res<ActiveSpaceEntity>,
+    current_space: Query<Entity, With<CurrentSpace>>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
     child_of: Query<&ChildOf>,
     spaces: Query<(), With<Space>>,
     mut commands: Commands,
 ) {
-    if let Some(space) = active_space.0
+    if let Some(space) = current_space.iter().next()
         && let Some(stack) = open_team_stack_in_space(space, &stacks, &child_of, &spaces)
     {
         focus_pane_entity(stack, &mut commands, &child_of);
@@ -701,8 +701,10 @@ mod tests {
         let mut app = App::new();
         app.add_message::<AgentCommandRequest>()
             .add_plugins(TeamProjectionPlugin);
-        let space = app.world_mut().spawn((Space, vmux_core::Active)).id();
-        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        let space = app
+            .world_mut()
+            .spawn((Space, vmux_core::Active, CurrentSpace))
+            .id();
         app.world_mut().spawn((Profile::user(), User));
         app.world_mut().spawn((
             Profile::agent(AgentKind::Codex),
@@ -817,8 +819,7 @@ mod tests {
     #[test]
     fn agent_avatar_click_focuses_agent_stack() {
         let mut app = command_app();
-        let space = app.world_mut().spawn(Space).id();
-        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
         let stack = app
             .world_mut()
             .spawn((
@@ -846,8 +847,7 @@ mod tests {
     #[test]
     fn user_click_reuses_open_team_stack() {
         let mut app = command_app();
-        let space = app.world_mut().spawn(Space).id();
-        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
         let team = spawn_team_stack(app.world_mut(), space);
 
         app.world_mut().trigger(UiInput::<TeamOpenRequest> {
@@ -862,8 +862,7 @@ mod tests {
     #[test]
     fn acp_agent_appears_in_roster_with_registry_icon() {
         let mut app = App::new();
-        let space = app.world_mut().spawn(Space).id();
-        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
         app.world_mut().spawn((Profile::user(), User));
         app.world_mut().spawn((
             Profile::registry("Mistral Vibe", "mistral-vibe"),
@@ -882,7 +881,7 @@ mod tests {
         let rows = app
             .world_mut()
             .run_system_once(
-                |active: Res<ActiveSpaceEntity>,
+                |current_space: Query<Entity, With<CurrentSpace>>,
                  user_q: Query<(Entity, &Profile), With<User>>,
                  agent_q: Query<(
                     Entity,
@@ -897,7 +896,7 @@ mod tests {
                  meta_q: Query<&PageMetadata>,
                  children_q: Query<&Children>| {
                     build_team_members(
-                        active.0,
+                        current_space.iter().next(),
                         &user_q,
                         &agent_q,
                         &child_of,

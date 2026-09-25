@@ -146,7 +146,7 @@ const UNLISTED_DIRS: &[&str] = &[
 pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, vmux_setting::AppSettings>>,
     active_space: Option<Res<'w, super::spaces::ActiveSpace>>,
-    active_space_entity: Option<Res<'w, vmux_layout::space::ActiveSpaceEntity>>,
+    current_space: Query<'w, 's, Entity, With<vmux_layout::space::CurrentSpace>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
     space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
@@ -168,10 +168,7 @@ impl SpaceProjects<'_, '_> {
         let Some(active) = self.active_space.as_deref() else {
             return Vec::new();
         };
-        let space = self
-            .active_space_entity
-            .as_deref()
-            .and_then(|active| active.0);
+        let space = self.current_space.iter().next();
         self.rows_of(&active.record.id, space)
     }
 
