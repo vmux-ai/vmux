@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use vmux_ui::i18n::translate;
 
 use crate::event::{FileStatus, GitFileEntry};
@@ -44,6 +46,16 @@ impl FileStatusView for FileStatus {
 }
 
 impl GitFileEntry {
+    pub(super) fn absolute_path(&self, root: &str) -> String {
+        if root.is_empty() || self.path.is_empty() {
+            return String::new();
+        }
+        Path::new(root)
+            .join(&self.path)
+            .to_string_lossy()
+            .to_string()
+    }
+
     pub(super) fn name(&self) -> &str {
         self.path.rsplit('/').next().unwrap_or(&self.path)
     }

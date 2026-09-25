@@ -14,7 +14,6 @@ use crate::state::{GitOperationEligibility, GitPanel};
 
 use super::model::FileStatusView;
 use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
-use super::workspace::GitWorkspace;
 
 #[component]
 pub(super) fn ChangesCard(
@@ -174,7 +173,7 @@ fn FileRow(
     selected_path_bytes: Vec<u8>,
     confirm_discard: Vec<u8>,
 ) -> Element {
-    let absolute = GitWorkspace::absolute_path(&repo_root, &entry.path);
+    let absolute = entry.absolute_path(&repo_root);
     let selected = selected_path_bytes == entry.path_bytes;
     let file_path_bytes = entry.path_bytes.clone();
     let file_name = entry.name().to_string();

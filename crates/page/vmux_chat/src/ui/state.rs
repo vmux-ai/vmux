@@ -8,7 +8,7 @@ use crate::event::{
     RuntimeSwitchRequest, SelectMode, SelectModel, SlashCommandEntry,
 };
 use crate::event::{ChatResumeQueryRequest, ChatResumeState};
-use crate::format::composer::{
+use crate::format::{
     ResumeMenuState, SelectorMode, chat_page_title, filter_models, resume_menu_state,
     selector_mode, should_clear_draft_on_escape, should_fetch_resume,
 };

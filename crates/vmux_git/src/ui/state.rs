@@ -1,9 +1,8 @@
 use dioxus::prelude::*;
-use vmux_ui::hooks::use_ui_state_root;
+use vmux_ui::hooks::{send, use_ui_state_root};
 use vmux_ui::scroll::ScrollIntoView;
 
-use super::workspace::GitWorkspace;
-use crate::event::GitOperation;
+use crate::event::{GitDirectoryRequest, GitOperation};
 use crate::state::{
     GitBranchPrompt, GitPageControllerState, GitPageSnapshot, GitUiState, GitUiStatePatch,
 };
@@ -120,7 +119,10 @@ impl GitPageState {
         preview_path.set(String::new());
         if let Some(entry) = directory.entries.get(selected).filter(|entry| entry.is_dir) {
             preview_path.set(entry.path.clone());
-            GitWorkspace::browse(&entry.path, true);
+            let _ = send(&GitDirectoryRequest {
+                path: entry.path.clone(),
+                preview: true,
+            });
         }
     }
 
