@@ -43,15 +43,13 @@ fn dispatch_extension_tools(
     requests: Query<(Entity, &ToolCall, &ExtensionTool), Added<ExtensionTool>>,
 ) {
     for (entity, call, tool) in &requests {
-        let result = match tool {
-            ExtensionTool::Echo => call.parse::<EchoArgs>().map(|args| {
-                DispatchTarget::Command(AgentCommand::Notify {
-                    title: Some("Extension".to_string()),
-                    body: Some(args.text),
-                })
+        let command = match tool {
+            ExtensionTool::Echo => call.parse::<EchoArgs>().map(|args| AgentCommand::Notify {
+                title: Some("Extension".to_string()),
+                body: Some(args.text),
             }),
         };
-        commands.entity(entity).insert(ToolDispatchResult(result));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -111,13 +109,19 @@ fn owning_world_dispatches_tool_entities() {
     let request = app.world_mut().spawn(call).id();
     app.update();
 
-    let target = app.world().get::<DispatchTarget>(request).cloned().unwrap();
+    let command = app
+        .world()
+        .get::<ToolCommand>(request)
+        .unwrap()
+        .0
+        .clone()
+        .unwrap();
     assert!(matches!(
-        target,
-        DispatchTarget::Command(AgentCommand::Notify {
+        command,
+        AgentCommand::Notify {
             title: None,
             body: Some(body),
-        }) if body == "hello"
+        } if body == "hello"
     ));
 }
 

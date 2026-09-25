@@ -13,10 +13,12 @@ mod workspace;
 
 pub(crate) use files::{GrepExecution, ReadFileExecution};
 pub(crate) use knowledge::VaultStatusExecution;
+#[cfg(test)]
+pub use runtime::DispatchTarget;
 use runtime::ToolCalls;
 pub(crate) use runtime::canonical_tool_name;
 pub use runtime::{
-    BuiltinToolPlugin, DispatchTarget, McpToolPlugin, RegisterTools, ShellNote, ToolCall,
-    ToolCallPolicy, ToolDefinition, ToolDispatchError, ToolDispatchFlush, ToolDispatchResult,
-    ToolDispatchSet, ToolRegistry, ToolRequestSet, ToolRuntimePlugin,
+    BuiltinToolPlugin, McpToolPlugin, RegisterTools, ShellNote, ToolCall, ToolCallPolicy,
+    ToolCommand, ToolDefinition, ToolDispatchError, ToolDispatchFlush, ToolDispatchSet, ToolQuery,
+    ToolRegistry, ToolRequestSet, ToolRuntimePlugin,
 };

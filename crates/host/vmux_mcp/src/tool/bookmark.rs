@@ -1,5 +1,5 @@
 use super::{
-    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
@@ -86,9 +86,7 @@ fn list(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
     for (request, _, _) in calls.matching(BookmarkTool::BookmarkList) {
         commands
             .entity(request)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::BookmarkList,
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::BookmarkList)));
     }
 }
 
@@ -115,9 +113,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
             }
         };
         if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchResult(Err(message)));
+            commands.entity(request).insert(ToolDispatchError(message));
         }
     }
 }
@@ -127,18 +123,18 @@ fn add(
     requests: Query<(Entity, &BookmarkAddArgs), (With<ToolCall>, Added<BookmarkAddArgs>)>,
 ) {
     for (entity, args) in &requests {
-        let target =
+        let command =
             RequiredText::get(args.url.clone(), "bookmark_add.url is required").map(|url| {
-                DispatchTarget::Command(AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add {
+                AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add {
                     page: AgentBookmarkPage {
                         url,
                         title: args.title.clone(),
                         favicon_url: args.favicon_url.clone(),
                     },
                     folder: args.folder.clone(),
-                }))
+                })
             });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -147,13 +143,9 @@ fn remove(
     requests: Query<(Entity, &BookmarkRemoveArgs), (With<ToolCall>, Added<BookmarkRemoveArgs>)>,
 ) {
     for (entity, args) in &requests {
-        let target =
-            RequiredText::get(args.uuid.clone(), "bookmark_remove.uuid is required").map(|uuid| {
-                DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                    AgentBookmarkCommand::Remove { uuid },
-                ))
-            });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        let command = RequiredText::get(args.uuid.clone(), "bookmark_remove.uuid is required")
+            .map(|uuid| AgentCommand::BookmarkCommand(AgentBookmarkCommand::Remove { uuid }));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -162,7 +154,7 @@ fn pin(
     requests: Query<(Entity, &BookmarkPinArgs), (With<ToolCall>, Added<BookmarkPinArgs>)>,
 ) {
     for (entity, args) in &requests {
-        let target = match args {
+        let command = match args {
             BookmarkPinArgs::Existing(args) => {
                 RequiredText::get(args.uuid.clone(), "bookmark_pin.uuid is required")
                     .map(|uuid| AgentBookmarkCommand::Pin { uuid })
@@ -179,8 +171,8 @@ fn pin(
                 })
             }
         }
-        .map(|command| DispatchTarget::Command(AgentCommand::BookmarkCommand(command)));
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        .map(AgentCommand::BookmarkCommand);
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -189,13 +181,9 @@ fn unpin(
     requests: Query<(Entity, &BookmarkUnpinArgs), (With<ToolCall>, Added<BookmarkUnpinArgs>)>,
 ) {
     for (entity, args) in &requests {
-        let target =
-            RequiredText::get(args.uuid.clone(), "bookmark_unpin.uuid is required").map(|uuid| {
-                DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                    AgentBookmarkCommand::Unpin { uuid },
-                ))
-            });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        let command = RequiredText::get(args.uuid.clone(), "bookmark_unpin.uuid is required")
+            .map(|uuid| AgentCommand::BookmarkCommand(AgentBookmarkCommand::Unpin { uuid }));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -207,15 +195,11 @@ fn create_folder(
     >,
 ) {
     for (entity, args) in &requests {
-        let target =
+        let command =
             RequiredText::get(args.name.clone(), "bookmark_folder_create.name is required").map(
-                |name| {
-                    DispatchTarget::Command(AgentCommand::BookmarkCommand(
-                        AgentBookmarkCommand::CreateFolder { name },
-                    ))
-                },
+                |name| AgentCommand::BookmarkCommand(AgentBookmarkCommand::CreateFolder { name }),
             );
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 

@@ -1,5 +1,5 @@
 use super::{
-    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
@@ -44,9 +44,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<SettingTool>) {
                     commands.entity(request).insert(args);
                 }
                 Err(message) => {
-                    commands
-                        .entity(request)
-                        .insert(ToolDispatchResult(Err(message)));
+                    commands.entity(request).insert(ToolDispatchError(message));
                 }
             }
         }
@@ -57,9 +55,7 @@ fn get_settings(mut commands: Commands, calls: ToolCalls<SettingTool>) {
     for (request, _, _) in calls.matching(SettingTool::GetSettings) {
         commands
             .entity(request)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::GetSettings,
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::GetSettings)));
     }
 }
 
@@ -68,14 +64,14 @@ fn update_settings(
     requests: Query<(Entity, &UpdateSettingsArgs), (With<ToolCall>, Added<UpdateSettingsArgs>)>,
 ) {
     for (entity, args) in &requests {
-        let target = if args.path.trim().is_empty() {
+        let command = if args.path.trim().is_empty() {
             Err("update_settings.path is empty".to_string())
         } else {
-            Ok(DispatchTarget::Command(AgentCommand::UpdateSettings {
+            Ok(AgentCommand::UpdateSettings {
                 path: args.path.clone(),
                 value: JsonValue::from(args.value.clone()),
-            }))
+            })
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }

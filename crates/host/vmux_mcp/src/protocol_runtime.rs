@@ -62,13 +62,13 @@ impl Plugin for McpPlugin {
                 (
                     route_request.in_set(McpSet::Route),
                     (
-                        route_tool_dispatch_results,
-                        bevy_ecs::schedule::ApplyDeferred,
+                        finish_tool_errors,
                         start_list_tools,
                         start_read_file_tools,
                         start_grep_tools,
                         start_vault_status_tools,
-                        start_dispatches,
+                        start_tool_commands,
+                        start_tool_queries,
                         bevy_ecs::schedule::ApplyDeferred,
                         poll_tool_tasks,
                     )
@@ -225,14 +225,6 @@ struct ListToolsExecution {
 }
 
 #[derive(Component)]
-struct DispatchExecution {
-    target: crate::tool::DispatchTarget,
-    name: String,
-    arguments: Value,
-    anchor: Option<vmux_client::protocol::ProcessId>,
-}
-
-#[derive(Component)]
 enum McpReply {
     Result(Result<Value, String>),
     ProtocolError { code: i64, message: String },
@@ -372,37 +364,16 @@ fn route_request(
     }
 }
 
-fn route_tool_dispatch_results(
+fn finish_tool_errors(
     mut commands: Commands,
-    results: Query<
-        (
-            Entity,
-            &crate::tool::ToolCall,
-            &crate::tool::ToolDispatchResult,
-        ),
-        Added<crate::tool::ToolDispatchResult>,
-    >,
+    errors: Query<(Entity, &crate::tool::ToolDispatchError), Added<crate::tool::ToolDispatchError>>,
 ) {
-    for (entity, call, result) in &results {
-        let mut request = commands.entity(entity);
-        request
+    for (entity, error) in &errors {
+        commands
+            .entity(entity)
             .remove::<crate::tool::ToolCall>()
-            .remove::<crate::tool::ToolDispatchResult>()
-            .remove::<crate::tool::DispatchTarget>()
-            .remove::<crate::tool::ToolDispatchError>();
-        match result.0.clone() {
-            Err(message) => {
-                request.insert(McpReply::Result(Err(message)));
-            }
-            Ok(target) => {
-                request.insert(DispatchExecution {
-                    target,
-                    name: call.name.clone(),
-                    arguments: call.arguments.clone(),
-                    anchor: call.anchor,
-                });
-            }
-        }
+            .remove::<crate::tool::ToolDispatchError>()
+            .insert(McpReply::Result(Err(error.message().to_string())));
     }
 }
 
@@ -487,44 +458,72 @@ fn start_vault_status_tools(
     }
 }
 
-fn start_dispatches(
+fn start_tool_commands(
     mut commands: Commands,
     runtime: Res<McpRuntime>,
-    requests: Query<(Entity, &DispatchExecution), Added<DispatchExecution>>,
+    requests: Query<
+        (Entity, &crate::tool::ToolCall, &crate::tool::ToolCommand),
+        Added<crate::tool::ToolCommand>,
+    >,
     config: Res<McpConfig>,
 ) {
-    for (entity, request) in &requests {
-        let target = request.target.clone();
-        let name = request.name.clone();
-        let arguments = request.arguments.clone();
-        let anchor = request.anchor;
+    for (entity, call, result) in &requests {
+        let mut request = commands.entity(entity);
+        request
+            .remove::<crate::tool::ToolCall>()
+            .remove::<crate::tool::ToolCommand>();
+        let command = match result.0.clone() {
+            Ok(command) => command,
+            Err(message) => {
+                request.insert(McpReply::Result(Err(message)));
+                continue;
+            }
+        };
+        let name = call.name.clone();
+        let arguments = call.arguments.clone();
+        let anchor = call.anchor;
         let run_block_timeout = config.run_block_timeout;
-        commands
-            .entity(entity)
-            .remove::<DispatchExecution>()
-            .insert(McpTask::spawn(&runtime, async move {
-                if name == "open_file" {
-                    let path = arguments
-                        .get("path")
-                        .and_then(Value::as_str)
-                        .ok_or("open_file.path is required")?;
-                    if !Path::new(path).is_absolute() {
-                        return Err("open_file.path must be an absolute path".to_string());
-                    }
-                    scoped_existing_path(anchor, Path::new(path), "open_file").await?;
+        request.insert(McpTask::spawn(&runtime, async move {
+            if name == "open_file" {
+                let path = arguments
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .ok_or("open_file.path is required")?;
+                if !Path::new(path).is_absolute() {
+                    return Err("open_file.path must be an absolute path".to_string());
                 }
+                scoped_existing_path(anchor, Path::new(path), "open_file").await?;
+            }
 
-                match target {
-                    crate::tool::DispatchTarget::Command(command @ AgentCommand::Run { .. })
-                    | crate::tool::DispatchTarget::Command(
-                        command @ AgentCommand::RunWithPlacementOverride { .. },
-                    ) => run_blocking(command, run_block_timeout).await,
-                    crate::tool::DispatchTarget::Command(command) => {
-                        run_agent_command(command, anchor).await
-                    }
-                    crate::tool::DispatchTarget::Query(query) => run_agent_query(query).await,
+            match command {
+                command @ AgentCommand::Run { .. }
+                | command @ AgentCommand::RunWithPlacementOverride { .. } => {
+                    run_blocking(command, run_block_timeout).await
                 }
-            }));
+                command => run_agent_command(command, anchor).await,
+            }
+        }));
+    }
+}
+
+fn start_tool_queries(
+    mut commands: Commands,
+    runtime: Res<McpRuntime>,
+    requests: Query<(Entity, &crate::tool::ToolQuery), Added<crate::tool::ToolQuery>>,
+) {
+    for (entity, result) in &requests {
+        let mut request = commands.entity(entity);
+        request
+            .remove::<crate::tool::ToolCall>()
+            .remove::<crate::tool::ToolQuery>();
+        let query = match result.0.clone() {
+            Ok(query) => query,
+            Err(message) => {
+                request.insert(McpReply::Result(Err(message)));
+                continue;
+            }
+        };
+        request.insert(McpTask::spawn(&runtime, run_agent_query(query)));
     }
 }
 

@@ -1,6 +1,5 @@
 use super::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolDispatchError, ToolDispatchResult, ToolDispatchSet,
-    ToolRequestSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolDispatchError, ToolDispatchSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
@@ -65,9 +64,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<FileTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchResult(Err(message)));
+            commands.entity(request).insert(ToolDispatchError(message));
         }
     }
 }
