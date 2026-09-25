@@ -8,23 +8,32 @@ use vmux_core::tool::{ToolAdoptRequest, ToolForgetRequest, ToolImportRequest, To
 
 use crate::manifest::{ToolStore, expand_user_path, load_manifest_from, write_manifest_to};
 use crate::{
-    ToolOperation, ToolOperationCompletion, ToolOperationPlugin, ToolOperationRequest,
-    ToolOperationRouteSet, ToolStoreOperation, ToolStoreTarget,
+    ToolOperationCompletion, ToolOperationFailure, ToolOperationRequest, ToolOperationRouteFlush,
+    ToolOperationRouteSet, ToolOperationTask, ToolStoreOperation, ToolStoreTarget,
+    finish_tool_operation,
 };
 
 pub(crate) struct McpToolPlugin;
 
 impl Plugin for McpToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            ToolOperationPlugin::<DiscoverMcpServers>::default(),
-            ToolOperationPlugin::<ImportMcpConfig>::default(),
-            ToolOperationPlugin::<ImportMcpServer>::default(),
-            ToolOperationPlugin::<ForgetMcpServer>::default(),
-        ))
-        .add_systems(
+        app.add_systems(
             Update,
             (route_import, route_adopt, route_forget).in_set(ToolOperationRouteSet),
+        )
+        .add_systems(
+            Update,
+            (
+                discover_mcp_servers_system,
+                import_mcp_config_system,
+                import_mcp_server_system,
+                forget_mcp_server_system,
+                finish_tool_operation::<DiscoveredMcpServers>,
+                finish_tool_operation::<ImportedMcpConfig>,
+                finish_tool_operation::<ImportedMcpServer>,
+                finish_tool_operation::<ForgottenMcpServer>,
+            )
+                .after(ToolOperationRouteFlush),
         )
         .add_systems(
             Update,
@@ -148,12 +157,32 @@ pub struct DiscoveredMcpServers {
     pub errors: Vec<String>,
 }
 
-impl ToolOperation for DiscoverMcpServers {
-    type Output = DiscoveredMcpServers;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let (servers, errors) = store.discover_mcp_servers();
-        Ok(DiscoveredMcpServers { servers, errors })
+fn discover_mcp_servers_system(
+    operations: Query<
+        (Entity, &ToolStoreTarget),
+        (
+            With<DiscoverMcpServers>,
+            Without<ToolOperationTask<DiscoveredMcpServers>>,
+            Without<DiscoveredMcpServers>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let (servers, errors) = store.discover_mcp_servers();
+                Ok(DiscoveredMcpServers { servers, errors })
+            }));
     }
 }
 
@@ -179,15 +208,35 @@ pub struct ImportedMcpConfig {
     pub servers: usize,
 }
 
-impl ToolOperation for ImportMcpConfig {
-    type Output = ImportedMcpConfig;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let servers = match &self.path {
-            Some(path) => store.import_mcp_config(path)?,
-            None => store.import_default_mcp_configs()?,
+fn import_mcp_config_system(
+    operations: Query<
+        (Entity, &ImportMcpConfig, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<ImportedMcpConfig>>,
+            Without<ImportedMcpConfig>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
         };
-        Ok(ImportedMcpConfig { servers })
+        let path = operation.path.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let servers = match path {
+                    Some(path) => store.import_mcp_config(&path)?,
+                    None => store.import_default_mcp_configs()?,
+                };
+                Ok(ImportedMcpConfig { servers })
+            }));
     }
 }
 
@@ -207,14 +256,32 @@ pub struct ImportedMcpServer {
     pub name: String,
 }
 
-impl ToolOperation for ImportMcpServer {
-    type Output = ImportedMcpServer;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        store.import_discovered_mcp_server(&self.name)?;
-        Ok(ImportedMcpServer {
-            name: self.name.clone(),
-        })
+fn import_mcp_server_system(
+    operations: Query<
+        (Entity, &ImportMcpServer, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<ImportedMcpServer>>,
+            Without<ImportedMcpServer>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let name = operation.name.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                store.import_discovered_mcp_server(&name)?;
+                Ok(ImportedMcpServer { name })
+            }));
     }
 }
 
@@ -234,16 +301,34 @@ pub struct ForgottenMcpServer {
     pub name: String,
 }
 
-impl ToolOperation for ForgetMcpServer {
-    type Output = ForgottenMcpServer;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let mut manifest = store.load()?;
-        manifest.mcp.servers.remove(&self.name);
-        store.save(&manifest)?;
-        Ok(ForgottenMcpServer {
-            name: self.name.clone(),
-        })
+fn forget_mcp_server_system(
+    operations: Query<
+        (Entity, &ForgetMcpServer, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<ForgottenMcpServer>>,
+            Without<ForgottenMcpServer>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let name = operation.name.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let mut manifest = store.load()?;
+                manifest.mcp.servers.remove(&name);
+                store.save(&manifest)?;
+                Ok(ForgottenMcpServer { name })
+            }));
     }
 }
 
