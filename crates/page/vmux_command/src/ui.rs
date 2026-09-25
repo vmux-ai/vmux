@@ -1,7 +1,8 @@
 use crate::event::{
     CommandBarFocusInput, CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch,
-    CommandPaletteBranchesRequest, CommandPaletteDraftRequest, CommandPalettePromptHistoryRequest,
-    CommandPaletteSelectionRequest, CommandPaletteState,
+    CommandPaletteActivateRequest, CommandPaletteBranchesRequest, CommandPaletteDraftRequest,
+    CommandPalettePromptHistoryRequest, CommandPaletteSelectionRequest, CommandPaletteState,
+    CommandPaletteSubmitRequest,
 };
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles, inline_media_query};
 use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_prompt_recall};
@@ -22,9 +23,7 @@ use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
-use vmux_ui::launcher::palette::{
-    PaletteGlyph, PaletteRows, PaletteState, PaletteSurface, Submission,
-};
+use vmux_ui::launcher::palette::{PaletteGlyph, PaletteRows, PaletteState, PaletteSurface};
 use vmux_ui::launcher::row::ResultRow;
 use vmux_ui::launcher::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -73,9 +72,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let surface = props.surface;
     let is_start = surface.is_start();
     let on_close = props.on_close;
-    let on_dismiss = props.on_dismiss;
     let on_activity = props.on_activity;
-    let on_start_inline_transition = props.on_start_inline_transition;
 
     let mut signals = use_palette_signals();
     let host_state = use_ui_state::<CommandPaletteState>();
@@ -84,6 +81,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let menu = use_composer_menu();
     let mcp = use_mcp_connections();
     let ime = use_ime_guard();
+    let mut handled_close = use_signal(|| None);
 
     use_drop(move || {
         let _ = send(&PageKeyContext { keys: Vec::new() });
@@ -190,6 +188,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             input_id,
         );
     });
+    use_effect(move || {
+        let opened = state();
+        let snapshot = host_state.read();
+        if snapshot.open_id != opened.open_id || snapshot.projection.close_revision == 0 {
+            return;
+        }
+        let close = (snapshot.open_id, snapshot.projection.close_revision);
+        if Some(close) == *handled_close.peek() {
+            return;
+        }
+        handled_close.set(Some(close));
+        on_close.call(());
+    });
     let keys = use_key_claim(Unclaimed::Types, || vec!["command-bar".to_string()]);
 
     let state_val = state();
@@ -205,7 +216,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         &signals.draft(),
         surface,
     ));
-    let query = signals.query;
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());
     let q = palette.query.clone();
     let ghost_text = palette.ghost.clone();
@@ -225,30 +235,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     use_effect(move || {
         let _ = host_state.read().media_entries.len();
         ScrollIntoView::nearest(&format!("prompt-media-item-{}", (media.selected)()));
-    });
-
-    let apply_attachments = attachments.clone();
-    let apply = std::rc::Rc::new(move |submission: Submission| {
-        if let Some(typed) = submission.retype {
-            let mut signals = signals;
-            signals.retype(typed);
-            focus_prompt_end(PROMPT_INPUT_ID);
-            return;
-        }
-        if submission.close {
-            on_close.call(());
-        }
-        let _ = submission.send();
-        let (Some(target_url), Some(handler)) =
-            (submission.inline_target, on_start_inline_transition)
-        else {
-            return;
-        };
-        handler.call(StartInlineTransition {
-            target_url,
-            prompt: query.peek().trim().to_string(),
-            attachments: apply_attachments.as_ref().clone(),
-        });
     });
 
     let composer = palette.composer.clone();
@@ -317,25 +303,15 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
 
     let start_keydown = {
-        let apply = apply.clone();
-        let attachments = attachments.clone();
         let palette = palette.clone();
         let menus = menus.clone();
-        let entries = mcp_entries.clone();
         let prompt_history = prompt_history.clone();
         move |e: KeyboardEvent| {
             if Readline::chord(&e, signals.query, &palette.ghost, PROMPT_INPUT_ID) {
                 return;
             }
             if e.key() == Key::Tab {
-                e.prevent_default();
-                if !palette.ghost.is_empty() {
-                    signals
-                        .query
-                        .set(format!("{}{}", palette.query, palette.ghost));
-                    signals.selected.set(0);
-                    focus_prompt_end(PROMPT_INPUT_ID);
-                }
+                keys.on_keydown(&e, |_| false);
                 return;
             }
 
@@ -357,9 +333,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if mcp_open {
                 if e.key() == Key::Enter && !e.modifiers().shift() {
                     e.prevent_default();
-                    if let Some(server) = entries.get(mcp_selected) {
-                        mcp.activate(server);
-                    }
+                    let _ = send(&CommandPaletteSubmitRequest {
+                        open_id: state().open_id,
+                    });
                     return;
                 }
                 if go_down || go_up || e.key() == Key::Escape || ctrl && e.code() == Code::KeyC {
@@ -424,18 +400,17 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             } else if go_up {
                 keys.on_keydown(&e, |_| false);
             } else if e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC) {
-                on_dismiss.call(());
+                keys.on_keydown(&e, |_| false);
             } else if e.key() == Key::Enter && !e.modifiers().shift() {
                 e.prevent_default();
-                apply(palette.submit_start(attachments.as_ref()));
+                let _ = send(&CommandPaletteSubmitRequest {
+                    open_id: state().open_id,
+                });
             }
         }
     };
     let modal_keydown = {
-        let apply = apply.clone();
-        let attachments = attachments.clone();
         let palette = palette.clone();
-        let entries = mcp_entries.clone();
         move |e: KeyboardEvent| {
             if ime.swallows(&e) {
                 return;
@@ -455,33 +430,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 return;
             }
             if e.key() == Key::Enter {
-                if mcp_open {
-                    e.prevent_default();
-                    if let Some(server) = entries.get(mcp_selected) {
-                        mcp.activate(server);
-                    }
-                    return;
-                }
-                apply(palette.submit_modal(attachments.as_ref()));
+                e.prevent_default();
+                let _ = send(&CommandPaletteSubmitRequest {
+                    open_id: state().open_id,
+                });
                 return;
             }
             keys.on_keydown(&e, |_| false);
         }
     };
-    let on_send = {
-        let apply = apply.clone();
-        let attachments = attachments.clone();
-        let palette = palette.clone();
-        let entries = mcp_entries.clone();
-        move |_| {
-            if mcp_open {
-                if let Some(server) = entries.get(mcp_selected) {
-                    mcp.activate(server);
-                }
-                return;
-            }
-            apply(palette.submit_current(attachments.as_ref()));
-        }
+    let on_send = move |_| {
+        let _ = send(&CommandPaletteSubmitRequest {
+            open_id: state().open_id,
+        });
     };
 
     rsx! {
@@ -571,13 +532,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     entries: mcp_entries.as_ref().clone(),
                     selected: mcp_selected,
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
-                    on_select: {
-                        let entries = mcp_entries.clone();
-                        move |index| {
-                            if let Some(server) = entries.get(index) {
-                                mcp.activate(server);
-                            }
-                        }
+                    on_select: move |index| {
+                        let _ = send(&CommandPaletteActivateRequest {
+                            open_id: state().open_id,
+                            index: index as u32,
+                        });
                     },
                     on_hover: move |index| signals.selected.set(index),
                     on_dismiss: move |()| signals.retype(String::new()),
@@ -609,12 +568,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         index: i,
                         item: item.clone(),
                         selected: i == palette.selected,
-                        on_activate: {
-                            let apply = apply.clone();
-                            let attachments = attachments.clone();
-                            let palette = palette.clone();
-                            let item = item.clone();
-                            move |_| apply(palette.activate(&item, attachments.as_ref()))
+                        on_activate: move |_| {
+                            let _ = send(&CommandPaletteActivateRequest {
+                                open_id: state().open_id,
+                                index: i as u32,
+                            });
                         },
                         space_switch: palette.space_switch,
                         start_prompt_mode: palette.start_prompt_mode,
@@ -703,22 +661,12 @@ fn BookmarkButton() -> Element {
     }
 }
 
-#[derive(Clone, PartialEq)]
-pub struct StartInlineTransition {
-    pub target_url: String,
-    pub prompt: String,
-    pub attachments: Vec<crate::prompt_media::ChatAttachment>,
-}
-
 #[derive(Props, Clone, PartialEq)]
 pub struct PaletteProps {
     pub state: ReadSignal<CommandBarOpenEvent>,
     pub surface: PaletteSurface,
     pub on_close: EventHandler<()>,
-    pub on_dismiss: EventHandler<()>,
     pub on_activity: EventHandler<()>,
-    #[props(default)]
-    pub on_start_inline_transition: Option<EventHandler<StartInlineTransition>>,
 }
 
 pub fn focus_prompt_input() {

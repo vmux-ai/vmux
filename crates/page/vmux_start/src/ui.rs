@@ -43,7 +43,6 @@ pub fn Page() -> Element {
                             state,
                             surface: PaletteSurface::Start,
                             on_close: move |_| {},
-                            on_dismiss: move |_| {},
                             on_activity: move |_| {},
                         }
                     }

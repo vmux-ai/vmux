@@ -225,6 +225,7 @@ pub struct CommandPaletteProjection {
     pub selected: u32,
     pub navigating: bool,
     pub input_revision: u64,
+    pub close_revision: u64,
     pub mcp_open: bool,
     pub mcp_entries: Vec<McpServerEntry>,
     pub prompt_targets: Vec<CommandBarResultItem>,

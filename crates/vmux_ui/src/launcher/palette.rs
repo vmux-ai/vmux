@@ -1,4 +1,3 @@
-use vmux_api::agent::supports_inline_agent_transition;
 use vmux_api::command_bar::{
     AgentModels, AgentModes, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
     CommandBarPromptContext, CommandBarQuery, CommandPaletteProjection, ExCommandName, ExRequest,
@@ -12,7 +11,6 @@ use vmux_api::room::ModelOptionEntry;
 use vmux_api::space::ProjectRow;
 
 use crate::components::agent_menu::ComposerAgentOption;
-use crate::hooks::{EventListenerError, send};
 use crate::i18n::translate;
 use crate::launcher::results::{
     CommandBarResultItem, PickerRows, SlashRows, active_space_index, filter_results,
@@ -483,137 +481,86 @@ impl ComposerState {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Submission {
-    pub close: bool,
-    pub inline_target: Option<String>,
-    pub retype: Option<String>,
-    prompt: Option<PromptRequest>,
-    open: Option<OpenRequest>,
-    terminal: Option<TerminalRequest>,
-    invoke: Option<InvokeRequest>,
-    switch_space: Option<SwitchSpaceRequest>,
-    switch_tab: Option<SwitchTabRequest>,
-    ex: Option<ExRequest>,
-    pick: Option<PickRequest>,
+pub enum PaletteDecision {
+    #[default]
+    None,
+    Close,
+    Retype(String),
+    Prompt {
+        close: bool,
+        request: PromptRequest,
+    },
+    Open {
+        close: bool,
+        request: OpenRequest,
+    },
+    Terminal(TerminalRequest),
+    Invoke(InvokeRequest),
+    SwitchSpace(SwitchSpaceRequest),
+    SwitchTab(SwitchTabRequest),
+    Ex(ExRequest),
+    Pick(PickRequest),
 }
 
-impl Submission {
+impl PaletteDecision {
     fn closing() -> Self {
-        Self {
-            close: true,
-            ..Self::default()
-        }
+        Self::Close
     }
 
     fn prompt(close: bool, text: &str, target_url: &str, attachments: &[ChatAttachment]) -> Self {
-        Self {
+        Self::Prompt {
             close,
-            prompt: Some(PromptRequest::new(text, target_url, attachments)),
-            ..Self::default()
+            request: PromptRequest::new(text, target_url, attachments),
         }
     }
 
     fn open(close: bool, value: &str, open: Option<OpenTarget>) -> Self {
-        Self {
+        Self::Open {
             close,
-            open: Some(OpenRequest::new(value, open)),
-            ..Self::default()
+            request: OpenRequest::new(value, open),
         }
     }
 
     fn terminal(value: String) -> Self {
-        Self {
-            close: true,
-            terminal: Some(TerminalRequest { value }),
-            ..Self::default()
-        }
+        Self::Terminal(TerminalRequest { value })
     }
 
     fn invoke(id: String, open: Option<OpenTarget>) -> Self {
-        Self {
-            close: true,
-            invoke: Some(InvokeRequest { id, open }),
-            ..Self::default()
-        }
+        Self::Invoke(InvokeRequest { id, open })
     }
 
     fn switch_space(id: String) -> Self {
-        Self {
-            close: true,
-            switch_space: Some(SwitchSpaceRequest { id }),
-            ..Self::default()
-        }
+        Self::SwitchSpace(SwitchSpaceRequest { id })
     }
 
     fn switch_tab(pane: u64, index: usize) -> Self {
-        Self {
-            close: true,
-            switch_tab: Some(SwitchTabRequest { pane, index }),
-            ..Self::default()
-        }
+        Self::SwitchTab(SwitchTabRequest { pane, index })
     }
 
     fn ex(line: String) -> Self {
-        Self {
-            close: true,
-            ex: Some(ExRequest { line }),
-            ..Self::default()
-        }
+        Self::Ex(ExRequest { line })
     }
 
     fn pick(pick: CommandBarPick) -> Self {
-        Self {
-            close: true,
-            pick: Some(PickRequest { pick }),
-            ..Self::default()
-        }
+        Self::Pick(PickRequest { pick })
     }
 
     fn retyping(query: impl Into<String>) -> Self {
-        Self {
-            retype: Some(query.into()),
-            ..Self::default()
-        }
+        Self::Retype(query.into())
     }
 
-    pub fn send(&self) -> Result<(), EventListenerError> {
-        if let Some(request) = self.prompt.as_ref() {
-            return send(request);
+    pub const fn closes(&self) -> bool {
+        match self {
+            Self::Prompt { close, .. } | Self::Open { close, .. } => *close,
+            Self::Close
+            | Self::Terminal(_)
+            | Self::Invoke(_)
+            | Self::SwitchSpace(_)
+            | Self::SwitchTab(_)
+            | Self::Ex(_)
+            | Self::Pick(_) => true,
+            Self::None | Self::Retype(_) => false,
         }
-        if let Some(request) = self.open.as_ref() {
-            return send(request);
-        }
-        if let Some(request) = self.terminal.as_ref() {
-            return send(request);
-        }
-        if let Some(request) = self.invoke.as_ref() {
-            return send(request);
-        }
-        if let Some(request) = self.switch_space.as_ref() {
-            return send(request);
-        }
-        if let Some(request) = self.switch_tab.as_ref() {
-            return send(request);
-        }
-        if let Some(request) = self.ex.as_ref() {
-            return send(request);
-        }
-        if let Some(request) = self.pick.as_ref() {
-            return send(request);
-        }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn has_request(&self) -> bool {
-        self.prompt.is_some()
-            || self.open.is_some()
-            || self.terminal.is_some()
-            || self.invoke.is_some()
-            || self.switch_space.is_some()
-            || self.switch_tab.is_some()
-            || self.ex.is_some()
-            || self.pick.is_some()
     }
 }
 
@@ -733,75 +680,65 @@ impl PaletteState {
         &self,
         item: &CommandBarResultItem,
         attachments: &[ChatAttachment],
-    ) -> Submission {
-        let inline_target = self.inline_target(item);
+    ) -> PaletteDecision {
         if self.surface.is_start()
             && (CommandBarQuery(&self.query).is_start_prompt() || !attachments.is_empty())
             && let Some(target_url) = prompt_target_url(item)
         {
-            let mut submission =
-                if prompt_target_matches_query(item, &self.query) && attachments.is_empty() {
-                    Submission::open(true, target_url, self.open_target)
-                } else {
-                    Submission::prompt(true, self.query.trim(), target_url, attachments)
-                };
-            submission.inline_target = inline_target;
-            return submission;
+            return if prompt_target_matches_query(item, &self.query) && attachments.is_empty() {
+                PaletteDecision::open(true, target_url, self.open_target)
+            } else {
+                PaletteDecision::prompt(true, self.query.trim(), target_url, attachments)
+            };
         }
 
         if let CommandBarResultItem::Slash { name, .. } = item {
-            return Submission::retyping(format!("/{name} "));
+            return PaletteDecision::retyping(format!("/{name} "));
         }
-        let mut submission = self.acted(item).unwrap_or_else(Submission::closing);
-        submission.inline_target = inline_target;
-        submission
+        self.acted(item).unwrap_or_else(PaletteDecision::closing)
     }
 
-    fn inline_target(&self, item: &CommandBarResultItem) -> Option<String> {
-        if !self.surface.is_start() {
-            return None;
-        }
-        let url = prompt_target_url(item)?;
-        supports_inline_agent_transition(url).then(|| url.to_string())
-    }
-
-    fn acted(&self, item: &CommandBarResultItem) -> Option<Submission> {
+    fn acted(&self, item: &CommandBarResultItem) -> Option<PaletteDecision> {
         match item {
             CommandBarResultItem::Slash { .. } => None,
             CommandBarResultItem::Resume { entry, .. } => {
-                Some(Submission::open(true, &entry.url, self.open_target))
+                Some(PaletteDecision::open(true, &entry.url, self.open_target))
             }
-            CommandBarResultItem::Terminal { path } => Some(Submission::terminal(path.clone())),
+            CommandBarResultItem::Terminal { path } => {
+                Some(PaletteDecision::terminal(path.clone()))
+            }
             CommandBarResultItem::Editor { path } | CommandBarResultItem::File { path, .. } => {
-                Some(Submission::open(
+                Some(PaletteDecision::open(
                     true,
                     &format!("file://{path}"),
                     self.open_target,
                 ))
             }
-            CommandBarResultItem::WorkDir { path, .. } => Some(Submission::open(
+            CommandBarResultItem::WorkDir { path, .. } => Some(PaletteDecision::open(
                 true,
                 &format!("file://{path}"),
                 self.open_target,
             )),
             CommandBarResultItem::Stack {
                 pane_id, tab_index, ..
-            } => Some(Submission::switch_tab(*pane_id, *tab_index)),
+            } => Some(PaletteDecision::switch_tab(*pane_id, *tab_index)),
             CommandBarResultItem::Command { id, .. } => {
-                Some(Submission::invoke(id.clone(), self.open_target))
+                Some(PaletteDecision::invoke(id.clone(), self.open_target))
             }
-            CommandBarResultItem::Ex { name, .. } => Some(Submission::ex(name.clone())),
-            CommandBarResultItem::Pick { pick, .. } => Some(Submission::pick(pick.clone())),
-            CommandBarResultItem::Space { id, .. } => Some(Submission::switch_space(id.clone())),
+            CommandBarResultItem::Ex { name, .. } => Some(PaletteDecision::ex(name.clone())),
+            CommandBarResultItem::Pick { pick, .. } => Some(PaletteDecision::pick(pick.clone())),
+            CommandBarResultItem::Space { id, .. } => {
+                Some(PaletteDecision::switch_space(id.clone()))
+            }
             CommandBarResultItem::Page { url, .. }
             | CommandBarResultItem::Navigate { url }
             | CommandBarResultItem::History { url, .. } => {
-                (!url.is_empty()).then(|| Submission::open(true, url, self.open_target))
+                (!url.is_empty()).then(|| PaletteDecision::open(true, url, self.open_target))
             }
             CommandBarResultItem::RecentFile { url, .. } => {
-                Some(Submission::open(true, url, self.open_target))
+                Some(PaletteDecision::open(true, url, self.open_target))
             }
-            CommandBarResultItem::Search { engine, query } => Some(Submission::open(
+            CommandBarResultItem::Search { engine, query } => Some(PaletteDecision::open(
                 true,
                 &engine.search_url(query),
                 self.open_target,
@@ -812,7 +749,7 @@ impl PaletteState {
         }
     }
 
-    pub fn submit_modal(&self, attachments: &[ChatAttachment]) -> Submission {
+    pub fn submit_modal(&self, attachments: &[ChatAttachment]) -> PaletteDecision {
         if let Some(picker) = self.mode.picking() {
             return self.submit_picked(picker, attachments);
         }
@@ -823,9 +760,9 @@ impl PaletteState {
                 return self.activate(item, attachments);
             }
             let Some(line) = ExLine::parse(&self.query) else {
-                return Submission::default();
+                return PaletteDecision::default();
             };
-            return Submission::ex(line);
+            return PaletteDecision::ex(line);
         }
         self.submit_typed(attachments)
     }
@@ -834,32 +771,32 @@ impl PaletteState {
         &self,
         picker: CommandBarPicker,
         attachments: &[ChatAttachment],
-    ) -> Submission {
+    ) -> PaletteDecision {
         if picker.takes_typed_value() {
             let Some(pick) = CommandBarPick::goto_line(&self.query) else {
-                return Submission::default();
+                return PaletteDecision::default();
             };
-            return Submission::pick(pick);
+            return PaletteDecision::pick(pick);
         }
         let Some(item) = self.row(self.selected) else {
-            return Submission::default();
+            return PaletteDecision::default();
         };
         self.activate(item, attachments)
     }
 
-    pub fn submit_start(&self, attachments: &[ChatAttachment]) -> Submission {
+    pub fn submit_start(&self, attachments: &[ChatAttachment]) -> PaletteDecision {
         if self.mode == PaletteMode::Slash && self.rows.is_empty() {
-            return Submission::default();
+            return PaletteDecision::default();
         }
         if self.query.trim().is_empty() && !attachments.is_empty() {
             if let Some(item) = self.default_target.as_ref() {
                 return self.activate(item, attachments);
             }
-            return Submission::prompt(false, "", "", attachments);
+            return PaletteDecision::prompt(false, "", "", attachments);
         }
         if self.space_switch {
             let Some(item) = self.row(self.selected) else {
-                return Submission::default();
+                return PaletteDecision::default();
             };
             return self.activate(item, attachments);
         }
@@ -875,42 +812,23 @@ impl PaletteState {
         if let Some(item) = self.default_target.as_ref() {
             return self.activate(item, attachments);
         }
-        Submission::prompt(true, self.query.trim(), "", attachments)
+        PaletteDecision::prompt(true, self.query.trim(), "", attachments)
     }
 
-    pub fn submit_current(&self, attachments: &[ChatAttachment]) -> Submission {
-        if self.mode == PaletteMode::Slash && self.rows.is_empty() {
-            return Submission::default();
-        }
-        if let Some(item) = self
-            .row(self.selected)
-            .filter(|item| !self.start_prompt_mode || self.accepts_typed(item))
-        {
-            return self.activate(item, attachments);
-        }
-        if self.query.trim().is_empty() && attachments.is_empty() {
-            return Submission::default();
-        }
-        if let Some(item) = self.effective_target.as_ref() {
-            return self.activate(item, attachments);
-        }
-        Submission::prompt(true, self.query.trim(), "", attachments)
-    }
-
-    fn submit_typed(&self, attachments: &[ChatAttachment]) -> Submission {
+    fn submit_typed(&self, attachments: &[ChatAttachment]) -> PaletteDecision {
         if !TypedRow::beats_a_guessed_url(self.row(self.selected), &self.query)
             && CommandBarQuery(&self.query)
                 .opens_typed_url_on_enter(self.open_target, self.nav_mode)
         {
-            return Submission::open(true, &self.query, self.open_target);
+            return PaletteDecision::open(true, &self.query, self.open_target);
         }
         if let Some(item) = self.row(self.selected) {
             return self.activate(item, attachments);
         }
         if !self.query.is_empty() {
-            return Submission::open(false, &self.query, self.open_target);
+            return PaletteDecision::open(false, &self.query, self.open_target);
         }
-        Submission::default()
+        PaletteDecision::default()
     }
 
     pub fn opening_selection(state: &CommandBarOpenEvent) -> usize {
@@ -1601,7 +1519,7 @@ mod tests {
             .expect("the notice is listed");
 
         let submission = palette.activate(&palette.rows[at], &[]);
-        assert!(!submission.has_request());
+        assert_eq!(submission, PaletteDecision::Close);
         assert_eq!(
             RowText::over(Some(&CommandBarResultItem::PartialIndex), "settings"),
             None
@@ -1737,7 +1655,7 @@ mod tests {
         let submitted = bar.submit_start(&[]);
 
         assert!(
-            !submitted.has_request(),
+            matches!(submitted, PaletteDecision::None),
             "the list is still loading, so Enter must wait rather than search the web for the command"
         );
     }
@@ -1909,7 +1827,7 @@ mod tests {
         ));
         assert_eq!(
             mcp.submit_start(&[]),
-            Submission::retyping("/mcp ".to_string())
+            PaletteDecision::Retype("/mcp ".to_string())
         );
     }
 
@@ -1919,16 +1837,16 @@ mod tests {
 
         let typed = PaletteState::modal(&state, PaletteDraft::typed(":noh"));
         assert_eq!(
-            typed.submit_modal(&[]).ex,
-            Some(ExRequest {
+            typed.submit_modal(&[]),
+            PaletteDecision::Ex(ExRequest {
                 line: "noh".to_string(),
             })
         );
 
         let picked = PaletteState::modal(&state, PaletteDraft::typed(":").at(1).navigating());
         assert_eq!(
-            picked.submit_modal(&[]).ex,
-            Some(ExRequest {
+            picked.submit_modal(&[]),
+            PaletteDecision::Ex(ExRequest {
                 line: ExCommandName::ALL[1].name.to_string(),
             }),
             "an empty line still runs the row the user walked to: {:?}",
@@ -1964,8 +1882,8 @@ mod tests {
         let narrowed = PaletteState::modal(&state, PaletteDraft::typed("shift"));
         assert_eq!(narrowed.rows.len(), 1, "{:?}", narrowed.rows);
         assert_eq!(
-            narrowed.submit_modal(&[]).pick,
-            Some(PickRequest {
+            narrowed.submit_modal(&[]),
+            PaletteDecision::Pick(PickRequest {
                 pick: CommandBarPick::Encoding {
                     label: "Shift_JIS".to_string(),
                     save: false,
@@ -1980,8 +1898,8 @@ mod tests {
         let palette = PaletteState::modal(&state, PaletteDraft::default());
 
         assert_eq!(
-            palette.submit_modal(&[]).pick,
-            Some(PickRequest {
+            palette.submit_modal(&[]),
+            PaletteDecision::Pick(PickRequest {
                 pick: CommandBarPick::Picker(CommandBarPicker::EncodingReopen),
             })
         );
@@ -1994,14 +1912,14 @@ mod tests {
         let typed = PaletteState::modal(&state, PaletteDraft::typed("42"));
         assert!(typed.rows.is_empty(), "{:?}", typed.rows);
         assert_eq!(
-            typed.submit_modal(&[]).pick,
-            Some(PickRequest {
+            typed.submit_modal(&[]),
+            PaletteDecision::Pick(PickRequest {
                 pick: CommandBarPick::GotoLine { line: 41 },
             })
         );
 
         let refused = PaletteState::modal(&state, PaletteDraft::typed("abc"));
-        assert_eq!(refused.submit_modal(&[]), Submission::default());
+        assert_eq!(refused.submit_modal(&[]), PaletteDecision::default());
     }
 
     #[test]
@@ -2095,29 +2013,23 @@ mod tests {
     }
 
     #[test]
-    fn prose_on_start_prompts_the_agent_and_offers_an_inline_handoff() {
+    fn prose_on_start_prompts_the_agent() {
         let state = Launcher::state();
         let palette = PaletteState::start(&state, PaletteDraft::typed("fix the failing test"));
 
         let submitted = palette.submit_start(&[]);
 
-        assert!(submitted.close);
         assert_eq!(
-            submitted.prompt,
-            Some(PromptRequest::new(
-                "fix the failing test",
-                "vmux://sessions/vibe/",
-                &[]
-            ))
-        );
-        assert_eq!(
-            submitted.inline_target.as_deref(),
-            Some("vmux://sessions/vibe/")
+            submitted,
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest::new("fix the failing test", "vmux://sessions/vibe/", &[]),
+            }
         );
     }
 
     #[test]
-    fn a_cli_agent_is_prompted_without_an_inline_handoff() {
+    fn a_cli_agent_is_prompted() {
         let state = Launcher::state();
         let palette = PaletteState::start(
             &state,
@@ -2127,14 +2039,16 @@ mod tests {
         let submitted = palette.submit_start(&[]);
 
         assert_eq!(
-            submitted.prompt,
-            Some(PromptRequest::new(
-                "fix the failing test",
-                "vmux://sessions/codex/cli",
-                &[]
-            ))
+            submitted,
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest::new(
+                    "fix the failing test",
+                    "vmux://sessions/codex/cli",
+                    &[]
+                ),
+            }
         );
-        assert_eq!(submitted.inline_target, None);
     }
 
     #[test]
@@ -2145,11 +2059,11 @@ mod tests {
         let submitted = palette.submit_start(&[]);
 
         assert_eq!(
-            submitted.open,
-            Some(OpenRequest::new(
-                "vmux://sessions/vibe/",
-                palette.open_target
-            ))
+            submitted,
+            PaletteDecision::Open {
+                close: true,
+                request: OpenRequest::new("vmux://sessions/vibe/", palette.open_target),
+            }
         );
     }
 
@@ -2168,8 +2082,11 @@ mod tests {
         let submitted = palette.submit_start(&attached);
 
         assert_eq!(
-            submitted.prompt,
-            Some(PromptRequest::new("", "vmux://sessions/vibe/", &attached))
+            submitted,
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest::new("", "vmux://sessions/vibe/", &attached),
+            }
         );
     }
 
@@ -2187,10 +2104,13 @@ mod tests {
 
         let submitted = palette.submit_start(&attached);
 
-        assert!(!submitted.close, "the composer keeps its draft on screen");
         assert_eq!(
-            submitted.prompt,
-            Some(PromptRequest::new("", "", &attached))
+            submitted,
+            PaletteDecision::Prompt {
+                close: false,
+                request: PromptRequest::new("", "", &attached),
+            },
+            "the composer keeps its draft on screen"
         );
     }
 
@@ -2201,21 +2121,21 @@ mod tests {
 
         let typed = PaletteState::modal(&state, PaletteDraft::typed("https://example.com"));
         assert_eq!(
-            typed.submit_modal(&[]).open,
-            Some(OpenRequest::new(
-                "https://example.com",
-                Some(OpenTarget::InPlace)
-            ))
+            typed.submit_modal(&[]),
+            PaletteDecision::Open {
+                close: true,
+                request: OpenRequest::new("https://example.com", Some(OpenTarget::InPlace)),
+            }
         );
 
         let page = PaletteState::modal(&state, PaletteDraft::typed("vmux://settings"));
         let opened = page.submit_modal(&[]);
         assert_eq!(
-            opened.open,
-            Some(OpenRequest::new(
-                "vmux://settings/",
-                Some(OpenTarget::InPlace)
-            )),
+            opened,
+            PaletteDecision::Open {
+                close: true,
+                request: OpenRequest::new("vmux://settings/", Some(OpenTarget::InPlace)),
+            },
             "the page row wins over the raw text: {:?}",
             page.rows
         );
@@ -2227,8 +2147,8 @@ mod tests {
         let palette = PaletteState::modal(&state, PaletteDraft::default().at(1));
 
         assert_eq!(
-            palette.submit_modal(&[]).switch_space,
-            Some(SwitchSpaceRequest {
+            palette.submit_modal(&[]),
+            PaletteDecision::SwitchSpace(SwitchSpaceRequest {
                 id: "work".to_string(),
             })
         );
@@ -2240,8 +2160,8 @@ mod tests {
         let palette = PaletteState::start(&state, PaletteDraft::default());
 
         assert_eq!(
-            palette.submit_start(&[]).switch_tab,
-            Some(SwitchTabRequest { pane: 8, index: 1 })
+            palette.submit_start(&[]),
+            PaletteDecision::SwitchTab(SwitchTabRequest { pane: 8, index: 1 })
         );
     }
 
@@ -2260,13 +2180,12 @@ mod tests {
             &[],
         );
 
-        assert!(opened.close);
         assert_eq!(
-            opened.open,
-            Some(OpenRequest::new(
-                "file:///work/main.rs",
-                palette.open_target
-            ))
+            opened,
+            PaletteDecision::Open {
+                close: true,
+                request: OpenRequest::new("file:///work/main.rs", palette.open_target),
+            }
         );
     }
 
@@ -2278,8 +2197,7 @@ mod tests {
         let submitted =
             palette.activate(&CommandBarResultItem::Navigate { url: String::new() }, &[]);
 
-        assert!(submitted.close);
-        assert!(!submitted.has_request());
+        assert_eq!(submitted, PaletteDecision::Close);
     }
 
     #[test]
@@ -2291,12 +2209,15 @@ mod tests {
         );
 
         assert_eq!(
-            palette.submit_current(&[]).prompt,
-            Some(PromptRequest::new(
-                "fix the failing test",
-                "vmux://sessions/codex/cli",
-                &[]
-            ))
+            palette.submit_start(&[]),
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest::new(
+                    "fix the failing test",
+                    "vmux://sessions/codex/cli",
+                    &[]
+                ),
+            }
         );
     }
 
@@ -2309,7 +2230,7 @@ mod tests {
             ..palette
         };
 
-        assert_eq!(empty.submit_current(&[]), Submission::default());
+        assert_eq!(empty.submit_start(&[]), PaletteDecision::default());
     }
 
     #[test]

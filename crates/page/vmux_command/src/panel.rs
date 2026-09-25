@@ -189,7 +189,6 @@ pub fn CommandBarPanel() -> Element {
                             state: ReadSignal::from(state),
                             surface: PaletteSurface::Modal,
                             on_close: move |_| set_open(false),
-                            on_dismiss: move |_| set_open(false),
                             on_activity: move |_| {},
                         }
                     }

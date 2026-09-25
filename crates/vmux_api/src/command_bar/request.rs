@@ -92,6 +92,17 @@ pub struct CommandPaletteSelectionRequest {
     pub navigating: bool,
 }
 
+#[vmux_api::ui_event(Copy, Default, Eq, targets = ["command-bar", "start", "layout"])]
+pub struct CommandPaletteSubmitRequest {
+    pub open_id: super::OpenId,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq, targets = ["command-bar", "start", "layout"])]
+pub struct CommandPaletteActivateRequest {
+    pub open_id: super::OpenId,
+    pub index: u32,
+}
+
 #[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
 pub struct CommandPalettePromptHistoryRequest {
     pub open_id: super::OpenId,
