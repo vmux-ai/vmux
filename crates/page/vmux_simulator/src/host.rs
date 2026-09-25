@@ -29,8 +29,7 @@ impl Plugin for SimulatorPlugin {
             PAGE_MANIFEST,
             NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title),
         ));
-        app.init_resource::<ActiveSimulatorView>()
-            .add_plugins(UiStatePlugin::<SimulatorReady>::default())
+        app.add_plugins(UiStatePlugin::<SimulatorReady>::default())
             .configure_sets(Update, (SimulatorFocusSet, SimulatorInputSet).chain())
             .add_message::<HardwareButtonRequest>()
             .add_message::<SimulatorClipboardRequest>()
@@ -162,8 +161,8 @@ type SimulatorAttachmentCandidates<'w, 's> = Query<
     With<PageReady>,
 >;
 
-#[derive(Resource, Default)]
-struct ActiveSimulatorView(Option<Entity>);
+#[derive(Component)]
+struct ActiveSimulatorView;
 
 #[derive(Component, Clone, PartialEq, Eq)]
 struct AttachedRoute(SimulatorRoute);
@@ -236,9 +235,6 @@ fn start_device_attachments(
 fn finish_device_attachments(
     mut attachments: Query<(Entity, &mut DeviceAttachment)>,
     wake: Option<Res<EventLoopProxyWrapper>>,
-    #[cfg(target_os = "macos")] mut keyboard: MessageWriter<
-        core_simulator::HardwareKeyboardSetRequest,
-    >,
     mut commands: Commands,
 ) {
     for (entity, mut attachment) in &mut attachments {
@@ -259,11 +255,6 @@ fn finish_device_attachments(
             attached.device.name,
             attached.server.port()
         );
-        #[cfg(target_os = "macos")]
-        keyboard.write(core_simulator::HardwareKeyboardSetRequest {
-            udid: attached.device.udid.clone(),
-            enabled: false,
-        });
         let mut entity_commands = commands.entity(entity);
         if let Some((width, height)) = attached.points {
             entity_commands.insert(DevicePoints(width, height));
@@ -328,20 +319,24 @@ fn announce_simulator(
     }
 }
 
-fn sync_stream_activity(active: Res<ActiveSimulatorView>, streams: Query<(Entity, &StreamServer)>) {
-    for (entity, stream) in &streams {
-        stream.set_active(active.0 == Some(entity));
+fn sync_stream_activity(streams: Query<(&StreamServer, Has<ActiveSimulatorView>)>) {
+    for (stream, active) in &streams {
+        stream.set_active(active);
     }
 }
 
 fn handle_screenshot_requests(
     mut requests: MessageReader<SimulatorScreenshotRequest>,
     mut responses: MessageWriter<SimulatorScreenshotResponse>,
-    active: Res<ActiveSimulatorView>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
     attachments: Query<(Entity, &SimulatorDevice, &Axe)>,
 ) {
+    let active = active.iter().next();
     for request in requests.read() {
-        let result = match active.select(attachments.iter().map(|(entity, _, _)| entity)) {
+        let result = match ActiveSimulatorView::select(
+            active,
+            attachments.iter().map(|(entity, _, _)| entity),
+        ) {
             Some(entity) => {
                 let (_, device, axe) = attachments.get(entity).unwrap();
                 SimulatorScreenshot::capture(request.request_id, device, axe)
@@ -356,10 +351,10 @@ fn handle_screenshot_requests(
 }
 
 impl ActiveSimulatorView {
-    fn select(&self, candidates: impl Iterator<Item = Entity>) -> Option<Entity> {
+    fn select(active: Option<Entity>, candidates: impl Iterator<Item = Entity>) -> Option<Entity> {
         let mut first = None;
         for entity in candidates {
-            if self.0 == Some(entity) {
+            if active == Some(entity) {
                 return Some(entity);
             }
             if first.is_none() {
