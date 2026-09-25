@@ -29,6 +29,7 @@ impl Plugin for ChatResumePlugin {
             .init_resource::<ResumableScan>()
             .add_observer(on_resume_list_request)
             .add_observer(on_chat_resume_query_request)
+            .add_observer(on_chat_resume_query)
             .add_observer(on_resume_session)
             .add_observer(on_prompt_history_request)
             .add_systems(
@@ -52,6 +53,24 @@ struct ResumeListAnswer {
     sessions: ResumableSessions,
     scanned: Option<Vec<crate::runtime::cli::strategy::ResumableSession>>,
     labels: RepoLabels,
+}
+
+#[derive(EntityEvent)]
+pub(super) struct ChatResumeQuery {
+    #[event_target]
+    webview: Entity,
+    active: bool,
+    query: String,
+}
+
+impl ChatResumeQuery {
+    pub(super) fn new(webview: Entity, active: bool, query: String) -> Self {
+        Self {
+            webview,
+            active,
+            query,
+        }
+    }
 }
 
 impl ChatResumeProjection {
@@ -369,11 +388,22 @@ fn on_resume_list_request(
 
 fn on_chat_resume_query_request(
     trigger: On<UiInput<ChatResumeQueryRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(ChatResumeQuery::new(
+        trigger.event().webview,
+        trigger.event().payload.active,
+        trigger.event().payload.query.clone(),
+    ));
+}
+
+fn on_chat_resume_query(
+    trigger: On<ChatResumeQuery>,
     mut projections: Query<&mut ChatResumeProjection, With<AgentChatView>>,
     mut commands: Commands,
 ) {
-    let webview = trigger.event().webview;
-    let request = &trigger.event().payload;
+    let webview = trigger.event_target();
+    let request = trigger.event();
     let Ok(mut projection) = projections.get_mut(webview) else {
         return;
     };

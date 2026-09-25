@@ -1,16 +1,15 @@
 use super::scroll;
+use crate::event::ChatResumeState;
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
     ChatBranchesRequest, ChatBranchesState, ChatCancel, ChatChoiceSelected, ChatComposerEffect,
-    ChatEscape, ChatHistoryRequest, ChatItem, ChatMediaEntry, ChatMediaQueryRequest,
-    ChatMediaState, ChatRemoveAttachment, ChatSlashCommandRequest, ChatSnapshot, ChatSubmit,
+    ChatDraftChanged, ChatEscape, ChatHistoryRequest, ChatItem, ChatMediaEntry, ChatMediaState,
+    ChatRemoveAttachment, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
     ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
     ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
 };
-use crate::event::{ChatResumeQueryRequest, ChatResumeState};
 use crate::format::{
-    ResumeMenuState, SelectorMode, chat_page_title, filter_models, resume_menu_state,
-    selector_mode, should_clear_draft_on_escape, should_fetch_resume,
+    ResumeMenuState, SelectorMode, chat_page_title, filter_models, resume_menu_state, selector_mode,
 };
 use crate::state::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -151,9 +150,13 @@ impl Chat {
         }
         let mut revision = self.composer.effect_revision;
         let mut draft = self.composer.draft;
+        let mut history_cursor = self.composer.history_cursor;
+        let mut history_scratch = self.composer.history_scratch;
         let mut menu_sel = self.slash.menu_sel;
         revision.set(effect.revision);
         draft.set(effect.draft.clone());
+        history_cursor.set(None);
+        history_scratch.set(String::new());
         menu_sel.set(0);
         if effect.focus {
             focus_prompt_end(PROMPT_INPUT_ID);
@@ -206,13 +209,6 @@ impl Chat {
                 return;
             }
             scroll::to_bottom(chat.transcript.scroll_container);
-        });
-        use_effect(move || chat.fetch_resume_sessions());
-        use_effect(move || chat.fetch_media_entries());
-        use_effect(move || {
-            if chat.mcp_menu_open() {
-                chat.mcp.request();
-            }
         });
         use_selector(chat.slash.menu_sel, move |selected| {
             let media_open = {
@@ -297,30 +293,6 @@ impl Chat {
         if let Some((height, top)) = metrics {
             scroll::restore(transcript.scroll_container, height, top);
         }
-    }
-
-    fn fetch_resume_sessions(&self) {
-        let draft = (self.composer.draft)();
-        let active = should_fetch_resume(&draft, &self.slash.commands.read());
-        let query = match selector_mode(&draft) {
-            SelectorMode::Resume(query) => query.to_string(),
-            _ => String::new(),
-        };
-        if (self.resume.active)() == active && (self.resume.query)() == query {
-            return;
-        }
-        let _ = send(&ChatResumeQueryRequest { active, query });
-    }
-
-    fn fetch_media_entries(&self) {
-        let value = (self.composer.draft)();
-        let query = inline_media_query(&value)
-            .map(|query| query.query.to_string())
-            .unwrap_or_default();
-        if (self.media.query)() == query {
-            return;
-        }
-        let _ = send(&ChatMediaQueryRequest { query });
     }
 
     pub fn request_history(&self) {
@@ -542,10 +514,9 @@ impl Chat {
         };
         let chat = *self;
         let open = EventHandler::new(move |()| {
-            let mut draft = chat.composer.draft;
             let mut menu_sel = chat.slash.menu_sel;
             chat.menu.close();
-            draft.set("/model ".to_string());
+            chat.set_draft("/model ".to_string());
             menu_sel.set(0);
             focus_prompt_end(PROMPT_INPUT_ID);
         });
@@ -681,11 +652,8 @@ impl Chat {
 
 impl Chat {
     pub fn submit(&self) {
-        let mut draft = self.composer.draft;
-        let mut history_cursor = self.composer.history_cursor;
-        let mut history_scratch = self.composer.history_scratch;
         let mut at_bottom = self.transcript.at_bottom;
-        let text = draft.peek().trim().to_string();
+        let text = self.composer.draft.peek().trim().to_string();
         let selected = self.composer.attachments.peek().clone();
         if text.is_empty() && selected.is_empty() {
             return;
@@ -694,29 +662,14 @@ impl Chat {
             return;
         }
         at_bottom.set(true);
-        draft.set(String::new());
-        history_cursor.set(None);
-        history_scratch.set(String::new());
     }
 
     pub fn stop_or_flush(&self) {
-        if self.queue.queued.peek().is_empty() {
-            let _ = send(&ChatCancel);
-        } else {
-            let _ = send(&ChatEscape);
-        }
+        let _ = send(&ChatStop);
     }
 
     pub fn interrupt(&self) {
         let _ = send(&ChatEscape);
-        let mut draft = self.composer.draft;
-        if should_clear_draft_on_escape(
-            self.streaming(),
-            self.queue.queued.peek().is_empty(),
-            draft.peek().is_empty(),
-        ) {
-            draft.set(String::new());
-        }
     }
 
     pub fn cancel(&self) {
@@ -728,11 +681,10 @@ impl Chat {
     }
 
     pub fn select_model(&self, model: &ModelOptionEntry) {
-        let mut draft = self.composer.draft;
         let _ = send(&SelectModel {
             model_id: model.id.clone(),
         });
-        draft.set(String::new());
+        self.set_draft(String::new());
     }
 
     pub fn select_mode(&self, mode_id: String) {
@@ -754,19 +706,17 @@ impl Chat {
     }
 
     pub fn select_resume_session(&self, session: &ResumableSessionEntry) {
-        let mut draft = self.composer.draft;
         let _ = send(&ResumeSession {
             kind: session.kind.clone(),
             sid: session.sid.clone(),
             cwd: session.cwd.clone(),
         });
-        draft.set(String::new());
+        self.set_draft(String::new());
     }
 
     pub fn select_media_entry(&self, entry: &ChatMediaEntry) {
-        let mut draft = self.composer.draft;
         let mut menu_sel = self.slash.menu_sel;
-        let value = draft.peek().clone();
+        let value = self.composer.draft.peek().clone();
         let Some(query) = inline_media_query(&value) else {
             return;
         };
@@ -783,7 +733,7 @@ impl Chat {
             }
             String::new()
         };
-        draft.set(replace_inline_media_query(&value, query, &replacement));
+        self.set_draft(replace_inline_media_query(&value, query, &replacement));
         menu_sel.set(0);
         focus_prompt_end(PROMPT_INPUT_ID);
     }
@@ -829,28 +779,35 @@ impl Chat {
             focus_prompt_end(PROMPT_INPUT_ID);
             return;
         }
-        let mut draft = self.composer.draft;
         let mut menu_sel = self.slash.menu_sel;
-        let value = draft.peek().clone();
+        let value = self.composer.draft.peek().clone();
         if let Some(query) = inline_media_query(&value) {
-            draft.set(replace_inline_media_query(&value, query, ""));
+            self.set_draft(replace_inline_media_query(&value, query, ""));
             focus_prompt_end(PROMPT_INPUT_ID);
         } else {
-            draft.set(String::new());
+            self.set_draft(String::new());
         }
         menu_sel.set(0);
     }
 
     pub fn edit_draft(&self, value: String) {
-        let mut draft = self.composer.draft;
         let mut history_cursor = self.composer.history_cursor;
         let mut history_scratch = self.composer.history_scratch;
         let mut menu_sel = self.slash.menu_sel;
         self.menu.close();
-        draft.set(value);
+        self.set_draft(value);
         history_cursor.set(None);
         history_scratch.set(String::new());
         menu_sel.set(0);
+    }
+
+    pub(crate) fn set_draft(&self, value: String) {
+        let mut draft = self.composer.draft;
+        if draft.peek().as_str() == value.as_str() {
+            return;
+        }
+        draft.set(value.clone());
+        let _ = send(&ChatDraftChanged { text: value });
     }
 
     pub fn remove_attachment(&self, index: usize) {

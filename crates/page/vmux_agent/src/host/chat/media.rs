@@ -28,6 +28,7 @@ impl Plugin for ChatMediaPlugin {
             .add_observer(on_chat_pick_files)
             .add_observer(on_chat_paste_media)
             .add_observer(on_chat_media_query_request)
+            .add_observer(on_chat_media_query)
             .add_observer(on_chat_media_list_request)
             .add_observer(on_chat_attach_paths)
             .add_observer(on_chat_remove_attachment)
@@ -73,6 +74,19 @@ struct ChatMediaListTask {
 struct ChatMediaPreviewTask {
     webview: Entity,
     task: Task<ChatMediaEntries>,
+}
+
+#[derive(EntityEvent)]
+pub(super) struct ChatMediaQuery {
+    #[event_target]
+    webview: Entity,
+    query: String,
+}
+
+impl ChatMediaQuery {
+    pub(super) fn new(webview: Entity, query: String) -> Self {
+        Self { webview, query }
+    }
 }
 
 impl ChatMediaProjection {
@@ -573,14 +587,24 @@ fn on_chat_media_list_request(trigger: On<UiInput<ChatMediaListRequest>>, mut co
 
 fn on_chat_media_query_request(
     trigger: On<UiInput<ChatMediaQueryRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(ChatMediaQuery::new(
+        trigger.event().webview,
+        trigger.event().payload.query.clone(),
+    ));
+}
+
+fn on_chat_media_query(
+    trigger: On<ChatMediaQuery>,
     mut projections: Query<&mut ChatMediaProjection, With<AgentChatView>>,
     mut commands: Commands,
 ) {
-    let webview = trigger.event().webview;
+    let webview = trigger.event_target();
     let Ok(mut projection) = projections.get_mut(webview) else {
         return;
     };
-    let query = trigger.event().payload.query.clone();
+    let query = trigger.event().query.clone();
     let Some(request_id) = projection.start(query.clone()) else {
         return;
     };

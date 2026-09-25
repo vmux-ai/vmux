@@ -195,6 +195,11 @@ pub struct ChatSubmit {
 }
 
 #[vmux_api::ui_event(Default)]
+pub struct ChatDraftChanged {
+    pub text: String,
+}
+
+#[vmux_api::ui_event(Default)]
 pub struct ChatRemoveAttachment {
     pub path: String,
 }
@@ -212,6 +217,9 @@ pub struct ChatApproval {
 
 #[vmux_api::ui_event(Default)]
 pub struct ChatCancel;
+
+#[vmux_api::ui_event(Default)]
+pub struct ChatStop;
 
 #[vmux_api::ui_event(Default)]
 pub struct ChatResume;

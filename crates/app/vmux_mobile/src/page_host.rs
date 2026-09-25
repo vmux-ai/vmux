@@ -6,13 +6,13 @@ use dioxus::core::ReactiveContext;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use vmux_chat::event::{
-    ChatApproval, ChatCancel, ChatEscape, ChatMediaQueryRequest, ChatRemoveAttachment, ChatSubmit,
-    SelectModel, SetAgentEffort,
+    ChatApproval, ChatCancel, ChatComposerEffect, ChatDraftChanged, ChatEscape,
+    ChatRemoveAttachment, ChatStop, ChatSubmit, SelectModel, SetAgentEffort,
 };
 use vmux_chat::model::{Models, Picker};
 use vmux_chat::prompt::{Attach, Attachments, Browsed, Media, RemoveAttachment};
-use vmux_chat::room::{Reported, Snapshot, Submitted};
-use vmux_chat::state::ChatUiState;
+use vmux_chat::room::{Conversation, Reported, Snapshot, Submitted};
+use vmux_chat::state::{ChatUiState, ChatUiStateProjection};
 use vmux_start::event::StartDataRequest;
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
@@ -91,12 +91,56 @@ fn superseded(epoch: u64) -> bool {
 pub(crate) struct ComposerExchange {
     media_request: Signal<Option<ChatMediaListRequest>>,
     offered: Signal<Vec<RemoteMediaEntry>>,
+    draft: Signal<String>,
+    effect_revision: Signal<u64>,
 }
 
 pub(crate) fn use_composer_exchange() -> ComposerExchange {
     ComposerExchange {
         media_request: use_signal(|| None),
         offered: use_signal(Vec::new),
+        draft: use_signal(String::new),
+        effect_revision: use_signal(|| 0),
+    }
+}
+
+impl ComposerExchange {
+    fn change_draft(self, text: String) {
+        let mut draft = self.draft;
+        let mut request = self.media_request;
+        draft.set(text.clone());
+        let query = vmux_api::prompt_media::inline_media_query(&text)
+            .map(|query| query.query.to_string())
+            .unwrap_or_default();
+        if request
+            .peek()
+            .as_ref()
+            .is_some_and(|request| request.query == query)
+        {
+            return;
+        }
+        let request_id = request
+            .peek()
+            .as_ref()
+            .map(|request| request.request_id.wrapping_add(1).max(1))
+            .unwrap_or(1);
+        request.set(Some(ChatMediaListRequest { request_id, query }));
+    }
+
+    fn clear_effect(self) -> Option<ChatComposerEffect> {
+        let mut draft = self.draft;
+        if draft.peek().is_empty() {
+            return None;
+        }
+        let mut revision = self.effect_revision;
+        let next = revision().wrapping_add(1).max(1);
+        revision.set(next);
+        draft.set(String::new());
+        Some(ChatComposerEffect {
+            revision: next,
+            draft: String::new(),
+            focus: true,
+        })
     }
 }
 
@@ -112,8 +156,14 @@ impl PageHost for MobileHost {
         }
         match id {
             ChatSubmit::ID => submit(self, decode(bytes)?),
+            ChatDraftChanged::ID => {
+                let payload: ChatDraftChanged = decode(bytes)?;
+                self.composer.change_draft(payload.text);
+                Ok(())
+            }
             ChatRemoveAttachment::ID => remove_attachment(self, decode(bytes)?),
-            ChatCancel::ID | ChatEscape::ID => cancel(self),
+            ChatCancel::ID | ChatStop::ID => cancel(self),
+            ChatEscape::ID => escape(self),
             ChatApproval::ID => approve(self, decode(bytes)?),
             SelectModel::ID => {
                 let payload: SelectModel = decode(bytes)?;
@@ -130,20 +180,6 @@ impl PageHost for MobileHost {
                         tracing::warn!("setting the effort failed: {error:?}");
                     }
                 })
-            }
-            ChatMediaQueryRequest::ID => {
-                let payload: ChatMediaQueryRequest = decode(bytes)?;
-                let mut request = self.composer.media_request;
-                let request_id = request
-                    .peek()
-                    .as_ref()
-                    .map(|request| request.request_id.wrapping_add(1).max(1))
-                    .unwrap_or(1);
-                request.set(Some(ChatMediaListRequest {
-                    request_id,
-                    query: payload.query,
-                }));
-                Ok(())
             }
             ChatAttachPaths::ID => attach(self, decode(bytes)?),
             CommandBarPromptRequest::ID => prompt(self, decode(bytes)?),
@@ -225,11 +261,14 @@ fn submit(host: &MobileHost, payload: ChatSubmit) -> Result<(), EventListenerErr
         });
     }
     drop(runtime);
-    host.runtime
-        .borrow_mut()
-        .app
-        .world_mut()
-        .write_message(Submitted);
+    let effect = host.composer.clear_effect();
+    let mut runtime = host.runtime.borrow_mut();
+    let world = runtime.app.world_mut();
+    world.write_message(Submitted);
+    if let Some(effect) = effect {
+        world.resource_mut::<ChatUiStateProjection>().write(&effect);
+    }
+    drop(runtime);
     let runtime = host.runtime.clone();
     agent_call(host, move |api, sid| async move {
         let request = PromptRequest {
@@ -269,6 +308,28 @@ fn cancel(host: &MobileHost) -> Result<(), EventListenerError> {
             tracing::warn!("cancelling failed: {error:?}");
         }
     })
+}
+
+fn escape(host: &MobileHost) -> Result<(), EventListenerError> {
+    let running = matches!(
+        &host
+            .runtime
+            .borrow()
+            .app
+            .world()
+            .resource::<Conversation>()
+            .status,
+        RemoteStatus::Streaming
+    );
+    if !running && let Some(effect) = host.composer.clear_effect() {
+        host.runtime
+            .borrow_mut()
+            .app
+            .world_mut()
+            .resource_mut::<ChatUiStateProjection>()
+            .write(&effect);
+    }
+    cancel(host)
 }
 
 fn approve(host: &MobileHost, payload: ChatApproval) -> Result<(), EventListenerError> {
