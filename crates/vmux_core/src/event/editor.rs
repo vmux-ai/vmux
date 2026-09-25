@@ -457,16 +457,14 @@ pub struct FileEncodingEvent {
     pub encoding: FileEncoding,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub enum FileEncodingOperation {
-    Reopen,
-    Save,
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
+pub struct FileEncodingReopenRequest {
+    pub encoding: FileEncoding,
 }
 
 #[vmux_api::ui_event(Copy, Eq, target = "files")]
-pub struct FileEncodingSet {
+pub struct FileEncodingSaveRequest {
     pub encoding: FileEncoding,
-    pub operation: FileEncodingOperation,
 }
 
 #[vmux_api::ui_event(Copy, Eq, target = "files")]

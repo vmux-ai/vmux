@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::RequestNavigate;
 use crossbeam_channel::RecvTimeoutError;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
@@ -11,12 +10,12 @@ use vmux_core::extension::protocol::{
     ExtensionCallerContext,
 };
 
-use super::ExtensionPopup;
 use super::bridge::{BridgeAuthorization, BridgeInbound, ExtensionBridgeServer};
 use super::capability::{CapabilityKind, CapabilityMatrix, CapabilityStatus};
 use super::model::{ChromeModel, ChromeModelEvent};
 use super::windows::{
-    CloseExtensionWindowRequest, ExtensionWindows, UpdateHostWindowRequest, WindowEffect,
+    CloseExtensionWindowRequest, ExtensionWindows, OpenExtensionWindowRequest,
+    UpdateHostWindowRequest,
 };
 
 pub(crate) struct ExtensionBrokerPlugin;
@@ -134,8 +133,7 @@ pub fn drain_bridge_requests(
     mut extension_windows: ResMut<ExtensionWindows>,
     mut seen: Local<SeenBridgeRequests>,
     mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
-    popups: Query<(Entity, &ExtensionPopup)>,
-    mut commands: Commands,
+    mut open_window_requests: MessageWriter<OpenExtensionWindowRequest>,
     mut close_window_requests: MessageWriter<CloseExtensionWindowRequest>,
     mut update_host_window_requests: MessageWriter<UpdateHostWindowRequest>,
     mut model_events: MessageWriter<ChromeModelEvent>,
@@ -237,38 +235,14 @@ pub fn drain_bridge_requests(
                 for request in dispatched.requests {
                     stack_requests.write(request);
                 }
-                for effect in dispatched.effects {
-                    match effect {
-                        WindowEffect::Open { urls, window_type } => {
-                            let popup = if window_type == "popup" {
-                                popups.iter().find_map(|(entity, popup)| {
-                                    (popup.extension_id == extension_id).then_some(entity)
-                                })
-                            } else {
-                                None
-                            };
-                            let mut urls = urls.into_iter();
-                            if let Some(popup) = popup
-                                && let Some(Some(url)) = urls.next()
-                            {
-                                commands.trigger(RequestNavigate {
-                                    webview: popup,
-                                    url,
-                                });
-                            }
-                            for url in urls {
-                                stack_requests.write(vmux_layout::stack::OpenRequest { url });
-                            }
-                        }
-                        WindowEffect::Close { tab_ids, urls } => {
-                            close_window_requests
-                                .write(CloseExtensionWindowRequest { tab_ids, urls });
-                        }
-                        WindowEffect::UpdateHost { window_id, update } => {
-                            update_host_window_requests
-                                .write(UpdateHostWindowRequest { window_id, update });
-                        }
-                    }
+                if let Some(request) = dispatched.open_window {
+                    open_window_requests.write(request);
+                }
+                if let Some(request) = dispatched.close_window {
+                    close_window_requests.write(request);
+                }
+                if let Some(request) = dispatched.update_host_window {
+                    update_host_window_requests.write(request);
                 }
                 for event in dispatched.events {
                     model_events.write(event);
@@ -794,7 +768,9 @@ pub fn fire_conformance_wake_timer(
 struct DispatchedApiRequest {
     response: BridgeServerMessage,
     requests: Vec<vmux_layout::stack::OpenRequest>,
-    effects: Vec<WindowEffect>,
+    open_window: Option<OpenExtensionWindowRequest>,
+    close_window: Option<CloseExtensionWindowRequest>,
+    update_host_window: Option<UpdateHostWindowRequest>,
     events: Vec<ChromeModelEvent>,
 }
 
@@ -802,7 +778,9 @@ fn dispatched_response(response: BridgeServerMessage) -> DispatchedApiRequest {
     DispatchedApiRequest {
         response,
         requests: Vec::new(),
-        effects: Vec::new(),
+        open_window: None,
+        close_window: None,
+        update_host_window: None,
         events: Vec::new(),
     }
 }
@@ -877,7 +855,9 @@ fn dispatch_api_request(
                     dispatched.result,
                 )),
                 requests: Vec::new(),
-                effects: dispatched.effects,
+                open_window: dispatched.open_window,
+                close_window: dispatched.close_window,
+                update_host_window: dispatched.update_host_window,
                 events: dispatched.events,
             },
             Err(error) => dispatched_response(BridgeServerMessage::Response(ApiResponse::failure(
@@ -912,7 +892,9 @@ fn dispatch_api_request(
                     serde_json::Value::Null,
                 )),
                 requests: vec![stack_request],
-                effects: Vec::new(),
+                open_window: None,
+                close_window: None,
+                update_host_window: None,
                 events: Vec::new(),
             },
             Err(error) => dispatched_response(BridgeServerMessage::Response(ApiResponse::failure(
@@ -1179,13 +1161,14 @@ mod tests {
             false,
         );
 
-        assert!(matches!(
-            &dispatched.effects[0],
-            WindowEffect::Open { urls, window_type }
-                if window_type == "normal" && urls == &vec![Some(format!(
-                    "chrome-extension://{EXTENSION_ID}/popup/index.html"
-                ))]
-        ));
+        let open = dispatched.open_window.unwrap();
+        assert_eq!(open.window_type, "normal");
+        assert_eq!(
+            open.urls,
+            vec![Some(format!(
+                "chrome-extension://{EXTENSION_ID}/popup/index.html"
+            ))]
+        );
         let BridgeServerMessage::Response(response) = dispatched.response else {
             panic!("expected response");
         };
@@ -1270,6 +1253,7 @@ mod tests {
             .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
             .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1525,6 +1509,7 @@ mod tests {
             .init_resource::<ConformanceWakeTimer>()
             .init_resource::<ExtensionWindows>()
             .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1594,6 +1579,7 @@ mod tests {
             .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
             .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1649,6 +1635,7 @@ mod tests {
             })
             .init_resource::<ExtensionWindows>()
             .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()

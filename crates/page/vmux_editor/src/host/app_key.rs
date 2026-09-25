@@ -7,8 +7,8 @@ use vmux_command::{
     RegisterCommandDefinitions,
 };
 use vmux_core::event::{
-    ExplorerGoto, FileEncoding, FileEncodingOperation, FileEncodingSet, FileIndent, FileKey,
-    FileLineEnding, FileShapeSet, FileStatusPickerOpen,
+    ExplorerGoto, FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileIndent,
+    FileKey, FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
 
 use crate::host::editor::{Editor, FileView};
@@ -215,17 +215,17 @@ fn apply_status_picks(
                 let Ok(encoding) = FileEncoding::try_from(label.as_str()) else {
                     continue;
                 };
-                let operation = match save {
-                    true => FileEncodingOperation::Save,
-                    false => FileEncodingOperation::Reopen,
-                };
-                commands.trigger(UiInput {
-                    webview: entity,
-                    payload: FileEncodingSet {
-                        encoding,
-                        operation,
-                    },
-                });
+                if *save {
+                    commands.trigger(UiInput {
+                        webview: entity,
+                        payload: FileEncodingSaveRequest { encoding },
+                    });
+                } else {
+                    commands.trigger(UiInput {
+                        webview: entity,
+                        payload: FileEncodingReopenRequest { encoding },
+                    });
+                }
             }
         }
     }
@@ -300,10 +300,7 @@ mod tests {
     struct Reopened(Vec<(Entity, FileEncoding)>);
 
     impl Reopened {
-        fn record(trigger: On<UiInput<FileEncodingSet>>, mut seen: ResMut<Self>) {
-            if trigger.event().payload.operation != FileEncodingOperation::Reopen {
-                return;
-            }
+        fn record(trigger: On<UiInput<FileEncodingReopenRequest>>, mut seen: ResMut<Self>) {
             seen.0
                 .push((trigger.event().webview, trigger.event().payload.encoding));
         }

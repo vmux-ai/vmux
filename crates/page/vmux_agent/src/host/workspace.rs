@@ -17,16 +17,18 @@ pub(super) struct WorkspacePlugin;
 
 impl Plugin for WorkspacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(handle_agent_choice_selected).add_systems(
-            Update,
-            (
-                drain_workspace_picker_tasks.after(super::self_command::SelfCommandSet),
-                send_pending_agent_continuations,
-            )
-                .chain()
-                .in_set(WriteCommandRequests)
-                .after(ServiceMessageSet),
-        );
+        app.add_observer(resume_agent_choice)
+            .add_observer(initialize_git_agent_choice)
+            .add_systems(
+                Update,
+                (
+                    drain_workspace_picker_tasks.after(super::self_command::SelfCommandSet),
+                    send_pending_agent_continuations,
+                )
+                    .chain()
+                    .in_set(WriteCommandRequests)
+                    .after(ServiceMessageSet),
+            );
     }
 }
 
@@ -49,18 +51,17 @@ pub(crate) struct PendingAgentContinuation(String);
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PendingAgentChoice {
     pub(crate) session_entity: Entity,
-    pub(crate) operation: PendingAgentChoiceOperation,
     pub(crate) question: String,
     pub(crate) options: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PendingAgentChoiceOperation {
-    Resume,
-    InitializeGit {
-        tab_entity: Entity,
-        workspace: PathBuf,
-    },
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ResumeAgentChoice;
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InitializeGitAgentChoice {
+    pub(crate) tab_entity: Entity,
+    pub(crate) workspace: PathBuf,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -86,10 +87,9 @@ pub(crate) struct WorkspacePickerContext<'w, 's> {
     pub(crate) proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
 }
 
-fn handle_agent_choice_selected(
+fn resume_agent_choice(
     trigger: On<AgentChoiceSelected>,
-    choices: Query<&PendingAgentChoice>,
-    tabs: Query<(), With<vmux_layout::tab::Tab>>,
+    choices: Query<&PendingAgentChoice, With<ResumeAgentChoice>>,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -99,33 +99,48 @@ fn handle_agent_choice_selected(
     let Some(selected) = choice.options.get(event.index) else {
         return;
     };
-    let continuation = match &choice.operation {
-        PendingAgentChoiceOperation::Resume => format!(
-            "VMUX USER CHOICE: For \"{}\", the user selected \"{}\". Continue the original request in this same conversation.",
-            choice.question, selected
-        ),
-        PendingAgentChoiceOperation::InitializeGit {
-            tab_entity,
-            workspace,
-        } => {
-            if !tabs.contains(*tab_entity) {
-                failed_workspace_continuation("The project tab no longer exists")
-            } else if event.index == 0 {
-                match vmux_git::worktree::repository_init(workspace) {
-                    Ok(root) => new_git_workspace_ready_continuation(&root),
-                    Err(error) => git_initialization_failed_continuation(workspace, &error.0),
-                }
-            } else {
-                plain_workspace_ready_continuation(workspace)
-            }
+    let continuation = format!(
+        "VMUX USER CHOICE: For \"{}\", the user selected \"{}\". Continue the original request in this same conversation.",
+        choice.question, selected
+    );
+    commands
+        .entity(choice.session_entity)
+        .insert(PendingAgentContinuation(continuation));
+    commands
+        .entity(event.webview)
+        .remove::<(PendingAgentChoice, ResumeAgentChoice)>()
+        .remove::<crate::host::chat::ChatSynced>();
+}
+
+fn initialize_git_agent_choice(
+    trigger: On<AgentChoiceSelected>,
+    choices: Query<(&PendingAgentChoice, &InitializeGitAgentChoice), Without<ResumeAgentChoice>>,
+    tabs: Query<(), With<vmux_layout::tab::Tab>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let Ok((choice, initialize)) = choices.get(event.webview) else {
+        return;
+    };
+    if choice.options.get(event.index).is_none() {
+        return;
+    }
+    let continuation = if !tabs.contains(initialize.tab_entity) {
+        failed_workspace_continuation("The project tab no longer exists")
+    } else if event.index == 0 {
+        match vmux_git::worktree::repository_init(&initialize.workspace) {
+            Ok(root) => new_git_workspace_ready_continuation(&root),
+            Err(error) => git_initialization_failed_continuation(&initialize.workspace, &error.0),
         }
+    } else {
+        plain_workspace_ready_continuation(&initialize.workspace)
     };
     commands
         .entity(choice.session_entity)
         .insert(PendingAgentContinuation(continuation));
     commands
         .entity(event.webview)
-        .remove::<PendingAgentChoice>()
+        .remove::<(PendingAgentChoice, InitializeGitAgentChoice)>()
         .remove::<crate::host::chat::ChatSynced>();
 }
 
@@ -483,19 +498,20 @@ fn drain_workspace_picker_tasks(
                                     {
                                         commands
                                             .entity(picker.agent_entity)
-                                            .insert(PendingAgentChoice {
-                                                session_entity: picker.session_entity,
-                                                operation:
-                                                    PendingAgentChoiceOperation::InitializeGit {
-                                                        tab_entity: picker.tab_entity,
-                                                        workspace: execution_dir,
-                                                    },
-                                                question: INITIALIZE_GIT_QUESTION.to_string(),
-                                                options: INITIALIZE_GIT_OPTIONS
-                                                    .into_iter()
-                                                    .map(str::to_string)
-                                                    .collect(),
-                                            })
+                                            .insert((
+                                                PendingAgentChoice {
+                                                    session_entity: picker.session_entity,
+                                                    question: INITIALIZE_GIT_QUESTION.to_string(),
+                                                    options: INITIALIZE_GIT_OPTIONS
+                                                        .into_iter()
+                                                        .map(str::to_string)
+                                                        .collect(),
+                                                },
+                                                InitializeGitAgentChoice {
+                                                    tab_entity: picker.tab_entity,
+                                                    workspace: execution_dir,
+                                                },
+                                            ))
                                             .remove::<crate::host::chat::ChatSynced>();
                                         None
                                     }
@@ -601,16 +617,19 @@ mod tests {
     #[test]
     pub(crate) fn selected_agent_choice_resumes_session() {
         let mut app = App::new();
-        app.add_observer(handle_agent_choice_selected);
+        app.add_observer(resume_agent_choice)
+            .add_observer(initialize_git_agent_choice);
         let session = app.world_mut().spawn_empty().id();
         let webview = app
             .world_mut()
-            .spawn(PendingAgentChoice {
-                session_entity: session,
-                operation: PendingAgentChoiceOperation::Resume,
-                question: "Mode?".into(),
-                options: vec!["Fast".into(), "Safe".into()],
-            })
+            .spawn((
+                PendingAgentChoice {
+                    session_entity: session,
+                    question: "Mode?".into(),
+                    options: vec!["Fast".into(), "Safe".into()],
+                },
+                ResumeAgentChoice,
+            ))
             .id();
 
         app.world_mut()
@@ -630,7 +649,8 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let workspace_path = workspace.path().canonicalize().unwrap();
         let mut app = App::new();
-        app.add_observer(handle_agent_choice_selected);
+        app.add_observer(resume_agent_choice)
+            .add_observer(initialize_git_agent_choice);
         let session = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
@@ -641,18 +661,20 @@ mod tests {
             .id();
         let webview = app
             .world_mut()
-            .spawn(PendingAgentChoice {
-                session_entity: session,
-                operation: PendingAgentChoiceOperation::InitializeGit {
+            .spawn((
+                PendingAgentChoice {
+                    session_entity: session,
+                    question: INITIALIZE_GIT_QUESTION.into(),
+                    options: INITIALIZE_GIT_OPTIONS
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                },
+                InitializeGitAgentChoice {
                     tab_entity: tab,
                     workspace: workspace_path.clone(),
                 },
-                question: INITIALIZE_GIT_QUESTION.into(),
-                options: INITIALIZE_GIT_OPTIONS
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
-            })
+            ))
             .id();
 
         app.world_mut()

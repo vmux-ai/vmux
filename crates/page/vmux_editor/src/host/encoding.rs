@@ -2,7 +2,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
-use vmux_core::event::{FileEncoding, FileEncodingEvent, FileEncodingOperation, FileEncodingSet};
+use vmux_core::event::{
+    FileEncoding, FileEncodingEvent, FileEncodingReopenRequest, FileEncodingSaveRequest,
+};
 
 use crate::edit::EditCommand;
 use crate::host::editing::EditRequest;
@@ -14,44 +16,52 @@ pub(super) struct EncodingPlugin;
 
 impl Plugin for EncodingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(FileEncodingSet,)>::default())
-            .add_observer(on_file_encoding_set);
+        app.add_plugins(UiEventPlugin::<(
+            FileEncodingReopenRequest,
+            FileEncodingSaveRequest,
+        )>::default())
+            .add_observer(reopen_with_encoding)
+            .add_observer(save_with_encoding);
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn on_file_encoding_set(
-    trigger: On<UiInput<FileEncodingSet>>,
-    mut views: Query<(&FileView, Option<&mut Editor>)>,
+fn reopen_with_encoding(
+    trigger: On<UiInput<FileEncodingReopenRequest>>,
+    views: Query<&FileView>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let encoding = trigger.event().payload.encoding;
+    let Ok(view) = views.get(entity) else {
+        return;
+    };
+    commands
+        .entity(entity)
+        .insert(ForcedEncoding {
+            path: view.path.clone(),
+            encoding,
+        })
+        .remove::<Editor>()
+        .remove::<vmux_git::GitDiffSource>()
+        .remove::<FileBuffer>()
+        .remove::<FileLoadTask>()
+        .remove::<FileInitialMetaSent>()
+        .remove::<crate::lsp::manager::LintRan>();
+    manager.change(&view.path);
+}
+
+fn save_with_encoding(
+    trigger: On<UiInput<FileEncodingSaveRequest>>,
+    mut editors: Query<&mut Editor>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let wanted = trigger.event().payload;
-    let Ok((view, edit)) = views.get_mut(entity) else {
+    let Ok(mut edit) = editors.get_mut(entity) else {
         return;
     };
-    if wanted.operation == FileEncodingOperation::Reopen {
-        commands
-            .entity(entity)
-            .insert(ForcedEncoding {
-                path: view.path.clone(),
-                encoding: wanted.encoding,
-            })
-            .remove::<Editor>()
-            .remove::<vmux_git::GitDiffSource>()
-            .remove::<FileBuffer>()
-            .remove::<FileLoadTask>()
-            .remove::<FileInitialMetaSent>()
-            .remove::<crate::lsp::manager::LintRan>();
-        manager.change(&view.path);
-        return;
-    }
-    let Some(mut edit) = edit else {
-        return;
-    };
-    edit.core.buffer.encoding = wanted.encoding;
+    edit.core.buffer.encoding = trigger.event().payload.encoding;
     commands.trigger(EditRequest::new(entity, vec![EditCommand::Save]));
     if !browsers.can_emit_to(&entity) {
         return;
