@@ -15,7 +15,8 @@ use crate::events::{
     snapshot_response_to_query_result,
 };
 use vmux_core::browser::{
-    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
+    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserSnapshotRequest,
+    BrowserSnapshotResponse,
 };
 
 use super::browser_pane::AgentBrowserResolve;
@@ -53,6 +54,7 @@ impl Plugin for QueryPlugin {
                 forward_layout_snapshot_responses,
                 forward_screenshot_responses,
                 forward_snapshot_responses,
+                forward_navigation_snapshot_responses,
                 forward_record_start_responses,
                 forward_record_stop_responses,
                 forward_simulator_control_responses,
@@ -535,25 +537,30 @@ fn forward_screenshot_responses(
 fn forward_snapshot_responses(
     mut reader: MessageReader<BrowserSnapshotResponse>,
     service: Option<Res<ServiceClient>>,
-    mut nav_awaiting: ResMut<NavAwaitingSnapshot>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
-        if nav_awaiting.0.remove(&response.request_id) {
-            let result = match &response.result {
-                Ok(json) => AgentCommandResult::Text(json.clone()),
-                Err(message) => AgentCommandResult::Error(message.clone()),
-            };
-            service.0.send(ClientMessage::AgentCommandResponse {
-                request_id: AgentRequestId(response.request_id),
-                result,
-            });
-        } else {
-            service.0.send(ClientMessage::AgentQueryResponse {
-                request_id: AgentRequestId(response.request_id),
-                result: snapshot_response_to_query_result(&response.result),
-            });
-        }
+        service.0.send(ClientMessage::AgentQueryResponse {
+            request_id: AgentRequestId(response.request_id),
+            result: snapshot_response_to_query_result(&response.result),
+        });
+    }
+}
+
+fn forward_navigation_snapshot_responses(
+    mut reader: MessageReader<BrowserNavigationSnapshotResponse>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else { return };
+    for response in reader.read() {
+        let result = match &response.result {
+            Ok(json) => AgentCommandResult::Text(json.clone()),
+            Err(message) => AgentCommandResult::Error(message.clone()),
+        };
+        service.0.send(ClientMessage::AgentCommandResponse {
+            request_id: AgentRequestId(response.request_id),
+            result,
+        });
     }
 }
 

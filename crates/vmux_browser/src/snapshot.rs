@@ -3,7 +3,9 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, SnapshotResult};
 use vmux_core::LastActivatedAt;
-use vmux_core::browser::{BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot};
+use vmux_core::browser::{
+    BrowserNavigationSnapshotResponse, BrowserSnapshotRequest, BrowserSnapshotResponse,
+};
 use vmux_core::dom_snapshot::{RawSnapshot, shape_snapshot};
 use vmux_core::terminal::{ProcessExited, Terminal};
 use vmux_layout::active_pane::ActivePaneQuery;
@@ -13,6 +15,11 @@ use vmux_layout::target::active_webview_for_tab;
 use vmux_layout::{Browser, Loading};
 
 pub(crate) struct SnapshotPlugin;
+
+#[derive(Component)]
+struct NavigationSnapshotResponseRoute {
+    request_id: [u8; 16],
+}
 
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
@@ -52,7 +59,7 @@ fn parse_hex(s: &str) -> Option<[u8; 16]> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn start_snapshots(
+fn start_snapshots(
     mut reader: MessageReader<BrowserSnapshotRequest>,
     cef_browsers: NonSend<Browsers>,
     active: ActivePaneQuery,
@@ -62,7 +69,10 @@ pub(crate) fn start_snapshots(
     pane_children: Query<&Children, With<Pane>>,
     stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    navigation_routes: Query<(Entity, &NavigationSnapshotResponseRoute)>,
     mut writer: MessageWriter<BrowserSnapshotResponse>,
+    mut navigation_writer: MessageWriter<BrowserNavigationSnapshotResponse>,
+    mut commands: Commands,
 ) {
     for request in reader.read() {
         let explicit_target = request.webview.is_some() || request.pane.is_some();
@@ -97,9 +107,21 @@ pub(crate) fn start_snapshots(
             } else {
                 "no browser page to snapshot"
             };
+            let result = Err(message.to_string());
+            let navigation = navigation_routes
+                .iter()
+                .find(|(_, route)| route.request_id == request.request_id);
+            if let Some((entity, _)) = navigation {
+                navigation_writer.write(BrowserNavigationSnapshotResponse {
+                    request_id: request.request_id,
+                    result,
+                });
+                commands.entity(entity).despawn();
+                continue;
+            }
             writer.write(BrowserSnapshotResponse {
                 request_id: request.request_id,
-                result: Err(message.to_string()),
+                result,
             });
         }
     }
@@ -151,7 +173,6 @@ pub(crate) fn drive_pending_nav_snapshots(
     loading_q: Query<(), With<Loading>>,
     alive_q: Query<(), With<Browser>>,
     ready_q: Query<(), With<vmux_core::page::PageReady>>,
-    mut nav_awaiting: ResMut<NavAwaitingSnapshot>,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
     mut commands: Commands,
 ) {
@@ -171,20 +192,27 @@ pub(crate) fn drive_pending_nav_snapshots(
         let assume_instant = !nav.saw_loading && elapsed > 2.0;
         let timed_out = elapsed > 10.0;
         if !alive || ready && (settled || assume_instant) || timed_out {
-            nav_awaiting.0.insert(nav.request_id);
             snapshot_writer.write(BrowserSnapshotRequest {
                 request_id: nav.request_id,
                 pane: nav.pane.clone(),
                 webview: Some(nav.webview),
             });
-            commands.entity(entity).despawn();
+            commands
+                .entity(entity)
+                .remove::<PendingNavigationSnapshot>()
+                .insert(NavigationSnapshotResponseRoute {
+                    request_id: nav.request_id,
+                });
         }
     }
 }
 
-pub(crate) fn shape_snapshot_results(
+fn shape_snapshot_results(
     mut reader: MessageReader<SnapshotResult>,
+    navigation_routes: Query<(Entity, &NavigationSnapshotResponseRoute)>,
     mut writer: MessageWriter<BrowserSnapshotResponse>,
+    mut navigation_writer: MessageWriter<BrowserNavigationSnapshotResponse>,
+    mut commands: Commands,
 ) {
     for result in reader.read() {
         let Some(request_id) = parse_hex(&result.request_id) else {
@@ -193,9 +221,72 @@ pub(crate) fn shape_snapshot_results(
         let mapped = serde_json::from_str::<RawSnapshot>(&result.json)
             .map(|raw| serde_json::to_string(&shape_snapshot(raw)).unwrap_or_default())
             .map_err(|e| format!("snapshot parse error: {e}"));
+        let navigation = navigation_routes
+            .iter()
+            .find(|(_, route)| route.request_id == request_id);
+        if let Some((entity, _)) = navigation {
+            navigation_writer.write(BrowserNavigationSnapshotResponse {
+                request_id,
+                result: mapped,
+            });
+            commands.entity(entity).despawn();
+            continue;
+        }
         writer.write(BrowserSnapshotResponse {
             request_id,
             result: mapped,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::message::Messages;
+
+    #[test]
+    fn snapshot_results_follow_the_request_entity_route() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SnapshotResult>()
+            .add_message::<BrowserSnapshotResponse>()
+            .add_message::<BrowserNavigationSnapshotResponse>()
+            .add_systems(Update, shape_snapshot_results);
+
+        let navigation_id = [1; 16];
+        let query_id = [2; 16];
+        let route = app
+            .world_mut()
+            .spawn(NavigationSnapshotResponseRoute {
+                request_id: navigation_id,
+            })
+            .id();
+        for request_id in [navigation_id, query_id] {
+            app.world_mut()
+                .resource_mut::<Messages<SnapshotResult>>()
+                .write(SnapshotResult {
+                    webview: Entity::PLACEHOLDER,
+                    request_id: hex(&request_id),
+                    json: "invalid".to_string(),
+                });
+        }
+
+        app.update();
+
+        let navigation = app
+            .world_mut()
+            .resource_mut::<Messages<BrowserNavigationSnapshotResponse>>()
+            .drain()
+            .collect::<Vec<_>>();
+        let query = app
+            .world_mut()
+            .resource_mut::<Messages<BrowserSnapshotResponse>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(navigation.len(), 1);
+        assert_eq!(navigation[0].request_id, navigation_id);
+        assert_eq!(query.len(), 1);
+        assert_eq!(query[0].request_id, query_id);
+        assert!(app.world().get_entity(route).is_err());
     }
 }
