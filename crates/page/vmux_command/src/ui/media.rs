@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::event::{CommandPaletteRemoveAttachmentRequest, CommandPaletteState, OpenId};
 use crate::prompt_media::{
     ChatAttachPaths, ChatAttachment, ChatMediaEntry, inline_media_query, replace_inline_media_query,
@@ -82,7 +80,7 @@ impl PromptMedia {
     }
 
     pub fn composer_attachments(attachments: &[ChatAttachment]) -> Vec<PromptComposerAttachment> {
-        PromptComposerAttachment::removable(attachments, &HashMap::new())
+        PromptComposerAttachment::removable(attachments)
     }
 
     pub fn handle_key(

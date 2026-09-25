@@ -3,11 +3,14 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use super::{AgentChatView, ChatMediaProjection};
+use super::{
+    AgentChatView, ChatAttachmentProjection, ChatMediaProjection, ChatSnapshotProjection,
+    ChatTranscriptProjection,
+};
 use vmux_chat::event::{
-    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachmentPreviews,
-    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatMediaQueryRequest,
-    ChatPasteMedia, ChatPickFiles,
+    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatItem, ChatMediaEntries, ChatMediaEntry,
+    ChatMediaListRequest, ChatMediaQueryRequest, ChatPasteMedia, ChatPickFiles,
+    ChatRemoveAttachment, ChatSnapshot, ChatTranscriptState,
 };
 
 pub(super) struct ChatMediaPlugin;
@@ -20,14 +23,15 @@ impl Plugin for ChatMediaPlugin {
             ChatMediaQueryRequest,
             ChatMediaListRequest,
             ChatAttachPaths,
-            ChatAttachmentPreviewRequest,
+            ChatRemoveAttachment,
         )>::default())
             .add_observer(on_chat_pick_files)
             .add_observer(on_chat_paste_media)
             .add_observer(on_chat_media_query_request)
             .add_observer(on_chat_media_list_request)
             .add_observer(on_chat_attach_paths)
-            .add_observer(on_chat_attachment_preview_request)
+            .add_observer(on_chat_remove_attachment)
+            .add_observer(on_chat_attachment_hydration_request)
             .add_systems(
                 Update,
                 (
@@ -43,13 +47,20 @@ impl Plugin for ChatMediaPlugin {
 struct ChatAttachmentTask {
     webview: Entity,
     delivery: ChatAttachmentDelivery,
+    paths: Vec<String>,
     task: Task<Vec<ChatAttachment>>,
 }
 
 #[derive(Clone, Copy)]
 enum ChatAttachmentDelivery {
     Selected,
-    Previews,
+    Hydrated,
+}
+
+#[derive(Event)]
+pub(super) struct ChatAttachmentHydrationRequest {
+    pub(super) webview: Entity,
+    pub(super) paths: Vec<String>,
 }
 
 #[derive(Component)]
@@ -83,6 +94,168 @@ impl ChatMediaProjection {
         self.0.entries.clone_from(&entries.entries);
         self.0.loading = false;
         true
+    }
+}
+
+impl ChatAttachmentProjection {
+    pub(super) fn merge_selected(&mut self, incoming: &ChatAttachments) -> bool {
+        for attachment in &incoming.attachments {
+            if attachment.preview_data_url.is_empty() {
+                continue;
+            }
+            self.resolved.insert(attachment.path.clone());
+            self.previews
+                .insert(attachment.path.clone(), attachment.clone());
+        }
+        let merged = incoming.merge_into(&mut self.selected);
+        self.hydrate_selected() || merged
+    }
+
+    pub(super) fn remove_selected(&mut self, path: &str) -> bool {
+        let previous = self.selected.len();
+        self.selected.retain(|attachment| attachment.path != path);
+        self.selected.len() != previous
+    }
+
+    pub(super) fn clear_selected(&mut self) -> bool {
+        if self.selected.is_empty() {
+            return false;
+        }
+        self.selected.clear();
+        true
+    }
+
+    pub(super) fn state(&self) -> ChatAttachments {
+        ChatAttachments {
+            attachments: self.selected.clone(),
+        }
+    }
+
+    pub(super) fn start_hydration(&mut self, paths: &[String]) -> Vec<std::path::PathBuf> {
+        let mut started = Vec::new();
+        for path in paths {
+            if path.is_empty() || self.resolved.contains(path) || !self.pending.insert(path.clone())
+            {
+                continue;
+            }
+            started.push(std::path::PathBuf::from(path));
+        }
+        started
+    }
+
+    pub(super) fn finish_hydration(
+        &mut self,
+        requested: &[String],
+        attachments: &[ChatAttachment],
+    ) -> bool {
+        for path in requested {
+            self.pending.remove(path);
+            self.resolved.insert(path.clone());
+        }
+        for attachment in attachments {
+            self.previews
+                .insert(attachment.path.clone(), attachment.clone());
+        }
+        self.hydrate_selected()
+    }
+
+    pub(super) fn hydrate_transcript(&self, state: &mut ChatTranscriptState) -> bool {
+        let mut changed = false;
+        for item in &mut state.items {
+            let ChatItem::User { attachments, .. } = item else {
+                continue;
+            };
+            changed |= self.hydrate(attachments);
+        }
+        changed
+    }
+
+    pub(super) fn hydrate_snapshot(&self, snapshot: &mut ChatSnapshot) -> bool {
+        let mut changed = false;
+        for prompt in &mut snapshot.queued {
+            changed |= self.hydrate(&mut prompt.attachments);
+        }
+        changed
+    }
+
+    pub(super) fn hydration_paths(
+        &self,
+        transcript: &ChatTranscriptState,
+        snapshot: &ChatSnapshot,
+    ) -> Vec<String> {
+        let mut paths = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        self.append_hydration_paths(&self.selected, &mut paths, &mut seen);
+        for item in &transcript.items {
+            let ChatItem::User { attachments, .. } = item else {
+                continue;
+            };
+            self.append_hydration_paths(attachments, &mut paths, &mut seen);
+        }
+        for prompt in &snapshot.queued {
+            self.append_hydration_paths(&prompt.attachments, &mut paths, &mut seen);
+        }
+        paths
+    }
+
+    fn hydrate(&self, attachments: &mut [ChatAttachment]) -> bool {
+        let mut changed = false;
+        for attachment in attachments {
+            if !attachment.preview_data_url.is_empty() {
+                continue;
+            }
+            let Some(preview) = self.previews.get(&attachment.path) else {
+                continue;
+            };
+            if preview.preview_data_url.is_empty() {
+                continue;
+            }
+            attachment
+                .preview_data_url
+                .clone_from(&preview.preview_data_url);
+            changed = true;
+        }
+        changed
+    }
+
+    fn hydrate_selected(&mut self) -> bool {
+        let previews = &self.previews;
+        let mut changed = false;
+        for attachment in &mut self.selected {
+            if !attachment.preview_data_url.is_empty() {
+                continue;
+            }
+            let Some(preview) = previews.get(&attachment.path) else {
+                continue;
+            };
+            if preview.preview_data_url.is_empty() {
+                continue;
+            }
+            attachment
+                .preview_data_url
+                .clone_from(&preview.preview_data_url);
+            changed = true;
+        }
+        changed
+    }
+
+    fn append_hydration_paths(
+        &self,
+        attachments: &[ChatAttachment],
+        paths: &mut Vec<String>,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        for attachment in attachments {
+            if !attachment.mime_type.starts_with("image/")
+                || !attachment.preview_data_url.is_empty()
+                || self.resolved.contains(&attachment.path)
+                || self.pending.contains(&attachment.path)
+                || !seen.insert(attachment.path.clone())
+            {
+                continue;
+            }
+            paths.push(attachment.path.clone());
+        }
     }
 }
 
@@ -186,12 +359,16 @@ fn spawn_chat_attachment_task(
     if paths.is_empty() {
         return;
     }
+    let requested = paths
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
     let task = IoTaskPool::get().spawn(async move {
         let _wake = wake;
         paths
             .into_iter()
             .filter_map(match delivery {
-                ChatAttachmentDelivery::Previews => chat_attachment_preview,
+                ChatAttachmentDelivery::Hydrated => chat_attachment_preview,
                 ChatAttachmentDelivery::Selected => chat_attachment,
             })
             .collect()
@@ -199,6 +376,7 @@ fn spawn_chat_attachment_task(
     commands.spawn(ChatAttachmentTask {
         webview,
         delivery,
+        paths: requested,
         task,
     });
 }
@@ -440,25 +618,43 @@ fn on_chat_attach_paths(
     );
 }
 
-fn on_chat_attachment_preview_request(
-    trigger: On<UiInput<ChatAttachmentPreviewRequest>>,
+fn on_chat_attachment_hydration_request(
+    trigger: On<ChatAttachmentHydrationRequest>,
+    mut projections: Query<&mut ChatAttachmentProjection, With<AgentChatView>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let paths = trigger
-        .event()
-        .payload
-        .paths
-        .iter()
-        .filter(|path| !path.is_empty())
-        .map(std::path::PathBuf::from)
-        .collect();
+    let request = trigger.event();
+    let Ok(mut projection) = projections.get_mut(request.webview) else {
+        return;
+    };
+    let paths = projection.start_hydration(&request.paths);
     spawn_chat_attachment_task(
-        trigger.event().webview,
-        ChatAttachmentDelivery::Previews,
+        request.webview,
+        ChatAttachmentDelivery::Hydrated,
         paths,
         vmux_core::host::wake::Wake::from_resource(proxy),
         &mut commands,
+    );
+}
+
+fn on_chat_remove_attachment(
+    trigger: On<UiInput<ChatRemoveAttachment>>,
+    mut projections: Query<&mut ChatAttachmentProjection, With<AgentChatView>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(mut projection) = projections.get_mut(webview) else {
+        return;
+    };
+    if !projection.remove_selected(&trigger.event().payload.path) {
+        return;
+    }
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.state(),
+        ),
     );
 }
 
@@ -520,6 +716,14 @@ fn on_chat_paste_media(
 
 fn drain_chat_attachment_tasks(
     mut tasks: Query<(Entity, &mut ChatAttachmentTask)>,
+    mut projections: Query<
+        (
+            &mut ChatAttachmentProjection,
+            &mut ChatTranscriptProjection,
+            &mut ChatSnapshotProjection,
+        ),
+        With<AgentChatView>,
+    >,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -527,47 +731,68 @@ fn drain_chat_attachment_tasks(
         let Some(attachments) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        let preview_paths =
-            matches!(pending.delivery, ChatAttachmentDelivery::Selected).then(|| {
-                attachments
+        if let Ok((mut projection, mut transcript, mut snapshot)) =
+            projections.get_mut(pending.webview)
+        {
+            match pending.delivery {
+                ChatAttachmentDelivery::Selected => {
+                    let incoming = ChatAttachments { attachments };
+                    if projection.merge_selected(&incoming) {
+                        commands.trigger(vmux_core::host::UiStateWrite::<
+                            vmux_chat::state::ChatUiState,
+                        >::from_event(pending.webview, &projection.state()));
+                    }
+                }
+                ChatAttachmentDelivery::Hydrated => {
+                    let selected_changed =
+                        projection.finish_hydration(&pending.paths, &attachments);
+                    let transcript_changed = projection.hydrate_transcript(&mut transcript.state);
+                    let snapshot_changed = projection.hydrate_snapshot(&mut snapshot.0);
+                    if selected_changed {
+                        commands.trigger(vmux_core::host::UiStateWrite::<
+                            vmux_chat::state::ChatUiState,
+                        >::from_event(pending.webview, &projection.state()));
+                    }
+                    if transcript_changed {
+                        commands.trigger(vmux_core::host::UiStateWrite::<
+                            vmux_chat::state::ChatUiState,
+                        >::from_event(pending.webview, &transcript.state));
+                    }
+                    if snapshot_changed {
+                        commands.trigger(vmux_core::host::UiStateWrite::<
+                            vmux_chat::state::ChatUiState,
+                        >::from_event(pending.webview, &snapshot.0));
+                    }
+                }
+            }
+            let paths = projection.hydration_paths(&transcript.state, &snapshot.0);
+            if !paths.is_empty() {
+                commands.trigger(ChatAttachmentHydrationRequest {
+                    webview: pending.webview,
+                    paths,
+                });
+            }
+        } else {
+            let response = ChatAttachments {
+                attachments: attachments.clone(),
+            };
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::from_event(pending.webview, &response));
+            if matches!(pending.delivery, ChatAttachmentDelivery::Selected) {
+                let paths = attachments
                     .iter()
+                    .filter(|attachment| attachment.mime_type.starts_with("image/"))
                     .map(|attachment| std::path::PathBuf::from(&attachment.path))
-                    .collect::<Vec<_>>()
-            });
-        match pending.delivery {
-            ChatAttachmentDelivery::Selected => {
-                let selected = ChatAttachments { attachments };
-                commands.trigger(
-                    vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-                        pending.webview,
-                        &selected,
-                    ),
+                    .collect();
+                spawn_chat_attachment_task(
+                    pending.webview,
+                    ChatAttachmentDelivery::Hydrated,
+                    paths,
+                    vmux_core::host::wake::Wake::beside(proxy.as_deref()),
+                    &mut commands,
                 );
-                commands.trigger(vmux_core::host::UiStateWrite::<
-                    vmux_api::command_bar::CommandBarUiState,
-                >::from_event(pending.webview, &selected));
             }
-            ChatAttachmentDelivery::Previews => {
-                let previews = ChatAttachmentPreviews { attachments };
-                commands.trigger(
-                    vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-                        pending.webview,
-                        &previews,
-                    ),
-                );
-                commands.trigger(vmux_core::host::UiStateWrite::<
-                    vmux_api::command_bar::CommandBarUiState,
-                >::from_event(pending.webview, &previews));
-            }
-        }
-        if let Some(paths) = preview_paths {
-            spawn_chat_attachment_task(
-                pending.webview,
-                ChatAttachmentDelivery::Previews,
-                paths,
-                vmux_core::host::wake::Wake::beside(proxy.as_deref()),
-                &mut commands,
-            );
         }
         commands.entity(entity).despawn();
     }
@@ -666,6 +891,87 @@ mod tests {
             entries: Vec::new(),
         }));
         assert!(!projection.0.loading);
+    }
+
+    #[test]
+    fn attachment_projection_deduplicates_requests_and_hydrates_every_surface() {
+        let image = ChatAttachment {
+            path: "/tmp/image.png".into(),
+            name: "image.png".into(),
+            mime_type: "image/png".into(),
+            size: 4,
+            preview_data_url: String::new(),
+        };
+        let mut projection = ChatAttachmentProjection::default();
+        assert!(projection.merge_selected(&ChatAttachments {
+            attachments: vec![image.clone(), image.clone()],
+        }));
+        let mut transcript = ChatTranscriptState {
+            items: vec![ChatItem::User {
+                text: "inspect".into(),
+                context: None,
+                attachments: vec![image.clone()],
+                created_at_ms: 0,
+            }],
+            ..Default::default()
+        };
+        let mut snapshot = ChatSnapshot {
+            queued: vec![vmux_chat::event::QueuedPromptSnapshot {
+                id: 1,
+                text: String::new(),
+                attachments: vec![image.clone()],
+            }],
+            ..Default::default()
+        };
+
+        let paths = projection.hydration_paths(&transcript, &snapshot);
+        assert_eq!(paths, ["/tmp/image.png"]);
+        assert_eq!(projection.start_hydration(&paths).len(), 1);
+        assert!(
+            projection
+                .start_hydration(&["/tmp/image.png".into()])
+                .is_empty()
+        );
+
+        let preview = ChatAttachment {
+            preview_data_url: "data:image/png;base64,cG5n".into(),
+            ..image
+        };
+        assert!(projection.finish_hydration(&paths, std::slice::from_ref(&preview)));
+        assert!(projection.hydrate_transcript(&mut transcript));
+        assert!(projection.hydrate_snapshot(&mut snapshot));
+        assert_eq!(
+            projection.selected[0].preview_data_url,
+            preview.preview_data_url
+        );
+        let ChatItem::User { attachments, .. } = &transcript.items[0] else {
+            panic!("expected user item");
+        };
+        assert_eq!(attachments[0].preview_data_url, preview.preview_data_url);
+        assert_eq!(
+            snapshot.queued[0].attachments[0].preview_data_url,
+            preview.preview_data_url
+        );
+        assert!(
+            projection
+                .hydration_paths(&transcript, &snapshot)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn attachment_projection_removes_selected_paths() {
+        let mut projection = ChatAttachmentProjection::default();
+        projection.merge_selected(&ChatAttachments {
+            attachments: vec![ChatAttachment {
+                path: "/tmp/image.png".into(),
+                ..Default::default()
+            }],
+        });
+
+        assert!(projection.remove_selected("/tmp/image.png"));
+        assert!(projection.selected.is_empty());
+        assert!(!projection.remove_selected("/tmp/image.png"));
     }
 
     #[test]

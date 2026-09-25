@@ -4,6 +4,7 @@ pub struct ChatAttachment {
     pub name: String,
     pub mime_type: String,
     pub size: u64,
+    #[serde(default)]
     pub preview_data_url: String,
 }
 
@@ -15,14 +16,45 @@ pub struct ChatSubmitAttachment {
     pub size: u64,
 }
 
-#[vmux_api::contract(Default)]
+impl From<&ChatAttachment> for ChatSubmitAttachment {
+    fn from(attachment: &ChatAttachment) -> Self {
+        Self {
+            path: attachment.path.clone(),
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
+            size: attachment.size,
+        }
+    }
+}
+
+#[vmux_api::contract(Default, Eq)]
 pub struct ChatAttachments {
     pub attachments: Vec<ChatAttachment>,
 }
 
-#[vmux_api::contract(Default)]
-pub struct ChatAttachmentPreviews {
-    pub attachments: Vec<ChatAttachment>,
+impl ChatAttachments {
+    pub fn merge_into(&self, current: &mut Vec<ChatAttachment>) -> bool {
+        let previous = current.clone();
+        for attachment in &self.attachments {
+            if let Some(existing) = current
+                .iter_mut()
+                .find(|existing| existing.path == attachment.path)
+            {
+                let mut replacement = attachment.clone();
+                if replacement.preview_data_url.is_empty()
+                    && replacement.name == existing.name
+                    && replacement.mime_type == existing.mime_type
+                    && replacement.size == existing.size
+                {
+                    replacement.preview_data_url = existing.preview_data_url.clone();
+                }
+                *existing = replacement;
+            } else {
+                current.push(attachment.clone());
+            }
+        }
+        *current != previous
+    }
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -82,11 +114,6 @@ pub struct ChatAttachPaths {
     pub paths: Vec<String>,
 }
 
-#[vmux_api::ui_event(Default, targets = ["command-bar", "start", "layout", "sessions", "agent"])]
-pub struct ChatAttachmentPreviewRequest {
-    pub paths: Vec<String>,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InlineMediaQuery<'a> {
     pub start: usize,
@@ -115,28 +142,6 @@ pub fn replace_inline_media_query(
     value.push_str(&draft[..query.start]);
     value.push_str(replacement);
     value
-}
-
-pub fn merge_chat_attachments(
-    current: &[ChatAttachment],
-    incoming: &[ChatAttachment],
-) -> Vec<ChatAttachment> {
-    let mut merged = current.to_vec();
-    for attachment in incoming {
-        if let Some(existing) = merged
-            .iter_mut()
-            .find(|existing| existing.path == attachment.path)
-        {
-            let mut replacement = attachment.clone();
-            if replacement.preview_data_url.is_empty() {
-                replacement.preview_data_url = existing.preview_data_url.clone();
-            }
-            *existing = replacement;
-        } else {
-            merged.push(attachment.clone());
-        }
-    }
-    merged
 }
 
 #[cfg(test)]
@@ -192,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn attachment_batches_append_new_files_and_refresh_existing_metadata() {
+    fn submit_attachment_drops_render_only_preview_data() {
         let first = ChatAttachment {
             path: "/tmp/one.png".into(),
             name: "one.png".into(),
@@ -200,25 +205,48 @@ mod tests {
             size: 1,
             preview_data_url: "data:image/png;base64,preview".into(),
         };
-        let second = ChatAttachment {
-            path: "/tmp/two.png".into(),
-            name: "two.png".into(),
+        let submitted = ChatSubmitAttachment::from(&first);
+
+        assert_eq!(submitted.path, first.path);
+        assert_eq!(submitted.name, first.name);
+        assert_eq!(submitted.mime_type, first.mime_type);
+        assert_eq!(submitted.size, first.size);
+    }
+
+    #[test]
+    fn attachment_batches_deduplicate_and_preserve_loaded_previews() {
+        let first = ChatAttachment {
+            path: "/tmp/one.png".into(),
+            name: "one.png".into(),
             mime_type: "image/png".into(),
-            size: 2,
-            preview_data_url: String::new(),
+            size: 1,
+            preview_data_url: "data:image/png;base64,preview".into(),
         };
         let refreshed = ChatAttachment {
-            size: 3,
             preview_data_url: String::new(),
             ..first.clone()
         };
+        let mut current = vec![first.clone()];
 
-        let merged =
-            merge_chat_attachments(std::slice::from_ref(&first), &[second.clone(), refreshed]);
+        assert!(
+            !ChatAttachments {
+                attachments: vec![refreshed],
+            }
+            .merge_into(&mut current)
+        );
+        assert_eq!(current[0].preview_data_url, first.preview_data_url);
 
-        assert_eq!(merged.len(), 2);
-        assert_eq!(merged[0].size, 3);
-        assert_eq!(merged[0].preview_data_url, first.preview_data_url);
-        assert_eq!(merged[1], second);
+        assert!(
+            ChatAttachments {
+                attachments: vec![ChatAttachment {
+                    size: 3,
+                    preview_data_url: String::new(),
+                    ..first
+                }],
+            }
+            .merge_into(&mut current)
+        );
+        assert_eq!(current[0].size, 3);
+        assert!(current[0].preview_data_url.is_empty());
     }
 }

@@ -1,4 +1,4 @@
-use crate::prompt_media::ChatSubmitAttachment;
+use crate::prompt_media::ChatAttachment;
 
 #[vmux_api::contract(Eq)]
 pub enum ChatBlock {
@@ -62,7 +62,7 @@ pub enum ChatItem {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        attachments: Vec<ChatSubmitAttachment>,
+        attachments: Vec<ChatAttachment>,
         #[serde(default, skip_serializing_if = "is_zero")]
         created_at_ms: u64,
     },

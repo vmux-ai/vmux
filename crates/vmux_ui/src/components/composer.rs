@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use dioxus::prelude::*;
 use vmux_api::prompt_media::ChatAttachment;
 
@@ -21,16 +19,7 @@ pub struct PromptComposerAttachment {
 }
 
 impl PromptComposerAttachment {
-    pub fn from_attachment(
-        attachment: &ChatAttachment,
-        previews: &HashMap<String, ChatAttachment>,
-        remove_index: Option<usize>,
-    ) -> Self {
-        let loaded = previews
-            .get(&attachment.path)
-            .map(|preview| preview.preview_data_url.as_str())
-            .filter(|url| !url.is_empty())
-            .unwrap_or(attachment.preview_data_url.as_str());
+    pub fn from_attachment(attachment: &ChatAttachment, remove_index: Option<usize>) -> Self {
         let held = match remove_index {
             Some(_) => "attachment",
             None => "pinned-attachment",
@@ -39,29 +28,23 @@ impl PromptComposerAttachment {
             key: format!("{held}-{}", attachment.path),
             name: attachment.name.clone(),
             label: FilePath(&attachment.name).extension_label(),
-            preview_data_url: loaded.to_string(),
+            preview_data_url: attachment.preview_data_url.clone(),
             remove_index,
         }
     }
 
-    pub fn removable(
-        attachments: &[ChatAttachment],
-        previews: &HashMap<String, ChatAttachment>,
-    ) -> Vec<Self> {
+    pub fn removable(attachments: &[ChatAttachment]) -> Vec<Self> {
         let mut listed = Vec::with_capacity(attachments.len());
         for (index, attachment) in attachments.iter().enumerate() {
-            listed.push(Self::from_attachment(attachment, previews, Some(index)));
+            listed.push(Self::from_attachment(attachment, Some(index)));
         }
         listed
     }
 
-    pub fn pinned(
-        attachments: &[ChatAttachment],
-        previews: &HashMap<String, ChatAttachment>,
-    ) -> Vec<Self> {
+    pub fn pinned(attachments: &[ChatAttachment]) -> Vec<Self> {
         let mut listed = Vec::with_capacity(attachments.len());
         for attachment in attachments {
-            listed.push(Self::from_attachment(attachment, previews, None));
+            listed.push(Self::from_attachment(attachment, None));
         }
         listed
     }

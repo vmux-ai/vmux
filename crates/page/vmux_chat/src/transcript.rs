@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
-use std::collections::HashMap;
 use vmux_api::chat::{ChatBlock, ChatItem, ChatTurn, WORKING_VERB_IDS};
-use vmux_api::prompt_media::{ChatAttachment, ChatSubmitAttachment};
+use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -142,7 +141,6 @@ pub fn MessageCopyButton(text: String) -> Element {
 pub fn ChatItemRow(
     absolute_index: usize,
     item: ChatItem,
-    attachment_previews: Signal<HashMap<String, ChatAttachment>>,
     latest_tool_block: Option<usize>,
     agent_name: String,
     agent_avatar: Option<String>,
@@ -192,7 +190,6 @@ pub fn ChatItemRow(
                         for attachment in attachments {
                             UserAttachment {
                                 attachment: attachment.clone(),
-                                previews: attachment_previews,
                             }
                         }
                     }
@@ -213,15 +210,8 @@ pub fn ChatItemRow(
 }
 
 #[component]
-fn UserAttachment(
-    attachment: ChatSubmitAttachment,
-    previews: Signal<HashMap<String, ChatAttachment>>,
-) -> Element {
-    let preview_data_url = previews
-        .read()
-        .get(&attachment.path)
-        .map(|preview| preview.preview_data_url.clone())
-        .unwrap_or_default();
+fn UserAttachment(attachment: ChatAttachment) -> Element {
+    let preview_data_url = &attachment.preview_data_url;
     if attachment.mime_type.starts_with("image/") && !preview_data_url.is_empty() {
         return rsx! {
             figure {

@@ -1,9 +1,7 @@
 use super::{CommandBarKey, CommandBarOpenEvent, PathCompleteResponse, StartProjectBranches};
 use crate::chat::{PromptHistory, ResumableSessionEntry, ResumableSessions};
 use crate::history::{HistoryEntry, HistorySuggestionsResponse};
-use crate::prompt_media::{
-    ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
-};
+use crate::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry};
 use crate::space::ProjectBranch;
 
 #[vmux_api::contract(Copy, Default, Eq)]
@@ -19,7 +17,6 @@ pub enum CommandBarUiStatePatch {
     ProjectBranches(Box<StartProjectBranches>),
     ResumableSessions(Box<ResumableSessions>),
     Attachments(Box<ChatAttachments>),
-    AttachmentPreviews(Box<ChatAttachmentPreviews>),
     MediaEntries(Box<ChatMediaEntries>),
     FocusInput(CommandBarFocusInput),
 }

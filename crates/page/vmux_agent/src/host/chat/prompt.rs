@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use super::{AgentChatView, ChatAttachmentProjection};
 use crate::events::{AgentApprovalReply, AgentChoiceSelected};
 use crate::run_state::AgentRunState;
 use vmux_chat::event::{
@@ -40,7 +41,7 @@ impl Plugin for ChatPromptPlugin {
 
 fn on_chat_submit(
     trigger: On<UiInput<ChatSubmit>>,
-    child_of: Query<&ChildOf>,
+    mut views: Query<(&ChildOf, &mut ChatAttachmentProjection), With<AgentChatView>>,
     mut sessions: Query<(
         &mut PromptQueue,
         &mut AgentRunState,
@@ -51,8 +52,11 @@ fn on_chat_submit(
     let webview = trigger.event().webview;
     let payload = &trigger.event().payload;
     let text = payload.text.clone();
-    let attachments = payload
-        .attachments
+    let Ok((parent, mut selected)) = views.get_mut(webview) else {
+        return;
+    };
+    let attachments = selected
+        .selected
         .iter()
         .filter(|attachment| !attachment.path.is_empty())
         .map(|attachment| AgentAttachment {
@@ -65,9 +69,6 @@ fn on_chat_submit(
     if text.trim().is_empty() && attachments.is_empty() {
         return;
     }
-    let Ok(parent) = child_of.get(webview) else {
-        return;
-    };
     let session = parent.parent();
     if let Ok((mut queue, mut state, title)) = sessions.get_mut(session) {
         if title.is_none()
@@ -78,6 +79,14 @@ fn on_chat_submit(
                 .insert(AgentConversationTitle(title));
         }
         enqueue_prompt(&mut queue, &mut state, text, attachments);
+        if selected.clear_selected() {
+            commands.trigger(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                    webview,
+                    &selected.state(),
+                ),
+            );
+        }
     }
 }
 
@@ -243,13 +252,15 @@ mod tests {
             .world_mut()
             .spawn((PromptQueue::default(), AgentRunState::Idle))
             .id();
-        let webview = app.world_mut().spawn(ChildOf(session)).id();
+        let webview = app
+            .world_mut()
+            .spawn((ChildOf(session), AgentChatView))
+            .id();
 
         app.world_mut().trigger(UiInput {
             webview,
             payload: ChatSubmit {
                 text: "  make me a new\nJapanese restaurant website  ".into(),
-                attachments: Vec::new(),
             },
         });
         app.world_mut().flush();
@@ -272,7 +283,6 @@ mod tests {
             webview,
             payload: ChatSubmit {
                 text: "make it darker".into(),
-                attachments: Vec::new(),
             },
         });
         app.world_mut().flush();

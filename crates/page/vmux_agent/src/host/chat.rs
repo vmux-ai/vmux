@@ -11,7 +11,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use vmux_chat::event::{
-    ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState, ChatTranscriptState,
+    ChatAttachment, ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState,
+    ChatSnapshot, ChatTranscriptState,
 };
 
 pub struct AgentChatPagePlugin;
@@ -48,6 +49,8 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 #[derive(Component)]
 #[require(
     ChatUiStateUpdates,
+    ChatAttachmentProjection,
+    ChatSnapshotProjection,
     ChatTranscriptProjection,
     ChatMediaProjection,
     ChatResumeProjection,
@@ -62,6 +65,17 @@ struct ChatTranscriptProjection {
     state: ChatTranscriptState,
     tail: Vec<ChatItem>,
     tail_start: u32,
+}
+
+#[derive(Component, Default)]
+struct ChatSnapshotProjection(ChatSnapshot);
+
+#[derive(Component, Default)]
+struct ChatAttachmentProjection {
+    selected: Vec<ChatAttachment>,
+    previews: std::collections::HashMap<String, ChatAttachment>,
+    pending: std::collections::HashSet<String>,
+    resolved: std::collections::HashSet<String>,
 }
 
 #[derive(Component, Default)]
