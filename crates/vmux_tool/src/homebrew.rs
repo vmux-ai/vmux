@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use bevy_tasks::IoTaskPool;
 use vmux_core::tool::{ToolImportRequest, ToolProvider};
 
 use crate::manifest::{
@@ -110,10 +111,10 @@ fn import_brewfile_system(
         let path = operation.path.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 let (formulae, casks) = import_brewfile_in(&store, &path)?;
                 Ok(ImportedBrewfile { formulae, casks })
-            }));
+            })));
     }
 }
 

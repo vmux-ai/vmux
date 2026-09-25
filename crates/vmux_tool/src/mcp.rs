@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
+use bevy_tasks::IoTaskPool;
 use serde::{Deserialize, Serialize};
 use vmux_core::tool::{ToolAdoptRequest, ToolForgetRequest, ToolImportRequest, ToolProvider};
 
@@ -210,10 +211,10 @@ fn discover_mcp_servers_system(
         let sources = sources.0.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 let (servers, errors) = discover_mcp_servers_in(&sources);
                 Ok(DiscoveredMcpServers { servers, errors })
-            }));
+            })));
     }
 }
 
@@ -252,10 +253,10 @@ fn import_mcp_config_system(
         let path = operation.path.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 let servers = import_mcp_config_in(&store, &path)?;
                 Ok(ImportedMcpConfig { servers })
-            }));
+            })));
     }
 }
 
@@ -282,10 +283,10 @@ fn import_default_mcp_configs_system(
         let discovered = discovered.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 let servers = import_discovered_mcp_configs_in(&store, &discovered)?;
                 Ok(ImportedMcpConfig { servers })
-            }));
+            })));
     }
 }
 
@@ -327,10 +328,10 @@ fn import_mcp_server_system(
         let discovered = discovered.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 import_discovered_mcp_server_in(&store, &name, &discovered)?;
                 Ok(ImportedMcpServer { name })
-            }));
+            })));
     }
 }
 
@@ -366,12 +367,12 @@ fn forget_mcp_server_system(
         let name = operation.name.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 let mut manifest = store.load()?;
                 manifest.mcp.servers.remove(&name);
                 store.save(&manifest)?;
                 Ok(ForgottenMcpServer { name })
-            }));
+            })));
     }
 }
 

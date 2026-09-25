@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::{Added, Commands, Component as EcsComponent, Entity, Query, With, Without};
 use bevy_ecs::schedule::IntoScheduleConfigs;
+use bevy_tasks::IoTaskPool;
 use serde::{Deserialize, Serialize};
 use vmux_core::tool::{
     ToolAdoptRequest, ToolImportRequest, ToolInstallRequest, ToolLinkRequest, ToolProvider,
@@ -279,12 +280,12 @@ fn discover_dotfile_packages_system(
         };
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
                 Ok(DiscoveredDotfilePackages {
                     packages: dotfile_packages_in(&store.dotfiles_dir()),
                 })
-            }));
+            })));
     }
 }
 
@@ -323,10 +324,10 @@ fn plan_dotfile_package_system(
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
                 plan_dotfile_package_in(&store.dotfiles_dir(), store.home(), &package)
-            }));
+            })));
     }
 }
 
@@ -368,13 +369,13 @@ fn import_dotfiles_system(
         let path = operation.path.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
                 let path = store.expand_user_path(&path)?;
                 let packages =
                     import_dotfiles_to(&path, &store.dotfiles_dir(), &store.manifest_path())?;
                 Ok(ImportedDotfiles { packages })
-            }));
+            })));
     }
 }
 
@@ -408,7 +409,7 @@ fn import_available_dotfiles_system(
         };
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
                 let packages = dotfile_packages_in(&store.dotfiles_dir());
                 let mut manifest = store.load()?;
@@ -419,7 +420,7 @@ fn import_available_dotfiles_system(
                 }
                 store.save(&manifest)?;
                 Ok(ImportedAvailableDotfiles { packages: imported })
-            }));
+            })));
     }
 }
 
@@ -463,14 +464,14 @@ fn link_dotfile_package_system(
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 let mut manifest = store.load()?;
                 manifest.set_dotfile_package(&package, true);
                 store.save(&manifest)?;
                 let files =
                     apply_dotfile_package_in(&store.dotfiles_dir(), store.home(), &package)?;
                 Ok(LinkedDotfilePackage { files })
-            }));
+            })));
     }
 }
 
@@ -514,7 +515,7 @@ fn disable_dotfile_package_system(
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
                 let files = disable_and_unlink_dotfile_package_in(
                     &store.manifest_path(),
@@ -523,7 +524,7 @@ fn disable_dotfile_package_system(
                     &package,
                 )?;
                 Ok(DisabledDotfilePackage { files })
-            }));
+            })));
     }
 }
 
@@ -567,12 +568,12 @@ fn unlink_dotfile_package_system(
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
                 let files =
                     unlink_dotfile_package_in(&store.dotfiles_dir(), store.home(), &package)?;
                 Ok(UnlinkedDotfilePackage { files })
-            }));
+            })));
     }
 }
 
@@ -606,12 +607,12 @@ fn apply_enabled_dotfiles_system(
         };
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 let manifest = store.load()?;
                 let files =
                     apply_enabled_dotfiles_in(&manifest, &store.dotfiles_dir(), store.home())?;
                 Ok(AppliedEnabledDotfiles { files })
-            }));
+            })));
     }
 }
 
@@ -658,7 +659,7 @@ fn adopt_dotfile_system(
         let package = operation.package.clone();
         commands
             .entity(entity)
-            .insert(ToolOperationTask::spawn(move || {
+            .insert(ToolOperationTask(IoTaskPool::get().spawn(async move {
                 store.migrate_legacy_storage()?;
                 let path = adopt_dotfile_in(
                     &store.dotfiles_dir(),
@@ -668,7 +669,7 @@ fn adopt_dotfile_system(
                     &package,
                 )?;
                 Ok(AdoptedDotfile { path })
-            }));
+            })));
     }
 }
 

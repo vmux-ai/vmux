@@ -681,14 +681,6 @@ struct ToolOperationTask {
     task: Task<Result<String, String>>,
 }
 
-impl ToolOperationTask {
-    fn spawn(operation: impl FnOnce() -> Result<String, String> + Send + 'static) -> Self {
-        Self {
-            task: IoTaskPool::get().spawn(async move { operation() }),
-        }
-    }
-}
-
 #[derive(Component, Default)]
 struct OperationRequestSequence(u64);
 
@@ -1891,10 +1883,11 @@ macro_rules! external_tool_system {
                     continue;
                 };
                 let request = operation.request().clone();
+                let task = IoTaskPool::get().spawn(async move { $execute(request, &store) });
                 commands
                     .entity(entity)
                     .remove::<ExternalToolOperation>()
-                    .insert(ToolOperationTask::spawn(move || $execute(request, &store)));
+                    .insert(ToolOperationTask { task });
             }
         }
     };
