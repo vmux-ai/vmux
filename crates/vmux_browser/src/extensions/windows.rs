@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, WindowMode, WindowPosition};
+use bevy_cef::prelude::RequestNavigate;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
@@ -8,6 +9,7 @@ use vmux_core::extension::protocol::{ApiRequest, ChromeError, ExtensionCallerCon
 use vmux_history::LastActivatedAt;
 use vmux_layout::stack::{CloseStackRequest, Stack};
 
+use super::ExtensionPopup;
 use super::bridge::BridgeAuthorization;
 use super::model::{ChromeModel, ChromeModelEvent, ChromeStableIds, ChromeTab, ChromeWindow};
 
@@ -16,6 +18,7 @@ pub(crate) struct ExtensionWindowsPlugin;
 impl Plugin for ExtensionWindowsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ExtensionWindows>()
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_systems(
@@ -24,7 +27,11 @@ impl Plugin for ExtensionWindowsPlugin {
             )
             .add_systems(
                 Update,
-                (route_close_extension_windows, apply_host_window_updates)
+                (
+                    open_extension_windows,
+                    route_close_extension_windows,
+                    apply_host_window_updates,
+                )
                     .after(super::broker::drain_bridge_requests),
             );
     }
@@ -72,26 +79,19 @@ pub struct HostWindowUpdate {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WindowEffect {
-    Open {
-        urls: Vec<Option<String>>,
-        window_type: String,
-    },
-    Close {
-        tab_ids: Vec<i32>,
-        urls: Vec<String>,
-    },
-    UpdateHost {
-        window_id: i32,
-        update: HostWindowUpdate,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WindowDispatch {
     pub result: Value,
-    pub effects: Vec<WindowEffect>,
+    pub open_window: Option<OpenExtensionWindowRequest>,
+    pub close_window: Option<CloseExtensionWindowRequest>,
+    pub update_host_window: Option<UpdateHostWindowRequest>,
     pub events: Vec<ChromeModelEvent>,
+}
+
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct OpenExtensionWindowRequest {
+    pub extension_id: String,
+    pub urls: Vec<Option<String>>,
+    pub window_type: String,
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
@@ -104,6 +104,35 @@ pub struct CloseExtensionWindowRequest {
 pub struct UpdateHostWindowRequest {
     pub window_id: i32,
     pub update: HostWindowUpdate,
+}
+
+fn open_extension_windows(
+    mut requests: MessageReader<OpenExtensionWindowRequest>,
+    popups: Query<(Entity, &ExtensionPopup)>,
+    mut commands: Commands,
+    mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
+) {
+    for request in requests.read() {
+        let popup = if request.window_type == "popup" {
+            popups.iter().find_map(|(entity, popup)| {
+                (popup.extension_id == request.extension_id).then_some(entity)
+            })
+        } else {
+            None
+        };
+        let mut urls = request.urls.iter().cloned();
+        if let Some(popup) = popup
+            && let Some(Some(url)) = urls.next()
+        {
+            commands.trigger(RequestNavigate {
+                webview: popup,
+                url,
+            });
+        }
+        for url in urls {
+            stack_requests.write(vmux_layout::stack::OpenRequest { url });
+        }
+    }
 }
 
 pub fn dispatch(
@@ -127,7 +156,7 @@ pub fn dispatch(
     }
 }
 
-pub fn route_close_extension_windows(
+fn route_close_extension_windows(
     mut requests: MessageReader<CloseExtensionWindowRequest>,
     stable_ids: Res<ChromeStableIds>,
     stacks: Query<(Entity, &PageMetadata, Option<&LastActivatedAt>), With<Stack>>,
@@ -183,7 +212,7 @@ pub fn sync_extension_windows(model: Res<ChromeModel>, mut windows: ResMut<Exten
     }
 }
 
-pub fn apply_host_window_updates(
+fn apply_host_window_updates(
     mut requests: MessageReader<UpdateHostWindowRequest>,
     stable_ids: Res<ChromeStableIds>,
     mut native_windows: Query<&mut Window>,
@@ -429,10 +458,13 @@ fn create(
     };
     Ok(WindowDispatch {
         result,
-        effects: vec![WindowEffect::Open {
+        open_window: Some(OpenExtensionWindowRequest {
+            extension_id: request.caller_context.extension_id().to_string(),
             urls: open,
             window_type: window_type.into(),
-        }],
+        }),
+        close_window: None,
+        update_host_window: None,
         events,
     })
 }
@@ -485,7 +517,9 @@ fn update(
                 request,
                 authorization,
             ),
-            effects: Vec::new(),
+            open_window: None,
+            close_window: None,
+            update_host_window: None,
             events,
         });
     }
@@ -513,10 +547,12 @@ fn update(
             request,
             authorization,
         ),
-        effects: vec![WindowEffect::UpdateHost {
+        open_window: None,
+        close_window: None,
+        update_host_window: Some(UpdateHostWindowRequest {
             window_id: id,
             update,
-        }],
+        }),
         events: window_update_events(&before, &after),
     })
 }
@@ -545,10 +581,12 @@ fn remove(
     }
     Ok(WindowDispatch {
         result: Value::Null,
-        effects: vec![WindowEffect::Close {
+        open_window: None,
+        close_window: Some(CloseExtensionWindowRequest {
             tab_ids: entry.tab_ids,
             urls: entry.urls,
-        }],
+        }),
+        update_host_window: None,
         events,
     })
 }
@@ -556,7 +594,9 @@ fn remove(
 fn success(result: Value) -> WindowDispatch {
     WindowDispatch {
         result,
-        effects: Vec::new(),
+        open_window: None,
+        close_window: None,
+        update_host_window: None,
         events: Vec::new(),
     }
 }
@@ -1063,7 +1103,7 @@ mod tests {
         .unwrap();
         let id = created.result["id"].as_i64().unwrap() as i32;
         assert_eq!(created.result["type"], "popup");
-        assert_eq!(created.effects.len(), 1);
+        assert!(created.open_window.is_some());
         model.tabs.push(ChromeTab {
             id: 8,
             window_id: 1,
@@ -1109,10 +1149,7 @@ mod tests {
             &BridgeAuthorization::default(),
         )
         .unwrap();
-        assert!(matches!(
-            &removed.effects[0],
-            WindowEffect::Close { tab_ids, .. } if tab_ids == &vec![8]
-        ));
+        assert_eq!(removed.close_window.unwrap().tab_ids, vec![8]);
         assert!(matches!(
             removed.events[0],
             ChromeModelEvent::WindowRemoved { window_id } if window_id == id
