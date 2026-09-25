@@ -219,7 +219,11 @@ pub enum CommandBarResultItem {
 
 #[vmux_api::contract(Default, Eq)]
 pub struct CommandPaletteProjection {
+    pub query: String,
     pub rows: Vec<CommandBarResultItem>,
+    pub selected: u32,
+    pub navigating: bool,
+    pub input_revision: u64,
     pub prompt_targets: Vec<CommandBarResultItem>,
     pub default_target: Option<CommandBarResultItem>,
     pub ghost: String,

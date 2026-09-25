@@ -49,21 +49,6 @@ impl McpConnections {
     }
 }
 
-pub struct McpQuery;
-
-impl McpQuery {
-    pub fn read(draft: &str) -> Option<&str> {
-        let rest = draft.strip_prefix("/mcp")?;
-        if rest.is_empty() {
-            return Some("");
-        }
-        rest.chars()
-            .next()?
-            .is_whitespace()
-            .then(|| rest.trim_start())
-    }
-}
-
 #[component]
 pub fn McpMenu(
     connections: McpConnections,
@@ -180,12 +165,12 @@ impl McpServerText {
 
 #[cfg(test)]
 mod tests {
-    use super::McpQuery;
+    use vmux_api::command_bar::CommandBarQuery;
 
     #[test]
     fn query_opens_on_the_complete_command() {
-        assert_eq!(McpQuery::read("/mcp"), Some(""));
-        assert_eq!(McpQuery::read("/mcp linear"), Some("linear"));
-        assert_eq!(McpQuery::read("/mcpx"), None);
+        assert_eq!(CommandBarQuery("/mcp").mcp_filter(), Some(""));
+        assert_eq!(CommandBarQuery("/mcp linear").mcp_filter(), Some("linear"));
+        assert_eq!(CommandBarQuery("/mcpx").mcp_filter(), None);
     }
 }

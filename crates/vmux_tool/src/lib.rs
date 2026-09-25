@@ -399,6 +399,61 @@ brew "ripgrep"
     }
 
     #[test]
+    fn mcp_provider_discovers_and_imports_through_ecs() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join("config");
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join(".mcp.json"),
+            r#"{"mcpServers":{"docs":{"url":"https://example.com/mcp"}}}"#,
+        )
+        .unwrap();
+        let store = ToolStore::new(config, home);
+        let mut app = App::new();
+        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolPlugin));
+        let store_entity = app.world_mut().spawn(store.clone()).id();
+        let operation = app
+            .world_mut()
+            .spawn((
+                ToolOperationRequest::new(ToolImportRequest {
+                    provider: vmux_core::tool::ToolProvider::Mcp,
+                    value: String::new(),
+                }),
+                ToolStoreTarget::new(store_entity),
+            ))
+            .id();
+
+        for _ in 0..100 {
+            app.update();
+            if app
+                .world()
+                .get::<ToolOperationCompletion>(operation)
+                .is_some()
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        assert_eq!(
+            app.world().get::<ToolOperationCompletion>(operation),
+            Some(&ToolOperationCompletion::succeeded(
+                "imported 1 MCP server(s)"
+            )),
+        );
+        assert!(
+            app.world()
+                .get::<ExternalToolOperation>(operation)
+                .is_none()
+        );
+        assert_eq!(
+            store.load().unwrap().mcp.servers["docs"].url.as_deref(),
+            Some("https://example.com/mcp")
+        );
+    }
+
+    #[test]
     fn mcp_import_normalizes_codex_and_vibe_formats() {
         let codex = parse_mcp_config(
             r#"

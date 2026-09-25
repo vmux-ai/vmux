@@ -13,6 +13,7 @@ use vmux_core::launcher::{
     StackInPaneChosen,
 };
 
+use crate::command_bar::CloseCommandBar;
 use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
@@ -757,22 +758,6 @@ fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
         format!("https://{}", value)
     } else {
         search_engine.search_url(value)
-    }
-}
-
-#[derive(EntityEvent)]
-struct CloseCommandBar {
-    #[event_target]
-    webview: Entity,
-    restore_keyboard: bool,
-}
-
-impl CloseCommandBar {
-    fn after(webview: Entity, custom_keyboard_restore: bool) -> Self {
-        Self {
-            webview,
-            restore_keyboard: !custom_keyboard_restore,
-        }
     }
 }
 

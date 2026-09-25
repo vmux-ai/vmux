@@ -1,5 +1,5 @@
 use crate::event::{
-    CommandBarFocusInput, CommandBarKey, CommandBarOpenEvent, CommandBarUiState,
+    CommandBarFocusInput, CommandBarKey, CommandBarOpenEvent, CommandBarQuery, CommandBarUiState,
     CommandBarUiStatePatch, CommandPaletteBranchesRequest, CommandPaletteDraftRequest,
     CommandPalettePromptHistoryRequest, CommandPaletteSelectionRequest, CommandPaletteState,
 };
@@ -7,7 +7,7 @@ use crate::prompt_media::{ChatPasteMedia, ChatPickFiles, inline_media_query};
 use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_prompt_recall};
 use crate::ui::media::{PromptMedia, use_prompt_media};
 use crate::ui::signals::{
-    COMMAND_BAR_INPUT_ID, CommandBarField, PaletteKeys, Readline, TypedDigit, use_palette_signals,
+    COMMAND_BAR_INPUT_ID, CommandBarField, Readline, TypedDigit, use_palette_signals,
 };
 use dioxus::prelude::*;
 use vmux_core::input::{PageKeyContext, Unclaimed};
@@ -16,7 +16,7 @@ use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, focus_prompt_end};
 use vmux_ui::components::composer_bar::{ComposerBar, ComposerMenus, use_composer_menu};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::mcp_menu::{McpMenu, McpQuery, use_mcp_connections};
+use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::hooks::{
@@ -102,20 +102,26 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let opened = state();
         let query = (signals.query)();
         let target_url = (signals.target_url)();
+        let selected = (signals.selected)() as u32;
+        let navigating = (signals.nav_mode)();
         let _ = send(&CommandPaletteDraftRequest {
             open_id: opened.open_id,
             query,
             start: is_start,
             target_url,
+            selected,
+            navigating,
         });
     });
 
     use_effect(move || {
         let opened = state();
         let selected = (signals.selected)() as u32;
+        let navigating = (signals.nav_mode)();
         let _ = send(&CommandPaletteSelectionRequest {
             open_id: opened.open_id,
             selected,
+            navigating,
         });
     });
 
@@ -160,7 +166,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     use_effect(move || {
         let query = (signals.query)();
-        if McpQuery::read(&query).is_some() {
+        if CommandBarQuery(&query).mcp_filter().is_some() {
             mcp.request();
         }
     });
@@ -173,44 +179,52 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
         PaletteRows::from_projection(&snapshot.projection)
     });
-    let mut palette_keys = PaletteKeys {
-        rows,
-        signals,
-        on_dismiss,
+    let input_id = if is_start {
+        PROMPT_INPUT_ID
+    } else {
+        COMMAND_BAR_INPUT_ID
     };
-    let keys = use_key_claim(Unclaimed::Types, move || match surface {
-        PaletteSurface::Modal => vec!["command-bar".to_string()],
-        PaletteSurface::Start => Vec::new(),
+    use_effect(move || {
+        let opened = state();
+        let snapshot = host_state.read();
+        if snapshot.open_id != opened.open_id {
+            return;
+        }
+        let projection = &snapshot.projection;
+        signals.apply_host_input(
+            projection.input_revision,
+            &projection.query,
+            projection.selected as usize,
+            projection.navigating,
+            input_id,
+        );
     });
+    let keys = use_key_claim(Unclaimed::Types, || vec!["command-bar".to_string()]);
     let key_updates = use_ui_state_patch::<CommandBarUiState, CommandBarKey>();
     use_effect(move || {
         for key in key_updates.take() {
             let query = signals.query.peek().clone();
-            if let Some(filter) = McpQuery::read(&query) {
-                let entries = mcp.filtered(filter);
-                match key {
-                    CommandBarKey::Next => {
-                        let current = *signals.selected.peek();
-                        signals.highlight(move_selection(
-                            current,
-                            entries.len(),
-                            MenuDirection::Next,
-                        ));
-                    }
-                    CommandBarKey::Previous => {
-                        let current = *signals.selected.peek();
-                        signals.highlight(move_selection(
-                            current,
-                            entries.len(),
-                            MenuDirection::Previous,
-                        ));
-                    }
-                    CommandBarKey::Complete => {}
-                    CommandBarKey::Dismiss => signals.retype(String::new()),
-                }
+            let command_bar_query = CommandBarQuery(&query);
+            let Some(filter) = command_bar_query.mcp_filter() else {
                 continue;
+            };
+            let entries = mcp.filtered(filter);
+            match key {
+                CommandBarKey::Next => {
+                    let current = *signals.selected.peek();
+                    signals.highlight(move_selection(current, entries.len(), MenuDirection::Next));
+                }
+                CommandBarKey::Previous => {
+                    let current = *signals.selected.peek();
+                    signals.highlight(move_selection(
+                        current,
+                        entries.len(),
+                        MenuDirection::Previous,
+                    ));
+                }
+                CommandBarKey::Complete => {}
+                CommandBarKey::Dismiss => signals.retype(String::new()),
             }
-            palette_keys.apply(key);
         }
     });
 
@@ -231,7 +245,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());
     let q = palette.query.clone();
     let ghost_text = palette.ghost.clone();
-    let mcp_query = McpQuery::read(&q).map(str::to_string);
+    let mcp_query = CommandBarQuery(&q).mcp_filter().map(str::to_string);
     let mcp_open = mcp_query.is_some();
     let mcp_entries = std::rc::Rc::new(
         mcp_query
@@ -454,11 +468,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             }
 
             if go_down {
-                e.prevent_default();
-                signals.highlight(palette.step(MenuDirection::Next));
+                keys.on_keydown(&e, |_| false);
             } else if go_up {
-                e.prevent_default();
-                signals.highlight(palette.step(MenuDirection::Previous));
+                keys.on_keydown(&e, |_| false);
             } else if e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC) {
                 on_dismiss.call(());
             } else if e.key() == Key::Enter && !e.modifiers().shift() {
