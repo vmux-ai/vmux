@@ -29,6 +29,8 @@ impl Plugin for OsMenuPlugin {
             .add_message::<crate::window_manager::CloseVmuxWindow>()
             .add_message::<CloseRequest>()
             .add_message::<vmux_browser::OpenRequest>()
+            .add_observer(dispatch_command_menu_selection)
+            .add_observer(hide_windows_from_menu)
             .init_resource::<LastMenuCommandAt>()
             .init_resource::<LastStackCloseAt>()
             .init_resource::<LastNativePageOpenAt>()
@@ -93,8 +95,16 @@ impl OsMenuEntry {
         }
     }
 
+    pub(crate) fn identified(id: String) -> Self {
+        Self {
+            id: Some(id),
+            label: String::new(),
+            enabled: true,
+        }
+    }
+
     fn matches(&self, event_id: &str) -> bool {
-        self.enabled && self.id.as_deref() == Some(event_id)
+        self.id.as_deref() == Some(event_id)
     }
 }
 
@@ -113,6 +123,12 @@ impl OsContextMenu {
 
 #[derive(Component)]
 pub(crate) struct OsMenuSeparator;
+
+#[derive(Component)]
+struct TransientOsMenuEntry;
+
+#[derive(Component)]
+struct HideWindowsMenuEntry;
 
 #[derive(EntityEvent)]
 pub(crate) struct OsMenuSelect(#[event_target] Entity);
@@ -174,6 +190,21 @@ fn setup(world: &mut World) {
     }));
 
     world.spawn((Name::new("OS menu runtime"), inbox));
+    world.spawn((
+        Name::new("Close Vmux menu item"),
+        OsMenuEntry::identified("app_quit".to_string()),
+        HideWindowsMenuEntry,
+    ));
+    let command_entries = {
+        let mut query = world.query::<(Entity, &CommandDefinition)>();
+        query
+            .iter(world)
+            .map(|(entity, definition)| (entity, definition.id.clone()))
+            .collect::<Vec<_>>()
+    };
+    for (entity, id) in command_entries {
+        world.entity_mut(entity).insert(OsMenuEntry::identified(id));
+    }
     world.insert_non_send(OsMenuResource {
         menu,
         context_menu: None,
@@ -187,6 +218,7 @@ fn setup(world: &mut World) {
 #[cfg(target_os = "macos")]
 fn present_context_menus(
     _non_send: bevy::ecs::system::NonSendMarker,
+    mut commands: Commands,
     menu: Option<NonSendMut<OsMenuResource>>,
     context_menus: Query<(&OsContextMenu, &Children), Added<OsContextMenu>>,
     mut entries: Query<&mut OsMenuEntry>,
@@ -203,6 +235,7 @@ fn present_context_menus(
                 let item = MenuItem::with_id(id.clone(), &entry.label, entry.enabled, None);
                 let _ = menu.append(&item);
                 entry.id = Some(id);
+                commands.entity(child).insert(TransientOsMenuEntry);
                 continue;
             }
             if separators.contains(child) {
@@ -479,11 +512,7 @@ fn sync_close_menu_item(
 fn forward_menu_events(
     mut commands: Commands,
     inbox: Option<Single<&OsMenuInbox>>,
-    menu_entries: Query<(Entity, &OsMenuEntry)>,
-    definitions: Query<&CommandDefinition>,
-    users: Query<Entity, With<vmux_core::team::User>>,
-    mut invocations: MessageWriter<CommandInvocation>,
-    mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
+    menu_entries: Query<(Entity, &OsMenuEntry, Has<TransientOsMenuEntry>)>,
     mut last_menu_command: ResMut<LastMenuCommandAt>,
 ) {
     let drained = {
@@ -501,26 +530,38 @@ fn forward_menu_events(
         last_menu_command.0 = Some(std::time::Instant::now());
     }
     for event_id in drained {
-        let selected = menu_entries
-            .iter()
-            .find_map(|(entity, entry)| entry.matches(&event_id).then_some(entity));
-        if let Some(entity) = selected {
+        let selected = menu_entries.iter().find_map(|(entity, entry, transient)| {
+            entry.matches(&event_id).then_some((entity, transient))
+        });
+        if let Some((entity, transient)) = selected {
             commands.trigger(OsMenuSelect::new(entity));
-            commands.entity(entity).despawn();
-            continue;
+            if transient {
+                commands.entity(entity).despawn();
+            }
         }
-        if event_id == "app_quit" {
-            hide_windows.write(crate::runtime::HideAllWindowsRequest);
-        } else if definitions
-            .iter()
-            .any(|definition| definition.id == event_id)
-        {
-            let caller = users.iter().next().unwrap_or(Entity::PLACEHOLDER);
-            invocations.write(CommandInvocation::new(caller, event_id));
-        } else {
-            #[cfg(feature = "tray")]
-            crate::tray::PENDING_TRAY_EVENTS.lock().push(event_id);
-        }
+    }
+}
+
+fn dispatch_command_menu_selection(
+    trigger: On<OsMenuSelect>,
+    definitions: Query<&CommandDefinition>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut invocations: MessageWriter<CommandInvocation>,
+) {
+    let Ok(definition) = definitions.get(trigger.event_target()) else {
+        return;
+    };
+    let caller = users.iter().next().unwrap_or(Entity::PLACEHOLDER);
+    invocations.write(CommandInvocation::new(caller, definition.id.clone()));
+}
+
+fn hide_windows_from_menu(
+    trigger: On<OsMenuSelect>,
+    menu_items: Query<(), With<HideWindowsMenuEntry>>,
+    mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
+) {
+    if menu_items.contains(trigger.event_target()) {
+        hide_windows.write(crate::runtime::HideAllWindowsRequest);
     }
 }
 
@@ -676,10 +717,47 @@ mod tests {
     }
 
     #[test]
-    fn application_menu_contains_close_item() {
-        let menu = Menu::new();
-        append_application_menu(&menu).unwrap();
-        assert!(find_menu_item(menu.items(), "app_quit").is_some());
+    fn command_menu_selection_emits_command_invocation() {
+        let mut app = App::new();
+        app.add_message::<CommandInvocation>()
+            .add_observer(dispatch_command_menu_selection);
+        let command = app
+            .world_mut()
+            .spawn(CommandDefinition::new(
+                "terminal_next",
+                "Next Terminal",
+                "Terminal",
+            ))
+            .id();
+
+        app.world_mut().trigger(OsMenuSelect::new(command));
+
+        let invocations = app
+            .world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            invocations,
+            vec![CommandInvocation::new(Entity::PLACEHOLDER, "terminal_next")]
+        );
+    }
+
+    #[test]
+    fn close_menu_selection_emits_hide_windows_request() {
+        let mut app = App::new();
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
+            .add_observer(hide_windows_from_menu);
+        let close = app.world_mut().spawn(HideWindowsMenuEntry).id();
+
+        app.world_mut().trigger(OsMenuSelect::new(close));
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<crate::runtime::HideAllWindowsRequest>>()
+            .drain()
+            .count();
+        assert_eq!(requests, 1);
     }
 
     #[test]
