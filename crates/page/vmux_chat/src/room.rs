@@ -199,14 +199,9 @@ fn project_snapshot(
     }
     let total = items.len() as u32;
     let speaker = agents.named(&session.name);
-    let approval = conversation
-        .approval
-        .as_ref()
-        .map(|pending| PendingApproval {
-            call_id: pending.call_id.clone(),
-            name: pending.name.clone(),
-            args: pending.args.clone(),
-        });
+    let approval = conversation.approval.as_ref().map(|pending| {
+        PendingApproval::new(pending.call_id.clone(), pending.name.clone(), &pending.args)
+    });
     let error = match &conversation.status {
         RemoteStatus::Errored(message) => message.clone(),
         _ => String::new(),
