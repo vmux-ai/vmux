@@ -56,10 +56,10 @@ impl Plugin for TerminalPlugin {
         app.add_plugins((
             vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
             crate::TerminalToolPlugin,
-            vmux_command::CommandTypePlugin::<super::command::CloseRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::NextRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::PrevRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::ClearRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::TerminalCloseRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::TerminalNextRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::TerminalPrevRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::TerminalClearRequest>::default(),
             vmux_command::CommandTypePlugin::<super::command::CopyModeRequest>::default(),
         ))
         .add_plugins(crate::contract::TerminalContractPlugin)
@@ -2327,9 +2327,9 @@ fn handle_terminal_copy_mode_command(
 }
 
 fn handle_terminal_navigation_commands(
-    mut close_requests: MessageReader<super::command::CloseRequest>,
-    mut next_requests: MessageReader<super::command::NextRequest>,
-    mut previous_requests: MessageReader<super::command::PrevRequest>,
+    mut close_requests: MessageReader<super::command::TerminalCloseRequest>,
+    mut next_requests: MessageReader<super::command::TerminalNextRequest>,
+    mut previous_requests: MessageReader<super::command::TerminalPrevRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     terminals: Query<&ChildOf, With<Terminal>>,
     mut stack_close_requests: MessageWriter<StackCloseRequest>,
@@ -2358,7 +2358,7 @@ fn handle_terminal_navigation_commands(
 }
 
 fn handle_terminal_clear_command(
-    mut requests: MessageReader<super::command::ClearRequest>,
+    mut requests: MessageReader<super::command::TerminalClearRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     mut sequence: ResMut<NextTerminalInputSequence>,

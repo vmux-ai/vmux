@@ -128,6 +128,7 @@ impl Plugin for InputPlugin {
 }
 
 #[derive(vmux_macro::CommandBar)]
+#[menu(group = "Layout > Space")]
 #[shortcut(chord = "Ctrl+b, s")]
 struct SpaceOpenRequest;
 

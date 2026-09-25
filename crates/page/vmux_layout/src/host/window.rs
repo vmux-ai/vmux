@@ -87,6 +87,7 @@ impl Plugin for WindowLayoutPlugin {
 pub struct FocusedWindow(pub Option<Entity>);
 
 #[derive(vmux_macro::CommandBar)]
+#[menu(group = "Layout > Window")]
 #[shortcut(direct = "Super+m")]
 struct MinimizeWindowRequest;
 

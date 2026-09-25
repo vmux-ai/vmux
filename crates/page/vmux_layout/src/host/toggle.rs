@@ -26,6 +26,7 @@ impl Plugin for TogglePlugin {
 }
 
 #[derive(vmux_macro::CommandBar)]
+#[menu(group = "Layout > Layout")]
 #[shortcut(direct = "Super+Shift+S")]
 struct ToggleLayoutRequest;
 
