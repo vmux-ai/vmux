@@ -2,11 +2,12 @@
 
 use dioxus::prelude::*;
 use vmux_core::vault::{
-    VaultChooseCloudFolderRequest, VaultConnectCloudRequest, VaultConnectGithubRequest,
-    VaultConnectRequest, VaultCreateCloudFolderRequest, VaultCreateRecoveryKeyRequest,
-    VaultCreateRequest, VaultGenerateRecoveryKeyRequest, VaultOperation, VaultOperationKind,
-    VaultRefreshRequest, VaultSnapshot, VaultSyncRequest, VaultUiState,
-    VaultUnlockRecoveryKeyRequest,
+    VaultConnectionProvider, VaultDestination, VaultDestinationSelectRequest,
+    VaultGenerateRecoveryKeyRequest, VaultOperationKind, VaultOwnerKind, VaultOwnerSelectRequest,
+    VaultPrivacyRequest, VaultProviderSelectRequest, VaultRecoveryConfirmationRequest,
+    VaultRecoveryInputRequest, VaultRefreshRequest, VaultRepositoryNameRequest,
+    VaultRepositorySelectRequest, VaultSnapshot, VaultSyncRequest, VaultSyncStatus, VaultUiState,
+    VaultWorkflowConnectRequest, VaultWorkflowCreateRequest, VaultWorkflowState,
 };
 use vmux_ui::components::checkbox::Checkbox;
 use vmux_ui::components::manager::{
@@ -25,173 +26,31 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 )]
 pub struct VaultPage;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RemoteProvider {
-    Github,
-    GoogleDrive,
-    Dropbox,
-    OneDrive,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VaultDestination {
-    Create,
-    Existing,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct VaultNotice {
-    kind: VaultOperationKind,
-    success: bool,
-    message: String,
-}
-
-impl VaultNotice {
-    fn from_operation(operation: &VaultOperation) -> Option<Self> {
-        let completion = operation.completion()?;
-        Some(Self {
-            kind: operation.kind,
-            success: completion.success,
-            message: completion.message.clone(),
-        })
-    }
-
-    fn visible(&self) -> bool {
-        if !self.success {
-            return !self.message.is_empty();
-        }
-        !matches!(
-            self.kind,
-            VaultOperationKind::GenerateRecoveryKey
-                | VaultOperationKind::CreateRecoveryKey
-                | VaultOperationKind::ConnectCloud
-                | VaultOperationKind::ConnectGithub
-        )
-    }
-
-    fn message(&self) -> String {
-        if !self.success {
-            return match self.kind {
-                VaultOperationKind::Sync => translate("vault-backup-failed"),
-                VaultOperationKind::GenerateRecoveryKey | VaultOperationKind::CreateRecoveryKey => {
-                    translate("vault-recovery-key-create-failed")
-                }
-                VaultOperationKind::UnlockRecoveryKey => translate("vault-recovery-key-invalid"),
-                _ => self.message.clone(),
-            };
-        }
-        translate(match self.kind {
-            VaultOperationKind::Create => "vault-result-created",
-            VaultOperationKind::Connect => "vault-result-connected",
-            VaultOperationKind::Sync => "vault-result-synced",
-            VaultOperationKind::ConnectGithub => "vault-result-github-connected",
-            VaultOperationKind::ConnectFolder => "vault-result-folder-connected",
-            VaultOperationKind::GenerateRecoveryKey | VaultOperationKind::CreateRecoveryKey => {
-                "vault-result-created"
-            }
-            VaultOperationKind::UnlockRecoveryKey => "vault-result-connected",
-            VaultOperationKind::ConnectCloud => "vault-result-connected",
-            VaultOperationKind::CreateCloudFolder | VaultOperationKind::ChooseCloudFolder => {
-                "vault-result-folder-connected"
-            }
-        })
-    }
-}
-
-impl RemoteProvider {
-    const ALL: [Self; 4] = [
-        Self::Github,
-        Self::GoogleDrive,
-        Self::Dropbox,
-        Self::OneDrive,
-    ];
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Github => "GitHub",
-            Self::GoogleDrive => "Google Drive",
-            Self::Dropbox => "Dropbox",
-            Self::OneDrive => "OneDrive",
-        }
-    }
-
-    fn is_github(self) -> bool {
-        self == Self::Github
-    }
-}
-
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();
     let state = use_ui_state::<VaultUiState>();
-    let mut recovery_key_confirmation = use_signal(String::new);
     let mut recovery_key_copied = use_signal(|| false);
-    let mut recovery_key_input = use_signal(String::new);
     let mut github_device_code_copied = use_signal(|| false);
-    let mut repository = use_signal(|| "vmux-vault".to_string());
-    let mut selected_owner = use_signal(|| None::<String>);
-    let selected_repository = use_signal(|| None::<String>);
-    let preferred_provider = RequestedProvider::current();
-    let selected_provider = use_signal(|| match preferred_provider.as_str() {
-        "github" => Some(RemoteProvider::Github),
-        "google_drive" | "cloud_folder" => Some(RemoteProvider::GoogleDrive),
-        "dropbox" => Some(RemoteProvider::Dropbox),
-        "onedrive" => Some(RemoteProvider::OneDrive),
-        _ => None,
-    });
-    let private = use_signal(|| true);
 
     use_effect(move || {
         let event = state();
-        if !event.vault.github_owner.is_empty()
-            && selected_owner()
-                .as_ref()
-                .is_none_or(|owner| !event.vault.github_owners.contains(owner))
-        {
-            selected_owner.set(Some(event.vault.github_owner.clone()));
-        }
-        if event.vault.repositories_loaded && repository() == "vmux-vault" {
-            let owner = selected_owner().unwrap_or_else(|| event.vault.github_owner.clone());
-            repository.set(suggested_repository_name(&owner, &event.vault.repositories));
-        }
-        if event.vault.unlocked {
-            recovery_key_input.set(String::new());
-        }
         if event.generated_recovery_key.is_empty() {
-            recovery_key_confirmation.set(String::new());
             recovery_key_copied.set(false);
         }
-        if event
-            .operation
-            .as_ref()
-            .is_none_or(|operation| operation.authorization().is_none())
-        {
+        if event.workflow.github_device_code.is_empty() {
             github_device_code_copied.set(false);
         }
     });
 
     use_effect(move || {
         locale();
-        request_snapshot(false);
+        let _ = send(&VaultRefreshRequest {
+            load_repositories: false,
+        });
     });
 
     let current = state();
-    let pending = current
-        .operation
-        .as_ref()
-        .filter(|operation| operation.is_pending())
-        .map(|operation| operation.kind);
-    let notice = current
-        .operation
-        .as_ref()
-        .and_then(VaultNotice::from_operation)
-        .filter(VaultNotice::visible);
-    let github_device_code = current
-        .operation
-        .as_ref()
-        .and_then(VaultOperation::authorization)
-        .map(|authorization| authorization.code.clone())
-        .unwrap_or_default();
     rsx! {
         ManagerPage {
             header { class: "shrink-0 border-b border-foreground/[0.07] px-5 py-3",
@@ -201,7 +60,9 @@ pub fn Page() -> Element {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         onclick: move |_| {
-                            request_snapshot(false);
+                            let _ = send(&VaultRefreshRequest {
+                                load_repositories: false,
+                            });
                         },
                         {translate("common-refresh")}
                     }
@@ -211,31 +72,27 @@ pub fn Page() -> Element {
                 if current.vault.root.is_empty() {
                     ManagerSpinner { detail: translate("common-loading") }
                 } else {
-                    if let Some(notice) = notice {
+                    if let Some(notice) = current.workflow.notice.as_ref() {
                         div {
                             class: if notice.success {
                                 "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
                             } else {
                                 "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                             },
-                            {notice.message()}
+                            {if notice.message_id.is_empty() {
+                                notice.message.clone()
+                            } else {
+                                translate(&notice.message_id)
+                            }}
                         }
                     }
                     VaultPanel {
                         vault: current.vault.clone(),
-                        repository,
-                        selected_owner,
-                        selected_repository,
-                        selected_provider,
-                        github_device_code,
+                        workflow: current.workflow.clone(),
                         github_device_code_copied,
                         cloud_root: current.cloud_root.clone(),
-                        private,
-                        pending,
                         generated_recovery_key: current.generated_recovery_key.clone(),
-                        recovery_key_confirmation,
                         recovery_key_copied,
-                        recovery_key_input,
                         recovery_upload_pending: current.recovery_upload_pending,
                     }
                 }
@@ -247,68 +104,32 @@ pub fn Page() -> Element {
 #[component]
 fn VaultPanel(
     vault: VaultSnapshot,
-    repository: Signal<String>,
-    selected_owner: Signal<Option<String>>,
-    selected_repository: Signal<Option<String>>,
-    selected_provider: Signal<Option<RemoteProvider>>,
-    github_device_code: String,
+    workflow: VaultWorkflowState,
     github_device_code_copied: Signal<bool>,
     cloud_root: String,
-    private: Signal<bool>,
-    pending: Option<VaultOperationKind>,
     generated_recovery_key: String,
-    recovery_key_confirmation: Signal<String>,
     recovery_key_copied: Signal<bool>,
-    recovery_key_input: Signal<String>,
     recovery_upload_pending: bool,
 ) -> Element {
-    let mut destination = use_signal(|| VaultDestination::Create);
-    let is_connected = vault.initialized && !vault.remote.is_empty();
-    let pending_changes = vault
-        .dirty
-        .saturating_add(vault.ahead)
-        .saturating_add(vault.behind);
-    let status = if vault.sync_failed {
-        translate("vault-backup-failed-short")
-    } else if pending_changes > 0 {
-        translate_with(
-            "vault-change-count",
-            &[("count", TranslationValue::Number(pending_changes as i64))],
-        )
-    } else {
-        translate("vault-clean")
-    };
-    let github_connected = !vault.github_owner.is_empty();
-    let github_repositories_loaded = vault.repositories_loaded;
-    let provider = selected_provider();
-    let authenticated = provider.is_some_and(|provider| {
-        if provider.is_github() {
-            !vault.github_owner.is_empty() && vault.repositories_loaded
-        } else {
-            !cloud_root.is_empty()
-        }
-    });
-    let owner = selected_owner().unwrap_or_else(|| vault.github_owner.clone());
-    let owner_items = vault
-        .github_owners
+    let provider = workflow.provider;
+    let owner_items = workflow
+        .owners
         .iter()
         .map(|owner| ManagerSelectItem {
-            value: owner.clone(),
-            label: owner.clone(),
-            kind: if owner == &vault.github_owner {
+            value: owner.value.clone(),
+            label: owner.value.clone(),
+            kind: if owner.kind == VaultOwnerKind::User {
                 ManagerSelectItemKind::User
             } else {
                 ManagerSelectItemKind::Organization
             },
         })
         .collect::<Vec<_>>();
-    let owner_prefix = format!("{owner}/");
-    let repository_items = vault
+    let repository_items = workflow
         .repositories
         .iter()
-        .filter(|repository| repository.name.starts_with(&owner_prefix))
         .map(|repository| ManagerSelectItem {
-            value: repository.url.clone(),
+            value: repository.value.clone(),
             label: if repository.empty {
                 format!("{} · {}", repository.name, translate("vault-empty"))
             } else {
@@ -317,11 +138,14 @@ fn VaultPanel(
             kind: ManagerSelectItemKind::Default,
         })
         .collect::<Vec<_>>();
-    let connecting = pending.is_some_and(|kind| {
-        kind == VaultOperationKind::ConnectGithub || kind == VaultOperationKind::ConnectCloud
-    }) || provider.is_some_and(|provider| {
-        provider.is_github() && github_connected && !github_repositories_loaded
-    });
+    let status = match workflow.sync_status {
+        VaultSyncStatus::Failed => translate("vault-backup-failed-short"),
+        VaultSyncStatus::Changes(count) => translate_with(
+            "vault-change-count",
+            &[("count", TranslationValue::Number(count as i64))],
+        ),
+        VaultSyncStatus::Clean => translate("vault-clean"),
+    };
     rsx! {
         div { class: "relative overflow-hidden rounded-[28px] bg-foreground/[0.03] p-6 shadow-2xl shadow-black/[0.06] ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl",
             div { class: "pointer-events-none absolute -right-24 -top-28 h-64 w-64 rounded-full bg-primary/[0.08] blur-3xl motion-safe:animate-pulse [animation-duration:7s]" }
@@ -335,7 +159,7 @@ fn VaultPanel(
                 }
                 div { class: "min-w-0 flex-1",
                     div { class: "text-base font-semibold tracking-tight text-foreground/95", {translate("vault-title")} }
-                    if !is_connected || vault.encrypted {
+                    if !workflow.connected || vault.encrypted {
                         div { class: "mt-1 flex items-center gap-1.5 text-xs text-muted-foreground/70",
                             svg { class: "h-3 w-3 shrink-0", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
                                 rect { x: "5", y: "11", width: "14", height: "10", rx: "2" }
@@ -344,7 +168,7 @@ fn VaultPanel(
                             {translate("vault-encrypted")}
                         }
                     }
-                    if is_connected {
+                    if workflow.connected {
                         div { class: "mt-1 truncate text-xs text-muted-foreground/70", "{vault.remote}" }
                         div { class: "mt-1.5 flex gap-2 text-[10px] text-muted-foreground/60",
                             if !vault.branch.is_empty() {
@@ -366,19 +190,21 @@ fn VaultPanel(
                         div { class: "mt-1.5 truncate font-mono text-[10px] text-muted-foreground/50", "{vault.root}" }
                     }
                 }
-                if is_connected {
+                if workflow.connected {
                     ManagerButton {
                         variant: ManagerButtonVariant::Primary,
-                        disabled: pending.is_some(),
-                        onclick: move |_| send_operation(VaultOperationKind::Sync, String::new(), true),
+                        disabled: workflow.pending.is_some(),
+                        onclick: move |_| {
+                            let _ = send(&VaultSyncRequest);
+                        },
                         {translate("vault-sync")}
                     }
                 }
             }
-            if !is_connected {
+            if !workflow.connected {
                 div { class: "relative mt-6 overflow-hidden rounded-[24px] bg-background/35 p-4 shadow-inner ring-1 ring-inset ring-foreground/[0.08]",
                     div { class: "mx-auto flex w-fit flex-wrap items-center justify-center gap-1.5 rounded-2xl bg-foreground/[0.035] p-1.5 ring-1 ring-inset ring-foreground/[0.07]",
-                        for option in RemoteProvider::ALL {
+                        for option in VaultConnectionProvider::ALL {
                             button {
                                 class: if provider == Some(option) {
                                     "grid h-12 w-12 scale-105 place-items-center rounded-xl bg-background text-foreground shadow-lg shadow-black/10 ring-1 ring-inset ring-primary/40 transition-all duration-300 ease-out"
@@ -388,32 +214,14 @@ fn VaultPanel(
                                 title: option.name(),
                                 aria_label: option.name(),
                                 onclick: move |_| {
-                                    selected_provider.set(Some(option));
-                                    selected_repository.set(None);
-                                    destination.set(VaultDestination::Create);
-                                    if option.is_github() {
-                                        if !github_connected {
-                                            send_operation(
-                                                VaultOperationKind::ConnectGithub,
-                                                String::new(),
-                                                true,
-                                            );
-                                        }
-                                    } else {
-                                        repository.set("vmux-vault".to_string());
-                                        send_operation(
-                                            VaultOperationKind::ConnectCloud,
-                                            option.name().to_string(),
-                                            true,
-                                        );
-                                    }
+                                    let _ = send(&VaultProviderSelectRequest { provider: option });
                                 },
                                 ProviderIcon { provider: option }
                             }
                         }
                     }
                     if let Some(provider) = provider {
-                        if !authenticated {
+                        if !workflow.authenticated {
                             div {
                                 key: "connect-{provider.name()}",
                                 class: "flex min-h-52 flex-col items-center justify-center px-5 py-8 text-center transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
@@ -424,23 +232,23 @@ fn VaultPanel(
                                     }
                                 }
                                 div { class: "mt-4 text-sm font-medium text-foreground/90",
-                                    if connecting {
+                                    if workflow.connecting {
                                         {translate("common-loading")}
                                     } else {
                                         {translate("vault-not-connected")}
                                     }
                                 }
-                                if provider.is_github() && !github_device_code.is_empty() {
+                                if provider.is_github() && !workflow.github_device_code.is_empty() {
                                     button {
                                         r#type: "button",
                                         class: "group mt-4 rounded-xl bg-foreground/[0.06] px-4 py-2.5 text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-[opacity,transform,background-color] duration-200 ease-out hover:bg-foreground/[0.09] active:scale-[0.98] starting:scale-90 starting:opacity-0",
                                         title: translate("common-copy"),
                                         aria_label: translate("common-copy"),
                                         onclick: move |_| copy_recovery_key(
-                                            github_device_code.clone(),
+                                            workflow.github_device_code.clone(),
                                             github_device_code_copied,
                                         ),
-                                        code { class: "font-mono text-base font-semibold tracking-[0.2em]", {github_device_code.clone()} }
+                                        code { class: "font-mono text-base font-semibold tracking-[0.2em]", {workflow.github_device_code.clone()} }
                                     }
                                     div {
                                         class: if github_device_code_copied() {
@@ -455,7 +263,7 @@ fn VaultPanel(
                                         }
                                     }
                                 }
-                                if connecting {
+                                if workflow.connecting {
                                     div { class: "mt-5 flex items-center gap-1.5",
                                         span { class: "h-1.5 w-1.5 rounded-full bg-primary/70 motion-safe:animate-bounce [animation-duration:1.15s]" }
                                         span { class: "h-1.5 w-1.5 rounded-full bg-primary/70 motion-safe:animate-bounce [animation-delay:120ms] [animation-duration:1.15s]" }
@@ -482,41 +290,44 @@ fn VaultPanel(
                                         span { class: "max-w-md truncate", "{cloud_root}" }
                                     }
                                 }
-                                if provider == RemoteProvider::Github {
+                                if provider == VaultConnectionProvider::Github {
                                     div { class: "mx-auto mt-4 max-w-md",
                                         ManagerSelect {
                                             items: owner_items,
-                                            value: Some(owner.clone()),
+                                            value: (!workflow.selected_owner.is_empty()).then(|| workflow.selected_owner.clone()),
                                             placeholder: vault.github_owner.clone(),
                                             onselect: move |value: String| {
-                                                repository.set(suggested_repository_name(
-                                                    &value,
-                                                    &vault.repositories,
-                                                ));
-                                                selected_owner.set(Some(value));
-                                                selected_repository.set(None);
+                                                let _ = send(&VaultOwnerSelectRequest { owner: value });
                                             },
                                         }
                                     }
                                 }
                                 div { class: "mx-auto mt-4 grid max-w-md grid-cols-2 gap-1 rounded-xl bg-foreground/[0.04] p-1 ring-1 ring-inset ring-foreground/[0.07]",
                                     button {
-                                        class: if destination() == VaultDestination::Create {
+                                        class: if workflow.destination == VaultDestination::Create {
                                             "rounded-lg bg-background px-4 py-2 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/[0.08] transition-all duration-200"
                                         } else {
                                             "rounded-lg px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground"
                                         },
-                                        onclick: move |_| destination.set(VaultDestination::Create),
+                                        onclick: move |_| {
+                                            let _ = send(&VaultDestinationSelectRequest {
+                                                destination: VaultDestination::Create,
+                                            });
+                                        },
                                         {translate("vault-create")}
                                     }
                                     button {
-                                        class: if destination() == VaultDestination::Existing {
+                                        class: if workflow.destination == VaultDestination::Existing {
                                             "rounded-lg bg-background px-4 py-2 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/[0.08] transition-all duration-200"
                                         } else {
                                             "rounded-lg px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground"
                                         },
-                                        onclick: move |_| destination.set(VaultDestination::Existing),
-                                        if provider == RemoteProvider::Github {
+                                        onclick: move |_| {
+                                            let _ = send(&VaultDestinationSelectRequest {
+                                                destination: VaultDestination::Existing,
+                                            });
+                                        },
+                                        if provider == VaultConnectionProvider::Github {
                                             {translate("vault-choose-repository")}
                                         } else {
                                             {translate("vault-choose-folder")}
@@ -524,93 +335,90 @@ fn VaultPanel(
                                     }
                                 }
                                 div { class: "mx-auto max-w-md py-4",
-                                    if destination() == VaultDestination::Create {
+                                    if workflow.destination == VaultDestination::Create {
                                         div { class: "rounded-2xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07] transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
                                             div { class: "flex gap-2",
-                                                if provider == RemoteProvider::Github {
+                                                if provider == VaultConnectionProvider::Github {
                                                     div { class: "flex min-w-0 flex-1 items-center rounded-xl bg-background/60 ring-1 ring-inset ring-foreground/10 focus-within:ring-primary/40",
-                                                        span { class: "shrink-0 pl-3 text-xs text-muted-foreground/60", "{owner}/" }
+                                                        span { class: "shrink-0 pl-3 text-xs text-muted-foreground/60", "{workflow.selected_owner}/" }
                                                         input {
                                                             class: "min-w-0 flex-1 bg-transparent py-2.5 pl-0.5 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/50",
-                                                            value: repository(),
+                                                            value: "{workflow.repository_name}",
                                                             placeholder: translate("vault-repository-name"),
-                                                            oninput: move |event| repository.set(event.value()),
+                                                            oninput: move |event| {
+                                                                let _ = send(&VaultRepositoryNameRequest {
+                                                                    name: event.value(),
+                                                                });
+                                                            },
                                                         }
                                                     }
                                                 } else {
                                                     input {
                                                         class: "min-w-0 flex-1 rounded-xl bg-background/60 px-3 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-primary/40",
-                                                        value: repository(),
+                                                        value: "{workflow.repository_name}",
                                                         placeholder: translate("vault-repository-name"),
-                                                        oninput: move |event| repository.set(event.value()),
+                                                        oninput: move |event| {
+                                                            let _ = send(&VaultRepositoryNameRequest {
+                                                                name: event.value(),
+                                                            });
+                                                        },
                                                     }
                                                 }
                                                 ManagerButton {
                                                     variant: ManagerButtonVariant::Primary,
-                                                    disabled: pending.is_some() || repository().trim().is_empty() || (provider == RemoteProvider::Github && owner.is_empty()),
+                                                    disabled: workflow.pending.is_some() || workflow.repository_name.trim().is_empty() || (provider == VaultConnectionProvider::Github && workflow.selected_owner.is_empty()),
                                                     onclick: move |_| {
-                                                        if provider == RemoteProvider::Github {
-                                                            send_operation(
-                                                                VaultOperationKind::Create,
-                                                                format!("{owner}/{}", repository().trim()),
-                                                                private(),
-                                                            );
-                                                        } else {
-                                                            send_cloud_create(
-                                                                &cloud_root,
-                                                                repository().trim(),
-                                                            );
-                                                        }
+                                                        let _ = send(&VaultWorkflowCreateRequest);
                                                     },
                                                     {translate("vault-create")}
                                                 }
                                             }
-                                            if provider == RemoteProvider::Github {
+                                            if provider == VaultConnectionProvider::Github {
                                                 label { class: "mt-3 flex cursor-pointer items-center gap-2 px-1 text-xs text-muted-foreground",
                                                     Checkbox {
-                                                        checked: private(),
-                                                        on_checked_change: move |checked| private.set(checked),
+                                                        checked: workflow.private,
+                                                        on_checked_change: move |private| {
+                                                            let _ = send(&VaultPrivacyRequest { private });
+                                                        },
                                                         attributes: vec![],
                                                     }
                                                     {translate("vault-private")}
                                                 }
-                                                if !private() {
+                                                if !workflow.private {
                                                     div { class: "mt-2 px-1 text-[10px] text-amber-600 dark:text-amber-300", {translate("vault-public-warning")} }
                                                 }
                                             }
                                         }
                                     } else {
                                         div { class: "rounded-2xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07] transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
-                                            if provider == RemoteProvider::Github {
+                                            if provider == VaultConnectionProvider::Github {
                                                 div { class: "flex gap-2",
                                                     div { class: "min-w-0 flex-1",
                                                         ManagerSelect {
                                                             items: repository_items,
-                                                            value: selected_repository(),
+                                                            value: (!workflow.selected_repository.is_empty()).then(|| workflow.selected_repository.clone()),
                                                             placeholder: translate("vault-choose-repository"),
-                                                            onselect: move |value| selected_repository.set(Some(value)),
+                                                            onselect: move |repository| {
+                                                                let _ = send(&VaultRepositorySelectRequest { repository });
+                                                            },
                                                         }
                                                     }
                                                     ManagerButton {
                                                         variant: ManagerButtonVariant::Primary,
-                                                        disabled: pending.is_some() || selected_repository().is_none(),
-                                                        onclick: move |_| send_operation(
-                                                            VaultOperationKind::Connect,
-                                                            selected_repository().unwrap_or_default(),
-                                                            true,
-                                                        ),
+                                                        disabled: workflow.pending.is_some() || workflow.selected_repository.is_empty(),
+                                                        onclick: move |_| {
+                                                            let _ = send(&VaultWorkflowConnectRequest);
+                                                        },
                                                         {translate("vault-use-repository")}
                                                     }
                                                 }
                                             } else {
                                                 button {
                                                     class: "flex w-full items-center justify-center gap-2 rounded-xl bg-background/60 px-4 py-3 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-all duration-200 hover:-translate-y-0.5 hover:bg-foreground/[0.07] active:translate-y-0",
-                                                    disabled: pending.is_some(),
-                                                    onclick: move |_| send_operation(
-                                                        VaultOperationKind::ChooseCloudFolder,
-                                                        cloud_root.clone(),
-                                                        true,
-                                                    ),
+                                                    disabled: workflow.pending.is_some(),
+                                                    onclick: move |_| {
+                                                        let _ = send(&VaultWorkflowConnectRequest);
+                                                    },
                                                     svg { class: "h-4 w-4", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
                                                         path { d: "M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" }
                                                         path { d: "M3 7V5a2 2 0 0 1 2-2h3l2 2h4" }
@@ -636,11 +444,9 @@ fn VaultPanel(
             } else {
                 RecoveryCard {
                     vault: vault.clone(),
-                    pending,
+                    workflow: workflow.clone(),
                     generated_recovery_key: generated_recovery_key.clone(),
-                    recovery_key_confirmation,
                     recovery_key_copied,
-                    recovery_key_input,
                     recovery_upload_pending,
                 }
             }
@@ -649,31 +455,31 @@ fn VaultPanel(
 }
 
 #[component]
-fn ProviderIcon(provider: RemoteProvider, #[props(default)] large: bool) -> Element {
+fn ProviderIcon(provider: VaultConnectionProvider, #[props(default)] large: bool) -> Element {
     let class = if large {
         "h-8 w-8 shrink-0"
     } else {
         "h-5 w-5 shrink-0"
     };
     match provider {
-        RemoteProvider::Github => rsx! {
+        VaultConnectionProvider::Github => rsx! {
             svg { class, view_box: "0 0 24 24", fill: "currentColor",
                 path { d: "M12 .7a11.3 11.3 0 0 0-3.57 22.02c.57.1.78-.25.78-.55v-2.16c-3.18.69-3.85-1.35-3.85-1.35-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.24 3.33.95.1-.74.4-1.24.73-1.53-2.54-.29-5.21-1.27-5.21-5.65 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.45.11-3.03 0 0 .96-.31 3.11 1.17A10.8 10.8 0 0 1 12 5.93c.96 0 1.92.13 2.82.38 2.15-1.48 3.11-1.17 3.11-1.17.62 1.58.23 2.74.11 3.03.73.8 1.18 1.82 1.18 3.07 0 4.39-2.68 5.35-5.23 5.64.41.36.78 1.06.78 2.14v3.15c0 .3.21.66.79.55A11.3 11.3 0 0 0 12 .7Z" }
             }
         },
-        RemoteProvider::GoogleDrive => rsx! {
+        VaultConnectionProvider::GoogleDrive => rsx! {
             svg { class, view_box: "0 0 24 24", fill: "none",
                 path { d: "M8.1 3h7.8l4 7h-7.8Z", fill: "#fbbc04" }
                 path { d: "m8.1 3 4 7-4.1 7H4Z", fill: "#34a853" }
                 path { d: "M8 17h8l3.9-7h-7.8Z", fill: "#4285f4" }
             }
         },
-        RemoteProvider::Dropbox => rsx! {
+        VaultConnectionProvider::Dropbox => rsx! {
             svg { class: "{class} text-[#0061ff]", view_box: "0 0 24 24", fill: "currentColor",
                 path { d: "m6.5 3.5 5.5 3.4-5.5 3.5L1 6.9Zm11 0L23 6.9l-5.5 3.5L12 6.9Zm-11 8L12 15l-5.5 3.4L1 15Zm11 0L23 15l-5.5 3.4L12 15ZM6.6 19.6l5.4-3.4 5.4 3.4L12 23Z" }
             }
         },
-        RemoteProvider::OneDrive => rsx! {
+        VaultConnectionProvider::OneDrive => rsx! {
             svg { class: "{class} text-[#0078d4]", view_box: "0 0 24 24", fill: "currentColor",
                 path { d: "M9.3 7.3A6 6 0 0 1 19.8 11a4.5 4.5 0 0 1-.3 9H6a5 5 0 0 1-.6-10A5.8 5.8 0 0 1 9.3 7.3Z" }
             }
@@ -684,19 +490,13 @@ fn ProviderIcon(provider: RemoteProvider, #[props(default)] large: bool) -> Elem
 #[component]
 fn RecoveryCard(
     vault: VaultSnapshot,
-    pending: Option<VaultOperationKind>,
+    workflow: VaultWorkflowState,
     generated_recovery_key: String,
-    mut recovery_key_confirmation: Signal<String>,
     mut recovery_key_copied: Signal<bool>,
-    mut recovery_key_input: Signal<String>,
     recovery_upload_pending: bool,
 ) -> Element {
     let generated = generated_recovery_key.clone();
     let copy_value = generated_recovery_key.clone();
-    let confirmation_value = generated_recovery_key.clone();
-    let confirmation = recovery_key_confirmation();
-    let confirmation_complete = recovery_key_complete(&confirmation);
-    let confirmation_matches = recovery_keys_match(&generated, &confirmation);
     rsx! {
         div { class: "mt-4 rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10",
             div { class: "flex items-start gap-3",
@@ -713,12 +513,10 @@ fn RecoveryCard(
                 if vault.unlocked && !vault.recovery_enabled && generated.is_empty() {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
-                        disabled: pending.is_some() || !generated.is_empty(),
-                        onclick: move |_| send_operation(
-                            VaultOperationKind::GenerateRecoveryKey,
-                            String::new(),
-                            true,
-                        ),
+                        disabled: workflow.pending.is_some() || !generated.is_empty(),
+                        onclick: move |_| {
+                            let _ = send(&VaultGenerateRecoveryKeyRequest);
+                        },
                         {translate("vault-recovery-key-create")}
                     }
                 }
@@ -761,31 +559,24 @@ fn RecoveryCard(
                             div { class: "text-xs leading-relaxed text-muted-foreground/70", {translate("vault-recovery-key-verify")} }
                             input {
                                 autofocus: true,
-                                class: if confirmation_complete && !confirmation_matches {
+                                class: if workflow.recovery_confirmation_complete && !workflow.recovery_confirmation_matches {
                                     "w-full rounded-xl bg-background/60 px-3 py-2.5 font-mono text-xs text-foreground outline-none ring-1 ring-inset ring-ansi-1/45 transition focus:ring-ansi-1/65"
                                 } else {
                                     "w-full rounded-xl bg-background/60 px-3 py-2.5 font-mono text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition focus:ring-primary/50"
                                 },
                                 r#type: "password",
-                                value: "{confirmation}",
+                                value: "{workflow.recovery_confirmation}",
                                 placeholder: translate("vault-recovery-key-verify-placeholder"),
-                                disabled: pending.is_some(),
+                                disabled: workflow.pending.is_some(),
                                 oninput: move |event| {
-                                    let value = event.value();
-                                    recovery_key_confirmation.set(value.clone());
-                                    if pending.is_none()
-                                        && recovery_keys_match(&confirmation_value, &value)
-                                    {
-                                        send_recovery_operation(
-                                            VaultOperationKind::CreateRecoveryKey,
-                                            confirmation_value.clone(),
-                                        );
-                                    }
+                                    let _ = send(&VaultRecoveryConfirmationRequest {
+                                        value: event.value(),
+                                    });
                                 },
                             }
-                            if pending == Some(VaultOperationKind::CreateRecoveryKey) {
+                            if workflow.pending == Some(VaultOperationKind::CreateRecoveryKey) {
                                 div { class: "text-[11px] text-primary", {translate("common-loading")} }
-                            } else if confirmation_complete && !confirmation_matches {
+                            } else if workflow.recovery_confirmation_complete && !workflow.recovery_confirmation_matches {
                                 div { class: "text-[11px] text-ansi-1", {translate("vault-recovery-key-mismatch")} }
                             }
                         }
@@ -799,21 +590,16 @@ fn RecoveryCard(
                     input {
                         class: "w-full rounded-xl bg-background/60 px-3 py-2.5 font-mono text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition focus:ring-primary/50",
                         r#type: "password",
-                        value: "{recovery_key_input}",
+                        value: "{workflow.recovery_input}",
                         placeholder: translate("vault-recovery-key-placeholder"),
-                        disabled: pending.is_some(),
+                        disabled: workflow.pending.is_some(),
                         oninput: move |event| {
-                            let value = event.value();
-                            recovery_key_input.set(value.clone());
-                            if pending.is_none() && recovery_key_complete(&value) {
-                                send_recovery_operation(
-                                    VaultOperationKind::UnlockRecoveryKey,
-                                    value,
-                                );
-                            }
+                            let _ = send(&VaultRecoveryInputRequest {
+                                value: event.value(),
+                            });
                         },
                     }
-                    if pending == Some(VaultOperationKind::UnlockRecoveryKey) {
+                    if workflow.pending == Some(VaultOperationKind::UnlockRecoveryKey) {
                         div { class: "text-[11px] text-primary", {translate("common-loading")} }
                     }
                 }
@@ -827,110 +613,10 @@ fn RecoveryCard(
     }
 }
 
-fn send_recovery_operation(kind: VaultOperationKind, recovery_key: String) {
-    let _ = match kind {
-        VaultOperationKind::CreateRecoveryKey => send(&VaultCreateRecoveryKeyRequest),
-        VaultOperationKind::UnlockRecoveryKey => {
-            send(&VaultUnlockRecoveryKeyRequest { recovery_key })
-        }
-        _ => unreachable!(),
-    };
-}
-
-fn normalized_recovery_key(value: &str) -> String {
-    value
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .filter(|character| !character.is_ascii_whitespace() && *character != '-')
-        .collect()
-}
-
-fn recovery_key_complete(value: &str) -> bool {
-    normalized_recovery_key(value).len() == 68
-}
-
-struct RequestedProvider;
-
-impl RequestedProvider {
-    fn current() -> String {
-        if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
-            && let Some(provider) = Self::from_query(&meta.url)
-        {
-            return provider;
-        }
-        String::new()
-    }
-
-    fn from_query(source: &str) -> Option<String> {
-        Some(
-            source
-                .split_once("?provider=")?
-                .1
-                .split(['&', '#'])
-                .next()?
-                .to_string(),
-        )
-    }
-}
-
 fn copy_recovery_key(value: String, mut copied: Signal<bool>) {
     spawn(async move {
         if vmux_ui::platform::copy_to_clipboard(value).await {
             copied.set(true);
         }
     });
-}
-
-fn recovery_keys_match(expected: &str, actual: &str) -> bool {
-    recovery_key_complete(actual)
-        && normalized_recovery_key(expected) == normalized_recovery_key(actual)
-}
-
-fn request_snapshot(load_repositories: bool) {
-    let _ = send(&VaultRefreshRequest { load_repositories });
-}
-
-fn send_operation(kind: VaultOperationKind, repository: String, private: bool) {
-    let _ = match kind {
-        VaultOperationKind::Create => send(&VaultCreateRequest {
-            repository,
-            private,
-        }),
-        VaultOperationKind::Connect => send(&VaultConnectRequest { repository }),
-        VaultOperationKind::Sync => send(&VaultSyncRequest),
-        VaultOperationKind::ConnectGithub => send(&VaultConnectGithubRequest),
-        VaultOperationKind::GenerateRecoveryKey => send(&VaultGenerateRecoveryKeyRequest),
-        VaultOperationKind::ConnectCloud => send(&VaultConnectCloudRequest {
-            provider: repository,
-        }),
-        VaultOperationKind::ChooseCloudFolder => {
-            send(&VaultChooseCloudFolderRequest { root: repository })
-        }
-        _ => unreachable!(),
-    };
-}
-
-fn send_cloud_create(root: &str, name: &str) {
-    let _ = send(&VaultCreateCloudFolderRequest {
-        root: root.to_string(),
-        folder_name: name.to_string(),
-    });
-}
-
-fn suggested_repository_name(
-    owner: &str,
-    repositories: &[vmux_core::vault::VaultRepository],
-) -> String {
-    let names = repositories
-        .iter()
-        .filter_map(|repository| repository.name.strip_prefix(&format!("{owner}/")))
-        .collect::<std::collections::BTreeSet<_>>();
-    if !names.contains("vmux-vault") {
-        return "vmux-vault".to_string();
-    }
-    (2..)
-        .map(|suffix| format!("vmux-vault-{suffix}"))
-        .find(|name| !names.contains(name.as_str()))
-        .unwrap()
 }
