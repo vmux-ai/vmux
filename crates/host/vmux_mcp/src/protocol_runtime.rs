@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 use std::future::Future;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use vmux_client::protocol::{
     AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, FileTouchKind,
@@ -72,6 +74,8 @@ impl Plugin for McpPlugin {
                     start_vault_status_tools,
                     start_tool_commands,
                     start_tool_queries,
+                    bevy_ecs::schedule::ApplyDeferred,
+                    start_mcp_tasks,
                     bevy_ecs::schedule::ApplyDeferred,
                     poll_tool_tasks,
                 )
@@ -219,16 +223,14 @@ struct McpRouted;
 #[derive(Component)]
 struct McpTask(tokio::sync::oneshot::Receiver<Result<Value, String>>);
 
-impl McpTask {
-    fn spawn(
-        runtime: &McpRuntime,
-        future: impl Future<Output = Result<Value, String>> + Send + 'static,
-    ) -> Self {
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        drop(runtime.0.spawn(async move {
-            let _ = sender.send(future.await);
-        }));
-        Self(receiver)
+type McpFuture = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
+
+#[derive(Component)]
+struct PendingMcpTask(Mutex<Option<McpFuture>>);
+
+impl PendingMcpTask {
+    fn new(future: impl Future<Output = Result<Value, String>> + Send + 'static) -> Self {
+        Self(Mutex::new(Some(Box::pin(future))))
     }
 }
 
@@ -392,7 +394,6 @@ fn finish_tool_errors(
 
 fn start_list_tools(
     mut commands: Commands,
-    runtime: Single<&McpRuntime>,
     requests: Query<(Entity, &ListToolsExecution), Added<ListToolsExecution>>,
 ) {
     for (entity, request) in &requests {
@@ -400,7 +401,7 @@ fn start_list_tools(
         commands
             .entity(entity)
             .remove::<ListToolsExecution>()
-            .insert(McpTask::spawn(&runtime, async move {
+            .insert(PendingMcpTask::new(async move {
                 if let Ok(connection) = vmux_client::client::ServiceConnection::connect().await
                     && let Ok(AgentQueryResult::Commands(commands)) =
                         agent_query(&connection, AgentQuery::ListCommands).await
@@ -415,7 +416,6 @@ fn start_list_tools(
 
 fn start_read_file_tools(
     mut commands: Commands,
-    runtime: Single<&McpRuntime>,
     requests: Query<
         (Entity, &crate::tool::ReadFileExecution),
         Added<crate::tool::ReadFileExecution>,
@@ -430,16 +430,14 @@ fn start_read_file_tools(
             .entity(entity)
             .remove::<crate::tool::ToolCall>()
             .remove::<crate::tool::ReadFileExecution>()
-            .insert(McpTask::spawn(
-                &runtime,
-                read_file_result(path, offset, limit, anchor),
-            ));
+            .insert(PendingMcpTask::new(read_file_result(
+                path, offset, limit, anchor,
+            )));
     }
 }
 
 fn start_grep_tools(
     mut commands: Commands,
-    runtime: Single<&McpRuntime>,
     requests: Query<(Entity, &crate::tool::GrepExecution), Added<crate::tool::GrepExecution>>,
 ) {
     for (entity, request) in &requests {
@@ -450,13 +448,12 @@ fn start_grep_tools(
             .entity(entity)
             .remove::<crate::tool::ToolCall>()
             .remove::<crate::tool::GrepExecution>()
-            .insert(McpTask::spawn(&runtime, grep_result(query, path, anchor)));
+            .insert(PendingMcpTask::new(grep_result(query, path, anchor)));
     }
 }
 
 fn start_vault_status_tools(
     mut commands: Commands,
-    runtime: Single<&McpRuntime>,
     requests: Query<Entity, Added<crate::tool::VaultStatusExecution>>,
 ) {
     for entity in &requests {
@@ -464,16 +461,14 @@ fn start_vault_status_tools(
             .entity(entity)
             .remove::<crate::tool::ToolCall>()
             .remove::<crate::tool::VaultStatusExecution>()
-            .insert(McpTask::spawn(
-                &runtime,
-                run_agent_query(AgentQuery::VaultStatus),
-            ));
+            .insert(PendingMcpTask::new(run_agent_query(
+                AgentQuery::VaultStatus,
+            )));
     }
 }
 
 fn start_tool_commands(
     mut commands: Commands,
-    runtime: Single<&McpRuntime>,
     requests: Query<
         (Entity, &crate::tool::ToolCall, &crate::tool::ToolCommand),
         Added<crate::tool::ToolCommand>,
@@ -496,7 +491,7 @@ fn start_tool_commands(
         let arguments = call.arguments.clone();
         let anchor = call.anchor;
         let run_block_timeout = config.run_block_timeout;
-        request.insert(McpTask::spawn(&runtime, async move {
+        request.insert(PendingMcpTask::new(async move {
             if name == "open_file" {
                 let path = arguments
                     .get("path")
@@ -521,7 +516,6 @@ fn start_tool_commands(
 
 fn start_tool_queries(
     mut commands: Commands,
-    runtime: Single<&McpRuntime>,
     requests: Query<(Entity, &crate::tool::ToolQuery), Added<crate::tool::ToolQuery>>,
 ) {
     for (entity, result) in &requests {
@@ -536,7 +530,30 @@ fn start_tool_queries(
                 continue;
             }
         };
-        request.insert(McpTask::spawn(&runtime, run_agent_query(query)));
+        request.insert(PendingMcpTask::new(run_agent_query(query)));
+    }
+}
+
+fn start_mcp_tasks(
+    runtime: Single<&McpRuntime>,
+    mut pending: Query<(Entity, &mut PendingMcpTask), Added<PendingMcpTask>>,
+    mut commands: Commands,
+) {
+    for (entity, mut pending) in &mut pending {
+        let future = pending
+            .0
+            .get_mut()
+            .unwrap()
+            .take()
+            .expect("pending MCP task must own its future");
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        drop(runtime.0.spawn(async move {
+            let _ = sender.send(future.await);
+        }));
+        commands
+            .entity(entity)
+            .remove::<PendingMcpTask>()
+            .insert(McpTask(receiver));
     }
 }
 
