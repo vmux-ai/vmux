@@ -4,6 +4,7 @@
 mod connection;
 pub mod host_quote;
 pub mod protocol;
+mod protocol_runtime;
 pub mod tool;
 
 #[cfg(feature = "connection")]
