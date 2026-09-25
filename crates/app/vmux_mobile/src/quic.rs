@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use vmux_api::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
+use vmux_api::protocol::{AgentRequest, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 use vmux_transport::framing::{Frame, FrameStream};
 use vmux_transport::quic::endpoint::Trust;
 use vmux_transport::quic::tunnel::{DESKTOP_TAG, TunnelSocket, relayed_peer};
@@ -271,7 +271,7 @@ impl QuicApi {
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
 
-        let request = SharedMessage::agent(sid, AgentAction::Attach);
+        let request = SharedMessage::agent(sid, AgentRequest::Attach);
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&request)
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         let frame = Frame::new(MessageType::SESSION_EVENTS, body.to_vec());

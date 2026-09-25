@@ -799,7 +799,7 @@ fn codex_subagent_block(
             provider: "Codex".to_string(),
             title: title.to_string(),
             status: status.map(tool_call_status).unwrap_or_default().to_string(),
-            action: string_field(subagent, "activity").unwrap_or_default(),
+            activity: string_field(subagent, "activity").unwrap_or_default(),
             agent_name: path.as_deref().and_then(agent_name_from_path),
             thread_id: string_field(subagent, "threadId")
                 .or_else(|| input.and_then(|input| string_field(input, "agentThreadId"))),
@@ -821,7 +821,7 @@ fn codex_subagent_block(
         provider: "Codex".to_string(),
         title: title.to_string(),
         status: status.map(tool_call_status).unwrap_or_default().to_string(),
-        action: string_field(collaboration, "tool").unwrap_or_default(),
+        activity: string_field(collaboration, "tool").unwrap_or_default(),
         agent_name: None,
         thread_id: None,
         parent_thread_id: string_field(collaboration, "senderThreadId")
@@ -854,7 +854,7 @@ fn claude_subagent_block(
         return None;
     }
     let input = raw_input.and_then(serde_json::Value::as_object);
-    let action = if input.is_some_and(|input| input.get("resume").is_some()) {
+    let activity = if input.is_some_and(|input| input.get("resume").is_some()) {
         "resume"
     } else if input
         .and_then(|input| input.get("run_in_background"))
@@ -870,7 +870,7 @@ fn claude_subagent_block(
         provider: "Claude".to_string(),
         title: title.to_string(),
         status: status.map(tool_call_status).unwrap_or_default().to_string(),
-        action: action.to_string(),
+        activity: activity.to_string(),
         agent_name: input.and_then(|input| {
             string_field(input, "name").or_else(|| string_field(input, "subagent_type"))
         }),
@@ -902,8 +902,8 @@ fn merge_subagent(existing: &mut SubagentBlock, update: SubagentBlock) {
     if !update.status.is_empty() {
         existing.status = update.status;
     }
-    if !update.action.is_empty() {
-        existing.action = update.action;
+    if !update.activity.is_empty() {
+        existing.activity = update.activity;
     }
     existing.agent_name = update.agent_name.or(existing.agent_name.take());
     existing.thread_id = update.thread_id.or(existing.thread_id.take());
@@ -1176,7 +1176,7 @@ mod tests {
         };
         assert_eq!(subagent.provider, "Codex");
         assert_eq!(subagent.status, "in_progress");
-        assert_eq!(subagent.action, "started");
+        assert_eq!(subagent.activity, "started");
         assert_eq!(subagent.agent_name.as_deref(), Some("explorer"));
         assert_eq!(subagent.thread_id.as_deref(), Some("thread-child"));
         assert_eq!(subagent.prompt.as_deref(), Some("Inspect ACP projection"));
@@ -1213,7 +1213,7 @@ mod tests {
         let AssistantBlock::Subagent(subagent) = &blocks[0] else {
             panic!("expected subagent block")
         };
-        assert_eq!(subagent.action, "spawn_agent");
+        assert_eq!(subagent.activity, "spawn_agent");
         assert_eq!(subagent.parent_thread_id.as_deref(), Some("thread-root"));
         assert_eq!(subagent.child_thread_ids, ["thread-a", "thread-b"]);
         assert_eq!(subagent.prompt.as_deref(), Some("Inspect two subsystems"));

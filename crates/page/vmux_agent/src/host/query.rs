@@ -455,10 +455,10 @@ fn route_simulator_queries(
                     request_id: request.request_id.0,
                 });
             }
-            AgentQuery::SimulatorControl { action } => {
+            AgentQuery::SimulatorControl { input } => {
                 control_writer.write(vmux_simulator::SimulatorControlRequest {
                     request_id: request.request_id.0,
-                    action: action.clone(),
+                    input: input.clone(),
                 });
             }
             _ => {}

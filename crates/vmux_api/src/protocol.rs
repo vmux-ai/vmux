@@ -5,7 +5,7 @@ pub use layout::{
     format_id, parse_id,
 };
 pub use shared::{
-    AgentAction, SharedAgentCommand, SharedEvent, SharedFailure, SharedMessage, SharedResponse,
+    AgentRequest, SharedAgentCommand, SharedEvent, SharedFailure, SharedMessage, SharedResponse,
 };
 
 pub use crate::ProcessId;
@@ -78,7 +78,7 @@ mod tests {
             ["Agent", "ListSessions", "AgentCommand"]
         );
         assert_eq!(
-            AgentAction::VARIANT_NAMES,
+            AgentRequest::VARIANT_NAMES,
             ["Attach", "Input", "Cancel", "Approve", "ListMedia"]
         );
     }
@@ -127,11 +127,11 @@ mod tests {
 
     #[test]
     fn agent_cancel_and_interrupted_roundtrip() {
-        let msg = ClientMessage::Shared(SharedMessage::agent("s1", AgentAction::Cancel));
+        let msg = ClientMessage::Shared(SharedMessage::agent("s1", AgentRequest::Cancel));
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
         let back = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
         assert!(
-            matches!(back, ClientMessage::Shared(SharedMessage::Agent { sid, action: AgentAction::Cancel }) if sid == "s1")
+            matches!(back, ClientMessage::Shared(SharedMessage::Agent { sid, request: AgentRequest::Cancel }) if sid == "s1")
         );
 
         let st = AgentRunStatus::Interrupted;
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn agent_query_simulator_control_rkyv_round_trip() {
         let query = AgentQuery::SimulatorControl {
-            action: SimulatorAction::Swipe {
+            input: SimulatorInput::Swipe {
                 start_x: 120,
                 start_y: 700,
                 end_x: 120,
@@ -787,11 +787,11 @@ mod tests {
                 auto_tools: vec!["list_spaces".into()],
                 tools_json: "[]".into(),
             },
-            ClientMessage::Shared(SharedMessage::agent("s", AgentAction::Attach)),
+            ClientMessage::Shared(SharedMessage::agent("s", AgentRequest::Attach)),
             ClientMessage::DetachPageAgent { sid: "s".into() },
             ClientMessage::Shared(SharedMessage::agent(
                 "s",
-                AgentAction::Input {
+                AgentRequest::Input {
                     text: "hi".into(),
                     context: Some("prior conversation".into()),
                     attachments: Vec::new(),
@@ -800,7 +800,7 @@ mod tests {
             )),
             ClientMessage::Shared(SharedMessage::agent(
                 "s",
-                AgentAction::Input {
+                AgentRequest::Input {
                     text: "inspect".into(),
                     context: None,
                     attachments: vec![AgentAttachment {
@@ -820,14 +820,14 @@ mod tests {
             },
             ClientMessage::Shared(SharedMessage::agent(
                 "s",
-                AgentAction::Approve {
+                AgentRequest::Approve {
                     call_id: "c".into(),
                     decision: ApprovalDecision::Allow,
                 },
             )),
             ClientMessage::Shared(SharedMessage::agent(
                 "s",
-                AgentAction::Approve {
+                AgentRequest::Approve {
                     call_id: "ca".into(),
                     decision: ApprovalDecision::AllowAlways,
                 },
@@ -847,7 +847,7 @@ mod tests {
             let expects_allow_always = matches!(
                 &msg,
                 ClientMessage::Shared(SharedMessage::Agent {
-                    action: AgentAction::Approve {
+                    request: AgentRequest::Approve {
                         decision: ApprovalDecision::AllowAlways,
                         ..
                     },
@@ -860,7 +860,7 @@ mod tests {
                 assert!(matches!(
                     decoded,
                     ClientMessage::Shared(SharedMessage::Agent {
-                        action: AgentAction::Approve {
+                        request: AgentRequest::Approve {
                             decision: ApprovalDecision::AllowAlways,
                             ..
                         },
@@ -877,7 +877,7 @@ mod tests {
             ClientMessage::agent_input("s".into(), "hi".into(), None, Vec::new()),
             ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                action: AgentAction::Input { text, context, attachments, preferred_mode },
+                request: AgentRequest::Input { text, context, attachments, preferred_mode },
             }) if sid == "s" && text == "hi" && context.is_none() && attachments.is_empty() && preferred_mode.is_none()
         ));
         assert!(matches!(
@@ -893,7 +893,7 @@ mod tests {
                 }],
             ),
             ClientMessage::Shared(SharedMessage::Agent {
-                action: AgentAction::Input { attachments, .. },
+                request: AgentRequest::Input { attachments, .. },
                 ..
             }) if attachments.len() == 1
         ));

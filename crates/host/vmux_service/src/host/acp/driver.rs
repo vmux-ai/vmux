@@ -2081,21 +2081,21 @@ fn is_permissionless_host_tool(name: &str) -> bool {
             if request == "request" && user == "user" && choice == "choice"
     ) || matches!(
         parts.as_slice(),
-        [mcp, vmux, action, knowledge]
+        [mcp, vmux, operation, knowledge]
             if mcp == "mcp"
                 && vmux == "vmux"
-                && matches!(action.as_str(), "search" | "read")
+                && matches!(operation.as_str(), "search" | "read")
                 && knowledge == "knowledge"
     ) || matches!(
         parts.as_slice(),
-        [vmux, action, knowledge]
+        [vmux, operation, knowledge]
             if vmux == "vmux"
-                && matches!(action.as_str(), "search" | "read")
+                && matches!(operation.as_str(), "search" | "read")
                 && knowledge == "knowledge"
     ) || matches!(
         parts.as_slice(),
-        [action, knowledge]
-            if matches!(action.as_str(), "search" | "read") && knowledge == "knowledge"
+        [operation, knowledge]
+            if matches!(operation.as_str(), "search" | "read") && knowledge == "knowledge"
     )
 }
 

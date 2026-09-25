@@ -133,7 +133,7 @@ fn spawn_provider_session_on_add(
         });
         service.0.send(ClientMessage::Shared(SharedMessage::agent(
             session.sid.clone(),
-            vmux_api::protocol::AgentAction::Attach,
+            vmux_api::protocol::AgentRequest::Attach,
         )));
     }
 }

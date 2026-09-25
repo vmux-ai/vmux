@@ -29,7 +29,7 @@ pub struct McpServers {
 pub struct McpServersRequest;
 
 #[vmux_api::contract(Copy, Default, Eq)]
-pub enum McpServerAction {
+pub enum McpServerOperation {
     #[default]
     Connect,
     Disconnect,
@@ -38,7 +38,7 @@ pub enum McpServerAction {
 #[vmux_api::contract(Default, Eq)]
 pub struct McpServerPending {
     pub id: String,
-    pub action: McpServerAction,
+    pub operation: McpServerOperation,
 }
 
 #[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
@@ -49,7 +49,7 @@ pub struct McpServerRequest {
 #[vmux_api::contract(Default, Eq)]
 pub struct McpServerResult {
     pub id: String,
-    pub action: McpServerAction,
+    pub operation: McpServerOperation,
     pub success: bool,
     pub message: String,
 }
@@ -67,7 +67,7 @@ mod tests {
             pending: None,
             result: Some(McpServerResult {
                 id: "linear".to_string(),
-                action: McpServerAction::Connect,
+                operation: McpServerOperation::Connect,
                 success: false,
                 message: "denied".to_string(),
             }),

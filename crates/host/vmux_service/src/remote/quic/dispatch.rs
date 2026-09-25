@@ -1,5 +1,5 @@
 use vmux_api::protocol::{
-    AgentAction, SharedAgentCommand, SharedFailure, SharedMessage, SharedResponse,
+    AgentRequest, SharedAgentCommand, SharedFailure, SharedMessage, SharedResponse,
 };
 use vmux_api::room::{ClientOpId, RemoteSession};
 
@@ -11,7 +11,7 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
     match request {
         SharedMessage::ListSessions => SharedResponse::Sessions(sessions(state).await),
 
-        SharedMessage::Agent { sid, action } => agent(state, &sid, action).await,
+        SharedMessage::Agent { sid, request } => agent(state, &sid, request).await,
 
         SharedMessage::AgentCommand(command) => {
             let Some(client_op_id) = new_chat_op_id(&command) else {
@@ -32,9 +32,9 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
     }
 }
 
-async fn agent(state: &RemoteState, sid: &str, action: AgentAction) -> SharedResponse {
-    match action {
-        AgentAction::Attach => {
+async fn agent(state: &RemoteState, sid: &str, request: AgentRequest) -> SharedResponse {
+    match request {
+        AgentRequest::Attach => {
             if session_exists(state, sid).await {
                 SharedResponse::Ok
             } else {
@@ -42,16 +42,18 @@ async fn agent(state: &RemoteState, sid: &str, action: AgentAction) -> SharedRes
             }
         }
 
-        AgentAction::Input {
+        AgentRequest::Input {
             text,
             context,
             attachments,
             preferred_mode,
         } => prompt(state, sid, text, context, attachments, preferred_mode).await,
 
-        AgentAction::Cancel => push_input(state, sid, AcpInput::Cancel, SessionInput::Cancel).await,
+        AgentRequest::Cancel => {
+            push_input(state, sid, AcpInput::Cancel, SessionInput::Cancel).await
+        }
 
-        AgentAction::Approve { call_id, decision } => {
+        AgentRequest::Approve { call_id, decision } => {
             push_input(
                 state,
                 sid,
@@ -64,7 +66,7 @@ async fn agent(state: &RemoteState, sid: &str, action: AgentAction) -> SharedRes
             .await
         }
 
-        AgentAction::ListMedia { query } => {
+        AgentRequest::ListMedia { query } => {
             if !session_exists(state, sid).await {
                 return SharedResponse::Failed(SharedFailure::NotFound);
             }
@@ -208,7 +210,7 @@ mod tests {
     fn prompt_of(length: usize) -> SharedMessage {
         SharedMessage::agent(
             "s",
-            AgentAction::Input {
+            AgentRequest::Input {
                 text: "x".repeat(length),
                 context: None,
                 attachments: Vec::new(),
@@ -242,7 +244,7 @@ mod tests {
             &state,
             SharedMessage::agent(
                 "s",
-                AgentAction::Input {
+                AgentRequest::Input {
                     text: "   ".into(),
                     context: None,
                     attachments: Vec::new(),
@@ -279,11 +281,11 @@ mod tests {
         let state = empty_state();
 
         for request in [
-            SharedMessage::agent("ghost", AgentAction::Cancel),
-            SharedMessage::agent("ghost", AgentAction::Attach),
+            SharedMessage::agent("ghost", AgentRequest::Cancel),
+            SharedMessage::agent("ghost", AgentRequest::Attach),
             SharedMessage::agent(
                 "ghost",
-                AgentAction::ListMedia {
+                AgentRequest::ListMedia {
                     query: String::new(),
                 },
             ),

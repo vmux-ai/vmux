@@ -318,7 +318,7 @@ async fn stream_session_events(
 ) {
     let SharedMessage::Agent {
         sid,
-        action: vmux_api::protocol::AgentAction::Attach,
+        request: vmux_api::protocol::AgentRequest::Attach,
     } = request
     else {
         return;
@@ -633,7 +633,7 @@ mod live {
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
         let body = rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::agent(
             "ghost",
-            vmux_api::protocol::AgentAction::Attach,
+            vmux_api::protocol::AgentRequest::Attach,
         ))
         .expect("encode");
         CONTROL

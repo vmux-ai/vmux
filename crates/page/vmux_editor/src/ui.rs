@@ -102,7 +102,7 @@ pub fn Page() -> Element {
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
     let mut lsp_status = use_signal(|| Option::<FileLspStatus>::None);
-    let mut lsp_actions = use_signal(Vec::<EditorAction>::new);
+    let mut lsp_capabilities = use_signal(Vec::<EditorCapability>::new);
     let mut lsp_install_notice = use_signal(|| Option::<LspInstallProgress>::None);
     let mut lsp_install_request = use_signal(|| Option::<(String, String)>::None);
     let mut lsp_notice_generation = use_signal(|| 0u32);
@@ -568,7 +568,7 @@ pub fn Page() -> Element {
                     let _ = send(&LspInstallRequest { name: package });
                 }
             }
-            lsp_actions.set(s.actions.clone());
+            lsp_capabilities.set(s.capabilities.clone());
             lsp_status.set(Some(s));
         })
     });
@@ -1889,7 +1889,7 @@ pub fn Page() -> Element {
                 })
             }
 
-            EditorContextMenu { position: ctx_menu, offered: lsp_actions }
+            EditorContextMenu { position: ctx_menu, offered: lsp_capabilities }
             ReferencesPanel { open: refs_open, items: refs, selected: refs_sel }
         }
         }

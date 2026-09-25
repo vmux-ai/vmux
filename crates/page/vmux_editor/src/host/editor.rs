@@ -309,7 +309,7 @@ mod tests {
     use super::*;
     use bevy_cef::prelude::{BinIpcEventRawBuffer, Browsers, UiInput};
     use vmux_core::PageMetadata;
-    use vmux_core::event::{FileEncoding, FileEncodingAction, FileEncodingSet, FileOpenEvent};
+    use vmux_core::event::{FileEncoding, FileEncodingOperation, FileEncodingSet, FileOpenEvent};
 
     use crate::host::edit::{EditCommand, EditMode};
     use crate::host::editing::{ClipboardHandle, EditExecutionPlugin};
@@ -420,10 +420,13 @@ mod tests {
             Some(reason)
         }
 
-        fn encoding_action(&mut self, encoding: FileEncoding, action: FileEncodingAction) {
+        fn apply_encoding(&mut self, encoding: FileEncoding, operation: FileEncodingOperation) {
             self.app.world_mut().trigger(UiInput {
                 webview: self.entity,
-                payload: FileEncodingSet { encoding, action },
+                payload: FileEncodingSet {
+                    encoding,
+                    operation,
+                },
             });
             self.settle();
         }
@@ -485,7 +488,7 @@ mod tests {
         assert_eq!(session.encoding(), FileEncoding::ShiftJis);
 
         session.type_into_buffer("EDIT");
-        session.encoding_action(FileEncoding::ShiftJis, FileEncodingAction::Save);
+        session.apply_encoding(FileEncoding::ShiftJis, FileEncodingOperation::Save);
 
         let mut expected = b"EDIT".to_vec();
         expected.extend_from_slice(&SHIFT_JIS_SAMPLE);
@@ -503,7 +506,7 @@ mod tests {
         session.settle();
 
         session.type_into_buffer("€");
-        session.encoding_action(FileEncoding::ShiftJis, FileEncodingAction::Save);
+        session.apply_encoding(FileEncoding::ShiftJis, FileEncodingOperation::Save);
 
         assert_eq!(
             session.bytes("main.txt"),
@@ -519,7 +522,7 @@ mod tests {
         session.settle();
         assert_eq!(session.encoding(), FileEncoding::ShiftJis);
 
-        session.encoding_action(FileEncoding::EucJp, FileEncodingAction::Reopen);
+        session.apply_encoding(FileEncoding::EucJp, FileEncodingOperation::Reopen);
 
         assert_eq!(session.encoding(), FileEncoding::EucJp);
         assert_ne!(
@@ -541,7 +544,7 @@ mod tests {
             "no buffer is loaded, so the footer chooser has nothing to hang off"
         );
 
-        session.encoding_action(FileEncoding::Iso8859_1, FileEncodingAction::Reopen);
+        session.apply_encoding(FileEncoding::Iso8859_1, FileEncodingOperation::Reopen);
 
         assert_eq!(
             session.failure(),
@@ -567,7 +570,7 @@ mod tests {
         session.write("plain.txt", "ascii\n");
         session.settle();
 
-        session.encoding_action(FileEncoding::Utf16Le, FileEncodingAction::Reopen);
+        session.apply_encoding(FileEncoding::Utf16Le, FileEncodingOperation::Reopen);
         assert_eq!(session.encoding(), FileEncoding::Utf16Le);
 
         session.navigate_to("plain.txt");

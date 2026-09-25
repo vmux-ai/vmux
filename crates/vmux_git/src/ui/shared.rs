@@ -69,7 +69,7 @@ pub fn GitFooter(
         let Some(result) = state.result else {
             return;
         };
-        if result.action != "commit" {
+        if result.operation != "commit" {
             return;
         }
         if result.ok && commit_msg().trim() == pending_commit_msg() {

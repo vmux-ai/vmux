@@ -230,11 +230,11 @@ fn probe_presentation(status: &ShortcutProbeStatus) -> (String, &'static str) {
         ShortcutProbeStatus::Idle => (translate("shortcuts-try-hint"), "text-muted-foreground"),
         ShortcutProbeStatus::Pending => (translate("shortcuts-waiting"), "text-amber-500"),
         ShortcutProbeStatus::Match(names) => {
-            let action = names.join(", ");
+            let commands = names.join(", ");
             (
                 translate_with(
                     "shortcuts-triggered",
-                    &[("action", TranslationValue::String(&action))],
+                    &[("action", TranslationValue::String(&commands))],
                 ),
                 "text-primary",
             )

@@ -105,12 +105,12 @@ pub fn parse(json: &str) -> Result<ExtManifest, String> {
         .unwrap_or_default()
         .to_string();
     validate_version(&version)?;
-    let action = v.get("action").or_else(|| v.get("browser_action"));
-    let popup = action
+    let manifest_action = v.get("action").or_else(|| v.get("browser_action"));
+    let popup = manifest_action
         .and_then(|a| a.get("default_popup"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    let icon = action
+    let icon = manifest_action
         .and_then(|a| a.get("default_icon"))
         .and_then(pick_icon);
     let default_locale = v

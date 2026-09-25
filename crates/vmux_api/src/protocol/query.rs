@@ -1,4 +1,4 @@
-use super::SimulatorAction;
+use super::SimulatorInput;
 use crate::{ProcessId, json::JsonValue};
 
 #[vmux_api::contract(Eq)]
@@ -105,7 +105,7 @@ pub enum AgentQuery {
     BookmarkList,
     SimulatorScreenshot,
     SimulatorControl {
-        action: SimulatorAction,
+        input: SimulatorInput,
     },
     WorkingDirectory {
         anchor: ProcessId,

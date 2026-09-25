@@ -10,7 +10,7 @@ use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-use crate::page_model::{PkgAction, pkg_action, pkg_status_class};
+use crate::page_model::{PackageOperation, package_operation, pkg_status_class};
 
 #[vmux_native::page(url = "vmux://lsp/", title = "Language Servers", component = Page)]
 pub(crate) struct LspPage;
@@ -75,7 +75,7 @@ pub fn Page() -> Element {
 fn PackageRow(package: LspPackage, progress: Option<LspInstallProgress>) -> Element {
     let item = package.clone();
     let install_progress = progress;
-    let action = pkg_action(item.status, item.installable);
+    let operation = package_operation(item.status, item.installable);
     let action_name = item.name.clone();
     let mut subtitle = item.version.clone().unwrap_or_default();
     if let Some(progress) = install_progress.as_ref() {
@@ -111,7 +111,7 @@ fn PackageRow(package: LspPackage, progress: Option<LspInstallProgress>) -> Elem
             },
             actions: rsx! {
                 span { class: "shrink-0 text-xs {pkg_status_class(item.status)}", "{status_label}" }
-                PackageAction { action, name: action_name.clone(), requires: item.requires.clone() }
+                PackageOperationButton { operation, name: action_name.clone(), requires: item.requires.clone() }
             },
         }
     }
@@ -171,14 +171,18 @@ fn localized_status(status: LspPkgStatus) -> String {
 }
 
 #[component]
-fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> Element {
+fn PackageOperationButton(
+    operation: PackageOperation,
+    name: String,
+    requires: Option<String>,
+) -> Element {
     let name = name.as_str();
     let requires = requires.as_deref();
     let install_name = name.to_string();
     let update_name = name.to_string();
     let uninstall_name = name.to_string();
-    match action {
-        PkgAction::Install => rsx! {
+    match operation {
+        PackageOperation::Install => rsx! {
             ManagerButton {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
@@ -187,7 +191,7 @@ fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> E
                 {translate("common-install")}
             }
         },
-        PkgAction::Update => rsx! {
+        PackageOperation::Update => rsx! {
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 onclick: move |_| {
@@ -196,7 +200,7 @@ fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> E
                 {translate("common-update")}
             }
         },
-        PkgAction::Uninstall => rsx! {
+        PackageOperation::Uninstall => rsx! {
             ManagerButton {
                 variant: ManagerButtonVariant::Danger,
                 onclick: move |_| {
@@ -205,7 +209,7 @@ fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> E
                 {translate("common-uninstall")}
             }
         },
-        PkgAction::None => match requires {
+        PackageOperation::None => match requires {
             Some(tool) => {
                 let detail =
                     translate_with("lsp-needs", &[("tool", TranslationValue::String(tool))]);

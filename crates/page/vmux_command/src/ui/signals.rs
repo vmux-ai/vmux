@@ -171,20 +171,20 @@ impl Readline {
             return false;
         }
 
-        let action = match ctrl_key_capture_for_code(&event.code().to_string()) {
+        let edit = match ctrl_key_capture_for_code(&event.code().to_string()) {
             CtrlKeyCapture::Ignore => return false,
             CtrlKeyCapture::PassToDioxus => {
                 event.prevent_default();
                 return false;
             }
-            CtrlKeyCapture::Edit(action) => action,
+            CtrlKeyCapture::Edit(edit) => edit,
         };
 
         event.prevent_default();
         event.stop_propagation();
         Self::edit(
             &mut query,
-            action,
+            edit,
             ghost,
             EventSelection::caret_in(input_id),
             input_id,
@@ -194,18 +194,18 @@ impl Readline {
 
     fn edit(
         query: &mut Signal<String>,
-        action: TextEditCommand,
+        edit: TextEditCommand,
         ghost: &str,
         caret: usize,
         input_id: &'static str,
     ) {
         let value = query.peek().clone();
-        let ghost = match action {
+        let ghost = match edit {
             TextEditCommand::End => ghost,
             _ => "",
         };
 
-        let edited = action.apply(&value, caret, ghost);
+        let edited = edit.apply(&value, caret, ghost);
         if edited.value != value {
             query.set(edited.value);
         }

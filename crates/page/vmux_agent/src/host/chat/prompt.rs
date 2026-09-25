@@ -127,7 +127,7 @@ fn cancel_session(
     };
     service.0.send(ClientMessage::Shared(SharedMessage::agent(
         sid,
-        vmux_api::protocol::AgentAction::Cancel,
+        vmux_api::protocol::AgentRequest::Cancel,
     )));
 }
 

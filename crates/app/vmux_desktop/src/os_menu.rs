@@ -286,7 +286,7 @@ fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
     let Some(main_menu) = NSApplication::sharedApplication(mtm).mainMenu() else {
         return Vec::new();
     };
-    let actions: [Sel; 6] = [
+    let selectors: [Sel; 6] = [
         sel!(undo:),
         sel!(redo:),
         sel!(cut:),
@@ -306,7 +306,7 @@ fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
             };
             if item
                 .action()
-                .is_some_and(|action| actions.contains(&action))
+                .is_some_and(|selector| selectors.contains(&selector))
             {
                 items.push(item);
                 found = true;

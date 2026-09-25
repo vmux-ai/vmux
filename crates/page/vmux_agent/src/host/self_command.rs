@@ -23,11 +23,11 @@ use super::run_terminal::{
     RunTerminalBucketPanes, RunTerminalCandidate,
 };
 use super::workspace::{
-    AgentTabWorktreeContext, PendingAgentChoice, PendingAgentChoiceAction, PendingWorkspacePicker,
-    USER_CHOICE_REQUESTED, WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED,
-    WorkspacePickerContext, activate_agent_directory, activate_agent_worktree,
-    ambiguous_worktree_message, existing_worktree_candidates, resolve_requested_worktree,
-    workspace_path_task, workspace_picker_task,
+    AgentTabWorktreeContext, PendingAgentChoice, PendingAgentChoiceOperation,
+    PendingWorkspacePicker, USER_CHOICE_REQUESTED, WORKSPACE_SELECTION_PENDING,
+    WORKSPACE_SELECTION_REQUESTED, WorkspacePickerContext, activate_agent_directory,
+    activate_agent_worktree, ambiguous_worktree_message, existing_worktree_candidates,
+    resolve_requested_worktree, workspace_path_task, workspace_picker_task,
 };
 
 pub(super) struct SelfCommandPlugin;
@@ -536,7 +536,7 @@ fn handle_agent_self_commands(
                             .entity(agent_entity)
                             .insert(PendingAgentChoice {
                                 session_entity,
-                                action: PendingAgentChoiceAction::Resume,
+                                operation: PendingAgentChoiceOperation::Resume,
                                 question: question.clone(),
                                 options: options.clone(),
                             })

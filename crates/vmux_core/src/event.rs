@@ -215,7 +215,7 @@ mod file_event_tests {
             server: "rust-analyzer".into(),
             package: Some("rust-analyzer".into()),
             state: LspServerState::Ready,
-            actions: vec![EditorAction::Rename, EditorAction::FormatDocument],
+            capabilities: vec![EditorCapability::Rename, EditorCapability::FormatDocument],
         };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).unwrap();
         let d = rkyv::from_bytes::<FileLspStatus, rkyv::rancor::Error>(&b).unwrap();
@@ -224,8 +224,8 @@ mod file_event_tests {
         assert_eq!(d.package.as_deref(), Some("rust-analyzer"));
         assert_eq!(d.state, LspServerState::Ready);
         assert_eq!(
-            d.actions,
-            vec![EditorAction::Rename, EditorAction::FormatDocument]
+            d.capabilities,
+            vec![EditorCapability::Rename, EditorCapability::FormatDocument]
         );
     }
 

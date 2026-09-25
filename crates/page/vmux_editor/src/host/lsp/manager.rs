@@ -220,8 +220,8 @@ impl LspManager {
         self.open_docs.get(path).map(|doc| doc.version)
     }
 
-    fn menu_actions(&self, path: &Path) -> Vec<vmux_core::event::EditorAction> {
-        use vmux_core::event::EditorAction;
+    fn menu_capabilities(&self, path: &Path) -> Vec<vmux_core::event::EditorCapability> {
+        use vmux_core::event::EditorCapability;
         let Some(doc) = self.open_docs.get(path) else {
             return Vec::new();
         };
@@ -229,30 +229,33 @@ impl LspManager {
             return Vec::new();
         };
         let offered = [
-            (EditorAction::GotoDeclaration, "textDocument/declaration"),
             (
-                EditorAction::GotoTypeDefinition,
+                EditorCapability::GotoDeclaration,
+                "textDocument/declaration",
+            ),
+            (
+                EditorCapability::GotoTypeDefinition,
                 "textDocument/typeDefinition",
             ),
             (
-                EditorAction::GotoImplementation,
+                EditorCapability::GotoImplementation,
                 "textDocument/implementation",
             ),
-            (EditorAction::Rename, "textDocument/rename"),
-            (EditorAction::FormatDocument, "textDocument/formatting"),
+            (EditorCapability::Rename, "textDocument/rename"),
+            (EditorCapability::FormatDocument, "textDocument/formatting"),
             (
-                EditorAction::FormatSelection,
+                EditorCapability::FormatSelection,
                 "textDocument/rangeFormatting",
             ),
-            (EditorAction::CodeAction, "textDocument/codeAction"),
+            (EditorCapability::CodeAction, "textDocument/codeAction"),
         ];
-        let mut actions = Vec::new();
-        for (action, method) in offered {
+        let mut operations = Vec::new();
+        for (operation, method) in offered {
             if client.provides(method) {
-                actions.push(action);
+                operations.push(operation);
             }
         }
-        actions
+        operations
     }
 
     fn ensure_server(
@@ -1416,7 +1419,7 @@ fn lsp_status_system(
                     .flatten()
                     .map(str::to_string),
                 state: desired,
-                actions: manager.menu_actions(&fv.path),
+                capabilities: manager.menu_capabilities(&fv.path),
             },
         ));
         commands.entity(entity).insert(LspStatusSent {

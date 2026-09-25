@@ -1,5 +1,5 @@
 use super::{
-    CompletionItem, EditorAction, FileDiagnostic, HoverBlock, InstallPhase, LspPackage,
+    CompletionItem, EditorCapability, FileDiagnostic, HoverBlock, InstallPhase, LspPackage,
     LspPkgStatus, LspServerState, RefItem,
 };
 
@@ -15,7 +15,7 @@ pub struct FileLspStatus {
     pub server: String,
     pub package: Option<String>,
     pub state: LspServerState,
-    pub actions: Vec<EditorAction>,
+    pub capabilities: Vec<EditorCapability>,
 }
 
 #[vmux_api::contract(Eq)]

@@ -681,7 +681,7 @@ pub fn TurnBlock(
             } else {
                 subagent.title.replace('_', " ")
             };
-            let action = subagent.action.replace('_', " ");
+            let activity = subagent.activity.replace('_', " ");
             let child_threads = subagent.child_thread_ids.join(", ");
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl bg-violet-500/[0.025] px-2 py-1.5 ring-1 ring-inset ring-violet-500/10 transition-colors hover:bg-violet-500/[0.05]",
@@ -695,8 +695,8 @@ pub fn TurnBlock(
                             }
                             div { class: "mt-2 flex flex-wrap gap-1.5 text-[10px]",
                                 span { class: "rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-700 dark:text-violet-300", "{subagent.provider}" }
-                                if !subagent.action.is_empty() {
-                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{action}" }
+                                if !subagent.activity.is_empty() {
+                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{activity}" }
                                 }
                                 if let Some(agent_name) = &subagent.agent_name {
                                     span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{agent_name}" }

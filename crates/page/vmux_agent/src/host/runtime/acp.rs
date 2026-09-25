@@ -446,7 +446,7 @@ fn acp_auto_approval_message(
     policy.allows(&request.name).then(|| {
         ClientMessage::Shared(SharedMessage::agent(
             session.sid.clone(),
-            vmux_service::protocol::AgentAction::Approve {
+            vmux_service::protocol::AgentRequest::Approve {
                 call_id: request.call_id.clone(),
                 decision: vmux_service::protocol::ApprovalDecision::AllowAlways,
             },
@@ -670,7 +670,7 @@ mod tests {
             acp_auto_approval_message(&session, &policy, &request),
             Some(ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                action: vmux_service::protocol::AgentAction::Approve { call_id, decision },
+                request: vmux_service::protocol::AgentRequest::Approve { call_id, decision },
             }))
                 if sid == "s1"
                     && call_id == "call-1"

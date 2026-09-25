@@ -74,11 +74,11 @@ pub(super) enum Emit {
 fn result_then_status(
     repo_root: &std::path::Path,
     path: &std::path::Path,
-    action: &str,
+    operation: &str,
     message: &str,
 ) -> Vec<Emit> {
     let result = Emit::Result(GitOperationResult {
-        action: action.to_string(),
+        operation: operation.to_string(),
         ok: true,
         message: message.to_string(),
     });
@@ -91,13 +91,13 @@ fn result_then_status(
 fn mutate(
     repo_root: &std::path::Path,
     path: &std::path::Path,
-    action: &str,
+    operation: &str,
     op: fn(&std::path::Path, &std::path::Path) -> Result<(), runner::GitError>,
 ) -> Vec<Emit> {
     match op(repo_root, path) {
-        Ok(()) => result_then_status(repo_root, path, action, "ok"),
+        Ok(()) => result_then_status(repo_root, path, operation, "ok"),
         Err(e) => vec![Emit::Result(GitOperationResult {
-            action: action.to_string(),
+            operation: operation.to_string(),
             ok: false,
             message: e.0,
         })],
@@ -183,7 +183,7 @@ impl JobKind {
             JobKind::Commit { path, message } => match runner::commit(&path, &message) {
                 Ok(()) => result_then_status(&path, &path, "commit", "committed"),
                 Err(e) => vec![Emit::Result(GitOperationResult {
-                    action: "commit".into(),
+                    operation: "commit".into(),
                     ok: false,
                     message: e.0,
                 })],
@@ -191,7 +191,7 @@ impl JobKind {
             JobKind::Fetch { path } => match runner::fetch(&path) {
                 Ok(()) => result_then_status(&path, &path, "fetch", "fetched"),
                 Err(e) => vec![Emit::Result(GitOperationResult {
-                    action: "fetch".into(),
+                    operation: "fetch".into(),
                     ok: false,
                     message: e.0,
                 })],
@@ -199,7 +199,7 @@ impl JobKind {
             JobKind::Pull { path } => match runner::pull(&path) {
                 Ok(()) => result_then_status(&path, &path, "pull", "pulled"),
                 Err(e) => vec![Emit::Result(GitOperationResult {
-                    action: "pull".into(),
+                    operation: "pull".into(),
                     ok: false,
                     message: e.0,
                 })],
@@ -208,15 +208,15 @@ impl JobKind {
                 repo_root,
                 operation,
             } => {
-                let action = operation.action().to_string();
+                let operation_name = operation.label().to_string();
                 match operation.run(&repo_root) {
                     Ok(message) => vec![Emit::Result(GitOperationResult {
-                        action,
+                        operation: operation_name,
                         ok: true,
                         message,
                     })],
                     Err(error) => vec![Emit::Result(GitOperationResult {
-                        action,
+                        operation: operation_name,
                         ok: false,
                         message: error.0,
                     })],
@@ -225,7 +225,7 @@ impl JobKind {
             JobKind::Push { path } => match runner::push(&path) {
                 Ok(()) => result_then_status(&path, &path, "push", "pushed"),
                 Err(e) => vec![Emit::Result(GitOperationResult {
-                    action: "push".into(),
+                    operation: "push".into(),
                     ok: false,
                     message: e.0,
                 })],
@@ -233,7 +233,7 @@ impl JobKind {
             JobKind::StageAll { path } => match runner::stage_all(&path) {
                 Ok(()) => result_then_status(&path, &path, "stage all", "staged"),
                 Err(e) => vec![Emit::Result(GitOperationResult {
-                    action: "stage all".into(),
+                    operation: "stage all".into(),
                     ok: false,
                     message: e.0,
                 })],
@@ -251,7 +251,7 @@ impl JobKind {
                     "ok",
                 ),
                 Err(e) => vec![Emit::Result(GitOperationResult {
-                    action: "hunk".into(),
+                    operation: "hunk".into(),
                     ok: false,
                     message: e.0,
                 })],

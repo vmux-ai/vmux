@@ -72,19 +72,14 @@ pub struct HoverBlock {
 }
 
 #[vmux_api::contract(Copy, Eq)]
-pub enum EditorAction {
+pub enum EditorCapability {
     GotoDeclaration,
     GotoTypeDefinition,
     GotoImplementation,
     Rename,
     FormatDocument,
     FormatSelection,
-    Cut,
-    Copy,
-    Paste,
-    ChangeAllOccurrences,
     CodeAction,
-    CommandPalette,
 }
 
 #[vmux_api::contract(Eq)]

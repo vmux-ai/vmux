@@ -132,30 +132,30 @@ impl CommandDefinition {
             .next()
             .and_then(|name| name.strip_prefix("vmux_"))
             .unwrap_or(module_path);
-        let action = request_type.strip_suffix("Request").unwrap_or(request_type);
-        let action = Self::snake_case(action);
+        let request = request_type.strip_suffix("Request").unwrap_or(request_type);
+        let request = Self::snake_case(request);
         let scope = Self::command_scope(module_path);
         let id = if let Some(scope) = scope {
-            if action.split('_').any(|word| word == scope) {
-                action.clone()
+            if request.split('_').any(|word| word == scope) {
+                request.clone()
             } else {
-                format!("{scope}_{action}")
+                format!("{scope}_{request}")
             }
-        } else if action.contains('_') {
-            action.clone()
+        } else if request.contains('_') {
+            request.clone()
         } else {
-            format!("{crate_namespace}_{action}")
+            format!("{crate_namespace}_{request}")
         };
         let group = Self::inferred_group(&id);
         let group_name = group.rsplit(" > ").next().unwrap_or(&group);
         let group_key = Self::snake_case(group_name);
-        let label_action = action
+        let label_request = request
             .strip_prefix(&format!("{group_key}_"))
-            .unwrap_or(&action);
-        let label = if !action.contains('_') && id != action {
-            format!("{} {group_name}", Self::title_case(label_action))
+            .unwrap_or(&request);
+        let label = if !request.contains('_') && id != request {
+            format!("{} {group_name}", Self::title_case(label_request))
         } else {
-            Self::title_case(label_action)
+            Self::title_case(label_request)
         };
         Self::new(id, label, group)
     }

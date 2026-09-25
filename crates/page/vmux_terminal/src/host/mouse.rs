@@ -53,7 +53,7 @@ struct MouseClickRecord {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum MouseTerminalAction {
+enum MouseTerminalEffect {
     ForwardInput(Vec<u8>),
     EnterCopyMode,
     ExitCopyMode,
@@ -69,7 +69,7 @@ impl MouseSessionState {
         event: &TermMouseEvent,
         mouse_capture: bool,
         now: Instant,
-    ) -> Vec<MouseTerminalAction> {
+    ) -> Vec<MouseTerminalEffect> {
         let shift = event.modifiers & MOD_SHIFT != 0;
         let is_left = event.button == 0;
         let select_mode = is_left && (!mouse_capture || shift);
@@ -83,7 +83,7 @@ impl MouseSessionState {
             } else {
                 event.button
             };
-            return vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
+            return vec![MouseTerminalEffect::ForwardInput(sgr_mouse_sequence(
                 button,
                 event.col,
                 event.row,
@@ -122,25 +122,25 @@ impl MouseSessionState {
             return match count {
                 1 if shift => {
                     self.pending_anchor = None;
-                    vec![MouseTerminalAction::ExtendSelectionTo {
+                    vec![MouseTerminalEffect::ExtendSelectionTo {
                         col: event.col,
                         row: event.row,
                     }]
                 }
                 1 => {
                     self.pending_anchor = Some((event.col, event.row));
-                    vec![MouseTerminalAction::SetSelection(None)]
+                    vec![MouseTerminalEffect::SetSelection(None)]
                 }
                 2 => {
                     self.pending_anchor = None;
-                    vec![MouseTerminalAction::SelectWordAt {
+                    vec![MouseTerminalEffect::SelectWordAt {
                         col: event.col,
                         row: event.row,
                     }]
                 }
                 _ => {
                     self.pending_anchor = None;
-                    vec![MouseTerminalAction::SelectLineAt { row: event.row }]
+                    vec![MouseTerminalEffect::SelectLineAt { row: event.row }]
                 }
             };
         }
@@ -153,8 +153,8 @@ impl MouseSessionState {
             if let Some((start_col, start_row)) = self.pending_anchor.take() {
                 self.drag_visual_active = true;
                 return vec![
-                    MouseTerminalAction::EnterCopyMode,
-                    MouseTerminalAction::SetSelection(Some(TermSelectionRange {
+                    MouseTerminalEffect::EnterCopyMode,
+                    MouseTerminalEffect::SetSelection(Some(TermSelectionRange {
                         start_col,
                         start_row,
                         end_col: event.col,
@@ -163,15 +163,15 @@ impl MouseSessionState {
                     })),
                 ];
             }
-            return vec![MouseTerminalAction::ExtendSelectionTo {
+            return vec![MouseTerminalEffect::ExtendSelectionTo {
                 col: event.col,
                 row: event.row,
             }];
         }
 
         if !event.pressed {
-            let actions = if self.drag_visual_active {
-                vec![MouseTerminalAction::ExitCopyMode]
+            let effects = if self.drag_visual_active {
+                vec![MouseTerminalEffect::ExitCopyMode]
             } else {
                 Vec::new()
             };
@@ -179,14 +179,14 @@ impl MouseSessionState {
             self.drag_visual_active = false;
             self.last_extend_cell = None;
             self.pending_anchor = None;
-            return actions;
+            return effects;
         }
 
         Vec::new()
     }
 }
 
-impl MouseTerminalAction {
+impl MouseTerminalEffect {
     fn send(self, service: &ServiceHandle, process_id: ProcessId) {
         match self {
             Self::ForwardInput(data) => {
@@ -276,9 +276,9 @@ fn on_term_mouse(
         .get(&process_id)
         .is_some_and(|mode| mode.mouse_capture);
     let selection = selections.per_process.entry(process_id).or_default();
-    for action in selection.apply(event, mouse_capture, Instant::now()) {
-        action.update_copy_mode(&mut copy_mode, process_id);
-        action.send(&service.0, process_id);
+    for effect in selection.apply(event, mouse_capture, Instant::now()) {
+        effect.update_copy_mode(&mut copy_mode, process_id);
+        effect.send(&service.0, process_id);
     }
 }
 
@@ -305,15 +305,15 @@ mod tests {
         let down = mouse_event(0, 2, 3, true, false);
         assert_eq!(
             state.apply(&down, false, now),
-            vec![MouseTerminalAction::SetSelection(None)]
+            vec![MouseTerminalEffect::SetSelection(None)]
         );
 
         let drag = mouse_event(0, 5, 3, true, true);
         assert_eq!(
             state.apply(&drag, false, now + std::time::Duration::from_millis(10),),
             vec![
-                MouseTerminalAction::EnterCopyMode,
-                MouseTerminalAction::SetSelection(Some(TermSelectionRange {
+                MouseTerminalEffect::EnterCopyMode,
+                MouseTerminalEffect::SetSelection(Some(TermSelectionRange {
                     start_col: 2,
                     start_row: 3,
                     end_col: 5,
@@ -326,7 +326,7 @@ mod tests {
         let release = mouse_event(0, 5, 3, false, false);
         assert_eq!(
             state.apply(&release, false, now + std::time::Duration::from_millis(20),),
-            vec![MouseTerminalAction::ExitCopyMode]
+            vec![MouseTerminalEffect::ExitCopyMode]
         );
     }
 
@@ -338,13 +338,13 @@ mod tests {
         let down = mouse_event(0, 2, 3, true, false);
         assert_eq!(
             state.apply(&down, false, now),
-            vec![MouseTerminalAction::SetSelection(None)]
+            vec![MouseTerminalEffect::SetSelection(None)]
         );
 
         let release = mouse_event(0, 2, 3, false, false);
         assert_eq!(
             state.apply(&release, false, now + std::time::Duration::from_millis(20),),
-            Vec::<MouseTerminalAction>::new()
+            Vec::<MouseTerminalEffect>::new()
         );
     }
 
@@ -355,7 +355,7 @@ mod tests {
 
         assert_eq!(
             state.apply(&event, true, Instant::now()),
-            vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
+            vec![MouseTerminalEffect::ForwardInput(sgr_mouse_sequence(
                 32, 4, 5, 0, true,
             ))]
         );
@@ -368,7 +368,7 @@ mod tests {
 
         assert_eq!(
             state.apply(&hover, false, Instant::now()),
-            Vec::<MouseTerminalAction>::new()
+            Vec::<MouseTerminalEffect>::new()
         );
     }
 
@@ -379,7 +379,7 @@ mod tests {
 
         assert_eq!(
             state.apply(&hover, true, Instant::now()),
-            vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
+            vec![MouseTerminalEffect::ForwardInput(sgr_mouse_sequence(
                 35, 9, 4, 0, true,
             ))]
         );

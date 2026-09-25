@@ -114,9 +114,9 @@ fn Mirror(
                     let _ = send(&SimulatorSoftwareKeyboard);
                     return;
                 }
-                if let Some(action) = ClipboardShortcut::from_event(&event) {
+                if let Some(operation) = ClipboardShortcut::from_event(&event) {
                     event.prevent_default();
-                    action.send();
+                    operation.send();
                     return;
                 }
                 let Some(operation) = Keystroke::from_event(&event) else {

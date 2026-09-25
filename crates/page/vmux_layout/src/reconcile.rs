@@ -160,7 +160,7 @@ fn validate_focus(focus: &Focus, all_ids: &HashSet<String>) -> Result<(), Valida
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum NodeAction {
+pub enum NodePlan {
     Match {
         existing: u64,
         desired_kind: NodeKind,
@@ -170,7 +170,7 @@ pub enum NodeAction {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct DiffPlan {
-    pub actions_by_id: HashMap<String, NodeAction>,
+    pub actions_by_id: HashMap<String, NodePlan>,
     pub closes: Vec<String>,
     pub focus: Focus,
 }
@@ -180,7 +180,7 @@ pub fn plan_diff(
     existing_ids: &HashSet<String>,
 ) -> Result<DiffPlan, ValidationError> {
     validate(snapshot)?;
-    let mut actions_by_id: HashMap<String, NodeAction> = HashMap::new();
+    let mut actions_by_id: HashMap<String, NodePlan> = HashMap::new();
     let mut referenced: HashSet<String> = HashSet::new();
 
     for tab in &snapshot.tabs {
@@ -189,7 +189,7 @@ pub fn plan_diff(
             let (_, value) = parse_id(id).expect("validated above");
             actions_by_id.insert(
                 id.clone(),
-                NodeAction::Match {
+                NodePlan::Match {
                     existing: value,
                     desired_kind: NodeKind::Tab,
                 },
@@ -215,7 +215,7 @@ pub fn plan_diff(
 
 fn plan_node(
     node: &LayoutNode,
-    actions_by_id: &mut HashMap<String, NodeAction>,
+    actions_by_id: &mut HashMap<String, NodePlan>,
     referenced: &mut HashSet<String>,
 ) {
     match node {
@@ -225,7 +225,7 @@ fn plan_node(
                 let (_, value) = parse_id(id).expect("validated");
                 actions_by_id.insert(
                     id.clone(),
-                    NodeAction::Match {
+                    NodePlan::Match {
                         existing: value,
                         desired_kind: NodeKind::Split,
                     },
@@ -241,7 +241,7 @@ fn plan_node(
                 let (_, value) = parse_id(id).expect("validated");
                 actions_by_id.insert(
                     id.clone(),
-                    NodeAction::Match {
+                    NodePlan::Match {
                         existing: value,
                         desired_kind: NodeKind::Pane,
                     },
@@ -253,7 +253,7 @@ fn plan_node(
                     let (_, value) = parse_id(tid).expect("validated");
                     actions_by_id.insert(
                         tid.clone(),
-                        NodeAction::Match {
+                        NodePlan::Match {
                             existing: value,
                             desired_kind: NodeKind::Stack,
                         },
