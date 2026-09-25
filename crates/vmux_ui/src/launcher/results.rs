@@ -1,6 +1,6 @@
 use crate::i18n::translate;
 use vmux_api::PageIcon;
-use vmux_api::chat::ResumableSessionEntry;
+use vmux_api::chat::{ResumableSessionEntry, SlashCommand};
 use vmux_api::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
     CommandBarRecentFile, CommandBarSpace, CommandBarTab, CommandBarWorkDir, HistoryEntry,
@@ -27,16 +27,16 @@ impl SlashRows {
         let lowered = name.to_lowercase();
         let mut matching = Vec::new();
         for command in commands {
-            if command.name.starts_with(&lowered) {
+            if command.name().starts_with(&lowered) {
                 matching.push(command);
             }
         }
         let settled = match matching.as_slice() {
             [only] => Some(*only),
-            _ => commands.iter().find(|command| command.name == lowered),
+            _ => commands.iter().find(|command| command.name() == lowered),
         };
         if let Some(command) = settled
-            && command.name == "resume"
+            && command.command == SlashCommand::Resume
         {
             if sessions.is_empty() && pending {
                 return Self::pending();
@@ -46,8 +46,8 @@ impl SlashRows {
         let mut rows = Vec::new();
         for command in matching {
             rows.push(CommandBarResultItem::Slash {
-                name: command.name.clone(),
-                hint: if command.name == "mcp" {
+                name: command.name().to_string(),
+                hint: if command.command == SlashCommand::Mcp {
                     translate("mcp-command-description")
                 } else {
                     command.description.clone()

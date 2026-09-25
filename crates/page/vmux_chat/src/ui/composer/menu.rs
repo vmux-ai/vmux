@@ -36,7 +36,7 @@ pub(super) fn CommandMenu(chat: Chat) -> Element {
         PromptPopup { on_dismiss: move |()| chat.dismiss_selector(),
             for (index , command) in chat.filtered_commands().into_iter().enumerate() {
                 {
-                    let hint = if command.name == "mcp" {
+                    let hint = if command.command == vmux_api::chat::SlashCommand::Mcp {
                         translate("mcp-command-description")
                     } else {
                         command.description.clone()
@@ -46,13 +46,13 @@ pub(super) fn CommandMenu(chat: Chat) -> Element {
                             key: "sc{index}",
                             index,
                             item: CommandBarResultItem::Slash {
-                                name: command.name.clone(),
+                                name: command.name().to_string(),
                                 hint,
                             },
                             selected: index == menu_sel(),
                             on_activate: {
-                                let name = command.name.clone();
-                                move |()| chat.run_slash_command(&name)
+                                let command = command.command;
+                                move |()| chat.select_slash_command(command)
                             },
                             on_hover: move |()| menu_sel.set(index),
                         }

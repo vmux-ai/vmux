@@ -440,10 +440,54 @@ impl ResumableSessions {
         self.reaches() < self.total
     }
 }
+#[vmux_api::contract(Copy, Default, Eq)]
+pub enum SlashCommand {
+    #[default]
+    Upload,
+    Resume,
+    Mcp,
+    Model,
+    Cli,
+}
+
+impl SlashCommand {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Upload => "upload",
+            Self::Resume => "resume",
+            Self::Mcp => "mcp",
+            Self::Model => "model",
+            Self::Cli => "cli",
+        }
+    }
+
+    pub const fn draft(self) -> &'static str {
+        match self {
+            Self::Resume => "/resume ",
+            Self::Mcp => "/mcp ",
+            Self::Model => "/model ",
+            Self::Upload | Self::Cli => "",
+        }
+    }
+}
+
 #[vmux_api::contract(Default, Eq)]
 pub struct SlashCommandEntry {
-    pub name: String,
+    pub command: SlashCommand,
     pub description: String,
+}
+
+impl SlashCommandEntry {
+    pub const fn name(&self) -> &'static str {
+        self.command.name()
+    }
+
+    fn new(command: SlashCommand, description: &str) -> Self {
+        Self {
+            command,
+            description: description.to_string(),
+        }
+    }
 }
 #[vmux_api::contract(Default)]
 pub struct SlashCommands {
@@ -465,22 +509,13 @@ pub struct ResumeSession {
 impl SlashCommands {
     pub fn for_start() -> Self {
         let commands = vec![
-            SlashCommandEntry {
-                name: "upload".into(),
-                description: "Attach files".into(),
-            },
-            SlashCommandEntry {
-                name: "resume".into(),
-                description: "Resume a past session".into(),
-            },
+            SlashCommandEntry::new(SlashCommand::Upload, "Attach files"),
+            SlashCommandEntry::new(SlashCommand::Resume, "Resume a past session"),
         ];
         #[cfg(host)]
         let commands = {
             let mut commands = commands;
-            commands.push(SlashCommandEntry {
-                name: "mcp".into(),
-                description: String::new(),
-            });
+            commands.push(SlashCommandEntry::new(SlashCommand::Mcp, ""));
             commands
         };
         Self { commands }
@@ -488,31 +523,19 @@ impl SlashCommands {
 
     pub fn for_agent(cross_runtime: bool, has_models: bool) -> Self {
         let mut commands = vec![
-            SlashCommandEntry {
-                name: "upload".into(),
-                description: "Attach files".into(),
-            },
-            SlashCommandEntry {
-                name: "resume".into(),
-                description: "Resume a past session".into(),
-            },
+            SlashCommandEntry::new(SlashCommand::Upload, "Attach files"),
+            SlashCommandEntry::new(SlashCommand::Resume, "Resume a past session"),
         ];
         #[cfg(host)]
-        commands.push(SlashCommandEntry {
-            name: "mcp".into(),
-            description: String::new(),
-        });
+        commands.push(SlashCommandEntry::new(SlashCommand::Mcp, ""));
         if has_models {
-            commands.push(SlashCommandEntry {
-                name: "model".into(),
-                description: "Select model".into(),
-            });
+            commands.push(SlashCommandEntry::new(SlashCommand::Model, "Select model"));
         }
         if cross_runtime {
-            commands.push(SlashCommandEntry {
-                name: "cli".into(),
-                description: "Continue this session in the CLI".into(),
-            });
+            commands.push(SlashCommandEntry::new(
+                SlashCommand::Cli,
+                "Continue this session in the CLI",
+            ));
         }
         Self { commands }
     }

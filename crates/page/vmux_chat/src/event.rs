@@ -3,7 +3,7 @@ pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
 pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
 pub use vmux_api::chat::{
     ChatKey, ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
-    SlashCommandEntry, SlashCommands,
+    SlashCommand, SlashCommandEntry, SlashCommands,
 };
 use vmux_api::json::JsonValue;
 pub use vmux_api::prompt_media::{
@@ -228,6 +228,18 @@ pub struct ChatCancelQueuedPrompt {
 pub struct ChatEscape;
 
 #[vmux_api::ui_event(Default)]
+pub struct ChatSlashCommandRequest {
+    pub command: SlashCommand,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatComposerEffect {
+    pub revision: u64,
+    pub draft: String,
+    pub focus: bool,
+}
+
+#[vmux_api::ui_event(Default)]
 pub struct ChatSelectWorkspace;
 
 #[vmux_api::ui_event(Default)]
@@ -308,11 +320,6 @@ pub struct SetAgentEffort {
 #[vmux_api::ui_event(Default)]
 pub struct ChatOpenPage {
     pub url: String,
-}
-
-#[vmux_api::ui_event(Default)]
-pub struct RuntimeSwitchRequest {
-    pub to: String,
 }
 
 pub use vmux_api::chat::{

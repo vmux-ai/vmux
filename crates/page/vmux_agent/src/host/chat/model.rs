@@ -1010,7 +1010,7 @@ mod tests {
             SlashCommands::for_agent(cross, models)
                 .commands
                 .iter()
-                .map(|command| command.name.clone())
+                .map(|command| command.name())
                 .collect::<Vec<_>>()
         };
         assert_eq!(names(false, false), ["upload", "resume", "mcp"]);

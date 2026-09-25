@@ -1,11 +1,11 @@
 use super::scroll;
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
-    ChatBranchesRequest, ChatBranchesState, ChatCancel, ChatChoiceSelected, ChatEscape,
-    ChatHistoryRequest, ChatItem, ChatMediaEntry, ChatMediaQueryRequest, ChatMediaState,
-    ChatPickFiles, ChatRemoveAttachment, ChatSnapshot, ChatSubmit, ChatTranscriptState,
-    ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, ResumeSession,
-    RuntimeSwitchRequest, SelectMode, SelectModel, SlashCommandEntry,
+    ChatBranchesRequest, ChatBranchesState, ChatCancel, ChatChoiceSelected, ChatComposerEffect,
+    ChatEscape, ChatHistoryRequest, ChatItem, ChatMediaEntry, ChatMediaQueryRequest,
+    ChatMediaState, ChatRemoveAttachment, ChatSlashCommandRequest, ChatSnapshot, ChatSubmit,
+    ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
+    ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
 };
 use crate::event::{ChatResumeQueryRequest, ChatResumeState};
 use crate::format::{
@@ -141,6 +141,22 @@ impl Chat {
             ChatUiStatePatch::Media(state) => self.apply_media(state),
             ChatUiStatePatch::Branches(incoming) => self.apply_branches(incoming),
             ChatUiStatePatch::Resume(state) => self.apply_sessions(state),
+            ChatUiStatePatch::ComposerEffect(effect) => self.apply_composer_effect(effect),
+        }
+    }
+
+    fn apply_composer_effect(&self, effect: &ChatComposerEffect) {
+        if effect.revision <= *self.composer.effect_revision.peek() {
+            return;
+        }
+        let mut revision = self.composer.effect_revision;
+        let mut draft = self.composer.draft;
+        let mut menu_sel = self.slash.menu_sel;
+        revision.set(effect.revision);
+        draft.set(effect.draft.clone());
+        menu_sel.set(0);
+        if effect.focus {
+            focus_prompt_end(PROMPT_INPUT_ID);
         }
     }
 
@@ -376,7 +392,7 @@ impl Chat {
         let query = query.to_lowercase();
         let mut matching = Vec::new();
         for command in self.slash.commands.read().iter() {
-            if command.name.starts_with(&query) {
+            if command.name().starts_with(&query) {
                 matching.push(command.clone());
             }
         }
@@ -707,37 +723,8 @@ impl Chat {
         let _ = send(&ChatCancel);
     }
 
-    pub fn run_slash_command(&self, name: &str) {
-        let mut draft = self.composer.draft;
-        let mut menu_sel = self.slash.menu_sel;
-        match name {
-            "upload" => {
-                let _ = send(&ChatPickFiles);
-                draft.set(String::new());
-            }
-            "resume" => {
-                menu_sel.set(0);
-                draft.set("/resume ".to_string());
-            }
-            "model" => {
-                menu_sel.set(0);
-                draft.set("/model ".to_string());
-            }
-            "mcp" => {
-                menu_sel.set(0);
-                draft.set("/mcp ".to_string());
-                self.mcp.request();
-            }
-            "cli" => {
-                let _ = send(&RuntimeSwitchRequest { to: "cli".into() });
-                draft.set(String::new());
-            }
-            "acp" => {
-                let _ = send(&RuntimeSwitchRequest { to: "acp".into() });
-                draft.set(String::new());
-            }
-            _ => {}
-        }
+    pub fn select_slash_command(&self, command: SlashCommand) {
+        let _ = send(&ChatSlashCommandRequest { command });
     }
 
     pub fn select_model(&self, model: &ModelOptionEntry) {
@@ -987,6 +974,7 @@ pub fn use_handoff() -> Handoff {
 #[derive(Clone, Copy, PartialEq)]
 pub struct ComposerDraft {
     pub draft: Signal<String>,
+    pub effect_revision: Signal<u64>,
     pub attachments: Signal<Vec<ChatAttachment>>,
     pub history_cursor: Signal<Option<usize>>,
     pub history_scratch: Signal<String>,
@@ -997,6 +985,7 @@ pub struct ComposerDraft {
 pub fn use_composer_draft() -> ComposerDraft {
     ComposerDraft {
         draft: use_signal(String::new),
+        effect_revision: use_signal(|| 0),
         attachments: use_signal(Vec::new),
         history_cursor: use_signal(|| None),
         history_scratch: use_signal(String::new),
