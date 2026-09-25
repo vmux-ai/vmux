@@ -476,23 +476,19 @@ pub fn active_stack_in_pane(
 pub struct ActiveTabParam<'w, 's> {
     tabs: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
     active_tabs: Query<'w, 's, Entity, (With<Tab>, With<vmux_core::Active>)>,
-    active_space: Option<Res<'w, crate::space::ActiveSpaceEntity>>,
+    current_space: Query<'w, 's, Entity, With<crate::space::CurrentSpace>>,
     child_of: Query<'w, 's, &'static ChildOf>,
 }
 
 impl ActiveTabParam<'_, '_> {
     pub fn get(&self) -> Option<Entity> {
-        let scoped = self
-            .active_space
-            .as_ref()
-            .and_then(|resource| resource.0)
-            .and_then(|active_space| {
-                self.active_tabs.iter().find(|&tab| {
-                    self.child_of
-                        .get(tab)
-                        .is_ok_and(|parent| parent.parent() == active_space)
-                })
-            });
+        let scoped = self.current_space.iter().next().and_then(|active_space| {
+            self.active_tabs.iter().find(|&tab| {
+                self.child_of
+                    .get(tab)
+                    .is_ok_and(|parent| parent.parent() == active_space)
+            })
+        });
         if scoped.is_some() {
             return scoped;
         }
@@ -1810,7 +1806,9 @@ mod tests {
                 ChildOf(space_b),
             ))
             .id();
-        app.insert_resource(crate::space::ActiveSpaceEntity(Some(space_b)));
+        app.world_mut()
+            .entity_mut(space_b)
+            .insert(crate::space::CurrentSpace);
 
         let got = app
             .world_mut()

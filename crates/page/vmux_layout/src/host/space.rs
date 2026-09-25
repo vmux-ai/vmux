@@ -9,14 +9,12 @@ impl Plugin for SpaceLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Space>()
             .register_type::<SpaceId>()
-            .init_resource::<ActiveSpaceEntity>()
-            .init_resource::<ActiveSpaceId>()
             .add_systems(
                 Update,
                 (
                     crate::active::ensure_active_space,
-                    sync_active_space_entity,
-                    sync_active_space_id,
+                    bevy::ecs::schedule::ApplyDeferred,
+                    sync_current_space.in_set(CurrentSpaceSet),
                 )
                     .chain()
                     .after(crate::window::WindowFocusSet),
@@ -40,6 +38,9 @@ impl Plugin for SpaceLayoutPlugin {
 
 pub struct SpaceLayoutPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CurrentSpaceSet;
+
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::space"]
@@ -52,43 +53,39 @@ pub struct Space;
 #[require(Save)]
 pub struct SpaceId(pub String);
 
-#[derive(Resource, Default, Debug, PartialEq, Eq)]
-pub struct ActiveSpaceEntity(pub Option<Entity>);
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CurrentSpace;
 
-#[derive(Resource, Default, Debug, PartialEq, Eq)]
-pub struct ActiveSpaceId(pub Option<String>);
-
-pub fn sync_active_space_entity(
-    tagged: Query<Entity, (With<Space>, With<vmux_core::Active>)>,
+fn sync_current_space(
+    spaces: Query<(Entity, Has<vmux_core::Active>, Has<CurrentSpace>), With<Space>>,
     focused_window: Res<crate::window::FocusedWindow>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
-    mut active: ResMut<ActiveSpaceEntity>,
+    mut commands: Commands,
 ) {
     let current = focused_window
         .0
         .and_then(|focused| {
-            tagged.iter().find(|space| {
-                crate::window::host_window_of(*space, &child_of, &host_windows) == Some(focused)
-            })
+            spaces
+                .iter()
+                .filter(|(_, active, _)| *active)
+                .map(|(entity, _, _)| entity)
+                .find(|space| {
+                    crate::window::host_window_of(*space, &child_of, &host_windows) == Some(focused)
+                })
         })
-        .or_else(|| tagged.iter().next());
-    if active.0 != current {
-        active.0 = current;
-    }
-}
-
-pub fn sync_active_space_id(
-    active: Res<ActiveSpaceEntity>,
-    ids: Query<&SpaceId>,
-    mut active_id: ResMut<ActiveSpaceId>,
-) {
-    let current = active
-        .0
-        .and_then(|entity| ids.get(entity).ok())
-        .map(|id| id.0.clone());
-    if active_id.0 != current {
-        active_id.0 = current;
+        .or_else(|| {
+            spaces
+                .iter()
+                .find(|(_, active, _)| *active)
+                .map(|(entity, _, _)| entity)
+        });
+    for (entity, _, selected) in &spaces {
+        if current == Some(entity) && !selected {
+            commands.entity(entity).insert(CurrentSpace);
+        } else if current != Some(entity) && selected {
+            commands.entity(entity).remove::<CurrentSpace>();
+        }
     }
 }
 
@@ -179,45 +176,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn active_space_entity_tracks_tagged_space() {
+    fn current_space_tracks_active_space() {
         let mut app = App::new();
-        app.init_resource::<ActiveSpaceEntity>()
-            .init_resource::<crate::window::FocusedWindow>()
-            .add_systems(Update, sync_active_space_entity);
+        app.init_resource::<crate::window::FocusedWindow>()
+            .add_systems(Update, sync_current_space);
         let space = app
             .world_mut()
             .spawn((Space, SpaceId("default".to_string()), vmux_core::Active))
             .id();
         app.update();
-        assert_eq!(app.world().resource::<ActiveSpaceEntity>().0, Some(space));
+        assert!(app.world().get::<CurrentSpace>(space).is_some());
     }
 
     #[test]
-    fn active_space_entity_clears_when_no_tag() {
+    fn current_space_clears_when_no_space_is_active() {
         let mut app = App::new();
-        app.init_resource::<ActiveSpaceEntity>()
-            .init_resource::<crate::window::FocusedWindow>()
-            .add_systems(Update, sync_active_space_entity);
-        app.insert_resource(ActiveSpaceEntity(Some(Entity::from_bits(42))));
+        app.init_resource::<crate::window::FocusedWindow>()
+            .add_systems(Update, sync_current_space);
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
         app.update();
-        assert_eq!(app.world().resource::<ActiveSpaceEntity>().0, None);
+        assert!(app.world().get::<CurrentSpace>(space).is_none());
     }
 
     #[test]
-    fn active_space_id_tracks_active_entity() {
+    fn current_space_retains_its_typed_id() {
         let mut app = App::new();
-        app.init_resource::<ActiveSpaceEntity>()
-            .init_resource::<ActiveSpaceId>()
-            .init_resource::<crate::window::FocusedWindow>()
-            .add_systems(
-                Update,
-                (sync_active_space_entity, sync_active_space_id).chain(),
-            );
-        app.world_mut()
-            .spawn((Space, SpaceId("work".to_string()), vmux_core::Active));
+        app.init_resource::<crate::window::FocusedWindow>()
+            .add_systems(Update, sync_current_space);
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("work".to_string()), vmux_core::Active))
+            .id();
         app.update();
         assert_eq!(
-            app.world().resource::<ActiveSpaceId>().0.as_deref(),
+            app.world()
+                .get::<SpaceId>(space)
+                .filter(|_| app.world().get::<CurrentSpace>(space).is_some())
+                .map(|id| id.0.as_str()),
             Some("work")
         );
     }

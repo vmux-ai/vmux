@@ -20,7 +20,7 @@ use crate::pane::{
     Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, split_root_bundle,
 };
 use crate::settings::LayoutSettings;
-use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
+use crate::space::{CurrentSpace, Space, SpaceId, space_of};
 #[cfg(test)]
 use crate::stack::CloseRequest;
 use crate::stack::{
@@ -533,7 +533,7 @@ fn handle_reopen_closed_page(
     spaces: Query<(Entity, &SpaceId), With<Space>>,
     any_space: Query<Entity, With<Space>>,
     layout: ReopenLayout,
-    active_space: Res<ActiveSpaceEntity>,
+    current_space: Query<Entity, With<CurrentSpace>>,
     focused_window: Option<Res<crate::window::FocusedWindow>>,
     settings: Res<LayoutSettings>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -568,7 +568,11 @@ fn handle_reopen_closed_page(
         .or_else(|| spaces.iter().find(|(_, id)| id.0 == page.space_id))
         .map(|(e, _)| e);
     let target_space = origin_space
-        .or_else(|| active_space.0.filter(|e| any_space.get(*e).is_ok()))
+        .or_else(|| {
+            current_space
+                .iter()
+                .find(|entity| any_space.get(*entity).is_ok())
+        })
         .or_else(|| any_space.iter().next());
     let Some(space) = target_space else {
         return;
@@ -1337,7 +1341,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(ArchivePlugin)
             .add_message::<CloseStackRequest>()
-            .init_resource::<crate::space::ActiveSpaceEntity>()
             .init_resource::<LayoutSettings>();
         app.world_mut()
             .spawn((bevy::window::Window::default(), PrimaryWindow));
@@ -1510,7 +1513,6 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<crate::pane::PendingCursorWarp>()
-            .init_resource::<crate::space::ActiveSpaceEntity>()
             .init_resource::<LayoutSettings>();
         app.world_mut()
             .spawn((bevy::window::Window::default(), PrimaryWindow));
@@ -1817,7 +1819,6 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<TerminalSpawnRequest>()
-            .init_resource::<crate::space::ActiveSpaceEntity>()
             .init_resource::<crate::settings::LayoutSettings>()
             .add_systems(Update, super::handle_reopen_closed_page);
         app.world_mut()
@@ -1863,7 +1864,6 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<TerminalSpawnRequest>()
-            .init_resource::<crate::space::ActiveSpaceEntity>()
             .init_resource::<crate::settings::LayoutSettings>()
             .init_resource::<CapturedTerminalSpawnTargets>()
             .add_systems(
@@ -2278,7 +2278,8 @@ mod tests {
             ))
             .id();
         app.world_mut()
-            .insert_resource(crate::space::ActiveSpaceEntity(Some(active)));
+            .entity_mut(active)
+            .insert(crate::space::CurrentSpace);
         app.world_mut().spawn(ArchivedPage {
             url: "https://x.example".to_string(),
             title: String::new(),
@@ -2330,7 +2331,8 @@ mod tests {
             .spawn((Space, SpaceId("active".to_string())))
             .id();
         app.world_mut()
-            .insert_resource(crate::space::ActiveSpaceEntity(Some(active)));
+            .entity_mut(active)
+            .insert(crate::space::CurrentSpace);
         let t0 = app
             .world_mut()
             .spawn((Tab::default(), ChildOf(active)))

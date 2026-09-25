@@ -12,7 +12,6 @@ use crate::bookmark::{
 };
 use crate::pane::{OpenBesideRequest, SpawnCounter};
 use crate::settings::{EffectiveStartupDir, EffectiveStartupUrl};
-use crate::space::ActiveSpaceId;
 use crate::stack::{CloseStackRequest, FocusedStack};
 use crate::worktree::TabDirectoryObserved;
 use crate::{
@@ -26,7 +25,6 @@ pub struct LayoutContractPlugin;
 impl Plugin for LayoutContractPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActivePanes>()
-            .init_resource::<ActiveSpaceId>()
             .init_resource::<EffectiveStartupDir>()
             .init_resource::<EffectiveStartupUrl>()
             .init_resource::<FocusedStack>()

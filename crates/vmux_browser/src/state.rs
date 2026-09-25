@@ -225,6 +225,7 @@ type LayoutMarkerChanged = Or<(
     Changed<PaneSplit>,
     Changed<vmux_layout::pane::Zoomed>,
     Changed<vmux_layout::space::Space>,
+    Changed<vmux_layout::space::CurrentSpace>,
     Changed<vmux_core::Active>,
 )>;
 
@@ -290,6 +291,7 @@ struct PageStateRemovals<'w, 's> {
     zoomed: RemovedComponents<'w, 's, vmux_layout::pane::Zoomed>,
     space: RemovedComponents<'w, 's, vmux_layout::space::Space>,
     space_id: RemovedComponents<'w, 's, vmux_layout::space::SpaceId>,
+    current_space: RemovedComponents<'w, 's, vmux_layout::space::CurrentSpace>,
     sections_expanded:
         RemovedComponents<'w, 's, vmux_layout::side_sheet::SideSheetSectionsExpanded>,
     uuid: RemovedComponents<'w, 's, vmux_core::Uuid>,
@@ -336,6 +338,7 @@ impl PageStateRemovals<'_, '_> {
         any |= self.zoomed.read().count() > 0;
         any |= self.space.read().count() > 0;
         any |= self.space_id.read().count() > 0;
+        any |= self.current_space.read().count() > 0;
         any |= self.sections_expanded.read().count() > 0;
         any |= self.uuid.read().count() > 0;
         any |= self.bookmark_order.read().count() > 0;
@@ -358,7 +361,6 @@ fn mark_page_state_dirty(
     side_sheet_width: Res<SideSheetWidth>,
     settings: Res<AppSettings>,
     active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
-    active_space_entity: Option<Res<vmux_layout::space::ActiveSpaceEntity>>,
     repo_info: Option<Res<vmux_git::RepoInfoCache>>,
     mut revision: ResMut<StateRevision>,
 ) {
@@ -367,9 +369,6 @@ fn mark_page_state_dirty(
         || side_sheet_width.is_changed()
         || settings.is_changed()
         || active_space
-            .as_ref()
-            .is_some_and(|value| value.is_changed())
-        || active_space_entity
             .as_ref()
             .is_some_and(|value| value.is_changed())
         || repo_info.as_ref().is_some_and(|value| value.is_changed());
