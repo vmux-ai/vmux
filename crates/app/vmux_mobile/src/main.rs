@@ -35,6 +35,7 @@ static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(V
 static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
+#[cfg(target_os = "ios")]
 const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
 
 #[cfg(target_os = "ios")]
@@ -177,6 +178,7 @@ fn AppBody() -> Element {
         let client = api();
         let sid = session.sid();
         let generation = (session.generation)();
+        let stream_runtime = stream_runtime.clone();
         async move {
             let Some(client) = client else {
                 return;
@@ -184,7 +186,7 @@ fn AppBody() -> Element {
             if sid.is_empty() {
                 return;
             }
-            session::stream(session, stream_runtime.clone(), client, sid, generation).await;
+            session::stream(session, stream_runtime, client, sid, generation).await;
         }
     });
 

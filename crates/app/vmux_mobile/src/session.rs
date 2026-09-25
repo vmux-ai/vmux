@@ -174,9 +174,8 @@ fn open_sessions(
         transition::NativeSheet::open();
         session.current.set(Some(request.0.clone()));
         session.connected.set(false);
-        session
-            .generation
-            .set((session.generation)().wrapping_add(1));
+        let generation = (session.generation)().wrapping_add(1);
+        session.generation.set(generation);
         commands.insert_resource(Log {
             room_id: Some(request.0.room_id.clone()),
             ..Log::default()
@@ -200,9 +199,8 @@ fn leave_sessions(
     };
     for _ in requests.read() {
         let dismissing = transition::NativeSheet::close();
-        session
-            .generation
-            .set((session.generation)().wrapping_add(1));
+        let generation = (session.generation)().wrapping_add(1);
+        session.generation.set(generation);
         session.current.set(None);
         session.connected.set(false);
         commands.insert_resource(Conversation::default());

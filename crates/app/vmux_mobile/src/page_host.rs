@@ -165,7 +165,7 @@ impl PageHost for MobileHost {
                 let mut runtime = self.runtime.borrow_mut();
                 let world = runtime.app.world_mut();
                 world
-                    .non_send_resource_mut::<PageListeners>()
+                    .non_send_mut::<PageListeners>()
                     .0
                     .insert(ChatUiState::ID.to_string(), on_bytes);
                 mark_changed::<Snapshot>(world);
@@ -177,7 +177,7 @@ impl PageHost for MobileHost {
                 let mut runtime = self.runtime.borrow_mut();
                 let world = runtime.app.world_mut();
                 world
-                    .non_send_resource_mut::<PageListeners>()
+                    .non_send_mut::<PageListeners>()
                     .0
                     .insert(CommandBarUiState::ID.to_string(), on_bytes);
                 mark_changed::<Launcher>(world);
@@ -187,7 +187,7 @@ impl PageHost for MobileHost {
                 let mut runtime = self.runtime.borrow_mut();
                 let world = runtime.app.world_mut();
                 world
-                    .non_send_resource_mut::<PageListeners>()
+                    .non_send_mut::<PageListeners>()
                     .0
                     .insert(TeamEvent::ID.to_string(), on_bytes);
                 mark_changed::<Team>(world);
