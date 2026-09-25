@@ -19,7 +19,6 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let folders = folder_context();
     let is_active = stack.is_active;
     let stack_id = stack.id;
-    let command = StackCommand::new(pane_id, stack_id);
     let mut hovered = use_signal(|| false);
     let menu_val = use_signal(|| stack.url.clone());
     let metadata = PageMetadata {
@@ -73,7 +72,10 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             event.stop_propagation();
                             return;
                         }
-                        command.activate();
+                        let _ = send(&crate::event::SideSheetStackActivateRequest {
+                            pane_id,
+                            stack_id,
+                        });
                     },
                     StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
                     span { class: "{title_class}", "{display_title}" }
@@ -97,7 +99,10 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         onclick: move |evt| {
                             evt.prevent_default();
                             evt.stop_propagation();
-                            command.close();
+                            let _ = send(&crate::event::SideSheetStackCloseRequest {
+                                pane_id,
+                                stack_id,
+                            });
                         },
                         Icon { class: "h-3 w-3 pointer-events-none",
                             path { d: "M18 6 6 18" }
@@ -197,32 +202,6 @@ pub(super) fn StackIcon(icon: PageIcon, url: String, title: String) -> Element {
             img_class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
             icon_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
         }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct StackCommand {
-    pane_id: u64,
-    stack_id: u64,
-}
-
-impl StackCommand {
-    fn new(pane_id: u64, stack_id: u64) -> Self {
-        Self { pane_id, stack_id }
-    }
-
-    fn activate(self) {
-        let _ = send(&crate::event::SideSheetStackActivateRequest {
-            pane_id: self.pane_id,
-            stack_id: self.stack_id,
-        });
-    }
-
-    fn close(self) {
-        let _ = send(&crate::event::SideSheetStackCloseRequest {
-            pane_id: self.pane_id,
-            stack_id: self.stack_id,
-        });
     }
 }
 

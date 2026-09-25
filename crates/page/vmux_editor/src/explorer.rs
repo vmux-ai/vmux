@@ -83,25 +83,6 @@ fn collapse_all_dirs() {
     let _ = send(&ExplorerCollapseAll);
 }
 
-#[derive(Clone, PartialEq)]
-pub struct EditorTabCommand {
-    pub path: String,
-}
-
-impl EditorTabCommand {
-    pub fn open(&self) {
-        let _ = send(&FileOpenEvent {
-            path: self.path.clone(),
-        });
-    }
-
-    pub fn close(&self) {
-        let _ = send(&ExplorerCloseEditor {
-            path: self.path.clone(),
-        });
-    }
-}
-
 fn goto_line(line: u32) {
     let _ = send(&ExplorerGoto {
         path: String::new(),
@@ -1520,8 +1501,8 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                     div { class: "min-h-0 overflow-hidden",
                         for it in open_editors() {
                             {
-                                let command = EditorTabCommand { path: it.path.clone() };
-                                let close_command = command.clone();
+                                let open_path = it.path.clone();
+                                let close_path = it.path.clone();
                                 let active = it.active;
                                 let dirty = it.dirty;
                                 rsx! {
@@ -1532,12 +1513,18 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                         } else {
                                             "group flex cursor-default items-center gap-1 py-0.5 pl-5 pr-2 text-foreground/75 transition-[background-color,opacity,transform] duration-150 hover:bg-foreground/[0.08]"
                                         },
-                                        onclick: move |_| command.open(),
+                                        onclick: move |_| {
+                                            let _ = send(&FileOpenEvent {
+                                                path: open_path.clone(),
+                                            });
+                                        },
                                         span {
                                             class: "inline-block w-3 shrink-0 cursor-default text-center text-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground",
                                             onclick: move |e: Event<MouseData>| {
                                                 e.stop_propagation();
-                                                close_command.close();
+                                                let _ = send(&ExplorerCloseEditor {
+                                                    path: close_path.clone(),
+                                                });
                                             },
                                             "\u{00D7}"
                                         }
