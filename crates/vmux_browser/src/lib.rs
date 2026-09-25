@@ -710,15 +710,69 @@ fn send_page_open_response(
     });
 }
 
-pub struct NavPending {
+#[derive(Component, Clone)]
+struct PendingNavigationSnapshot {
+    webview: Entity,
     pub request_id: [u8; 16],
     pub started: std::time::Duration,
     pub saw_loading: bool,
     pub pane: Option<String>,
 }
 
-#[derive(Resource, Default)]
-pub struct PendingNavSnapshots(pub std::collections::HashMap<Entity, NavPending>);
+#[derive(Message)]
+struct PendingNavigationUpdate {
+    webview: Entity,
+    pending: Option<PendingNavigationSnapshot>,
+}
+
+impl PendingNavigationUpdate {
+    fn set(
+        webview: Entity,
+        request_id: [u8; 16],
+        started: std::time::Duration,
+        pane: Option<String>,
+    ) -> Self {
+        Self {
+            webview,
+            pending: Some(PendingNavigationSnapshot {
+                webview,
+                request_id,
+                started,
+                saw_loading: false,
+                pane,
+            }),
+        }
+    }
+
+    fn clear(webview: Entity) -> Self {
+        Self {
+            webview,
+            pending: None,
+        }
+    }
+}
+
+fn apply_pending_navigation_updates(
+    mut updates: MessageReader<PendingNavigationUpdate>,
+    existing: Query<(Entity, &PendingNavigationSnapshot)>,
+    service: Option<Res<vmux_service::client::ServiceClient>>,
+    mut commands: Commands,
+) {
+    let mut pending = existing
+        .iter()
+        .map(|(entity, operation)| (operation.webview, (entity, operation.clone())))
+        .collect::<bevy::ecs::entity::EntityHashMap<_>>();
+    for update in updates.read() {
+        if let Some((entity, displaced)) = pending.remove(&update.webview) {
+            commands.entity(entity).despawn();
+            send_page_open_response(&service, Some(displaced.request_id), Ok(()));
+        }
+        if let Some(next) = update.pending.clone() {
+            let entity = commands.spawn(next.clone()).id();
+            pending.insert(update.webview, (entity, next));
+        }
+    }
+}
 
 fn cef_root_cache_path() -> Option<String> {
     vmux_core::profile::cef_cache_path()
@@ -729,6 +783,38 @@ mod tests {
     use super::*;
     use crate::appearance::sync_appearance_to_cef;
     use vmux_core::overlay::WindowOverlay;
+
+    #[test]
+    fn pending_navigation_updates_keep_only_the_latest_request() {
+        let mut app = App::new();
+        app.add_message::<PendingNavigationUpdate>()
+            .add_systems(Update, apply_pending_navigation_updates);
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Messages<PendingNavigationUpdate>>()
+            .write(PendingNavigationUpdate::set(
+                webview,
+                [1; 16],
+                std::time::Duration::ZERO,
+                None,
+            ));
+        app.world_mut()
+            .resource_mut::<Messages<PendingNavigationUpdate>>()
+            .write(PendingNavigationUpdate::set(
+                webview,
+                [2; 16],
+                std::time::Duration::ZERO,
+                None,
+            ));
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut pending = world.query::<&PendingNavigationSnapshot>();
+        let pending = pending.iter(world).collect::<Vec<_>>();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].request_id, [2; 16]);
+    }
 
     #[test]
     fn cef_disables_bfcache_for_extension_ports() {
@@ -949,7 +1035,7 @@ mod tests {
 
     mod browser_navigate_flow {
         use crate::input::RecentBrowserInteraction;
-        use crate::{Browser, PendingNavSnapshots};
+        use crate::{Browser, PendingNavigationSnapshot};
         use bevy::ecs::relationship::Relationship;
         use bevy::prelude::*;
         use vmux_agent::events::AgentCommandRequest;
@@ -1010,7 +1096,6 @@ mod tests {
                 .add_message::<vmux_space::SpaceOpenPageRequest>()
                 .add_message::<vmux_space::SpaceRenameRequest>()
                 .add_message::<vmux_history::query::HistoryOpenIntent>()
-                .init_resource::<crate::PendingNavSnapshots>()
                 .add_systems(
                     Update,
                     (
@@ -1208,17 +1293,10 @@ mod tests {
                 .expect("new browser stack");
             assert_ne!(second.0, first_stack);
             assert!(second.1 > 1);
-            assert_eq!(world.resource::<PendingNavSnapshots>().0.len(), 1);
-            assert_eq!(
-                world
-                    .resource::<PendingNavSnapshots>()
-                    .0
-                    .values()
-                    .next()
-                    .unwrap()
-                    .request_id,
-                request_id
-            );
+            let mut pending = world.query::<&PendingNavigationSnapshot>();
+            let pending = pending.iter(world).collect::<Vec<_>>();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].request_id, request_id);
         }
 
         #[test]
@@ -1348,11 +1426,10 @@ mod tests {
                 terminal_count >= 1,
                 "terminal should be spawned in focused pane"
             );
+            let mut pending = world.query::<&PendingNavigationSnapshot>();
             assert!(
-                world
-                    .resource::<PendingNavSnapshots>()
-                    .0
-                    .values()
+                pending
+                    .iter(world)
                     .any(|pending| pending.request_id == request_id.0),
                 "terminal navigation should wait for its snapshot"
             );
@@ -1618,8 +1695,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(crate::page::PagePlugin)
-                .insert_resource(FocusedStack::default())
-                .init_resource::<crate::PendingNavSnapshots>();
+                .insert_resource(FocusedStack::default());
             let stack = app.world_mut().spawn_empty().id();
             let task = app
                 .world_mut()

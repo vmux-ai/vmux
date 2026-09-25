@@ -1,4 +1,4 @@
-use crate::PendingNavSnapshots;
+use crate::PendingNavigationSnapshot;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, SnapshotResult};
@@ -16,18 +16,19 @@ pub(crate) struct SnapshotPlugin;
 
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingNavSnapshots>()
-            .add_systems(
-                Update,
-                drive_pending_nav_snapshots.after(vmux_command::WriteCommandRequests),
-            )
-            .add_systems(
-                Update,
-                (start_snapshots, shape_snapshot_results)
-                    .chain()
-                    .after(crate::scroll::run_scrolls)
-                    .after(vmux_command::WriteCommandRequests),
-            );
+        app.add_systems(
+            Update,
+            drive_pending_nav_snapshots
+                .after(crate::apply_pending_navigation_updates)
+                .after(vmux_command::WriteCommandRequests),
+        )
+        .add_systems(
+            Update,
+            (start_snapshots, shape_snapshot_results)
+                .chain()
+                .after(crate::scroll::run_scrolls)
+                .after(vmux_command::WriteCommandRequests),
+        );
     }
 }
 
@@ -146,22 +147,22 @@ pub(crate) fn most_recent_browser(
 
 pub(crate) fn drive_pending_nav_snapshots(
     time: Res<Time>,
-    mut pending: ResMut<PendingNavSnapshots>,
+    mut pending: Query<(Entity, &mut PendingNavigationSnapshot)>,
     loading_q: Query<(), With<Loading>>,
     alive_q: Query<(), With<Browser>>,
     ready_q: Query<(), With<vmux_core::page::PageReady>>,
     mut nav_awaiting: ResMut<NavAwaitingSnapshot>,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
+    mut commands: Commands,
 ) {
-    if pending.0.is_empty() {
+    if pending.is_empty() {
         return;
     }
     let now = time.elapsed();
-    let mut done: Vec<Entity> = Vec::new();
-    for (webview, nav) in pending.0.iter_mut() {
-        let alive = alive_q.contains(*webview);
-        let ready = ready_q.contains(*webview);
-        let loading = loading_q.contains(*webview);
+    for (entity, mut nav) in &mut pending {
+        let alive = alive_q.contains(nav.webview);
+        let ready = ready_q.contains(nav.webview);
+        let loading = loading_q.contains(nav.webview);
         if loading {
             nav.saw_loading = true;
         }
@@ -174,13 +175,10 @@ pub(crate) fn drive_pending_nav_snapshots(
             snapshot_writer.write(BrowserSnapshotRequest {
                 request_id: nav.request_id,
                 pane: nav.pane.clone(),
-                webview: Some(*webview),
+                webview: Some(nav.webview),
             });
-            done.push(*webview);
+            commands.entity(entity).despawn();
         }
-    }
-    for webview in done {
-        pending.0.remove(&webview);
     }
 }
 

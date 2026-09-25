@@ -19,7 +19,7 @@ use vmux_layout::{
 use vmux_terminal::{self as terminal, Terminal};
 
 use crate::input::RecentBrowserInteraction;
-use crate::{NavPending, PendingNavSnapshots, send_page_open_response};
+use crate::{PendingNavigationUpdate, send_page_open_response};
 
 pub(crate) struct NavigationPlugin;
 
@@ -289,7 +289,7 @@ pub(crate) fn handle_browser_navigate_requests(
     service: Option<Res<vmux_service::client::ServiceClient>>,
     mut commands: Commands,
     mut page_open_writer: MessageWriter<PageOpenRequest>,
-    mut pending_nav: ResMut<PendingNavSnapshots>,
+    mut pending_navigation: MessageWriter<PendingNavigationUpdate>,
     time: Res<Time>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &vmux_core::LastActivatedAt), With<vmux_layout::stack::Stack>>,
@@ -366,21 +366,16 @@ pub(crate) fn handle_browser_navigate_requests(
                         webview,
                         url: url.clone(),
                     });
-                    let displaced = match request_id {
-                        Some(rid) => pending_nav.0.insert(
+                    let update = match request_id {
+                        Some(request_id) => PendingNavigationUpdate::set(
                             webview,
-                            NavPending {
-                                request_id: rid,
-                                started: time.elapsed(),
-                                saw_loading: false,
-                                pane: Some(target.to_bits().to_string()),
-                            },
+                            request_id,
+                            time.elapsed(),
+                            Some(target.to_bits().to_string()),
                         ),
-                        None => pending_nav.0.remove(&webview),
+                        None => PendingNavigationUpdate::clear(webview),
                     };
-                    if let Some(old) = displaced {
-                        send_page_open_response(&service, Some(old.request_id), Ok(()));
-                    }
+                    pending_navigation.write(update);
                     if request_id.is_none() {
                         send_page_open_response(&service, None, Ok(()));
                     }
@@ -438,21 +433,16 @@ pub(crate) fn handle_browser_navigate_requests(
                     webview,
                     url: url.clone(),
                 });
-                let displaced = match request_id {
-                    Some(rid) => pending_nav.0.insert(
+                let update = match request_id {
+                    Some(request_id) => PendingNavigationUpdate::set(
                         webview,
-                        NavPending {
-                            request_id: rid,
-                            started: time.elapsed(),
-                            saw_loading: false,
-                            pane: focus.pane.map(|p| p.to_bits().to_string()),
-                        },
+                        request_id,
+                        time.elapsed(),
+                        focus.pane.map(|pane| pane.to_bits().to_string()),
                     ),
-                    None => pending_nav.0.remove(&webview),
+                    None => PendingNavigationUpdate::clear(webview),
                 };
-                if let Some(old) = displaced {
-                    send_page_open_response(&service, Some(old.request_id), Ok(()));
-                }
+                pending_navigation.write(update);
                 if request_id.is_none() {
                     send_page_open_response(&service, None, Ok(()));
                 }
