@@ -2,14 +2,13 @@ use std::collections::{HashMap, HashSet};
 
 use super::scroll;
 use crate::event::{
-    ApprovalDecision, CHAT_HISTORY_PAGE_SIZE, ChatApproval, ChatAttachPaths, ChatAttachment,
-    ChatAttachmentPreviewRequest, ChatAttachmentPreviews, ChatAttachments, ChatBranch,
-    ChatBranchesRequest, ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage,
-    ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
-    ChatPickFiles, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ComposerContext,
-    ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SelectMode, SelectModel,
-    SlashCommandEntry, latest_tool_location,
+    ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest,
+    ChatAttachmentPreviews, ChatAttachments, ChatBranch, ChatBranchesRequest, ChatCancel,
+    ChatChoiceSelected, ChatEscape, ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry,
+    ChatMediaListRequest, ChatPickFiles, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
+    ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
+    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
+    RuntimeSwitchRequest, SelectMode, SelectModel, SlashCommandEntry, latest_tool_location,
 };
 use crate::format::composer::{
     ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
@@ -146,7 +145,7 @@ impl Chat {
                 commands.set(incoming.commands.clone());
             }
             ChatUiStatePatch::Key(_) => {}
-            ChatUiStatePatch::History(page) => self.apply_history_page(*page.clone()),
+            ChatUiStatePatch::Transcript(state) => self.apply_transcript(state),
             ChatUiStatePatch::Attachments(selected) => self.apply_attachments(selected),
             ChatUiStatePatch::AttachmentPreviews(loaded) => self.apply_previews(loaded),
             ChatUiStatePatch::MediaEntries(response) => self.apply_media(response),
@@ -231,28 +230,6 @@ impl Chat {
     }
 
     fn apply_snapshot(&self, snapshot: ChatSnapshot) {
-        let transcript = self.transcript;
-        let messages_changed = (transcript.recent_messages_start)() != snapshot.messages_start
-            || transcript.recent_messages.peek().as_slice() != snapshot.messages.as_slice();
-        if messages_changed {
-            self.request_transcript_previews(&snapshot.messages);
-            let mut items = transcript.items;
-            let mut recent_messages = transcript.recent_messages;
-            let mut recent_start = transcript.recent_messages_start;
-            let start = merge_transcript_page(
-                &mut items.write(),
-                (transcript.loaded_start)(),
-                snapshot.messages.clone(),
-                snapshot.messages_start,
-            );
-            set_if_changed(transcript.loaded_start, start);
-            recent_messages.set(snapshot.messages.clone());
-            recent_start.set(snapshot.messages_start);
-            if start == 0 {
-                set_if_changed(transcript.history_loading, false);
-            }
-        }
-        set_if_changed(transcript.messages_total, snapshot.messages_total);
         set_if_changed(self.run.status, snapshot.status.clone());
         set_if_changed(self.run.error, snapshot.error.clone());
         self.request_queue_previews(&snapshot.queued);
@@ -297,21 +274,23 @@ impl Chat {
         }
     }
 
-    fn apply_history_page(&self, page: ChatHistoryPage) {
+    fn apply_transcript(&self, state: &ChatTranscriptState) {
         let transcript = self.transcript;
-        let mut history_loading = transcript.history_loading;
-        history_loading.set(false);
-        if page.end != (transcript.loaded_start)() {
-            return;
-        }
-        self.request_transcript_previews(&page.items);
-        let metrics = scroll::metrics(transcript.scroll_container);
-        let mut items = transcript.items;
-        let mut loaded_start = transcript.loaded_start;
-        let mut messages_total = transcript.messages_total;
-        drop(items.write().splice(0..0, page.items));
-        loaded_start.set(page.start);
-        messages_total.set(page.total);
+        let preserve_scroll = (transcript.generation)() == state.generation
+            && (transcript.prepend_revision)() != state.prepend_revision;
+        let metrics = if preserve_scroll {
+            scroll::metrics(transcript.scroll_container)
+        } else {
+            None
+        };
+        self.request_transcript_previews(&state.items);
+        set_if_changed(transcript.items, state.items.clone());
+        set_if_changed(transcript.loaded_start, state.loaded_start);
+        set_if_changed(transcript.messages_total, state.total);
+        set_if_changed(transcript.history_loading, state.loading);
+        set_if_changed(transcript.generation, state.generation);
+        set_if_changed(transcript.request_id, state.request_id);
+        set_if_changed(transcript.prepend_revision, state.prepend_revision);
         if let Some((height, top)) = metrics {
             scroll::restore(transcript.scroll_container, height, top);
         }
@@ -408,19 +387,17 @@ impl Chat {
     }
 
     pub fn request_history(&self) {
-        let mut loading = self.transcript.history_loading;
+        let transcript = self.transcript;
         let before = (self.transcript.loaded_start)();
-        if before == 0 || *loading.peek() {
+        let generation = (transcript.generation)();
+        if before == 0 || generation == 0 || (transcript.history_loading)() {
             return;
         }
-        if send(&ChatHistoryRequest {
-            before,
-            limit: CHAT_HISTORY_PAGE_SIZE,
-        })
-        .is_ok()
-        {
-            loading.set(true);
-        }
+        let request_id = (transcript.request_id)().saturating_add(1);
+        let _ = send(&ChatHistoryRequest {
+            generation,
+            request_id,
+        });
     }
 }
 
@@ -1008,8 +985,9 @@ pub struct Transcript {
     pub loaded_start: Signal<u32>,
     pub messages_total: Signal<u32>,
     pub history_loading: Signal<bool>,
-    pub recent_messages: Signal<Vec<ChatItem>>,
-    pub recent_messages_start: Signal<u32>,
+    pub generation: Signal<u64>,
+    pub request_id: Signal<u64>,
+    pub prepend_revision: Signal<u64>,
     pub at_bottom: Signal<bool>,
     pub last_top: Signal<i32>,
     pub scroll_container: scroll::Container,
@@ -1021,8 +999,9 @@ pub fn use_transcript() -> Transcript {
         loaded_start: use_signal(|| 0),
         messages_total: use_signal(|| 0),
         history_loading: use_signal(|| false),
-        recent_messages: use_signal(Vec::new),
-        recent_messages_start: use_signal(|| u32::MAX),
+        generation: use_signal(|| 0),
+        request_id: use_signal(|| 0),
+        prepend_revision: use_signal(|| 0),
         at_bottom: use_signal(|| true),
         last_top: use_signal(|| 0),
         scroll_container: use_signal(|| None),
@@ -1265,24 +1244,6 @@ fn set_if_changed<T: PartialEq + 'static>(mut signal: Signal<T>, value: T) {
     if signal.peek().ne(&value) {
         signal.set(value);
     }
-}
-
-fn merge_transcript_page(
-    current: &mut Vec<ChatItem>,
-    current_start: u32,
-    incoming: Vec<ChatItem>,
-    incoming_start: u32,
-) -> u32 {
-    if current_start <= incoming_start {
-        let keep = incoming_start.saturating_sub(current_start) as usize;
-        if keep <= current.len() {
-            current.truncate(keep);
-            current.extend(incoming);
-            return current_start;
-        }
-    }
-    *current = incoming;
-    incoming_start
 }
 
 struct CurrentAgent;
