@@ -23,19 +23,18 @@ pub(crate) struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RecentBrowserInteraction>()
-            .add_systems(
-                PreUpdate,
-                (
-                    publish_layout_pointer_inside,
-                    forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
-                    forward_layout_cef_mouse_button.run_if(on_message::<MouseButtonInput>),
-                )
-                    .chain()
-                    .after(InputSystems),
+        app.add_systems(
+            PreUpdate,
+            (
+                publish_layout_pointer_inside,
+                forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
+                forward_layout_cef_mouse_button.run_if(on_message::<MouseButtonInput>),
             )
-            .add_systems(PreUpdate, log_command_bar_keyboard_input)
-            .add_systems(Update, track_browser_interaction);
+                .chain()
+                .after(InputSystems),
+        )
+        .add_systems(PreUpdate, log_command_bar_keyboard_input)
+        .add_systems(Update, track_browser_interaction);
     }
 }
 
@@ -196,18 +195,20 @@ fn forward_layout_cef_mouse_button(
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Component)]
 pub(crate) struct RecentBrowserInteraction {
-    pub(crate) stack: Option<Entity>,
-    pub(crate) at: Option<std::time::Instant>,
+    at: std::time::Instant,
 }
 
 impl RecentBrowserInteraction {
-    pub(crate) fn active(&self, stack: Entity) -> bool {
-        self.stack == Some(stack)
-            && self
-                .at
-                .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(2))
+    pub(crate) fn now() -> Self {
+        Self {
+            at: std::time::Instant::now(),
+        }
+    }
+
+    pub(crate) fn active(&self) -> bool {
+        self.at.elapsed() < std::time::Duration::from_secs(2)
     }
 }
 
@@ -217,7 +218,7 @@ fn track_browser_interaction(
     mut keyboard: MessageReader<KeyboardInput>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     browsers: Query<&ChildOf, With<Browser>>,
-    mut recent: ResMut<RecentBrowserInteraction>,
+    mut commands: Commands,
 ) {
     let interacted = mouse_buttons
         .read()
@@ -231,7 +232,8 @@ fn track_browser_interaction(
     }
     let Some(stack) = focus.stack else { return };
     if browsers.iter().any(|child_of| child_of.get() == stack) {
-        recent.stack = Some(stack);
-        recent.at = Some(std::time::Instant::now());
+        commands
+            .entity(stack)
+            .insert(RecentBrowserInteraction::now());
     }
 }
