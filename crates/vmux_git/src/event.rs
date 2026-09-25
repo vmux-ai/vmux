@@ -4,7 +4,7 @@ pub use vmux_api::git::{
 };
 use vmux_core::input::KeyModifiers;
 
-use crate::state::{GitBranchCollection, GitPageControllerState, GitPanel};
+use crate::state::{GitBranchCollection, GitPanel};
 
 #[vmux_api::ui_event(Eq, target = "git")]
 pub struct GitKeyRequest {
@@ -15,19 +15,9 @@ pub struct GitKeyRequest {
 }
 
 impl GitKeyRequest {
-    pub fn captures_browser_default(
-        &self,
-        controller: &GitPageControllerState,
-        repository_loaded: bool,
-    ) -> bool {
+    pub fn captures_browser_default(&self, repository_loaded: bool) -> bool {
         if self.navigation_key() {
-            return match controller.focused_panel {
-                GitPanel::Status => false,
-                GitPanel::Files => !controller.selected_path_bytes.is_empty(),
-                GitPanel::Branches => !controller.selected_branch.is_empty(),
-                GitPanel::Commits => !controller.selected_commit.is_empty(),
-                GitPanel::Stash => !controller.selected_stash.is_empty(),
-            };
+            return repository_loaded;
         }
         if self.repeat || self.modifiers.ctrl || self.modifiers.alt || self.modifiers.super_key {
             return false;
@@ -38,27 +28,27 @@ impl GitKeyRequest {
         if !repository_loaded {
             return false;
         }
-        let operations = &controller.operations;
-        match (controller.focused_panel, self.key.as_str()) {
-            (GitPanel::Status, "e" | "u" | "Enter") => true,
-            (GitPanel::Files, "a") => operations.stage_all,
-            (GitPanel::Files, "s") => operations.stash,
-            (GitPanel::Files, "A") => operations.amend,
-            (GitPanel::Files, " " | "Space") => operations.toggle_stage,
-            (GitPanel::Files, "x") => operations.discard,
-            (GitPanel::Branches, "Enter" | " " | "Space" | "c") => operations.checkout_branch,
-            (GitPanel::Branches, "r") => operations.rebase,
-            (GitPanel::Branches, "M") => operations.merge,
-            (GitPanel::Branches, "f") => operations.fast_forward,
-            (GitPanel::Branches, "n") => operations.create_branch,
-            (GitPanel::Branches, "d") => operations.delete_branch,
-            (GitPanel::Commits, " " | "Space") => operations.checkout_commit,
-            (GitPanel::Commits, "C" | "V") => operations.cherry_pick,
-            (GitPanel::Commits, "t") => operations.revert_commit,
-            (GitPanel::Stash, "g") => operations.stash_pop,
-            (GitPanel::Stash, "d") => operations.stash_drop,
-            _ => false,
-        }
+        matches!(
+            self.key.as_str(),
+            "e" | "u"
+                | "Enter"
+                | "a"
+                | "s"
+                | "A"
+                | " "
+                | "Space"
+                | "x"
+                | "c"
+                | "r"
+                | "M"
+                | "f"
+                | "n"
+                | "d"
+                | "C"
+                | "V"
+                | "t"
+                | "g"
+        )
     }
 
     fn navigation_key(&self) -> bool {
