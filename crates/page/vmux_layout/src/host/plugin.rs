@@ -1,6 +1,4 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::UiEventPlugin;
-use vmux_core::page::{PageReady, mark_webview_page_ready};
 
 use super::command::LayoutRequestPlugin;
 use super::projection::LayoutUiProjectionPlugin;
@@ -64,8 +62,6 @@ impl Plugin for LayoutPlugin {
                 Update,
                 (apply::apply_layout_requests, apply::serve_snapshot_requests),
             )
-            .add_plugins(UiEventPlugin::<(PageReady,)>::default())
-            .add_observer(mark_webview_page_ready)
             .add_plugins((
                 crate::tool::LayoutToolPlugin,
                 crate::bookmark_tool::BookmarkToolPlugin,
