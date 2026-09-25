@@ -99,16 +99,25 @@ pub struct BookmarkMoveRequest {
     pub folder: Option<String>,
 }
 
-#[vmux_api::ui_event(Eq)]
-pub struct BookmarkMovePinRequest {
-    pub uuid: String,
-    pub folder: Option<String>,
+#[vmux_api::contract(Eq)]
+pub enum BookmarkDropSource {
+    Page { metadata: PageMetadata },
+    Bookmark { uuid: String },
+    Pin { uuid: String },
+    Folder { uuid: String },
+}
+
+#[vmux_api::contract(Eq)]
+pub enum BookmarkDropTarget {
+    Root,
+    Folder { uuid: String },
+    Pin { uuid: String },
 }
 
 #[vmux_api::ui_event(Eq)]
-pub struct BookmarkReorderPinRequest {
-    pub uuid: String,
-    pub target_uuid: String,
+pub struct BookmarkDropRequest {
+    pub source: BookmarkDropSource,
+    pub target: BookmarkDropTarget,
 }
 
 #[vmux_api::ui_event(Eq)]

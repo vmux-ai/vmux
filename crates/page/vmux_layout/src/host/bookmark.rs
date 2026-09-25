@@ -4,19 +4,18 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::bookmark::{
-    BookmarkAddRequest as BookmarkAddUiRequest, BookmarkContextMenuRequest,
+    BookmarkAddRequest as BookmarkAddUiRequest, BookmarkContextMenuRequest, BookmarkDropRequest,
+    BookmarkDropSource, BookmarkDropTarget,
     BookmarkFolderCreateRequest as BookmarkFolderCreateUiRequest,
     BookmarkFolderMoveRequest as BookmarkFolderMoveUiRequest,
     BookmarkFolderRemoveRequest as BookmarkFolderRemoveUiRequest,
     BookmarkFolderRenameRequest as BookmarkFolderRenameUiRequest,
     BookmarkFolderToggleRequest as BookmarkFolderToggleUiRequest, BookmarkMenuEntryRequest,
     BookmarkMenuFolderRequest, BookmarkMenuPinRequest, BookmarkMenuRootRequest,
-    BookmarkMovePinRequest as BookmarkMovePinUiRequest,
     BookmarkMoveRequest as BookmarkMoveUiRequest, BookmarkOpenRequest,
     BookmarkPinRequest as BookmarkPinUiRequest, BookmarkPinUrlRequest as BookmarkPinUrlUiRequest,
     BookmarkRemoveRequest as BookmarkRemoveUiRequest,
-    BookmarkRenameRequest as BookmarkRenameUiRequest,
-    BookmarkReorderPinRequest as BookmarkReorderPinUiRequest, BookmarkTextInputRequest,
+    BookmarkRenameRequest as BookmarkRenameUiRequest, BookmarkTextInputRequest,
     BookmarkToggleRequest, BookmarkUnpinRequest as BookmarkUnpinUiRequest,
 };
 use vmux_core::host::page::PageManifest;
@@ -51,10 +50,8 @@ impl Plugin for BookmarkPlugin {
             BookmarkRemoveUiRequest,
             BookmarkRenameUiRequest,
             BookmarkMoveUiRequest,
-            BookmarkMovePinUiRequest,
         )>::default())
         .add_plugins(UiEventPlugin::<(
-            BookmarkReorderPinUiRequest,
             BookmarkPinUiRequest,
             BookmarkUnpinUiRequest,
             BookmarkFolderToggleUiRequest,
@@ -64,6 +61,7 @@ impl Plugin for BookmarkPlugin {
             BookmarkFolderRemoveUiRequest,
             BookmarkTextInputRequest,
             BookmarkContextMenuRequest,
+            BookmarkDropRequest,
         )>::default())
         .add_observer(on_bookmark_toggle_request)
         .add_observer(on_bookmark_menu_request::<BookmarkMenuRootRequest>)
@@ -76,8 +74,6 @@ impl Plugin for BookmarkPlugin {
         .add_observer(on_bookmark_remove_request)
         .add_observer(on_bookmark_rename_request)
         .add_observer(on_bookmark_move_request)
-        .add_observer(on_bookmark_move_pin_request)
-        .add_observer(on_bookmark_reorder_pin_request)
         .add_observer(on_bookmark_pin_request)
         .add_observer(on_bookmark_unpin_request)
         .add_observer(on_bookmark_folder_toggle_request)
@@ -87,6 +83,7 @@ impl Plugin for BookmarkPlugin {
         .add_observer(on_bookmark_folder_remove_request)
         .add_observer(on_bookmark_text_input_request)
         .add_observer(on_bookmark_context_menu_request)
+        .add_observer(on_bookmark_drop_request)
         .add_systems(
             Update,
             (
@@ -859,24 +856,76 @@ fn on_bookmark_move_request(
     });
 }
 
-fn on_bookmark_move_pin_request(
-    trigger: On<UiInput<BookmarkMovePinUiRequest>>,
-    mut requests: MessageWriter<MovePinRequest>,
+fn on_bookmark_drop_request(
+    trigger: On<UiInput<BookmarkDropRequest>>,
+    mut add_requests: MessageWriter<AddRequest>,
+    mut move_requests: MessageWriter<MoveRequest>,
+    mut move_pin_requests: MessageWriter<MovePinRequest>,
+    mut reorder_pin_requests: MessageWriter<ReorderPinRequest>,
+    mut move_folder_requests: MessageWriter<MoveFolderRequest>,
 ) {
-    requests.write(MovePinRequest {
-        uuid: trigger.event().payload.uuid.clone(),
-        folder: trigger.event().payload.folder.clone(),
-    });
-}
-
-fn on_bookmark_reorder_pin_request(
-    trigger: On<UiInput<BookmarkReorderPinUiRequest>>,
-    mut requests: MessageWriter<ReorderPinRequest>,
-) {
-    requests.write(ReorderPinRequest {
-        uuid: trigger.event().payload.uuid.clone(),
-        target_uuid: trigger.event().payload.target_uuid.clone(),
-    });
+    let request = &trigger.event().payload;
+    match (&request.source, &request.target) {
+        (BookmarkDropSource::Page { metadata }, BookmarkDropTarget::Root) => {
+            add_requests.write(AddRequest {
+                metadata: metadata.clone(),
+                folder: None,
+            });
+        }
+        (BookmarkDropSource::Page { metadata }, BookmarkDropTarget::Folder { uuid: folder }) => {
+            add_requests.write(AddRequest {
+                metadata: metadata.clone(),
+                folder: Some(folder.clone()),
+            });
+        }
+        (BookmarkDropSource::Bookmark { uuid }, BookmarkDropTarget::Root) => {
+            move_requests.write(MoveRequest {
+                uuid: uuid.clone(),
+                folder: None,
+            });
+        }
+        (BookmarkDropSource::Bookmark { uuid }, BookmarkDropTarget::Folder { uuid: folder }) => {
+            move_requests.write(MoveRequest {
+                uuid: uuid.clone(),
+                folder: Some(folder.clone()),
+            });
+        }
+        (BookmarkDropSource::Pin { uuid }, BookmarkDropTarget::Root) => {
+            move_pin_requests.write(MovePinRequest {
+                uuid: uuid.clone(),
+                folder: None,
+            });
+        }
+        (BookmarkDropSource::Pin { uuid }, BookmarkDropTarget::Folder { uuid: folder }) => {
+            move_pin_requests.write(MovePinRequest {
+                uuid: uuid.clone(),
+                folder: Some(folder.clone()),
+            });
+        }
+        (BookmarkDropSource::Pin { uuid }, BookmarkDropTarget::Pin { uuid: target_uuid })
+            if uuid != target_uuid =>
+        {
+            reorder_pin_requests.write(ReorderPinRequest {
+                uuid: uuid.clone(),
+                target_uuid: target_uuid.clone(),
+            });
+        }
+        (BookmarkDropSource::Folder { uuid }, BookmarkDropTarget::Root) => {
+            move_folder_requests.write(MoveFolderRequest {
+                uuid: uuid.clone(),
+                parent: None,
+            });
+        }
+        (BookmarkDropSource::Folder { uuid }, BookmarkDropTarget::Folder { uuid: parent })
+            if uuid != parent =>
+        {
+            move_folder_requests.write(MoveFolderRequest {
+                uuid: uuid.clone(),
+                parent: Some(parent.clone()),
+            });
+        }
+        _ => {}
+    }
 }
 
 fn on_bookmark_pin_request(
@@ -1121,6 +1170,107 @@ mod tests {
             requests,
             vec![OpenRequest {
                 url: Some("https://a.test".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn drop_event_routes_domain_requests() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AddRequest>()
+            .add_message::<MoveRequest>()
+            .add_message::<MovePinRequest>()
+            .add_message::<ReorderPinRequest>()
+            .add_message::<MoveFolderRequest>()
+            .add_observer(on_bookmark_drop_request);
+        let webview = app.world_mut().spawn_empty().id();
+        for payload in [
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Page {
+                    metadata: metadata("Page"),
+                },
+                target: BookmarkDropTarget::Folder {
+                    uuid: "folder".into(),
+                },
+            },
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Bookmark {
+                    uuid: "bookmark".into(),
+                },
+                target: BookmarkDropTarget::Root,
+            },
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Pin { uuid: "pin".into() },
+                target: BookmarkDropTarget::Folder {
+                    uuid: "folder".into(),
+                },
+            },
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Pin { uuid: "pin".into() },
+                target: BookmarkDropTarget::Pin {
+                    uuid: "target".into(),
+                },
+            },
+            BookmarkDropRequest {
+                source: BookmarkDropSource::Folder {
+                    uuid: "folder".into(),
+                },
+                target: BookmarkDropTarget::Folder {
+                    uuid: "parent".into(),
+                },
+            },
+        ] {
+            app.world_mut().trigger(UiInput { webview, payload });
+        }
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<AddRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [AddRequest {
+                metadata: metadata("Page"),
+                folder: Some("folder".into()),
+            }]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<MoveRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [MoveRequest {
+                uuid: "bookmark".into(),
+                folder: None,
+            }]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<MovePinRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [MovePinRequest {
+                uuid: "pin".into(),
+                folder: Some("folder".into()),
+            }]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<ReorderPinRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [ReorderPinRequest {
+                uuid: "pin".into(),
+                target_uuid: "target".into(),
+            }]
+        );
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<MoveFolderRequest>>()
+                .drain()
+                .collect::<Vec<_>>(),
+            [MoveFolderRequest {
+                uuid: "folder".into(),
+                parent: Some("parent".into()),
             }]
         );
     }

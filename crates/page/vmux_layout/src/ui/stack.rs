@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_api::bookmark::BookmarkFolderChoice;
+use vmux_api::bookmark::{BookmarkAddRequest, BookmarkFolderChoice, BookmarkPinUrlRequest};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
@@ -8,8 +8,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 
 use super::bookmark::{
-    BookmarkDragItem, BookmarkDragState, BookmarkPageCommand, LayoutContextMenu,
-    SideSheetContextMenuContent,
+    BookmarkDragItem, BookmarkDragState, LayoutContextMenu, SideSheetContextMenuContent,
 };
 use crate::event::StackNode;
 
@@ -112,7 +111,10 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| {
-                        BookmarkPageCommand::Add.send(bookmark_metadata.clone(), None)
+                        let _ = send(&BookmarkAddRequest {
+                            metadata: bookmark_metadata.clone(),
+                            folder: None,
+                        });
                     },
                     attributes: vec![],
                     {translate("layout-bookmark")}
@@ -131,8 +133,10 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             };
                             let folder_uuid = folder.uuid.clone();
                             move |_: String| {
-                                BookmarkPageCommand::Add
-                                    .send(metadata.clone(), Some(folder_uuid.clone()))
+                                let _ = send(&BookmarkAddRequest {
+                                    metadata: metadata.clone(),
+                                    folder: Some(folder_uuid.clone()),
+                                });
                             }
                         },
                         attributes: vec![],
@@ -146,7 +150,9 @@ pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     index: pin_index,
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| {
-                        BookmarkPageCommand::Pin.send(pin_metadata.clone(), None)
+                        let _ = send(&BookmarkPinUrlRequest {
+                            metadata: pin_metadata.clone(),
+                        });
                     },
                     attributes: vec![],
                     {translate("layout-pin")}
