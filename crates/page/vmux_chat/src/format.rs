@@ -65,10 +65,10 @@ pub(crate) fn should_fetch_resume(draft: &str, commands: &[SlashCommandEntry]) -
             let query = query.to_lowercase();
             let mut matches = commands
                 .iter()
-                .filter(|command| command.name.starts_with(&query));
+                .filter(|command| command.name().starts_with(&query));
             matches
                 .next()
-                .is_some_and(|command| command.name == "resume")
+                .is_some_and(|command| command.command == vmux_api::chat::SlashCommand::Resume)
                 && matches.next().is_none()
         }
         SelectorMode::None => false,
@@ -337,11 +337,11 @@ mod tests {
     fn resume_prefetch_starts_only_for_resume_as_the_sole_match() {
         let commands = vec![
             SlashCommandEntry {
-                name: "resume".into(),
+                command: vmux_api::chat::SlashCommand::Resume,
                 ..Default::default()
             },
             SlashCommandEntry {
-                name: "cli".into(),
+                command: vmux_api::chat::SlashCommand::Cli,
                 ..Default::default()
             },
         ];

@@ -367,7 +367,7 @@ impl ChatList {
             }
             Self::Command => {
                 if let Some(command) = chat.filtered_commands().get(index) {
-                    chat.run_slash_command(&command.name);
+                    chat.select_slash_command(command.command);
                 }
             }
         }

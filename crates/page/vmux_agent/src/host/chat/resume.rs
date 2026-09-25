@@ -5,11 +5,11 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use super::{AgentChatView, ChatResumeProjection};
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
-use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
+use crate::strategy::{AgentStrategies, acp_agent_kind};
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_chat::event::{
     ChatResumeQueryRequest, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest,
+    ResumeSession,
 };
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
@@ -24,14 +24,12 @@ impl Plugin for ChatResumePlugin {
             ResumeListRequest,
             ChatResumeQueryRequest,
             ResumeSession,
-            RuntimeSwitchRequest,
             PromptHistoryRequest,
         )>::default())
             .init_resource::<ResumableScan>()
             .add_observer(on_resume_list_request)
             .add_observer(on_chat_resume_query_request)
             .add_observer(on_resume_session)
-            .add_observer(on_runtime_switch_request)
             .add_observer(on_prompt_history_request)
             .add_systems(
                 Update,
@@ -522,71 +520,10 @@ fn on_resume_session(
     });
 }
 
-fn on_runtime_switch_request(
-    trigger: On<UiInput<RuntimeSwitchRequest>>,
-    child_of: Query<&ChildOf>,
-    acp_sessions: Query<&AcpSession>,
-    settings: Res<vmux_setting::AppSettings>,
-    mut swap: MessageWriter<SwapStackSession>,
-) {
-    let to = trigger.event().payload.to.clone();
-    let Ok(parent) = child_of.get(trigger.event().webview) else {
-        return;
-    };
-    let stack = parent.parent();
-    let Ok(acp) = acp_sessions.get(stack) else {
-        bevy::log::warn!("runtime switch: current pane is not an ACP session");
-        return;
-    };
-    let acp_ids: Vec<String> = settings.agent.acp.iter().map(|c| c.id.clone()).collect();
-    let Some((target_url, cwd)) = runtime_switch_target(
-        &acp.agent_id,
-        acp.resume.as_deref(),
-        &acp.cwd,
-        &to,
-        &acp_ids,
-    ) else {
-        bevy::log::warn!(
-            "runtime switch to '{to}' unavailable for ACP agent '{}' (no shared session id yet)",
-            acp.agent_id
-        );
-        return;
-    };
-    swap.write(SwapStackSession {
-        stack,
-        target_url,
-        cwd,
-        handoff: None,
-    });
-}
-
-fn runtime_switch_target(
-    agent_id: &str,
-    resume: Option<&str>,
-    cwd: &std::path::Path,
-    to: &str,
-    acp_ids: &[String],
-) -> Option<(String, std::path::PathBuf)> {
-    let kind = acp_agent_kind(agent_id)?;
-    if !kind_supports_cross_runtime(kind) {
-        return None;
-    }
-    let sid = resume?;
-    let target = match to {
-        "cli" => crate::AgentUrl::Cli {
-            kind,
-            sid: sid.to_string(),
-        },
-        "acp" => crate::AgentUrl::for_session(kind, sid, true, acp_ids),
-        _ => return None,
-    };
-    Some((target.format(), cwd.to_path_buf()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use crate::strategy::kind_supports_cross_runtime;
 
     #[test]
     fn resume_projection_rejects_stale_results() {
@@ -668,50 +605,6 @@ mod tests {
         assert_eq!(
             resume_agent_name(None, None, Some("custom-acp")),
             "custom-acp"
-        );
-    }
-
-    #[test]
-    fn runtime_switch_builtin_acp_agents_to_cli() {
-        let cases = [
-            ("claude", "claude"),
-            ("claude-acp", "claude"),
-            ("codex", "codex"),
-            ("codex-acp", "codex"),
-            ("vibe", "vibe"),
-            ("mistral-vibe", "vibe"),
-        ];
-        let ids = cases
-            .iter()
-            .map(|(id, _)| (*id).to_string())
-            .collect::<Vec<_>>();
-        for (agent_id, cli_segment) in cases {
-            let got = runtime_switch_target(agent_id, Some("sid-9"), Path::new("/w"), "cli", &ids);
-            assert_eq!(
-                got,
-                Some((
-                    format!("vmux://sessions/{cli_segment}/cli/sid-9"),
-                    std::path::PathBuf::from("/w")
-                ))
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_switch_requires_session_id() {
-        let ids = vec!["claude".to_string()];
-        assert_eq!(
-            runtime_switch_target("claude", None, Path::new("/w"), "cli", &ids),
-            None
-        );
-    }
-
-    #[test]
-    fn runtime_switch_gated_for_unknown_agent() {
-        let ids = vec!["claude".to_string()];
-        assert_eq!(
-            runtime_switch_target("custom", Some("s"), Path::new("/w"), "cli", &ids),
-            None
         );
     }
 }

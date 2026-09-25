@@ -90,7 +90,7 @@ impl PaletteMode {
         let lowered = name.to_lowercase();
         slash_commands
             .iter()
-            .any(|command| command.name.starts_with(&lowered))
+            .any(|command| command.name().starts_with(&lowered))
     }
 
     pub fn opened(state: &CommandBarOpenEvent) -> Self {
