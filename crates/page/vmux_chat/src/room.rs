@@ -8,6 +8,7 @@ use vmux_api::room::{
 use vmux_service::chat::group_turns_tail;
 
 use crate::event::{ChatSnapshot, ChatTranscriptState, PendingApproval};
+use crate::prompt::AttachmentPreviews;
 use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
 
 pub struct ChatRoomPlugin;
@@ -25,6 +26,7 @@ impl Plugin for ChatRoomPlugin {
             .init_resource::<Log>()
             .init_resource::<LiveTurn>()
             .init_resource::<Agents>()
+            .init_resource::<AttachmentPreviews>()
             .init_resource::<Snapshot>()
             .init_resource::<RoomTranscript>()
             .add_systems(
@@ -35,7 +37,8 @@ impl Plugin for ChatRoomPlugin {
                         resource_changed::<Conversation>
                             .or_else(resource_changed::<Log>)
                             .or_else(resource_changed::<LiveTurn>)
-                            .or_else(resource_changed::<Agents>),
+                            .or_else(resource_changed::<Agents>)
+                            .or_else(resource_changed::<AttachmentPreviews>),
                     ),
                     emit_snapshot.after(RoomProjection).run_if(
                         resource_changed::<Snapshot>.or_else(resource_changed::<RoomTranscript>),
@@ -176,6 +179,7 @@ fn project_snapshot(
     log: Res<Log>,
     live: Res<LiveTurn>,
     agents: Res<Agents>,
+    previews: Res<AttachmentPreviews>,
     mut snapshot: ResMut<Snapshot>,
     mut transcript: ResMut<RoomTranscript>,
 ) {
@@ -186,7 +190,13 @@ fn project_snapshot(
         return;
     };
     let running = matches!(session.status, RemoteStatus::Streaming);
-    let items = log.chat_items(&live.0, running);
+    let mut items = log.chat_items(&live.0, running);
+    for item in &mut items {
+        let ChatItem::User { attachments, .. } = item else {
+            continue;
+        };
+        previews.hydrate(attachments);
+    }
     let total = items.len() as u32;
     let speaker = agents.named(&session.name);
     let approval = conversation

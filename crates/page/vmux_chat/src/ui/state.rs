@@ -1,14 +1,11 @@
-use std::collections::{HashMap, HashSet};
-
 use super::scroll;
 use crate::event::{
-    ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest,
-    ChatAttachmentPreviews, ChatAttachments, ChatBranch, ChatBranchesRequest, ChatBranchesState,
-    ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryRequest, ChatItem, ChatMediaEntry,
-    ChatMediaQueryRequest, ChatMediaState, ChatPickFiles, ChatSnapshot, ChatSubmit,
-    ChatSubmitAttachment, ChatTranscriptState, ComposerContext, ModelOptionEntry,
-    QueuedPromptSnapshot, ResumableSessionEntry, ResumeSession, RuntimeSwitchRequest, SelectMode,
-    SelectModel, SlashCommandEntry, latest_tool_location,
+    ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
+    ChatBranchesRequest, ChatBranchesState, ChatCancel, ChatChoiceSelected, ChatEscape,
+    ChatHistoryRequest, ChatItem, ChatMediaEntry, ChatMediaQueryRequest, ChatMediaState,
+    ChatPickFiles, ChatRemoveAttachment, ChatSnapshot, ChatSubmit, ChatTranscriptState,
+    ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, ResumeSession,
+    RuntimeSwitchRequest, SelectMode, SelectModel, SlashCommandEntry, latest_tool_location,
 };
 use crate::event::{ChatResumeQueryRequest, ChatResumeState};
 use crate::format::composer::{
@@ -18,9 +15,7 @@ use crate::format::composer::{
 use crate::state::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
 use dioxus::prelude::*;
-use vmux_api::prompt_media::{
-    inline_media_query, merge_chat_attachments, replace_inline_media_query,
-};
+use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::composer::{
     PROMPT_INPUT_ID, PromptComposerAttachment, PromptComposerMode, focus_prompt_end,
@@ -148,7 +143,6 @@ impl Chat {
             ChatUiStatePatch::Key(_) => {}
             ChatUiStatePatch::Transcript(state) => self.apply_transcript(state),
             ChatUiStatePatch::Attachments(selected) => self.apply_attachments(selected),
-            ChatUiStatePatch::AttachmentPreviews(loaded) => self.apply_previews(loaded),
             ChatUiStatePatch::Media(state) => self.apply_media(state),
             ChatUiStatePatch::Branches(incoming) => self.apply_branches(incoming),
             ChatUiStatePatch::Resume(state) => self.apply_sessions(state),
@@ -156,19 +150,17 @@ impl Chat {
     }
 
     fn apply_attachments(&self, selected: &ChatAttachments) {
-        let mut attachments = self.composer.attachments;
-        let current = attachments.peek().clone();
-        attachments.set(merge_chat_attachments(&current, &selected.attachments));
-        focus_prompt_end(PROMPT_INPUT_ID);
-    }
-
-    fn apply_previews(&self, loaded: &ChatAttachmentPreviews) {
-        let mut known = self.composer.attachment_previews;
-        let mut previews = known.peek().clone();
-        for attachment in &loaded.attachments {
-            previews.insert(attachment.path.clone(), attachment.clone());
+        let attachments = self.composer.attachments;
+        let selection_changed = attachments.peek().len() != selected.attachments.len()
+            || attachments
+                .peek()
+                .iter()
+                .zip(&selected.attachments)
+                .any(|(current, incoming)| current.path != incoming.path);
+        set_if_changed(attachments, selected.attachments.clone());
+        if selection_changed {
+            focus_prompt_end(PROMPT_INPUT_ID);
         }
-        known.set(previews);
     }
 
     fn apply_media(&self, state: &ChatMediaState) {
@@ -232,7 +224,6 @@ impl Chat {
     fn apply_snapshot(&self, snapshot: ChatSnapshot) {
         set_if_changed(self.run.status, snapshot.status.clone());
         set_if_changed(self.run.error, snapshot.error.clone());
-        self.request_queue_previews(&snapshot.queued);
         set_if_changed(self.queue.queued, snapshot.queued.clone());
         set_if_changed(self.composer.transition_preview, String::new());
         set_if_changed(self.composer.transition_attachments, Vec::new());
@@ -283,7 +274,6 @@ impl Chat {
         } else {
             None
         };
-        self.request_transcript_previews(&state.items);
         set_if_changed(transcript.items, state.items.clone());
         set_if_changed(transcript.loaded_start, state.loaded_start);
         set_if_changed(transcript.messages_total, state.total);
@@ -293,46 +283,6 @@ impl Chat {
         set_if_changed(transcript.prepend_revision, state.prepend_revision);
         if let Some((height, top)) = metrics {
             scroll::restore(transcript.scroll_container, height, top);
-        }
-    }
-
-    fn request_transcript_previews(&self, items: &[ChatItem]) {
-        let mut paths = Vec::new();
-        for item in items {
-            let ChatItem::User { attachments, .. } = item else {
-                continue;
-            };
-            for attachment in attachments {
-                if attachment.mime_type.starts_with("image/") {
-                    paths.push(attachment.path.clone());
-                }
-            }
-        }
-        self.request_attachment_previews(paths);
-    }
-
-    fn request_queue_previews(&self, queued: &[QueuedPromptSnapshot]) {
-        let mut paths = Vec::new();
-        for prompt in queued {
-            paths.extend(prompt.image_paths());
-        }
-        self.request_attachment_previews(paths);
-    }
-
-    fn request_attachment_previews(&self, wanted: Vec<String>) {
-        let previews = self.composer.attachment_previews;
-        let mut requests = self.composer.attachment_preview_requests;
-        let known = previews.peek().keys().cloned().collect::<HashSet<_>>();
-        let mut requested = requests.peek().clone();
-        let mut paths = Vec::new();
-        for path in wanted {
-            if known.contains(&path) || !requested.insert(path.clone()) {
-                continue;
-            }
-            paths.push(path);
-        }
-        if !paths.is_empty() && send(&ChatAttachmentPreviewRequest { paths }).is_ok() {
-            requests.set(requested);
         }
     }
 
@@ -519,14 +469,10 @@ impl Chat {
     }
 
     pub fn composer_attachments(&self) -> Vec<PromptComposerAttachment> {
-        let previews = self.composer.attachment_previews.read();
-        let mut pills = PromptComposerAttachment::pinned(
-            &self.composer.transition_attachments.read(),
-            &previews,
-        );
+        let mut pills =
+            PromptComposerAttachment::pinned(&self.composer.transition_attachments.read());
         pills.extend(PromptComposerAttachment::removable(
             &self.composer.attachments.read(),
-            &previews,
         ));
         pills
     }
@@ -723,35 +669,19 @@ impl Chat {
 impl Chat {
     pub fn submit(&self) {
         let mut draft = self.composer.draft;
-        let mut attachments = self.composer.attachments;
         let mut history_cursor = self.composer.history_cursor;
         let mut history_scratch = self.composer.history_scratch;
         let mut at_bottom = self.transcript.at_bottom;
         let text = draft.peek().trim().to_string();
-        let selected = attachments.peek().clone();
+        let selected = self.composer.attachments.peek().clone();
         if text.is_empty() && selected.is_empty() {
             return;
         }
-        let mut to_submit = Vec::with_capacity(selected.len());
-        for attachment in &selected {
-            to_submit.push(ChatSubmitAttachment {
-                path: attachment.path.clone(),
-                name: attachment.name.clone(),
-                mime_type: attachment.mime_type.clone(),
-                size: attachment.size,
-            });
-        }
-        if send(&ChatSubmit {
-            text,
-            attachments: to_submit,
-        })
-        .is_err()
-        {
+        if send(&ChatSubmit { text }).is_err() {
             return;
         }
         at_bottom.set(true);
         draft.set(String::new());
-        attachments.set(Vec::new());
         history_cursor.set(None);
         history_scratch.set(String::new());
     }
@@ -940,12 +870,13 @@ impl Chat {
     }
 
     pub fn remove_attachment(&self, index: usize) {
-        let mut attachments = self.composer.attachments;
-        let mut next = attachments.peek().clone();
-        if index < next.len() {
-            next.remove(index);
-            attachments.set(next);
-        }
+        let attachments = self.composer.attachments.read();
+        let Some(attachment) = attachments.get(index) else {
+            return;
+        };
+        let _ = send(&ChatRemoveAttachment {
+            path: attachment.path.clone(),
+        });
     }
 }
 
@@ -1056,8 +987,6 @@ pub fn use_handoff() -> Handoff {
 pub struct ComposerDraft {
     pub draft: Signal<String>,
     pub attachments: Signal<Vec<ChatAttachment>>,
-    pub attachment_previews: Signal<HashMap<String, ChatAttachment>>,
-    pub attachment_preview_requests: Signal<HashSet<String>>,
     pub history_cursor: Signal<Option<usize>>,
     pub history_scratch: Signal<String>,
     pub transition_preview: Signal<String>,
@@ -1068,8 +997,6 @@ pub fn use_composer_draft() -> ComposerDraft {
     ComposerDraft {
         draft: use_signal(String::new),
         attachments: use_signal(Vec::new),
-        attachment_previews: use_signal(HashMap::new),
-        attachment_preview_requests: use_signal(HashSet::new),
         history_cursor: use_signal(|| None),
         history_scratch: use_signal(String::new),
         transition_preview: use_signal(String::new),

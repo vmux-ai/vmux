@@ -6,11 +6,11 @@ use dioxus::core::ReactiveContext;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use vmux_chat::event::{
-    ChatApproval, ChatCancel, ChatEscape, ChatMediaQueryRequest, ChatSubmit, SelectModel,
-    SetAgentEffort,
+    ChatApproval, ChatCancel, ChatEscape, ChatMediaQueryRequest, ChatRemoveAttachment, ChatSubmit,
+    SelectModel, SetAgentEffort,
 };
 use vmux_chat::model::{Models, Picker};
-use vmux_chat::prompt::{Attach, Attachments, Browsed, Media};
+use vmux_chat::prompt::{Attach, Attachments, Browsed, Media, RemoveAttachment};
 use vmux_chat::room::{Reported, Snapshot, Submitted};
 use vmux_chat::state::ChatUiState;
 use vmux_start::event::StartDataRequest;
@@ -112,6 +112,7 @@ impl PageHost for MobileHost {
         }
         match id {
             ChatSubmit::ID => submit(self, decode(bytes)?),
+            ChatRemoveAttachment::ID => remove_attachment(self, decode(bytes)?),
             ChatCancel::ID | ChatEscape::ID => cancel(self),
             ChatApproval::ID => approve(self, decode(bytes)?),
             SelectModel::ID => {
@@ -212,15 +213,18 @@ fn submit(host: &MobileHost, payload: ChatSubmit) -> Result<(), EventListenerErr
     if host.session.sid().is_empty() {
         return Err(EventListenerError::Unsupported);
     }
-    let mut attachments = Vec::with_capacity(payload.attachments.len());
-    for attachment in payload.attachments {
+    let runtime = host.runtime.borrow();
+    let selected = &runtime.app.world().resource::<Attachments>().0;
+    let mut attachments = Vec::with_capacity(selected.len());
+    for attachment in selected {
         attachments.push(AgentAttachment {
-            path: attachment.path,
-            name: attachment.name,
-            mime_type: attachment.mime_type,
+            path: attachment.path.clone(),
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
             size: attachment.size,
         });
     }
+    drop(runtime);
     host.runtime
         .borrow_mut()
         .app
@@ -237,6 +241,18 @@ fn submit(host: &MobileHost, payload: ChatSubmit) -> Result<(), EventListenerErr
             report(&runtime, RemoteStatus::Errored(message));
         }
     })
+}
+
+fn remove_attachment(
+    host: &MobileHost,
+    payload: ChatRemoveAttachment,
+) -> Result<(), EventListenerError> {
+    host.runtime
+        .borrow_mut()
+        .app
+        .world_mut()
+        .write_message(RemoveAttachment(payload.path));
+    Ok(())
 }
 
 fn report(runtime: &RuntimeHandle, status: RemoteStatus) {

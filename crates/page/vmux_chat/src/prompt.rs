@@ -1,8 +1,7 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_api::prompt_media::{
-    ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntry,
-};
+use std::collections::HashMap;
+use vmux_api::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntry};
 use vmux_api::room::RemoteMediaEntry;
 
 use crate::event::ChatMediaState;
@@ -17,15 +16,18 @@ impl Plugin for ChatPromptPlugin {
             app.add_plugins(ChatUiStatePlugin);
         }
         app.add_message::<Attach>()
+            .add_message::<RemoveAttachment>()
             .add_message::<Submitted>()
             .init_resource::<Attachments>()
+            .init_resource::<AttachmentPreviews>()
             .init_resource::<Browsed>()
             .init_resource::<Media>()
             .add_systems(
                 Update,
                 (
-                    fold_attachments.in_set(PromptProjection),
-                    spend_attachments.in_set(PromptProjection),
+                    (fold_attachments, remove_attachments, spend_attachments)
+                        .chain()
+                        .in_set(PromptProjection),
                     emit_attachments
                         .after(PromptProjection)
                         .run_if(resource_changed::<Attachments>),
@@ -46,8 +48,36 @@ struct PromptProjection;
 #[derive(Message)]
 pub struct Attach(pub Vec<ChatAttachment>);
 
+#[derive(Message)]
+pub struct RemoveAttachment(pub String);
+
 #[derive(Resource, Default, PartialEq)]
 pub struct Attachments(pub Vec<ChatAttachment>);
+
+#[derive(Resource, Default, PartialEq)]
+pub struct AttachmentPreviews(HashMap<String, ChatAttachment>);
+
+impl AttachmentPreviews {
+    pub(crate) fn hydrate(&self, attachments: &mut [ChatAttachment]) -> bool {
+        let mut changed = false;
+        for attachment in attachments {
+            if !attachment.preview_data_url.is_empty() {
+                continue;
+            }
+            let Some(preview) = self.0.get(&attachment.path) else {
+                continue;
+            };
+            if preview.preview_data_url.is_empty() {
+                continue;
+            }
+            attachment
+                .preview_data_url
+                .clone_from(&preview.preview_data_url);
+            changed = true;
+        }
+        changed
+    }
+}
 
 #[derive(Resource, Default, PartialEq)]
 pub struct Browsed {
@@ -87,17 +117,10 @@ fn emit_media(media: Res<Media>, mut projection: ResMut<ChatUiStateProjection>) 
 }
 
 fn emit_attachments(attachments: Res<Attachments>, mut projection: ResMut<ChatUiStateProjection>) {
-    if attachments.0.is_empty() {
-        return;
-    }
     let payload = ChatAttachments {
         attachments: attachments.0.clone(),
     };
     projection.write(&payload);
-    let previews = ChatAttachmentPreviews {
-        attachments: attachments.0.clone(),
-    };
-    projection.write(&previews);
 }
 
 fn spend_attachments(
@@ -110,18 +133,33 @@ fn spend_attachments(
     attachments.0.clear();
 }
 
-fn fold_attachments(mut asked: MessageReader<Attach>, mut attachments: ResMut<Attachments>) {
+fn fold_attachments(
+    mut asked: MessageReader<Attach>,
+    mut attachments: ResMut<Attachments>,
+    mut previews: ResMut<AttachmentPreviews>,
+) {
     for Attach(added) in asked.read() {
         for attachment in added {
-            if attachments
-                .0
-                .iter()
-                .any(|held| held.path == attachment.path)
-            {
+            if attachment.preview_data_url.is_empty() {
                 continue;
             }
-            attachments.0.push(attachment.clone());
+            previews
+                .0
+                .insert(attachment.path.clone(), attachment.clone());
         }
+        ChatAttachments {
+            attachments: added.clone(),
+        }
+        .merge_into(&mut attachments.0);
+    }
+}
+
+fn remove_attachments(
+    mut removed: MessageReader<RemoveAttachment>,
+    mut attachments: ResMut<Attachments>,
+) {
+    for RemoveAttachment(path) in removed.read() {
+        attachments.0.retain(|attachment| attachment.path != *path);
     }
 }
 
@@ -159,6 +197,13 @@ mod tests {
             self.0.update();
         }
 
+        fn remove(&mut self, path: &str) {
+            self.0
+                .world_mut()
+                .write_message(RemoveAttachment(path.to_string()));
+            self.0.update();
+        }
+
         fn paths(&self) -> Vec<&str> {
             let mut paths = Vec::new();
             for attachment in &self.0.world().resource::<Attachments>().0 {
@@ -182,6 +227,15 @@ mod tests {
         let mut started = Started::empty();
         started.attach(&["a.png", "b.png"]);
         started.submit();
+
+        assert!(started.paths().is_empty());
+    }
+
+    #[test]
+    fn removing_the_last_attachment_empties_the_pile() {
+        let mut started = Started::empty();
+        started.attach(&["a.png"]);
+        started.remove("a.png");
 
         assert!(started.paths().is_empty());
     }

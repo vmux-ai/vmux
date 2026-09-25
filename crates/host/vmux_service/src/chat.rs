@@ -1,6 +1,6 @@
 use crate::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
 use vmux_api::chat::{ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn};
-use vmux_api::prompt_media::ChatSubmitAttachment;
+use vmux_api::prompt_media::ChatAttachment;
 
 #[cfg(test)]
 pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Vec<ChatItem> {
@@ -228,11 +228,12 @@ impl<'a> PageBuilder<'a> {
                 context: context.map(str::to_string),
                 attachments: attachments
                     .iter()
-                    .map(|attachment| ChatSubmitAttachment {
+                    .map(|attachment| ChatAttachment {
                         path: attachment.path.clone(),
                         name: attachment.name.clone(),
                         mime_type: attachment.mime_type.clone(),
                         size: attachment.size,
+                        preview_data_url: String::new(),
                     })
                     .collect(),
                 created_at_ms,

@@ -15,12 +15,7 @@ impl PromptRequest {
     ) -> Self {
         let mut submitted = Vec::with_capacity(attachments.len());
         for attachment in attachments {
-            submitted.push(crate::prompt_media::ChatSubmitAttachment {
-                path: attachment.path.clone(),
-                name: attachment.name.clone(),
-                mime_type: attachment.mime_type.clone(),
-                size: attachment.size,
-            });
+            submitted.push(crate::prompt_media::ChatSubmitAttachment::from(attachment));
         }
         Self {
             text: text.to_string(),

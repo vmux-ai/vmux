@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
 use bevy::prelude::*;
@@ -8,8 +7,7 @@ use vmux_api::command_bar::{
     CommandPaletteRemoveAttachmentRequest,
 };
 use vmux_api::prompt_media::{
-    ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries,
-    ChatMediaListRequest, inline_media_query, merge_chat_attachments,
+    ChatAttachments, ChatMediaEntries, ChatMediaListRequest, inline_media_query,
 };
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
@@ -25,7 +23,6 @@ impl Plugin for PaletteMediaPlugin {
         app.add_observer(update_palette_media_draft)
             .add_observer(remove_palette_attachment)
             .add_observer(receive_palette_attachments)
-            .add_observer(receive_palette_attachment_previews)
             .add_observer(receive_palette_media_entries)
             .add_systems(PreUpdate, attach_palette_media)
             .add_systems(Update, dispatch_media_request);
@@ -38,7 +35,6 @@ pub(super) struct PaletteMedia {
     start: bool,
     query: Option<String>,
     generation: RequestGeneration,
-    previews: HashMap<String, ChatAttachment>,
 }
 
 fn attach_palette_media(
@@ -72,7 +68,6 @@ fn update_palette_media_draft(
     if opened {
         media.query = None;
         media.generation.advance();
-        media.previews.clear();
         snapshot.0.open_id = request.open_id;
         snapshot.0.media_query = None;
         snapshot.0.media_entries.clear();
@@ -134,33 +129,9 @@ fn receive_palette_attachments(
     if !media.start {
         return;
     }
-    let mut attachments = merge_chat_attachments(&snapshot.0.attachments, &response.attachments);
-    media.apply_previews(&mut attachments);
-    snapshot.0.attachments = attachments;
-    snapshot.0.attachment_sequence = snapshot.0.attachment_sequence.wrapping_add(1).max(1);
-}
-
-fn receive_palette_attachment_previews(
-    trigger: On<UiStateWrite<CommandBarUiState>>,
-    mut palettes: Query<(&mut PaletteMedia, &mut PaletteSnapshot)>,
-) {
-    let Some(response) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
-        ChatAttachmentPreviews,
-    >>::payload(trigger.event().patch()) else {
-        return;
-    };
-    let Ok((mut media, mut snapshot)) = palettes.get_mut(trigger.event().webview()) else {
-        return;
-    };
-    if !media.start {
-        return;
+    if response.merge_into(&mut snapshot.0.attachments) {
+        snapshot.0.attachment_sequence = snapshot.0.attachment_sequence.wrapping_add(1).max(1);
     }
-    for attachment in &response.attachments {
-        media
-            .previews
-            .insert(attachment.path.clone(), attachment.clone());
-    }
-    media.apply_previews(&mut snapshot.0.attachments);
 }
 
 fn receive_palette_media_entries(
@@ -193,19 +164,6 @@ fn receive_palette_media_entries(
     }
     snapshot.0.media_entries.clone_from(&response.entries);
     snapshot.0.media_loading = false;
-}
-
-impl PaletteMedia {
-    fn apply_previews(&self, attachments: &mut [ChatAttachment]) {
-        for attachment in attachments {
-            let Some(preview) = self.previews.get(&attachment.path) else {
-                continue;
-            };
-            attachment
-                .preview_data_url
-                .clone_from(&preview.preview_data_url);
-        }
-    }
 }
 
 #[derive(Component)]

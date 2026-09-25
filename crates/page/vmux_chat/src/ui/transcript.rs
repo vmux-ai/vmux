@@ -5,7 +5,6 @@ use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
 use crate::format::composer::is_handoff_boundary;
 use crate::transcript::ChatItemRow;
 use dioxus::prelude::*;
-use std::collections::HashMap;
 use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::favicon_src_for_url;
@@ -13,23 +12,17 @@ use vmux_ui::hooks::send;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
-fn QueuedAttachments(
-    names: Vec<String>,
-    paths: Vec<String>,
-    previews: Signal<HashMap<String, ChatAttachment>>,
-) -> Element {
-    let held = previews.read();
+fn QueuedAttachments(attachments: Vec<ChatAttachment>) -> Element {
     let mut thumbs = Vec::new();
     let mut plain = Vec::new();
-    for (index, name) in names.iter().enumerate() {
-        let path = paths.get(index).cloned().unwrap_or_default();
-        let preview = held
-            .get(&path)
-            .map(|preview| preview.preview_data_url.clone())
-            .unwrap_or_default();
-        match preview.is_empty() {
-            true => plain.push(name.clone()),
-            false => thumbs.push((path, name.clone(), preview)),
+    for attachment in attachments {
+        match attachment.preview_data_url.is_empty() {
+            true => plain.push(attachment.name),
+            false => thumbs.push((
+                attachment.path,
+                attachment.name,
+                attachment.preview_data_url,
+            )),
         }
     }
     rsx! {
@@ -115,7 +108,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         key: "{loaded_start() as usize + i}",
                         absolute_index: loaded_start() as usize + i,
                         item,
-                        attachment_previews: chat.composer.attachment_previews,
                         agent_name: agent_name.clone(),
                         agent_avatar: agent_avatar.clone(),
                         agent_color: agent_color.clone(),
@@ -208,11 +200,9 @@ pub(super) fn QueuedPrompts(chat: Chat) -> Element {
                         if !queued_prompt.text.is_empty() {
                             "{queued_prompt.text}"
                         }
-                        if !queued_prompt.attachment_names.is_empty() {
+                        if !queued_prompt.attachments.is_empty() {
                             QueuedAttachments {
-                                names: queued_prompt.attachment_names.clone(),
-                                paths: queued_prompt.attachment_paths.clone(),
-                                previews: chat.composer.attachment_previews,
+                                attachments: queued_prompt.attachments.clone(),
                             }
                         }
                     }

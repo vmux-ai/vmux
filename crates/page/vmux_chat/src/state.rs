@@ -1,7 +1,6 @@
 use crate::event::{
-    ChatAttachmentPreviews, ChatAttachments, ChatBranchesState, ChatKey, ChatMediaState,
-    ChatResumeState, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState, ModelState,
-    SlashCommands,
+    ChatAttachments, ChatBranchesState, ChatKey, ChatMediaState, ChatResumeState, ChatSnapshot,
+    ChatTranscriptState, ComposerContext, ModeState, ModelState, SlashCommands,
 };
 use bevy_app::{App, Last, Plugin};
 use bevy_ecs::prelude::*;
@@ -27,7 +26,6 @@ pub enum ChatUiStatePatch {
     Key(ChatKey),
     Transcript(Box<ChatTranscriptState>),
     Attachments(Box<ChatAttachments>),
-    AttachmentPreviews(Box<ChatAttachmentPreviews>),
     Media(Box<ChatMediaState>),
     Branches(Box<ChatBranchesState>),
     Resume(Box<ChatResumeState>),

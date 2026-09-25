@@ -7,9 +7,8 @@ pub use vmux_api::chat::{
 };
 use vmux_api::json::JsonValue;
 pub use vmux_api::prompt_media::{
-    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachmentPreviews,
-    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
-    ChatPickFiles, ChatSubmitAttachment,
+    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
+    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
 };
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_api::room::ModelOptionEntry;
@@ -25,20 +24,7 @@ impl vmux_api::BinEventFamily for Events {
 pub struct QueuedPromptSnapshot {
     pub id: u64,
     pub text: String,
-    pub attachment_names: Vec<String>,
-    pub attachment_paths: Vec<String>,
-}
-
-impl QueuedPromptSnapshot {
-    pub fn image_paths(&self) -> Vec<String> {
-        let mut paths = Vec::new();
-        for path in &self.attachment_paths {
-            if vmux_ui::file_icon::FilePath(path).is_image() {
-                paths.push(path.clone());
-            }
-        }
-        paths
-    }
+    pub attachments: Vec<ChatAttachment>,
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -119,7 +105,11 @@ pub struct ChatTranscriptState {
 #[vmux_api::ui_event(Default)]
 pub struct ChatSubmit {
     pub text: String,
-    pub attachments: Vec<ChatSubmitAttachment>,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ChatRemoveAttachment {
+    pub path: String,
 }
 
 #[vmux_api::ui_event(Default)]
@@ -261,14 +251,18 @@ mod tests {
                 QueuedPromptSnapshot {
                     id: 4,
                     text: "a".into(),
-                    attachment_names: vec!["image.png".into()],
-                    attachment_paths: vec!["/tmp/image.png".into()],
+                    attachments: vec![ChatAttachment {
+                        path: "/tmp/image.png".into(),
+                        name: "image.png".into(),
+                        mime_type: "image/png".into(),
+                        size: 3,
+                        preview_data_url: "data:image/png;base64,cG5n".into(),
+                    }],
                 },
                 QueuedPromptSnapshot {
                     id: 9,
                     text: "b".into(),
-                    attachment_names: Vec::new(),
-                    attachment_paths: Vec::new(),
+                    attachments: Vec::new(),
                 },
             ],
             paused: true,
@@ -351,11 +345,12 @@ mod tests {
             ChatItem::User {
                 text: "hi".into(),
                 context: Some("project policy".into()),
-                attachments: vec![ChatSubmitAttachment {
+                attachments: vec![ChatAttachment {
                     path: "/tmp/image.png".into(),
                     name: "image.png".into(),
                     mime_type: "image/png".into(),
                     size: 3,
+                    preview_data_url: "data:image/png;base64,cG5n".into(),
                 }],
                 created_at_ms: 100,
             },

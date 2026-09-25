@@ -1,8 +1,12 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
+use super::media::ChatAttachmentHydrationRequest;
 use super::model::{ModeProjection, ModelProjection};
-use super::{AgentChatView, ChatSynced, ChatTranscriptProjection};
+use super::{
+    AgentChatView, ChatAttachmentProjection, ChatSnapshotProjection, ChatSynced,
+    ChatTranscriptProjection,
+};
 use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::runtime::acp::{AcpModeState, AcpModelState};
@@ -193,7 +197,14 @@ fn push_chat_to_page(
         Option<Ref<AgentConversationTitle>>,
     )>,
     children: Query<&Children>,
-    mut chat_views: Query<&mut ChatTranscriptProjection, With<AgentChatView>>,
+    mut chat_views: Query<
+        (
+            &mut ChatTranscriptProjection,
+            &mut ChatSnapshotProjection,
+            &ChatAttachmentProjection,
+        ),
+        With<AgentChatView>,
+    >,
     choices: Query<&crate::host::PendingAgentChoice>,
     user_profiles: Query<Ref<Profile>, With<User>>,
     browsers: NonSend<Browsers>,
@@ -252,7 +263,7 @@ fn push_chat_to_page(
             continue;
         }
         owed.remove(&stack);
-        let projection = ChatProjection::new(
+        let mut projection = ChatProjection::new(
             &messages,
             &message_times,
             &state,
@@ -265,16 +276,19 @@ fn push_chat_to_page(
             title.as_deref(),
             choices.get(webview).ok(),
         );
-        let Ok(mut transcript) = chat_views.get_mut(webview) else {
+        let Ok((mut transcript, mut snapshot, attachments)) = chat_views.get_mut(webview) else {
             owed.insert(stack);
             continue;
         };
-        let transcript_changed = transcript.merge_tail(projection.transcript);
+        let mut transcript_changed = transcript.merge_tail(projection.transcript);
+        transcript_changed |= attachments.hydrate_transcript(&mut transcript.state);
+        attachments.hydrate_snapshot(&mut projection.snapshot);
+        snapshot.0 = projection.snapshot;
         if !matches!(*state, AgentRunState::Streaming) {
             info!(
                 ?stack,
                 ?webview,
-                error = %projection.snapshot.error,
+                error = %snapshot.0.error,
                 items = messages.0.len(),
                 "chat snapshot pushed"
             );
@@ -282,7 +296,7 @@ fn push_chat_to_page(
         commands.trigger(
             vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 webview,
-                &projection.snapshot,
+                &snapshot.0,
             ),
         );
         if transcript_changed {
@@ -292,6 +306,10 @@ fn push_chat_to_page(
                     &transcript.state,
                 ),
             );
+        }
+        let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
+        if !paths.is_empty() {
+            commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
         }
         last_push.insert(stack, now);
     }
@@ -405,15 +423,16 @@ impl ChatProjection {
                     .map(|item| QueuedPromptSnapshot {
                         id: item.id,
                         text: item.text.clone(),
-                        attachment_names: item
+                        attachments: item
                             .attachments
                             .iter()
-                            .map(|attachment| attachment.name.clone())
-                            .collect(),
-                        attachment_paths: item
-                            .attachments
-                            .iter()
-                            .map(|attachment| attachment.path.clone())
+                            .map(|attachment| vmux_chat::event::ChatAttachment {
+                                path: attachment.path.clone(),
+                                name: attachment.name.clone(),
+                                mime_type: attachment.mime_type.clone(),
+                                size: attachment.size,
+                                preview_data_url: String::new(),
+                            })
                             .collect(),
                     })
                     .collect(),
@@ -430,7 +449,12 @@ impl ChatProjection {
 
 fn sync_chat_to_ready_views(
     mut pending: Query<
-        (Entity, &mut ChatTranscriptProjection),
+        (
+            Entity,
+            &mut ChatTranscriptProjection,
+            &mut ChatSnapshotProjection,
+            &ChatAttachmentProjection,
+        ),
         (
             With<AgentChatView>,
             With<vmux_core::page::PageReady>,
@@ -457,7 +481,7 @@ fn sync_chat_to_ready_views(
     mut commands: Commands,
 ) {
     let user_profile = user_profiles.single().ok();
-    for (webview, mut transcript) in &mut pending {
+    for (webview, mut transcript, mut snapshot, attachments) in &mut pending {
         let Ok(parent) = child_of.get(webview) else {
             continue;
         };
@@ -470,7 +494,7 @@ fn sync_chat_to_ready_views(
         if !browsers.can_emit_to(&webview) {
             continue;
         }
-        let projection = ChatProjection::new(
+        let mut projection = ChatProjection::new(
             messages,
             message_times,
             state,
@@ -484,10 +508,13 @@ fn sync_chat_to_ready_views(
             choices.get(webview).ok(),
         );
         transcript.merge_tail(projection.transcript);
+        attachments.hydrate_transcript(&mut transcript.state);
+        attachments.hydrate_snapshot(&mut projection.snapshot);
+        snapshot.0 = projection.snapshot;
         commands.trigger(
             vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 webview,
-                &projection.snapshot,
+                &snapshot.0,
             ),
         );
         commands.trigger(
@@ -496,6 +523,16 @@ fn sync_chat_to_ready_views(
                 &transcript.state,
             ),
         );
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview,
+                &attachments.state(),
+            ),
+        );
+        let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
+        if !paths.is_empty() {
+            commands.trigger(ChatAttachmentHydrationRequest { webview, paths });
+        }
         let (cross, model_state, mode_state, agent_key) = acp_sessions
             .get(stack)
             .ok()
@@ -622,15 +659,23 @@ fn resolve_chat_history_queries(
 
 fn apply_chat_history_results(
     results: Query<(Entity, &ChatHistoryResult)>,
-    mut views: Query<&mut ChatTranscriptProjection, With<AgentChatView>>,
+    mut views: Query<
+        (
+            &mut ChatTranscriptProjection,
+            &ChatSnapshotProjection,
+            &ChatAttachmentProjection,
+        ),
+        With<AgentChatView>,
+    >,
     mut commands: Commands,
 ) {
     for (entity, result) in &results {
-        let Ok(mut transcript) = views.get_mut(result.webview) else {
+        let Ok((mut transcript, snapshot, attachments)) = views.get_mut(result.webview) else {
             commands.entity(entity).despawn();
             continue;
         };
-        let changed = transcript.finish_history_query(result);
+        let mut changed = transcript.finish_history_query(result);
+        changed |= attachments.hydrate_transcript(&mut transcript.state);
         commands.entity(entity).despawn();
         if changed {
             commands.trigger(
@@ -639,6 +684,13 @@ fn apply_chat_history_results(
                     &transcript.state,
                 ),
             );
+        }
+        let paths = attachments.hydration_paths(&transcript.state, &snapshot.0);
+        if !paths.is_empty() {
+            commands.trigger(ChatAttachmentHydrationRequest {
+                webview: result.webview,
+                paths,
+            });
         }
     }
 }
