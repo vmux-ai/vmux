@@ -1,5 +1,5 @@
 use super::{
-    AgentAction, AgentAttachment, AgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult,
+    AgentAttachment, AgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequest,
     AgentRequestId, CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo,
     SharedEvent, SharedMessage,
 };
@@ -162,7 +162,7 @@ impl ClientMessage {
     ) -> Self {
         SharedMessage::agent(
             sid,
-            AgentAction::Input {
+            AgentRequest::Input {
                 text,
                 context,
                 attachments,
@@ -181,7 +181,7 @@ impl ClientMessage {
     ) -> Self {
         SharedMessage::agent(
             sid,
-            AgentAction::Input {
+            AgentRequest::Input {
                 text,
                 context,
                 attachments,

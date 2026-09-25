@@ -19,7 +19,7 @@ use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use vmux_api::protocol::{SimulatorAction, SimulatorButton};
+use vmux_api::protocol::{SimulatorButton, SimulatorInput};
 
 pub(super) struct SimulatorInputPlugin;
 
@@ -584,8 +584,8 @@ fn handle_control_requests(
         let Ok((_, _, _, points, pixels, hid)) = attachments.get(target) else {
             continue;
         };
-        let result = match &request.action {
-            SimulatorAction::Tap { x, y } => match (control_coordinates(points, pixels), hid) {
+        let result = match &request.input {
+            SimulatorInput::Tap { x, y } => match (control_coordinates(points, pixels), hid) {
                 (Ok(coordinates), Some(hid)) => {
                     hid.dispatch(HidRequest::tap(coordinates.point((*x, *y))));
                     Ok(format!("tapped simulator at ({x}, {y})"))
@@ -593,7 +593,7 @@ fn handle_control_requests(
                 (Err(error), _) => Err(error),
                 (_, None) => Err("simulator input is unavailable".to_string()),
             },
-            SimulatorAction::Swipe {
+            SimulatorInput::Swipe {
                 start_x,
                 start_y,
                 end_x,
@@ -611,14 +611,14 @@ fn handle_control_requests(
                 (Err(error), _) => Err(error),
                 (_, None) => Err("simulator input is unavailable".to_string()),
             },
-            SimulatorAction::TypeText(text) => {
+            SimulatorInput::TypeText(text) => {
                 inputs.write(SimulatorInputRequest {
                     view: Some(target),
                     operation: SimulatorInputOperation::Text { text: text.clone() },
                 });
                 Ok("typed text into simulator".to_string())
             }
-            SimulatorAction::Key(keycode) => {
+            SimulatorInput::Key(keycode) => {
                 inputs.write(SimulatorInputRequest {
                     view: Some(target),
                     operation: SimulatorInputOperation::Key {
@@ -627,7 +627,7 @@ fn handle_control_requests(
                 });
                 Ok(format!("pressed simulator keycode {keycode}"))
             }
-            SimulatorAction::Button(button) => {
+            SimulatorInput::Button(button) => {
                 let button = match button {
                     SimulatorButton::Home => HardwareButton::Home,
                     SimulatorButton::Lock => HardwareButton::Lock,

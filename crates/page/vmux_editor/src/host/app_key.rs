@@ -7,7 +7,7 @@ use vmux_command::{
     RegisterCommandDefinitions,
 };
 use vmux_core::event::{
-    ExplorerGoto, FileEncoding, FileEncodingAction, FileEncodingSet, FileIndent, FileKey,
+    ExplorerGoto, FileEncoding, FileEncodingOperation, FileEncodingSet, FileIndent, FileKey,
     FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
 
@@ -190,13 +190,16 @@ fn apply_status_picks(
                 let Ok(encoding) = FileEncoding::try_from(label.as_str()) else {
                     continue;
                 };
-                let action = match save {
-                    true => FileEncodingAction::Save,
-                    false => FileEncodingAction::Reopen,
+                let operation = match save {
+                    true => FileEncodingOperation::Save,
+                    false => FileEncodingOperation::Reopen,
                 };
                 commands.trigger(UiInput {
                     webview: entity,
-                    payload: FileEncodingSet { encoding, action },
+                    payload: FileEncodingSet {
+                        encoding,
+                        operation,
+                    },
                 });
             }
         }
@@ -270,7 +273,7 @@ mod tests {
 
     impl Reopened {
         fn record(trigger: On<UiInput<FileEncodingSet>>, mut seen: ResMut<Self>) {
-            if trigger.event().payload.action != FileEncodingAction::Reopen {
+            if trigger.event().payload.operation != FileEncodingOperation::Reopen {
                 return;
             }
             seen.0

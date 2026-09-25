@@ -478,8 +478,8 @@ fn install(state: Arc<Mutex<KeyboardState>>, wake: impl Fn() + Send + Sync + 'st
         let Some(combo) = translate(key_code, flags) else {
             return event.as_ptr();
         };
-        let action = state.classify(combo);
-        if state.consume(action) {
+        let decision = state.classify(combo);
+        if state.consume(decision) {
             std::ptr::null_mut()
         } else {
             event.as_ptr()

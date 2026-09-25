@@ -1,5 +1,3 @@
-use super::EditorAction;
-
 #[vmux_api::ui_event(Default, Eq, target = "lsp")]
 pub struct LspCatalogRequest {
     pub query: String,
@@ -59,13 +57,6 @@ pub struct FileRenameRequest {
 #[vmux_api::ui_event(Copy, Eq, target = "files")]
 pub struct FileCodeActionPick {
     pub index: u32,
-}
-
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
-pub struct FileEditorAction {
-    pub action: EditorAction,
-    pub line: u32,
-    pub col: u32,
 }
 
 #[vmux_api::ui_event(Copy, Eq, target = "files")]

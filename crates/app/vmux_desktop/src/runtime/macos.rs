@@ -198,7 +198,7 @@ fn activate_app_during_boot(
 
 type NativeThrottle = Arc<dyn Fn(Duration) + Send + Sync>;
 
-fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> NativeThrottle {
+fn native_throttle(name: &'static str, callback: impl Fn() + Send + 'static) -> NativeThrottle {
     let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
     let thread_pending_interval_ns = Arc::clone(&pending_interval_ns);
     let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -228,7 +228,7 @@ fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> Na
                             }
                         }
                     }
-                    action();
+                    callback();
                     last_fire = Some(Instant::now());
                     interval_ns = thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel);
                     if interval_ns == u64::MAX {
@@ -351,8 +351,8 @@ impl WindowTitlebarGesture {
         use objc2_foundation::{NSString, NSUserDefaults};
 
         let defaults = NSUserDefaults::standardUserDefaults();
-        let action = defaults.stringForKey(&NSString::from_str("AppleActionOnDoubleClick"))?;
-        Some(action.to_string())
+        let behavior = defaults.stringForKey(&NSString::from_str("AppleActionOnDoubleClick"))?;
+        Some(behavior.to_string())
     }
 }
 

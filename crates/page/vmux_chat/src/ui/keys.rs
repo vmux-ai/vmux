@@ -18,16 +18,16 @@ const APPROVAL_OPTION_COUNT: usize = 3;
 
 #[derive(Clone, Copy)]
 pub struct ChatKeys {
-    actions: ChatKeyActions,
+    handler: ChatKeyHandler,
     claim: KeyClaim,
 }
 
 pub fn use_chat_keys(chat: Chat) -> ChatKeys {
-    let actions = ChatKeyActions(chat);
+    let handler = ChatKeyHandler(chat);
     let events = use_ui_state_patch::<crate::state::ChatUiState, ChatKey>();
-    use_effect(move || events.for_each(|key| actions.apply(key)));
+    use_effect(move || events.for_each(|key| handler.apply(key)));
     let keys = ChatKeys {
-        actions,
+        handler,
         claim: use_key_claim(Unclaimed::Types, move || chat.key_context()),
     };
     use_drop(move || {
@@ -39,44 +39,44 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
 impl ChatKeys {
     pub fn on_prompt_keydown(&self, event: KeyboardEvent) {
         event.stop_propagation();
-        if self.actions.answered_by_number(&event) {
+        if self.handler.answered_by_number(&event) {
             return;
         }
-        if self.actions.moves_list_locally(&event) {
+        if self.handler.moves_list_locally(&event) {
             return;
         }
-        if self.actions.submits_prompt(&event) {
+        if self.handler.submits_prompt(&event) {
             return;
         }
         self.hand_over(&event);
     }
 
     pub fn on_root_keydown(&self, event: KeyboardEvent) {
-        if self.actions.answered_by_number(&event) {
+        if self.handler.answered_by_number(&event) {
             return;
         }
-        if self.actions.moves_list_locally(&event) {
+        if self.handler.moves_list_locally(&event) {
             return;
         }
         self.hand_over(&event);
         if event.default_action_enabled() {
-            self.actions.type_into_draft(&event);
+            self.handler.type_into_draft(&event);
         }
     }
 
     fn hand_over(&self, event: &KeyboardEvent) {
         if !self.claim.resolves() {
-            return self.actions.recall_alone(event);
+            return self.handler.recall_alone(event);
         }
         self.claim
-            .on_keydown(event, |stroke| self.actions.wanted_locally(stroke));
+            .on_keydown(event, |stroke| self.handler.wanted_locally(stroke));
     }
 }
 
 #[derive(Clone, Copy)]
-struct ChatKeyActions(Chat);
+struct ChatKeyHandler(Chat);
 
-impl ChatKeyActions {
+impl ChatKeyHandler {
     fn moves_list_locally(&self, event: &KeyboardEvent) -> bool {
         if ChatList::current(self.0).is_none() {
             return false;

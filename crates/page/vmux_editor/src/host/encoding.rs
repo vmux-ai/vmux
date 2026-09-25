@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
-use vmux_core::event::{FileEncoding, FileEncodingAction, FileEncodingEvent, FileEncodingSet};
+use vmux_core::event::{FileEncoding, FileEncodingEvent, FileEncodingOperation, FileEncodingSet};
 
 use crate::edit::EditCommand;
 use crate::host::editing::EditRequest;
@@ -32,7 +32,7 @@ fn on_file_encoding_set(
     let Ok((view, edit)) = views.get_mut(entity) else {
         return;
     };
-    if wanted.action == FileEncodingAction::Reopen {
+    if wanted.operation == FileEncodingOperation::Reopen {
         commands
             .entity(entity)
             .insert(ForcedEncoding {

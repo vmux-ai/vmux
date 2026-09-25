@@ -12,7 +12,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use hid::HidBroker;
 use stream::StreamServer;
-use vmux_api::protocol::SimulatorAction;
+use vmux_api::protocol::SimulatorInput;
 use vmux_core::PageMetadata;
 use vmux_core::host::page::{NativelyHosted, PageReady};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
@@ -89,7 +89,7 @@ pub struct SimulatorFocusRequest(pub Option<Entity>);
 #[derive(Message, Clone)]
 pub struct SimulatorControlRequest {
     pub request_id: [u8; 16],
-    pub action: SimulatorAction,
+    pub input: SimulatorInput,
 }
 
 #[derive(Message, Clone)]

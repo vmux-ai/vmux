@@ -820,15 +820,15 @@ impl PaletteState {
             && (CommandBarQuery(&self.query).is_start_prompt() || !attachments.is_empty())
             && let Some(target_url) = prompt_target_url(item)
         {
-            let action = if prompt_target_matches_query(item, &self.query) && attachments.is_empty()
-            {
-                SubmissionKind::open(target_url, self.open_target)
-            } else {
-                SubmissionKind::prompt(self.query.trim(), target_url, attachments)
-            };
+            let request =
+                if prompt_target_matches_query(item, &self.query) && attachments.is_empty() {
+                    SubmissionKind::open(target_url, self.open_target)
+                } else {
+                    SubmissionKind::prompt(self.query.trim(), target_url, attachments)
+                };
             return Submission {
                 close: true,
-                request: Some(action),
+                request: Some(request),
                 inline_target,
                 retype: None,
             };

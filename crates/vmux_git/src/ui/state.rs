@@ -135,7 +135,7 @@ impl GitPageState {
         let Some(result) = snapshot.result.as_ref() else {
             return;
         };
-        if result.action != "commit" {
+        if result.operation != "commit" {
             return;
         }
         let mut pending = self.pending_commit_message;

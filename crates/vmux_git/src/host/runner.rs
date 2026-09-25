@@ -466,7 +466,7 @@ impl GitStashEntry {
 }
 
 impl GitOperation {
-    pub(crate) fn action(&self) -> &'static str {
+    pub(crate) fn label(&self) -> &'static str {
         match self {
             Self::Amend => "amend",
             Self::CheckoutCommit { .. } => "checkout commit",

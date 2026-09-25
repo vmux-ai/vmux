@@ -123,7 +123,7 @@ impl GitController {
         &mut self,
         result: &crate::event::GitOperationResult,
     ) -> Option<String> {
-        if result.action != "new branch" {
+        if result.operation != "new branch" {
             return None;
         }
         let branch = std::mem::take(&mut self.pending_branch_checkout);

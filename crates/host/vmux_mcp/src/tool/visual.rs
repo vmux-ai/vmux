@@ -5,7 +5,7 @@ use super::{
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::{AgentQuery, SimulatorAction, SimulatorButton};
+use vmux_client::protocol::{AgentQuery, SimulatorButton, SimulatorInput};
 
 pub(super) struct VisualToolPlugin;
 
@@ -191,7 +191,7 @@ fn simulator_tap(
             .entity(entity)
             .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
                 AgentQuery::SimulatorControl {
-                    action: SimulatorAction::Tap {
+                    input: SimulatorInput::Tap {
                         x: args.x,
                         y: args.y,
                     },
@@ -208,7 +208,7 @@ fn simulator_swipe(
         let duration_ms = args.duration_ms.unwrap_or(300);
         let target = if (1..=10_000).contains(&duration_ms) {
             Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
-                action: SimulatorAction::Swipe {
+                input: SimulatorInput::Swipe {
                     start_x: args.start_x,
                     start_y: args.start_y,
                     end_x: args.end_x,
@@ -233,7 +233,7 @@ fn simulator_type(
             Err("simulator_type.text is empty".to_string())
         } else {
             Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
-                action: SimulatorAction::TypeText(text.clone()),
+                input: SimulatorInput::TypeText(text.clone()),
             }))
         };
         commands.entity(entity).insert(ToolDispatchResult(target));
@@ -249,7 +249,7 @@ fn simulator_key(
             .entity(entity)
             .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
                 AgentQuery::SimulatorControl {
-                    action: SimulatorAction::Key(args.keycode),
+                    input: SimulatorInput::Key(args.keycode),
                 },
             ))));
     }
@@ -264,7 +264,7 @@ fn simulator_button(
             .entity(entity)
             .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
                 AgentQuery::SimulatorControl {
-                    action: SimulatorAction::Button(args.button.into()),
+                    input: SimulatorInput::Button(args.button.into()),
                 },
             ))));
     }

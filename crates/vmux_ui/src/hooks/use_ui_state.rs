@@ -129,9 +129,9 @@ where
         payloads
     }
 
-    pub fn for_each(self, mut action: impl FnMut(T)) {
+    pub fn for_each(self, mut callback: impl FnMut(T)) {
         for payload in self.take() {
-            action(payload);
+            callback(payload);
         }
     }
 }

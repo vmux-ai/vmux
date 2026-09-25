@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use vmux_core::event::{
-    EditorAction, FileCodeActionPick, FileDefinitionRequest, FileEditorAction, FileGotoRequest,
+    EditorCapability, FileCodeActionPick, FileDefinitionRequest, FileGotoRequest,
     FileReferencesRequest, FileRenameRequest, RefItem,
 };
 use vmux_ui::hooks::send;
@@ -8,6 +8,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::ime::use_ime_guard;
 
 use super::focus_file_input;
+use crate::event::FileEditorOperation;
 use crate::page_key::FileKeys;
 
 const RENAME_ID: &str = "file-rename";
@@ -170,7 +171,7 @@ pub(super) fn RenameInput(state: Signal<Option<RenameBox>>, top: f64, left: f64)
 #[component]
 pub(super) fn EditorContextMenu(
     position: Signal<Option<(f64, f64, u32, u32)>>,
-    offered: Signal<Vec<EditorAction>>,
+    offered: Signal<Vec<EditorCapability>>,
 ) -> Element {
     let mut position = position;
     let Some((x, y, line, col)) = position() else {
@@ -286,16 +287,14 @@ pub(super) fn ReferencesPanel(
 struct MenuRow {
     label: &'static str,
     shortcut: &'static str,
-    action: Option<EditorAction>,
+    operation: Option<FileEditorOperation>,
     opens_group: bool,
 }
 
 impl MenuRow {
     fn invoke(self, line: u32, col: u32) {
-        match self.action {
-            Some(action) => {
-                let _ = send(&FileEditorAction { action, line, col });
-            }
+        match self.operation {
+            Some(operation) => operation.send(line, col),
             None if self.label == "editor-go-to-definition" => {
                 let _ = send(&FileDefinitionRequest { line, col });
             }
@@ -307,95 +306,98 @@ impl MenuRow {
 }
 
 struct EditorMenu {
-    offered: Vec<EditorAction>,
+    offered: Vec<EditorCapability>,
 }
 
 impl EditorMenu {
-    fn offering(offered: &[EditorAction]) -> Self {
+    fn offering(offered: &[EditorCapability]) -> Self {
         Self {
             offered: offered.to_vec(),
         }
     }
 
     fn rows(&self) -> Vec<MenuRow> {
-        let lsp = |label, shortcut, action, opens_group| MenuRow {
+        let lsp = |label, shortcut, operation, opens_group| MenuRow {
             label,
             shortcut,
-            action: Some(action),
+            operation: Some(operation),
             opens_group,
         };
         let mut rows = vec![
             MenuRow {
                 label: "editor-go-to-definition",
                 shortcut: "F12",
-                action: None,
+                operation: None,
                 opens_group: false,
             },
             MenuRow {
                 label: "editor-find-references",
                 shortcut: "⇧F12",
-                action: None,
+                operation: None,
                 opens_group: false,
             },
         ];
-        for (action, label, shortcut) in [
+        for (capability, operation, label, shortcut) in [
             (
-                EditorAction::GotoDeclaration,
+                EditorCapability::GotoDeclaration,
+                FileEditorOperation::GotoDeclaration,
                 "editor-go-to-declaration",
                 "",
             ),
             (
-                EditorAction::GotoTypeDefinition,
+                EditorCapability::GotoTypeDefinition,
+                FileEditorOperation::GotoTypeDefinition,
                 "editor-go-to-type-definition",
                 "",
             ),
             (
-                EditorAction::GotoImplementation,
+                EditorCapability::GotoImplementation,
+                FileEditorOperation::GotoImplementation,
                 "editor-go-to-implementation",
                 "⌘F12",
             ),
         ] {
-            if self.offered.contains(&action) {
-                rows.push(lsp(label, shortcut, action, false));
+            if self.offered.contains(&capability) {
+                rows.push(lsp(label, shortcut, operation, false));
             }
         }
 
         let mut modifying = Vec::new();
-        if self.offered.contains(&EditorAction::Rename) {
+        if self.offered.contains(&EditorCapability::Rename) {
             modifying.push(lsp(
                 "editor-rename-symbol",
                 "F2",
-                EditorAction::Rename,
+                FileEditorOperation::Rename,
                 false,
             ));
         }
         modifying.push(lsp(
             "editor-change-all-occurrences",
             "⌘F2",
-            EditorAction::ChangeAllOccurrences,
+            FileEditorOperation::ChangeAllOccurrences,
             false,
         ));
-        if self.offered.contains(&EditorAction::FormatDocument) {
+        if self.offered.contains(&EditorCapability::FormatDocument) {
             modifying.push(lsp(
                 "editor-format-document",
                 "⇧⌥F",
-                EditorAction::FormatDocument,
+                FileEditorOperation::FormatDocument,
                 false,
             ));
         }
-        if self.offered.contains(&EditorAction::FormatSelection) {
+        if self.offered.contains(&EditorCapability::FormatSelection) {
             modifying.push(lsp(
                 "editor-format-selection",
                 "",
-                EditorAction::FormatSelection,
+                FileEditorOperation::FormatSelection,
                 false,
             ));
         }
-        if self.offered.contains(&EditorAction::CodeAction) {
+        if self.offered.contains(&EditorCapability::CodeAction) {
             modifying.push(lsp(
                 "editor-code-action",
                 "⌃⇧R",
-                EditorAction::CodeAction,
+                FileEditorOperation::CodeAction,
                 false,
             ));
         }
@@ -404,13 +406,13 @@ impl EditorMenu {
         }
         rows.append(&mut modifying);
 
-        rows.push(lsp("editor-cut", "⌘X", EditorAction::Cut, true));
-        rows.push(lsp("editor-copy", "⌘C", EditorAction::Copy, false));
-        rows.push(lsp("editor-paste", "⌘V", EditorAction::Paste, false));
+        rows.push(lsp("editor-cut", "⌘X", FileEditorOperation::Cut, true));
+        rows.push(lsp("editor-copy", "⌘C", FileEditorOperation::Copy, false));
+        rows.push(lsp("editor-paste", "⌘V", FileEditorOperation::Paste, false));
         rows.push(lsp(
             "editor-command-palette",
             "⇧⌘P",
-            EditorAction::CommandPalette,
+            FileEditorOperation::CommandPalette,
             true,
         ));
         rows
@@ -422,7 +424,7 @@ mod tests {
     use super::*;
 
     impl EditorMenu {
-        fn labels(offered: &[EditorAction]) -> Vec<&'static str> {
+        fn labels(offered: &[EditorCapability]) -> Vec<&'static str> {
             Self::offering(offered)
                 .rows()
                 .into_iter()
@@ -442,7 +444,10 @@ mod tests {
 
     #[test]
     fn a_row_appears_exactly_when_its_server_offers_it() {
-        let rows = EditorMenu::labels(&[EditorAction::Rename, EditorAction::GotoImplementation]);
+        let rows = EditorMenu::labels(&[
+            EditorCapability::Rename,
+            EditorCapability::GotoImplementation,
+        ]);
         assert!(rows.contains(&"editor-rename-symbol"));
         assert!(rows.contains(&"editor-go-to-implementation"));
         assert!(!rows.contains(&"editor-go-to-declaration"));
@@ -452,12 +457,12 @@ mod tests {
     #[test]
     fn each_group_opens_exactly_once() {
         let all = [
-            EditorAction::GotoDeclaration,
-            EditorAction::GotoTypeDefinition,
-            EditorAction::GotoImplementation,
-            EditorAction::Rename,
-            EditorAction::FormatDocument,
-            EditorAction::FormatSelection,
+            EditorCapability::GotoDeclaration,
+            EditorCapability::GotoTypeDefinition,
+            EditorCapability::GotoImplementation,
+            EditorCapability::Rename,
+            EditorCapability::FormatDocument,
+            EditorCapability::FormatSelection,
         ];
         let opens = EditorMenu::offering(&all)
             .rows()

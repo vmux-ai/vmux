@@ -1,6 +1,6 @@
 use crate::process::{Process, ProcessManager, PtyInputWriter};
 use crate::protocol::{
-    AgentAction, AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
+    AgentAttachment, AgentRequest, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
     ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
 };
 use crate::{read_message, write_message};
@@ -846,7 +846,7 @@ async fn handle_client(
                 SharedMessage::ListSessions
                 | SharedMessage::AgentCommand(_)
                 | SharedMessage::Agent {
-                    action: AgentAction::ListMedia { .. },
+                    request: AgentRequest::ListMedia { .. },
                     ..
                 },
             ) => {
@@ -855,7 +855,7 @@ async fn handle_client(
 
             ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                action: AgentAction::Attach,
+                request: AgentRequest::Attach,
             }) => {
                 let rx = agent_manager.lock().await.subscribe(&sid);
                 if let Some(mut rx) = rx {
@@ -906,8 +906,8 @@ async fn handle_client(
 
             ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                action:
-                    AgentAction::Input {
+                request:
+                    AgentRequest::Input {
                         text,
                         context,
                         attachments,
@@ -972,7 +972,7 @@ async fn handle_client(
 
             ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                action: AgentAction::Cancel,
+                request: AgentRequest::Cancel,
             }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
@@ -989,7 +989,7 @@ async fn handle_client(
 
             ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                action: AgentAction::Approve { call_id, decision },
+                request: AgentRequest::Approve { call_id, decision },
             }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager

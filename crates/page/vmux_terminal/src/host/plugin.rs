@@ -1988,7 +1988,7 @@ fn term_key_event_to_bytes(event: &KeyStroke) -> Vec<u8> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum TerminalWebShortcutAction {
+enum TerminalWebShortcutResolution {
     Command(String),
     Consume,
     PassThrough,
@@ -1998,9 +1998,9 @@ fn resolve_terminal_web_shortcut(
     event: &KeyStroke,
     map: &Keymap,
     state: &mut TerminalWebShortcutState,
-) -> TerminalWebShortcutAction {
+) -> TerminalWebShortcutResolution {
     let Some(combo) = term_key_event_to_shortcut_combo(event) else {
-        return TerminalWebShortcutAction::PassThrough;
+        return TerminalWebShortcutResolution::PassThrough;
     };
     let now = Instant::now();
     if let Some((_, started)) = state.pending_prefix.as_ref()
@@ -2012,7 +2012,7 @@ fn resolve_terminal_web_shortcut(
     if let Some((prefix, _)) = state.pending_prefix.clone() {
         if let Some(cmd) = map.chord(&prefix, &combo) {
             state.pending_prefix = None;
-            return TerminalWebShortcutAction::Command(cmd);
+            return TerminalWebShortcutResolution::Command(cmd);
         }
         state.pending_prefix = None;
     }
@@ -2020,15 +2020,15 @@ fn resolve_terminal_web_shortcut(
     if let Some(cmd) = map.direct(&combo)
         && (combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key)
     {
-        return TerminalWebShortcutAction::Command(cmd);
+        return TerminalWebShortcutResolution::Command(cmd);
     }
 
     if map.has_chord_prefix(&combo) {
         state.pending_prefix = Some((combo, now));
-        return TerminalWebShortcutAction::Consume;
+        return TerminalWebShortcutResolution::Consume;
     }
 
-    TerminalWebShortcutAction::PassThrough
+    TerminalWebShortcutResolution::PassThrough
 }
 
 fn term_key_event_to_shortcut_combo(event: &KeyStroke) -> Option<KeyCombo> {
@@ -2162,7 +2162,7 @@ fn on_term_key(
         return;
     }
     match resolve_terminal_web_shortcut(event, &keymap, &mut web_shortcuts) {
-        TerminalWebShortcutAction::Command(id) => {
+        TerminalWebShortcutResolution::Command(id) => {
             let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
             command_invocations.write(vmux_command::CommandInvocation::new(caller, id));
             if let Some(proxy) = proxy.as_ref() {
@@ -2170,8 +2170,8 @@ fn on_term_key(
             }
             return;
         }
-        TerminalWebShortcutAction::Consume => return,
-        TerminalWebShortcutAction::PassThrough => {}
+        TerminalWebShortcutResolution::Consume => return,
+        TerminalWebShortcutResolution::PassThrough => {}
     }
     if event.is_modifier_key() {
         return;
@@ -3148,7 +3148,7 @@ mod tests {
 
         assert_eq!(
             resolve_terminal_web_shortcut(&event, &keymap, &mut state),
-            TerminalWebShortcutAction::Command("browser_open_page_in_command_bar".to_string())
+            TerminalWebShortcutResolution::Command("browser_open_page_in_command_bar".to_string())
         );
     }
 
@@ -3176,7 +3176,7 @@ mod tests {
 
         assert_eq!(
             resolve_terminal_web_shortcut(&event, &keymap, &mut state),
-            TerminalWebShortcutAction::Command("toggle_layout".to_string())
+            TerminalWebShortcutResolution::Command("toggle_layout".to_string())
         );
     }
 

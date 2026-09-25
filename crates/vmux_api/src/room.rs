@@ -246,7 +246,7 @@ pub struct SubagentBlock {
     pub provider: String,
     pub title: String,
     pub status: String,
-    pub action: String,
+    pub activity: String,
     pub agent_name: Option<String>,
     pub thread_id: Option<String>,
     pub parent_thread_id: Option<String>,

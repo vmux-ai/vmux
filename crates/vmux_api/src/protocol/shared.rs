@@ -8,13 +8,13 @@ use vmux_macro::VariantNames;
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
 pub enum SharedMessage {
-    Agent { sid: String, action: AgentAction },
+    Agent { sid: String, request: AgentRequest },
     ListSessions,
     AgentCommand(SharedAgentCommand),
 }
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
-pub enum AgentAction {
+pub enum AgentRequest {
     Attach,
     Input {
         text: String,
@@ -33,10 +33,10 @@ pub enum AgentAction {
 }
 
 impl SharedMessage {
-    pub fn agent(sid: impl Into<String>, action: AgentAction) -> Self {
+    pub fn agent(sid: impl Into<String>, request: AgentRequest) -> Self {
         Self::Agent {
             sid: sid.into(),
-            action,
+            request,
         }
     }
 }

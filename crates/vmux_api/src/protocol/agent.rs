@@ -70,7 +70,7 @@ pub enum SimulatorButton {
 }
 
 #[vmux_api::contract(Eq)]
-pub enum SimulatorAction {
+pub enum SimulatorInput {
     Tap {
         x: u32,
         y: u32,

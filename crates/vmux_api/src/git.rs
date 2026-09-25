@@ -75,7 +75,7 @@ pub struct GitDiffViewport {
 
 #[vmux_api::contract(Eq)]
 pub struct GitOperationResult {
-    pub action: String,
+    pub operation: String,
     pub ok: bool,
     pub message: String,
 }

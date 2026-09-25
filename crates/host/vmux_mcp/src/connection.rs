@@ -13,7 +13,7 @@ use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_api::mcp::{
-    McpServerAction, McpServerEntry, McpServerPending, McpServerRequest, McpServerResult,
+    McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
     McpServerStatus, McpServers, McpServersRequest,
 };
 use vmux_core::host::{UiStatePlugin, UiStateWrite};
@@ -37,8 +37,8 @@ impl Plugin for McpConnectionPlugin {
         .add_systems(
             Update,
             (
-                start_mcp_action,
-                drain_mcp_actions,
+                start_mcp_operation,
+                drain_mcp_operations,
                 start_mcp_snapshots,
                 drain_mcp_snapshots,
                 publish_mcp_connections,
@@ -91,24 +91,24 @@ fn request_mcp_server(
     let Ok(mut state) = states.get_mut(target) else {
         return;
     };
-    let Some((generation, action)) = state.begin_server_request(&id) else {
+    let Some((generation, operation)) = state.begin_server_request(&id) else {
         return;
     };
     commands.spawn((
-        McpAction { runtime: *runtime },
-        PendingMcpAction {
+        McpOperation { runtime: *runtime },
+        PendingMcpOperation {
             target,
             generation,
             id,
-            action,
+            operation,
         },
     ));
 }
 
-fn start_mcp_action(
-    runtime: Query<&McpActions, With<McpRuntime>>,
-    pending: Query<&PendingMcpAction>,
-    running: Query<(), With<McpActionTask>>,
+fn start_mcp_operation(
+    runtime: Query<&McpOperations, With<McpRuntime>>,
+    pending: Query<&PendingMcpOperation>,
+    running: Query<(), With<McpOperationTask>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -127,21 +127,21 @@ fn start_mcp_action(
     let target = pending.target;
     let generation = pending.generation;
     let id = pending.id.clone();
-    let action = pending.action;
+    let operation = pending.operation;
     let task_id = id.clone();
     let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let progress_wake = completion_wake.clone();
     let (progress_sender, progress_receiver) = mpsc::channel();
     let task = IoTaskPool::get().spawn(async move {
-        let result = match action {
-            McpServerAction::Connect => McpConnection::connect(&task_id, |url| {
+        let result = match operation {
+            McpServerOperation::Connect => McpConnection::connect(&task_id, |url| {
                 if progress_sender.send(url).is_ok()
                     && let Some(wake) = &progress_wake
                 {
                     let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
                 }
             }),
-            McpServerAction::Disconnect => McpConnection::disconnect(&task_id),
+            McpServerOperation::Disconnect => McpConnection::disconnect(&task_id),
         };
         if let Some(wake) = completion_wake {
             let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -150,19 +150,19 @@ fn start_mcp_action(
     });
     commands
         .entity(entity)
-        .remove::<PendingMcpAction>()
-        .insert(McpActionTask {
+        .remove::<PendingMcpOperation>()
+        .insert(McpOperationTask {
             target,
             generation,
             id,
-            action,
+            operation,
             task,
             progress: Mutex::new(progress_receiver),
         });
 }
 
-fn drain_mcp_actions(
-    mut tasks: Query<(Entity, &mut McpActionTask)>,
+fn drain_mcp_operations(
+    mut tasks: Query<(Entity, &mut McpOperationTask)>,
     browsers: NonSend<Browsers>,
     mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     mut snapshot_requests: MessageWriter<McpSnapshotRequest>,
@@ -190,7 +190,7 @@ fn drain_mcp_actions(
             generation: task.generation,
             result: Some(McpServerResult {
                 id: task.id.clone(),
-                action: task.action,
+                operation: task.operation,
                 success,
                 message,
             }),
@@ -284,7 +284,7 @@ impl McpPageState {
         Some(self.generation)
     }
 
-    fn begin_server_request(&mut self, id: &str) -> Option<(u64, McpServerAction)> {
+    fn begin_server_request(&mut self, id: &str) -> Option<(u64, McpServerOperation)> {
         if self.snapshot.loading || self.snapshot.pending.is_some() {
             return None;
         }
@@ -293,20 +293,20 @@ impl McpPageState {
             .servers
             .iter()
             .find(|server| server.id == id)?;
-        let action = match server.status {
+        let operation = match server.status {
             McpServerStatus::Available
             | McpServerStatus::AuthenticationRequired
-            | McpServerStatus::Failed => McpServerAction::Connect,
-            McpServerStatus::Connected => McpServerAction::Disconnect,
+            | McpServerStatus::Failed => McpServerOperation::Connect,
+            McpServerStatus::Connected => McpServerOperation::Disconnect,
             McpServerStatus::Configured => return None,
         };
         self.generation = self.generation.wrapping_add(1).max(1);
         self.snapshot.pending = Some(McpServerPending {
             id: id.to_string(),
-            action,
+            operation,
         });
         self.snapshot.result = None;
-        Some((self.generation, action))
+        Some((self.generation, operation))
     }
 
     fn finish(&mut self, generation: u64, snapshot: McpServers) {
@@ -317,22 +317,22 @@ impl McpPageState {
 }
 
 #[derive(Component)]
-#[relationship(relationship_target = McpActions)]
-struct McpAction {
+#[relationship(relationship_target = McpOperations)]
+struct McpOperation {
     #[relationship]
     runtime: Entity,
 }
 
 #[derive(Component)]
-#[relationship_target(relationship = McpAction)]
-struct McpActions(Vec<Entity>);
+#[relationship_target(relationship = McpOperation)]
+struct McpOperations(Vec<Entity>);
 
 #[derive(Component)]
-struct PendingMcpAction {
+struct PendingMcpOperation {
     target: Entity,
     generation: u64,
     id: String,
-    action: McpServerAction,
+    operation: McpServerOperation,
 }
 
 #[derive(Clone, Message)]
@@ -343,11 +343,11 @@ struct McpSnapshotRequest {
 }
 
 #[derive(Component)]
-struct McpActionTask {
+struct McpOperationTask {
     target: Entity,
     generation: u64,
     id: String,
-    action: McpServerAction,
+    operation: McpServerOperation,
     task: Task<Result<(), String>>,
     progress: Mutex<mpsc::Receiver<String>>,
 }
@@ -849,10 +849,11 @@ fn base64_url(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        McpAction, McpActions, McpCallback, McpConnection, McpPageState, McpRuntime, base64_url,
+        McpCallback, McpConnection, McpOperation, McpOperations, McpPageState, McpRuntime,
+        base64_url,
     };
     use bevy::prelude::*;
-    use vmux_api::mcp::{McpServerAction, McpServers};
+    use vmux_api::mcp::{McpServerOperation, McpServers};
 
     #[test]
     fn pkce_uses_unpadded_url_safe_base64() {
@@ -914,11 +915,11 @@ mod tests {
         });
         assert_eq!(
             state.begin_server_request("linear"),
-            Some((2, McpServerAction::Connect))
+            Some((2, McpServerOperation::Connect))
         );
         let pending = state.snapshot.pending.as_ref().unwrap();
         assert_eq!(pending.id, "linear");
-        assert_eq!(pending.action, McpServerAction::Connect);
+        assert_eq!(pending.operation, McpServerOperation::Connect);
         assert_eq!(state.begin_server_request("linear"), None);
     }
 
@@ -926,10 +927,10 @@ mod tests {
     fn mcp_actions_keep_entity_insertion_order() {
         let mut world = World::new();
         let runtime = world.spawn(McpRuntime).id();
-        let first = world.spawn(McpAction { runtime }).id();
-        let second = world.spawn(McpAction { runtime }).id();
+        let first = world.spawn(McpOperation { runtime }).id();
+        let second = world.spawn(McpOperation { runtime }).id();
 
-        let actions = world.get::<McpActions>(runtime).unwrap();
-        assert_eq!(actions.0, [first, second]);
+        let operations = world.get::<McpOperations>(runtime).unwrap();
+        assert_eq!(operations.0, [first, second]);
     }
 }

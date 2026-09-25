@@ -1,5 +1,5 @@
 use vmux_api::protocol::{
-    AgentAction, AgentAttachment, ApprovalDecision, ClientMessage, SharedAgentCommand,
+    AgentAttachment, AgentRequest, ApprovalDecision, ClientMessage, SharedAgentCommand,
     SharedMessage,
 };
 
@@ -18,25 +18,25 @@ const FROZEN: [(&str, &str); 7] = [
 
 fn samples() -> Vec<SharedMessage> {
     vec![
-        SharedMessage::agent("s", AgentAction::Attach),
+        SharedMessage::agent("s", AgentRequest::Attach),
         SharedMessage::agent(
             "s",
-            AgentAction::Input {
+            AgentRequest::Input {
                 text: "t".into(),
                 context: None,
                 attachments: Vec::<AgentAttachment>::new(),
                 preferred_mode: None,
             },
         ),
-        SharedMessage::agent("s", AgentAction::Cancel),
+        SharedMessage::agent("s", AgentRequest::Cancel),
         SharedMessage::agent(
             "s",
-            AgentAction::Approve {
+            AgentRequest::Approve {
                 call_id: "c".into(),
                 decision: ApprovalDecision::Allow,
             },
         ),
-        SharedMessage::agent("s", AgentAction::ListMedia { query: "q".into() }),
+        SharedMessage::agent("s", AgentRequest::ListMedia { query: "q".into() }),
         SharedMessage::ListSessions,
         SharedMessage::AgentCommand(SharedAgentCommand::ListAgents),
     ]
@@ -44,12 +44,12 @@ fn samples() -> Vec<SharedMessage> {
 
 fn name_of(message: &SharedMessage) -> &'static str {
     match message {
-        SharedMessage::Agent { action, .. } => match action {
-            AgentAction::Attach => "Agent/Attach",
-            AgentAction::Input { .. } => "Agent/Input",
-            AgentAction::Cancel => "Agent/Cancel",
-            AgentAction::Approve { .. } => "Agent/Approve",
-            AgentAction::ListMedia { .. } => "Agent/ListMedia",
+        SharedMessage::Agent { request, .. } => match request {
+            AgentRequest::Attach => "Agent/Attach",
+            AgentRequest::Input { .. } => "Agent/Input",
+            AgentRequest::Cancel => "Agent/Cancel",
+            AgentRequest::Approve { .. } => "Agent/Approve",
+            AgentRequest::ListMedia { .. } => "Agent/ListMedia",
         },
         SharedMessage::ListSessions => "ListSessions",
         SharedMessage::AgentCommand(_) => "AgentCommand",
@@ -90,7 +90,7 @@ fn every_shared_variant_still_encodes_to_its_frozen_bytes() {
 fn a_frame_round_trips_with_its_payload_intact() {
     let bytes = encode(SharedMessage::agent(
         "s",
-        AgentAction::Approve {
+        AgentRequest::Approve {
             call_id: "c".into(),
             decision: ApprovalDecision::Allow,
         },
@@ -100,7 +100,7 @@ fn a_frame_round_trips_with_its_payload_intact() {
 
     let ClientMessage::Shared(SharedMessage::Agent {
         sid,
-        action: AgentAction::Approve { call_id, decision },
+        request: AgentRequest::Approve { call_id, decision },
     }) = decoded
     else {
         panic!("decoded to the wrong variant");

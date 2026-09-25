@@ -831,7 +831,7 @@ impl TitleGlyph {
 }
 
 #[component]
-fn TitleAction(glyph: TitleGlyph, label: String, on_press: EventHandler<()>) -> Element {
+fn TitleButton(glyph: TitleGlyph, label: String, on_press: EventHandler<()>) -> Element {
     rsx! {
         button {
             class: "flex h-5 w-5 shrink-0 items-center justify-center rounded text-foreground/55 outline-none transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:bg-foreground/[0.12] focus-visible:text-foreground",
@@ -840,13 +840,13 @@ fn TitleAction(glyph: TitleGlyph, label: String, on_press: EventHandler<()>) -> 
                 e.stop_propagation();
                 on_press.call(());
             },
-            TitleActionIcon { glyph }
+            TitleButtonIcon { glyph }
         }
     }
 }
 
 #[component]
-fn TitleActionIcon(glyph: TitleGlyph) -> Element {
+fn TitleButtonIcon(glyph: TitleGlyph) -> Element {
     rsx! {
         svg {
             class: "h-3.5 w-3.5",
@@ -980,12 +980,12 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
                 span { class: "truncate", {SidebarView::Search.title()} }
                 div {
                     class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100",
-                    TitleAction {
+                    TitleButton {
                         glyph: TitleGlyph::Refresh,
                         label: translate("common-refresh"),
                         on_press: move |_| search.run(),
                     }
-                    TitleAction {
+                    TitleButton {
                         glyph: TitleGlyph::Clear,
                         label: translate("editor-search-clear"),
                         on_press: move |_| {
@@ -993,7 +993,7 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
                             search.clear();
                         },
                     }
-                    TitleAction {
+                    TitleButton {
                         glyph: TitleGlyph::CollapseAll,
                         label: translate("common-collapse-all"),
                         on_press: move |_| search.collapse_all(),
@@ -1226,7 +1226,7 @@ fn SidebarViewSwitch(view: Signal<SidebarView>) -> Element {
                     FocusClaim::new(SEARCH_INPUT_ID).request();
                 }
             },
-            TitleActionIcon { glyph: current.switch_glyph() }
+            TitleButtonIcon { glyph: current.switch_glyph() }
         }
     }
 }
@@ -1449,7 +1449,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                 span { class: "truncate", {SidebarView::Explorer.title()} }
                 div {
                     class: "pointer-events-none ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100",
-                    TitleAction {
+                    TitleButton {
                         glyph: TitleGlyph::NewFile,
                         label: translate("editor-new-file"),
                         on_press: move |_| {
@@ -1465,7 +1465,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                 );
                         },
                     }
-                    TitleAction {
+                    TitleButton {
                         glyph: TitleGlyph::NewFolder,
                         label: translate("editor-new-folder"),
                         on_press: move |_| {
@@ -1481,12 +1481,12 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
                                 );
                         },
                     }
-                    TitleAction {
+                    TitleButton {
                         glyph: TitleGlyph::Refresh,
                         label: translate("common-refresh"),
                         on_press: move |_| tree.refresh(root_path()),
                     }
-                    TitleAction {
+                    TitleButton {
                         glyph: TitleGlyph::CollapseAll,
                         label: translate("common-collapse-all"),
                         on_press: move |_| tree.collapse_all(),

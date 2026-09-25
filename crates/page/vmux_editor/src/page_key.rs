@@ -10,9 +10,9 @@ use vmux_ui::hooks::{KeyClaim, MenuDirection, move_selection, send, use_key_clai
 use vmux_ui::platform::sleep_ms;
 
 pub(crate) fn use_file_keys(page: FilePage) -> FileKeys {
-    let actions = FileKeyActions(page);
+    let handler = FileKeyHandler(page);
     let events = crate::state::use_file_ui::<FileKey>();
-    use_effect(move || events.for_each(|key| actions.apply(key)));
+    use_effect(move || events.for_each(|key| handler.apply(key)));
     let keys = FileKeys {
         claim: use_key_claim(Unclaimed::Types, move || page.key_context()),
     };
@@ -35,9 +35,9 @@ impl FileKeys {
 }
 
 #[derive(Clone, Copy)]
-struct FileKeyActions(FilePage);
+struct FileKeyHandler(FilePage);
 
-impl FileKeyActions {
+impl FileKeyHandler {
     fn apply(&self, key: FileKey) {
         match key {
             FileKey::ToggleExplorer => self.0.toggle_explorer(),

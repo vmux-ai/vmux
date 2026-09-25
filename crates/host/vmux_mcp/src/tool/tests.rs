@@ -1,7 +1,7 @@
 use super::*;
 use vmux_client::protocol::{
-    AgentBookmarkCommand, AgentCommand, AgentQuery, AgentSpaceCommand, SimulatorAction,
-    SimulatorButton,
+    AgentBookmarkCommand, AgentCommand, AgentQuery, AgentSpaceCommand, SimulatorButton,
+    SimulatorInput,
 };
 
 #[derive(Clone, Component, Deserialize, Serialize)]
@@ -369,7 +369,7 @@ fn simulator_controls_dispatch_to_queries() {
     assert_eq!(
         dispatch_query("simulator_tap", serde_json::json!({"x": 120, "y": 240})).unwrap(),
         AgentQuery::SimulatorControl {
-            action: SimulatorAction::Tap { x: 120, y: 240 }
+            input: SimulatorInput::Tap { x: 120, y: 240 }
         }
     );
     assert_eq!(
@@ -379,7 +379,7 @@ fn simulator_controls_dispatch_to_queries() {
         )
         .unwrap(),
         AgentQuery::SimulatorControl {
-            action: SimulatorAction::Swipe {
+            input: SimulatorInput::Swipe {
                 start_x: 100,
                 start_y: 700,
                 end_x: 100,
@@ -391,19 +391,19 @@ fn simulator_controls_dispatch_to_queries() {
     assert_eq!(
         dispatch_query("simulator_type", serde_json::json!({"text": "hello"})).unwrap(),
         AgentQuery::SimulatorControl {
-            action: SimulatorAction::TypeText("hello".to_string())
+            input: SimulatorInput::TypeText("hello".to_string())
         }
     );
     assert_eq!(
         dispatch_query("simulator_key", serde_json::json!({"keycode": 40})).unwrap(),
         AgentQuery::SimulatorControl {
-            action: SimulatorAction::Key(40)
+            input: SimulatorInput::Key(40)
         }
     );
     assert_eq!(
         dispatch_query("simulator_button", serde_json::json!({"button": "home"})).unwrap(),
         AgentQuery::SimulatorControl {
-            action: SimulatorAction::Button(SimulatorButton::Home)
+            input: SimulatorInput::Button(SimulatorButton::Home)
         }
     );
 }

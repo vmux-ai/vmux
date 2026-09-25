@@ -1,7 +1,7 @@
 use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use vmux_api::protocol::{AgentAction, SharedAgentCommand, SharedMessage, SharedResponse};
+use vmux_api::protocol::{AgentRequest, SharedAgentCommand, SharedMessage, SharedResponse};
 use vmux_api::room::{
     ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteAgent, RemoteApproval,
     RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
@@ -136,7 +136,7 @@ impl Api {
     ) -> Result<(), ApiError> {
         let message = SharedMessage::agent(
             sid,
-            AgentAction::Input {
+            AgentRequest::Input {
                 text: request.text.clone(),
                 context: None,
                 attachments: request.attachments.clone(),
@@ -160,7 +160,7 @@ impl Api {
     }
 
     pub(crate) async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(sid, AgentAction::Cancel);
+        let message = SharedMessage::agent(sid, AgentRequest::Cancel);
         self.applied(self.quic.request(message).await)
     }
 
@@ -171,7 +171,7 @@ impl Api {
     ) -> Result<(), ApiError> {
         let message = SharedMessage::agent(
             sid,
-            AgentAction::Approve {
+            AgentRequest::Approve {
                 call_id: request.call_id.clone(),
                 decision: request.decision,
             },
@@ -199,7 +199,7 @@ impl Api {
     ) -> Result<Vec<RemoteMediaEntry>, ApiError> {
         let request = SharedMessage::agent(
             sid,
-            AgentAction::ListMedia {
+            AgentRequest::ListMedia {
                 query: query.to_string(),
             },
         );

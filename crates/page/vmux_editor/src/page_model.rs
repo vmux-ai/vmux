@@ -307,7 +307,7 @@ pub fn note_source_position(source: &str, start_line: u32, offset: u32) -> (u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PkgAction {
+pub enum PackageOperation {
     Install,
     Update,
     Uninstall,
@@ -365,17 +365,17 @@ pub fn pkg_status_class(status: LspPkgStatus) -> &'static str {
     }
 }
 
-pub fn pkg_action(status: LspPkgStatus, installable: bool) -> PkgAction {
+pub fn package_operation(status: LspPkgStatus, installable: bool) -> PackageOperation {
     match status {
-        LspPkgStatus::Installed | LspPkgStatus::Running => PkgAction::Uninstall,
-        LspPkgStatus::Outdated => PkgAction::Update,
-        LspPkgStatus::Installing => PkgAction::None,
-        LspPkgStatus::OnPath => PkgAction::None,
+        LspPkgStatus::Installed | LspPkgStatus::Running => PackageOperation::Uninstall,
+        LspPkgStatus::Outdated => PackageOperation::Update,
+        LspPkgStatus::Installing => PackageOperation::None,
+        LspPkgStatus::OnPath => PackageOperation::None,
         LspPkgStatus::Available | LspPkgStatus::Failed => {
             if installable {
-                PkgAction::Install
+                PackageOperation::Install
             } else {
-                PkgAction::None
+                PackageOperation::None
             }
         }
     }
@@ -948,19 +948,31 @@ mod tests {
     }
 
     #[test]
-    fn pkg_action_by_status() {
+    fn package_operation_by_status() {
         assert_eq!(
-            pkg_action(LspPkgStatus::Available, true),
-            PkgAction::Install
+            package_operation(LspPkgStatus::Available, true),
+            PackageOperation::Install
         );
-        assert_eq!(pkg_action(LspPkgStatus::Available, false), PkgAction::None);
         assert_eq!(
-            pkg_action(LspPkgStatus::Installed, true),
-            PkgAction::Uninstall
+            package_operation(LspPkgStatus::Available, false),
+            PackageOperation::None
         );
-        assert_eq!(pkg_action(LspPkgStatus::Outdated, true), PkgAction::Update);
-        assert_eq!(pkg_action(LspPkgStatus::Installing, true), PkgAction::None);
-        assert_eq!(pkg_action(LspPkgStatus::OnPath, true), PkgAction::None);
+        assert_eq!(
+            package_operation(LspPkgStatus::Installed, true),
+            PackageOperation::Uninstall
+        );
+        assert_eq!(
+            package_operation(LspPkgStatus::Outdated, true),
+            PackageOperation::Update
+        );
+        assert_eq!(
+            package_operation(LspPkgStatus::Installing, true),
+            PackageOperation::None
+        );
+        assert_eq!(
+            package_operation(LspPkgStatus::OnPath, true),
+            PackageOperation::None
+        );
     }
 
     #[test]

@@ -98,11 +98,11 @@ impl GitState {
 
     pub(super) fn apply_result(&mut self, event: &GitOperationResult) {
         self.push_log(GitCommandLogEntry {
-            operation: event.action.clone(),
+            operation: event.operation.clone(),
             message: event.message.clone(),
             ok: event.ok,
         });
-        if event.action == "fetch" {
+        if event.operation == "fetch" {
             self.snapshot.fetching = false;
         }
         if event.ok {

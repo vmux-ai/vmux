@@ -49,13 +49,13 @@ pub(crate) struct PendingAgentContinuation(String);
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PendingAgentChoice {
     pub(crate) session_entity: Entity,
-    pub(crate) action: PendingAgentChoiceAction,
+    pub(crate) operation: PendingAgentChoiceOperation,
     pub(crate) question: String,
     pub(crate) options: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PendingAgentChoiceAction {
+pub(crate) enum PendingAgentChoiceOperation {
     Resume,
     InitializeGit {
         tab_entity: Entity,
@@ -99,12 +99,12 @@ fn handle_agent_choice_selected(
     let Some(selected) = choice.options.get(event.index) else {
         return;
     };
-    let continuation = match &choice.action {
-        PendingAgentChoiceAction::Resume => format!(
+    let continuation = match &choice.operation {
+        PendingAgentChoiceOperation::Resume => format!(
             "VMUX USER CHOICE: For \"{}\", the user selected \"{}\". Continue the original request in this same conversation.",
             choice.question, selected
         ),
-        PendingAgentChoiceAction::InitializeGit {
+        PendingAgentChoiceOperation::InitializeGit {
             tab_entity,
             workspace,
         } => {
@@ -485,10 +485,11 @@ fn drain_workspace_picker_tasks(
                                             .entity(picker.agent_entity)
                                             .insert(PendingAgentChoice {
                                                 session_entity: picker.session_entity,
-                                                action: PendingAgentChoiceAction::InitializeGit {
-                                                    tab_entity: picker.tab_entity,
-                                                    workspace: execution_dir,
-                                                },
+                                                operation:
+                                                    PendingAgentChoiceOperation::InitializeGit {
+                                                        tab_entity: picker.tab_entity,
+                                                        workspace: execution_dir,
+                                                    },
                                                 question: INITIALIZE_GIT_QUESTION.to_string(),
                                                 options: INITIALIZE_GIT_OPTIONS
                                                     .into_iter()
@@ -606,7 +607,7 @@ mod tests {
             .world_mut()
             .spawn(PendingAgentChoice {
                 session_entity: session,
-                action: PendingAgentChoiceAction::Resume,
+                operation: PendingAgentChoiceOperation::Resume,
                 question: "Mode?".into(),
                 options: vec!["Fast".into(), "Safe".into()],
             })
@@ -642,7 +643,7 @@ mod tests {
             .world_mut()
             .spawn(PendingAgentChoice {
                 session_entity: session,
-                action: PendingAgentChoiceAction::InitializeGit {
+                operation: PendingAgentChoiceOperation::InitializeGit {
                     tab_entity: tab,
                     workspace: workspace_path.clone(),
                 },
@@ -708,7 +709,7 @@ mod tests {
             chat_agent_continuation_message("sid-1", "continue original request"),
             ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                action: vmux_api::protocol::AgentAction::Input { text, context, .. },
+                request: vmux_api::protocol::AgentRequest::Input { text, context, .. },
             })
                 if sid == "sid-1"
                     && text.is_empty()

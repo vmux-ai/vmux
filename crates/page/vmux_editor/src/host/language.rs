@@ -5,6 +5,7 @@ use bevy_cef::prelude::*;
 use vmux_core::event::*;
 
 use crate::edit::{EditCommand, Selection};
+use crate::event::*;
 use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
 use crate::page_model::DisplayCells;
@@ -18,12 +19,12 @@ impl Plugin for LanguagePlugin {
             FileDefinitionRequest,
             FileReferencesRequest,
             FileRenameRequest,
-            FileEditorAction,
             FileCodeActionPick,
             FileCompletionRequest,
             FileGotoRequest,
             FileCompletionCommit,
         )>::default())
+            .add_plugins(UiEventPlugin::<FileEditorOperationRequests>::default())
             .add_observer(on_editor_hover)
             .add_observer(on_editor_definition)
             .add_observer(on_editor_references)
@@ -39,7 +40,18 @@ impl Plugin for LanguagePlugin {
             .add_observer(on_file_definition_request)
             .add_observer(on_file_references_request)
             .add_observer(on_file_rename_request)
-            .add_observer(on_file_editor_action)
+            .add_observer(on_file_editor_command_palette_request)
+            .add_observer(on_file_editor_code_action_request)
+            .add_observer(on_file_editor_goto_declaration_request)
+            .add_observer(on_file_editor_goto_type_definition_request)
+            .add_observer(on_file_editor_goto_implementation_request)
+            .add_observer(on_file_editor_format_document_request)
+            .add_observer(on_file_editor_format_selection_request)
+            .add_observer(on_file_editor_rename_request)
+            .add_observer(on_file_editor_copy_request)
+            .add_observer(on_file_editor_cut_request)
+            .add_observer(on_file_editor_paste_request)
+            .add_observer(on_file_editor_change_all_occurrences_request)
             .add_observer(on_file_code_action_pick)
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
@@ -547,66 +559,108 @@ fn on_file_definition_request(
     );
 }
 
-fn on_file_editor_action(
-    trigger: On<UiInput<FileEditorAction>>,
+fn on_file_editor_command_palette_request(
+    trigger: On<UiInput<FileEditorCommandPaletteRequest>>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
+) {
+    command_invocations.write(vmux_command::CommandInvocation::new(
+        trigger.event().webview,
+        "browser_open_command_bar",
+    ));
+}
+
+fn on_file_editor_code_action_request(
+    trigger: On<UiInput<FileEditorCodeActionRequest>>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview;
-    match trigger.event().payload.action {
-        EditorAction::CommandPalette => {
-            command_invocations.write(vmux_command::CommandInvocation::new(
-                entity,
-                "browser_open_command_bar",
-            ));
-        }
-        EditorAction::CodeAction => commands.trigger(EditorCodeActionRequest::from(entity)),
-        EditorAction::GotoDeclaration => {
-            commands.trigger(EditorDeclarationRequest::from(entity));
-        }
-        EditorAction::GotoTypeDefinition => {
-            commands.trigger(EditorTypeDefinitionRequest::from(entity));
-        }
-        EditorAction::GotoImplementation => {
-            commands.trigger(EditorImplementationRequest::from(entity));
-        }
-        EditorAction::FormatDocument => {
-            commands.trigger(EditorFormatDocumentRequest::from(entity));
-        }
-        EditorAction::FormatSelection => {
-            commands.trigger(EditorFormatSelectionRequest::from(entity));
-        }
-        EditorAction::Rename => commands.trigger(EditorRenameRequest::from(entity)),
-        EditorAction::Copy => {
-            commands.trigger(EditRequest::new(
-                entity,
-                vec![EditCommand::Op {
-                    operator: crate::edit::command::Operator::Yank,
-                    target: crate::edit::command::Target::Selection,
-                    register: None,
-                }],
-            ));
-        }
-        EditorAction::Cut => {
-            commands.trigger(EditRequest::new(
-                entity,
-                vec![EditCommand::Op {
-                    operator: crate::edit::command::Operator::Delete,
-                    target: crate::edit::command::Target::Selection,
-                    register: None,
-                }],
-            ));
-        }
-        EditorAction::Paste => {
-            commands.trigger(EditRequest::new(entity, vec![EditCommand::Paste]));
-        }
-        EditorAction::ChangeAllOccurrences => {
-            commands.trigger(EditRequest::new(
-                entity,
-                vec![EditCommand::SelectAllOccurrences],
-            ));
-        }
-    }
+    commands.trigger(EditorCodeActionRequest::from(trigger.event().webview));
+}
+
+fn on_file_editor_goto_declaration_request(
+    trigger: On<UiInput<FileEditorGotoDeclarationRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(EditorDeclarationRequest::from(trigger.event().webview));
+}
+
+fn on_file_editor_goto_type_definition_request(
+    trigger: On<UiInput<FileEditorGotoTypeDefinitionRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(EditorTypeDefinitionRequest::from(trigger.event().webview));
+}
+
+fn on_file_editor_goto_implementation_request(
+    trigger: On<UiInput<FileEditorGotoImplementationRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(EditorImplementationRequest::from(trigger.event().webview));
+}
+
+fn on_file_editor_format_document_request(
+    trigger: On<UiInput<FileEditorFormatDocumentRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(EditorFormatDocumentRequest::from(trigger.event().webview));
+}
+
+fn on_file_editor_format_selection_request(
+    trigger: On<UiInput<FileEditorFormatSelectionRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(EditorFormatSelectionRequest::from(trigger.event().webview));
+}
+
+fn on_file_editor_rename_request(
+    trigger: On<UiInput<FileEditorRenameRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(EditorRenameRequest::from(trigger.event().webview));
+}
+
+fn on_file_editor_copy_request(
+    trigger: On<UiInput<FileEditorCopyRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(EditRequest::new(
+        trigger.event().webview,
+        vec![EditCommand::Op {
+            operator: crate::edit::command::Operator::Yank,
+            target: crate::edit::command::Target::Selection,
+            register: None,
+        }],
+    ));
+}
+
+fn on_file_editor_cut_request(trigger: On<UiInput<FileEditorCutRequest>>, mut commands: Commands) {
+    commands.trigger(EditRequest::new(
+        trigger.event().webview,
+        vec![EditCommand::Op {
+            operator: crate::edit::command::Operator::Delete,
+            target: crate::edit::command::Target::Selection,
+            register: None,
+        }],
+    ));
+}
+
+fn on_file_editor_paste_request(
+    trigger: On<UiInput<FileEditorPasteRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(EditRequest::new(
+        trigger.event().webview,
+        vec![EditCommand::Paste],
+    ));
+}
+
+fn on_file_editor_change_all_occurrences_request(
+    trigger: On<UiInput<FileEditorChangeAllOccurrencesRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(EditRequest::new(
+        trigger.event().webview,
+        vec![EditCommand::SelectAllOccurrences],
+    ));
 }
 
 fn on_file_code_action_pick(

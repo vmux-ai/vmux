@@ -175,7 +175,7 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
     rsx! {
         div { class: "relative flex shrink-0 items-center gap-1 pl-1",
             for ext in enabled.iter().filter(|extension| extension.pinned) {
-                ExtensionActionButton { key: "{ext.id}", extension: ext.clone() }
+                ExtensionButton { key: "{ext.id}", extension: ext.clone() }
             }
             button {
                 r#type: "button",
@@ -255,9 +255,9 @@ pub(crate) fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
 }
 
 #[component]
-fn ExtensionActionButton(extension: Rc<ExtRow>) -> Element {
+fn ExtensionButton(extension: Rc<ExtRow>) -> Element {
     let mounted = use_signal(|| None::<Rc<MountedData>>);
-    let action = ExtensionActionState {
+    let button = ExtensionButtonState {
         id: extension.id.clone(),
         mounted,
     };
@@ -272,7 +272,7 @@ fn ExtensionActionButton(extension: Rc<ExtRow>) -> Element {
                 let mut mounted = mounted;
                 mounted.set(Some(event.data()));
             },
-            onclick: move |_| action.clone().open(),
+            onclick: move |_| button.clone().open(),
             if let Some(icon) = extension.icon.as_ref() {
                 img { class: "h-4 w-4", src: "{icon}", alt: "" }
             } else {
@@ -285,12 +285,12 @@ fn ExtensionActionButton(extension: Rc<ExtRow>) -> Element {
 }
 
 #[derive(Clone)]
-struct ExtensionActionState {
+struct ExtensionButtonState {
     id: String,
     mounted: Signal<Option<Rc<MountedData>>>,
 }
 
-impl ExtensionActionState {
+impl ExtensionButtonState {
     fn open(self) {
         spawn(async move {
             let anchor = match self.mounted.peek().clone() {
@@ -357,7 +357,7 @@ fn ExtensionMenuRow(
                 title: "{extension.name}",
                 onclick: move |_| {
                     on_close.call(());
-                    ExtensionActionState {
+                    ExtensionButtonState {
                         id: action_id.clone(),
                         mounted: anchor,
                     }
