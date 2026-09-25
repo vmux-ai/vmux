@@ -33,8 +33,8 @@ pub struct BookmarkRequestSet;
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            vmux_command::CommandTypePlugin::<ToggleActiveRequest>::default(),
-            vmux_command::CommandTypePlugin::<PinActiveRequest>::default(),
+            vmux_command::CommandTypePlugin::<BookmarkToggleActiveRequest>::default(),
+            vmux_command::CommandTypePlugin::<BookmarkPinActiveRequest>::default(),
             vmux_command::CommandTypePlugin::<CreateFolderRequest>::default(),
         ))
         .add_message::<ShowBookmarkMenuRequest>()
@@ -116,10 +116,10 @@ impl Plugin for BookmarkPlugin {
 
 #[derive(vmux_macro::CommandBar)]
 #[shortcut(direct = "Super+d")]
-struct ToggleActiveRequest;
+struct BookmarkToggleActiveRequest;
 
 #[derive(vmux_macro::CommandBar)]
-struct PinActiveRequest;
+struct BookmarkPinActiveRequest;
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct CreateFolderRequest {
@@ -781,9 +781,9 @@ fn sync_bookmark_metadata(
 
 fn on_bookmark_toggle_request(
     _trigger: On<UiInput<BookmarkToggleRequest>>,
-    mut requests: MessageWriter<ToggleActiveRequest>,
+    mut requests: MessageWriter<BookmarkToggleActiveRequest>,
 ) {
-    requests.write(ToggleActiveRequest);
+    requests.write(BookmarkToggleActiveRequest);
 }
 
 fn on_bookmark_open_request(
@@ -1022,8 +1022,8 @@ impl From<BookmarkMenuFolderRequest> for BookmarkMenuTarget {
 }
 
 fn handle_bookmark_requests(
-    mut toggles: MessageReader<ToggleActiveRequest>,
-    mut pins: MessageReader<PinActiveRequest>,
+    mut toggles: MessageReader<BookmarkToggleActiveRequest>,
+    mut pins: MessageReader<BookmarkPinActiveRequest>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -1076,7 +1076,7 @@ mod tests {
     fn command_id_dispatches_the_typed_bookmark_request() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(vmux_command::CommandTypePlugin::<ToggleActiveRequest>::default());
+        app.add_plugins(vmux_command::CommandTypePlugin::<BookmarkToggleActiveRequest>::default());
         let caller = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<vmux_command::CommandInvocation>>()
@@ -1089,7 +1089,7 @@ mod tests {
 
         let request_count = app
             .world_mut()
-            .resource_mut::<Messages<ToggleActiveRequest>>()
+            .resource_mut::<Messages<BookmarkToggleActiveRequest>>()
             .drain()
             .count();
         assert_eq!(request_count, 1);

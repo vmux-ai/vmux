@@ -543,6 +543,7 @@ fn impl_os_sub_menu_group(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
 struct MenuProps {
     id: Option<String>,
     label: Option<String>,
+    group: Option<String>,
     accel: Option<String>,
     hidden: bool,
     expand: Option<String>,
@@ -554,6 +555,7 @@ impl MenuProps {
     fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
         let mut id = None;
         let mut label = None;
+        let mut group = None;
         let mut accel = None;
         let mut hidden = false;
         let mut expand = None;
@@ -570,6 +572,9 @@ impl MenuProps {
                 } else if meta.path.is_ident("label") {
                     let v: LitStr = meta.value()?.parse()?;
                     label = Some(v.value());
+                } else if meta.path.is_ident("group") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    group = Some(v.value());
                 } else if meta.path.is_ident("accel") {
                     let v: LitStr = meta.value()?.parse()?;
                     accel = Some(v.value());
@@ -591,6 +596,7 @@ impl MenuProps {
         Ok(MenuProps {
             id,
             label,
+            group,
             accel,
             hidden,
             expand,
@@ -1196,6 +1202,7 @@ fn impl_inferred_command_bar_request(
     }
     let bind_props = BindProps::from_attrs(attrs)?;
     let mcp_props = McpProps::from_attrs(attrs)?;
+    let menu_props = MenuProps::from_attrs(attrs)?;
     if bind_props.expand.is_some()
         || !bind_props.extra_chords.is_empty()
         || !bind_props.direction_keys.is_empty()
@@ -1250,16 +1257,14 @@ fn impl_inferred_command_bar_request(
     } else {
         quote! {}
     };
+    let (id, label, group) = command_request_metadata(ident, menu_props)?;
 
     Ok(quote! {
         impl ::bevy::ecs::message::Message for #ident {}
 
         impl ::vmux_command::CommandRequest for #ident {
             fn definitions() -> ::std::vec::Vec<::vmux_command::CommandDefinition> {
-                let mut definition = ::vmux_command::CommandDefinition::inferred(
-                    module_path!(),
-                    stringify!(#ident),
-                );
+                let mut definition = ::vmux_command::CommandDefinition::new(#id, #label, #group);
                 definition.shortcuts = ::std::vec![#(#shortcuts),*];
                 #mcp
                 ::std::vec![definition]
@@ -1272,14 +1277,51 @@ fn impl_inferred_command_bar_request(
             fn try_from(
                 invocation: &::vmux_command::CommandInvocation,
             ) -> ::core::result::Result<Self, Self::Error> {
-                let definition = ::vmux_command::CommandDefinition::inferred(
-                    module_path!(),
-                    stringify!(#ident),
-                );
-                (invocation.id == definition.id).then_some(Self).ok_or(())
+                (invocation.id == #id).then_some(Self).ok_or(())
             }
         }
     })
+}
+
+fn command_request_metadata(
+    ident: &syn::Ident,
+    props: MenuProps,
+) -> syn::Result<(String, String, String)> {
+    let request_type = ident.to_string();
+    let request = request_type.strip_suffix("Request").ok_or_else(|| {
+        syn::Error::new_spanned(ident, "CommandBar request types must end with Request")
+    })?;
+    let id = props.id.unwrap_or_else(|| heck_variant_snake_case(request));
+    let Some((namespace, _)) = id.split_once('_') else {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "CommandBar request types must include their feature namespace",
+        ));
+    };
+    let group = props.group.unwrap_or_else(|| title_case(namespace));
+    let group_name = group.rsplit(" > ").next().unwrap_or(&group);
+    let group_key = heck_variant_snake_case(group_name);
+    let label_source = id.strip_prefix(&format!("{group_key}_")).unwrap_or(&id);
+    let label = props.label.unwrap_or_else(|| title_case(label_source));
+    Ok((id, label, group))
+}
+
+fn title_case(value: &str) -> String {
+    let mut words = Vec::new();
+    for word in value.split('_') {
+        let word = match word {
+            "prev" => "Previous".to_string(),
+            _ => {
+                let mut characters = word.chars();
+                let Some(first) = characters.next() else {
+                    continue;
+                };
+                format!("{}{}", first.to_ascii_uppercase(), characters.as_str())
+            }
+        };
+        words.push(word);
+    }
+    words.join(" ")
 }
 
 fn impl_command_bar_leaf(
@@ -2068,6 +2110,41 @@ fn accel_to_display(accel: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_request_metadata_comes_from_the_owned_type() {
+        let input: DeriveInput = syn::parse_quote! {
+            struct BookmarkToggleActiveRequest;
+        };
+        let props = MenuProps::from_attrs(&input.attrs).unwrap();
+
+        assert_eq!(
+            command_request_metadata(&input.ident, props).unwrap(),
+            (
+                "bookmark_toggle_active".to_string(),
+                "Toggle Active".to_string(),
+                "Bookmark".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn command_request_metadata_keeps_feature_owned_grouping() {
+        let input: DeriveInput = syn::parse_quote! {
+            #[menu(group = "Layout > Window")]
+            struct MinimizeWindowRequest;
+        };
+        let props = MenuProps::from_attrs(&input.attrs).unwrap();
+
+        assert_eq!(
+            command_request_metadata(&input.ident, props).unwrap(),
+            (
+                "minimize_window".to_string(),
+                "Minimize Window".to_string(),
+                "Layout > Window".to_string(),
+            )
+        );
+    }
 
     fn os_menu_tokens() -> String {
         let input: DeriveInput = syn::parse_quote! {

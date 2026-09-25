@@ -1,18 +1,22 @@
 #[derive(vmux_macro::CommandBar)]
+#[menu(label = "Close Terminal")]
 #[mcp(agent)]
-pub(super) struct CloseRequest;
+pub(super) struct TerminalCloseRequest;
 
 #[derive(vmux_macro::CommandBar)]
+#[menu(label = "Next Terminal")]
 #[mcp]
-pub(super) struct NextRequest;
+pub(super) struct TerminalNextRequest;
 
 #[derive(vmux_macro::CommandBar)]
+#[menu(label = "Previous Terminal")]
 #[mcp]
-pub(super) struct PrevRequest;
+pub(super) struct TerminalPrevRequest;
 
 #[derive(vmux_macro::CommandBar)]
+#[menu(label = "Clear Terminal")]
 #[mcp(agent)]
-pub(super) struct ClearRequest;
+pub(super) struct TerminalClearRequest;
 
 #[derive(bevy::prelude::Message)]
 pub(super) struct CopyModeRequest;
@@ -52,10 +56,10 @@ mod tests {
     #[test]
     fn terminal_mcp_definitions_are_the_dispatchable_command_set() {
         let mut definitions = Vec::new();
-        definitions.extend(CloseRequest::definitions());
-        definitions.extend(NextRequest::definitions());
-        definitions.extend(PrevRequest::definitions());
-        definitions.extend(ClearRequest::definitions());
+        definitions.extend(TerminalCloseRequest::definitions());
+        definitions.extend(TerminalNextRequest::definitions());
+        definitions.extend(TerminalPrevRequest::definitions());
+        definitions.extend(TerminalClearRequest::definitions());
         definitions.extend(CopyModeRequest::definitions());
         let tools = definitions
             .iter()
@@ -78,10 +82,10 @@ mod tests {
         for tool in tools {
             let invocation =
                 vmux_command::CommandInvocation::new(bevy::prelude::Entity::PLACEHOLDER, tool.name);
-            let dispatches = CloseRequest::try_from(&invocation).is_ok()
-                || NextRequest::try_from(&invocation).is_ok()
-                || PrevRequest::try_from(&invocation).is_ok()
-                || ClearRequest::try_from(&invocation).is_ok()
+            let dispatches = TerminalCloseRequest::try_from(&invocation).is_ok()
+                || TerminalNextRequest::try_from(&invocation).is_ok()
+                || TerminalPrevRequest::try_from(&invocation).is_ok()
+                || TerminalClearRequest::try_from(&invocation).is_ok()
                 || CopyModeRequest::try_from(&invocation).is_ok();
             assert!(dispatches);
         }
