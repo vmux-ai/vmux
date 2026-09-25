@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use vmux_api::protocol::{SimulatorButton, SimulatorInput};
+use vmux_core::host::page::PageReady;
 
 pub(super) struct SimulatorInputPlugin;
 
@@ -504,10 +505,24 @@ fn on_software_keyboard(
 
 fn apply_focus_requests(
     mut requests: MessageReader<SimulatorFocusRequest>,
-    mut active: ResMut<ActiveSimulatorView>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
+    views: Query<(), With<PageReady>>,
+    mut commands: Commands,
 ) {
+    let mut received = false;
+    let mut target = None;
     for request in requests.read() {
-        active.0 = request.0;
+        received = true;
+        target = request.0;
+    }
+    if !received {
+        return;
+    }
+    for entity in &active {
+        commands.entity(entity).remove::<ActiveSimulatorView>();
+    }
+    if let Some(entity) = target.filter(|entity| views.contains(*entity)) {
+        commands.entity(entity).insert(ActiveSimulatorView);
     }
 }
 
@@ -527,7 +542,7 @@ fn handle_button_requests(
 
 fn handle_clipboard_requests(
     mut requests: MessageReader<SimulatorClipboardRequest>,
-    active: Res<ActiveSimulatorView>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
     attachments: Query<(
         Entity,
         &SimulatorDevice,
@@ -537,11 +552,14 @@ fn handle_clipboard_requests(
     )>,
     worker: Res<ClipboardWorker>,
 ) {
+    let active = active.iter().next();
     for request in requests.read() {
         let target = request
             .view
             .filter(|entity| attachments.contains(*entity))
-            .or_else(|| active.select(attachments.iter().map(|(entity, ..)| entity)));
+            .or_else(|| {
+                ActiveSimulatorView::select(active, attachments.iter().map(|(entity, ..)| entity))
+            });
         let Some(target) = target else {
             continue;
         };
@@ -569,11 +587,13 @@ fn handle_control_requests(
     mut requests: MessageReader<SimulatorControlRequest>,
     mut responses: MessageWriter<SimulatorControlResponse>,
     mut inputs: MessageWriter<SimulatorInputRequest>,
-    active: Res<ActiveSimulatorView>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
     attachments: ControlAttachments,
 ) {
+    let active = active.iter().next();
     for request in requests.read() {
-        let target = active.select(attachments.iter().map(|(entity, ..)| entity));
+        let target =
+            ActiveSimulatorView::select(active, attachments.iter().map(|(entity, ..)| entity));
         let Some(target) = target else {
             responses.write(SimulatorControlResponse {
                 request_id: request.request_id,
@@ -659,14 +679,17 @@ fn control_coordinates(
 
 fn send_key_requests(
     mut requests: MessageReader<SimulatorInputRequest>,
-    active: Res<ActiveSimulatorView>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
     attachments: Query<(Entity, &SimulatorKeyboard)>,
 ) {
+    let active = active.iter().next();
     for request in requests.read() {
         let target = request
             .view
             .filter(|entity| attachments.contains(*entity))
-            .or_else(|| active.select(attachments.iter().map(|(entity, _)| entity)));
+            .or_else(|| {
+                ActiveSimulatorView::select(active, attachments.iter().map(|(entity, _)| entity))
+            });
         let Some(target) = target else {
             continue;
         };
@@ -751,5 +774,32 @@ mod tests {
                 "type \"\\\\\"".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn latest_focus_request_marks_one_ready_view() {
+        let mut app = App::new();
+        app.add_message::<SimulatorFocusRequest>()
+            .add_systems(Update, apply_focus_requests);
+        let first = app.world_mut().spawn(PageReady {}).id();
+        let second = app.world_mut().spawn(PageReady {}).id();
+        app.world_mut()
+            .resource_mut::<Messages<SimulatorFocusRequest>>()
+            .write(SimulatorFocusRequest(Some(first)));
+        app.world_mut()
+            .resource_mut::<Messages<SimulatorFocusRequest>>()
+            .write(SimulatorFocusRequest(Some(second)));
+
+        app.update();
+
+        assert!(!app.world().entity(first).contains::<ActiveSimulatorView>());
+        assert!(app.world().entity(second).contains::<ActiveSimulatorView>());
+
+        app.world_mut()
+            .resource_mut::<Messages<SimulatorFocusRequest>>()
+            .write(SimulatorFocusRequest(None));
+        app.update();
+
+        assert!(!app.world().entity(second).contains::<ActiveSimulatorView>());
     }
 }
