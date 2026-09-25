@@ -4,6 +4,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use crate::{McpServerManifest, McpTransport, load_manifest, write_manifest};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
@@ -20,7 +21,6 @@ use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
 };
-use vmux_tool::{McpServerManifest, McpTransport, load_manifest, write_manifest};
 
 pub struct McpConnectionPlugin;
 
