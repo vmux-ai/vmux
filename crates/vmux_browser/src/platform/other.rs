@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
-pub(super) struct NativePageOtherPlugin;
+pub(super) struct FallbackBrowserPlugin;
 
-impl Plugin for NativePageOtherPlugin {
+impl Plugin for FallbackBrowserPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, report_missing_renderer);
     }
@@ -13,6 +13,6 @@ fn report_missing_renderer() {
 
     static REPORTED: AtomicBool = AtomicBool::new(false);
     if !REPORTED.swap(true, Ordering::Relaxed) {
-        warn!("native_page: no renderer on this platform, native pages will be missing");
+        warn!("browser_platform: no renderer on this platform, native pages will be missing");
     }
 }
