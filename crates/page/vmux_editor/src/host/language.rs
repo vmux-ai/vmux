@@ -646,18 +646,23 @@ fn on_file_editor_change_all_occurrences_request(
 
 fn on_file_code_action_pick(
     trigger: On<UiInput<FileCodeActionPick>>,
-    views: Query<&Editor>,
+    views: Query<(&Editor, &crate::lsp::manager::OfferedCodeActions)>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
     mut edits: MessageWriter<crate::lsp::manager::LspRequestedEdit>,
 ) {
     let entity = trigger.event().webview;
-    let Ok(edit) = views.get(entity) else {
+    let Ok((edit, actions)) = views.get(entity) else {
         return;
     };
     let path = edit.core.buffer.path.clone();
-    let Some((root, workspace_edit)) =
-        manager.run_code_action(entity, trigger.event().payload.index as usize, &path)
+    let Some(action) = actions
+        .0
+        .get(trigger.event().payload.index as usize)
+        .cloned()
     else {
+        return;
+    };
+    let Some((root, workspace_edit)) = manager.run_code_action(&path, action) else {
         return;
     };
     edits.write(crate::lsp::manager::LspRequestedEdit {

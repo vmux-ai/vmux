@@ -158,7 +158,6 @@ pub struct LspManager {
     outbox: LspOutbox,
     events: crossbeam_channel::Sender<ServerEvent>,
     inflight: Vec<InFlight>,
-    offered_actions: HashMap<Entity, Vec<lsp_types::CodeActionOrCommand>>,
 }
 
 struct StartingServer {
@@ -208,7 +207,6 @@ impl LspManager {
             outbox,
             events,
             inflight: Vec::new(),
-            offered_actions: HashMap::new(),
         }
     }
 
@@ -526,13 +524,11 @@ impl LspManager {
 
     pub fn run_code_action(
         &mut self,
-        entity: Entity,
-        index: usize,
         path: &Path,
+        chosen: lsp_types::CodeActionOrCommand,
     ) -> Option<(PathBuf, lsp_types::WorkspaceEdit)> {
         let root = self.open_docs.get(path)?.key.0.clone();
-        let chosen = self.offered_actions.get(&entity)?.get(index)?;
-        match chosen.clone() {
+        match chosen {
             lsp_types::CodeActionOrCommand::Command(command) => {
                 self.execute_command(path, &command);
                 None
@@ -1059,7 +1055,9 @@ fn drain_lsp_requests(
                         lsp_types::CodeActionOrCommand::CodeAction(a) => a.title.clone(),
                     })
                     .collect();
-                manager.offered_actions.insert(f.entity, offered);
+                commands
+                    .entity(f.entity)
+                    .insert(OfferedCodeActions(offered));
                 if !ready {
                     continue;
                 }
@@ -1197,7 +1195,6 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
     let events = app.world().resource::<ServerEvents>().sender();
     app.insert_resource(LspManager::new(outbox, events))
         .init_resource::<LintOutbox>()
-        .init_resource::<DiagState>()
         .add_message::<LspGoto>()
         .add_message::<LspFolds>()
         .add_message::<LspSemantic>()
@@ -1229,19 +1226,25 @@ fn canon(p: &Path) -> PathBuf {
     vmux_path::PathIdentity::resolve(p).into_path_buf()
 }
 
-#[derive(Resource, Default)]
-struct DiagState {
-    lsp: HashMap<PathBuf, Vec<FileDiagnostic>>,
-    lint: HashMap<PathBuf, Vec<FileDiagnostic>>,
-    raw: HashMap<PathBuf, Vec<lsp_types::Diagnostic>>,
+#[derive(Component, Default)]
+struct LspDiagnostics {
+    mapped: Vec<FileDiagnostic>,
+    raw: Vec<lsp_types::Diagnostic>,
 }
+
+#[derive(Component, Default)]
+struct LintDiagnostics(Vec<FileDiagnostic>);
+
+#[derive(Component, Default)]
+pub(crate) struct OfferedCodeActions(pub(crate) Vec<lsp_types::CodeActionOrCommand>);
 
 #[derive(Component, Default)]
 pub struct DiagSent(Vec<FileDiagnostic>);
 
 fn emit_diagnostics_system(
     q: Query<(Entity, &FileView, Option<&DiagSent>), With<vmux_core::page::PageReady>>,
-    state: Res<DiagState>,
+    lsp_diagnostics: Query<&LspDiagnostics>,
+    lint_diagnostics: Query<&LintDiagnostics>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1249,13 +1252,12 @@ fn emit_diagnostics_system(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        let target = canon(&fv.path);
         let mut merged: Vec<FileDiagnostic> = Vec::new();
-        if let Some(d) = state.lsp.get(&target) {
-            merged.extend(d.iter().cloned());
+        if let Ok(diagnostics) = lsp_diagnostics.get(entity) {
+            merged.extend(diagnostics.mapped.iter().cloned());
         }
-        if let Some(d) = state.lint.get(&target) {
-            merged.extend(d.iter().cloned());
+        if let Ok(diagnostics) = lint_diagnostics.get(entity) {
+            merged.extend(diagnostics.0.iter().cloned());
         }
         match sent {
             Some(s) if s.0 == merged => continue,
@@ -1275,8 +1277,8 @@ fn emit_diagnostics_system(
 
 fn drain_lsp_diagnostics(
     outbox: Res<LspOutbox>,
-    mut state: ResMut<DiagState>,
     views: Query<(Entity, &FileView, &Editor)>,
+    mut commands: Commands,
 ) {
     let drained: Vec<(PathBuf, Vec<lsp_types::Diagnostic>)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
@@ -1284,23 +1286,33 @@ fn drain_lsp_diagnostics(
     };
     for (path, diags) in drained {
         let target = canon(&path);
-        let mapped = views
-            .iter()
-            .find(|(_, fv, _)| canon(&fv.path) == target)
-            .map(|(_, _, edit)| map_diags(&diags, |l| rope_line_text(&edit.core.buffer.rope, l)))
-            .unwrap_or_default();
-        state.lsp.insert(target.clone(), mapped);
-        state.raw.insert(target, diags);
+        for (entity, view, edit) in &views {
+            if canon(&view.path) != target {
+                continue;
+            }
+            let mapped = map_diags(&diags, |line| rope_line_text(&edit.core.buffer.rope, line));
+            commands.entity(entity).insert(LspDiagnostics {
+                mapped,
+                raw: diags.clone(),
+            });
+        }
     }
 }
 
-fn drain_lint(outbox: Res<LintOutbox>, mut state: ResMut<DiagState>) {
+fn drain_lint(outbox: Res<LintOutbox>, views: Query<(Entity, &FileView)>, mut commands: Commands) {
     let drained: Vec<(PathBuf, Vec<FileDiagnostic>)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
         q.drain(..).collect()
     };
     for (path, diags) in drained {
-        state.lint.insert(canon(&path), diags);
+        let target = canon(&path);
+        for (entity, view) in &views {
+            if canon(&view.path) == target {
+                commands
+                    .entity(entity)
+                    .insert(LintDiagnostics(diags.clone()));
+            }
+        }
     }
 }
 
@@ -1314,21 +1326,20 @@ pub struct LspCodeActionRequest {
 
 fn request_code_actions(
     mut reader: MessageReader<LspCodeActionRequest>,
-    state: Res<DiagState>,
+    diagnostics: Query<&LspDiagnostics>,
     mut manager: ResMut<LspManager>,
 ) {
     for request in reader.read() {
-        let diagnostics = state
-            .raw
-            .get(&canon(&request.path))
-            .cloned()
+        let diagnostics = diagnostics
+            .get(request.entity)
+            .map(|diagnostics| diagnostics.raw.as_slice())
             .unwrap_or_default();
         manager.code_actions(
             request.entity,
             &request.path,
             request.from_line,
             request.to_line,
-            &diagnostics,
+            diagnostics,
         );
     }
 }
@@ -1579,7 +1590,6 @@ mod tests {
         let mut app = App::new();
         let outbox = LspOutbox::default();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<DiagState>()
             .insert_resource(outbox.clone())
             .add_systems(Update, drain_lsp_diagnostics);
 
@@ -1590,10 +1600,13 @@ mod tests {
             EditMode::Insert,
         );
         let hl = HighlightCache::new(&path);
-        app.world_mut().spawn((
-            FileView { path: path.clone() },
-            Editor::new(core, hl, crate::fold::FoldState::default()),
-        ));
+        let entity = app
+            .world_mut()
+            .spawn((
+                FileView { path: path.clone() },
+                Editor::new(core, hl, crate::fold::FoldState::default()),
+            ))
+            .id();
 
         let diag = lsp_types::Diagnostic {
             range: lsp_types::Range {
@@ -1612,11 +1625,11 @@ mod tests {
         outbox.0.lock().unwrap().push((path.clone(), vec![diag]));
         app.update();
 
-        let state = app.world().resource::<DiagState>();
-        let mapped = state
-            .lsp
-            .get(&canon(&path))
-            .expect("diagnostics mapped for Editor entity");
+        let mapped = &app
+            .world()
+            .get::<LspDiagnostics>(entity)
+            .expect("diagnostics mapped for Editor entity")
+            .mapped;
         assert_eq!(mapped.len(), 1);
         assert_eq!(mapped[0].line, 1);
         assert_eq!(mapped[0].start_col, 4);
