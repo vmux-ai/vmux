@@ -13,6 +13,7 @@ use reqwest::blocking::{Client, Response};
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
+use vmux_api::command_bar::{CommandBarQuery, CommandPaletteDraftRequest};
 use vmux_api::mcp::{
     McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
     McpServerStatus, McpServers, McpServersRequest,
@@ -33,6 +34,8 @@ impl Plugin for McpConnectionPlugin {
         ))
         .add_message::<McpSnapshotRequest>()
         .add_observer(request_mcp_connections)
+        .add_observer(request_palette_mcp_connections)
+        .add_observer(begin_mcp_snapshot)
         .add_observer(request_mcp_server)
         .add_systems(
             Update,
@@ -48,14 +51,41 @@ impl Plugin for McpConnectionPlugin {
     }
 }
 
-fn request_mcp_connections(
-    trigger: On<UiInput<McpServersRequest>>,
+fn request_mcp_connections(trigger: On<UiInput<McpServersRequest>>, mut commands: Commands) {
+    commands.trigger(RequestMcpSnapshot {
+        target: trigger.event().webview,
+    });
+}
+
+fn request_palette_mcp_connections(
+    trigger: On<UiInput<CommandPaletteDraftRequest>>,
+    active: Query<(), With<McpPaletteActive>>,
+    mut commands: Commands,
+) {
+    let target = trigger.event().webview;
+    let wants_mcp = CommandBarQuery(&trigger.event().payload.query)
+        .mcp_filter()
+        .is_some();
+    match (wants_mcp, active.contains(target)) {
+        (true, false) => {
+            commands.entity(target).insert(McpPaletteActive);
+            commands.trigger(RequestMcpSnapshot { target });
+        }
+        (false, true) => {
+            commands.entity(target).remove::<McpPaletteActive>();
+        }
+        _ => {}
+    }
+}
+
+fn begin_mcp_snapshot(
+    trigger: On<RequestMcpSnapshot>,
     browsers: NonSend<Browsers>,
     mut states: Query<&mut McpPageState>,
     mut requests: MessageWriter<McpSnapshotRequest>,
     mut commands: Commands,
 ) {
-    let target = trigger.event().webview;
+    let target = trigger.event().target;
     if !browsers.can_emit_to(&target) {
         return;
     }
@@ -256,6 +286,15 @@ fn publish_mcp_connections(
 
 #[derive(Component)]
 struct McpRuntime;
+
+#[derive(Component)]
+struct McpPaletteActive;
+
+#[derive(EntityEvent)]
+struct RequestMcpSnapshot {
+    #[event_target]
+    target: Entity,
+}
 
 #[derive(Component, Default)]
 struct McpPageState {

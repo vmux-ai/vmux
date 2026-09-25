@@ -1,7 +1,5 @@
 use dioxus::prelude::*;
-use vmux_api::mcp::{
-    McpServerEntry, McpServerRequest, McpServerStatus, McpServers, McpServersRequest,
-};
+use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServerStatus, McpServers};
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::hooks::{send, use_ui_state};
@@ -19,10 +17,6 @@ pub fn use_mcp_connections() -> McpConnections {
 }
 
 impl McpConnections {
-    pub fn request(&self) {
-        let _ = send(&McpServersRequest);
-    }
-
     pub fn activate(&self, server: &McpServerEntry) {
         if self.state.peek().pending.is_some() {
             return;

@@ -1,4 +1,4 @@
-use super::{CommandBarKey, CommandBarOpenEvent, PathCompleteResponse, StartProjectBranches};
+use super::{CommandBarOpenEvent, PathCompleteResponse, StartProjectBranches};
 use crate::chat::{PromptHistory, ResumableSessionEntry, ResumableSessions};
 use crate::history::{HistoryEntry, HistorySuggestionsResponse};
 use crate::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry};
@@ -10,7 +10,6 @@ pub struct CommandBarFocusInput;
 #[vmux_api::ui_state_patch]
 pub enum CommandBarUiStatePatch {
     Snapshot(Box<CommandBarOpenEvent>),
-    Key(CommandBarKey),
     PathCompletion(PathCompleteResponse),
     HistorySuggestions(HistorySuggestionsResponse),
     PromptHistory(Box<PromptHistory>),
@@ -59,7 +58,6 @@ mod tests {
             sequence: 4,
             patches: vec![
                 CommandBarOpenEvent::default().into(),
-                CommandBarKey::Next.into(),
                 PathCompleteResponse::default().into(),
             ],
         };
@@ -71,7 +69,6 @@ mod tests {
             decoded.patches.as_slice(),
             [
                 CommandBarUiStatePatch::Snapshot(_),
-                CommandBarUiStatePatch::Key(CommandBarKey::Next),
                 CommandBarUiStatePatch::PathCompletion(_),
             ]
         ));

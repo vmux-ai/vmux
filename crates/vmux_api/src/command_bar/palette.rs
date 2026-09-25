@@ -1,6 +1,7 @@
 use super::{CommandBarPick, CommandBarPicker, CommandBarQuery, SearchEngine};
 use crate::PageIcon;
 use crate::chat::{ResumableSessionEntry, SlashCommandEntry};
+use crate::mcp::McpServerEntry;
 
 #[vmux_api::contract(Copy, Default, Eq)]
 pub enum PaletteMode {
@@ -224,6 +225,8 @@ pub struct CommandPaletteProjection {
     pub selected: u32,
     pub navigating: bool,
     pub input_revision: u64,
+    pub mcp_open: bool,
+    pub mcp_entries: Vec<McpServerEntry>,
     pub prompt_targets: Vec<CommandBarResultItem>,
     pub default_target: Option<CommandBarResultItem>,
     pub ghost: String,

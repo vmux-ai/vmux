@@ -3,14 +3,6 @@ use super::OpenId;
 #[vmux_api::ui_event(Copy, Default, Eq, targets = ["command-bar", "start", "layout"])]
 pub struct CommandBarReadyEvent;
 
-#[vmux_api::contract(Copy, Eq)]
-pub enum CommandBarKey {
-    Next,
-    Previous,
-    Complete,
-    Dismiss,
-}
-
 #[vmux_api::ui_event(Copy, Default, Eq, targets = ["command-bar", "start", "layout"])]
 pub struct CommandBarRenderedEvent {
     pub open_id: OpenId,
