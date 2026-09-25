@@ -260,9 +260,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         if submission.close {
             on_close.call(());
         }
-        if let Some(request) = submission.request.as_ref() {
-            let _ = request.send();
-        }
+        let _ = submission.send();
         let (Some(target_url), Some(handler)) =
             (submission.inline_target, on_start_inline_transition)
         else {
