@@ -10,7 +10,7 @@ mod npm;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy_tasks::{Task, futures_lite::future};
 use vmux_core::tool::{
     ToolAdoptRequest, ToolApplyRequest, ToolForgetRequest, ToolImportRequest, ToolInstallRequest,
     ToolLinkRequest, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
@@ -152,12 +152,6 @@ impl ToolOperationFailure {
 
 #[derive(Component)]
 pub(crate) struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
-
-impl<T: Component> ToolOperationTask<T> {
-    pub(crate) fn spawn(operation: impl FnOnce() -> Result<T, String> + Send + 'static) -> Self {
-        Self(IoTaskPool::get().spawn(async move { operation() }))
-    }
-}
 
 pub(crate) fn finish_tool_operation<T: Component>(
     mut operations: Query<(Entity, &mut ToolOperationTask<T>)>,
