@@ -1,6 +1,6 @@
+use crate::event::ModelOptionEntry;
 #[cfg(test)]
 use crate::event::ResumableSessionEntry;
-use crate::event::{ModelOptionEntry, SlashCommandEntry};
 use unicode_segmentation::UnicodeSegmentation;
 #[cfg(ui)]
 pub(crate) use vmux_ui::prompt_recall::{
@@ -58,24 +58,6 @@ pub fn selector_mode(draft: &str) -> SelectorMode<'_> {
     }
 }
 
-pub(crate) fn should_fetch_resume(draft: &str, commands: &[SlashCommandEntry]) -> bool {
-    match selector_mode(draft) {
-        SelectorMode::Resume(_) => true,
-        SelectorMode::Commands(query) => {
-            let query = query.to_lowercase();
-            let mut matches = commands
-                .iter()
-                .filter(|command| command.name().starts_with(&query));
-            matches
-                .next()
-                .is_some_and(|command| command.command == vmux_api::chat::SlashCommand::Resume)
-                && matches.next().is_none()
-        }
-        SelectorMode::None => false,
-        SelectorMode::Mcp(_) | SelectorMode::Models(_) => false,
-    }
-}
-
 pub fn filter_models(models: &[ModelOptionEntry], query: &str) -> Vec<ModelOptionEntry> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
@@ -111,14 +93,6 @@ pub(crate) fn resume_menu_state(
 
 pub(crate) fn is_handoff_boundary(message_index: usize, imported_message_count: u32) -> bool {
     imported_message_count != 0 && message_index + 1 == imported_message_count as usize
-}
-
-pub(crate) fn should_clear_draft_on_escape(
-    streaming: bool,
-    queue_empty: bool,
-    draft_empty: bool,
-) -> bool {
-    !streaming && queue_empty && !draft_empty
 }
 
 pub(crate) fn chat_page_title(generated_title: &str, agent_name: &str) -> String {
@@ -250,7 +224,6 @@ fn utf16_to_byte(value: &str, offset: u32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::SlashCommandEntry;
 
     fn session(sid: &str, title: &str, cwd: &str) -> ResumableSessionEntry {
         ResumableSessionEntry {
@@ -331,34 +304,6 @@ mod tests {
             resume_menu_state(true, false, "match", 1),
             ResumeMenuState::Results
         );
-    }
-
-    #[test]
-    fn resume_prefetch_starts_only_for_resume_as_the_sole_match() {
-        let commands = vec![
-            SlashCommandEntry {
-                command: vmux_api::chat::SlashCommand::Resume,
-                ..Default::default()
-            },
-            SlashCommandEntry {
-                command: vmux_api::chat::SlashCommand::Cli,
-                ..Default::default()
-            },
-        ];
-        assert!(should_fetch_resume("/r", &commands));
-        assert!(should_fetch_resume("/resume", &commands));
-        assert!(should_fetch_resume("/resume ", &commands));
-        assert!(!should_fetch_resume("/", &commands));
-        assert!(!should_fetch_resume("/c", &commands));
-        assert!(!should_fetch_resume("hello", &commands));
-    }
-
-    #[test]
-    fn escape_clears_only_idle_unqueued_draft() {
-        assert!(should_clear_draft_on_escape(false, true, false));
-        assert!(!should_clear_draft_on_escape(true, true, false));
-        assert!(!should_clear_draft_on_escape(false, false, false));
-        assert!(!should_clear_draft_on_escape(false, true, true));
     }
 
     #[test]

@@ -178,7 +178,6 @@ impl ChatKeyHandler {
     }
 
     fn recall(&self, direction: PromptHistoryDirection) {
-        let mut draft = self.0.composer.draft;
         let mut history_cursor = self.0.composer.history_cursor;
         let mut history_scratch = self.0.composer.history_scratch;
         let scratch = history_scratch.peek().clone();
@@ -189,7 +188,7 @@ impl ChatKeyHandler {
             &self.0.draft(),
             direction,
         );
-        draft.set(value);
+        self.0.set_draft(value);
         history_cursor.set(next_cursor);
         history_scratch.set(scratch);
         focus_prompt_end(PROMPT_INPUT_ID);
@@ -242,11 +241,10 @@ impl ChatKeyHandler {
             _ => return,
         };
         event.prevent_default();
-        let mut draft = self.0.composer.draft;
-        let current = draft.peek().clone();
+        let current = self.0.composer.draft.peek().clone();
         let end = current.encode_utf16().count() as u32;
         let (value, _caret) = edit_prompt(&current, end, end, edit);
-        draft.set(value);
+        self.0.edit_draft(value);
         focus_prompt_end(PROMPT_INPUT_ID);
     }
 }
