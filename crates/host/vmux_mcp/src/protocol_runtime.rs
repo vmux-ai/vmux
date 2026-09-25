@@ -62,11 +62,12 @@ impl Plugin for McpPlugin {
                 (
                     route_request.in_set(McpSet::Route),
                     (
-                        route_tool_outcomes,
+                        route_tool_dispatch_results,
                         bevy_ecs::schedule::ApplyDeferred,
                         start_list_tools,
-                        start_commands,
-                        start_protocol_tools,
+                        start_read_file_tools,
+                        start_grep_tools,
+                        start_vault_status_tools,
                         start_dispatches,
                         bevy_ecs::schedule::ApplyDeferred,
                         poll_tool_tasks,
@@ -185,7 +186,7 @@ struct McpRuntime(tokio::runtime::Handle);
 struct NextRequestSequence(u64);
 
 #[derive(Component)]
-struct McpRequest;
+pub(crate) struct McpRequest;
 
 #[derive(Component)]
 struct McpRequestId(Value);
@@ -221,20 +222,6 @@ impl McpTask {
 #[derive(Component)]
 struct ListToolsExecution {
     definitions: Vec<crate::tool::ToolDefinition>,
-}
-
-#[derive(Component)]
-struct CommandExecution {
-    name: String,
-    arguments: Value,
-    anchor: Option<vmux_client::protocol::ProcessId>,
-}
-
-#[derive(Component)]
-struct ProtocolExecution {
-    tool: crate::tool::ProtocolTool,
-    arguments: Value,
-    anchor: Option<vmux_client::protocol::ProcessId>,
 }
 
 #[derive(Component)]
@@ -342,9 +329,9 @@ fn route_request(
         "tools/list" => {
             let definitions =
                 tools.definitions(config.acp_session, config.acp_terminals, &config.shell);
-            commands.entity(entity).insert(crate::tool::ToolOutcome(Ok(
-                crate::tool::ToolExecution::List { definitions },
-            )));
+            commands
+                .entity(entity)
+                .insert(ListToolsExecution { definitions });
         }
         "tools/call" => {
             let Some(name) = params.0.get("name").and_then(Value::as_str) else {
@@ -385,53 +372,34 @@ fn route_request(
     }
 }
 
-fn route_tool_outcomes(
+fn route_tool_dispatch_results(
     mut commands: Commands,
-    outcomes: Query<(Entity, &crate::tool::ToolOutcome), Added<crate::tool::ToolOutcome>>,
+    results: Query<
+        (
+            Entity,
+            &crate::tool::ToolCall,
+            &crate::tool::ToolDispatchResult,
+        ),
+        Added<crate::tool::ToolDispatchResult>,
+    >,
 ) {
-    for (entity, outcome) in &outcomes {
+    for (entity, call, result) in &results {
         let mut request = commands.entity(entity);
-        request.remove::<crate::tool::ToolOutcome>();
-        match outcome.0.clone() {
+        request
+            .remove::<crate::tool::ToolCall>()
+            .remove::<crate::tool::ToolDispatchResult>()
+            .remove::<crate::tool::DispatchTarget>()
+            .remove::<crate::tool::ToolDispatchError>();
+        match result.0.clone() {
             Err(message) => {
                 request.insert(McpReply::Result(Err(message)));
             }
-            Ok(crate::tool::ToolExecution::List { definitions }) => {
-                request.insert(ListToolsExecution { definitions });
-            }
-            Ok(crate::tool::ToolExecution::Command {
-                name,
-                arguments,
-                anchor,
-            }) => {
-                request.insert(CommandExecution {
-                    name,
-                    arguments,
-                    anchor,
-                });
-            }
-            Ok(crate::tool::ToolExecution::Protocol {
-                tool,
-                arguments,
-                anchor,
-            }) => {
-                request.insert(ProtocolExecution {
-                    tool,
-                    arguments,
-                    anchor,
-                });
-            }
-            Ok(crate::tool::ToolExecution::Dispatch {
-                target,
-                name,
-                arguments,
-                anchor,
-            }) => {
+            Ok(target) => {
                 request.insert(DispatchExecution {
                     target,
-                    name,
-                    arguments,
-                    anchor,
+                    name: call.name.clone(),
+                    arguments: call.arguments.clone(),
+                    anchor: call.anchor,
                 });
             }
         }
@@ -461,47 +429,61 @@ fn start_list_tools(
     }
 }
 
-fn start_commands(
+fn start_read_file_tools(
     mut commands: Commands,
     runtime: Res<McpRuntime>,
-    requests: Query<(Entity, &CommandExecution), Added<CommandExecution>>,
+    requests: Query<
+        (Entity, &crate::tool::ReadFileExecution),
+        Added<crate::tool::ReadFileExecution>,
+    >,
 ) {
     for (entity, request) in &requests {
-        let command = AgentCommand::InvokeCommand {
-            id: request.name.clone(),
-            args: vmux_client::protocol::JsonValue::from(request.arguments.clone()),
-        };
+        let path = request.path.clone();
+        let offset = request.offset.map(std::num::NonZeroU32::get);
+        let limit = request.limit;
         let anchor = request.anchor;
         commands
             .entity(entity)
-            .remove::<CommandExecution>()
-            .insert(McpTask::spawn(&runtime, run_agent_command(command, anchor)));
+            .remove::<crate::tool::ToolCall>()
+            .remove::<crate::tool::ReadFileExecution>()
+            .insert(McpTask::spawn(
+                &runtime,
+                read_file_result(path, offset, limit, anchor),
+            ));
     }
 }
 
-fn start_protocol_tools(
+fn start_grep_tools(
     mut commands: Commands,
     runtime: Res<McpRuntime>,
-    requests: Query<(Entity, &ProtocolExecution), Added<ProtocolExecution>>,
+    requests: Query<(Entity, &crate::tool::GrepExecution), Added<crate::tool::GrepExecution>>,
 ) {
     for (entity, request) in &requests {
-        let tool = request.tool;
-        let arguments = request.arguments.clone();
+        let query = request.query.clone();
+        let path = request.path.clone();
         let anchor = request.anchor;
         commands
             .entity(entity)
-            .remove::<ProtocolExecution>()
-            .insert(McpTask::spawn(&runtime, async move {
-                match tool {
-                    crate::tool::ProtocolTool::ReadFile => {
-                        read_file_result(&arguments, anchor).await
-                    }
-                    crate::tool::ProtocolTool::Grep => grep_result(&arguments, anchor).await,
-                    crate::tool::ProtocolTool::VaultStatus => {
-                        run_agent_query(AgentQuery::VaultStatus).await
-                    }
-                }
-            }));
+            .remove::<crate::tool::ToolCall>()
+            .remove::<crate::tool::GrepExecution>()
+            .insert(McpTask::spawn(&runtime, grep_result(query, path, anchor)));
+    }
+}
+
+fn start_vault_status_tools(
+    mut commands: Commands,
+    runtime: Res<McpRuntime>,
+    requests: Query<Entity, Added<crate::tool::VaultStatusExecution>>,
+) {
+    for entity in &requests {
+        commands
+            .entity(entity)
+            .remove::<crate::tool::ToolCall>()
+            .remove::<crate::tool::VaultStatusExecution>()
+            .insert(McpTask::spawn(
+                &runtime,
+                run_agent_query(AgentQuery::VaultStatus),
+            ));
     }
 }
 
@@ -652,19 +634,15 @@ async fn scoped_existing_path(
 }
 
 async fn read_file_result(
-    arguments: &Value,
+    requested: String,
+    offset: Option<u32>,
+    limit: Option<usize>,
     anchor: Option<vmux_client::protocol::ProcessId>,
 ) -> Result<Value, String> {
-    let path = arguments
-        .get("path")
-        .and_then(Value::as_str)
-        .ok_or("read_file.path is required")?;
-    if !std::path::Path::new(path).is_absolute() {
+    if !Path::new(&requested).is_absolute() {
         return Err("read_file.path must be an absolute path".to_string());
     }
-    let path = scoped_existing_path(anchor, Path::new(path), "read_file").await?;
-    let offset = opt_u32(arguments, "offset", "read_file")?;
-    let limit = opt_usize(arguments, "limit", "read_file")?;
+    let path = scoped_existing_path(anchor, Path::new(&requested), "read_file").await?;
     let meta = std::fs::metadata(&path).map_err(|e| format!("read_file: {e}"))?;
     if !meta.is_file() {
         return Err("read_file: not a regular file".to_string());
@@ -693,19 +671,16 @@ const GREP_MAX_FILES: usize = 10;
 const GREP_MAX_LINES: usize = 200;
 
 async fn grep_result(
-    arguments: &Value,
+    query: String,
+    requested: Option<String>,
     anchor: Option<vmux_client::protocol::ProcessId>,
 ) -> Result<Value, String> {
-    let query = arguments
-        .get("query")
-        .and_then(Value::as_str)
-        .ok_or("grep.query is required")?;
-    let requested = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+    let requested = requested.as_deref().unwrap_or(".");
     let search_path = scoped_existing_path(anchor, Path::new(requested), "grep").await?;
 
     use std::io::{BufRead, Read};
     let mut child = std::process::Command::new("rg")
-        .args(["--json", "--", query])
+        .args(["--json", "--", &query])
         .arg(&search_path)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -845,7 +820,7 @@ async fn grep_result(
                 AgentCommand::FileSearch {
                     anchor,
                     root: search_path.to_string_lossy().into_owned(),
-                    query: query.to_string(),
+                    query: query.clone(),
                     matches,
                 },
                 Some(anchor),
@@ -866,27 +841,6 @@ async fn grep_result(
         ));
     }
     Ok(json!({ "content": [{"type": "text", "text": text}] }))
-}
-
-fn opt_u32(arguments: &Value, key: &str, tool: &str) -> Result<Option<u32>, String> {
-    match arguments.get(key) {
-        None | Some(Value::Null) => Ok(None),
-        Some(v) => v
-            .as_u64()
-            .filter(|n| *n <= u32::MAX as u64)
-            .map(|n| Some(n as u32))
-            .ok_or_else(|| format!("{tool}.{key} must be an integer between 0 and {}", u32::MAX)),
-    }
-}
-
-fn opt_usize(arguments: &Value, key: &str, tool: &str) -> Result<Option<usize>, String> {
-    match arguments.get(key) {
-        None | Some(Value::Null) => Ok(None),
-        Some(v) => v
-            .as_u64()
-            .map(|n| Some(n as usize))
-            .ok_or_else(|| format!("{tool}.{key} must be a non-negative integer")),
-    }
 }
 
 const READ_FILE_DEFAULT_LINES: usize = 2000;
@@ -1356,18 +1310,6 @@ mod tests {
         assert_eq!(byte_to_utf16(line, 3), 2);
         assert_eq!(byte_to_utf16(line, 7), 4);
         assert_eq!(byte_to_utf16(line, 999), 5);
-    }
-
-    #[test]
-    fn opt_u32_rejects_invalid() {
-        assert_eq!(opt_u32(&json!({}), "offset", "read_file").unwrap(), None);
-        assert_eq!(
-            opt_u32(&json!({"offset": 7}), "offset", "read_file").unwrap(),
-            Some(7)
-        );
-        assert!(opt_u32(&json!({"offset": -1}), "offset", "read_file").is_err());
-        assert!(opt_u32(&json!({"offset": 1.5}), "offset", "read_file").is_err());
-        assert!(opt_u32(&json!({"offset": 5_000_000_000u64}), "offset", "read_file").is_err());
     }
 
     #[test]

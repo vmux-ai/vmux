@@ -57,9 +57,7 @@ impl Plugin for ToolRuntimePlugin {
                 Update,
                 (
                     bevy_ecs::schedule::ApplyDeferred,
-                    resolve_tool_dispatch_results,
-                    bevy_ecs::schedule::ApplyDeferred,
-                    project_tool_outcomes,
+                    project_tool_dispatch_results,
                     bevy_ecs::schedule::ApplyDeferred,
                 )
                     .chain()
@@ -346,36 +344,6 @@ impl ToolAvailability {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ProtocolTool {
-    ReadFile,
-    Grep,
-    VaultStatus,
-}
-
-#[derive(Clone)]
-pub(crate) enum ToolExecution {
-    List {
-        definitions: Vec<ToolDefinition>,
-    },
-    Command {
-        name: String,
-        arguments: Value,
-        anchor: Option<ProcessId>,
-    },
-    Dispatch {
-        target: DispatchTarget,
-        name: String,
-        arguments: Value,
-        anchor: Option<ProcessId>,
-    },
-    Protocol {
-        tool: ProtocolTool,
-        arguments: Value,
-        anchor: Option<ProcessId>,
-    },
-}
-
 #[derive(Component)]
 pub(crate) struct McpTool;
 
@@ -397,11 +365,8 @@ pub(crate) struct ToolOrder(pub(crate) u32);
 #[derive(Component)]
 pub(crate) struct ShellAware;
 
-#[derive(Component)]
-pub(crate) struct ToolOutcome(pub(crate) Result<ToolExecution, String>);
-
 #[derive(Component, Clone, Debug)]
-pub struct ToolDispatchError(String);
+pub struct ToolDispatchError(pub(crate) String);
 
 impl ToolDispatchError {
     pub fn message(&self) -> &str {
@@ -438,7 +403,7 @@ impl ToolCall {
 }
 
 type PendingCommandCalls<'w, 's> =
-    Query<'w, 's, (Entity, &'static ToolCall), (Added<ToolCall>, Without<ToolOutcome>)>;
+    Query<'w, 's, (Entity, &'static ToolCall), (Added<ToolCall>, Without<ToolDispatchResult>)>;
 
 fn dispatch_command_calls(mut commands: Commands, calls: PendingCommandCalls) {
     for (entity, call) in &calls {
@@ -447,61 +412,27 @@ fn dispatch_command_calls(mut commands: Commands, calls: PendingCommandCalls) {
         }
         commands
             .entity(entity)
-            .insert(ToolOutcome(Ok(ToolExecution::Command {
-                name: call.name.clone(),
-                arguments: call.arguments.clone(),
-                anchor: call.anchor,
-            })));
+            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
+                AgentCommand::InvokeCommand {
+                    id: call.name.clone(),
+                    args: JsonValue::from(call.arguments.clone()),
+                },
+            ))));
     }
 }
 
-fn resolve_tool_dispatch_results(
-    results: Query<(Entity, &ToolCall, &ToolDispatchResult), Added<ToolDispatchResult>>,
+fn project_tool_dispatch_results(
+    results: Query<(Entity, &ToolDispatchResult), Added<ToolDispatchResult>>,
     mut commands: Commands,
 ) {
-    for (entity, call, result) in &results {
-        let outcome = result.0.clone().map(|target| ToolExecution::Dispatch {
-            target,
-            name: call.name.clone(),
-            arguments: call.arguments.clone(),
-            anchor: call.anchor,
-        });
-        commands
-            .entity(entity)
-            .remove::<ToolDispatchResult>()
-            .insert(ToolOutcome(outcome));
-    }
-}
-
-fn project_tool_outcomes(
-    outcomes: Query<(Entity, &ToolCall, &ToolOutcome), Added<ToolOutcome>>,
-    mut commands: Commands,
-) {
-    for (entity, call, outcome) in &outcomes {
-        let dispatch = match &outcome.0 {
-            Ok(ToolExecution::Dispatch { target, .. }) => Ok(target.clone()),
-            Ok(ToolExecution::Command {
-                name, arguments, ..
-            }) => Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
-                id: name.clone(),
-                args: JsonValue::from(arguments.clone()),
-            })),
-            Ok(ToolExecution::Protocol { .. }) => {
-                Err(format!("tool {} requires MCP protocol context", call.name))
-            }
-            Ok(ToolExecution::List { .. }) => {
-                Err("tool listing is not a dispatchable tool".to_string())
-            }
-            Err(message) => Err(message.clone()),
-        };
+    for (entity, result) in &results {
         let mut request = commands.entity(entity);
-        request.remove::<ToolCall>();
-        match dispatch {
+        match &result.0 {
             Ok(target) => {
-                request.insert(target);
+                request.insert(target.clone());
             }
             Err(message) => {
-                request.insert(ToolDispatchError(message));
+                request.insert(ToolDispatchError(message.clone()));
             }
         }
     }
@@ -610,6 +541,12 @@ fn builtin_tool_app() -> App {
 }
 
 #[cfg(test)]
+pub(super) enum TestToolDispatch {
+    Target(DispatchTarget),
+    Protocol,
+}
+
+#[cfg(test)]
 fn tool_definitions_in(
     world: &mut World,
     acp_session: bool,
@@ -633,7 +570,7 @@ fn dispatch_tool_call(
     host_shell: &str,
     acp_session: bool,
     acp_terminals: bool,
-) -> Result<ToolExecution, String> {
+) -> Result<TestToolDispatch, String> {
     let normalized = canonical_tool_name(name).to_string();
     let name = name.to_string();
     let host_shell = host_shell.to_string();
@@ -649,15 +586,42 @@ fn dispatch_tool_call(
             )
         })
         .map_err(|error| error.to_string())??;
-    let request = app.world_mut().spawn(call).id();
+    let request = app
+        .world_mut()
+        .spawn((call, crate::protocol_runtime::McpRequest))
+        .id();
     app.update();
-    let outcome = app
+    let dispatched = if let Some(result) = app
         .world_mut()
         .entity_mut(request)
-        .take::<ToolOutcome>()
-        .ok_or_else(|| format!("tool {normalized} did not produce an execution"))?;
+        .take::<ToolDispatchResult>()
+    {
+        result.0.map(TestToolDispatch::Target)
+    } else if app
+        .world()
+        .get::<super::files::ReadFileExecution>(request)
+        .is_some()
+        || app
+            .world()
+            .get::<super::files::GrepExecution>(request)
+            .is_some()
+        || app
+            .world()
+            .get::<super::knowledge::VaultStatusExecution>(request)
+            .is_some()
+    {
+        Ok(TestToolDispatch::Protocol)
+    } else if let Some(error) = app
+        .world_mut()
+        .entity_mut(request)
+        .take::<ToolDispatchError>()
+    {
+        Err(error.0)
+    } else {
+        Err(format!("tool {normalized} did not produce a dispatch"))
+    };
     app.world_mut().despawn(request);
-    outcome.0
+    dispatched
 }
 
 #[cfg(test)]
@@ -737,10 +701,8 @@ fn dispatch_in_shell(
 ) -> Result<DispatchTarget, String> {
     let mut app = builtin_tool_app();
     match dispatch_tool_call(&mut app, name, arguments, anchor, host_shell, false, false)? {
-        ToolExecution::Dispatch { target, .. } => Ok(target),
-        ToolExecution::Protocol { .. }
-        | ToolExecution::List { .. }
-        | ToolExecution::Command { .. } => Err(format!(
+        TestToolDispatch::Target(target) => Ok(target),
+        TestToolDispatch::Protocol => Err(format!(
             "tool {} requires MCP protocol context",
             canonical_tool_name(name)
         )),
