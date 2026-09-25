@@ -2,6 +2,7 @@ mod event_request;
 mod instance;
 mod page;
 mod page_dom;
+mod page_dom_converter;
 mod registration;
 mod shell;
 
