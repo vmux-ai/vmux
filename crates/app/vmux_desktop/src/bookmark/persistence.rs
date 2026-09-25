@@ -450,10 +450,10 @@ enum ToolBookmarkUrl {
     Other,
 }
 
-impl ToolBookmarkUrl {
-    const ROOT: &'static str = "vmux://tools/";
+const TOOL_ROOT_URL: &str = "vmux://tools/";
 
-    fn classify(url: &str) -> Self {
+impl From<&str> for ToolBookmarkUrl {
+    fn from(url: &str) -> Self {
         let url = url
             .trim()
             .split(['?', '#'])
@@ -487,8 +487,8 @@ fn migrate_tool_page_bookmarks(
     let mut normalized_urls = Vec::new();
     let original_urls = std::mem::take(&mut offered.urls);
     for url in &original_urls {
-        let normalized = match ToolBookmarkUrl::classify(url) {
-            ToolBookmarkUrl::Root => ToolBookmarkUrl::ROOT.to_string(),
+        let normalized = match ToolBookmarkUrl::from(url.as_str()) {
+            ToolBookmarkUrl::Root => TOOL_ROOT_URL.to_string(),
             ToolBookmarkUrl::Child => {
                 changed = true;
                 continue;
@@ -509,16 +509,16 @@ fn migrate_tool_page_bookmarks(
     }
 
     for (entity, metadata) in &items {
-        match ToolBookmarkUrl::classify(&metadata.url) {
+        match ToolBookmarkUrl::from(metadata.url.as_str()) {
             ToolBookmarkUrl::Root => {
-                if metadata.url == ToolBookmarkUrl::ROOT {
+                if metadata.url == TOOL_ROOT_URL {
                     continue;
                 }
                 let mut metadata = metadata.clone();
                 if metadata.title.trim() == metadata.url.trim() {
-                    metadata.title = ToolBookmarkUrl::ROOT.to_string();
+                    metadata.title = TOOL_ROOT_URL.to_string();
                 }
-                metadata.url = ToolBookmarkUrl::ROOT.to_string();
+                metadata.url = TOOL_ROOT_URL.to_string();
                 commands.entity(entity).insert(metadata);
                 changed = true;
             }
@@ -825,14 +825,14 @@ mod tests {
 
         assert_eq!(
             app.world().entity(root).get::<PageMetadata>().unwrap().url,
-            ToolBookmarkUrl::ROOT
+            TOOL_ROOT_URL
         );
         assert!(app.world().get_entity(lsp).is_err());
         assert!(app.world().get_entity(extensions).is_err());
         assert!(app.world().get_entity(agents).is_err());
         assert_eq!(
             app.world().resource::<OfferedBookmarkDefaults>().urls,
-            [ToolBookmarkUrl::ROOT]
+            [TOOL_ROOT_URL]
         );
         assert!(app.world().resource::<BookmarkAutoSave>().dirty);
     }
