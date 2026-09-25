@@ -401,13 +401,18 @@ pub fn Page() -> Element {
     });
 
     let scroll_by = use_file_ui::<FileScrollByEvent>();
+    let mut scroll_effect_revision = use_signal(|| 0u64);
     use_effect(move || {
         scroll_by.for_each(|event| {
+            if event.revision <= *scroll_effect_revision.peek() {
+                return;
+            }
             let Some(line_height) =
                 ScrolledLineHeight::resolve(file_view_mode(), document_kind(), cell_dims().height)
             else {
                 return;
             };
+            scroll_effect_revision.set(event.revision);
             dom.scroll_by(event.lines, line_height);
         })
     });

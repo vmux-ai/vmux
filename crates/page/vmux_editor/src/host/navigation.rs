@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
-use vmux_core::event::{FileErrorEvent, FileOpenEvent, FileScrollByEvent, KnowledgeLinkOpen};
+use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
 
 use crate::edit::Selection;
 use crate::host::editor::{
@@ -251,10 +251,7 @@ fn goto_caret(
             && browsers.can_emit_to(&entity)
         {
             commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-                entity,
-                &FileScrollByEvent {
-                    lines: scroll.lines,
-                },
+                entity, &scroll,
             ));
         }
         edit.core.top_row = viewport.top_row;
@@ -441,6 +438,7 @@ mod tests {
                         wrap_columns: 0,
                         word_wrap: vmux_core::editor::WordWrap::Off,
                         word_wrap_column: 80,
+                        scroll_revision: 0,
                     },
                     EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
                     PageMetadata {

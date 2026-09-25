@@ -39,13 +39,13 @@ pub struct ExplorerTreeEvent {
     pub root_name: String,
     pub root_path: String,
     pub current_path: String,
-    pub focus_path: String,
     pub loading: bool,
     pub rows: Vec<TreeRow>,
 }
 
 #[vmux_api::contract(Eq)]
 pub struct ExplorerFocusEvent {
+    pub revision: u64,
     pub path: String,
     pub reveal: ExplorerReveal,
 }
