@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use dioxus::html::geometry::{ClientPoint, ElementPoint};
 use dioxus::prelude::*;
-use vmux_core::event::{CompletionItem, FilePointerEvent, FilePropertyEdit, MdBlock, NoteBlock};
+use vmux_core::event::{
+    CompletionItem, FilePanelPick, FilePointerEvent, FilePropertyEdit, MdBlock, NoteBlock,
+};
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgePropertyKind};
 use vmux_git::event::GitLineStatus;
 use vmux_ui::caret::EventSelection;
@@ -886,6 +888,10 @@ pub(super) fn NoteBlockView(
                                 div {
                                     key: "note-completion-{item_index}",
                                     class: if item_index == comp_sel_clamped { "flex items-center gap-2 bg-primary/15 px-3 py-1" } else { "flex items-center gap-2 px-3 py-1" },
+                                    onmousedown: move |event: Event<MouseData>| {
+                                        event.prevent_default();
+                                        let _ = send(&FilePanelPick { index: item_index as u32 });
+                                    },
                                     span { class: "truncate", "{item.label}" }
                                     span { class: "ml-auto truncate text-[10px] text-foreground/40", "{item.detail}" }
                                 }

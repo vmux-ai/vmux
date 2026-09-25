@@ -71,16 +71,7 @@ pub struct FileCompletionRequest {
     pub col: u32,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
-pub struct FileGotoRequest {
-    pub path: String,
-    pub line: u32,
-    pub col: u32,
-}
-
-#[vmux_api::ui_event(Eq, target = "files")]
-pub struct FileCompletionCommit {
-    pub line: u32,
-    pub replace_from_col: u32,
-    pub text: String,
+#[vmux_api::ui_event(Copy, Eq, target = "files")]
+pub struct FilePanelPick {
+    pub index: u32,
 }

@@ -79,14 +79,35 @@ pub struct FileRenamePrompt {
     pub current: String,
 }
 
-#[vmux_api::contract(Eq)]
-pub struct FileReferences {
-    pub items: Vec<RefItem>,
+#[vmux_api::contract(Copy, Eq, Default)]
+pub enum FilePanelFocusTarget {
+    #[default]
+    None,
+    References,
+    Editor,
+}
+
+#[vmux_api::contract(Copy, Eq, Default)]
+pub struct FilePanelFocus {
+    pub revision: u64,
+    pub target: FilePanelFocusTarget,
 }
 
 #[vmux_api::contract(Eq)]
-pub struct FileCompletions {
-    pub items: Vec<CompletionItem>,
-    pub replace_from_col: u32,
-    pub line: u32,
+pub enum FilePanelContent {
+    References {
+        items: Vec<RefItem>,
+    },
+    Completion {
+        items: Vec<CompletionItem>,
+        replace_from_col: u32,
+        line: u32,
+    },
+}
+
+#[vmux_api::contract(Eq, Default)]
+pub struct FilePanelState {
+    pub content: Option<FilePanelContent>,
+    pub selected: u32,
+    pub focus: FilePanelFocus,
 }

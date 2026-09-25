@@ -21,6 +21,7 @@ impl Plugin for EditorPlugin {
             app_key::KeyPlugin,
             search::SearchPlugin,
         ))
+        .add_plugins(panel::PanelPlugin)
         .add_plugins((
             page_open::PageOpenPlugin,
             file_lifecycle::FileLifecyclePlugin,
@@ -86,6 +87,7 @@ pub(crate) mod media;
 pub(crate) mod navigation;
 pub(crate) mod note;
 pub(crate) mod page_open;
+pub(crate) mod panel;
 pub(crate) mod preview;
 pub(crate) mod search;
 pub(crate) mod status;

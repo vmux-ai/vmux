@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use vmux_core::event::{
-    EditorCapability, FileCodeActionPick, FileDefinitionRequest, FileGotoRequest,
+    EditorCapability, FileCodeActionPick, FileDefinitionRequest, FilePanelPick,
     FileReferencesRequest, FileRenameRequest, RefItem,
 };
 use vmux_ui::hooks::send;
@@ -211,18 +211,11 @@ pub(super) fn EditorContextMenu(
 }
 
 #[component]
-pub(super) fn ReferencesPanel(
-    open: Signal<bool>,
-    items: Signal<Vec<RefItem>>,
-    selected: Signal<usize>,
-) -> Element {
+pub(super) fn ReferencesPanel(open: bool, items: Vec<RefItem>, selected: usize) -> Element {
     let keys = use_context::<FileKeys>();
-    let mut open = open;
-    let mut selected = selected;
-    if !open() {
+    if !open {
         return rsx! {};
     }
-    let rows = items();
     rsx! {
         div {
             id: "refs-panel",
@@ -230,48 +223,24 @@ pub(super) fn ReferencesPanel(
             class: "absolute bottom-1 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-primary/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
             onkeydown: move |event: Event<KeyboardData>| {
                 event.stop_propagation();
-                if keys.offer(&event) {
-                    return;
-                }
-                let key = event.key().to_string();
-                let len = items.read().len();
-                match key.as_str() {
-                    "j" => {
-                        event.prevent_default();
-                        if len > 0 {
-                            selected.set((selected() + 1).min(len - 1));
-                        }
-                    }
-                    "k" => {
-                        event.prevent_default();
-                        selected.set(selected().saturating_sub(1));
-                    }
-                    _ => {}
-                }
+                keys.offer(&event);
             },
             div {
                 class: "px-2 py-1 text-[10px] uppercase tracking-wide text-foreground/50",
                 {translate_with(
                     "editor-references",
-                    &[("count", TranslationValue::Number(rows.len() as i64))],
+                    &[("count", TranslationValue::Number(items.len() as i64))],
                 )}
             }
-            for (index, item) in rows.iter().enumerate() {
+            for (index, item) in items.iter().enumerate() {
                 {
-                    let target = (item.path.clone(), item.line, item.col);
                     rsx! {
                         div {
                             key: "{index}",
-                            class: if index == selected() { "flex gap-2 rounded bg-primary/15 px-2 py-1" } else { "flex gap-2 rounded px-2 py-1 hover:bg-foreground/[0.05]" },
+                            class: if index == selected { "flex gap-2 rounded bg-primary/15 px-2 py-1" } else { "flex gap-2 rounded px-2 py-1 hover:bg-foreground/[0.05]" },
                             onmousedown: move |event: Event<MouseData>| {
                                 event.prevent_default();
-                                let _ = send(&FileGotoRequest {
-                                    path: target.0.clone(),
-                                    line: target.1,
-                                    col: target.2,
-                                });
-                                open.set(false);
-                                focus_file_input();
+                                let _ = send(&FilePanelPick { index: index as u32 });
                             },
                             span { class: "shrink-0 text-primary/80", "{item.display}" }
                             span { class: "truncate text-foreground/60", "{item.preview}" }
