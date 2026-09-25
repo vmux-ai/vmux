@@ -389,15 +389,13 @@ mod tracking_tests {
     }
 }
 
-#[derive(Resource)]
-pub struct AgentSessionWatchers {
-    receivers: Vec<Mutex<mpsc::Receiver<()>>>,
-    _watchers: Vec<RecommendedWatcher>,
+#[derive(Component)]
+struct AgentSessionWatcher {
+    receiver: Mutex<mpsc::Receiver<()>>,
+    _watcher: RecommendedWatcher,
 }
 
 pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
-    let mut receivers = Vec::new();
-    let mut watchers = Vec::new();
     for strategy in strategies.cli_strategies() {
         let root = strategy.sessions_root();
         if std::fs::create_dir_all(&root).is_err() {
@@ -416,25 +414,21 @@ pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<Agen
         if watcher.watch(&root, RecursiveMode::Recursive).is_err() {
             continue;
         }
-        watchers.push(watcher);
-        receivers.push(Mutex::new(rx));
+        commands.spawn(AgentSessionWatcher {
+            receiver: Mutex::new(rx),
+            _watcher: watcher,
+        });
     }
-    if receivers.is_empty() {
-        return;
-    }
-    commands.insert_resource(AgentSessionWatchers {
-        receivers,
-        _watchers: watchers,
-    });
 }
 
 pub fn mark_dirty_on_fs_change(
-    watchers: Option<Res<AgentSessionWatchers>>,
+    watchers: Query<&AgentSessionWatcher>,
     mut dirty: ResMut<AgentSessionDirty>,
 ) {
-    let Some(watchers) = watchers else { return };
-    for rx in &watchers.receivers {
-        let Ok(rx) = rx.lock() else { continue };
+    for watcher in &watchers {
+        let Ok(rx) = watcher.receiver.lock() else {
+            continue;
+        };
         while rx.try_recv().is_ok() {
             dirty.0 = true;
         }
