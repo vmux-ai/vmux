@@ -302,7 +302,7 @@ pub(crate) fn handle_browser_navigate_requests(
     stack_ts: Query<(Entity, &vmux_core::LastActivatedAt), With<vmux_layout::stack::Stack>>,
     stack_metadata: Query<&PageMetadata, With<Stack>>,
     recent_interactions: Query<&RecentBrowserInteraction>,
-    mut activate: MessageWriter<vmux_layout::active_panes::ActivatePane>,
+    mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
 ) {
     for request in reader.read() {
         let vmux_layout::BrowserNavigateRequest {
@@ -346,9 +346,9 @@ pub(crate) fn handle_browser_navigate_requests(
                         ))
                         .id();
                     if let Some(profile) = profile {
-                        activate.write(vmux_layout::active_panes::ActivatePane {
-                            profile: vmux_layout::active_panes::ProfileId::Agent(profile),
-                            active: vmux_layout::active_panes::ActiveStack {
+                        activate.write(vmux_layout::active_pane::ActivatePane {
+                            profile: vmux_layout::active_pane::ProfileId::Agent(profile),
+                            active: vmux_layout::active_pane::ActiveStack {
                                 tab: None,
                                 pane: Some(target),
                                 stack: Some(stack),

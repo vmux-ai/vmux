@@ -33,7 +33,7 @@ impl Plugin for FollowPlugin {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentFileResolve<'w, 's> {
-    activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
+    activate: MessageWriter<'w, vmux_layout::active_pane::ActivatePane>,
     page_open: MessageWriter<'w, vmux_core::PageOpenRequest>,
     open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
     observations: MessageWriter<'w, vmux_layout::worktree::TabDirectoryObserved>,
@@ -391,9 +391,9 @@ fn handle_agent_file_touch(
                 let kind = resolve.layout.agent_kind(anchor);
                 resolve
                     .activate
-                    .write(vmux_layout::active_panes::ActivatePane {
-                        profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
-                        active: vmux_layout::active_panes::ActiveStack {
+                    .write(vmux_layout::active_pane::ActivatePane {
+                        profile: vmux_layout::active_pane::ProfileId::Agent(format!("{anchor:?}")),
+                        active: vmux_layout::active_pane::ActiveStack {
                             tab: None,
                             pane: Some(pane),
                             stack: None,
