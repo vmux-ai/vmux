@@ -14,7 +14,7 @@ use crate::event::{
     SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
     SpacesListEvent, SpacesUiState,
 };
-use crate::spaces::{ActiveSpace, Spaces};
+use crate::spaces::{ActiveSpace, SpaceSelection, Spaces, SpacesPageSnapshot};
 
 pub struct SpacePlugin;
 
@@ -326,22 +326,16 @@ fn space_rows_from_world(
 fn broadcast_spaces_to_views(
     spaces: SpaceListQuery,
     tab_q: Query<(), With<vmux_layout::tab::Tab>>,
-    pending_spaces: Query<Entity, (With<Spaces>, With<PageReady>, Without<SpacesListSent>)>,
-    sent_spaces: Query<Entity, (With<Spaces>, With<PageReady>, With<SpacesListSent>)>,
-    pending_cef: Query<
-        Entity,
+    mut views: Query<
         (
-            With<vmux_layout::LayoutCef>,
-            With<PageReady>,
-            Without<SpacesListSent>,
+            Entity,
+            Option<&mut SpaceSelection>,
+            Option<&SpacesPageSnapshot>,
+            Has<SpacesListSent>,
         ),
-    >,
-    sent_cef: Query<
-        Entity,
         (
-            With<vmux_layout::LayoutCef>,
             With<PageReady>,
-            With<SpacesListSent>,
+            Or<(With<Spaces>, With<vmux_layout::LayoutCef>)>,
         ),
     >,
     browsers: NonSend<Browsers>,
@@ -351,31 +345,31 @@ fn broadcast_spaces_to_views(
     host_windows: Query<&HostWindow>,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     spaces_ui: Query<(), With<SpacesUiStateUpdates>>,
-    mut last_body: Local<std::collections::HashMap<Entity, SpacesListEvent>>,
     mut commands: Commands,
 ) {
-    let pending_total = pending_spaces.iter().count() + pending_cef.iter().count();
-    let sent_total = sent_spaces.iter().count() + sent_cef.iter().count();
-    if pending_total == 0 && sent_total == 0 {
-        return;
-    }
-    for (entity, pending) in pending_spaces
-        .iter()
-        .chain(pending_cef.iter())
-        .map(|entity| (entity, true))
-        .chain(
-            sent_spaces
-                .iter()
-                .chain(sent_cef.iter())
-                .map(|entity| (entity, false)),
-        )
-    {
+    for (entity, selection, snapshot, sent) in &mut views {
         let host = vmux_layout::window::host_window_of(entity, &child_of, &host_windows);
         let main = host.and_then(|host| main_for_window(host, &mains, &child_of, &host_windows));
-        let payload = SpacesListEvent {
-            spaces: space_rows_from_world(&spaces, &tab_q, settings.as_deref(), main),
+        let rows = space_rows_from_world(&spaces, &tab_q, settings.as_deref(), main);
+        let active = rows
+            .iter()
+            .position(|space| space.is_active)
+            .unwrap_or_default();
+        let selected = if let Some(mut selection) = selection {
+            if !sent {
+                selection.0 = active;
+            } else {
+                selection.0 = selection.0.min(rows.len().saturating_sub(1));
+            }
+            selection.0
+        } else {
+            active
         };
-        if !pending && last_body.get(&entity) == Some(&payload) {
+        let payload = SpacesListEvent {
+            spaces: rows,
+            selected: selected as u32,
+        };
+        if sent && snapshot.is_some_and(|snapshot| snapshot.0 == payload) {
             continue;
         }
         if !browsers.can_emit_to(&entity) {
@@ -391,8 +385,9 @@ fn broadcast_spaces_to_views(
                 entity, &payload,
             ));
         }
-        commands.entity(entity).insert(SpacesListSent);
-        last_body.insert(entity, payload);
+        commands
+            .entity(entity)
+            .insert((SpacesListSent, SpacesPageSnapshot(payload)));
     }
 }
 
