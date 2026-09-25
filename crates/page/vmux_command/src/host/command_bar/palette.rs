@@ -3,12 +3,14 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiEventPlugin;
 use vmux_api::command_bar::{
-    CommandPaletteBranchesRequest, CommandPaletteDraftRequest, CommandPalettePromptHistoryRequest,
+    CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteBranchesRequest,
+    CommandPaletteDraftRequest, CommandPalettePromptHistoryRequest,
     CommandPaletteRemoveAttachmentRequest, CommandPaletteSelectionRequest, CommandPaletteState,
     OpenId,
 };
 use vmux_core::host::{UiState, UiStateWrite};
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
+use vmux_ui::launcher::palette::{PaletteDraft, PaletteRows, PaletteSurface};
 
 mod branch;
 mod media;
@@ -35,17 +37,33 @@ impl Plugin for PalettePlugin {
             media::PaletteMediaPlugin,
             resume::PaletteResumePlugin,
         ))
+        .add_observer(receive_palette_open)
+        .add_observer(update_palette_draft)
         .add_systems(
             PreUpdate,
             (attach_palette_snapshot, detach_palette_snapshot),
         )
-        .add_systems(PostUpdate, publish_palette_snapshot)
+        .add_systems(
+            PostUpdate,
+            (project_palette, publish_palette_snapshot).chain(),
+        )
         .add_systems(Last, keep_palette_frames_coming);
     }
 }
 
 #[derive(Component, Default)]
 struct PaletteSnapshot(CommandPaletteState);
+
+#[derive(Component, Default)]
+struct PaletteOpen(CommandBarOpenEvent);
+
+#[derive(Component, Default)]
+struct PaletteDraftInput {
+    open_id: OpenId,
+    query: String,
+    start: bool,
+    target_url: String,
+}
 
 fn attach_palette_snapshot(
     pages: Query<
@@ -60,8 +78,85 @@ fn attach_palette_snapshot(
     for page in &pages {
         commands.entity(page).insert((
             PaletteSnapshot::default(),
+            PaletteOpen::default(),
+            PaletteDraftInput::default(),
             UiState::<CommandPaletteState>::default(),
         ));
+    }
+}
+
+fn receive_palette_open(
+    trigger: On<UiStateWrite<CommandBarUiState>>,
+    mut palettes: Query<(
+        &mut PaletteOpen,
+        &mut PaletteDraftInput,
+        &mut PaletteSnapshot,
+    )>,
+) {
+    let Some(opened) =
+        <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(
+            trigger.event().patch(),
+        )
+    else {
+        return;
+    };
+    let Ok((mut current, mut draft, mut snapshot)) = palettes.get_mut(trigger.event().webview())
+    else {
+        return;
+    };
+    current.0.clone_from(opened);
+    if draft.open_id == opened.open_id {
+        return;
+    }
+    draft.open_id = opened.open_id;
+    draft.query.clone_from(&opened.url);
+    draft.target_url.clear();
+    snapshot.0.open_id = opened.open_id;
+    snapshot.0.projection = Default::default();
+}
+
+fn update_palette_draft(
+    trigger: On<bevy_cef::prelude::UiInput<CommandPaletteDraftRequest>>,
+    mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput)>,
+) {
+    let Ok((opened, mut draft)) = palettes.get_mut(trigger.event().webview) else {
+        return;
+    };
+    let request = &trigger.event().payload;
+    if request.open_id != opened.0.open_id {
+        return;
+    }
+    draft.open_id = request.open_id;
+    draft.query.clone_from(&request.query);
+    draft.start = request.start;
+    draft.target_url.clone_from(&request.target_url);
+}
+
+fn project_palette(mut palettes: Query<(&PaletteOpen, &PaletteDraftInput, &mut PaletteSnapshot)>) {
+    for (opened, input, mut snapshot) in &mut palettes {
+        if input.open_id != opened.0.open_id || snapshot.0.open_id != opened.0.open_id {
+            continue;
+        }
+        let draft = PaletteDraft {
+            query: input.query.clone(),
+            target_url: input.target_url.clone(),
+            completions: snapshot.0.completions.clone(),
+            completions_partial: snapshot.0.completions_partial,
+            completions_total: snapshot.0.completions_total as usize,
+            history: snapshot.0.history.clone(),
+            sessions: snapshot.0.sessions.clone(),
+            sessions_pending: snapshot.0.sessions_loading,
+            ..Default::default()
+        };
+        let surface = match input.start {
+            true => PaletteSurface::Start,
+            false => PaletteSurface::Modal,
+        };
+        let projection = PaletteRows::build(&opened.0, &draft, surface).projection();
+        if snapshot.0.projection == projection {
+            continue;
+        }
+        snapshot.0.projection = projection;
     }
 }
 
@@ -91,6 +186,8 @@ fn detach_palette_snapshot(
     for page in &pages {
         commands.entity(page).remove::<(
             PaletteSnapshot,
+            PaletteOpen,
+            PaletteDraftInput,
             UiState<CommandPaletteState>,
             search::PaletteSearch,
             prompt::PalettePrompt,
@@ -190,6 +287,7 @@ fn keep_palette_frames_coming(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_api::command_bar::{CommandBarCommandEntry, CommandBarResultItem};
 
     #[test]
     fn open_versions_reject_older_inputs() {
@@ -209,5 +307,42 @@ mod tests {
 
         assert!(!generation.matches(first));
         assert!(generation.matches(second));
+    }
+
+    #[test]
+    fn page_entity_projects_palette_rows() {
+        let open_id = OpenId(7);
+        let mut app = App::new();
+        app.add_systems(Update, project_palette);
+        let page = app
+            .world_mut()
+            .spawn((
+                PaletteOpen(CommandBarOpenEvent {
+                    open_id,
+                    commands: vec![CommandBarCommandEntry {
+                        id: "close_tab".to_string(),
+                        name: "Close Tab".to_string(),
+                        shortcut: String::new(),
+                    }],
+                    ..Default::default()
+                }),
+                PaletteDraftInput {
+                    open_id,
+                    query: ">close".to_string(),
+                    ..Default::default()
+                },
+                PaletteSnapshot(CommandPaletteState {
+                    open_id,
+                    ..Default::default()
+                }),
+            ))
+            .id();
+
+        app.update();
+
+        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
+        assert!(snapshot.0.projection.rows.iter().any(
+            |row| matches!(row, CommandBarResultItem::Command { id, .. } if id == "close_tab")
+        ));
     }
 }

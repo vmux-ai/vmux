@@ -6,7 +6,6 @@ use crate::event::{
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles, inline_media_query};
 use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_prompt_recall};
 use crate::ui::media::{PromptMedia, use_prompt_media};
-use crate::ui::search::PaletteFeeds;
 use crate::ui::signals::{
     COMMAND_BAR_INPUT_ID, CommandBarField, PaletteKeys, Readline, TypedDigit, use_palette_signals,
 };
@@ -38,7 +37,6 @@ use vmux_ui::scroll::ScrollIntoView;
 
 mod composer;
 mod media;
-mod search;
 mod signals;
 
 pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
@@ -84,7 +82,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut signals = use_palette_signals();
     let host_state = use_ui_state::<CommandPaletteState>();
     let open_id = state().open_id;
-    let feeds = PaletteFeeds::new(host_state, open_id);
     let mut media = use_prompt_media(host_state, open_id);
     let menu = use_composer_menu();
     let mcp = use_mcp_connections();
@@ -104,10 +101,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     use_effect(move || {
         let opened = state();
         let query = (signals.query)();
+        let target_url = (signals.target_url)();
         let _ = send(&CommandPaletteDraftRequest {
             open_id: opened.open_id,
             query,
             start: is_start,
+            target_url,
         });
     });
 
@@ -138,7 +137,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     use_effect(move || {
         signals.watch();
-        feeds.watch();
         on_activity.call(());
     });
 
@@ -167,7 +165,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     });
 
-    let rows = use_memo(move || PaletteRows::build(&state(), &feeds.draft(signals), surface));
+    let rows = use_memo(move || {
+        let opened = state();
+        let snapshot = host_state.read();
+        if snapshot.open_id != opened.open_id {
+            return PaletteRows::default();
+        }
+        PaletteRows::from_projection(&snapshot.projection)
+    });
     let mut palette_keys = PaletteKeys {
         rows,
         signals,
@@ -563,7 +568,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 "{palette.space_name}"
                             }
                         }
-                        PaletteModeChip { label: palette.mode.label() }
+                        PaletteModeChip { mode: palette.mode }
                         if let Some(glyph) = palette.glyph {
                             PaletteGlyphIcon { glyph }
                         }
@@ -664,7 +669,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 }
 
 #[component]
-fn PaletteModeChip(label: String) -> Element {
+fn PaletteModeChip(mode: vmux_api::command_bar::PaletteMode) -> Element {
+    let id = mode.label();
+    let label = if id.is_empty() {
+        String::new()
+    } else {
+        translate(id)
+    };
     rsx! {
         if !label.is_empty() {
             span {

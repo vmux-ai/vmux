@@ -30,6 +30,7 @@ pub struct CommandBarUiState {
 #[vmux_api::ui_state(Default, targets = ["command-bar", "start", "layout"])]
 pub struct CommandPaletteState {
     pub open_id: super::OpenId,
+    pub projection: super::CommandPaletteProjection,
     pub completions: Vec<super::PathEntry>,
     pub completions_partial: bool,
     pub completions_total: u32,
@@ -50,6 +51,7 @@ pub struct CommandPaletteState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command_bar::{CommandBarResultItem, CommandPaletteProjection, OpenId, PaletteMode};
 
     #[test]
     fn batches_preserve_patch_order() {
@@ -72,6 +74,31 @@ mod tests {
                 CommandBarUiStatePatch::Key(CommandBarKey::Next),
                 CommandBarUiStatePatch::PathCompletion(_),
             ]
+        ));
+    }
+
+    #[test]
+    fn palette_projection_round_trips() {
+        let state = CommandPaletteState {
+            open_id: OpenId(8),
+            projection: CommandPaletteProjection {
+                rows: vec![CommandBarResultItem::Navigate {
+                    url: "vmux://settings".to_string(),
+                }],
+                ghost: "/settings".to_string(),
+                mode: PaletteMode::Url,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
+        let decoded = rkyv::from_bytes::<CommandPaletteState, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(decoded.open_id, OpenId(8));
+        assert_eq!(decoded.projection.mode, PaletteMode::Url);
+        assert!(matches!(
+            decoded.projection.rows.as_slice(),
+            [CommandBarResultItem::Navigate { url }] if url == "vmux://settings"
         ));
     }
 }

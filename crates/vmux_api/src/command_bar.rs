@@ -2,6 +2,7 @@ pub use crate::history::{HistoryEntry, HistorySuggestionsRequest, HistorySuggest
 
 mod input;
 mod open;
+mod palette;
 mod picker;
 mod query;
 mod request;
@@ -9,6 +10,7 @@ mod state;
 
 pub use input::*;
 pub use open::*;
+pub use palette::*;
 pub use picker::*;
 pub use query::*;
 pub use request::*;
