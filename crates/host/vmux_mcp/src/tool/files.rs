@@ -1,10 +1,11 @@
 use super::{
-    McpToolPlugin, ProtocolTool, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
-    ToolExecution, ToolOutcome, ToolRequestSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolDispatchError, ToolDispatchResult, ToolDispatchSet,
+    ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
+use vmux_client::protocol::ProcessId;
 
 pub(super) struct FileToolPlugin;
 
@@ -38,6 +39,21 @@ struct GrepArgs {
     path: Option<String>,
 }
 
+#[derive(Component)]
+pub(crate) struct ReadFileExecution {
+    pub(crate) path: String,
+    pub(crate) offset: Option<std::num::NonZeroU32>,
+    pub(crate) limit: Option<usize>,
+    pub(crate) anchor: Option<ProcessId>,
+}
+
+#[derive(Component)]
+pub(crate) struct GrepExecution {
+    pub(crate) query: String,
+    pub(crate) path: Option<String>,
+    pub(crate) anchor: Option<ProcessId>,
+}
+
 fn parse(mut commands: Commands, calls: ToolCalls<FileTool>) {
     for (request, call, tool) in calls.iter() {
         let parsed = match tool {
@@ -59,28 +75,42 @@ fn parse(mut commands: Commands, calls: ToolCalls<FileTool>) {
 fn read_file(
     mut commands: Commands,
     requests: Query<(Entity, &ToolCall, &ReadFileArgs), Added<ReadFileArgs>>,
+    protocol_requests: Query<(), With<crate::protocol_runtime::McpRequest>>,
 ) {
     for (entity, call, args) in &requests {
-        let result = serde_json::to_value(args)
-            .map_err(|error| format!("MCP tool arguments must serialize: {error}"))
-            .map(|arguments| ToolExecution::Protocol {
-                tool: ProtocolTool::ReadFile,
-                arguments,
+        if protocol_requests.contains(entity) {
+            commands.entity(entity).insert(ReadFileExecution {
+                path: args.path.clone(),
+                offset: args.offset,
+                limit: args.limit,
                 anchor: call.anchor,
             });
-        commands.entity(entity).insert(ToolOutcome(result));
+        } else {
+            commands.entity(entity).insert(ToolDispatchError(format!(
+                "tool {} requires MCP protocol context",
+                call.name
+            )));
+        }
     }
 }
 
-fn grep(mut commands: Commands, requests: Query<(Entity, &ToolCall, &GrepArgs), Added<GrepArgs>>) {
+fn grep(
+    mut commands: Commands,
+    requests: Query<(Entity, &ToolCall, &GrepArgs), Added<GrepArgs>>,
+    protocol_requests: Query<(), With<crate::protocol_runtime::McpRequest>>,
+) {
     for (entity, call, args) in &requests {
-        let result = serde_json::to_value(args)
-            .map_err(|error| format!("MCP tool arguments must serialize: {error}"))
-            .map(|arguments| ToolExecution::Protocol {
-                tool: ProtocolTool::Grep,
-                arguments,
+        if protocol_requests.contains(entity) {
+            commands.entity(entity).insert(GrepExecution {
+                query: args.query.clone(),
+                path: args.path.clone(),
                 anchor: call.anchor,
             });
-        commands.entity(entity).insert(ToolOutcome(result));
+        } else {
+            commands.entity(entity).insert(ToolDispatchError(format!(
+                "tool {} requires MCP protocol context",
+                call.name
+            )));
+        }
     }
 }

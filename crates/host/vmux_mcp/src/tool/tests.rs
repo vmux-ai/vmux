@@ -82,13 +82,10 @@ fn extension_plugin_registers_and_dispatches_its_manifest() {
     .unwrap();
     assert!(matches!(
         execution,
-        ToolExecution::Dispatch {
-            target: DispatchTarget::Command(AgentCommand::Notify {
+        TestToolDispatch::Target(DispatchTarget::Command(AgentCommand::Notify {
                 title: Some(title),
                 body: Some(body),
-            }),
-            ..
-        } if title == "Extension" && body == "hello"
+            })) if title == "Extension" && body == "hello"
     ));
 }
 
@@ -308,13 +305,25 @@ fn aliases_resolve_to_the_same_tool_entity() {
         false,
     )
     .unwrap();
-    assert!(matches!(
-        execution,
-        ToolExecution::Protocol {
-            tool: ProtocolTool::ReadFile,
-            ..
-        }
-    ));
+    assert!(matches!(execution, TestToolDispatch::Protocol));
+}
+
+#[test]
+fn read_file_rejects_a_zero_offset() {
+    let mut app = builtin_tool_app();
+    let error = dispatch_tool_call(
+        &mut app,
+        "read_file",
+        serde_json::json!({"path": "/tmp/example", "offset": 0}),
+        None,
+        "",
+        false,
+        false,
+    )
+    .err()
+    .unwrap();
+
+    assert!(error.contains("invalid arguments"));
 }
 
 fn tool_names() -> Vec<String> {

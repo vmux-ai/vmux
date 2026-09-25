@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, McpToolPlugin, ProtocolTool, ToolCall, ToolCalls, ToolDispatchResult,
-    ToolDispatchSet, ToolExecution, ToolOutcome, ToolRequestSet,
+    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchError, ToolDispatchResult,
+    ToolDispatchSet, ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
@@ -84,15 +84,23 @@ struct WriteKnowledgeArgs {
     content: String,
 }
 
-fn vault_status(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
+#[derive(Component)]
+pub(crate) struct VaultStatusExecution;
+
+fn vault_status(
+    mut commands: Commands,
+    calls: ToolCalls<KnowledgeTool>,
+    protocol_requests: Query<(), With<crate::protocol_runtime::McpRequest>>,
+) {
     for (request, call, _) in calls.matching(KnowledgeTool::VaultStatus) {
-        commands
-            .entity(request)
-            .insert(ToolOutcome(Ok(ToolExecution::Protocol {
-                tool: ProtocolTool::VaultStatus,
-                arguments: call.arguments.clone(),
-                anchor: call.anchor,
-            })));
+        if protocol_requests.contains(request) {
+            commands.entity(request).insert(VaultStatusExecution);
+        } else {
+            commands.entity(request).insert(ToolDispatchError(format!(
+                "tool {} requires MCP protocol context",
+                call.name
+            )));
+        }
     }
 }
 
