@@ -290,55 +290,67 @@ fn on_editor_hover(
     trigger: On<EditorHoverRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
     let position = edit.caret_lsp_position();
-    manager.hover(
+    let request = manager.hover(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
         position.char_col as u32,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_editor_definition(
     trigger: On<EditorDefinitionRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
     let position = edit.caret_lsp_position();
-    manager.definition(
+    let request = manager.definition(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_editor_references(
     trigger: On<EditorReferencesRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
     let position = edit.caret_lsp_position();
-    manager.references(
+    let request = manager.references(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_editor_rename(
@@ -370,98 +382,120 @@ fn on_editor_completion(
     trigger: On<EditorCompletionRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
     let position = edit.caret_lsp_position();
-    manager.completion(
+    let request = manager.completion(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
         position.word_start_col(),
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_editor_declaration(
     trigger: On<EditorDeclarationRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
     let position = edit.caret_lsp_position();
-    manager.declaration(
+    let request = manager.declaration(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_editor_type_definition(
     trigger: On<EditorTypeDefinitionRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
     let position = edit.caret_lsp_position();
-    manager.type_definition(
+    let request = manager.type_definition(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_editor_implementation(
     trigger: On<EditorImplementationRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
     let position = edit.caret_lsp_position();
-    manager.implementation(
+    let request = manager.implementation(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_editor_format_document(
     trigger: On<EditorFormatDocumentRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
-    manager.format_document(entity, &edit.core.buffer.path);
+    if let Some(request) = manager.format_document(entity, &edit.core.buffer.path) {
+        commands.spawn(request);
+    }
 }
 
 fn on_editor_format_selection(
     trigger: On<EditorFormatSelectionRequest>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(edit) = views.get(entity) else {
         return;
     };
     let (from, to) = edit.core.selected_lines();
-    manager.format_range(entity, &edit.core.buffer.path, from, to);
+    if let Some(request) = manager.format_range(entity, &edit.core.buffer.path, from, to) {
+        commands.spawn(request);
+    }
 }
 
 fn on_editor_code_action(
@@ -505,6 +539,7 @@ fn on_file_hover_request(
     trigger: On<UiInput<FileHoverRequest>>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let request = trigger.event().payload;
@@ -512,19 +547,23 @@ fn on_file_hover_request(
         return;
     };
     let position = edit.lsp_position_at_cell(request.line, request.col);
-    manager.hover(
+    let request = manager.hover(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
         position.char_col as u32,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_file_definition_request(
     trigger: On<UiInput<FileDefinitionRequest>>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let request = trigger.event().payload;
@@ -532,12 +571,15 @@ fn on_file_definition_request(
         return;
     };
     let position = edit.lsp_position_at_cell(request.line, request.col);
-    manager.definition(
+    let request = manager.definition(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_file_editor_command_palette_request(
@@ -676,6 +718,7 @@ fn on_file_rename_request(
     trigger: On<UiInput<FileRenameRequest>>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let request = &trigger.event().payload;
@@ -686,19 +729,23 @@ fn on_file_rename_request(
         return;
     };
     let position = edit.lsp_position_at_cell(request.line, request.col);
-    manager.rename(
+    let request = manager.rename(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
         &request.new_name,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_file_references_request(
     trigger: On<UiInput<FileReferencesRequest>>,
     views: Query<&Editor>,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let request = trigger.event().payload;
@@ -706,12 +753,15 @@ fn on_file_references_request(
         return;
     };
     let position = edit.lsp_position_at_cell(request.line, request.col);
-    manager.references(
+    let request = manager.references(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn on_file_completion_request(
@@ -733,13 +783,16 @@ fn on_file_completion_request(
         return;
     }
     let position = edit.lsp_position_at_cell(request.line, request.col);
-    manager.completion(
+    let request = manager.completion(
         entity,
         &edit.core.buffer.path,
         position.line,
         position.utf16_col,
         position.word_start_col(),
     );
+    if let Some(request) = request {
+        commands.spawn(request);
+    }
 }
 
 fn flush_lsp_changes(
@@ -759,10 +812,16 @@ fn flush_lsp_changes(
     *elapsed = 0.0;
     for (entity, view, edit) in &views {
         manager.change_with_text(&view.path, &edit.core.buffer.text());
-        manager.folding_range(entity, &view.path);
-        manager.semantic_tokens(entity, &view.path);
-        if !crate::explorer_model::is_markdown(&view.path) {
-            manager.document_symbol(entity, &view.path);
+        if let Some(request) = manager.folding_range(entity, &view.path) {
+            commands.spawn(request);
+        }
+        if let Some(request) = manager.semantic_tokens(entity, &view.path) {
+            commands.spawn(request);
+        }
+        if !crate::explorer_model::is_markdown(&view.path)
+            && let Some(request) = manager.document_symbol(entity, &view.path)
+        {
+            commands.spawn(request);
         }
         commands.entity(entity).remove::<LspEditDirty>();
     }
