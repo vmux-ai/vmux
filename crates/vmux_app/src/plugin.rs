@@ -60,7 +60,7 @@ impl Plugin for VmuxCorePlugin {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "layout", feature = "agent")))]
 mod tests {
     use super::*;
 

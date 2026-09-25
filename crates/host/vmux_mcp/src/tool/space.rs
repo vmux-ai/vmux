@@ -1,5 +1,5 @@
 use super::{
-    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
@@ -63,9 +63,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchResult(Err(message)));
+            commands.entity(request).insert(ToolDispatchError(message));
         }
     }
 }
@@ -74,9 +72,7 @@ fn list_spaces(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
     for (request, _, _) in calls.matching(SpaceTool::ListSpaces) {
         commands
             .entity(request)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::ListSpaces,
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::ListSpaces)));
     }
 }
 
@@ -87,10 +83,10 @@ fn create(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
-                AgentCommand::SpaceCommand(AgentSpaceCommand::Create {
+            .insert(ToolCommand(Ok(AgentCommand::SpaceCommand(
+                AgentSpaceCommand::Create {
                     name: args.name.clone().filter(|name| !name.trim().is_empty()),
-                }),
+                },
             ))));
     }
 }
@@ -100,19 +96,17 @@ fn rename(
     requests: Query<(Entity, &RenameSpaceArgs), (With<ToolCall>, Added<RenameSpaceArgs>)>,
 ) {
     for (entity, args) in &requests {
-        let target = if args.space_id.trim().is_empty() {
+        let command = if args.space_id.trim().is_empty() {
             Err("rename_space.space_id is empty".to_string())
         } else if args.name.trim().is_empty() {
             Err("rename_space.name is empty".to_string())
         } else {
-            Ok(DispatchTarget::Command(AgentCommand::SpaceCommand(
-                AgentSpaceCommand::Rename {
-                    space_id: args.space_id.clone(),
-                    name: args.name.clone(),
-                },
-            )))
+            Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Rename {
+                space_id: args.space_id.clone(),
+                name: args.name.clone(),
+            }))
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -122,15 +116,13 @@ fn delete(
 ) {
     for (entity, args) in &requests {
         let space_id = &args.space_id;
-        let target = if space_id.trim().is_empty() {
+        let command = if space_id.trim().is_empty() {
             Err("delete_space.space_id is empty".to_string())
         } else {
-            Ok(DispatchTarget::Command(AgentCommand::SpaceCommand(
-                AgentSpaceCommand::Delete {
-                    space_id: space_id.clone(),
-                },
-            )))
+            Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Delete {
+                space_id: space_id.clone(),
+            }))
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::AgentCommand;
 
 use super::{
-    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet,
     ToolRequestSet,
 };
 
@@ -41,9 +41,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<TerminalTool>) {
                 commands.entity(request).insert(args);
             }
             Err(message) => {
-                commands
-                    .entity(request)
-                    .insert(ToolDispatchResult(Err(message)));
+                commands.entity(request).insert(ToolDispatchError(message));
             }
         }
     }
@@ -59,14 +57,14 @@ fn dispatch(
         } else {
             args.text.clone()
         };
-        let target = if text.is_empty() {
+        let command = if text.is_empty() {
             Err("terminal_send.text is empty".to_string())
         } else {
-            Ok(DispatchTarget::Command(AgentCommand::TerminalSend {
+            Ok(AgentCommand::TerminalSend {
                 text,
                 terminal: args.terminal.clone(),
-            }))
+            })
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }

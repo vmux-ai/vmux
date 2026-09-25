@@ -1,5 +1,5 @@
 use super::{
-    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
@@ -150,9 +150,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<VisualTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchResult(Err(message)));
+            commands.entity(request).insert(ToolDispatchError(message));
         }
     }
 }
@@ -164,11 +162,9 @@ fn screenshot(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::Screenshot {
-                    pane: OptionalText::trim(args.pane.clone()),
-                },
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::Screenshot {
+                pane: OptionalText::trim(args.pane.clone()),
+            })));
     }
 }
 
@@ -176,9 +172,7 @@ fn simulator_screenshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
     for (request, _, _) in calls.matching(VisualTool::SimulatorScreenshot) {
         commands
             .entity(request)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::SimulatorScreenshot,
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::SimulatorScreenshot)));
     }
 }
 
@@ -189,14 +183,12 @@ fn simulator_tap(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::SimulatorControl {
-                    input: SimulatorInput::Tap {
-                        x: args.x,
-                        y: args.y,
-                    },
+            .insert(ToolQuery(Ok(AgentQuery::SimulatorControl {
+                input: SimulatorInput::Tap {
+                    x: args.x,
+                    y: args.y,
                 },
-            ))));
+            })));
     }
 }
 
@@ -206,8 +198,8 @@ fn simulator_swipe(
 ) {
     for (entity, args) in &requests {
         let duration_ms = args.duration_ms.unwrap_or(300);
-        let target = if (1..=10_000).contains(&duration_ms) {
-            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
+        let query = if (1..=10_000).contains(&duration_ms) {
+            Ok(AgentQuery::SimulatorControl {
                 input: SimulatorInput::Swipe {
                     start_x: args.start_x,
                     start_y: args.start_y,
@@ -215,11 +207,11 @@ fn simulator_swipe(
                     end_y: args.end_y,
                     duration_ms,
                 },
-            }))
+            })
         } else {
             Err("simulator_swipe.duration_ms must be between 1 and 10000".to_string())
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolQuery(query));
     }
 }
 
@@ -229,14 +221,14 @@ fn simulator_type(
 ) {
     for (entity, args) in &requests {
         let text = &args.text;
-        let target = if text.is_empty() {
+        let query = if text.is_empty() {
             Err("simulator_type.text is empty".to_string())
         } else {
-            Ok(DispatchTarget::Query(AgentQuery::SimulatorControl {
+            Ok(AgentQuery::SimulatorControl {
                 input: SimulatorInput::TypeText(text.clone()),
-            }))
+            })
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolQuery(query));
     }
 }
 
@@ -247,11 +239,9 @@ fn simulator_key(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::SimulatorControl {
-                    input: SimulatorInput::Key(args.keycode),
-                },
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::SimulatorControl {
+                input: SimulatorInput::Key(args.keycode),
+            })));
     }
 }
 
@@ -262,11 +252,9 @@ fn simulator_button(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::SimulatorControl {
-                    input: SimulatorInput::Button(args.button.into()),
-                },
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::SimulatorControl {
+                input: SimulatorInput::Button(args.button.into()),
+            })));
     }
 }
 
@@ -277,13 +265,11 @@ fn record_start(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::RecordStart {
-                    gif: args.gif,
-                    max_secs: args.max_secs.unwrap_or(600),
-                    pane: OptionalText::trim(args.pane.clone()),
-                },
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::RecordStart {
+                gif: args.gif,
+                max_secs: args.max_secs.unwrap_or(600),
+                pane: OptionalText::trim(args.pane.clone()),
+            })));
     }
 }
 
@@ -294,12 +280,10 @@ fn record_stop(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::RecordStop {
-                    dir: OptionalText::trim(args.dir.clone()),
-                    name: OptionalText::trim(args.name.clone()),
-                },
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::RecordStop {
+                dir: OptionalText::trim(args.dir.clone()),
+                name: OptionalText::trim(args.name.clone()),
+            })));
     }
 }
 

@@ -1,5 +1,5 @@
 use super::{
-    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
@@ -149,8 +149,8 @@ fn resume_in_acp(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
     for (request, call, _) in calls.matching(WorkspaceTool::ResumeInAcp) {
         let result = call
             .require_anchor()
-            .map(|anchor| DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor }));
-        commands.entity(request).insert(ToolDispatchResult(result));
+            .map(|anchor| AgentCommand::ResumeInAcp { anchor });
+        commands.entity(request).insert(ToolCommand(result));
     }
 }
 
@@ -181,9 +181,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchResult(Err(message)));
+            commands.entity(request).insert(ToolDispatchError(message));
         }
     }
 }
@@ -193,18 +191,18 @@ fn open_page(
     requests: Query<(Entity, &ToolCall, &OpenPageArgs), Added<OpenPageArgs>>,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().and_then(|anchor| {
+        let command = call.require_anchor().and_then(|anchor| {
             if args.url.trim().is_empty() {
                 return Err("open_page.url is empty".to_string());
             }
-            Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
+            Ok(AgentCommand::OpenBeside {
                 anchor,
                 direction: args.direction.map(Into::into),
                 url: args.url.clone(),
                 focus: args.focus,
-            }))
+            })
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -213,7 +211,7 @@ fn open_file(
     requests: Query<(Entity, &ToolCall, &OpenFileArgs), Added<OpenFileArgs>>,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().and_then(|anchor| {
+        let command = call.require_anchor().and_then(|anchor| {
             let path = args.path.trim();
             if path.is_empty() {
                 return Err("open_file.path is empty".to_string());
@@ -223,20 +221,20 @@ fn open_file(
             } else {
                 format!("file://{path}")
             };
-            Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
+            Ok(AgentCommand::OpenBeside {
                 anchor,
                 direction: args.direction.map(Into::into),
                 url,
                 focus: args.focus,
-            }))
+            })
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
 fn run(mut commands: Commands, requests: Query<(Entity, &ToolCall, &RunArgs), Added<RunArgs>>) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().and_then(|anchor| {
+        let command = call.require_anchor().and_then(|anchor| {
             let placement_override =
                 args.mode.is_some() || args.direction.is_some() || args.beside.is_some();
             let mut command = args.command.clone();
@@ -285,9 +283,9 @@ fn run(mut commands: Commands, requests: Query<(Entity, &ToolCall, &RunArgs), Ad
                     done_marker: None,
                 }
             };
-            Ok(DispatchTarget::Command(command))
+            Ok(command)
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -314,8 +312,8 @@ fn create_worktree(
     requests: Query<(Entity, &ToolCall, &CreateWorktreeArgs), Added<CreateWorktreeArgs>>,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().map(|anchor| {
-            let command = if let Some(branch) = args.branch.clone().and_then(Trimmed::into_option) {
+        let command = call.require_anchor().map(|anchor| {
+            if let Some(branch) = args.branch.clone().and_then(Trimmed::into_option) {
                 AgentCommand::CreateWorktreeOnBranch {
                     anchor,
                     branch,
@@ -328,10 +326,9 @@ fn create_worktree(
                     task: args.task.clone().and_then(Trimmed::into_option),
                     create: args.create,
                 }
-            };
-            DispatchTarget::Command(command)
+            }
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -349,7 +346,7 @@ fn request_user_choice(
     requests: Query<(Entity, &ToolCall, &RequestUserChoiceArgs), Added<RequestUserChoiceArgs>>,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().and_then(|anchor| {
+        let command = call.require_anchor().and_then(|anchor| {
             let question = Trimmed::into_option(args.question.clone())
                 .ok_or("request_user_choice.question is empty")?;
             let options = args
@@ -362,13 +359,13 @@ fn request_user_choice(
             if !(2..=9).contains(&options.len()) {
                 return Err("request_user_choice requires 2 to 9 options".to_string());
             }
-            Ok(DispatchTarget::Command(AgentCommand::RequestUserChoice {
+            Ok(AgentCommand::RequestUserChoice {
                 anchor,
                 question,
                 options,
-            }))
+            })
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -377,14 +374,13 @@ fn select_project(
     requests: Query<(Entity, &ToolCall, &SelectProjectArgs), Added<SelectProjectArgs>>,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().map(|anchor| {
-            let command = match args.path.clone().and_then(Trimmed::into_option) {
+        let command = call.require_anchor().map(|anchor| {
+            match args.path.clone().and_then(Trimmed::into_option) {
                 Some(path) => AgentCommand::ChooseWorkspaceAtPath { anchor, path },
                 None => AgentCommand::ChooseWorkspace { anchor },
-            };
-            DispatchTarget::Command(command)
+            }
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -393,11 +389,11 @@ fn read_terminal(
     requests: Query<(Entity, &ReadTerminalArgs), (With<ToolCall>, Added<ReadTerminalArgs>)>,
 ) {
     for (entity, args) in &requests {
-        let target = args
+        let query = args
             .terminal
             .parse()
-            .map(|process_id| DispatchTarget::Query(AgentQuery::ReadTerminal { process_id }))
+            .map(|process_id| AgentQuery::ReadTerminal { process_id })
             .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string());
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolQuery(query));
     }
 }

@@ -55,13 +55,7 @@ impl Plugin for ToolRuntimePlugin {
             .add_systems(Update, dispatch_command_calls.in_set(ToolDispatchSet))
             .add_systems(
                 Update,
-                (
-                    bevy_ecs::schedule::ApplyDeferred,
-                    project_tool_dispatch_results,
-                    bevy_ecs::schedule::ApplyDeferred,
-                )
-                    .chain()
-                    .in_set(ToolDispatchFlush),
+                bevy_ecs::schedule::ApplyDeferred.in_set(ToolDispatchFlush),
             );
     }
 }
@@ -317,13 +311,10 @@ impl ToolDefinition {
 }
 
 #[derive(Component, Clone, Debug)]
-pub enum DispatchTarget {
-    Command(AgentCommand),
-    Query(AgentQuery),
-}
+pub struct ToolCommand(pub Result<AgentCommand, String>);
 
-#[derive(Component)]
-pub struct ToolDispatchResult(pub Result<DispatchTarget, String>);
+#[derive(Component, Clone, Debug)]
+pub struct ToolQuery(pub Result<AgentQuery, String>);
 
 #[derive(Clone, Copy, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -403,7 +394,7 @@ impl ToolCall {
 }
 
 type PendingCommandCalls<'w, 's> =
-    Query<'w, 's, (Entity, &'static ToolCall), (Added<ToolCall>, Without<ToolDispatchResult>)>;
+    Query<'w, 's, (Entity, &'static ToolCall), (Added<ToolCall>, Without<ToolCommand>)>;
 
 fn dispatch_command_calls(mut commands: Commands, calls: PendingCommandCalls) {
     for (entity, call) in &calls {
@@ -412,29 +403,10 @@ fn dispatch_command_calls(mut commands: Commands, calls: PendingCommandCalls) {
         }
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
-                AgentCommand::InvokeCommand {
-                    id: call.name.clone(),
-                    args: JsonValue::from(call.arguments.clone()),
-                },
-            ))));
-    }
-}
-
-fn project_tool_dispatch_results(
-    results: Query<(Entity, &ToolDispatchResult), Added<ToolDispatchResult>>,
-    mut commands: Commands,
-) {
-    for (entity, result) in &results {
-        let mut request = commands.entity(entity);
-        match &result.0 {
-            Ok(target) => {
-                request.insert(target.clone());
-            }
-            Err(message) => {
-                request.insert(ToolDispatchError(message.clone()));
-            }
-        }
+            .insert(ToolCommand(Ok(AgentCommand::InvokeCommand {
+                id: call.name.clone(),
+                args: JsonValue::from(call.arguments.clone()),
+            })));
     }
 }
 
@@ -547,6 +519,13 @@ pub(super) enum TestToolDispatch {
 }
 
 #[cfg(test)]
+#[derive(Clone, Debug)]
+pub enum DispatchTarget {
+    Command(AgentCommand),
+    Query(AgentQuery),
+}
+
+#[cfg(test)]
 fn tool_definitions_in(
     world: &mut World,
     acp_session: bool,
@@ -591,12 +570,17 @@ fn dispatch_tool_call(
         .spawn((call, crate::protocol_runtime::McpRequest))
         .id();
     app.update();
-    let dispatched = if let Some(result) = app
-        .world_mut()
-        .entity_mut(request)
-        .take::<ToolDispatchResult>()
+    let dispatched = if let Some(result) = app.world_mut().entity_mut(request).take::<ToolCommand>()
     {
-        result.0.map(TestToolDispatch::Target)
+        result
+            .0
+            .map(DispatchTarget::Command)
+            .map(TestToolDispatch::Target)
+    } else if let Some(result) = app.world_mut().entity_mut(request).take::<ToolQuery>() {
+        result
+            .0
+            .map(DispatchTarget::Query)
+            .map(TestToolDispatch::Target)
     } else if app
         .world()
         .get::<super::files::ReadFileExecution>(request)

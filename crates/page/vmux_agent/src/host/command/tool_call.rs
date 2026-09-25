@@ -18,7 +18,11 @@ impl Plugin for ToolCallPlugin {
         )
         .add_systems(
             Update,
-            finish_agent_tool_calls
+            (
+                finish_agent_tool_commands,
+                finish_agent_tool_queries,
+                fail_agent_tool_calls,
+            )
                 .after(vmux_mcp::tool::ToolDispatchFlush)
                 .before(CommandSet::Commands),
         );
@@ -80,27 +84,18 @@ fn handle_agent_tool_calls(
     }
 }
 
-fn finish_agent_tool_calls(
+fn finish_agent_tool_commands(
     mut commands: Commands,
     calls: Query<
-        (
-            Entity,
-            &PendingAgentToolCall,
-            Option<&vmux_mcp::tool::DispatchTarget>,
-            Option<&vmux_mcp::tool::ToolDispatchError>,
-        ),
-        Or<(
-            Added<vmux_mcp::tool::DispatchTarget>,
-            Added<vmux_mcp::tool::ToolDispatchError>,
-        )>,
+        (Entity, &PendingAgentToolCall, &vmux_mcp::tool::ToolCommand),
+        Added<vmux_mcp::tool::ToolCommand>,
     >,
     mut command_writer: MessageWriter<AgentCommandRequest>,
-    mut query_writer: MessageWriter<AgentQueryRequest>,
     service: Option<Res<ServiceClient>>,
 ) {
-    for (entity, pending, target, error) in &calls {
-        match target {
-            Some(vmux_mcp::tool::DispatchTarget::Command(command)) => {
+    for (entity, pending, result) in &calls {
+        match &result.0 {
+            Ok(command) => {
                 command_writer.write(AgentCommandRequest {
                     request_id: pending.request_id,
                     origin: CommandOrigin::Agent {
@@ -110,24 +105,70 @@ fn finish_agent_tool_calls(
                     command: command.clone(),
                 });
             }
-            Some(vmux_mcp::tool::DispatchTarget::Query(query)) => {
+            Err(message) => {
+                if let Some(service) = service.as_ref() {
+                    service.0.send(ClientMessage::AgentToolResult {
+                        request_id: pending.request_id,
+                        content: message.clone(),
+                        is_error: true,
+                    });
+                }
+            }
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn finish_agent_tool_queries(
+    mut commands: Commands,
+    calls: Query<
+        (Entity, &PendingAgentToolCall, &vmux_mcp::tool::ToolQuery),
+        Added<vmux_mcp::tool::ToolQuery>,
+    >,
+    mut query_writer: MessageWriter<AgentQueryRequest>,
+    service: Option<Res<ServiceClient>>,
+) {
+    for (entity, pending, result) in &calls {
+        match &result.0 {
+            Ok(query) => {
                 query_writer.write(AgentQueryRequest {
                     request_id: pending.request_id,
                     query: query.clone(),
                 });
             }
-            None => {
+            Err(message) => {
                 if let Some(service) = service.as_ref() {
                     service.0.send(ClientMessage::AgentToolResult {
                         request_id: pending.request_id,
-                        content: error
-                            .map(vmux_mcp::tool::ToolDispatchError::message)
-                            .unwrap_or("tool dispatch produced no target")
-                            .to_string(),
+                        content: message.clone(),
                         is_error: true,
                     });
                 }
             }
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+fn fail_agent_tool_calls(
+    mut commands: Commands,
+    calls: Query<
+        (
+            Entity,
+            &PendingAgentToolCall,
+            &vmux_mcp::tool::ToolDispatchError,
+        ),
+        Added<vmux_mcp::tool::ToolDispatchError>,
+    >,
+    service: Option<Res<ServiceClient>>,
+) {
+    for (entity, pending, error) in &calls {
+        if let Some(service) = service.as_ref() {
+            service.0.send(ClientMessage::AgentToolResult {
+                request_id: pending.request_id,
+                content: error.message().to_string(),
+                is_error: true,
+            });
         }
         commands.entity(entity).despawn();
     }

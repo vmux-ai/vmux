@@ -1,6 +1,6 @@
 use super::{
-    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchError, ToolDispatchResult,
-    ToolDispatchSet, ToolRequestSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet,
+    ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
@@ -127,9 +127,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchResult(Err(message)));
+            commands.entity(request).insert(ToolDispatchError(message));
         }
     }
 }
@@ -139,20 +137,20 @@ fn open_vault(
     requests: Query<(Entity, &ToolCall, &OpenVaultArgs), Added<OpenVaultArgs>>,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().map(|anchor| {
+        let command = call.require_anchor().map(|anchor| {
             let url = match args.provider.as_ref().unwrap_or(&VaultProvider::Overview) {
                 VaultProvider::Overview => "vmux://vault/",
                 VaultProvider::Github => "vmux://vault/?provider=github",
                 VaultProvider::CloudFolder => "vmux://vault/?provider=cloud_folder",
             };
-            DispatchTarget::Command(AgentCommand::OpenBeside {
+            AgentCommand::OpenBeside {
                 anchor,
                 direction: None,
                 url: url.to_string(),
                 focus: true,
-            })
+            }
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -164,17 +162,15 @@ fn set_conversation_title(
     >,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().and_then(|anchor| {
+        let command = call.require_anchor().and_then(|anchor| {
             let title =
                 Text::required(args.title.clone(), "set_conversation_title.title is empty")?;
             if title.chars().count() > 120 {
                 return Err("set_conversation_title.title exceeds 120 characters".to_string());
             }
-            Ok(DispatchTarget::Command(
-                AgentCommand::SetConversationTitle { anchor, title },
-            ))
+            Ok(AgentCommand::SetConversationTitle { anchor, title })
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -183,19 +179,19 @@ fn search(
     requests: Query<(Entity, &ToolCall, &SearchKnowledgeArgs), Added<SearchKnowledgeArgs>>,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().and_then(|anchor| {
+        let command = call.require_anchor().and_then(|anchor| {
             let query = Text::required(args.query.clone(), "search_knowledge.query is empty")?;
             let limit = args.limit.unwrap_or(20);
             if !(1..=100).contains(&limit) {
                 return Err("search_knowledge.limit must be between 1 and 100".to_string());
             }
-            Ok(DispatchTarget::Command(AgentCommand::SearchKnowledge {
+            Ok(AgentCommand::SearchKnowledge {
                 anchor,
                 query,
                 limit: limit as u16,
-            }))
+            })
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -204,7 +200,7 @@ fn read(
     requests: Query<(Entity, &ToolCall, &ReadKnowledgeArgs), Added<ReadKnowledgeArgs>>,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().and_then(|anchor| {
+        let command = call.require_anchor().and_then(|anchor| {
             let path = Text::required(args.path.clone(), "read_knowledge.path is empty")?;
             let line = args.line.unwrap_or(1);
             let limit = args.limit.unwrap_or(200);
@@ -214,14 +210,14 @@ fn read(
             if !(1..=2_000).contains(&limit) {
                 return Err("read_knowledge.limit must be between 1 and 2000".to_string());
             }
-            Ok(DispatchTarget::Command(AgentCommand::ReadKnowledge {
+            Ok(AgentCommand::ReadKnowledge {
                 anchor,
                 path,
                 line: line as u32,
                 limit: limit as u32,
-            }))
+            })
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -230,18 +226,18 @@ fn write(
     requests: Query<(Entity, &ToolCall, &WriteKnowledgeArgs), Added<WriteKnowledgeArgs>>,
 ) {
     for (entity, call, args) in &requests {
-        let target = call.require_anchor().and_then(|anchor| {
+        let command = call.require_anchor().and_then(|anchor| {
             let path = args.path.clone().and_then(Text::trimmed);
             let title = Text::required(args.title.clone(), "write_knowledge.title is empty")?;
             let content = Text::required(args.content.clone(), "write_knowledge.content is empty")?;
-            Ok(DispatchTarget::Command(AgentCommand::WriteKnowledge {
+            Ok(AgentCommand::WriteKnowledge {
                 anchor,
                 path,
                 title,
                 content,
-            }))
+            })
         });
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 

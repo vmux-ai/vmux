@@ -9,7 +9,7 @@ pub use vmux_mcp::{
     McpConnectionPlugin,
     protocol::{McpPlugin, McpServer},
     tool::{
-        DispatchTarget, McpToolPlugin, RegisterTools, ToolCall, ToolDispatchResult,
-        ToolDispatchSet, ToolRuntimePlugin,
+        McpToolPlugin, RegisterTools, ToolCall, ToolCommand, ToolDispatchSet, ToolQuery,
+        ToolRuntimePlugin,
     },
 };

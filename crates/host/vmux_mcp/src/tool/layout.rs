@@ -1,5 +1,5 @@
 use super::{
-    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
 use bevy_app::{App, Plugin, Update};
@@ -50,9 +50,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchResult(Err(message)));
+            commands.entity(request).insert(ToolDispatchError(message));
         }
     }
 }
@@ -61,11 +59,9 @@ fn read_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
     for (request, call, _) in calls.matching(LayoutTool::ReadLayout) {
         commands
             .entity(request)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::ReadLayout {
-                    anchor: call.anchor,
-                },
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::ReadLayout {
+                anchor: call.anchor,
+            })));
     }
 }
 
@@ -76,11 +72,9 @@ fn update_layout(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
-                AgentCommand::UpdateLayout {
-                    layout: args.0.clone(),
-                },
-            ))));
+            .insert(ToolCommand(Ok(AgentCommand::UpdateLayout {
+                layout: args.0.clone(),
+            })));
     }
 }
 
@@ -90,16 +84,16 @@ fn select_tab(
 ) {
     for (entity, args) in &requests {
         let index = args.index;
-        let target = if (1..=8).contains(&index) {
-            Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
+        let command = if (1..=8).contains(&index) {
+            Ok(AgentCommand::InvokeCommand {
                 id: format!("tab_select_{index}"),
                 args: JsonValue::Object(Vec::new()),
-            }))
+            })
         } else {
             Err(format!(
                 "select_tab.index must be between 1 and 8, got {index}"
             ))
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }

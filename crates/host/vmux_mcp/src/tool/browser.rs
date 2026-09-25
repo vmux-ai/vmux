@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use vmux_client::protocol::{AgentCommand, AgentQuery};
 
 use super::{
-    DispatchTarget, McpToolPlugin, ToolCall, ToolCalls, ToolDispatchResult, ToolDispatchSet,
+    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
 
@@ -181,9 +181,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchResult(Err(message)));
+            commands.entity(request).insert(ToolDispatchError(message));
         }
     }
 }
@@ -193,15 +191,15 @@ fn navigate(
     requests: Query<(Entity, &BrowserNavigateArgs), (With<ToolCall>, Added<BrowserNavigateArgs>)>,
 ) {
     for (entity, args) in &requests {
-        let target = if args.url.trim().is_empty() {
+        let command = if args.url.trim().is_empty() {
             Err("browser_navigate.url is empty".to_string())
         } else {
-            Ok(DispatchTarget::Command(AgentCommand::BrowserNavigate {
+            Ok(AgentCommand::BrowserNavigate {
                 url: args.url.clone(),
                 pane: args.pane.clone(),
-            }))
+            })
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -212,11 +210,9 @@ fn go_back(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
-                AgentCommand::BrowserGoBack {
-                    pane: args.pane.clone(),
-                },
-            ))));
+            .insert(ToolCommand(Ok(AgentCommand::BrowserGoBack {
+                pane: args.pane.clone(),
+            })));
     }
 }
 
@@ -227,11 +223,9 @@ fn go_forward(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Command(
-                AgentCommand::BrowserGoForward {
-                    pane: args.pane.clone(),
-                },
-            ))));
+            .insert(ToolCommand(Ok(AgentCommand::BrowserGoForward {
+                pane: args.pane.clone(),
+            })));
     }
 }
 
@@ -243,17 +237,15 @@ fn history_search(
     >,
 ) {
     for (entity, args) in &requests {
-        let target = if args.query.trim().is_empty() {
+        let command = if args.query.trim().is_empty() {
             Err("browser_history_search.query is empty".to_string())
         } else {
-            Ok(DispatchTarget::Command(
-                AgentCommand::BrowserHistorySearch {
-                    query: args.query.clone(),
-                    limit: args.limit.unwrap_or(20).min(100),
-                },
-            ))
+            Ok(AgentCommand::BrowserHistorySearch {
+                query: args.query.clone(),
+                limit: args.limit.unwrap_or(20).min(100),
+            })
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -266,16 +258,14 @@ fn install_extension(
 ) {
     for (entity, args) in &requests {
         let source = &args.source;
-        let target = if source.trim().is_empty() {
+        let command = if source.trim().is_empty() {
             Err("browser_install_extension.source is empty".to_string())
         } else {
-            Ok(DispatchTarget::Command(
-                AgentCommand::BrowserInstallExtension {
-                    source: source.clone(),
-                },
-            ))
+            Ok(AgentCommand::BrowserInstallExtension {
+                source: source.clone(),
+            })
         };
-        commands.entity(entity).insert(ToolDispatchResult(target));
+        commands.entity(entity).insert(ToolCommand(command));
     }
 }
 
@@ -286,12 +276,10 @@ fn snapshot(
     for (entity, call, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::BrowserSnapshot {
-                    pane: BrowserPane::from(args.target.clone()).into(),
-                    anchor: call.anchor,
-                },
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::BrowserSnapshot {
+                pane: BrowserPane::from(args.target.clone()).into(),
+                anchor: call.anchor,
+            })));
     }
 }
 
@@ -306,13 +294,11 @@ fn scroll(
         };
         commands
             .entity(entity)
-            .insert(ToolDispatchResult(Ok(DispatchTarget::Query(
-                AgentQuery::BrowserScroll {
-                    pane: BrowserPane::from(target).into(),
-                    to,
-                    delta,
-                    anchor: call.anchor,
-                },
-            ))));
+            .insert(ToolQuery(Ok(AgentQuery::BrowserScroll {
+                pane: BrowserPane::from(target).into(),
+                to,
+                delta,
+                anchor: call.anchor,
+            })));
     }
 }
