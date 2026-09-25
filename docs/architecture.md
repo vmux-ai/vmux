@@ -220,8 +220,9 @@ serializable typed patch mapping. `#[vmux_api::host_event]` remains for one-shot
 responses that are not page state.
 
 Command palette queries are UI input, while filtered rows, completion text, prompt targets, and
-mode are a host-owned ECS projection on the page entity. Dioxus renders that projection and keeps
-only immediate text-entry, focus, caret, and IME state locally.
+mode are a host-owned ECS projection on the page entity. Dioxus renders that projection; immediate
+text entry, selection, submission, focus, caret, and IME behavior remain local until the input and
+effect audit is complete.
 
 Command-bar requests implement `CommandRequest` and are registered through `CommandTypePlugin`.
 Their definitions become ECS entities with targeted dispatch observers; no callback registry owns
