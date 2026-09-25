@@ -81,32 +81,31 @@ impl ExplorerTrees {
         std::mem::take(&mut self.dirty)
     }
 
-    pub(super) fn request_dir_load(
-        &mut self,
-        root: &Path,
-        path: PathBuf,
-        force: bool,
-    ) -> Option<ExplorerDirLoadTask> {
+    pub(super) fn begin_dir_load(&mut self, root: &Path, path: &Path, force: bool) -> bool {
         let tree = self.at(root);
-        if tree.loading.contains(&path) || !force && tree.children.contains_key(&path) {
-            return None;
+        if tree.loading.contains(path) || !force && tree.children.contains_key(path) {
+            return false;
         }
-        tree.loading.insert(path.clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let entries = list_dir(&path);
-            (path, entries)
-        });
-        let task = ExplorerDirLoadTask {
-            root: root.to_path_buf(),
-            task,
-        };
+        tree.loading.insert(path.to_path_buf());
         self.touch(root);
-        Some(task)
+        true
     }
 }
 
 #[derive(Component)]
-pub(crate) struct ExplorerDirLoadTask {
+pub(crate) struct ExplorerDirLoadRequest {
+    root: PathBuf,
+    path: PathBuf,
+}
+
+impl ExplorerDirLoadRequest {
+    pub(crate) fn new(root: PathBuf, path: PathBuf) -> Self {
+        Self { root, path }
+    }
+}
+
+#[derive(Component)]
+struct ExplorerDirLoadTask {
     root: PathBuf,
     task: Task<(PathBuf, Vec<FileDirEntry>)>,
 }
@@ -122,6 +121,7 @@ impl Plugin for TreePlugin {
                 Update,
                 (
                     init_explorer_state,
+                    start_explorer_dir_loads,
                     drain_explorer_dir_loads,
                     reveal_on_file_change,
                     mark_explorer_tree_dirty,
@@ -163,15 +163,15 @@ pub(super) fn reveal_current_in_tree(
     };
     let mut dir = state.root.clone();
     shared_changed |= trees.at(&state.root).expanded.insert(dir.clone());
-    if let Some(task) = trees.request_dir_load(&state.root, dir.clone(), false) {
-        commands.spawn(task);
+    if trees.begin_dir_load(&state.root, &dir, false) {
+        commands.spawn(ExplorerDirLoadRequest::new(state.root.clone(), dir.clone()));
         shared_changed = true;
     }
     for component in relative.components() {
         dir.push(component);
         shared_changed |= trees.at(&state.root).expanded.insert(dir.clone());
-        if let Some(task) = trees.request_dir_load(&state.root, dir.clone(), false) {
-            commands.spawn(task);
+        if trees.begin_dir_load(&state.root, &dir, false) {
+            commands.spawn(ExplorerDirLoadRequest::new(state.root.clone(), dir.clone()));
             shared_changed = true;
         }
     }
@@ -212,10 +212,28 @@ fn init_explorer_state(
         let root = project_root(&view.path);
         state.root = root.clone();
         trees.at(&root).expanded.insert(root.clone());
-        if let Some(task) = trees.request_dir_load(&root, root.clone(), false) {
-            commands.spawn(task);
+        if trees.begin_dir_load(&root, &root, false) {
+            commands.spawn(ExplorerDirLoadRequest::new(root.clone(), root.clone()));
         }
         commands.entity(entity).insert(ExplorerTreeDirty);
+    }
+}
+
+fn start_explorer_dir_loads(
+    requests: Query<(Entity, &ExplorerDirLoadRequest), Added<ExplorerDirLoadRequest>>,
+    mut commands: Commands,
+) {
+    for (entity, request) in &requests {
+        let root = request.root.clone();
+        let path = request.path.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            let entries = list_dir(&path);
+            (path, entries)
+        });
+        commands
+            .entity(entity)
+            .remove::<ExplorerDirLoadRequest>()
+            .insert(ExplorerDirLoadTask { root, task });
     }
 }
 
@@ -251,8 +269,8 @@ fn drain_explorer_dir_loads(
             ahead.push(PathBuf::from(&entry.path));
         }
         for dir in ahead {
-            if let Some(task) = trees.request_dir_load(&root, dir, false) {
-                commands.spawn(task);
+            if trees.begin_dir_load(&root, &dir, false) {
+                commands.spawn(ExplorerDirLoadRequest::new(root.clone(), dir));
             }
         }
     }
@@ -396,8 +414,8 @@ fn on_explorer_tree_toggle(
             return;
         }
         trees.at(&root).expanded.insert(path.clone());
-        if let Some(task) = trees.request_dir_load(&root, path, false) {
-            commands.spawn(task);
+        if trees.begin_dir_load(&root, &path, false) {
+            commands.spawn(ExplorerDirLoadRequest::new(root.clone(), path));
         }
     }
     trees.touch(&root);
@@ -415,10 +433,8 @@ fn on_explorer_tree_prefetch(
     let Ok(state) = query.get(entity) else {
         return;
     };
-    if state.allows(&path)
-        && let Some(task) = trees.request_dir_load(&state.root, path, false)
-    {
-        commands.spawn(task);
+    if state.allows(&path) && trees.begin_dir_load(&state.root, &path, false) {
+        commands.spawn(ExplorerDirLoadRequest::new(state.root.clone(), path));
     }
 }
 
@@ -433,10 +449,8 @@ fn on_explorer_tree_refresh(
     let Ok(state) = query.get(entity) else {
         return;
     };
-    if state.allows(&path)
-        && let Some(task) = trees.request_dir_load(&state.root, path, true)
-    {
-        commands.spawn(task);
+    if state.allows(&path) && trees.begin_dir_load(&state.root, &path, true) {
+        commands.spawn(ExplorerDirLoadRequest::new(state.root.clone(), path));
     }
 }
 

@@ -33,7 +33,10 @@ impl Plugin for ManagerPlugin {
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_update_request)
-            .add_systems(Update, (start_install_jobs, start_uninstall_jobs).chain())
+            .add_systems(
+                Update,
+                (start_catalog_jobs, start_install_jobs, start_uninstall_jobs).chain(),
+            )
             .add_systems(
                 Update,
                 (poll_catalog_jobs, poll_install_jobs, poll_uninstall_jobs),
@@ -187,13 +190,24 @@ impl PackageTargets<'_, '_> {
 }
 
 #[derive(Component)]
+struct PendingCatalogJob {
+    target: Entity,
+    request: LspCatalogRequest,
+}
+
+#[derive(Component)]
 struct CatalogJob {
     target: Entity,
     task: Task<LspCatalog>,
 }
 
-impl CatalogJob {
-    fn spawn(target: Entity, request: LspCatalogRequest) -> Self {
+fn start_catalog_jobs(
+    pending: Query<(Entity, &PendingCatalogJob), Added<PendingCatalogJob>>,
+    mut commands: Commands,
+) {
+    for (entity, pending) in &pending {
+        let target = pending.target;
+        let request = pending.request.clone();
         let task = IoTaskPool::get().spawn(async move {
             let root = store::default_root();
             let packages = catalog::ensure_catalog(&root, request.refresh).unwrap_or_default();
@@ -216,7 +230,10 @@ impl CatalogJob {
             }
             LspCatalog { packages }
         });
-        Self { target, task }
+        commands
+            .entity(entity)
+            .remove::<PendingCatalogJob>()
+            .insert(CatalogJob { target, task });
     }
 }
 
@@ -456,7 +473,10 @@ fn on_catalog_request(
     }
     commands.spawn((
         Name::new("LSP catalog"),
-        CatalogJob::spawn(entity, trigger.event().payload.clone()),
+        PendingCatalogJob {
+            target: entity,
+            request: trigger.event().payload.clone(),
+        },
     ));
 }
 
