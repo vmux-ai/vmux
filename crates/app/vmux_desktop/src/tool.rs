@@ -142,11 +142,11 @@ impl Plugin for ToolPlugin {
             ToolRegistry::default(),
             ToolStore::current(),
             ToolsManifest::default(),
+            OperationRequestSequence::default(),
+            VaultAutoSync::default(),
+            VaultRecoveryState::default(),
         ));
-        app.init_resource::<OperationRequestSequence>()
-            .init_resource::<VaultAutoSync>()
-            .init_resource::<VaultRecoveryState>()
-            .add_plugins((
+        app.add_plugins((
                 vmux_app::extension::McpConnectionPlugin,
                 vmux_tool::ToolPlugin,
                 UiStatePlugin::<ToolsUiState>::default(),
@@ -679,7 +679,7 @@ struct ToolOperationTask {
     task: Task<Result<String, String>>,
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct OperationRequestSequence(u64);
 
 impl OperationRequestSequence {
@@ -761,14 +761,14 @@ struct VaultWatch {
     remote_rx: mpsc::Receiver<()>,
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct VaultAutoSync {
     requested: bool,
     initial_scan_complete: bool,
     remote_check: bool,
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 struct VaultRecoveryState {
     service: VaultRecovery,
     pending_key: Option<GeneratedRecoveryKey>,
@@ -1413,10 +1413,13 @@ fn on_refresh_request(
 fn queue_tool_operation<R: DesktopToolRequest>(
     target: Entity,
     request: R,
-    mut sequence: ResMut<OperationRequestSequence>,
+    mut registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
     mut subscribers: Query<&mut ToolSubscriber>,
     mut commands: Commands,
 ) {
+    let Ok(mut sequence) = registries.single_mut() else {
+        return;
+    };
     let operation_id = sequence.next();
     let operation = request.operation();
     if let Ok(mut subscriber) = subscribers.get_mut(target) {
@@ -1441,14 +1444,14 @@ macro_rules! tool_operation_observer {
     ($name:ident, $request:ty) => {
         fn $name(
             trigger: On<UiInput<$request>>,
-            sequence: ResMut<OperationRequestSequence>,
+            registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
             subscribers: Query<&mut ToolSubscriber>,
             commands: Commands,
         ) {
             queue_tool_operation(
                 trigger.event().webview,
                 trigger.event().payload.clone(),
-                sequence,
+                registries,
                 subscribers,
                 commands,
             );
@@ -1469,7 +1472,7 @@ tool_operation_observer!(on_import_request, ToolImportRequest);
 fn queue_vault_operation<R: DesktopVaultRequest>(
     target: Entity,
     request: R,
-    mut sequence: ResMut<OperationRequestSequence>,
+    mut registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
     pending: Query<Entity, With<PendingVaultOperation>>,
     pending_github: Query<
         Entity,
@@ -1488,6 +1491,9 @@ fn queue_vault_operation<R: DesktopVaultRequest>(
     mut subscribers: Query<&mut VaultSubscriber>,
     mut commands: Commands,
 ) {
+    let Ok(mut sequence) = registries.single_mut() else {
+        return;
+    };
     let operation_id = sequence.next();
     if let Ok(mut subscriber) = subscribers.get_mut(target) {
         request.begin(&mut subscriber, operation_id);
@@ -1528,7 +1534,7 @@ macro_rules! vault_operation_observer {
     ($name:ident, $request:ty) => {
         fn $name(
             trigger: On<UiInput<$request>>,
-            sequence: ResMut<OperationRequestSequence>,
+            registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
             pending: Query<Entity, With<PendingVaultOperation>>,
             pending_github: Query<
                 Entity,
@@ -1550,7 +1556,7 @@ macro_rules! vault_operation_observer {
             queue_vault_operation(
                 trigger.event().webview,
                 trigger.event().payload.clone(),
-                sequence,
+                registries,
                 pending,
                 pending_github,
                 active_github,
@@ -1862,13 +1868,12 @@ fn on_vault_recovery_input_request(
 
 fn drain_vault_watch(
     watcher: Option<NonSendMut<VaultWatch>>,
-    mut auto_sync: ResMut<VaultAutoSync>,
-    mut registry: Query<&mut ToolRegistry>,
+    mut registry: Query<(&mut ToolRegistry, &mut VaultAutoSync)>,
 ) {
     let Some(watcher) = watcher else {
         return;
     };
-    let Ok(mut state) = registry.single_mut() else {
+    let Ok((mut state, mut auto_sync)) = registry.single_mut() else {
         return;
     };
     if watcher.remote_rx.try_iter().next().is_some() {
@@ -1894,8 +1899,11 @@ fn drain_vault_watch(
 }
 
 fn queue_vault_auto_sync(
-    mut auto_sync: ResMut<VaultAutoSync>,
-    registry: Query<&ToolRegistry>,
+    mut registry: Query<(
+        &ToolRegistry,
+        &mut VaultAutoSync,
+        &mut OperationRequestSequence,
+    )>,
     scans: Query<(), With<ToolsScanTask>>,
     tasks: Query<
         (),
@@ -1918,10 +1926,9 @@ fn queue_vault_auto_sync(
             With<VaultOperationRequest<VaultSyncRequest>>,
         ),
     >,
-    mut sequence: ResMut<OperationRequestSequence>,
     mut commands: Commands,
 ) {
-    let Ok(state) = registry.single() else {
+    let Ok((state, mut auto_sync, mut sequence)) = registry.single_mut() else {
         return;
     };
     if !auto_sync.requested || state.dirty || !state.snapshot.loaded || !scans.is_empty() {
@@ -2045,10 +2052,13 @@ fn start_vault_operation(
 
 fn launch_vault_operation<R: DesktopVaultRequest>(
     operations: Query<(Entity, &VaultOperationRequest<R>), Added<ReadyVaultOperation>>,
-    mut recovery: ResMut<VaultRecoveryState>,
+    mut registries: Query<&mut VaultRecoveryState, With<ToolRegistry>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
+    let Ok(mut recovery) = registries.single_mut() else {
+        return;
+    };
     for (entity, operation) in &operations {
         let request = operation.request().clone();
         let service = recovery.service();
@@ -2138,11 +2148,10 @@ fn start_tools_scan(
 
 fn drain_tools_scan(
     mut tasks: Query<(Entity, &mut ToolsScanTask)>,
-    mut registry: Query<(&mut ToolRegistry, &mut ToolsManifest)>,
-    mut auto_sync: ResMut<VaultAutoSync>,
+    mut registry: Query<(&mut ToolRegistry, &mut ToolsManifest, &mut VaultAutoSync)>,
     mut commands: Commands,
 ) {
-    let Ok((mut state, mut manifest)) = registry.single_mut() else {
+    let Ok((mut state, mut manifest, mut auto_sync)) = registry.single_mut() else {
         return;
     };
     for (entity, mut task) in &mut tasks {
@@ -2248,13 +2257,12 @@ fn drain_vault_operation<R: DesktopVaultRequest>(
         &VaultOperationRequest<R>,
         &mut VaultOperationTask,
     )>,
-    mut registry: Query<&mut ToolRegistry>,
-    mut recovery: ResMut<VaultRecoveryState>,
+    mut registry: Query<(&mut ToolRegistry, &mut VaultRecoveryState)>,
     mut subscribers: Query<&mut VaultSubscriber>,
     mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     mut commands: Commands,
 ) {
-    let Ok(mut state) = registry.single_mut() else {
+    let Ok((mut state, mut recovery)) = registry.single_mut() else {
         return;
     };
     for (entity, context, operation, mut task) in &mut operations {
@@ -3268,19 +3276,26 @@ mod tests {
     impl VaultAutoSyncScenario {
         fn pending_targets(vault: VaultSnapshot, remote_check: bool) -> Vec<VaultOperationTarget> {
             let mut app = App::new();
-            app.init_resource::<VaultAutoSync>()
-                .init_resource::<OperationRequestSequence>()
-                .add_systems(Update, queue_vault_auto_sync);
-            let registry = app.world_mut().spawn(ToolRegistry::default()).id();
+            app.add_systems(Update, queue_vault_auto_sync);
+            let registry = app
+                .world_mut()
+                .spawn((
+                    ToolRegistry::default(),
+                    VaultAutoSync::default(),
+                    OperationRequestSequence::default(),
+                ))
+                .id();
             {
                 let mut state = app.world_mut().get_mut::<ToolRegistry>(registry).unwrap();
                 state.dirty = false;
                 state.snapshot.loaded = true;
                 state.snapshot.vault = vault;
             }
-            let mut auto_sync = app.world_mut().resource_mut::<VaultAutoSync>();
-            auto_sync.requested = true;
-            auto_sync.remote_check = remote_check;
+            {
+                let mut auto_sync = app.world_mut().get_mut::<VaultAutoSync>(registry).unwrap();
+                auto_sync.requested = true;
+                auto_sync.remote_check = remote_check;
+            }
 
             app.update();
 
