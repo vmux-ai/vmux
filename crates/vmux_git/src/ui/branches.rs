@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use vmux_core::event::space::ProjectActivateRequest;
 use vmux_ui::components::button::{Button, ButtonSize, ButtonVariant};
 use vmux_ui::components::card::{Card, CardVariant};
 use vmux_ui::components::dialog::{DialogContent, DialogRoot, DialogTitle};
@@ -13,7 +14,6 @@ use crate::event::*;
 use crate::state::{GitBranchCollection, GitBranchPrompt, GitOperationEligibility, GitPanel};
 
 use super::panel::{HeaderOperationButton, PanelHeader, PanelIcon};
-use super::workspace::GitWorkspace;
 
 #[component]
 pub(super) fn BranchPromptDialog() -> Element {
@@ -186,7 +186,14 @@ pub(super) fn BranchesCard(
                     onpress: {
                         let repo_root = repository.repo_root.clone();
                         let branch = branch.clone();
-                        move |_| GitWorkspace::select_branch(&repo_root, &branch)
+                        move |_| {
+                            let _ = send(&ProjectActivateRequest {
+                                path: repo_root.clone(),
+                                branch: branch.name.clone(),
+                                checkout: branch.checkout.clone(),
+                                pane_id: None,
+                            });
+                        }
                     },
                 }
                 HeaderOperationButton {

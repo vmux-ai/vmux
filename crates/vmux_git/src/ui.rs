@@ -13,7 +13,6 @@ mod shared;
 mod shortcuts;
 mod state;
 mod status;
-mod workspace;
 
 pub use diff_projection::DiffViewRow;
 pub use root::Page;

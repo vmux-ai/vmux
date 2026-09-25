@@ -4,10 +4,8 @@ use dioxus::prelude::*;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-use crate::event::GitRepositoryPickerRequest;
+use crate::event::{GitConfigEditRequest, GitRepositoryPickerRequest, GitUpdateCheckRequest};
 use crate::state::{GitBranchCollection, GitPanel};
-
-use super::workspace::GitWorkspace;
 
 #[component]
 pub(super) fn GitShortcutBar(
@@ -53,14 +51,20 @@ pub(super) fn GitShortcutBar(
                     label: translate("git-edit-config"),
                     onclick: {
                         let repo_root = repo_root.clone();
-                        move |_| GitWorkspace::edit_config(&repo_root)
+                        move |_| {
+                            let _ = send(&GitConfigEditRequest {
+                                repo_root: repo_root.clone(),
+                            });
+                        }
                     },
                 }
                 ShortcutButton {
                     keycap: "u",
                     label: translate("settings-check-updates"),
                     onclick: {
-                        move |_| GitWorkspace::check_for_updates()
+                        move |_| {
+                            let _ = send(&GitUpdateCheckRequest);
+                        }
                     },
                 }
                 ShortcutButton {

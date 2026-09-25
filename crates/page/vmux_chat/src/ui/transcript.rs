@@ -2,7 +2,7 @@ use super::agent::AgentBanner;
 use super::error::ChatErrorCard;
 use super::state::Chat;
 use crate::event::{ChatCancelQueuedPrompt, ChatClearQueue, ChatResume};
-use crate::format::composer::is_handoff_boundary;
+use crate::format::is_handoff_boundary;
 use crate::transcript::ChatItemRow;
 use dioxus::prelude::*;
 use vmux_api::prompt_media::ChatAttachment;

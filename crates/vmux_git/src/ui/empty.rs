@@ -6,11 +6,12 @@ use dioxus::prelude::*;
 use vmux_ui::components::skeleton::Skeleton;
 use vmux_ui::directory::{DirectoryNavigator, DirectoryNavigatorEvent, visible_directory_entries};
 use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use super::state::GitPageState;
-use super::workspace::GitWorkspace;
+use crate::event::GitDirectoryRequest;
 
 #[component]
 pub(super) fn EmptyRepository() -> Element {
@@ -78,7 +79,10 @@ pub(super) fn EmptyRepository() -> Element {
                         preview_path.set(String::new());
                         if entry.is_dir {
                             preview_path.set(entry.path.clone());
-                            GitWorkspace::browse(&entry.path, true);
+                            let _ = send(&GitDirectoryRequest {
+                                path: entry.path.clone(),
+                                preview: true,
+                            });
                         }
                     }
                     DirectoryNavigatorEvent::Ascend { target } => {
@@ -86,7 +90,10 @@ pub(super) fn EmptyRepository() -> Element {
                             return;
                         }
                         came_from.set(target);
-                        GitWorkspace::browse(&action_directory.parent_path, false);
+                        let _ = send(&GitDirectoryRequest {
+                            path: action_directory.parent_path.clone(),
+                            preview: false,
+                        });
                     }
                     DirectoryNavigatorEvent::Descend { target } => {
                         let Some(entry) = action_directory.entries.get(selected()) else {
@@ -96,12 +103,18 @@ pub(super) fn EmptyRepository() -> Element {
                             return;
                         }
                         came_from.set(target);
-                        GitWorkspace::browse(&entry.path, false);
+                        let _ = send(&GitDirectoryRequest {
+                            path: entry.path.clone(),
+                            preview: false,
+                        });
                     }
                     DirectoryNavigatorEvent::Open { entry } => {
                         if entry.is_dir {
                             came_from.set(String::new());
-                            GitWorkspace::browse(&entry.path, false);
+                            let _ = send(&GitDirectoryRequest {
+                                path: entry.path.clone(),
+                                preview: false,
+                            });
                         }
                     }
                     DirectoryNavigatorEvent::ToggleHidden => {
@@ -113,7 +126,10 @@ pub(super) fn EmptyRepository() -> Element {
                         preview_path.set(String::new());
                         if let Some(entry) = entries.get(index).filter(|entry| entry.is_dir) {
                             preview_path.set(entry.path.clone());
-                            GitWorkspace::browse(&entry.path, true);
+                            let _ = send(&GitDirectoryRequest {
+                                path: entry.path.clone(),
+                                preview: true,
+                            });
                         }
                     }
                 },

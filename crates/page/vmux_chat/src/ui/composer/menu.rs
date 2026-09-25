@@ -1,4 +1,4 @@
-use crate::format::composer::ResumeMenuState;
+use crate::format::ResumeMenuState;
 use crate::ui::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::components::prompt_box::PromptPopup;

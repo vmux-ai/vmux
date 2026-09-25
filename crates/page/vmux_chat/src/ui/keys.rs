@@ -1,7 +1,7 @@
 use super::composer::options::ChatMenuSet;
 use super::state::Chat;
 use crate::event::{ApprovalDecision, ChatItem, ChatKey};
-use crate::format::composer::{
+use crate::format::{
     PromptEdit, PromptHistoryDirection, edit_prompt, move_prompt_history, prompt_history_direction,
 };
 use dioxus::prelude::*;
