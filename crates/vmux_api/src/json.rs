@@ -1,15 +1,12 @@
-#[vmux_api::contract(Default, Eq)]
-#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
-#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
-#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
+#[vmux_api::contract(recursive, Default, Eq)]
 pub enum JsonValue {
     #[default]
     Null,
     Bool(bool),
     Number(String),
     String(String),
-    Array(#[rkyv(omit_bounds)] Vec<Self>),
-    Object(#[rkyv(omit_bounds)] Vec<(String, Self)>),
+    Array(Vec<Self>),
+    Object(Vec<(String, Self)>),
 }
 
 impl JsonValue {

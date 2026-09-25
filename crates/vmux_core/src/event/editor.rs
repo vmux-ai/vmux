@@ -161,19 +161,15 @@ pub enum MdTableAlign {
     Right,
 }
 
-#[vmux_api::contract]
-#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
-#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
-#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
+#[vmux_api::contract(recursive)]
 pub enum MdInline {
     Text(String),
     Code(String),
-    Strong(#[rkyv(omit_bounds)] Vec<MdInline>),
-    Emph(#[rkyv(omit_bounds)] Vec<MdInline>),
-    Strike(#[rkyv(omit_bounds)] Vec<MdInline>),
+    Strong(Vec<MdInline>),
+    Emph(Vec<MdInline>),
+    Strike(Vec<MdInline>),
     Link {
         href: String,
-        #[rkyv(omit_bounds)]
         inlines: Vec<MdInline>,
     },
     Image {
@@ -192,21 +188,14 @@ pub enum MdInline {
     },
 }
 
-#[vmux_api::contract]
-#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
-#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
-#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
+#[vmux_api::contract(recursive)]
 pub struct MdListItem {
     pub source_line: u32,
     pub task: Option<bool>,
-    #[rkyv(omit_bounds)]
     pub blocks: Vec<MdBlock>,
 }
 
-#[vmux_api::contract]
-#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
-#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
-#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
+#[vmux_api::contract(recursive)]
 pub enum MdBlock {
     Heading {
         level: u8,
@@ -218,7 +207,6 @@ pub enum MdBlock {
     List {
         ordered: bool,
         start: u64,
-        #[rkyv(omit_bounds)]
         items: Vec<MdListItem>,
     },
     CodeBlock {
@@ -226,7 +214,6 @@ pub enum MdBlock {
         lines: Vec<FileLine>,
     },
     BlockQuote {
-        #[rkyv(omit_bounds)]
         blocks: Vec<MdBlock>,
     },
     Table {
