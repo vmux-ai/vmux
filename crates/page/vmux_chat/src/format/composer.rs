@@ -1,4 +1,6 @@
-use crate::event::{ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry};
+#[cfg(test)]
+use crate::event::ResumableSessionEntry;
+use crate::event::{ModelOptionEntry, SlashCommandEntry};
 use unicode_segmentation::UnicodeSegmentation;
 #[cfg(ui)]
 pub(crate) use vmux_ui::prompt_recall::{
@@ -90,37 +92,18 @@ pub fn filter_models(models: &[ModelOptionEntry], query: &str) -> Vec<ModelOptio
         .collect()
 }
 
-pub(crate) fn filter_sessions(
-    sessions: &[ResumableSessionEntry],
-    query: &str,
-) -> Vec<ResumableSessionEntry> {
-    let query = query.trim().to_lowercase();
-    if query.is_empty() {
-        return sessions.to_vec();
-    }
-    sessions
-        .iter()
-        .filter(|session| {
-            session.sid.to_lowercase().contains(&query)
-                || session.title.to_lowercase().contains(&query)
-                || session.cwd.to_lowercase().contains(&query)
-        })
-        .cloned()
-        .collect()
-}
-
 pub(crate) fn resume_menu_state(
-    requested: bool,
+    active: bool,
     loading: bool,
-    session_count: usize,
-    filtered_count: usize,
+    query: &str,
+    result_count: usize,
 ) -> ResumeMenuState {
-    if !requested || loading {
+    if !active || loading {
         ResumeMenuState::Loading
-    } else if session_count == 0 {
-        ResumeMenuState::Empty
-    } else if filtered_count == 0 {
+    } else if result_count == 0 && !query.trim().is_empty() {
         ResumeMenuState::NoMatch
+    } else if result_count == 0 {
+        ResumeMenuState::Empty
     } else {
         ResumeMenuState::Results
     }
@@ -315,34 +298,37 @@ mod tests {
     }
 
     #[test]
-    fn resume_filter_matches_sid_title_and_cwd_case_insensitively() {
-        let sessions = vec![
+    fn resumable_session_matches_sid_title_and_cwd_case_insensitively() {
+        let sessions = [
             session("SID-ABC", "Fix auth", "/work/api"),
             session("sid-def", "Docs", "/work/site"),
         ];
-        assert_eq!(filter_sessions(&sessions, "abc")[0].sid, "SID-ABC");
-        assert_eq!(filter_sessions(&sessions, "AUTH")[0].sid, "SID-ABC");
-        assert_eq!(filter_sessions(&sessions, "SITE")[0].sid, "sid-def");
-        assert!(filter_sessions(&sessions, "missing").is_empty());
+        assert!(sessions[0].matches("abc"));
+        assert!(sessions[0].matches("AUTH"));
+        assert!(sessions[1].matches("SITE"));
+        assert!(!sessions[0].matches("missing"));
     }
 
     #[test]
     fn resume_menu_distinguishes_loading_from_loaded_empty() {
         assert_eq!(
-            resume_menu_state(false, false, 0, 0),
+            resume_menu_state(false, false, "", 0),
             ResumeMenuState::Loading
         );
         assert_eq!(
-            resume_menu_state(true, true, 0, 0),
+            resume_menu_state(true, true, "", 0),
             ResumeMenuState::Loading
         );
-        assert_eq!(resume_menu_state(true, false, 0, 0), ResumeMenuState::Empty);
         assert_eq!(
-            resume_menu_state(true, false, 2, 0),
+            resume_menu_state(true, false, "", 0),
+            ResumeMenuState::Empty
+        );
+        assert_eq!(
+            resume_menu_state(true, false, "missing", 0),
             ResumeMenuState::NoMatch
         );
         assert_eq!(
-            resume_menu_state(true, false, 2, 1),
+            resume_menu_state(true, false, "match", 1),
             ResumeMenuState::Results
         );
     }

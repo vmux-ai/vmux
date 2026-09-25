@@ -1,11 +1,10 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use super::AgentChatView;
+use super::{AgentChatView, ChatBranchesProjection};
 use crate::events::{AgentCommandRequest, CommandOrigin};
 use vmux_chat::event::{
-    ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatProjectBranches, ChatSelectWorkspace,
-    ComposerContext,
+    ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId};
 use vmux_session::AcpSession;
@@ -195,20 +194,52 @@ fn composer_context_from_input(
 #[derive(Component)]
 struct BranchRead {
     webview: Entity,
+    request_id: u64,
     project: String,
     task: bevy::tasks::Task<Vec<ChatBranch>>,
+}
+
+impl ChatBranchesProjection {
+    fn start(&mut self, project: String) -> u64 {
+        self.0.request_id = self.0.request_id.wrapping_add(1).max(1);
+        self.0.project = project;
+        self.0.branches.clear();
+        self.0.loading = true;
+        self.0.request_id
+    }
+
+    fn finish(&mut self, request_id: u64, project: &str, branches: Vec<ChatBranch>) -> bool {
+        if self.0.request_id != request_id || self.0.project != project {
+            return false;
+        }
+        self.0.branches = branches;
+        self.0.loading = false;
+        true
+    }
 }
 
 fn on_chat_branches_request(
     trigger: On<UiInput<ChatBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut projections: Query<&mut ChatBranchesProjection, With<AgentChatView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let project = trigger.event().payload.project.trim().to_string();
+    let request = &trigger.event().payload;
+    let project = request.project.trim().to_string();
     if project.is_empty() {
         return;
     }
+    let Ok(mut projection) = projections.get_mut(webview) else {
+        return;
+    };
+    let request_id = projection.start(project.clone());
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ),
+    );
     let root = std::path::PathBuf::from(&project);
     let wake = vmux_core::host::wake::Wake::from_resource(proxy);
     let task = bevy::tasks::IoTaskPool::get().spawn(async move {
@@ -232,6 +263,7 @@ fn on_chat_branches_request(
     });
     commands.spawn(BranchRead {
         webview,
+        request_id,
         project,
         task,
     });
@@ -239,6 +271,7 @@ fn on_chat_branches_request(
 
 fn drain_branch_reads(
     mut reads: Query<(Entity, &mut BranchRead)>,
+    mut projections: Query<&mut ChatBranchesProjection, With<AgentChatView>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -252,13 +285,16 @@ fn drain_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
+        let Ok(mut projection) = projections.get_mut(read.webview) else {
+            continue;
+        };
+        if !projection.finish(read.request_id, &read.project, branches) {
+            continue;
+        }
         commands.trigger(
             vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
                 read.webview,
-                &ChatProjectBranches {
-                    project: read.project.clone(),
-                    branches,
-                },
+                &projection.0,
             ),
         );
     }
@@ -322,6 +358,17 @@ fn on_chat_select_workspace(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_projection_rejects_stale_results() {
+        let mut projection = ChatBranchesProjection::default();
+        let stale = projection.start("/one".into());
+        let current = projection.start("/two".into());
+        assert!(!projection.finish(stale, "/one", Vec::new()));
+        assert!(projection.0.loading);
+        assert!(projection.finish(current, "/two", Vec::new()));
+        assert!(!projection.0.loading);
+    }
 
     #[test]
     fn composer_workspace_selection_dispatches_for_current_session() {

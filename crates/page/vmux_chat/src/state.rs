@@ -1,6 +1,6 @@
 use crate::event::{
-    ChatAttachmentPreviews, ChatAttachments, ChatKey, ChatMediaEntries, ChatProjectBranches,
-    ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState, ModelState, ResumableSessions,
+    ChatAttachmentPreviews, ChatAttachments, ChatBranchesState, ChatKey, ChatMediaState,
+    ChatResumeState, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState, ModelState,
     SlashCommands,
 };
 use bevy_app::{App, Last, Plugin};
@@ -28,9 +28,9 @@ pub enum ChatUiStatePatch {
     Transcript(Box<ChatTranscriptState>),
     Attachments(Box<ChatAttachments>),
     AttachmentPreviews(Box<ChatAttachmentPreviews>),
-    MediaEntries(Box<ChatMediaEntries>),
-    ProjectBranches(Box<ChatProjectBranches>),
-    ResumableSessions(Box<ResumableSessions>),
+    Media(Box<ChatMediaState>),
+    Branches(Box<ChatBranchesState>),
+    Resume(Box<ChatResumeState>),
 }
 
 #[vmux_api::ui_state(Default, targets = ["sessions", "agent", "start"])]

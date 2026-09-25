@@ -3,16 +3,17 @@ use std::collections::{HashMap, HashSet};
 use super::scroll;
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest,
-    ChatAttachmentPreviews, ChatAttachments, ChatBranch, ChatBranchesRequest, ChatCancel,
-    ChatChoiceSelected, ChatEscape, ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPickFiles, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
-    ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
-    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
-    RuntimeSwitchRequest, SelectMode, SelectModel, SlashCommandEntry, latest_tool_location,
+    ChatAttachmentPreviews, ChatAttachments, ChatBranch, ChatBranchesRequest, ChatBranchesState,
+    ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryRequest, ChatItem, ChatMediaEntry,
+    ChatMediaQueryRequest, ChatMediaState, ChatPickFiles, ChatSnapshot, ChatSubmit,
+    ChatSubmitAttachment, ChatTranscriptState, ComposerContext, ModelOptionEntry,
+    QueuedPromptSnapshot, ResumableSessionEntry, ResumeSession, RuntimeSwitchRequest, SelectMode,
+    SelectModel, SlashCommandEntry, latest_tool_location,
 };
+use crate::event::{ChatResumeQueryRequest, ChatResumeState};
 use crate::format::composer::{
-    ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
-    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_fetch_resume,
+    ResumeMenuState, SelectorMode, chat_page_title, filter_models, resume_menu_state,
+    selector_mode, should_clear_draft_on_escape, should_fetch_resume,
 };
 use crate::state::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -148,11 +149,9 @@ impl Chat {
             ChatUiStatePatch::Transcript(state) => self.apply_transcript(state),
             ChatUiStatePatch::Attachments(selected) => self.apply_attachments(selected),
             ChatUiStatePatch::AttachmentPreviews(loaded) => self.apply_previews(loaded),
-            ChatUiStatePatch::MediaEntries(response) => self.apply_media(response),
-            ChatUiStatePatch::ProjectBranches(incoming) => self
-                .projects
-                .remember(incoming.project.clone(), incoming.branches.clone()),
-            ChatUiStatePatch::ResumableSessions(incoming) => self.apply_sessions(incoming),
+            ChatUiStatePatch::Media(state) => self.apply_media(state),
+            ChatUiStatePatch::Branches(incoming) => self.apply_branches(incoming),
+            ChatUiStatePatch::Resume(state) => self.apply_sessions(state),
         }
     }
 
@@ -172,25 +171,26 @@ impl Chat {
         known.set(previews);
     }
 
-    fn apply_media(&self, response: &ChatMediaEntries) {
-        if response.request_id != (self.media.request_id)() {
-            return;
-        }
-        let mut entries = self.media.entries;
-        let mut loading = self.media.loading;
-        let mut menu_sel = self.slash.menu_sel;
-        entries.set(response.entries.clone());
-        loading.set(false);
-        menu_sel.set(0);
+    fn apply_media(&self, state: &ChatMediaState) {
+        set_if_changed(self.media.query, state.query.clone());
+        set_if_changed(self.media.entries, state.entries.clone());
+        set_if_changed(self.media.loading, state.loading);
+        set_if_changed(self.slash.menu_sel, 0);
     }
 
-    fn apply_sessions(&self, incoming: &ResumableSessions) {
-        let mut sessions = self.resume.sessions;
-        let mut menu_sel = self.slash.menu_sel;
-        let mut loading = self.resume.loading;
-        sessions.set(incoming.sessions.clone());
-        menu_sel.set(0);
-        loading.set(false);
+    fn apply_sessions(&self, state: &ChatResumeState) {
+        set_if_changed(self.resume.query, state.query.clone());
+        set_if_changed(self.resume.sessions, state.sessions.clone());
+        set_if_changed(self.resume.total, state.total);
+        set_if_changed(self.resume.loading, state.loading);
+        set_if_changed(self.resume.active, state.active);
+        set_if_changed(self.slash.menu_sel, 0);
+    }
+
+    fn apply_branches(&self, incoming: &ChatBranchesState) {
+        set_if_changed(self.projects.branches_for, incoming.project.clone());
+        set_if_changed(self.projects.branches, incoming.branches.clone());
+        set_if_changed(self.projects.branches_loading, incoming.loading);
     }
 
     fn watch(&self) {
@@ -337,53 +337,27 @@ impl Chat {
     }
 
     fn fetch_resume_sessions(&self) {
-        let mut requested = self.resume.requested;
-        let mut loading = self.resume.loading;
-        let should_fetch =
-            should_fetch_resume(&(self.composer.draft)(), &self.slash.commands.read());
-        if should_fetch && !requested() {
-            loading.set(true);
-            if send(&ResumeListRequest { offset: 0 }).is_err() {
-                loading.set(false);
-            }
-            requested.set(true);
-        } else if !should_fetch && requested() {
-            requested.set(false);
-            loading.set(false);
+        let draft = (self.composer.draft)();
+        let active = should_fetch_resume(&draft, &self.slash.commands.read());
+        let query = match selector_mode(&draft) {
+            SelectorMode::Resume(query) => query.to_string(),
+            _ => String::new(),
+        };
+        if (self.resume.active)() == active && (self.resume.query)() == query {
+            return;
         }
+        let _ = send(&ChatResumeQueryRequest { active, query });
     }
 
     fn fetch_media_entries(&self) {
-        let mut entries = self.media.entries;
-        let mut request_id = self.media.request_id;
-        let mut requested_query = self.media.requested_query;
-        let mut loading = self.media.loading;
         let value = (self.composer.draft)();
-        let Some(query) = inline_media_query(&value).map(|query| query.query.to_string()) else {
-            entries.set(Vec::new());
-            if requested_query.peek().is_some() {
-                request_id.set(request_id().wrapping_add(1).max(1));
-            }
-            requested_query.set(None);
-            loading.set(false);
-            return;
-        };
-        if requested_query().as_deref() == Some(query.as_str()) {
+        let query = inline_media_query(&value)
+            .map(|query| query.query.to_string())
+            .unwrap_or_default();
+        if (self.media.query)() == query {
             return;
         }
-        let next_id = request_id().wrapping_add(1).max(1);
-        request_id.set(next_id);
-        requested_query.set(Some(query.clone()));
-        entries.set(Vec::new());
-        loading.set(true);
-        if send(&ChatMediaListRequest {
-            request_id: next_id,
-            query,
-        })
-        .is_err()
-        {
-            loading.set(false);
-        }
+        let _ = send(&ChatMediaQueryRequest { query });
     }
 
     pub fn request_history(&self) {
@@ -463,11 +437,7 @@ impl Chat {
     }
 
     pub fn filtered_sessions(&self) -> Vec<ResumableSessionEntry> {
-        let draft = self.draft();
-        let SelectorMode::Resume(query) = selector_mode(&draft) else {
-            return Vec::new();
-        };
-        filter_sessions(&self.resume.sessions.read(), query)
+        self.resume.sessions.read().clone()
     }
 
     pub fn filtered_models(&self) -> Vec<ModelOptionEntry> {
@@ -522,10 +492,10 @@ impl Chat {
             return None;
         }
         Some(resume_menu_state(
-            (self.resume.requested)(),
+            (self.resume.active)(),
             (self.resume.loading)(),
+            &(self.resume.query)(),
             self.resume.sessions.read().len(),
-            self.filtered_sessions().len(),
         ))
     }
 
@@ -1123,16 +1093,14 @@ pub fn use_prompt_queue() -> PromptQueue {
 #[derive(Clone, Copy, PartialEq)]
 pub struct MediaPicker {
     pub entries: Signal<Vec<ChatMediaEntry>>,
-    pub request_id: Signal<u64>,
-    pub requested_query: Signal<Option<String>>,
+    pub query: Signal<String>,
     pub loading: Signal<bool>,
 }
 
 pub fn use_media_picker() -> MediaPicker {
     MediaPicker {
         entries: use_signal(Vec::new),
-        request_id: use_signal(|| 0),
-        requested_query: use_signal(|| None),
+        query: use_signal(String::new),
         loading: use_signal(|| false),
     }
 }
@@ -1161,6 +1129,7 @@ pub struct ProjectPicker {
     pub loaded: Signal<bool>,
     pub branches: Signal<Vec<ChatBranch>>,
     pub branches_for: Signal<String>,
+    pub branches_loading: Signal<bool>,
 }
 
 pub fn use_project_picker() -> ProjectPicker {
@@ -1168,15 +1137,7 @@ pub fn use_project_picker() -> ProjectPicker {
         loaded: use_signal(|| false),
         branches: use_signal(Vec::new),
         branches_for: use_signal(String::new),
-    }
-}
-
-impl ProjectPicker {
-    pub fn remember(&self, project: String, branches: Vec<ChatBranch>) {
-        let mut held = self.branches;
-        let mut held_for = self.branches_for;
-        held.set(branches);
-        held_for.set(project);
+        branches_loading: use_signal(|| false),
     }
 }
 
@@ -1228,15 +1189,19 @@ pub fn use_slash_commands() -> SlashCommands {
 #[derive(Clone, Copy, PartialEq)]
 pub struct Resume {
     pub sessions: Signal<Vec<ResumableSessionEntry>>,
-    pub requested: Signal<bool>,
+    pub query: Signal<String>,
+    pub total: Signal<u32>,
     pub loading: Signal<bool>,
+    pub active: Signal<bool>,
 }
 
 pub fn use_resume() -> Resume {
     Resume {
         sessions: use_signal(Vec::new),
-        requested: use_signal(|| false),
+        query: use_signal(String::new),
+        total: use_signal(|| 0),
         loading: use_signal(|| false),
+        active: use_signal(|| false),
     }
 }
 

@@ -6,7 +6,8 @@ use dioxus::core::ReactiveContext;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use vmux_chat::event::{
-    ChatApproval, ChatCancel, ChatEscape, ChatSubmit, SelectModel, SetAgentEffort,
+    ChatApproval, ChatCancel, ChatEscape, ChatMediaQueryRequest, ChatSubmit, SelectModel,
+    SetAgentEffort,
 };
 use vmux_chat::model::{Models, Picker};
 use vmux_chat::prompt::{Attach, Attachments, Browsed, Media};
@@ -129,9 +130,18 @@ impl PageHost for MobileHost {
                     }
                 })
             }
-            ChatMediaListRequest::ID => {
+            ChatMediaQueryRequest::ID => {
+                let payload: ChatMediaQueryRequest = decode(bytes)?;
                 let mut request = self.composer.media_request;
-                request.set(Some(decode(bytes)?));
+                let request_id = request
+                    .peek()
+                    .as_ref()
+                    .map(|request| request.request_id.wrapping_add(1).max(1))
+                    .unwrap_or(1);
+                request.set(Some(ChatMediaListRequest {
+                    request_id,
+                    query: payload.query,
+                }));
                 Ok(())
             }
             ChatAttachPaths::ID => attach(self, decode(bytes)?),
@@ -373,12 +383,37 @@ fn poll_media(host: &MobileHost) {
             }
             let asked = rc.reset_and_run_in(|| composer.media_request.read().clone());
             let sid = session.sid();
-            if let Some(request) = asked
-                && !sid.is_empty()
-            {
+            if let Some(request) = asked {
+                if request.query.is_empty() {
+                    offered.set(Vec::new());
+                    runtime.borrow_mut().app.insert_resource(Browsed {
+                        request_id: request.request_id,
+                        query: request.query,
+                        entries: Vec::new(),
+                    });
+                    if changed.next().await.is_none() {
+                        return;
+                    }
+                    continue;
+                }
+                if sid.is_empty() {
+                    if changed.next().await.is_none() {
+                        return;
+                    }
+                    continue;
+                }
                 let fetched = api.media(&sid, &request.query).await;
                 if superseded(epoch) {
                     return;
+                }
+                let current = composer.media_request.peek();
+                if current.as_ref().is_none_or(|current| {
+                    current.request_id != request.request_id || current.query != request.query
+                }) {
+                    if changed.next().await.is_none() {
+                        return;
+                    }
+                    continue;
                 }
                 if let Ok(found) = fetched {
                     offered.set(found.clone());

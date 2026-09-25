@@ -3,10 +3,11 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use super::{AgentChatView, ChatMediaProjection};
 use vmux_chat::event::{
     ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachmentPreviews,
-    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
-    ChatPickFiles,
+    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatMediaQueryRequest,
+    ChatPasteMedia, ChatPickFiles,
 };
 
 pub(super) struct ChatMediaPlugin;
@@ -16,12 +17,14 @@ impl Plugin for ChatMediaPlugin {
         app.add_plugins(UiEventPlugin::<(
             ChatPickFiles,
             ChatPasteMedia,
+            ChatMediaQueryRequest,
             ChatMediaListRequest,
             ChatAttachPaths,
             ChatAttachmentPreviewRequest,
         )>::default())
             .add_observer(on_chat_pick_files)
             .add_observer(on_chat_paste_media)
+            .add_observer(on_chat_media_query_request)
             .add_observer(on_chat_media_list_request)
             .add_observer(on_chat_attach_paths)
             .add_observer(on_chat_attachment_preview_request)
@@ -59,6 +62,28 @@ struct ChatMediaListTask {
 struct ChatMediaPreviewTask {
     webview: Entity,
     task: Task<ChatMediaEntries>,
+}
+
+impl ChatMediaProjection {
+    fn start(&mut self, query: String) -> Option<u64> {
+        if self.0.query == query {
+            return None;
+        }
+        self.0.request_id = self.0.request_id.wrapping_add(1).max(1);
+        self.0.query = query;
+        self.0.entries.clear();
+        self.0.loading = !self.0.query.is_empty();
+        Some(self.0.request_id)
+    }
+
+    fn finish(&mut self, entries: &ChatMediaEntries) -> bool {
+        if self.0.request_id != entries.request_id || self.0.query != entries.query {
+            return false;
+        }
+        self.0.entries.clone_from(&entries.entries);
+        self.0.loading = false;
+        true
+    }
 }
 
 const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
@@ -368,6 +393,32 @@ fn on_chat_media_list_request(trigger: On<UiInput<ChatMediaListRequest>>, mut co
     });
 }
 
+fn on_chat_media_query_request(
+    trigger: On<UiInput<ChatMediaQueryRequest>>,
+    mut projections: Query<&mut ChatMediaProjection, With<AgentChatView>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(mut projection) = projections.get_mut(webview) else {
+        return;
+    };
+    let query = trigger.event().payload.query.clone();
+    let Some(request_id) = projection.start(query.clone()) else {
+        return;
+    };
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ),
+    );
+    if query.is_empty() {
+        return;
+    }
+    let task = IoTaskPool::get().spawn(async move { chat_media_entries(request_id, query) });
+    commands.spawn(ChatMediaListTask { webview, task });
+}
+
 fn on_chat_attach_paths(
     trigger: On<UiInput<ChatAttachPaths>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -524,6 +575,7 @@ fn drain_chat_attachment_tasks(
 
 fn drain_chat_media_list_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaListTask)>,
+    mut projections: Query<&mut ChatMediaProjection, With<AgentChatView>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -531,15 +583,22 @@ fn drain_chat_media_list_tasks(
         let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-                pending.webview,
-                &entries,
-            ),
-        );
-        commands.trigger(vmux_core::host::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(pending.webview, &entries));
+        if let Ok(mut projection) = projections.get_mut(pending.webview) {
+            if !projection.finish(&entries) {
+                commands.entity(entity).despawn();
+                continue;
+            }
+            commands.trigger(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                    pending.webview,
+                    &projection.0,
+                ),
+            );
+        } else {
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::from_event(pending.webview, &entries));
+        }
         if entries
             .entries
             .iter()
@@ -561,21 +620,27 @@ fn drain_chat_media_list_tasks(
 
 fn drain_chat_media_preview_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaPreviewTask)>,
+    mut projections: Query<&mut ChatMediaProjection, With<AgentChatView>>,
     mut commands: Commands,
 ) {
     for (entity, mut pending) in &mut tasks {
         let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-                pending.webview,
-                &entries,
-            ),
-        );
-        commands.trigger(vmux_core::host::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(pending.webview, &entries));
+        if let Ok(mut projection) = projections.get_mut(pending.webview) {
+            if projection.finish(&entries) {
+                commands.trigger(
+                    vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                        pending.webview,
+                        &projection.0,
+                    ),
+                );
+            }
+        } else {
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::from_event(pending.webview, &entries));
+        }
         commands.entity(entity).despawn();
     }
 }
@@ -583,6 +648,25 @@ fn drain_chat_media_preview_tasks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_projection_rejects_stale_results() {
+        let mut projection = ChatMediaProjection::default();
+        let stale = projection.start("old".into()).unwrap();
+        let current = projection.start("new".into()).unwrap();
+        assert!(!projection.finish(&ChatMediaEntries {
+            request_id: stale,
+            query: "old".into(),
+            entries: Vec::new(),
+        }));
+        assert!(projection.0.loading);
+        assert!(projection.finish(&ChatMediaEntries {
+            request_id: current,
+            query: "new".into(),
+            entries: Vec::new(),
+        }));
+        assert!(!projection.0.loading);
+    }
 
     #[test]
     fn media_query_paths_decode_percent_escapes() {

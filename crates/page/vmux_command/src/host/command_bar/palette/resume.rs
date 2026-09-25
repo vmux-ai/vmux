@@ -136,14 +136,20 @@ impl PaletteResume {
             return None;
         }
         snapshot.0.sessions_loading = true;
+        let request_id = self.generation.current();
         self.inflight = Some(ResumeFlight {
             open_generation: self.open.generation(),
             generation: self.generation.current(),
+            request_id,
             offset,
         });
         Some(UiInput {
             webview: target,
-            payload: ResumeListRequest { offset },
+            payload: ResumeListRequest {
+                request_id,
+                query: String::new(),
+                offset,
+            },
         })
     }
 
@@ -157,6 +163,8 @@ impl PaletteResume {
         let accepted = flight.open_generation == self.open.generation()
             && self.generation.matches(flight.generation)
             && self.active
+            && flight.request_id == response.request_id
+            && response.query.is_empty()
             && flight.offset == response.offset;
         if accepted {
             snapshot.0.sessions_total = response.total;
@@ -197,6 +205,7 @@ impl PaletteResume {
 struct ResumeFlight {
     open_generation: u64,
     generation: u64,
+    request_id: u64,
     offset: u32,
 }
 

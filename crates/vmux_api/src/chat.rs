@@ -354,8 +354,20 @@ pub struct ResumableSessionEntry {
     pub branch: String,
     pub cross_runtime: bool,
 }
+
+impl ResumableSessionEntry {
+    pub fn matches(&self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        query.is_empty()
+            || self.sid.to_lowercase().contains(&query)
+            || self.title.to_lowercase().contains(&query)
+            || self.cwd.to_lowercase().contains(&query)
+    }
+}
 #[vmux_api::contract(Default)]
 pub struct ResumableSessions {
+    pub request_id: u64,
+    pub query: String,
     pub sessions: Vec<ResumableSessionEntry>,
     pub offset: u32,
     pub total: u32,
@@ -383,6 +395,8 @@ pub struct SlashCommands {
 }
 #[vmux_api::ui_event(Default, targets = ["sessions", "agent", "start"])]
 pub struct ResumeListRequest {
+    pub request_id: u64,
+    pub query: String,
     pub offset: u32,
 }
 #[vmux_api::ui_event(Default, targets = ["sessions", "agent", "start"])]
