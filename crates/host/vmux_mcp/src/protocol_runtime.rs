@@ -323,7 +323,7 @@ async fn handle_message(
 fn route_request(
     mut commands: Commands,
     requests: PendingRequests,
-    tools: Res<crate::tool::ToolCatalog>,
+    tools: crate::tool::ToolRegistry,
     config: Res<McpConfig>,
 ) {
     let Some((entity, method, params, _)) =

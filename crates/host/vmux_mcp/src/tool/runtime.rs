@@ -1,4 +1,4 @@
-use bevy_app::{App, First, Plugin, Startup, Update};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 #[cfg(test)]
@@ -38,7 +38,6 @@ pub struct ToolRuntimePlugin;
 impl Plugin for ToolRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NextToolOrder>()
-            .init_resource::<ToolCatalog>()
             .configure_sets(
                 Update,
                 (
@@ -53,7 +52,6 @@ impl Plugin for ToolRuntimePlugin {
                 Update,
                 bevy_ecs::schedule::ApplyDeferred.in_set(ToolRequestFlush),
             )
-            .add_systems(First, index_tool_definitions)
             .add_systems(Update, dispatch_command_calls.in_set(ToolDispatchSet))
             .add_systems(
                 Update,
@@ -92,13 +90,14 @@ where
         if !app.is_plugin_added::<ToolRuntimePlugin>() {
             app.add_plugins(ToolRuntimePlugin);
         }
-        app.insert_resource(McpToolManifest::<T>::new(self.manifest))
-            .add_systems(Startup, register_mcp_tools::<T>.in_set(RegisterTools))
+        app.world_mut()
+            .spawn(McpToolManifest::<T>::new(self.manifest));
+        app.add_systems(Startup, register_mcp_tools::<T>.in_set(RegisterTools))
             .add_systems(Update, route_mcp_tools::<T>.in_set(ToolRequestSet));
     }
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 struct McpToolManifest<T> {
     source: &'static str,
     marker: PhantomData<fn() -> T>,
@@ -114,30 +113,33 @@ impl<T> McpToolManifest<T> {
 }
 
 fn register_mcp_tools<T>(
-    manifest: Res<McpToolManifest<T>>,
+    manifests: Query<(Entity, &McpToolManifest<T>)>,
     mut commands: Commands,
     mut next_order: ResMut<NextToolOrder>,
 ) where
     T: Component + serde::de::DeserializeOwned + Serialize,
 {
-    let manifest = ToolManifest::<T>::from_ron(manifest.source);
-    for entry in manifest.0 {
-        let (seed, kind) = entry.into_seed();
-        let order = next_order.0;
-        next_order.0 += 1;
-        let mut entity = commands.spawn((
-            McpTool,
-            Name::new(seed.name),
-            ToolAliases(seed.aliases),
-            ToolDescription(seed.description),
-            ToolInputSchema(seed.input_schema),
-            ToolAccess(seed.availability),
-            ToolOrder(order),
-            kind,
-        ));
-        if seed.shell_aware {
-            entity.insert(ShellAware);
+    for (manifest_entity, manifest) in &manifests {
+        let manifest = ToolManifest::<T>::from_ron(manifest.source);
+        for entry in manifest.0 {
+            let (seed, kind) = entry.into_seed();
+            let order = next_order.0;
+            next_order.0 += 1;
+            let mut entity = commands.spawn((
+                McpTool,
+                Name::new(seed.name),
+                ToolAliases(seed.aliases),
+                ToolDescription(seed.description),
+                ToolInputSchema(seed.input_schema),
+                ToolAccess(seed.availability),
+                ToolOrder(order),
+                kind,
+            ));
+            if seed.shell_aware {
+                entity.insert(ShellAware);
+            }
         }
+        commands.entity(manifest_entity).despawn();
     }
 }
 
@@ -184,40 +186,9 @@ type ToolEntity<'w> = (
     Option<&'w ShellAware>,
 );
 
-#[derive(Clone)]
-struct RegisteredTool {
-    entity: Entity,
-    name: String,
-    aliases: Vec<String>,
-    description: String,
-    input_schema: InputSchema,
-    availability: ToolAvailability,
-    order: u32,
-    shell_aware: bool,
-}
-
-#[derive(Resource, Default)]
-pub struct ToolCatalog {
-    tools: Vec<RegisteredTool>,
-}
-
-fn index_tool_definitions(
-    tools: Query<ToolEntity, (With<McpTool>, Added<McpTool>)>,
-    mut catalog: ResMut<ToolCatalog>,
-) {
-    for (entity, name, aliases, description, schema, access, order, shell_aware) in &tools {
-        catalog.tools.push(RegisteredTool {
-            entity,
-            name: name.as_str().to_string(),
-            aliases: aliases.0.clone(),
-            description: description.0.clone(),
-            input_schema: schema.0.clone(),
-            availability: access.0,
-            order: order.0,
-            shell_aware: shell_aware.is_some(),
-        });
-    }
-    catalog.tools.sort_by_key(|tool| tool.order);
+#[derive(bevy_ecs::system::SystemParam)]
+pub struct ToolRegistry<'w, 's> {
+    tools: Query<'w, 's, ToolEntity<'static>, With<McpTool>>,
 }
 
 #[derive(Clone, Copy)]
@@ -254,7 +225,7 @@ impl ToolCallPolicy {
     }
 }
 
-impl ToolCatalog {
+impl ToolRegistry<'_, '_> {
     pub fn definitions(
         &self,
         acp_session: bool,
@@ -262,21 +233,28 @@ impl ToolCatalog {
         shell: &str,
     ) -> Vec<ToolDefinition> {
         let mut definitions = Vec::new();
-        for tool in &self.tools {
-            if !tool.availability.allows(acp_session, acp_terminals) {
+        for (_, name, _, description, schema, access, order, shell_aware) in &self.tools {
+            if !access.0.allows(acp_session, acp_terminals) {
                 continue;
             }
-            let mut description = tool.description.clone();
-            if tool.shell_aware {
+            let mut description = description.0.clone();
+            if shell_aware.is_some() {
                 description.push_str(&ShellNote::for_shell(shell));
             }
-            definitions.push(ToolDefinition {
-                name: tool.name.clone(),
-                description,
-                input_schema: tool.input_schema.to_json(),
-            });
+            definitions.push((
+                order.0,
+                ToolDefinition {
+                    name: name.as_str().to_string(),
+                    description,
+                    input_schema: schema.0.to_json(),
+                },
+            ));
         }
+        definitions.sort_by_key(|(order, _)| *order);
         definitions
+            .into_iter()
+            .map(|(_, definition)| definition)
+            .collect()
     }
 
     pub fn call(
@@ -288,19 +266,16 @@ impl ToolCatalog {
         policy: ToolCallPolicy,
     ) -> Result<ToolCall, String> {
         let normalized = canonical_tool_name(name);
-        for tool in &self.tools {
-            if tool.name != normalized && !tool.aliases.iter().any(|alias| alias == normalized) {
+        for (entity, name, aliases, _, _, access, _, _) in &self.tools {
+            if name.as_str() != normalized && !aliases.0.iter().any(|alias| alias == normalized) {
                 continue;
             }
-            if !tool
-                .availability
-                .allows(policy.acp_session, policy.acp_terminals)
-            {
+            if !access.0.allows(policy.acp_session, policy.acp_terminals) {
                 return Err(format!("tool {normalized} is unavailable for ACP sessions"));
             }
             return Ok(ToolCall {
-                tool: Some(tool.entity),
-                name: tool.name.clone(),
+                tool: Some(entity),
+                name: name.as_str().to_string(),
                 arguments,
                 anchor,
                 host_shell: host_shell.to_string(),
@@ -643,7 +618,7 @@ fn tool_definitions_in(
 ) -> Vec<ToolDefinition> {
     let shell = shell.to_string();
     world
-        .run_system_once(move |tools: Res<ToolCatalog>| {
+        .run_system_once(move |tools: ToolRegistry| {
             tools.definitions(acp_session, acp_terminals, &shell)
         })
         .expect("tool catalog system must run")
@@ -664,7 +639,7 @@ fn dispatch_tool_call(
     let host_shell = host_shell.to_string();
     let call = app
         .world_mut()
-        .run_system_once(move |tools: Res<ToolCatalog>| {
+        .run_system_once(move |tools: ToolRegistry| {
             tools.call(
                 &name,
                 arguments.clone(),
@@ -689,7 +664,7 @@ fn dispatch_tool_call(
 fn find_tool(world: &mut World, name: &str) -> Option<(Entity, String, ToolAvailability)> {
     let name = name.to_string();
     world
-        .run_system_once(move |tools: Res<ToolCatalog>| {
+        .run_system_once(move |tools: ToolRegistry| {
             tools
                 .call(
                     &name,
