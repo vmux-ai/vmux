@@ -3,11 +3,12 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiEventPlugin;
 use vmux_api::command_bar::{
-    CommandBarKey, CommandBarOpenEvent, CommandBarQuery, CommandBarUiState, CommandBarUiStatePatch,
+    CommandBarOpenEvent, CommandBarQuery, CommandBarUiState, CommandBarUiStatePatch,
     CommandPaletteBranchesRequest, CommandPaletteDraftRequest, CommandPalettePromptHistoryRequest,
     CommandPaletteRemoveAttachmentRequest, CommandPaletteSelectionRequest, CommandPaletteState,
     OpenId,
 };
+use vmux_api::mcp::McpServers;
 use vmux_core::host::{UiState, UiStateWrite};
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_ui::launcher::palette::{PaletteDraft, PaletteRows, PaletteSurface};
@@ -46,6 +47,7 @@ impl Plugin for PalettePlugin {
             resume::PaletteResumePlugin,
         ))
         .add_observer(receive_palette_open)
+        .add_observer(receive_mcp_servers)
         .add_observer(update_palette_draft)
         .add_observer(update_palette_selection)
         .add_observer(apply_palette_key)
@@ -81,6 +83,9 @@ struct PaletteDraftInput {
     navigating: bool,
     input_revision: u64,
 }
+
+#[derive(Component, Default)]
+struct PaletteMcp(McpServers);
 
 #[derive(Clone, Copy)]
 enum PaletteKey {
@@ -144,9 +149,20 @@ fn attach_palette_snapshot(
             PaletteSnapshot::default(),
             PaletteOpen::default(),
             PaletteDraftInput::default(),
+            PaletteMcp::default(),
             UiState::<CommandPaletteState>::default(),
         ));
     }
+}
+
+fn receive_mcp_servers(
+    trigger: On<UiStateWrite<McpServers>>,
+    mut palettes: Query<&mut PaletteMcp>,
+) {
+    let Ok(mut mcp) = palettes.get_mut(trigger.event().webview()) else {
+        return;
+    };
+    mcp.0.clone_from(trigger.event().update());
 }
 
 fn receive_palette_open(
@@ -233,14 +249,25 @@ fn apply_palette_key(
     let Ok((mut input, snapshot)) = palettes.get_mut(target) else {
         return;
     };
-    if CommandBarQuery(&input.query).mcp_filter().is_some() {
-        let key = match key.0 {
-            PaletteKey::Next => CommandBarKey::Next,
-            PaletteKey::Previous => CommandBarKey::Previous,
-            PaletteKey::Complete => CommandBarKey::Complete,
-            PaletteKey::Dismiss => CommandBarKey::Dismiss,
-        };
-        commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(target, &key));
+    if snapshot.0.projection.mcp_open {
+        match key.0 {
+            PaletteKey::Next => {
+                input.selected = (input.selected + 1)
+                    .min(snapshot.0.projection.mcp_entries.len().saturating_sub(1));
+                input.navigating = true;
+            }
+            PaletteKey::Previous => {
+                input.selected = input.selected.saturating_sub(1);
+                input.navigating = true;
+            }
+            PaletteKey::Complete => return,
+            PaletteKey::Dismiss => {
+                input.query.clear();
+                input.selected = 0;
+                input.navigating = false;
+            }
+        }
+        input.input_revision = input.input_revision.wrapping_add(1).max(1);
         return;
     }
     match key.0 {
@@ -269,8 +296,15 @@ fn apply_palette_key(
     input.input_revision = input.input_revision.wrapping_add(1).max(1);
 }
 
-fn project_palette(mut palettes: Query<(&PaletteOpen, &PaletteDraftInput, &mut PaletteSnapshot)>) {
-    for (opened, input, mut snapshot) in &mut palettes {
+fn project_palette(
+    mut palettes: Query<(
+        &PaletteOpen,
+        &PaletteDraftInput,
+        &PaletteMcp,
+        &mut PaletteSnapshot,
+    )>,
+) {
+    for (opened, input, mcp, mut snapshot) in &mut palettes {
         if input.open_id != opened.0.open_id || snapshot.0.open_id != opened.0.open_id {
             continue;
         }
@@ -294,7 +328,25 @@ fn project_palette(mut palettes: Query<(&PaletteOpen, &PaletteDraftInput, &mut P
         let rows = PaletteRows::build(&opened.0, &draft, surface);
         let mut projection = rows.projection();
         projection.query.clone_from(&input.query);
-        projection.selected = rows.selected(input.selected) as u32;
+        if let Some(filter) = CommandBarQuery(&input.query).mcp_filter() {
+            let filter = filter.trim().to_ascii_lowercase();
+            projection.mcp_open = true;
+            for server in &mcp.0.servers {
+                if filter.is_empty()
+                    || server.id.to_ascii_lowercase().contains(&filter)
+                    || server.name.to_ascii_lowercase().contains(&filter)
+                    || server.description.to_ascii_lowercase().contains(&filter)
+                {
+                    projection.mcp_entries.push(server.clone());
+                }
+            }
+            projection.selected = input
+                .selected
+                .min(projection.mcp_entries.len().saturating_sub(1))
+                as u32;
+        } else {
+            projection.selected = rows.selected(input.selected) as u32;
+        }
         projection.navigating = input.navigating;
         projection.input_revision = input.input_revision;
         if snapshot.0.projection == projection {
@@ -332,6 +384,7 @@ fn detach_palette_snapshot(
             PaletteSnapshot,
             PaletteOpen,
             PaletteDraftInput,
+            PaletteMcp,
             UiState<CommandPaletteState>,
             search::PaletteSearch,
             prompt::PalettePrompt,
@@ -433,6 +486,7 @@ mod tests {
     use super::*;
     use crate::CommandInvocation;
     use vmux_api::command_bar::{CommandBarCommandEntry, CommandBarResultItem};
+    use vmux_api::mcp::{McpServerEntry, McpServerStatus};
 
     #[test]
     fn open_versions_reject_older_inputs() {
@@ -476,6 +530,7 @@ mod tests {
                     query: ">close".to_string(),
                     ..Default::default()
                 },
+                PaletteMcp::default(),
                 PaletteSnapshot(CommandPaletteState {
                     open_id,
                     ..Default::default()
@@ -537,6 +592,70 @@ mod tests {
         let input = app.world().get::<PaletteDraftInput>(page).unwrap();
         assert_eq!(input.selected, 1);
         assert!(input.navigating);
+        assert_eq!(input.input_revision, 1);
+    }
+
+    #[test]
+    fn mcp_filter_and_key_selection_stay_in_host_state() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(PalettePlugin);
+        let page = app.world_mut().spawn(HostsLauncher).id();
+        app.update();
+
+        let open_id = OpenId(9);
+        app.world_mut().entity_mut(page).insert((
+            PaletteOpen(CommandBarOpenEvent {
+                open_id,
+                ..Default::default()
+            }),
+            PaletteDraftInput {
+                open_id,
+                query: "/mcp lin".to_string(),
+                ..Default::default()
+            },
+            PaletteSnapshot(CommandPaletteState {
+                open_id,
+                ..Default::default()
+            }),
+        ));
+        app.world_mut()
+            .trigger(UiStateWrite::<McpServers>::from_event(
+                page,
+                &McpServers {
+                    loaded: true,
+                    servers: vec![
+                        McpServerEntry {
+                            id: "linear".to_string(),
+                            name: "Linear".to_string(),
+                            description: String::new(),
+                            status: McpServerStatus::Connected,
+                        },
+                        McpServerEntry {
+                            id: "github".to_string(),
+                            name: "GitHub".to_string(),
+                            description: String::new(),
+                            status: McpServerStatus::Available,
+                        },
+                    ],
+                    ..Default::default()
+                },
+            ));
+        app.update();
+
+        let snapshot = app.world().get::<PaletteSnapshot>(page).unwrap();
+        assert!(snapshot.0.projection.mcp_open);
+        assert_eq!(snapshot.0.projection.mcp_entries.len(), 1);
+        assert_eq!(snapshot.0.projection.mcp_entries[0].id, "linear");
+
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write(CommandInvocation::new(page, "command_bar_dismiss"));
+        app.update();
+
+        let input = app.world().get::<PaletteDraftInput>(page).unwrap();
+        assert!(input.query.is_empty());
         assert_eq!(input.input_revision, 1);
     }
 }

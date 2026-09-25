@@ -1,7 +1,7 @@
 use crate::event::{
-    CommandBarFocusInput, CommandBarKey, CommandBarOpenEvent, CommandBarQuery, CommandBarUiState,
-    CommandBarUiStatePatch, CommandPaletteBranchesRequest, CommandPaletteDraftRequest,
-    CommandPalettePromptHistoryRequest, CommandPaletteSelectionRequest, CommandPaletteState,
+    CommandBarFocusInput, CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch,
+    CommandPaletteBranchesRequest, CommandPaletteDraftRequest, CommandPalettePromptHistoryRequest,
+    CommandPaletteSelectionRequest, CommandPaletteState,
 };
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles, inline_media_query};
 use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_prompt_recall};
@@ -19,9 +19,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
-use vmux_ui::hooks::{
-    MenuDirection, move_selection, send, use_key_claim, use_ui_state, use_ui_state_patch,
-};
+use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::launcher::palette::{
@@ -164,13 +162,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         focus_prompt_end(PROMPT_INPUT_ID);
     });
 
-    use_effect(move || {
-        let query = (signals.query)();
-        if CommandBarQuery(&query).mcp_filter().is_some() {
-            mcp.request();
-        }
-    });
-
     let rows = use_memo(move || {
         let opened = state();
         let snapshot = host_state.read();
@@ -200,33 +191,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         );
     });
     let keys = use_key_claim(Unclaimed::Types, || vec!["command-bar".to_string()]);
-    let key_updates = use_ui_state_patch::<CommandBarUiState, CommandBarKey>();
-    use_effect(move || {
-        for key in key_updates.take() {
-            let query = signals.query.peek().clone();
-            let command_bar_query = CommandBarQuery(&query);
-            let Some(filter) = command_bar_query.mcp_filter() else {
-                continue;
-            };
-            let entries = mcp.filtered(filter);
-            match key {
-                CommandBarKey::Next => {
-                    let current = *signals.selected.peek();
-                    signals.highlight(move_selection(current, entries.len(), MenuDirection::Next));
-                }
-                CommandBarKey::Previous => {
-                    let current = *signals.selected.peek();
-                    signals.highlight(move_selection(
-                        current,
-                        entries.len(),
-                        MenuDirection::Previous,
-                    ));
-                }
-                CommandBarKey::Complete => {}
-                CommandBarKey::Dismiss => signals.retype(String::new()),
-            }
-        }
-    });
 
     let state_val = state();
     let host_snapshot = host_state();
@@ -245,15 +209,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let attachments = std::rc::Rc::new(palette_data.attachments.clone());
     let q = palette.query.clone();
     let ghost_text = palette.ghost.clone();
-    let mcp_query = CommandBarQuery(&q).mcp_filter().map(str::to_string);
-    let mcp_open = mcp_query.is_some();
-    let mcp_entries = std::rc::Rc::new(
-        mcp_query
-            .as_deref()
-            .map(|query| mcp.filtered(query))
-            .unwrap_or_default(),
-    );
-    let mcp_selected = (*signals.selected.peek()).min(mcp_entries.len().saturating_sub(1));
+    let mcp_open = palette_data.projection.mcp_open;
+    let mcp_entries = std::rc::Rc::new(palette_data.projection.mcp_entries.clone());
+    let mcp_selected =
+        (palette_data.projection.selected as usize).min(mcp_entries.len().saturating_sub(1));
     let media_menu_open = is_start && inline_media_query(&q).is_some();
     let media_entries = media.entries(&q);
     let media_sel = media.highlighted(media_entries.len());
@@ -396,22 +355,15 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             let go_up = direction == Some(MenuDirection::Previous);
 
             if mcp_open {
-                if e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC) {
-                    e.prevent_default();
-                    signals.retype(String::new());
-                    return;
-                }
-                if let Some(direction) = direction {
-                    e.prevent_default();
-                    let current = *signals.selected.peek();
-                    signals.highlight(move_selection(current, entries.len(), direction));
-                    return;
-                }
                 if e.key() == Key::Enter && !e.modifiers().shift() {
                     e.prevent_default();
                     if let Some(server) = entries.get(mcp_selected) {
                         mcp.activate(server);
                     }
+                    return;
+                }
+                if go_down || go_up || e.key() == Key::Escape || ctrl && e.code() == Code::KeyC {
+                    keys.on_keydown(&e, |_| false);
                     return;
                 }
             }
