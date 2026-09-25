@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceKey, SpaceRenameRequest,
-    SpaceRow, SpacesListEvent, SpacesUiState, SpacesUiStatePatch,
+    SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceRenameRequest, SpaceRow,
+    SpacesListEvent, SpacesUiState, SpacesUiStatePatch,
 };
 use dioxus::prelude::*;
 use vmux_core::event::team::{TeamEvent, TeamRequest};
@@ -12,9 +12,7 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem, ManagerSelectItemKind};
-use vmux_ui::hooks::{
-    MenuDirection, send, use_key_claim, use_theme, use_ui_state, use_ui_state_root,
-};
+use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::sleep_ms;
 
@@ -30,10 +28,8 @@ pub fn Page() -> Element {
     use_theme();
     let root = use_ui_state_root::<SpacesUiState>();
     let mut state = use_signal(SpacesListEvent::default);
-    let mut selected = use_signal(|| 0usize);
     let team = use_ui_state::<TeamEvent>();
 
-    let mut space_keys = SpaceKeys { state, selected };
     let mut handled_sequence = use_signal(|| 0);
     use_effect(move || {
         let update = root.state.read();
@@ -42,21 +38,9 @@ pub fn Page() -> Element {
         }
         handled_sequence.set(update.sequence);
         for patch in &update.patches {
-            match patch {
-                SpacesUiStatePatch::Snapshot(snapshot) => state.set(*snapshot.clone()),
-                SpacesUiStatePatch::Key(key) => space_keys.apply(*key),
-            }
+            let SpacesUiStatePatch::Snapshot(snapshot) = patch;
+            state.set(*snapshot.clone());
         }
-    });
-
-    use_effect(move || {
-        let active = state
-            .read()
-            .spaces
-            .iter()
-            .position(|space| space.is_active)
-            .unwrap_or(0);
-        selected.set(active);
     });
 
     let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);
@@ -66,7 +50,7 @@ pub fn Page() -> Element {
 
     let spaces = state.read().spaces.clone();
     let count = spaces.len();
-    let sel = selected().min(count.saturating_sub(1));
+    let selected = state().selected as usize;
     let active_name = spaces
         .iter()
         .find(|space| space.is_active)
@@ -135,83 +119,16 @@ pub fn Page() -> Element {
                                 SpaceRowView {
                                     key: "{space.id}",
                                     space: space.clone(),
-                                    selected: index == sel,
+                                    selected: index == selected,
                                     deletable: count > 1,
                                 }
                             }
-                            NewSpaceCard { count }
+                            NewSpaceCard {}
                         }
                     }
                 }
             }
         }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct SpaceKeys {
-    state: Signal<SpacesListEvent>,
-    selected: Signal<usize>,
-}
-
-impl SpaceKeys {
-    fn apply(&mut self, key: SpaceKey) {
-        match key {
-            SpaceKey::Next => self.move_selection(MenuDirection::Next),
-            SpaceKey::Previous => self.move_selection(MenuDirection::Previous),
-            SpaceKey::Attach => self.attach(),
-            SpaceKey::Delete => self.delete(),
-        }
-    }
-
-    fn move_selection(&mut self, direction: MenuDirection) {
-        let count = self.state.peek().spaces.len();
-        let from = self.row();
-        let landed = match direction {
-            MenuDirection::Next => (from + 1).min(count.saturating_sub(1)),
-            MenuDirection::Previous => from.saturating_sub(1),
-        };
-        self.selected.set(landed);
-    }
-
-    fn attach(&self) {
-        let Some(id) = self.selected_id() else {
-            return;
-        };
-        let _ = send(&SpaceAttachRequest { space_id: id });
-    }
-
-    fn delete(&self) {
-        if self.state.peek().spaces.len() <= 1 {
-            return;
-        }
-        let Some(id) = self.selected_id() else {
-            return;
-        };
-        let _ = send(&SpaceDeleteRequest { space_id: id });
-    }
-
-    fn row(&self) -> usize {
-        let count = self.state.peek().spaces.len();
-        (*self.selected.peek()).min(count.saturating_sub(1))
-    }
-
-    fn selected_id(&self) -> Option<String> {
-        let row = self.row();
-        let state = self.state.peek();
-        state.spaces.get(row).map(|space| space.id.clone())
-    }
-}
-
-fn new_space_name(typed: &str, count: usize) -> String {
-    let trimmed = typed.trim();
-    if trimmed.is_empty() {
-        translate_with(
-            "spaces-default-name",
-            &[("number", TranslationValue::Number((count + 1) as i64))],
-        )
-    } else {
-        trimmed.to_string()
     }
 }
 
@@ -317,7 +234,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
 }
 
 #[component]
-fn NewSpaceCard(count: usize) -> Element {
+fn NewSpaceCard() -> Element {
     let mut creating = use_signal(|| false);
     let mut draft = use_signal(String::new);
 
@@ -333,7 +250,7 @@ fn NewSpaceCard(count: usize) -> Element {
                     restore_focus_id: "new-space".to_string(),
                     on_commit: move |name: String| {
                         creating.set(false);
-                        let _ = send(&SpaceCreateRequest { name: new_space_name(&name, count) });
+                        let _ = send(&SpaceCreateRequest { name });
                     },
                     on_cancel: move |_| creating.set(false),
                 }

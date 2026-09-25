@@ -1,8 +1,12 @@
 use bevy::prelude::*;
-use vmux_api::space::SpaceKey;
+use bevy_cef::prelude::UiInput;
 use vmux_command::{
     CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
+use vmux_core::host::UiStateWrite;
+
+use super::spaces::{SpaceSelection, Spaces, SpacesPageSnapshot};
+use crate::event::{SpaceAttachRequest, SpaceDeleteRequest, SpacesUiState};
 
 pub(crate) struct SpaceKeyPlugin;
 
@@ -12,93 +16,184 @@ impl Plugin for SpaceKeyPlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
-            .add_observer(echo_key_command);
+            .add_observer(select_next_space)
+            .add_observer(select_previous_space)
+            .add_observer(attach_selected_space)
+            .add_observer(delete_selected_space);
     }
 }
 
 #[derive(Component)]
-struct SpaceKeyBinding(SpaceKey);
+struct SelectNextSpace;
+
+#[derive(Component)]
+struct SelectPreviousSpace;
+
+#[derive(Component)]
+struct AttachSelectedSpace;
+
+#[derive(Component)]
+struct DeleteSelectedSpace;
 
 fn spawn_commands(mut commands: Commands) {
-    for (definition, key) in [
-        (
-            CommandDefinition::new("space_next", "Next Space", "Layout > Space")
-                .hidden()
-                .direct_when("ArrowDown", Some("spaces"))
-                .direct_when("Ctrl+n", Some("spaces"))
-                .direct_when("Ctrl+j", Some("spaces")),
-            SpaceKey::Next,
-        ),
-        (
-            CommandDefinition::new("space_previous", "Previous Space", "Layout > Space")
-                .hidden()
-                .direct_when("ArrowUp", Some("spaces"))
-                .direct_when("Ctrl+p", Some("spaces"))
-                .direct_when("Ctrl+k", Some("spaces")),
-            SpaceKey::Previous,
-        ),
-        (
-            CommandDefinition::new("space_attach", "Open Selected Space", "Layout > Space")
-                .hidden()
-                .direct_when("Enter", Some("spaces")),
-            SpaceKey::Attach,
-        ),
-        (
-            CommandDefinition::new("space_delete", "Delete Selected Space", "Layout > Space")
-                .hidden()
-                .direct_when("Delete", Some("spaces"))
-                .direct_when("Backspace", Some("spaces")),
-            SpaceKey::Delete,
-        ),
-    ] {
-        commands.spawn((definition, SpaceKeyBinding(key)));
-    }
+    commands.spawn((
+        CommandDefinition::new("space_next", "Next Space", "Layout > Space")
+            .hidden()
+            .direct_when("ArrowDown", Some("spaces"))
+            .direct_when("Ctrl+n", Some("spaces"))
+            .direct_when("Ctrl+j", Some("spaces")),
+        SelectNextSpace,
+    ));
+    commands.spawn((
+        CommandDefinition::new("space_previous", "Previous Space", "Layout > Space")
+            .hidden()
+            .direct_when("ArrowUp", Some("spaces"))
+            .direct_when("Ctrl+p", Some("spaces"))
+            .direct_when("Ctrl+k", Some("spaces")),
+        SelectPreviousSpace,
+    ));
+    commands.spawn((
+        CommandDefinition::new("space_attach", "Open Selected Space", "Layout > Space")
+            .hidden()
+            .direct_when("Enter", Some("spaces")),
+        AttachSelectedSpace,
+    ));
+    commands.spawn((
+        CommandDefinition::new("space_delete", "Delete Selected Space", "Layout > Space")
+            .hidden()
+            .direct_when("Delete", Some("spaces"))
+            .direct_when("Backspace", Some("spaces")),
+        DeleteSelectedSpace,
+    ));
 }
 
-fn echo_key_command(
+fn select_next_space(
     trigger: On<CommandDispatch>,
-    keys: Query<&SpaceKeyBinding>,
+    bindings: Query<(), With<SelectNextSpace>>,
+    mut pages: Query<(&mut SpaceSelection, &mut SpacesPageSnapshot), With<Spaces>>,
     mut commands: Commands,
 ) {
-    let Ok(key) = keys.get(trigger.event().command()) else {
+    if bindings.get(trigger.event().command()).is_err() {
+        return;
+    }
+    let caller = trigger.event().invocation().caller;
+    let Ok((mut selection, mut snapshot)) = pages.get_mut(caller) else {
         return;
     };
-    commands.trigger(vmux_core::host::UiStateWrite::<
-        vmux_api::space::SpacesUiState,
-    >::from_event(
-        trigger.event().invocation().caller, &key.0
+    selection.0 = (selection.0 + 1).min(snapshot.0.spaces.len().saturating_sub(1));
+    snapshot.0.selected = selection.0 as u32;
+    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+        caller,
+        &snapshot.0,
     ));
+}
+
+fn select_previous_space(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<SelectPreviousSpace>>,
+    mut pages: Query<(&mut SpaceSelection, &mut SpacesPageSnapshot), With<Spaces>>,
+    mut commands: Commands,
+) {
+    if bindings.get(trigger.event().command()).is_err() {
+        return;
+    }
+    let caller = trigger.event().invocation().caller;
+    let Ok((mut selection, mut snapshot)) = pages.get_mut(caller) else {
+        return;
+    };
+    selection.0 = selection.0.saturating_sub(1);
+    snapshot.0.selected = selection.0 as u32;
+    commands.trigger(UiStateWrite::<SpacesUiState>::from_event(
+        caller,
+        &snapshot.0,
+    ));
+}
+
+fn attach_selected_space(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<AttachSelectedSpace>>,
+    pages: Query<&SpacesPageSnapshot, With<Spaces>>,
+    mut commands: Commands,
+) {
+    if bindings.get(trigger.event().command()).is_err() {
+        return;
+    }
+    let caller = trigger.event().invocation().caller;
+    let Ok(snapshot) = pages.get(caller) else {
+        return;
+    };
+    let Some(space) = snapshot.0.spaces.get(snapshot.0.selected as usize) else {
+        return;
+    };
+    commands.trigger(UiInput {
+        webview: caller,
+        payload: SpaceAttachRequest {
+            space_id: space.id.clone(),
+        },
+    });
+}
+
+fn delete_selected_space(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<DeleteSelectedSpace>>,
+    pages: Query<&SpacesPageSnapshot, With<Spaces>>,
+    mut commands: Commands,
+) {
+    if bindings.get(trigger.event().command()).is_err() {
+        return;
+    }
+    let caller = trigger.event().invocation().caller;
+    let Ok(snapshot) = pages.get(caller) else {
+        return;
+    };
+    if snapshot.0.spaces.len() <= 1 {
+        return;
+    }
+    let Some(space) = snapshot.0.spaces.get(snapshot.0.selected as usize) else {
+        return;
+    };
+    commands.trigger(UiInput {
+        webview: caller,
+        payload: SpaceDeleteRequest {
+            space_id: space.id.clone(),
+        },
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::space::{SpacesUiState, SpacesUiStatePatch};
+    use crate::event::{SpaceRow, SpacesListEvent};
     use vmux_command::CommandInvocation;
-    use vmux_core::host::UiStateWrite;
 
-    #[derive(Resource, Default)]
-    struct Echoed(Vec<(Entity, SpaceKey)>);
+    struct Keyboard;
 
-    impl Echoed {
-        fn record(trigger: On<UiStateWrite<SpacesUiState>>, mut echoed: ResMut<Self>) {
-            let SpacesUiStatePatch::Key(key) = trigger.event().patch() else {
-                return;
-            };
-            echoed.0.push((trigger.event().webview(), *key));
-        }
-    }
-
-    struct Echo;
-
-    impl Echo {
+    impl Keyboard {
         fn app() -> App {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .add_plugins(SpaceKeyPlugin)
-                .init_resource::<Echoed>()
-                .add_observer(Echoed::record);
+            app.add_plugins(MinimalPlugins).add_plugins(SpaceKeyPlugin);
             app
+        }
+
+        fn page(app: &mut App) -> Entity {
+            app.world_mut()
+                .spawn((
+                    Spaces,
+                    SpacesPageSnapshot(SpacesListEvent {
+                        spaces: vec![
+                            SpaceRow {
+                                id: "one".into(),
+                                ..default()
+                            },
+                            SpaceRow {
+                                id: "two".into(),
+                                ..default()
+                            },
+                        ],
+                        selected: 0,
+                    }),
+                ))
+                .id()
         }
 
         fn issue(app: &mut App, caller: Entity, id: &str) {
@@ -110,23 +205,22 @@ mod tests {
     }
 
     #[test]
-    fn a_resolved_key_reaches_only_the_page_that_sent_it() {
-        let mut app = Echo::app();
-        let pressed = app.world_mut().spawn_empty().id();
-        let other = app.world_mut().spawn_empty().id();
+    fn selection_changes_only_for_the_page_that_sent_the_key() {
+        let mut app = Keyboard::app();
+        let pressed = Keyboard::page(&mut app);
+        let other = Keyboard::page(&mut app);
 
-        Echo::issue(&mut app, pressed, "space_delete");
+        Keyboard::issue(&mut app, pressed, "space_next");
 
+        assert_eq!(app.world().get::<SpaceSelection>(pressed).unwrap().0, 1);
+        assert_eq!(app.world().get::<SpaceSelection>(other).unwrap().0, 0);
         assert_eq!(
-            app.world().resource::<Echoed>().0,
-            vec![(pressed, SpaceKey::Delete)]
-        );
-        assert!(
-            !app.world()
-                .resource::<Echoed>()
+            app.world()
+                .get::<SpacesPageSnapshot>(pressed)
+                .unwrap()
                 .0
-                .iter()
-                .any(|(entity, _)| *entity == other)
+                .selected,
+            1
         );
     }
 }

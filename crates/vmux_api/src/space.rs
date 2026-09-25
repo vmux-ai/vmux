@@ -1,23 +1,15 @@
 pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
 pub const PROJECTS_PAGE_URL: &str = "vmux://projects/";
 
-#[vmux_api::contract(Copy, Eq)]
-pub enum SpaceKey {
-    Next,
-    Previous,
-    Attach,
-    Delete,
-}
-
 #[vmux_api::contract(Default, Eq)]
 pub struct SpacesListEvent {
     pub spaces: Vec<SpaceRow>,
+    pub selected: u32,
 }
 
 #[vmux_api::ui_state_patch]
 pub enum SpacesUiStatePatch {
     Snapshot(Box<SpacesListEvent>),
-    Key(SpaceKey),
 }
 
 #[vmux_api::ui_state(Default, target = "spaces")]
@@ -193,6 +185,7 @@ mod tests {
                 tab_count: 2,
                 startup_dir: "~/work".to_string(),
             }],
+            selected: 0,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =
