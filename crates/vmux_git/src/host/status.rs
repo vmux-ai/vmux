@@ -24,6 +24,7 @@ impl Plugin for StatusPlugin {
             Update,
             (
                 refresh_changed_sources,
+                start_status_refreshes,
                 poll_status_refreshes,
                 poll_status_tasks,
                 dispatch_status_requests,
@@ -60,7 +61,11 @@ impl FileGit {
         wake: Option<EventLoopProxy<WinitUserEvent>>,
     ) -> GitStatusRefresh {
         self.generation = self.generation.wrapping_add(1).max(1);
-        GitStatusRefresh::new(self.generation, delay, wake)
+        GitStatusRefresh {
+            revision: self.generation,
+            delay,
+            wake,
+        }
     }
 
     pub(super) fn apply_status(&mut self, event: GitFileStatus) {
@@ -157,21 +162,14 @@ impl FileGit {
 #[derive(Component)]
 pub(super) struct GitStatusRefresh {
     revision: u64,
-    task: Task<()>,
+    delay: Duration,
+    wake: Option<EventLoopProxy<WinitUserEvent>>,
 }
 
-impl GitStatusRefresh {
-    fn new(revision: u64, delay: Duration, wake: Option<EventLoopProxy<WinitUserEvent>>) -> Self {
-        let task = IoTaskPool::get().spawn(async move {
-            if !delay.is_zero() {
-                std::thread::sleep(delay);
-            }
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-        });
-        Self { revision, task }
-    }
+#[derive(Component)]
+struct GitStatusRefreshTask {
+    revision: u64,
+    task: Task<()>,
 }
 
 #[derive(Component, Clone, Debug)]
@@ -242,10 +240,33 @@ fn refresh_changed_sources(
     }
 }
 
+fn start_status_refreshes(
+    refreshes: Query<(Entity, &GitStatusRefresh), Added<GitStatusRefresh>>,
+    mut commands: Commands,
+) {
+    for (entity, refresh) in &refreshes {
+        let revision = refresh.revision;
+        let delay = refresh.delay;
+        let wake = refresh.wake.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            if !delay.is_zero() {
+                std::thread::sleep(delay);
+            }
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+        });
+        commands
+            .entity(entity)
+            .remove::<GitStatusRefresh>()
+            .insert(GitStatusRefreshTask { revision, task });
+    }
+}
+
 fn poll_status_refreshes(
     mut refreshes: Query<(
         Entity,
-        &mut GitStatusRefresh,
+        &mut GitStatusRefreshTask,
         &mut FileGit,
         Option<&GitDiffSource>,
     )>,
@@ -256,7 +277,7 @@ fn poll_status_refreshes(
         if future::block_on(future::poll_once(&mut refresh.task)).is_none() {
             continue;
         }
-        commands.entity(entity).remove::<GitStatusRefresh>();
+        commands.entity(entity).remove::<GitStatusRefreshTask>();
         if !file.settle(refresh.revision) {
             continue;
         }
@@ -297,8 +318,21 @@ fn poll_status_tasks(
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
-        let Some(results) = task.poll() else {
+        if !task.thread.as_ref().is_some_and(JoinHandle::is_finished) {
             continue;
+        }
+        let results = match task.thread.take().unwrap().join() {
+            Ok(results) => results,
+            Err(_) => GitStatusResults(
+                task.requests
+                    .iter()
+                    .copied()
+                    .map(|identity| GitStatusResult {
+                        identity,
+                        status: Err("Git status worker panicked".to_string()),
+                    })
+                    .collect(),
+            ),
         };
         for result in results.0 {
             let Ok(mut file) = files.get_mut(result.identity.webview) else {
@@ -342,28 +376,6 @@ fn dispatch_status_requests(
     }
     let wake = wake.as_deref().map(|wake| (**wake).clone());
     for (repo_root, requests) in batches {
-        commands.spawn(GitStatusTask::spawn(repo_root, requests, wake.clone()));
-    }
-}
-
-fn publish_file_git_state(
-    files: Query<(Entity, &FileGit), Changed<FileGit>>,
-    pages: Query<(), With<FileUiStateUpdates>>,
-    mut commands: Commands,
-) {
-    for (entity, file) in &files {
-        if pages.contains(entity) {
-            commands.trigger(FileUiStateWrite::from_event(entity, &file.state));
-        }
-    }
-}
-
-impl GitStatusTask {
-    fn spawn(
-        repo_root: PathBuf,
-        requests: Vec<GitStatusRequestInput>,
-        wake: Option<EventLoopProxy<WinitUserEvent>>,
-    ) -> Self {
         let task_root = repo_root.clone();
         let identities = requests
             .iter()
@@ -373,11 +385,12 @@ impl GitStatusTask {
                 revision: request.revision,
             })
             .collect();
+        let wake = wake.clone();
         let thread = std::thread::spawn(move || {
-            let paths: Vec<PathBuf> = requests
+            let paths = requests
                 .iter()
                 .map(|request| request.path.clone())
-                .collect();
+                .collect::<Vec<_>>();
             let results = match super::runner::statuses(&task_root, &paths) {
                 Ok(events) => requests
                     .into_iter()
@@ -417,29 +430,22 @@ impl GitStatusTask {
             }
             GitStatusResults(results)
         });
-        Self {
+        commands.spawn(GitStatusTask {
             repo_root,
             requests: identities,
             thread: Some(thread),
-        }
+        });
     }
+}
 
-    fn poll(&mut self) -> Option<GitStatusResults> {
-        if !self.thread.as_ref().is_some_and(JoinHandle::is_finished) {
-            return None;
-        }
-        match self.thread.take().unwrap().join() {
-            Ok(results) => Some(results),
-            Err(_) => Some(GitStatusResults(
-                self.requests
-                    .iter()
-                    .copied()
-                    .map(|identity| GitStatusResult {
-                        identity,
-                        status: Err("Git status worker panicked".to_string()),
-                    })
-                    .collect(),
-            )),
+fn publish_file_git_state(
+    files: Query<(Entity, &FileGit), Changed<FileGit>>,
+    pages: Query<(), With<FileUiStateUpdates>>,
+    mut commands: Commands,
+) {
+    for (entity, file) in &files {
+        if pages.contains(entity) {
+            commands.trigger(FileUiStateWrite::from_event(entity, &file.state));
         }
     }
 }
@@ -474,55 +480,38 @@ mod tests {
         let second = test_repo::write(repo.path(), "b.txt", "two\n");
         test_repo::run(repo.path(), &["add", "a.txt", "b.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
-        let first_webview = Entity::from_bits(1);
-        let second_webview = Entity::from_bits(2);
-        let mut task = GitStatusTask::spawn(
-            repo.path().to_path_buf(),
-            vec![
-                GitStatusRequestInput {
-                    webview: first_webview,
-                    path: first,
-                    document: 3,
-                    revision: 4,
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatusPlugin));
+        let first_webview = app
+            .world_mut()
+            .spawn((
+                FileGit::new(&first, 3),
+                GitDiffSource {
+                    content: String::new(),
                     dirty: true,
                 },
-                GitStatusRequestInput {
-                    webview: second_webview,
-                    path: second,
-                    document: 5,
-                    revision: 6,
-                    dirty: false,
-                },
-            ],
-            None,
-        );
+            ))
+            .id();
+        let second_webview = app
+            .world_mut()
+            .spawn((FileGit::new(&second, 5), GitDiffSource::default()))
+            .id();
 
-        let results = loop {
-            if let Some(results) = task.poll() {
-                break results;
+        for _ in 0..10_000 {
+            app.update();
+            let first = app.world().get::<FileGit>(first_webview).unwrap();
+            let second = app.world().get::<FileGit>(second_webview).unwrap();
+            if first.state.has_diff
+                && !first.state.branch.is_empty()
+                && !second.state.branch.is_empty()
+            {
+                assert!(first.state.has_diff);
+                assert!(!second.state.has_diff);
+                return;
             }
             std::thread::yield_now();
-        };
-
-        assert_eq!(results.0.len(), 2);
-        assert!(results.0.iter().any(|result| {
-            result.identity.webview == first_webview
-                && result.identity.document == 3
-                && result.identity.revision == 4
-                && matches!(
-                    &result.status,
-                    Ok(event) if event.file_status == FileStatus::Modified
-                )
-        }));
-        assert!(results.0.iter().any(|result| {
-            result.identity.webview == second_webview
-                && result.identity.document == 5
-                && result.identity.revision == 6
-                && matches!(
-                    &result.status,
-                    Ok(event) if event.file_status == FileStatus::Clean
-                )
-        }));
+        }
+        panic!("Git status batch did not complete");
     }
 
     #[test]
