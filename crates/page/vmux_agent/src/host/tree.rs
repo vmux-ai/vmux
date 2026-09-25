@@ -4,7 +4,8 @@ use vmux_core::agent::{
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
 };
 use vmux_core::browser::{
-    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
+    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserSnapshotRequest,
+    BrowserSnapshotResponse,
 };
 use vmux_terminal::TerminalStackSpawnRequest;
 
@@ -86,7 +87,6 @@ impl Plugin for AgentSessionPlugin {
             .init_resource::<AgentSessionToEntity>()
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
-            .init_resource::<NavAwaitingSnapshot>()
             .add_message::<AgentCommandRequest>()
             .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
@@ -95,6 +95,7 @@ impl Plugin for AgentSessionPlugin {
             .add_message::<ScreenshotResponse>()
             .add_message::<BrowserSnapshotRequest>()
             .add_message::<BrowserSnapshotResponse>()
+            .add_message::<BrowserNavigationSnapshotResponse>()
             .add_message::<BrowserScrollRequest>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStartResponse>()
