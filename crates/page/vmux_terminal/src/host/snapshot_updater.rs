@@ -29,8 +29,8 @@ fn update_terminals_snapshot(
     }
     let mut running = HashMap::new();
     if let Some(pid_map) = pid_map.as_deref() {
-        for (pid, entity) in &pid_map.0 {
-            running.insert(Pid(*pid).page_url(), *entity);
+        for (pid, entity) in pid_map.iter() {
+            running.insert(Pid(pid).page_url(), entity);
         }
     }
     state.terminals.running = running;
@@ -59,7 +59,7 @@ mod tests {
             .add_systems(Update, update_terminals_snapshot);
         let pane = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .insert_resource(PidToEntity(HashMap::from([(4321, pane)])));
+            .insert_resource([(4321, pane)].into_iter().collect::<PidToEntity>());
 
         app.update();
 

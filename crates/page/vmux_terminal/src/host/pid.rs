@@ -1,3 +1,4 @@
+use bevy::ecs::entity::EntityHashMap;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -22,14 +23,57 @@ impl Pid {
 }
 
 #[derive(Resource, Default, Debug)]
-pub struct PidToEntity(pub HashMap<u32, Entity>);
+pub struct PidToEntity {
+    by_pid: HashMap<u32, Entity>,
+    by_entity: EntityHashMap<u32>,
+}
+
+impl PidToEntity {
+    pub fn get(&self, pid: u32) -> Option<Entity> {
+        self.by_pid.get(&pid).copied()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (u32, Entity)> + '_ {
+        self.by_pid.iter().map(|(pid, entity)| (*pid, *entity))
+    }
+
+    fn insert(&mut self, entity: Entity, pid: u32) {
+        if let Some(previous_pid) = self.by_entity.insert(entity, pid) {
+            self.by_pid.remove(&previous_pid);
+        }
+        if let Some(previous_entity) = self.by_pid.insert(pid, entity)
+            && previous_entity != entity
+        {
+            self.by_entity.remove(&previous_entity);
+        }
+    }
+
+    fn remove(&mut self, entity: Entity) {
+        let Some(pid) = self.by_entity.remove(&entity) else {
+            return;
+        };
+        if self.by_pid.get(&pid) == Some(&entity) {
+            self.by_pid.remove(&pid);
+        }
+    }
+}
+
+impl FromIterator<(u32, Entity)> for PidToEntity {
+    fn from_iter<T: IntoIterator<Item = (u32, Entity)>>(iter: T) -> Self {
+        let mut index = Self::default();
+        for (pid, entity) in iter {
+            index.insert(entity, pid);
+        }
+        index
+    }
+}
 
 pub(crate) fn track_pid_inserts(
     mut map: ResMut<PidToEntity>,
-    inserted: Query<(Entity, &Pid), Added<Pid>>,
+    inserted: Query<(Entity, &Pid), Changed<Pid>>,
 ) {
     for (entity, Pid(pid)) in &inserted {
-        map.0.insert(*pid, entity);
+        map.insert(entity, *pid);
     }
 }
 
@@ -39,10 +83,8 @@ fn track_pid_removals(
     survivors: Query<&Pid>,
 ) {
     for entity in removed.read() {
-        if let Ok(Pid(pid)) = survivors.get(entity) {
-            map.0.remove(pid);
-        } else {
-            map.0.retain(|_, &mut e| e != entity);
+        if survivors.get(entity).is_err() {
+            map.remove(entity);
         }
     }
 }
@@ -63,7 +105,7 @@ mod tests {
         let e = app.world_mut().spawn(Pid(7777)).id();
         app.update();
         let map = app.world().resource::<PidToEntity>();
-        assert_eq!(map.0.get(&7777), Some(&e));
+        assert_eq!(map.get(7777), Some(e));
     }
 
     #[test]
@@ -74,7 +116,7 @@ mod tests {
         app.world_mut().despawn(e);
         app.update();
         let map = app.world().resource::<PidToEntity>();
-        assert!(!map.0.contains_key(&8888));
+        assert_eq!(map.get(8888), None);
     }
 
     #[test]
@@ -82,12 +124,10 @@ mod tests {
         let mut app = make_app();
         let e = app.world_mut().spawn(Pid(9000)).id();
         app.update();
-        app.world_mut().entity_mut(e).remove::<Pid>();
-        app.update();
         app.world_mut().entity_mut(e).insert(Pid(9001));
         app.update();
         let map = app.world().resource::<PidToEntity>();
-        assert_eq!(map.0.get(&9001), Some(&e));
-        assert!(!map.0.contains_key(&9000));
+        assert_eq!(map.get(9001), Some(e));
+        assert_eq!(map.get(9000), None);
     }
 }
