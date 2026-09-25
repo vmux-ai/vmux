@@ -28,9 +28,9 @@ use vmux_ui::hooks::EventListenerError;
 use crate::LayoutPointerCapture;
 use crate::present::PaneFrames;
 
-pub(super) struct NativePageMacosPlugin;
+pub(super) struct MacosBrowserPlugin;
 
-impl Plugin for NativePageMacosPlugin {
+impl Plugin for MacosBrowserPlugin {
     fn build(&self, app: &mut App) {
         let (metadata_tx, metadata_rx) = async_channel::unbounded();
         app.insert_resource(NativePageMetadataSender(metadata_tx))
@@ -190,7 +190,7 @@ fn open_native_pages(world: &mut World) {
                     .entity_mut(entity)
                     .remove::<vmux_core::page::PageReady>();
             }
-            info!("native_page: navigated {entity:?} to {}", page.url);
+            info!("browser_platform: navigated {entity:?} to {}", page.url);
             continue;
         }
         if current.is_some() {
@@ -226,7 +226,7 @@ fn open_native_pages(world: &mut World) {
                     .non_send_mut::<Browsers>()
                     .set_externally_hosted(entity);
                 info!(
-                    "native_page: hosting {} for {entity:?} as {placement:?}, {appearance:?}",
+                    "browser_platform: hosting {} for {entity:?} as {placement:?}, {appearance:?}",
                     page.url
                 );
                 world.non_send_mut::<HostedPages>().0.insert(
@@ -241,7 +241,7 @@ fn open_native_pages(world: &mut World) {
             }
             Some(Err(error)) => {
                 error!(
-                    "native_page: build_as_child failed for {}: {error}",
+                    "browser_platform: build_as_child failed for {}: {error}",
                     page.url
                 )
             }
@@ -348,7 +348,7 @@ fn sync_native_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<Ap
         return;
     };
     let appearance = appearance_of(settings.appearance.mode);
-    info!("native_page: colour scheme set to {appearance:?}");
+    info!("browser_platform: colour scheme set to {appearance:?}");
     for page in hosted.0.values() {
         page.surface.set_appearance(appearance);
     }
@@ -615,7 +615,7 @@ impl vmux_native::Assets for PageAssets {
         }
         let uri = asset_load_path_from_request_url(url);
         if uri.is_empty() {
-            error!("native_page: vmux:// url maps to no asset path, url={url}");
+            error!("browser_platform: vmux:// url maps to no asset path, url={url}");
             reply.fail("no asset path for url");
             return;
         }
@@ -628,7 +628,7 @@ impl vmux_native::Assets for PageAssets {
             })
             .is_err()
         {
-            error!("native_page: vmux:// request channel closed, uri={uri}");
+            error!("browser_platform: vmux:// request channel closed, uri={uri}");
             reply.fail("request channel closed");
             return;
         }
@@ -640,7 +640,7 @@ impl vmux_native::Assets for PageAssets {
                 response.data,
             ),
             Err(_) => {
-                error!("native_page: vmux:// responder dropped, uri={uri}");
+                error!("browser_platform: vmux:// responder dropped, uri={uri}");
                 reply.fail("responder dropped");
             }
         });
@@ -837,7 +837,7 @@ fn report_waiting(reason: &str) {
 
     static REPORTED: AtomicBool = AtomicBool::new(false);
     if !REPORTED.swap(true, Ordering::Relaxed) {
-        info!("native_page: waiting, {reason}");
+        info!("browser_platform: waiting, {reason}");
     }
 }
 

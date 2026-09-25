@@ -10,7 +10,7 @@ mod page_life;
 
 mod native_bridge;
 mod native_layout;
-pub mod native_page;
+mod platform;
 mod navigation;
 mod present;
 
@@ -110,7 +110,7 @@ impl Plugin for BrowserPlugin {
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
             vmux_command::command_bar::CommandBarPlugin,
-            native_page::NativePageRuntimePlugin,
+            platform::BrowserPlatformPlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
             extensions::broker::ExtensionBrokerPlugin,

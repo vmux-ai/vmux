@@ -5,13 +5,13 @@ mod macos;
 #[cfg(not(target_os = "macos"))]
 mod other;
 
-pub struct NativePageRuntimePlugin;
+pub struct BrowserPlatformPlugin;
 
-impl Plugin for NativePageRuntimePlugin {
+impl Plugin for BrowserPlatformPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(target_os = "macos")]
-        app.add_plugins(macos::NativePageMacosPlugin);
+        app.add_plugins(macos::MacosBrowserPlugin);
         #[cfg(not(target_os = "macos"))]
-        app.add_plugins(other::NativePageOtherPlugin);
+        app.add_plugins(other::FallbackBrowserPlugin);
     }
 }
