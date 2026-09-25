@@ -28,7 +28,7 @@ use crate::stack::{
     stack_bundle,
 };
 use crate::tab::{
-    CloseTabRequest, LastTabCloseAt, Tab, active_tab_siblings, pick_after_close, tab_bundle,
+    CloseTabRequest, Tab, TabClosed, active_tab_siblings, pick_after_close, tab_bundle,
 };
 use crate::window::spawn_tab_scaffold_in_space;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
@@ -343,7 +343,6 @@ pub(crate) fn handle_close_tab_requests(
     layout: TabArchiveLayout,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    mut last_tab_close: ResMut<LastTabCloseAt>,
     mut commands: Commands,
 ) {
     let mut seen = HashSet::new();
@@ -414,7 +413,7 @@ pub(crate) fn handle_close_tab_requests(
         }
 
         archive_tab(request.tab, tab, &layout, &mut commands);
-        last_tab_close.0 = Some(std::time::Instant::now());
+        commands.trigger(TabClosed);
         commands.entity(request.tab).despawn();
     }
 }
@@ -1618,7 +1617,6 @@ mod tests {
         let mut app = App::new();
         app.add_message::<CloseTabRequest>()
             .add_message::<TabLayoutSpawnRequest>()
-            .init_resource::<LastTabCloseAt>()
             .add_systems(Update, super::handle_close_tab_requests);
         app.world_mut()
             .spawn((bevy::window::Window::default(), PrimaryWindow));
@@ -1762,7 +1760,6 @@ mod tests {
         let mut app = App::new();
         app.add_message::<CloseTabRequest>()
             .add_message::<TabLayoutSpawnRequest>()
-            .init_resource::<LastTabCloseAt>()
             .add_systems(Update, super::handle_close_tab_requests);
         app.world_mut()
             .spawn((bevy::window::Window::default(), PrimaryWindow));

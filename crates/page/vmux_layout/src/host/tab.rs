@@ -10,7 +10,6 @@ use bevy::window::PrimaryWindow;
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use std::time::Instant;
 use vmux_command::{
     CommandDefinition, CommandInvocation, CommandMcp, CommandRequest, CommandTypePlugin,
     InputSchema,
@@ -38,7 +37,6 @@ impl Plugin for TabPlugin {
         .register_type::<TabWorkspace>()
         .register_type::<TabWorktree>()
         .register_type::<TabDirDecided>()
-        .init_resource::<LastTabCloseAt>()
         .init_resource::<crate::window::FocusedWindow>()
         .add_message::<CloseTabRequest>()
         .add_message::<crate::NewTabRequest>()
@@ -328,8 +326,8 @@ pub fn ancestor_tab_startup_dir(
     }
 }
 
-#[derive(Resource, Default)]
-pub struct LastTabCloseAt(pub Option<Instant>);
+#[derive(Event, Clone, Copy, Debug)]
+pub struct TabClosed;
 
 pub fn tab_bundle() -> impl Bundle {
     (
@@ -972,6 +970,13 @@ mod tests {
     #[derive(Resource, Default)]
     struct CollectedSpawns(Vec<PageOpenRequest>);
 
+    #[derive(Resource, Default)]
+    struct ClosedTabs(usize);
+
+    fn record_closed_tab(_trigger: On<TabClosed>, mut closed: ResMut<ClosedTabs>) {
+        closed.0 += 1;
+    }
+
     fn collect_spawn_requests(
         mut reader: MessageReader<PageOpenRequest>,
         mut collected: ResMut<CollectedSpawns>,
@@ -1293,11 +1298,13 @@ mod tests {
     }
 
     #[test]
-    fn tabs_close_event_records_recent_tab_close() {
+    fn tabs_close_event_emits_tab_closed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .add_message::<crate::TabLayoutSpawnRequest>();
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .init_resource::<ClosedTabs>()
+            .add_observer(record_closed_tab);
 
         let webview = app.world_mut().spawn_empty().id();
         let main = app.world_mut().spawn(MainNode).id();
@@ -1335,15 +1342,17 @@ mod tests {
 
         assert!(app.world().get_entity(tab).is_err());
         assert!(app.world().get_entity(other_tab).is_ok());
-        assert!(app.world().resource::<LastTabCloseAt>().0.is_some());
+        assert_eq!(app.world().resource::<ClosedTabs>().0, 1);
     }
 
     #[test]
-    fn tabs_close_event_without_target_does_not_record_recent_close() {
+    fn tabs_close_event_without_target_does_not_emit_tab_closed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .add_message::<crate::TabLayoutSpawnRequest>();
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .init_resource::<ClosedTabs>()
+            .add_observer(record_closed_tab);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut().spawn(PrimaryWindow);
 
@@ -1353,7 +1362,7 @@ mod tests {
         });
         app.update();
 
-        assert!(app.world().resource::<LastTabCloseAt>().0.is_none());
+        assert_eq!(app.world().resource::<ClosedTabs>().0, 0);
     }
 
     #[test]
@@ -1405,7 +1414,6 @@ mod tests {
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<crate::NewTabRequest>()
             .add_message::<CloseTabRequest>()
-            .init_resource::<LastTabCloseAt>()
             .add_systems(
                 Update,
                 (
@@ -1468,7 +1476,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<CloseTabRequest>()
-            .init_resource::<LastTabCloseAt>()
             .add_systems(Update, crate::archive::handle_close_tab_requests)
             .add_observer(on_tab_close_request);
 
