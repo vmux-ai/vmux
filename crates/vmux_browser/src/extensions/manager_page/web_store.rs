@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{
     Browsers, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewCommittedNavigationEvent,
@@ -12,8 +10,7 @@ pub(super) struct WebStorePlugin;
 
 impl Plugin for WebStorePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WebStoreInjectors>()
-            .add_plugins(UiEventPlugin::<(ExtBrowseStoreRequest,)>::default())
+        app.add_plugins(UiEventPlugin::<(ExtBrowseStoreRequest,)>::default())
             .add_plugins(JsEmitEventPlugin::<AddExtensionRequest>::default())
             .add_observer(on_browse_request)
             .add_observer(on_add_extension)
@@ -21,13 +18,15 @@ impl Plugin for WebStorePlugin {
                 Update,
                 (
                     inject_on_navigation,
+                    bevy::ecs::schedule::ApplyDeferred,
                     inject_on_load.after(crate::page_life::drain_loading_state),
-                ),
+                )
+                    .chain(),
             );
     }
 }
 
-#[derive(Clone)]
+#[derive(Component, Clone)]
 struct WebStoreInjector {
     nonce: String,
     extension_id: String,
@@ -46,9 +45,6 @@ impl WebStoreInjector {
         }
     }
 }
-
-#[derive(Resource, Default)]
-struct WebStoreInjectors(HashMap<Entity, WebStoreInjector>);
 
 #[derive(serde::Deserialize)]
 struct AddExtensionRequest {
@@ -101,16 +97,22 @@ impl std::fmt::Display for EncodedQuery {
     }
 }
 
-fn inject_page(webview: Entity, url: &str, browsers: &Browsers, injectors: &mut WebStoreInjectors) {
+fn inject_page(
+    webview: Entity,
+    url: &str,
+    browsers: &Browsers,
+    current: Option<&WebStoreInjector>,
+    commands: &mut Commands,
+) {
     if !WebStoreUrl::matches(url) {
-        injectors.0.remove(&webview);
+        commands.entity(webview).remove::<WebStoreInjector>();
         return;
     }
     let Some(extension_id) = vmux_core::extension::webstore::extension_id(url) else {
-        injectors.0.remove(&webview);
+        commands.entity(webview).remove::<WebStoreInjector>();
         return;
     };
-    let injector = WebStoreInjector::resolve(injectors.0.get(&webview), extension_id);
+    let injector = WebStoreInjector::resolve(current, extension_id);
     let profile = vmux_core::profile::active_profile_name();
     let index = vmux_core::extension::store::Index::load(&vmux_core::extension::store::root())
         .unwrap_or_default();
@@ -130,10 +132,10 @@ fn inject_page(webview: Entity, url: &str, browsers: &Browsers, injectors: &mut 
             serde_json::to_string(&injector.nonce).expect("serializable web store nonce"),
         ),
     ];
-    injectors.0.insert(webview, injector);
     if let Ok(script) = super::super::template::render(INJECTOR_JS, &replacements) {
         browsers.execute_js(&webview, &script);
     }
+    commands.entity(webview).insert(injector);
 }
 
 struct WebStoreUrl;
@@ -149,13 +151,20 @@ impl WebStoreUrl {
 fn inject_on_navigation(
     mut events: MessageReader<WebviewCommittedNavigationEvent>,
     browsers: NonSend<Browsers>,
-    mut injectors: ResMut<WebStoreInjectors>,
+    injectors: Query<&WebStoreInjector>,
+    mut commands: Commands,
 ) {
     for event in events.read() {
         if !event.is_main_frame {
             continue;
         }
-        inject_page(event.webview, &event.url, &browsers, &mut injectors);
+        inject_page(
+            event.webview,
+            &event.url,
+            &browsers,
+            injectors.get(event.webview).ok(),
+            &mut commands,
+        );
     }
 }
 
@@ -163,24 +172,31 @@ fn inject_on_load(
     mut events: MessageReader<crate::WebviewLoadCompleted>,
     browsers: NonSend<Browsers>,
     browser_meta: Query<&vmux_core::PageMetadata, With<vmux_layout::Browser>>,
-    mut injectors: ResMut<WebStoreInjectors>,
+    injectors: Query<&WebStoreInjector>,
+    mut commands: Commands,
 ) {
     for event in events.read() {
         let Ok(meta) = browser_meta.get(event.webview) else {
             continue;
         };
-        inject_page(event.webview, &meta.url, &browsers, &mut injectors);
+        inject_page(
+            event.webview,
+            &meta.url,
+            &browsers,
+            injectors.get(event.webview).ok(),
+            &mut commands,
+        );
     }
 }
 
 fn on_add_extension(
     trigger: On<Receive<AddExtensionRequest>>,
-    injectors: Res<WebStoreInjectors>,
+    injectors: Query<&WebStoreInjector>,
     mut installs: MessageWriter<InstallRequest>,
     mut pages: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     let request = &trigger.payload;
-    let Some(injector) = injectors.0.get(&trigger.event().webview) else {
+    let Ok(injector) = injectors.get(trigger.event().webview) else {
         return;
     };
     let Some(id) = vmux_core::extension::webstore::extension_id(&request.id) else {
