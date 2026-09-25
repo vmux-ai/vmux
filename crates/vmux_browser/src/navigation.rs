@@ -81,11 +81,18 @@ fn issue_open_history(
 
 fn drain_committed_navigation(
     receiver: Res<WebviewCommittedNavigationReceiver>,
-    infrastructure: Res<crate::extensions::bridge_page::ExtensionInfrastructureEntities>,
+    infrastructure: Query<(), With<crate::extensions::bridge_page::ExtensionInfrastructureWebview>>,
+    retired_infrastructure: Query<
+        &crate::extensions::bridge_page::RetiredExtensionInfrastructureWebview,
+    >,
     mut writer: MessageWriter<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
 ) {
     while let Ok(ev) = receiver.0.try_recv() {
-        if infrastructure.contains(ev.webview) {
+        if infrastructure.contains(ev.webview)
+            || retired_infrastructure
+                .iter()
+                .any(|retired| retired.contains(ev.webview))
+        {
             continue;
         }
         writer.write(ev);
@@ -486,22 +493,26 @@ mod committed_navigation_tests {
         let mut app = App::new();
         let infrastructure = app
             .world_mut()
-            .spawn(crate::extensions::bridge_page::ExtensionBridgeWebview {
-                extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-                role: crate::extensions::bridge_page::ExtensionBridgeRole::Transport,
-            })
+            .spawn((
+                crate::extensions::bridge_page::ExtensionBridgeWebview {
+                    extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                    role: crate::extensions::bridge_page::ExtensionBridgeRole::Transport,
+                },
+                crate::extensions::bridge_page::ExtensionInfrastructureWebview,
+            ))
             .id();
         let visible = app.world_mut().spawn_empty().id();
         let (sender, receiver) = async_channel::unbounded();
         app.insert_resource(WebviewCommittedNavigationReceiver(receiver))
-            .init_resource::<crate::extensions::bridge_page::ExtensionInfrastructureEntities>()
             .init_resource::<Collected>()
             .add_message::<WebviewCommittedNavigationEvent>()
             .add_systems(Update, (drain_committed_navigation, collect).chain());
-        app.world_mut()
-            .resource_mut::<crate::extensions::bridge_page::ExtensionInfrastructureEntities>()
-            .insert(infrastructure);
         app.world_mut().despawn(infrastructure);
+        app.world_mut().spawn(
+            crate::extensions::bridge_page::RetiredExtensionInfrastructureWebview::new(
+                infrastructure,
+            ),
+        );
         for webview in [infrastructure, visible] {
             sender
                 .send_blocking(WebviewCommittedNavigationEvent {
