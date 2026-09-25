@@ -582,10 +582,10 @@ fn drain_git_watch(
     for entity in affected {
         if let Ok(mut view) = views.get_mut(entity) {
             if let Some(path) = view.mark_changed() {
-                commands.trigger(super::job_runner::GitJobRequest {
-                    webview: entity,
-                    job: super::job::JobKind::Repository { path: path.into() },
-                });
+                commands.spawn((
+                    super::job_runner::GitJob::new(entity),
+                    super::job::RepositoryJob { path: path.into() },
+                ));
             }
         } else if let Ok(mut file) = files.get_mut(entity) {
             let refresh = file

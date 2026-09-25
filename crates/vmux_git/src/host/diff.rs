@@ -7,8 +7,8 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use crate::event::{DiffKind, DiffLine, GitDiffRequest, GitLineMarker, GitLineStatus};
 
 use super::GitUpdateSet;
-use super::job::JobKind;
-use super::job_runner::GitJobRequest;
+use super::job::DiffJob;
+use super::job_runner::GitJob;
 
 const DIFF_WINDOW_ROWS: u32 = 200_000;
 
@@ -162,9 +162,9 @@ fn start_diff_requests(
                 generation,
                 file: pending.file,
             });
-        commands.trigger(GitJobRequest {
-            webview: entity,
-            job: JobKind::Diff {
+        commands.spawn((
+            GitJob::new(entity),
+            DiffJob {
                 repo_root: target.repo_root,
                 path: target.path,
                 reference: target.reference,
@@ -173,7 +173,7 @@ fn start_diff_requests(
                 rows: DIFF_WINDOW_ROWS,
                 content,
             },
-        });
+        ));
     }
 }
 
