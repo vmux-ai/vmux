@@ -5,7 +5,7 @@ use crate::event::{
     ChatHistoryRequest, ChatItem, ChatMediaEntry, ChatMediaQueryRequest, ChatMediaState,
     ChatPickFiles, ChatRemoveAttachment, ChatSnapshot, ChatSubmit, ChatTranscriptState,
     ComposerContext, ModelOptionEntry, QueuedPromptSnapshot, ResumableSessionEntry, ResumeSession,
-    RuntimeSwitchRequest, SelectMode, SelectModel, SlashCommandEntry, latest_tool_location,
+    RuntimeSwitchRequest, SelectMode, SelectModel, SlashCommandEntry,
 };
 use crate::event::{ChatResumeQueryRequest, ChatResumeState};
 use crate::format::composer::{
@@ -48,14 +48,11 @@ pub struct Chat {
     pub slash: SlashCommands,
     pub resume: Resume,
     pub menu: ComposerMenu,
-    pub activity_counts: Memo<(usize, usize)>,
-    pub latest_tool: Memo<Option<(usize, usize)>>,
 }
 
 pub fn use_chat() -> Chat {
     use_theme();
     let transcript = use_transcript();
-    let items = transcript.items;
     let chat = Chat {
         agent: use_signal(CurrentAgent::read),
         transcript,
@@ -74,8 +71,6 @@ pub fn use_chat() -> Chat {
         slash: use_slash_commands(),
         resume: use_resume(),
         menu: use_composer_menu(),
-        activity_counts: use_memo(move || vmux_api::chat::activity_counts(&items.read())),
-        latest_tool: use_memo(move || latest_tool_location(&items.read())),
     };
     chat.listen();
     chat.watch();
@@ -281,6 +276,8 @@ impl Chat {
         set_if_changed(transcript.generation, state.generation);
         set_if_changed(transcript.request_id, state.request_id);
         set_if_changed(transcript.prepend_revision, state.prepend_revision);
+        set_if_changed(transcript.active_subagents, state.active_subagents);
+        set_if_changed(transcript.active_tasks, state.active_tasks);
         if let Some((height, top)) = metrics {
             scroll::restore(transcript.scroll_container, height, top);
         }
@@ -889,6 +886,8 @@ pub struct Transcript {
     pub generation: Signal<u64>,
     pub request_id: Signal<u64>,
     pub prepend_revision: Signal<u64>,
+    pub active_subagents: Signal<u32>,
+    pub active_tasks: Signal<u32>,
     pub at_bottom: Signal<bool>,
     pub last_top: Signal<i32>,
     pub scroll_container: scroll::Container,
@@ -903,6 +902,8 @@ pub fn use_transcript() -> Transcript {
         generation: use_signal(|| 0),
         request_id: use_signal(|| 0),
         prepend_revision: use_signal(|| 0),
+        active_subagents: use_signal(|| 0),
+        active_tasks: use_signal(|| 0),
         at_bottom: use_signal(|| true),
         last_top: use_signal(|| 0),
         scroll_container: use_signal(|| None),

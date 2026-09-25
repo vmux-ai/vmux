@@ -57,7 +57,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
     let loaded_start = chat.transcript.loaded_start;
     let history_loading = chat.transcript.history_loading;
     let items = chat.transcript.items;
-    let latest_tool = (chat.latest_tool)();
     let handoff_source = (chat.handoff.source)();
     let handoff_truncated = (chat.handoff.truncated)();
     let handoff_count = (chat.handoff.message_count)();
@@ -113,9 +112,6 @@ pub(super) fn ChatTranscript(chat: Chat) -> Element {
                         agent_color: agent_color.clone(),
                         user_name: user_name.clone(),
                         user_color: user_color.clone(),
-                        latest_tool_block: latest_tool
-                            .filter(|(item_index, _)| *item_index == i)
-                            .map(|(_, block_index)| block_index),
                     }
                     if !handoff_source.is_empty()
                         && is_handoff_boundary(loaded_start() as usize + i, handoff_count)

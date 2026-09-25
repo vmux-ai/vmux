@@ -111,6 +111,7 @@ impl ChatTranscriptProjection {
         if self.state.loaded_start == 0 {
             self.state.loading = false;
         }
+        self.refresh_activity();
         true
     }
 
@@ -157,7 +158,14 @@ impl ChatTranscriptProjection {
         self.state.loaded_start = page.start;
         self.state.total = self.state.total.max(page.total);
         self.state.prepend_revision = self.state.prepend_revision.wrapping_add(1).max(1);
+        self.refresh_activity();
         true
+    }
+
+    fn refresh_activity(&mut self) {
+        let (subagents, tasks) = vmux_service::chat_projection::activity_counts(&self.state.items);
+        self.state.active_subagents = subagents;
+        self.state.active_tasks = tasks;
     }
 }
 

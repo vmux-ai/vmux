@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod chat_projection;
 pub use vmux_api::service as event;
 
 #[cfg(ui)]
