@@ -13,7 +13,8 @@ pub(crate) struct TrayPlugin;
 
 impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
+        app.insert_non_send(TrayRuntime(None))
+            .add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
             .add_observer(toggle_tray_visibility)
             .add_observer(quit_from_tray)
             .add_observer(control_recording_from_tray)
@@ -55,8 +56,14 @@ struct TrayHandle {
     last_status: Option<RecordingStatus>,
 }
 
-fn setup_tray(world: &mut World) {
-    let locale = tray_locale(world.resource::<AppSettings>());
+struct TrayRuntime(Option<TrayHandle>);
+
+fn setup_tray(
+    settings: Res<AppSettings>,
+    mut runtime: NonSendMut<TrayRuntime>,
+    mut commands: Commands,
+) {
+    let locale = tray_locale(&settings);
     let menu = Menu::new();
     let toggle = MenuItem::new(toggle_label(true, &locale), true, None);
     #[cfg(feature = "recording")]
@@ -107,7 +114,7 @@ fn setup_tray(world: &mut World) {
         }
     };
 
-    world.insert_non_send(TrayHandle {
+    runtime.0 = Some(TrayHandle {
         _tray: tray,
         toggle,
         quit,
@@ -122,30 +129,30 @@ fn setup_tray(world: &mut World) {
         #[cfg(feature = "recording")]
         last_status: None,
     });
-    world.spawn((
+    commands.spawn((
         Name::new("Toggle tray visibility"),
         OsMenuEntry::identified(toggle_id),
         ToggleTrayVisibility,
     ));
-    world.spawn((
+    commands.spawn((
         Name::new("Quit from tray"),
         OsMenuEntry::identified(quit_id),
         QuitFromTray,
     ));
     #[cfg(feature = "recording")]
-    world.spawn((
+    commands.spawn((
         Name::new("Pause recording from tray"),
         OsMenuEntry::identified(pause_id),
         PauseRecordingFromTray,
     ));
     #[cfg(feature = "recording")]
-    world.spawn((
+    commands.spawn((
         Name::new("Resume recording from tray"),
         OsMenuEntry::identified(resume_id),
         ResumeRecordingFromTray,
     ));
     #[cfg(feature = "recording")]
-    world.spawn((
+    commands.spawn((
         Name::new("Finish recording from tray"),
         OsMenuEntry::identified(done_id),
         FinishRecordingFromTray,
@@ -202,11 +209,13 @@ fn control_recording_from_tray(
 fn control_recording_from_tray(_trigger: On<OsMenuSelect>) {}
 
 fn sync_tray_menu_state(
-    handle: Option<NonSendMut<TrayHandle>>,
+    mut runtime: NonSendMut<TrayRuntime>,
     windows: Query<&Window>,
     settings: Res<AppSettings>,
 ) {
-    let Some(mut handle) = handle else { return };
+    let Some(handle) = runtime.0.as_mut() else {
+        return;
+    };
     let any_visible = windows.iter().any(|w| w.visible);
     if handle.last_any_visible == Some(any_visible) && !settings.is_changed() {
         return;
@@ -234,8 +243,10 @@ fn sync_tray_menu_state(
 }
 
 #[cfg(feature = "recording")]
-fn sync_tray_recording(status: Res<RecordingStatus>, handle: Option<NonSendMut<TrayHandle>>) {
-    let Some(mut handle) = handle else { return };
+fn sync_tray_recording(status: Res<RecordingStatus>, mut runtime: NonSendMut<TrayRuntime>) {
+    let Some(handle) = runtime.0.as_mut() else {
+        return;
+    };
     if handle.last_status == Some(*status) {
         return;
     }
