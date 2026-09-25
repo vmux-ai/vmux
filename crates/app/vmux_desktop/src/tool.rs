@@ -254,15 +254,15 @@ impl Plugin for ToolPlugin {
         .add_systems(
             Update,
             (
-                start_external_tool_operation::<ToolInstallRequest>,
-                start_external_tool_operation::<ToolUpdateRequest>,
-                start_external_tool_operation::<ToolUninstallRequest>,
-                start_external_tool_operation::<ToolForgetRequest>,
-                start_external_tool_operation::<ToolAdoptRequest>,
-                start_external_tool_operation::<ToolLinkRequest>,
-                start_external_tool_operation::<ToolUnlinkRequest>,
-                start_external_tool_operation::<ToolApplyRequest>,
-                start_external_tool_operation::<ToolImportRequest>,
+                start_tool_install,
+                start_tool_update,
+                start_tool_uninstall,
+                start_tool_forget,
+                start_tool_adopt,
+                start_tool_link,
+                start_tool_unlink,
+                start_tool_apply,
+                start_tool_import,
             ),
         )
         .add_systems(
@@ -662,6 +662,14 @@ struct ToolOperationTask {
     task: Task<Result<String, String>>,
 }
 
+impl ToolOperationTask {
+    fn spawn(operation: impl FnOnce() -> Result<String, String> + Send + 'static) -> Self {
+        Self {
+            task: IoTaskPool::get().spawn(async move { operation() }),
+        }
+    }
+}
+
 #[derive(Component, Default)]
 struct OperationRequestSequence(u64);
 
@@ -791,144 +799,84 @@ struct InventoryItem {
     removable: bool,
 }
 
-trait DesktopToolRequest: Clone + Send + Sync + 'static {
-    fn operation(&self) -> ToolOperationKey;
-
-    fn execute(self, store: &ToolStore) -> Result<String, String>;
+fn install_tool(request: ToolInstallRequest, store: &ToolStore) -> Result<String, String> {
+    if request.id.trim().is_empty() {
+        return Err("package name is required".to_string());
+    }
+    set_manifest_entry(store, request.provider, &request.id, true)?;
+    install_provider(store, request.provider, &request.id)?;
+    Ok(format!("{} installed", request.id))
 }
 
-impl DesktopToolRequest for ToolInstallRequest {
-    fn operation(&self) -> ToolOperationKey {
-        ToolOperationKey::new(self.provider, ToolOperationKind::Install, self.id.clone())
+fn update_tool(request: ToolUpdateRequest, store: &ToolStore) -> Result<String, String> {
+    if request.id.trim().is_empty() {
+        return Err("package name is required".to_string());
     }
-
-    fn execute(self, store: &ToolStore) -> Result<String, String> {
-        if self.id.trim().is_empty() {
-            return Err("package name is required".to_string());
-        }
-        set_manifest_entry(store, self.provider, &self.id, true)?;
-        install_provider(store, self.provider, &self.id)?;
-        Ok(format!("{} installed", self.id))
-    }
+    set_manifest_entry(store, request.provider, &request.id, true)?;
+    update_provider(store, request.provider, &request.id)?;
+    Ok(format!("{} updated", request.id))
 }
 
-impl DesktopToolRequest for ToolUpdateRequest {
-    fn operation(&self) -> ToolOperationKey {
-        ToolOperationKey::new(self.provider, ToolOperationKind::Update, self.id.clone())
+fn uninstall_tool(request: ToolUninstallRequest, store: &ToolStore) -> Result<String, String> {
+    if request.id.trim().is_empty() {
+        return Err("package name is required".to_string());
     }
-
-    fn execute(self, store: &ToolStore) -> Result<String, String> {
-        if self.id.trim().is_empty() {
-            return Err("package name is required".to_string());
-        }
-        set_manifest_entry(store, self.provider, &self.id, true)?;
-        update_provider(store, self.provider, &self.id)?;
-        Ok(format!("{} updated", self.id))
-    }
+    uninstall_provider(store, request.provider, &request.id)?;
+    set_manifest_entry(store, request.provider, &request.id, false)?;
+    Ok(format!("{} removed", request.id))
 }
 
-impl DesktopToolRequest for ToolUninstallRequest {
-    fn operation(&self) -> ToolOperationKey {
-        ToolOperationKey::new(self.provider, ToolOperationKind::Uninstall, self.id.clone())
+fn forget_tool(request: ToolForgetRequest, store: &ToolStore) -> Result<String, String> {
+    if request.id.trim().is_empty() {
+        return Err("package name is required".to_string());
     }
-
-    fn execute(self, store: &ToolStore) -> Result<String, String> {
-        if self.id.trim().is_empty() {
-            return Err("package name is required".to_string());
-        }
-        uninstall_provider(store, self.provider, &self.id)?;
-        set_manifest_entry(store, self.provider, &self.id, false)?;
-        Ok(format!("{} removed", self.id))
-    }
+    set_manifest_entry(store, request.provider, &request.id, false)?;
+    Ok(format!("{} removed from tools.toml", request.id))
 }
 
-impl DesktopToolRequest for ToolForgetRequest {
-    fn operation(&self) -> ToolOperationKey {
-        ToolOperationKey::new(self.provider, ToolOperationKind::Forget, self.id.clone())
+fn adopt_tool(request: ToolAdoptRequest, store: &ToolStore) -> Result<String, String> {
+    if request.id.trim().is_empty() {
+        return Err("package name is required".to_string());
     }
-
-    fn execute(self, store: &ToolStore) -> Result<String, String> {
-        if self.id.trim().is_empty() {
-            return Err("package name is required".to_string());
-        }
-        set_manifest_entry(store, self.provider, &self.id, false)?;
-        Ok(format!("{} removed from tools.toml", self.id))
+    if matches!(request.provider, ToolProvider::Dotfiles | ToolProvider::Mcp) {
+        return Err(format!(
+            "{} adopt request reached the desktop fallback",
+            request.provider.id()
+        ));
     }
+    set_manifest_entry(store, request.provider, &request.id, true)?;
+    Ok(format!("{} is now managed", request.id))
 }
 
-impl DesktopToolRequest for ToolAdoptRequest {
-    fn operation(&self) -> ToolOperationKey {
-        ToolOperationKey::new(self.provider, ToolOperationKind::Adopt, self.id.clone())
+fn link_tool(request: ToolLinkRequest, store: &ToolStore) -> Result<String, String> {
+    if request.id.trim().is_empty() {
+        return Err("package name is required".to_string());
     }
-
-    fn execute(self, store: &ToolStore) -> Result<String, String> {
-        if self.id.trim().is_empty() {
-            return Err("package name is required".to_string());
-        }
-        if matches!(self.provider, ToolProvider::Dotfiles | ToolProvider::Mcp) {
-            return Err(format!(
-                "{} adopt request reached the desktop fallback",
-                self.provider.id()
-            ));
-        }
-        set_manifest_entry(store, self.provider, &self.id, true)?;
-        Ok(format!("{} is now managed", self.id))
+    if request.provider != ToolProvider::Dotfiles {
+        return Err("link is only valid for dotfiles".to_string());
     }
+    set_manifest_entry(store, request.provider, &request.id, true)?;
+    let linked = store.apply_dotfile_package(&request.id)?;
+    Ok(format!("linked {linked} file(s)"))
 }
 
-impl DesktopToolRequest for ToolLinkRequest {
-    fn operation(&self) -> ToolOperationKey {
-        ToolOperationKey::new(self.provider, ToolOperationKind::Link, self.id.clone())
+fn unlink_tool(request: ToolUnlinkRequest, store: &ToolStore) -> Result<String, String> {
+    if request.id.trim().is_empty() {
+        return Err("package name is required".to_string());
     }
-
-    fn execute(self, store: &ToolStore) -> Result<String, String> {
-        if self.id.trim().is_empty() {
-            return Err("package name is required".to_string());
-        }
-        if self.provider != ToolProvider::Dotfiles {
-            return Err("link is only valid for dotfiles".to_string());
-        }
-        set_manifest_entry(store, self.provider, &self.id, true)?;
-        let linked = store.apply_dotfile_package(&self.id)?;
-        Ok(format!("linked {linked} file(s)"))
+    if request.provider != ToolProvider::Dotfiles {
+        return Err("unlink is only valid for dotfiles".to_string());
     }
+    let removed = store.disable_and_unlink_dotfile_package(&request.id)?;
+    Ok(format!("unlinked {removed} file(s)"))
 }
 
-impl DesktopToolRequest for ToolUnlinkRequest {
-    fn operation(&self) -> ToolOperationKey {
-        ToolOperationKey::new(self.provider, ToolOperationKind::Unlink, self.id.clone())
-    }
-
-    fn execute(self, store: &ToolStore) -> Result<String, String> {
-        if self.id.trim().is_empty() {
-            return Err("package name is required".to_string());
-        }
-        if self.provider != ToolProvider::Dotfiles {
-            return Err("unlink is only valid for dotfiles".to_string());
-        }
-        let removed = store.disable_and_unlink_dotfile_package(&self.id)?;
-        Ok(format!("unlinked {removed} file(s)"))
-    }
+fn apply_tools(_request: ToolApplyRequest, store: &ToolStore) -> Result<String, String> {
+    apply_manifest(store)
 }
 
-impl DesktopToolRequest for ToolApplyRequest {
-    fn operation(&self) -> ToolOperationKey {
-        ToolOperationKey::new(ToolProvider::Dotfiles, ToolOperationKind::Apply, "")
-    }
-
-    fn execute(self, store: &ToolStore) -> Result<String, String> {
-        apply_manifest(store)
-    }
-}
-
-impl DesktopToolRequest for ToolImportRequest {
-    fn operation(&self) -> ToolOperationKey {
-        ToolOperationKey::new(self.provider, ToolOperationKind::Import, "")
-    }
-
-    fn execute(self, store: &ToolStore) -> Result<String, String> {
-        import_provider(store, self.provider, self.value.trim())
-    }
+fn import_tools(request: ToolImportRequest, store: &ToolStore) -> Result<String, String> {
+    import_provider(store, request.provider, request.value.trim())
 }
 
 type VaultOperationFuture =
@@ -1388,9 +1336,10 @@ fn on_refresh_request(
     }
 }
 
-fn queue_tool_operation<R: DesktopToolRequest>(
+fn queue_tool_operation<R: Clone + Send + Sync + 'static>(
     target: Entity,
     request: R,
+    operation: ToolOperationKey,
     mut registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
     mut subscribers: Query<&mut ToolSubscriber>,
     mut commands: Commands,
@@ -1399,7 +1348,6 @@ fn queue_tool_operation<R: DesktopToolRequest>(
         return;
     };
     let operation_id = sequence.next();
-    let operation = request.operation();
     if let Ok(mut subscriber) = subscribers.get_mut(target) {
         subscriber.begin(operation_id, operation.clone());
     } else {
@@ -1419,16 +1367,18 @@ fn queue_tool_operation<R: DesktopToolRequest>(
 }
 
 macro_rules! tool_operation_observer {
-    ($name:ident, $request:ty) => {
+    ($name:ident, $request:ty, $operation:expr) => {
         fn $name(
             trigger: On<UiInput<$request>>,
             registries: Query<&mut OperationRequestSequence, With<ToolRegistry>>,
             subscribers: Query<&mut ToolSubscriber>,
             commands: Commands,
         ) {
+            let request = trigger.event().payload.clone();
             queue_tool_operation(
                 trigger.event().webview,
-                trigger.event().payload.clone(),
+                request.clone(),
+                ($operation)(request),
                 registries,
                 subscribers,
                 commands,
@@ -1437,15 +1387,69 @@ macro_rules! tool_operation_observer {
     };
 }
 
-tool_operation_observer!(on_install_request, ToolInstallRequest);
-tool_operation_observer!(on_update_request, ToolUpdateRequest);
-tool_operation_observer!(on_uninstall_request, ToolUninstallRequest);
-tool_operation_observer!(on_forget_request, ToolForgetRequest);
-tool_operation_observer!(on_adopt_request, ToolAdoptRequest);
-tool_operation_observer!(on_link_request, ToolLinkRequest);
-tool_operation_observer!(on_unlink_request, ToolUnlinkRequest);
-tool_operation_observer!(on_apply_request, ToolApplyRequest);
-tool_operation_observer!(on_import_request, ToolImportRequest);
+tool_operation_observer!(
+    on_install_request,
+    ToolInstallRequest,
+    |request: ToolInstallRequest| {
+        ToolOperationKey::new(request.provider, ToolOperationKind::Install, request.id)
+    }
+);
+tool_operation_observer!(
+    on_update_request,
+    ToolUpdateRequest,
+    |request: ToolUpdateRequest| {
+        ToolOperationKey::new(request.provider, ToolOperationKind::Update, request.id)
+    }
+);
+tool_operation_observer!(
+    on_uninstall_request,
+    ToolUninstallRequest,
+    |request: ToolUninstallRequest| {
+        ToolOperationKey::new(request.provider, ToolOperationKind::Uninstall, request.id)
+    }
+);
+tool_operation_observer!(
+    on_forget_request,
+    ToolForgetRequest,
+    |request: ToolForgetRequest| {
+        ToolOperationKey::new(request.provider, ToolOperationKind::Forget, request.id)
+    }
+);
+tool_operation_observer!(
+    on_adopt_request,
+    ToolAdoptRequest,
+    |request: ToolAdoptRequest| {
+        ToolOperationKey::new(request.provider, ToolOperationKind::Adopt, request.id)
+    }
+);
+tool_operation_observer!(
+    on_link_request,
+    ToolLinkRequest,
+    |request: ToolLinkRequest| {
+        ToolOperationKey::new(request.provider, ToolOperationKind::Link, request.id)
+    }
+);
+tool_operation_observer!(
+    on_unlink_request,
+    ToolUnlinkRequest,
+    |request: ToolUnlinkRequest| {
+        ToolOperationKey::new(request.provider, ToolOperationKind::Unlink, request.id)
+    }
+);
+tool_operation_observer!(
+    on_apply_request,
+    ToolApplyRequest,
+    |_request: ToolApplyRequest| {
+        ToolOperationKey::new(ToolProvider::Dotfiles, ToolOperationKind::Apply, "")
+    }
+);
+tool_operation_observer!(
+    on_import_request,
+    ToolImportRequest,
+    |request: ToolImportRequest| {
+        ToolOperationKey::new(request.provider, ToolOperationKind::Import, "")
+    }
+);
 
 fn queue_vault_operation<R: DesktopVaultRequest>(
     target: Entity,
@@ -1979,27 +1983,39 @@ fn start_tool_operation(
         .insert(ToolStoreTarget::new(store));
 }
 
-fn start_external_tool_operation<R: DesktopToolRequest>(
-    operations: Query<
-        (Entity, &ToolOperationRequest<R>, &ToolStoreTarget),
-        Added<ExternalToolOperation>,
-    >,
-    stores: Query<&ToolStore>,
-    mut commands: Commands,
-) {
-    for (entity, operation, store) in &operations {
-        let Ok(store) = stores.get(store.entity()) else {
-            continue;
-        };
-        let request = operation.request().clone();
-        let store = store.clone();
-        let task = IoTaskPool::get().spawn(async move { request.execute(&store) });
-        commands
-            .entity(entity)
-            .remove::<ExternalToolOperation>()
-            .insert(ToolOperationTask { task });
-    }
+macro_rules! external_tool_system {
+    ($name:ident, $request:ty, $execute:ident) => {
+        fn $name(
+            operations: Query<
+                (Entity, &ToolOperationRequest<$request>, &ToolStoreTarget),
+                Added<ExternalToolOperation>,
+            >,
+            stores: Query<&ToolStore>,
+            mut commands: Commands,
+        ) {
+            for (entity, operation, target) in &operations {
+                let Ok(store) = stores.get(target.entity()).cloned() else {
+                    continue;
+                };
+                let request = operation.request().clone();
+                commands
+                    .entity(entity)
+                    .remove::<ExternalToolOperation>()
+                    .insert(ToolOperationTask::spawn(move || $execute(request, &store)));
+            }
+        }
+    };
 }
+
+external_tool_system!(start_tool_install, ToolInstallRequest, install_tool);
+external_tool_system!(start_tool_update, ToolUpdateRequest, update_tool);
+external_tool_system!(start_tool_uninstall, ToolUninstallRequest, uninstall_tool);
+external_tool_system!(start_tool_forget, ToolForgetRequest, forget_tool);
+external_tool_system!(start_tool_adopt, ToolAdoptRequest, adopt_tool);
+external_tool_system!(start_tool_link, ToolLinkRequest, link_tool);
+external_tool_system!(start_tool_unlink, ToolUnlinkRequest, unlink_tool);
+external_tool_system!(start_tool_apply, ToolApplyRequest, apply_tools);
+external_tool_system!(start_tool_import, ToolImportRequest, import_tools);
 
 fn start_vault_operation(
     pending: Query<(Entity, &VaultOperationContext), With<PendingVaultOperation>>,
