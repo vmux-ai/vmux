@@ -1077,7 +1077,6 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<crate::tab::LastTabCloseAt>()
             .init_resource::<FocusedStack>()
             .insert_resource(test_settings())
             .add_systems(
@@ -1222,7 +1221,6 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<crate::tab::LastTabCloseAt>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,
@@ -1286,7 +1284,6 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<crate::tab::LastTabCloseAt>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,

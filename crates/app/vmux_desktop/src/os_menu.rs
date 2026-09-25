@@ -33,6 +33,7 @@ impl Plugin for OsMenuPlugin {
             .add_message::<vmux_browser::OpenRequest>()
             .add_observer(dispatch_command_menu_selection)
             .add_observer(hide_windows_from_menu)
+            .add_observer(remember_tab_close)
             .add_systems(
                 Startup,
                 setup
@@ -63,6 +64,7 @@ impl Plugin for OsMenuPlugin {
 struct OsMenuState {
     last_menu_command_at: Option<std::time::Instant>,
     last_stack_close_at: Option<std::time::Instant>,
+    last_tab_close_at: Option<std::time::Instant>,
     last_native_page_open_at: Option<std::time::Instant>,
     close_item_enabled: bool,
 }
@@ -72,6 +74,7 @@ impl Default for OsMenuState {
         Self {
             last_menu_command_at: None,
             last_stack_close_at: None,
+            last_tab_close_at: None,
             last_native_page_open_at: None,
             close_item_enabled: true,
         }
@@ -575,6 +578,13 @@ fn remember_stack_close_commands(
     }
 }
 
+fn remember_tab_close(
+    _trigger: On<vmux_layout::tab::TabClosed>,
+    mut state: Single<&mut OsMenuState>,
+) {
+    state.last_tab_close_at = Some(std::time::Instant::now());
+}
+
 fn remember_native_page_open_requests(
     mut reader: MessageReader<vmux_browser::OpenRequest>,
     mut state: Single<&mut OsMenuState>,
@@ -595,14 +605,12 @@ fn hide_window_on_close_request(
     mut windows: Query<&mut Window>,
     mut close_windows: MessageWriter<crate::window_manager::CloseVmuxWindow>,
     state: Single<&OsMenuState>,
-    last_tab_close: Option<Res<vmux_layout::tab::LastTabCloseAt>>,
 ) {
     let from_menu_key_equivalent = state
         .last_menu_command_at
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
-    let from_tab_close = last_tab_close
-        .as_deref()
-        .and_then(|last| last.0)
+    let from_tab_close = state
+        .last_tab_close_at
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
     let from_stack_close = state
         .last_stack_close_at
@@ -790,6 +798,25 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<CloseRequest>>()
             .write(CloseRequest);
+        app.world_mut()
+            .resource_mut::<Messages<WindowCloseRequested>>()
+            .write(WindowCloseRequested { window });
+
+        app.world_mut().run_schedule(Update);
+
+        assert!(app.world().get::<Window>(window).unwrap().visible);
+    }
+
+    #[test]
+    fn window_close_request_after_tab_close_is_suppressed() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<CloseRequest>()
+            .add_message::<WindowCloseRequested>()
+            .insert_resource(test_settings());
+
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut().trigger(vmux_layout::tab::TabClosed);
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });
