@@ -21,18 +21,18 @@ pub(crate) struct AgentBrowserResolve<'w, 's> {
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
     browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
-    active: Res<'w, vmux_layout::active_panes::ActivePanes>,
+    active: vmux_layout::active_pane::ActivePaneQuery<'w, 's>,
 }
 
 pub(crate) struct AgentBrowserPaneClaim {
     pub(crate) pane: Entity,
     pub(crate) stack: Option<Entity>,
-    pub(crate) activation: vmux_layout::active_panes::ActivatePane,
+    pub(crate) activation: vmux_layout::active_pane::ActivatePane,
 }
 
 pub(crate) struct AgentBrowserPaneResolution {
     pub(crate) pane: Option<String>,
-    pub(crate) activation: Option<vmux_layout::active_panes::ActivatePane>,
+    pub(crate) activation: Option<vmux_layout::active_pane::ActivatePane>,
 }
 
 impl AgentBrowserResolve<'_, '_> {
@@ -102,7 +102,7 @@ impl AgentBrowserResolve<'_, '_> {
     ) -> Option<AgentBrowserPaneClaim> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
         let kind = self.agent_kind(anchor);
-        let profile = vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}"));
+        let profile = vmux_layout::active_pane::ProfileId::Agent(format!("{anchor:?}"));
         let stack = self
             .active
             .get(&profile)
@@ -111,9 +111,9 @@ impl AgentBrowserResolve<'_, '_> {
         Some(AgentBrowserPaneClaim {
             pane,
             stack,
-            activation: vmux_layout::active_panes::ActivatePane {
+            activation: vmux_layout::active_pane::ActivatePane {
                 profile,
-                active: vmux_layout::active_panes::ActiveStack {
+                active: vmux_layout::active_pane::ActiveStack {
                     tab: None,
                     pane: Some(pane),
                     stack,

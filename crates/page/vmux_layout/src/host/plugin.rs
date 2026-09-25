@@ -4,7 +4,7 @@ use vmux_core::page::{PageReady, mark_webview_page_ready};
 
 use super::command::LayoutRequestPlugin;
 use super::projection::LayoutUiProjectionPlugin;
-use crate::active_panes::ActivePanesPlugin;
+use crate::active_pane::ActivePanePlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
 use crate::cef::LayoutCefPlugin;
@@ -75,7 +75,7 @@ impl Plugin for LayoutPlugin {
                 TabPlugin,
                 PanePlugin,
                 StackPlugin,
-                ActivePanesPlugin,
+                ActivePanePlugin,
                 SideSheetLayoutPlugin,
                 HeaderLayoutPlugin,
                 WorktreePlugin,

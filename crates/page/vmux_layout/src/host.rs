@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 pub mod active;
-pub mod active_panes;
+pub mod active_pane;
 pub mod apply;
 pub mod archive;
 pub mod bookmark;

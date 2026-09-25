@@ -382,25 +382,19 @@ fn active_tab_is_visible(
 
 fn windowed_ring_for(
     stack: Entity,
-    pane: Entity,
     focus: &vmux_layout::stack::FocusedStack,
     visible_pane_count: usize,
-    active_panes: &vmux_layout::active_panes::ActivePanes,
+    agent: Option<(&str, vmux_layout::active_pane::ActiveStack)>,
     settings: &AppSettings,
     scale: f32,
 ) -> (f32, [f32; 3], Option<vmux_core::agent::AgentKind>) {
-    use vmux_layout::active_panes::ProfileId;
     let width = settings.layout.focus_ring.width * scale;
     let user = &settings.layout.focus_ring.color;
     if focus.stack == Some(stack) && visible_pane_count > 1 {
         return (width, [user.r, user.g, user.b], None);
     }
-    for (profile, active) in active_panes.0.iter() {
-        if let ProfileId::Agent(key) = profile
-            && active.pane == Some(pane)
-        {
-            return (width, agent_ring_rgb(key), active.kind);
-        }
+    if let Some((profile, active)) = agent {
+        return (width, agent_ring_rgb(profile), active.kind);
     }
     (0.0, [user.r, user.g, user.b], None)
 }
@@ -439,7 +433,7 @@ pub(crate) fn sync_windowed_frames(
     added_hidden_windows: Query<(), Added<vmux_layout::toggle::LayoutHidden>>,
     mut removed_hidden_windows: RemovedComponents<vmux_layout::toggle::LayoutHidden>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    active_panes: Res<vmux_layout::active_panes::ActivePanes>,
+    active_panes: vmux_layout::active_pane::ActivePaneQuery,
     clear_color: Res<vmux_layout::window::WindowBackground>,
     browser_q: Query<
         (
@@ -575,10 +569,9 @@ pub(crate) fn sync_windowed_frames(
         );
         let (focus_ring_width, focus_ring_rgb, focus_ring_kind) = windowed_ring_for(
             parent,
-            pane_entity,
             &focus,
             visible_pane_count,
-            &active_panes,
+            active_panes.agent_in_pane(pane_entity),
             &settings,
             scale,
         );
@@ -1514,21 +1507,19 @@ mod tests {
 
     #[test]
     fn the_user_ring_outranks_an_agent_ring_on_the_same_pane() {
-        use vmux_layout::active_panes::{ActivePanes, ActiveStack, ProfileId};
+        use vmux_layout::active_pane::ActiveStack;
         use vmux_layout::stack::FocusedStack;
 
         let mut world = World::new();
-        let pane = world.spawn_empty().id();
         let stack = world.spawn_empty().id();
         let settings = test_app_settings_with_radius(0.0);
         let user = &settings.layout.focus_ring.color;
 
-        let mut agent_only = ActivePanes::default();
-        agent_only.0.insert(
-            ProfileId::Agent("claude".to_string()),
+        let agent = (
+            "claude",
             ActiveStack {
                 tab: None,
-                pane: Some(pane),
+                pane: None,
                 stack: Some(stack),
                 kind: Some(vmux_core::agent::AgentKind::Claude),
             },
@@ -1536,7 +1527,7 @@ mod tests {
         let unfocused = FocusedStack::default();
 
         let (width, rgb, kind) =
-            windowed_ring_for(stack, pane, &unfocused, 2, &agent_only, &settings, 1.0);
+            windowed_ring_for(stack, &unfocused, 2, Some(agent), &settings, 1.0);
         assert!(width > 0.0, "an agent's active pane draws a ring");
         assert_eq!(kind, Some(vmux_core::agent::AgentKind::Claude));
         assert_ne!(
@@ -1549,21 +1540,12 @@ mod tests {
             stack: Some(stack),
             ..Default::default()
         };
-        let (width, rgb, kind) =
-            windowed_ring_for(stack, pane, &focused, 2, &agent_only, &settings, 1.0);
+        let (width, rgb, kind) = windowed_ring_for(stack, &focused, 2, Some(agent), &settings, 1.0);
         assert!(width > 0.0);
         assert_eq!(rgb, [user.r, user.g, user.b]);
         assert_eq!(kind, None, "no agent badge on the user's own ring");
 
-        let (width, _, _) = windowed_ring_for(
-            stack,
-            pane,
-            &focused,
-            1,
-            &ActivePanes::default(),
-            &settings,
-            1.0,
-        );
+        let (width, _, _) = windowed_ring_for(stack, &focused, 1, None, &settings, 1.0);
         assert_eq!(width, 0.0);
     }
 

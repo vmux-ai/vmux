@@ -307,7 +307,7 @@ fn handle_browser_commands(
     mut open_stack: MessageWriter<vmux_layout::OpenInNewStackRequest>,
     mut install_extension: MessageWriter<vmux_layout::ExtensionInstallRequest>,
     mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
-    mut activate: MessageWriter<vmux_layout::active_panes::ActivatePane>,
+    mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
     browse: AgentBrowserResolve,
     service: Option<Res<ServiceClient>>,
 ) {

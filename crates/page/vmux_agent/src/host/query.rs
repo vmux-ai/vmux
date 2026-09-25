@@ -411,7 +411,7 @@ fn route_browser_queries(
     service: Option<Res<ServiceClient>>,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
     mut scroll_writer: MessageWriter<BrowserScrollRequest>,
-    mut activate: MessageWriter<vmux_layout::active_panes::ActivatePane>,
+    mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
     browse: AgentBrowserResolve,
 ) {
     let Some(_) = service else { return };

@@ -6,7 +6,7 @@ use vmux_core::LastActivatedAt;
 use vmux_core::browser::{BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot};
 use vmux_core::dom_snapshot::{RawSnapshot, shape_snapshot};
 use vmux_core::terminal::{ProcessExited, Terminal};
-use vmux_layout::active_panes::ActivePanes;
+use vmux_layout::active_pane::ActivePaneQuery;
 use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::{Stack, active_stack_in_pane};
 use vmux_layout::target::active_webview_for_tab;
@@ -55,7 +55,7 @@ fn parse_hex(s: &str) -> Option<[u8; 16]> {
 pub(crate) fn start_snapshots(
     mut reader: MessageReader<BrowserSnapshotRequest>,
     cef_browsers: NonSend<Browsers>,
-    active: Res<ActivePanes>,
+    active: ActivePaneQuery,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
@@ -106,7 +106,7 @@ pub(crate) fn start_snapshots(
 }
 
 pub(crate) fn default_browser(
-    active: &ActivePanes,
+    active: &ActivePaneQuery,
     panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     browsers: &Query<(Entity, &ChildOf), With<Browser>>,

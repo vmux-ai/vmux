@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::active_panes::{ActivatePane, ActivePanes};
+use crate::active_pane::ActivatePane;
 use crate::apply::{
     LayoutApplyRequest, LayoutApplyResponse, LayoutSnapshotRequest, LayoutSnapshotResponse,
 };
@@ -24,8 +24,7 @@ pub struct LayoutContractPlugin;
 
 impl Plugin for LayoutContractPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ActivePanes>()
-            .init_resource::<EffectiveStartupDir>()
+        app.init_resource::<EffectiveStartupDir>()
             .init_resource::<EffectiveStartupUrl>()
             .init_resource::<FocusedStack>()
             .init_resource::<PendingLaunch>()
