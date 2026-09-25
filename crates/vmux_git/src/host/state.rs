@@ -5,12 +5,12 @@ use bevy_cef::prelude::UiInput;
 use vmux_core::page::PageReady;
 
 use crate::event::{
-    GitBranchLog, GitDiffViewport, GitDirectorySnapshot, GitOperationError, GitOperationResult,
-    GitRepositorySnapshot,
+    GitBranchLog, GitDiffViewport, GitOperationError, GitOperationResult, GitRepositorySnapshot,
 };
 use crate::state::{GitCommandLogEntry, GitPageSnapshot, GitUiState};
 
 use super::controller::GitController;
+use super::directory::GitDirectoryNavigation;
 
 type GitUiStateUpdates = vmux_core::host::UiState<GitUiState>;
 
@@ -25,7 +25,7 @@ impl Plugin for StatePlugin {
 }
 
 #[derive(Component, Default)]
-#[require(GitUiStateUpdates, GitController)]
+#[require(GitUiStateUpdates, GitController, GitDirectoryNavigation)]
 pub(super) struct GitState {
     snapshot: GitPageSnapshot,
 }
@@ -48,30 +48,18 @@ impl GitState {
     pub(super) fn set_repository(&mut self, event: GitRepositorySnapshot) {
         self.snapshot.workspace.clone_from(&event.repo_root);
         self.snapshot.repository = Some(event);
-        self.snapshot.directory = None;
-        self.snapshot.directory_preview = None;
         self.snapshot.loading = false;
         self.snapshot.message.clear();
     }
 
-    pub(super) fn start_directory(&mut self, path: &Path, preview: bool) {
-        if preview {
-            return;
-        }
+    pub(super) fn start_directory(&mut self, path: &Path) {
         self.snapshot.workspace = path.to_string_lossy().into_owned();
         self.snapshot.loading = true;
         self.snapshot.message.clear();
     }
 
-    pub(super) fn set_directory(&mut self, event: GitDirectorySnapshot) {
-        if event.preview {
-            self.snapshot.directory_preview = Some(event);
-            return;
-        }
-        self.snapshot.workspace.clone_from(&event.path);
+    pub(super) fn finish_directory(&mut self) {
         self.snapshot.repository = None;
-        self.snapshot.directory = Some(event);
-        self.snapshot.directory_preview = None;
         self.snapshot.loading = false;
         self.snapshot.message.clear();
     }
@@ -177,21 +165,36 @@ fn on_page_ready(
     commands.entity(entity).insert(GitState::default());
 }
 
-fn publish_git_state(
-    views: Query<(Entity, Ref<GitState>, Ref<GitController>)>,
-    mut commands: Commands,
-) {
-    for (entity, view, controller) in &views {
-        if !view.is_changed() && !controller.is_changed() {
-            continue;
+type GitStateQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Ref<'static, GitState>,
+        Ref<'static, GitController>,
+        Ref<'static, GitDirectoryNavigation>,
+    ),
+>;
+
+fn publish_git_state(views: GitStateQuery, mut commands: Commands) {
+    for (entity, view, controller, directory) in &views {
+        if view.is_changed() {
+            commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
+                entity,
+                &view.snapshot,
+            ));
         }
-        commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
-            entity,
-            &view.snapshot,
-        ));
-        commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
-            entity,
-            controller.state(),
-        ));
+        if controller.is_changed() {
+            commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
+                entity,
+                controller.state(),
+            ));
+        }
+        if directory.is_changed() {
+            commands.trigger(vmux_core::host::UiStateWrite::<GitUiState>::from_event(
+                entity,
+                &directory.state(),
+            ));
+        }
     }
 }

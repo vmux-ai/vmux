@@ -4,31 +4,31 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::directory::{DirectoryNavigator, DirectoryNavigatorEvent, visible_directory_entries};
+use vmux_ui::directory::{DirectoryNavigator, DirectoryNavigatorEvent};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
 
 use super::state::GitPageState;
-use crate::event::GitDirectoryRequest;
+use crate::event::{
+    GitDirectoryAscendRequest, GitDirectoryDescendRequest, GitDirectoryOpenRequest,
+    GitDirectorySelectRequest, GitDirectoryToggleHiddenRequest,
+};
 
 #[component]
 pub(super) fn EmptyRepository() -> Element {
     let GitPageState {
         snapshot,
-        directory_selected: mut selected,
-        directory_preview_path: mut preview_path,
-        directory_came_from: mut came_from,
-        directory_show_hidden: mut show_hidden,
+        directory,
         ..
     } = use_context::<GitPageState>();
     let ui = snapshot();
     let loading = ui.loading;
     let workspace = ui.workspace;
     let message = ui.message;
-    let directory = ui.directory;
-    let Some(directory) = directory else {
+    let directory = directory();
+    if directory.path.is_empty() {
         return rsx! {
             if loading {
                 GitLoadingSkeleton {}
@@ -44,20 +44,14 @@ pub(super) fn EmptyRepository() -> Element {
                 }
             }
         };
-    };
-    let path = directory.path.clone();
-    let entries = directory.entries.clone();
-    let action_directory = directory.clone();
-    let children = ui
-        .directory_preview
-        .filter(|preview| preview.path == preview_path())
-        .map(|preview| preview.entries);
+    }
+    let selected = usize::try_from(directory.selected).unwrap_or_default();
 
     rsx! {
         main { class: "flex min-h-0 flex-1 flex-col overflow-hidden bg-background bg-[radial-gradient(120%_80%_at_50%_-10%,color-mix(in_oklab,var(--primary)_5%,transparent),transparent_60%)] font-mono text-sm leading-normal",
             div { class: "relative z-20 flex h-7 shrink-0 items-center gap-1 overflow-hidden border-b border-foreground/[0.07] bg-background/40 px-4 font-sans text-ui text-muted-foreground",
-                TypeIcon { path: path.clone(), is_dir: true, class: "h-3.5 w-3.5 shrink-0 opacity-80" }
-                span { class: "truncate text-foreground/90", "{path}" }
+                TypeIcon { path: directory.path.clone(), is_dir: true, class: "h-3.5 w-3.5 shrink-0 opacity-80" }
+                span { class: "truncate text-foreground/90", "{directory.path}" }
                 if loading {
                     LineIconView { icon: LineIcon::RefreshCw, class: "ml-auto h-3.5 w-3.5 shrink-0 animate-spin" }
                 } else if !message.is_empty() {
@@ -65,72 +59,33 @@ pub(super) fn EmptyRepository() -> Element {
                 }
             }
             DirectoryNavigator {
-                path,
+                path: directory.path,
                 parent_entries: directory.parent_entries,
-                entries,
-                children,
-                selected: selected(),
+                entries: directory.entries,
+                children: directory.children,
+                selected,
                 thumbs: HashMap::new(),
-                show_hidden: show_hidden(),
                 preview: rsx! { div { class: "text-xs text-muted-foreground opacity-60", "" } },
                 on_event: move |event| match event {
-                    DirectoryNavigatorEvent::Select { index, entry } => {
-                        selected.set(index);
-                        preview_path.set(String::new());
-                        if entry.is_dir {
-                            preview_path.set(entry.path.clone());
-                            let _ = send(&GitDirectoryRequest {
-                                path: entry.path.clone(),
-                                preview: true,
-                            });
-                        }
-                    }
-                    DirectoryNavigatorEvent::Ascend { target } => {
-                        if action_directory.parent_path.is_empty() {
-                            return;
-                        }
-                        came_from.set(target);
-                        let _ = send(&GitDirectoryRequest {
-                            path: action_directory.parent_path.clone(),
-                            preview: false,
-                        });
-                    }
-                    DirectoryNavigatorEvent::Descend { target } => {
-                        let Some(entry) = action_directory.entries.get(selected()) else {
+                    DirectoryNavigatorEvent::Select { index, .. } => {
+                        let Ok(index) = u32::try_from(index) else {
                             return;
                         };
-                        if !entry.is_dir {
-                            return;
-                        }
-                        came_from.set(target);
-                        let _ = send(&GitDirectoryRequest {
-                            path: entry.path.clone(),
-                            preview: false,
-                        });
+                        let _ = send(&GitDirectorySelectRequest { index });
+                    }
+                    DirectoryNavigatorEvent::Ascend { target } => {
+                        let _ = send(&GitDirectoryAscendRequest { target });
+                    }
+                    DirectoryNavigatorEvent::Descend { target } => {
+                        let _ = send(&GitDirectoryDescendRequest { target });
                     }
                     DirectoryNavigatorEvent::Open { entry } => {
                         if entry.is_dir {
-                            came_from.set(String::new());
-                            let _ = send(&GitDirectoryRequest {
-                                path: entry.path.clone(),
-                                preview: false,
-                            });
+                            let _ = send(&GitDirectoryOpenRequest { path: entry.path });
                         }
                     }
                     DirectoryNavigatorEvent::ToggleHidden => {
-                        let next = !show_hidden();
-                        show_hidden.set(next);
-                        let entries = visible_directory_entries(&action_directory.entries, next);
-                        let index = selected().min(entries.len().saturating_sub(1));
-                        selected.set(index);
-                        preview_path.set(String::new());
-                        if let Some(entry) = entries.get(index).filter(|entry| entry.is_dir) {
-                            preview_path.set(entry.path.clone());
-                            let _ = send(&GitDirectoryRequest {
-                                path: entry.path.clone(),
-                                preview: true,
-                            });
-                        }
+                        let _ = send(&GitDirectoryToggleHiddenRequest);
                     }
                 },
             }

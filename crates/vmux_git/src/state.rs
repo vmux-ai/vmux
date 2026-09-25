@@ -1,6 +1,4 @@
-use crate::event::{
-    GitBranchLog, GitDiffViewport, GitDirectorySnapshot, GitOperationResult, GitRepositorySnapshot,
-};
+use crate::event::{GitBranchLog, GitDiffViewport, GitOperationResult, GitRepositorySnapshot};
 
 #[vmux_api::contract(Copy, Eq, Default)]
 pub enum GitPanel {
@@ -163,12 +161,33 @@ pub struct GitCommandLogEntry {
     pub ok: bool,
 }
 
+#[vmux_api::contract(Eq)]
+pub struct GitDirectoryState {
+    pub path: String,
+    pub parent_entries: Vec<vmux_core::event::FileDirEntry>,
+    pub entries: Vec<vmux_core::event::FileDirEntry>,
+    pub children: Option<Vec<vmux_core::event::FileDirEntry>>,
+    pub selected: u32,
+    pub show_hidden: bool,
+}
+
+impl Default for GitDirectoryState {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            parent_entries: Vec::new(),
+            entries: Vec::new(),
+            children: None,
+            selected: 0,
+            show_hidden: true,
+        }
+    }
+}
+
 #[vmux_api::contract]
 pub struct GitPageSnapshot {
     pub workspace: String,
     pub repository: Option<GitRepositorySnapshot>,
-    pub directory: Option<GitDirectorySnapshot>,
-    pub directory_preview: Option<GitDirectorySnapshot>,
     pub branch_log: Option<GitBranchLog>,
     pub diff_viewport: Option<GitDiffViewport>,
     pub diff_loading: bool,
@@ -186,8 +205,6 @@ impl Default for GitPageSnapshot {
         Self {
             workspace: String::new(),
             repository: None,
-            directory: None,
-            directory_preview: None,
             branch_log: None,
             diff_viewport: None,
             diff_loading: false,
@@ -208,6 +225,7 @@ pub enum GitUiStatePatch {
     RepositoryPicked(GitRepositoryPicked),
     Workspace(GitWorkspaceChanged),
     Snapshot(Box<GitPageSnapshot>),
+    Directory(Box<GitDirectoryState>),
     Controller(Box<GitPageControllerState>),
     BranchPrompt(GitBranchPromptRequested),
     SelectionReveal(GitSelectionReveal),

@@ -1,20 +1,18 @@
 use dioxus::prelude::*;
-use vmux_ui::hooks::{send, use_ui_state_root};
+use vmux_ui::hooks::use_ui_state_root;
 use vmux_ui::scroll::ScrollIntoView;
 
-use crate::event::{GitDirectoryRequest, GitOperation};
+use crate::event::GitOperation;
 use crate::state::{
-    GitBranchPrompt, GitPageControllerState, GitPageSnapshot, GitUiState, GitUiStatePatch,
+    GitBranchPrompt, GitDirectoryState, GitPageControllerState, GitPageSnapshot, GitUiState,
+    GitUiStatePatch,
 };
 
 #[derive(Clone, Copy)]
 pub(super) struct GitPageState {
     pub(super) snapshot: Signal<GitPageSnapshot>,
     pub(super) controller: Signal<GitPageControllerState>,
-    pub(super) directory_selected: Signal<usize>,
-    pub(super) directory_preview_path: Signal<String>,
-    pub(super) directory_came_from: Signal<String>,
-    pub(super) directory_show_hidden: Signal<bool>,
+    pub(super) directory: Signal<GitDirectoryState>,
     pub(super) branch_prompt: Signal<Option<GitBranchPrompt>>,
     pub(super) branch_draft: Signal<String>,
     pub(super) commit_message: Signal<String>,
@@ -28,10 +26,7 @@ impl GitPageState {
         let state = Self {
             snapshot: use_signal(GitPageSnapshot::default),
             controller: use_signal(GitPageControllerState::default),
-            directory_selected: use_signal(|| 0),
-            directory_preview_path: use_signal(String::new),
-            directory_came_from: use_signal(String::new),
-            directory_show_hidden: use_signal(|| true),
+            directory: use_signal(GitDirectoryState::default),
             branch_prompt: use_signal(|| None),
             branch_draft: use_signal(String::new),
             commit_message: use_signal(String::new),
@@ -55,6 +50,10 @@ impl GitPageState {
             for patch in &event.patches {
                 match patch {
                     GitUiStatePatch::Snapshot(snapshot) => self.apply_snapshot(*snapshot.clone()),
+                    GitUiStatePatch::Directory(directory) => {
+                        let mut current = self.directory;
+                        current.set(*directory.clone());
+                    }
                     GitUiStatePatch::Controller(controller) => {
                         let mut current = self.controller;
                         current.set(*controller.clone());
@@ -90,40 +89,9 @@ impl GitPageState {
     }
 
     fn apply_snapshot(self, snapshot: GitPageSnapshot) {
-        if let Some(directory) = snapshot.directory.as_ref() {
-            self.reconcile_directory(directory);
-        }
         self.apply_result(&snapshot);
         let mut current = self.snapshot;
         current.set(snapshot);
-    }
-
-    fn reconcile_directory(self, directory: &crate::event::GitDirectorySnapshot) {
-        let current = (self.snapshot)();
-        if current.directory.as_ref().map(|current| &current.path) == Some(&directory.path)
-            || !directory.repo_root.is_empty()
-        {
-            return;
-        }
-        let came_from = (self.directory_came_from)();
-        let selected = directory
-            .entries
-            .iter()
-            .position(|entry| entry.path == came_from)
-            .unwrap_or(0);
-        let mut directory_came_from = self.directory_came_from;
-        let mut directory_selected = self.directory_selected;
-        let mut preview_path = self.directory_preview_path;
-        directory_came_from.set(String::new());
-        directory_selected.set(selected);
-        preview_path.set(String::new());
-        if let Some(entry) = directory.entries.get(selected).filter(|entry| entry.is_dir) {
-            preview_path.set(entry.path.clone());
-            let _ = send(&GitDirectoryRequest {
-                path: entry.path.clone(),
-                preview: true,
-            });
-        }
     }
 
     fn apply_result(self, snapshot: &GitPageSnapshot) {
@@ -149,16 +117,10 @@ impl GitPageState {
     }
 
     fn reset_local_render_state(self) {
-        let mut directory_selected = self.directory_selected;
-        let mut directory_preview_path = self.directory_preview_path;
-        let mut directory_came_from = self.directory_came_from;
-        let mut directory_show_hidden = self.directory_show_hidden;
+        let mut directory = self.directory;
         let mut branch_prompt = self.branch_prompt;
         let mut branch_draft = self.branch_draft;
-        directory_selected.set(0);
-        directory_preview_path.set(String::new());
-        directory_came_from.set(String::new());
-        directory_show_hidden.set(true);
+        directory.set(GitDirectoryState::default());
         branch_prompt.set(None);
         branch_draft.set(String::new());
     }

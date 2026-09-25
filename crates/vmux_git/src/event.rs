@@ -118,10 +118,23 @@ pub struct GitBranchLogRequest {
     pub branch: String,
 }
 #[vmux_api::ui_event(Eq, target = "git")]
-pub struct GitDirectoryRequest {
+pub struct GitDirectoryOpenRequest {
     pub path: String,
-    pub preview: bool,
 }
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitDirectorySelectRequest {
+    pub index: u32,
+}
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitDirectoryAscendRequest {
+    pub target: String,
+}
+#[vmux_api::ui_event(Eq, target = "git")]
+pub struct GitDirectoryDescendRequest {
+    pub target: String,
+}
+#[vmux_api::ui_event(Copy, Eq, Default, target = "git")]
+pub struct GitDirectoryToggleHiddenRequest;
 #[vmux_api::ui_event(Eq, target = "git")]
 pub struct GitDiffRequest {
     pub repo_root: String,
@@ -255,15 +268,6 @@ pub struct GitBranchLog {
     pub commits: Vec<GitCommitEntry>,
 }
 
-#[vmux_api::contract(Eq)]
-pub struct GitDirectorySnapshot {
-    pub path: String,
-    pub parent_path: String,
-    pub entries: Vec<vmux_core::event::FileDirEntry>,
-    pub parent_entries: Vec<vmux_core::event::FileDirEntry>,
-    pub repo_root: String,
-    pub preview: bool,
-}
 #[vmux_api::ui_event_variants(Eq, target = "git", shared(repo_root: String))]
 pub enum GitOperation {
     Amend,

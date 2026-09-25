@@ -27,7 +27,6 @@ pub fn DirectoryNavigator(
     children: Option<Vec<FileDirEntry>>,
     selected: usize,
     thumbs: HashMap<String, String>,
-    show_hidden: bool,
     preview: Element,
     on_event: EventHandler<DirectoryNavigatorEvent>,
 ) -> Element {
@@ -41,8 +40,6 @@ pub fn DirectoryNavigator(
         .next()
         .unwrap_or_default()
         .to_string();
-    let parent_entries = visible_directory_entries(&parent_entries, show_hidden);
-    let entries = visible_directory_entries(&entries, show_hidden);
     let keyboard_entries = entries.clone();
     let keyboard_path = path.clone();
 
@@ -148,7 +145,7 @@ pub fn DirectoryNavigator(
 
             if let Some(children) = children {
                 div { class: DIRECTORY_PANE_CLASS,
-                    for entry in visible_directory_entries(&children, show_hidden) {
+                    for entry in children {
                         {
                             let row = entry.clone();
                             let target = entry.path.clone();
@@ -207,17 +204,6 @@ pub fn DirectoryEntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Eleme
     rsx! {
         TypeIcon { path: entry.path, is_dir: entry.is_dir, class: "h-5 w-5 shrink-0 opacity-80" }
     }
-}
-
-pub fn visible_directory_entries(entries: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
-    if show_hidden {
-        return entries.to_vec();
-    }
-    entries
-        .iter()
-        .filter(|entry| !entry.name.starts_with('.'))
-        .cloned()
-        .collect()
 }
 
 const DOUBLE_CLICK_MS: i64 = 500;
