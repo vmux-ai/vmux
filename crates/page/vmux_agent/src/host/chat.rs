@@ -10,7 +10,9 @@ mod workspace;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use vmux_chat::event::{ChatItem, ChatOpenPage, ChatTranscriptState};
+use vmux_chat::event::{
+    ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState, ChatTranscriptState,
+};
 
 pub struct AgentChatPagePlugin;
 
@@ -44,7 +46,13 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 };
 
 #[derive(Component)]
-#[require(ChatUiStateUpdates, ChatTranscriptProjection)]
+#[require(
+    ChatUiStateUpdates,
+    ChatTranscriptProjection,
+    ChatMediaProjection,
+    ChatResumeProjection,
+    ChatBranchesProjection
+)]
 pub struct AgentChatView;
 
 type ChatUiStateUpdates = vmux_core::host::UiState<vmux_chat::state::ChatUiState>;
@@ -55,6 +63,15 @@ struct ChatTranscriptProjection {
     tail: Vec<ChatItem>,
     tail_start: u32,
 }
+
+#[derive(Component, Default)]
+struct ChatMediaProjection(ChatMediaState);
+
+#[derive(Component, Default)]
+struct ChatResumeProjection(ChatResumeState);
+
+#[derive(Component, Default)]
+struct ChatBranchesProjection(ChatBranchesState);
 
 #[derive(Component)]
 pub(crate) struct ChatSynced;

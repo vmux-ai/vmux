@@ -2,13 +2,14 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use super::{AgentChatView, ChatResumeProjection};
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_chat::event::{
-    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
-    RuntimeSwitchRequest,
+    ChatResumeQueryRequest, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession, RuntimeSwitchRequest,
 };
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
@@ -21,12 +22,14 @@ impl Plugin for ChatResumePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiEventPlugin::<(
             ResumeListRequest,
+            ChatResumeQueryRequest,
             ResumeSession,
             RuntimeSwitchRequest,
             PromptHistoryRequest,
         )>::default())
             .init_resource::<ResumableScan>()
             .add_observer(on_resume_list_request)
+            .add_observer(on_chat_resume_query_request)
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
             .add_observer(on_prompt_history_request)
@@ -51,6 +54,34 @@ struct ResumeListAnswer {
     sessions: ResumableSessions,
     scanned: Option<Vec<crate::runtime::cli::strategy::ResumableSession>>,
     labels: RepoLabels,
+}
+
+impl ChatResumeProjection {
+    fn start(&mut self, active: bool, query: String) -> Option<u64> {
+        if self.0.active == active && self.0.query == query {
+            return None;
+        }
+        self.0.request_id = self.0.request_id.wrapping_add(1).max(1);
+        self.0.active = active;
+        self.0.query = query;
+        self.0.sessions.clear();
+        self.0.total = 0;
+        self.0.loading = active;
+        Some(self.0.request_id)
+    }
+
+    fn finish(&mut self, sessions: &ResumableSessions) -> bool {
+        if self.0.request_id != sessions.request_id
+            || self.0.query != sessions.query
+            || !self.0.active
+        {
+            return false;
+        }
+        self.0.sessions.clone_from(&sessions.sessions);
+        self.0.total = sessions.total;
+        self.0.loading = false;
+        true
+    }
 }
 
 #[derive(Component)]
@@ -298,37 +329,36 @@ fn on_resume_list_request(
     let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
     let (kind, agent_name) = ask.agent_of(webview);
     let project = ask.project_of(webview);
+    let request_id = trigger.event().payload.request_id;
+    let query = trigger.event().payload.query.clone();
     let offset = trigger.event().payload.offset;
     let mut labels = scan.labels.clone();
-    let held = scan.is_fresh().then(|| {
-        let total = scan.sessions.len() as u32;
-        let ranked = Preferred::first(&scan.sessions, kind, project.as_deref());
-        let page: Vec<_> = ranked
+    let held = scan
+        .is_fresh()
+        .then(|| Preferred::first(&scan.sessions, kind, project.as_deref()));
+    let task = IoTaskPool::get().spawn(async move {
+        let _wake = wake;
+        let (ranked, scanned) = match held {
+            Some(ranked) => (ranked, None),
+            None => {
+                let all = strategies.list_all_sessions().await;
+                let ranked = Preferred::first(&all, kind, project.as_deref());
+                (ranked, Some(all))
+            }
+        };
+        let mut built = resume_entries(ranked, kind, &agent_name, &mut labels, &strategies);
+        built.retain(|session| session.matches(&query));
+        let total = built.len() as u32;
+        let sessions = built
             .into_iter()
             .skip(offset as usize)
             .take(ResumableSessions::PAGE as usize)
             .collect();
-        (page, total)
-    });
-    let task = IoTaskPool::get().spawn(async move {
-        let _wake = wake;
-        let (page, total, scanned) = match held {
-            Some((page, total)) => (page, total, None),
-            None => {
-                let all = strategies.list_all_sessions().await;
-                let total = all.len() as u32;
-                let page = Preferred::first(&all, kind, project.as_deref())
-                    .into_iter()
-                    .skip(offset as usize)
-                    .take(ResumableSessions::PAGE as usize)
-                    .collect();
-                (page, total, Some(all))
-            }
-        };
-        let built = resume_entries(page, kind, &agent_name, &mut labels, &strategies);
         ResumeListAnswer {
             sessions: ResumableSessions {
-                sessions: built,
+                request_id,
+                query,
+                sessions,
                 offset,
                 total,
             },
@@ -339,8 +369,41 @@ fn on_resume_list_request(
     commands.spawn(ResumeListTask { webview, task });
 }
 
+fn on_chat_resume_query_request(
+    trigger: On<UiInput<ChatResumeQueryRequest>>,
+    mut projections: Query<&mut ChatResumeProjection, With<AgentChatView>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let Ok(mut projection) = projections.get_mut(webview) else {
+        return;
+    };
+    let Some(request_id) = projection.start(request.active, request.query.clone()) else {
+        return;
+    };
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ),
+    );
+    if !request.active {
+        return;
+    }
+    commands.trigger(UiInput {
+        webview,
+        payload: ResumeListRequest {
+            request_id,
+            query: request.query.clone(),
+            offset: 0,
+        },
+    });
+}
+
 fn drain_resume_list_tasks(
     mut tasks: Query<(Entity, &mut ResumeListTask)>,
+    mut projections: Query<&mut ChatResumeProjection, With<AgentChatView>>,
     mut scan: ResMut<ResumableScan>,
     mut commands: Commands,
 ) {
@@ -354,15 +417,21 @@ fn drain_resume_list_tasks(
             scan.sessions = scanned;
             scan.read_at = Some(std::time::Instant::now());
         }
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-                task.webview,
-                &answer.sessions,
-            ),
-        );
-        commands.trigger(vmux_core::host::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(task.webview, &answer.sessions));
+        if let Ok(mut projection) = projections.get_mut(task.webview) {
+            if !projection.finish(&answer.sessions) {
+                continue;
+            }
+            commands.trigger(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                    task.webview,
+                    &projection.0,
+                ),
+            );
+        } else {
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::from_event(task.webview, &answer.sessions));
+        }
     }
 }
 
@@ -518,6 +587,27 @@ fn runtime_switch_target(
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn resume_projection_rejects_stale_results() {
+        let mut projection = ChatResumeProjection::default();
+        let stale = projection.start(true, "old".into()).unwrap();
+        let current = projection.start(true, "new".into()).unwrap();
+        assert!(!projection.finish(&ResumableSessions {
+            request_id: stale,
+            query: "old".into(),
+            ..Default::default()
+        }));
+        assert!(projection.0.loading);
+        assert!(projection.finish(&ResumableSessions {
+            request_id: current,
+            query: "new".into(),
+            total: 1,
+            ..Default::default()
+        }));
+        assert_eq!(projection.0.total, 1);
+        assert!(!projection.0.loading);
+    }
 
     #[test]
     fn resume_results_include_all_agent_kinds_with_source_labels() {

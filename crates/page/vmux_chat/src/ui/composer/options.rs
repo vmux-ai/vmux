@@ -68,7 +68,8 @@ impl From<Chat> for ChatMenuSet {
         let branch = BranchMenuData {
             project: context.cwd.clone(),
             branches: (chat.projects.branches)(),
-            loaded: (chat.projects.branches_for)() == context.cwd,
+            loaded: (chat.projects.branches_for)() == context.cwd
+                && !(chat.projects.branches_loading)(),
             on_pick: EventHandler::new(Self::go_to),
         };
 

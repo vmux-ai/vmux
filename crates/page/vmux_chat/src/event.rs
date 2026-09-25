@@ -159,9 +159,40 @@ pub struct ChatBranchesRequest {
 }
 
 #[vmux_api::contract(Default)]
-pub struct ChatProjectBranches {
+pub struct ChatBranchesState {
+    pub request_id: u64,
     pub project: String,
     pub branches: Vec<ChatBranch>,
+    pub loading: bool,
+}
+
+#[vmux_api::contract(Default)]
+pub struct ChatMediaState {
+    pub request_id: u64,
+    pub query: String,
+    pub entries: Vec<ChatMediaEntry>,
+    pub loading: bool,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ChatMediaQueryRequest {
+    pub query: String,
+}
+
+#[vmux_api::contract(Default)]
+pub struct ChatResumeState {
+    pub request_id: u64,
+    pub query: String,
+    pub sessions: Vec<ResumableSessionEntry>,
+    pub total: u32,
+    pub loading: bool,
+    pub active: bool,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ChatResumeQueryRequest {
+    pub active: bool,
+    pub query: String,
 }
 
 pub use vmux_core::event::ProjectBranch as ChatBranch;
@@ -520,6 +551,8 @@ mod tests {
     #[test]
     fn resumable_sessions_rkyv_roundtrip() {
         let v = ResumableSessions {
+            request_id: 8,
+            query: "auth".into(),
             sessions: vec![ResumableSessionEntry {
                 kind: "claude".into(),
                 sid: "sid-9".into(),
@@ -540,6 +573,8 @@ mod tests {
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&v).unwrap();
         let back = rkyv::from_bytes::<ResumableSessions, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back.request_id, 8);
+        assert_eq!(back.query, "auth");
         assert_eq!(back.sessions.len(), 1);
         assert_eq!(back.sessions[0].sid, "sid-9");
         assert_eq!(back.sessions[0].latest, "and the tests");

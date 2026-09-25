@@ -1,10 +1,11 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::prompt_media::{
-    ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
+    ChatAttachment, ChatAttachmentPreviews, ChatAttachments, ChatMediaEntry,
 };
 use vmux_api::room::RemoteMediaEntry;
 
+use crate::event::ChatMediaState;
 use crate::room::Submitted;
 use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
 
@@ -56,7 +57,7 @@ pub struct Browsed {
 }
 
 #[derive(Resource, Default)]
-pub struct Media(pub ChatMediaEntries);
+pub struct Media(pub ChatMediaState);
 
 fn project_media(browsed: Res<Browsed>, mut media: ResMut<Media>) {
     let mut entries = Vec::with_capacity(browsed.entries.len());
@@ -70,10 +71,11 @@ fn project_media(browsed: Res<Browsed>, mut media: ResMut<Media>) {
             preview_data_url: entry.preview_data_url.clone(),
         });
     }
-    media.0 = ChatMediaEntries {
+    media.0 = ChatMediaState {
         request_id: browsed.request_id,
         query: browsed.query.clone(),
         entries,
+        loading: false,
     };
 }
 
