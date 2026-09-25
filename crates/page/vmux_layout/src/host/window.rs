@@ -611,7 +611,7 @@ pub fn spawn_requested_tab_layouts(
 
 fn sync_window_layout_to_settings(
     settings: Res<LayoutSettings>,
-    hidden: Option<Res<crate::toggle::LayoutHidden>>,
+    hidden_windows: Query<(), With<crate::toggle::LayoutHidden>>,
     mut window_q: Query<
         (&HostWindow, &mut Node),
         (With<VmuxWindow>, Without<SideSheet>, Without<MainColumn>),
@@ -637,9 +637,7 @@ fn sync_window_layout_to_settings(
     let gap = crate::event::PANE_GAP_PX;
     let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
     for (host, mut node) in &mut window_q {
-        let full_padding = hidden
-            .as_deref()
-            .is_some_and(|hidden| hidden.is_hidden(host.0));
+        let full_padding = hidden_windows.contains(host.0);
         node.padding = UiRect {
             top: Val::Px(if full_padding { pad_top } else { 0.0 }),
             left: Val::Px(if full_padding { pad_left } else { 0.0 }),
@@ -1256,7 +1254,6 @@ mod tests {
     fn visible_fills_monitor_window_sync_clears_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::toggle::LayoutHidden>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 16.0 },
