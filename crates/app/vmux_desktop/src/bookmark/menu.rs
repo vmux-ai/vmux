@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "macos"))]
 use bevy::prelude::*;
 
 #[cfg(not(target_os = "macos"))]
@@ -10,25 +11,11 @@ impl Plugin for BookmarkMenuPlugin {
 
 pub(crate) struct BookmarkMenuPlugin;
 
-pub(crate) fn forward_menu_event(world: &mut World, event_id: &str) -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        macos::forward_menu_event(world, event_id)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = world;
-        let _ = event_id;
-        false
-    }
-}
-
 #[cfg(target_os = "macos")]
 mod macos {
     use bevy::ecs::relationship::Relationship;
     use bevy::ecs::system::NonSendMarker;
     use bevy::prelude::*;
-    use muda::ContextMenu;
     use std::collections::HashSet;
     use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkMenuInput};
     use vmux_core::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid, host::UiStateWrite};
@@ -40,6 +27,8 @@ mod macos {
     use vmux_layout::stack::OpenRequest;
     use vmux_layout::state::LayoutUiState;
     use vmux_ui::i18n::{Locale, TranslationValue};
+
+    use crate::os_menu::{OsContextMenu, OsMenuEntry, OsMenuSelect, OsMenuSeparator};
 
     impl Plugin for super::BookmarkMenuPlugin {
         fn build(&self, app: &mut App) {
@@ -59,7 +48,7 @@ mod macos {
                 .add_observer(forward_message::<UnpinRequest>)
                 .add_observer(forward_message::<NewFolderInputRequest>)
                 .add_observer(forward_message::<RenameInputRequest>)
-                .add_systems(Update, (show_bookmark_menu, present_bookmark_menu).chain())
+                .add_systems(Update, show_bookmark_menu)
                 .add_systems(
                     Update,
                     begin_bookmark_menu_input.after(vmux_layout::bookmark::BookmarkRequestSet),
@@ -67,27 +56,11 @@ mod macos {
         }
     }
 
-    thread_local! {
-        static HELD_MENU: std::cell::RefCell<Option<muda::Menu>> =
-            const { std::cell::RefCell::new(None) };
-        static PENDING_MENU: std::cell::RefCell<Option<(muda::Menu, *mut std::ffi::c_void)>> =
-            const { std::cell::RefCell::new(None) };
-    }
-
     #[derive(Component, Default)]
     struct BookmarkMenuInputRevision(u64);
 
     #[derive(Component)]
-    struct BookmarkMenuItem {
-        id: String,
-        enabled: bool,
-    }
-
-    #[derive(Component)]
     struct BookmarkMenuMessage<M: Message>(M);
-
-    #[derive(EntityEvent)]
-    struct BookmarkMenuSelected(#[event_target] Entity);
 
     #[derive(Clone)]
     struct FolderMenuRow {
@@ -109,38 +82,6 @@ mod macos {
         uuid: String,
     }
 
-    struct BookmarkMenuBuilder {
-        menu: muda::Menu,
-        item_index: usize,
-    }
-
-    impl BookmarkMenuBuilder {
-        fn new() -> Self {
-            Self {
-                menu: muda::Menu::new(),
-                item_index: 0,
-            }
-        }
-
-        fn item(&mut self, label: String, enabled: bool) -> BookmarkMenuItem {
-            let id = format!("bookmark_context_{}", self.item_index);
-            self.item_index += 1;
-            let item = muda::MenuItem::with_id(id.clone(), label, enabled, None);
-            let _ = self.menu.append(&item);
-            BookmarkMenuItem { id, enabled }
-        }
-
-        fn separator(&mut self) {
-            let _ = self.menu.append(&muda::PredefinedMenuItem::separator());
-        }
-
-        fn queue(self, view_ptr: *mut std::ffi::c_void) {
-            PENDING_MENU.with(|pending| {
-                *pending.borrow_mut() = Some((self.menu, view_ptr));
-            });
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn show_bookmark_menu(
         _non_send: NonSendMarker,
@@ -158,7 +99,7 @@ mod macos {
             Option<&ChildOf>,
         )>,
         settings: Res<vmux_setting::AppSettings>,
-        menu_items: Query<Entity, With<BookmarkMenuItem>>,
+        context_menus: Query<Entity, With<OsContextMenu>>,
         mut commands: Commands,
     ) {
         use bevy::winit::WINIT_WINDOWS;
@@ -184,21 +125,19 @@ mod macos {
             return;
         };
 
-        for entity in &menu_items {
+        for entity in &context_menus {
             commands.entity(entity).despawn();
         }
         let locale = Locale::requested(Some(&settings.appearance.locale));
         let folders = FolderMenuRow::collect(&entries);
-        let mut builder = BookmarkMenuBuilder::new();
+        let menu = commands.spawn(OsContextMenu::new(view_ptr)).id();
         match request.target {
-            BookmarkMenuTarget::Root => {
-                root_menu(&mut builder, &mut commands, &locale, request.webview)
-            }
+            BookmarkMenuTarget::Root => root_menu(menu, &mut commands, &locale, request.webview),
             BookmarkMenuTarget::Pin { uuid } => {
-                pin_menu(&mut builder, &mut commands, &locale, &entries, &uuid)
+                pin_menu(menu, &mut commands, &locale, &entries, &uuid)
             }
             BookmarkMenuTarget::Entry { uuid } => bookmark_menu(
-                &mut builder,
+                menu,
                 &mut commands,
                 &locale,
                 &entries,
@@ -207,7 +146,7 @@ mod macos {
                 request.webview,
             ),
             BookmarkMenuTarget::Folder { uuid, active_page } => folder_menu(
-                &mut builder,
+                menu,
                 &mut commands,
                 &locale,
                 &entries,
@@ -217,33 +156,12 @@ mod macos {
                 request.webview,
             ),
         }
-        builder.queue(view_ptr);
     }
 
-    fn present_bookmark_menu(_non_send: NonSendMarker) {
-        PENDING_MENU.with(|pending| {
-            let Some((menu, view_ptr)) = pending.borrow_mut().take() else {
-                return;
-            };
-            HELD_MENU.with(|held| {
-                *held.borrow_mut() = Some(menu);
-                if let Some(menu) = held.borrow().as_ref() {
-                    unsafe {
-                        menu.show_context_menu_for_nsview(view_ptr as _, None);
-                    }
-                }
-            });
-        });
-    }
-
-    fn root_menu(
-        builder: &mut BookmarkMenuBuilder,
-        commands: &mut Commands,
-        locale: &Locale,
-        webview: Entity,
-    ) {
+    fn root_menu(menu: Entity, commands: &mut Commands, locale: &Locale, webview: Entity) {
         commands.spawn((
-            builder.item(locale.translate("layout-new-folder"), true),
+            OsMenuEntry::new(locale.translate("layout-new-folder"), true),
+            ChildOf(menu),
             BookmarkMenuMessage(NewFolderInputRequest {
                 webview,
                 parent: None,
@@ -252,7 +170,7 @@ mod macos {
     }
 
     fn pin_menu(
-        builder: &mut BookmarkMenuBuilder,
+        menu: Entity,
         commands: &mut Commands,
         locale: &Locale,
         entries: &Query<(
@@ -274,21 +192,24 @@ mod macos {
             return;
         };
         commands.spawn((
-            builder.item(locale.translate("common-open"), true),
+            OsMenuEntry::new(locale.translate("common-open"), true),
+            ChildOf(menu),
             BookmarkMenuMessage(OpenRequest {
                 url: Some(metadata.url.clone()),
             }),
         ));
         commands.spawn((
-            builder.item(locale.translate("layout-unpin-page"), true),
+            OsMenuEntry::new(locale.translate("layout-unpin-page"), true),
+            ChildOf(menu),
             BookmarkMenuMessage(UnpinRequest {
                 uuid: uuid.to_string(),
             }),
         ));
         if bookmarked {
-            builder.separator();
+            commands.spawn((OsMenuSeparator, ChildOf(menu)));
             commands.spawn((
-                builder.item(locale.translate("layout-remove-bookmark"), true),
+                OsMenuEntry::new(locale.translate("layout-remove-bookmark"), true),
+                ChildOf(menu),
                 BookmarkMenuMessage(RemoveRequest {
                     uuid: uuid.to_string(),
                 }),
@@ -297,7 +218,7 @@ mod macos {
     }
 
     fn bookmark_menu(
-        builder: &mut BookmarkMenuBuilder,
+        menu: Entity,
         commands: &mut Commands,
         locale: &Locale,
         entries: &Query<(
@@ -321,13 +242,15 @@ mod macos {
             return;
         };
         commands.spawn((
-            builder.item(locale.translate("common-open"), true),
+            OsMenuEntry::new(locale.translate("common-open"), true),
+            ChildOf(menu),
             BookmarkMenuMessage(OpenRequest {
                 url: Some(metadata.url.clone()),
             }),
         ));
         commands.spawn((
-            builder.item(locale.translate("common-rename"), true),
+            OsMenuEntry::new(locale.translate("common-rename"), true),
+            ChildOf(menu),
             BookmarkMenuMessage(RenameInputRequest {
                 webview,
                 uuid: uuid.to_string(),
@@ -335,23 +258,26 @@ mod macos {
         ));
         if pinned {
             commands.spawn((
-                builder.item(locale.translate("layout-unpin-page"), true),
+                OsMenuEntry::new(locale.translate("layout-unpin-page"), true),
+                ChildOf(menu),
                 BookmarkMenuMessage(UnpinRequest {
                     uuid: uuid.to_string(),
                 }),
             ));
         } else {
             commands.spawn((
-                builder.item(locale.translate("layout-pin"), true),
+                OsMenuEntry::new(locale.translate("layout-pin"), true),
+                ChildOf(menu),
                 BookmarkMenuMessage(PinRequest {
                     uuid: uuid.to_string(),
                 }),
             ));
         }
-        builder.separator();
+        commands.spawn((OsMenuSeparator, ChildOf(menu)));
         if parent.is_some() {
             commands.spawn((
-                builder.item(locale.translate("layout-move-to-bookmarks"), true),
+                OsMenuEntry::new(locale.translate("layout-move-to-bookmarks"), true),
+                ChildOf(menu),
                 BookmarkMenuMessage(MoveRequest {
                     uuid: uuid.to_string(),
                     folder: None,
@@ -363,22 +289,24 @@ mod macos {
                 continue;
             }
             commands.spawn((
-                builder.item(
+                OsMenuEntry::new(
                     locale.translate_with(
                         "layout-move-to",
                         &[("folder", TranslationValue::String(&folder.label))],
                     ),
                     true,
                 ),
+                ChildOf(menu),
                 BookmarkMenuMessage(MoveRequest {
                     uuid: uuid.to_string(),
                     folder: Some(folder.uuid),
                 }),
             ));
         }
-        builder.separator();
+        commands.spawn((OsMenuSeparator, ChildOf(menu)));
         commands.spawn((
-            builder.item(locale.translate("common-remove"), true),
+            OsMenuEntry::new(locale.translate("common-remove"), true),
+            ChildOf(menu),
             BookmarkMenuMessage(RemoveRequest {
                 uuid: uuid.to_string(),
             }),
@@ -386,7 +314,7 @@ mod macos {
     }
 
     fn folder_menu(
-        builder: &mut BookmarkMenuBuilder,
+        menu: Entity,
         commands: &mut Commands,
         locale: &Locale,
         entries: &Query<(
@@ -411,7 +339,7 @@ mod macos {
             return;
         };
         commands.spawn((
-            builder.item(
+            OsMenuEntry::new(
                 locale.translate(if collapsed {
                     "common-expand"
                 } else {
@@ -419,6 +347,7 @@ mod macos {
                 }),
                 true,
             ),
+            ChildOf(menu),
             BookmarkMenuMessage(ToggleFolderRequest {
                 uuid: uuid.to_string(),
             }),
@@ -426,16 +355,17 @@ mod macos {
         let current_page_enabled = active_page.is_some();
         let current_page = active_page.unwrap_or_default();
         commands.spawn((
-            builder.item(
+            OsMenuEntry::new(
                 locale.translate("layout-bookmark-current-page"),
                 current_page_enabled,
             ),
+            ChildOf(menu),
             BookmarkMenuMessage(AddRequest {
                 metadata: current_page,
                 folder: Some(uuid.to_string()),
             }),
         ));
-        let new_folder_item = builder.item(locale.translate("layout-new-folder"), true);
+        let new_folder_item = OsMenuEntry::new(locale.translate("layout-new-folder"), true);
         let new_folder = NewFolderInputRequest {
             webview,
             parent: Some(uuid.to_string()),
@@ -443,25 +373,32 @@ mod macos {
         if collapsed {
             commands.spawn((
                 new_folder_item,
+                ChildOf(menu),
                 BookmarkMenuMessage(new_folder),
                 BookmarkMenuMessage(ToggleFolderRequest {
                     uuid: uuid.to_string(),
                 }),
             ));
         } else {
-            commands.spawn((new_folder_item, BookmarkMenuMessage(new_folder)));
+            commands.spawn((
+                new_folder_item,
+                ChildOf(menu),
+                BookmarkMenuMessage(new_folder),
+            ));
         }
         commands.spawn((
-            builder.item(locale.translate("layout-rename-folder"), true),
+            OsMenuEntry::new(locale.translate("layout-rename-folder"), true),
+            ChildOf(menu),
             BookmarkMenuMessage(RenameInputRequest {
                 webview,
                 uuid: uuid.to_string(),
             }),
         ));
-        builder.separator();
+        commands.spawn((OsMenuSeparator, ChildOf(menu)));
         if parent.is_some() {
             commands.spawn((
-                builder.item(locale.translate("layout-move-to-bookmarks"), true),
+                OsMenuEntry::new(locale.translate("layout-move-to-bookmarks"), true),
+                ChildOf(menu),
                 BookmarkMenuMessage(MoveFolderRequest {
                     uuid: uuid.to_string(),
                     parent: None,
@@ -475,22 +412,24 @@ mod macos {
                 continue;
             }
             commands.spawn((
-                builder.item(
+                OsMenuEntry::new(
                     locale.translate_with(
                         "layout-move-to",
                         &[("folder", TranslationValue::String(&folder.label))],
                     ),
                     true,
                 ),
+                ChildOf(menu),
                 BookmarkMenuMessage(MoveFolderRequest {
                     uuid: uuid.to_string(),
                     parent: Some(folder.uuid),
                 }),
             ));
         }
-        builder.separator();
+        commands.spawn((OsMenuSeparator, ChildOf(menu)));
         commands.spawn((
-            builder.item(locale.translate("layout-remove-folder"), true),
+            OsMenuEntry::new(locale.translate("layout-remove-folder"), true),
+            ChildOf(menu),
             BookmarkMenuMessage(RemoveFolderRequest {
                 uuid: uuid.to_string(),
             }),
@@ -590,23 +529,8 @@ mod macos {
         }
     }
 
-    pub(super) fn forward_menu_event(world: &mut World, event_id: &str) -> bool {
-        let selected = {
-            let mut items = world.query::<(Entity, &BookmarkMenuItem)>();
-            items
-                .iter(world)
-                .find_map(|(entity, item)| (item.enabled && item.id == event_id).then_some(entity))
-        };
-        let Some(entity) = selected else {
-            return false;
-        };
-        world.trigger(BookmarkMenuSelected(entity));
-        world.despawn(entity);
-        true
-    }
-
     fn forward_message<M: Message + Clone>(
-        trigger: On<BookmarkMenuSelected>,
+        trigger: On<OsMenuSelect>,
         menu_messages: Query<&BookmarkMenuMessage<M>>,
         mut messages: MessageWriter<M>,
     ) {
@@ -695,10 +619,7 @@ mod macos {
             let selected = app
                 .world_mut()
                 .spawn((
-                    BookmarkMenuItem {
-                        id: "selected".to_string(),
-                        enabled: true,
-                    },
+                    OsMenuEntry::new("selected".to_string(), true),
                     BookmarkMenuMessage(FirstRequest(7)),
                     BookmarkMenuMessage(SecondRequest("second")),
                 ))
@@ -706,16 +627,13 @@ mod macos {
             let disabled = app
                 .world_mut()
                 .spawn((
-                    BookmarkMenuItem {
-                        id: "disabled".to_string(),
-                        enabled: false,
-                    },
+                    OsMenuEntry::new("disabled".to_string(), false),
                     BookmarkMenuMessage(FirstRequest(9)),
                 ))
                 .id();
 
-            assert!(forward_menu_event(app.world_mut(), "selected"));
-            assert!(!forward_menu_event(app.world_mut(), "disabled"));
+            app.world_mut().trigger(OsMenuSelect::new(selected));
+            app.world_mut().despawn(selected);
             app.update();
 
             let received = app.world().resource::<Received>();

@@ -256,13 +256,13 @@ impl From<objc2_foundation::NSRect> for NativeWindowFrame {
     }
 }
 
-impl NativeWindowFrame {
-    fn rect(self) -> objc2_foundation::NSRect {
+impl From<NativeWindowFrame> for objc2_foundation::NSRect {
+    fn from(frame: NativeWindowFrame) -> Self {
         use objc2_foundation::{NSPoint, NSRect, NSSize};
 
         NSRect::new(
-            NSPoint::new(self.x, self.y),
-            NSSize::new(self.width, self.height),
+            NSPoint::new(frame.x, frame.y),
+            NSSize::new(frame.width, frame.height),
         )
     }
 }
@@ -307,7 +307,7 @@ fn update_native_window_resize(event: &objc2_app_kit::NSEvent, drag: NativeWindo
     };
     let cursor = NSEvent::mouseLocation();
     let frame = resized_native_window_frame(drag, cursor.x, cursor.y);
-    window.setFrame_display(frame.rect(), true);
+    window.setFrame_display(frame.into(), true);
 }
 
 const TITLEBAR_DOUBLE_CLICK_SLOP_PX: f32 = 8.0;
@@ -363,12 +363,11 @@ impl WindowZoom {
         let Some(screen) = window.screen() else {
             return;
         };
-        let target = self
-            .toggled(
-                NativeWindowFrame::from(window.frame()),
-                NativeWindowFrame::from(screen.visibleFrame()),
-            )
-            .rect();
+        let target = self.toggled(
+            NativeWindowFrame::from(window.frame()),
+            NativeWindowFrame::from(screen.visibleFrame()),
+        );
+        let target = target.into();
         let duration = window.animationResizeTime(target);
         let changes = block2::RcBlock::new(move |context: NonNull<NSAnimationContext>| {
             unsafe { context.as_ref() }.setDuration(duration);

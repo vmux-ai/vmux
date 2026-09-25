@@ -1,6 +1,7 @@
-use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::WindowCloseRequested;
+#[cfg(target_os = "macos")]
+use muda::ContextMenu;
 use muda::{Menu, MenuEvent, MenuItem, MenuItemKind};
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
@@ -53,7 +54,8 @@ impl Plugin for OsMenuPlugin {
                 ),
             );
         #[cfg(target_os = "macos")]
-        app.add_systems(Update, sync_edit_menu_items.after(ReadCommandRequests));
+        app.add_systems(Update, sync_edit_menu_items.after(ReadCommandRequests))
+            .add_systems(PostUpdate, present_context_menus);
     }
 }
 
@@ -75,6 +77,52 @@ impl Default for CloseMenuItemEnabled {
     }
 }
 
+#[derive(Component)]
+pub(crate) struct OsMenuEntry {
+    id: Option<String>,
+    label: String,
+    enabled: bool,
+}
+
+impl OsMenuEntry {
+    pub(crate) fn new(label: String, enabled: bool) -> Self {
+        Self {
+            id: None,
+            label,
+            enabled,
+        }
+    }
+
+    fn matches(&self, event_id: &str) -> bool {
+        self.enabled && self.id.as_deref() == Some(event_id)
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct OsContextMenu {
+    view: usize,
+}
+
+impl OsContextMenu {
+    pub(crate) fn new(view: *mut std::ffi::c_void) -> Self {
+        Self {
+            view: view as usize,
+        }
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct OsMenuSeparator;
+
+#[derive(EntityEvent)]
+pub(crate) struct OsMenuSelect(#[event_target] Entity);
+
+impl OsMenuSelect {
+    pub(crate) fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+}
+
 static PENDING_MENU_EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 const WINDOW_CLOSE_SUPPRESSION_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
@@ -82,6 +130,7 @@ const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
 
 struct OsMenuResource {
     menu: Menu,
+    context_menu: Option<Menu>,
     locale: Locale,
     close_window: Option<MenuItem>,
     #[cfg(target_os = "macos")]
@@ -122,11 +171,47 @@ fn setup(world: &mut World) {
 
     world.insert_non_send(OsMenuResource {
         menu,
+        context_menu: None,
         locale,
         close_window,
         #[cfg(target_os = "macos")]
         edit_items,
     });
+}
+
+#[cfg(target_os = "macos")]
+fn present_context_menus(
+    _non_send: bevy::ecs::system::NonSendMarker,
+    menu: Option<NonSendMut<OsMenuResource>>,
+    context_menus: Query<(&OsContextMenu, &Children), Added<OsContextMenu>>,
+    mut entries: Query<&mut OsMenuEntry>,
+    separators: Query<(), (With<OsMenuSeparator>, Without<OsMenuEntry>)>,
+) {
+    let Some(mut menu_resource) = menu else {
+        return;
+    };
+    for (context, children) in &context_menus {
+        let menu = Menu::new();
+        for child in children.iter() {
+            if let Ok(mut entry) = entries.get_mut(child) {
+                let id = format!("os_context_menu_{}", child.to_bits());
+                let item = MenuItem::with_id(id.clone(), &entry.label, entry.enabled, None);
+                let _ = menu.append(&item);
+                entry.id = Some(id);
+                continue;
+            }
+            if separators.contains(child) {
+                let _ = menu.append(&muda::PredefinedMenuItem::separator());
+            }
+        }
+        menu_resource.context_menu = Some(menu);
+        let Some(menu) = menu_resource.context_menu.as_ref() else {
+            continue;
+        };
+        unsafe {
+            menu.show_context_menu_for_nsview(context.view as _, None);
+        }
+    }
 }
 
 fn sync_menu_locale(
@@ -386,7 +471,15 @@ fn sync_close_menu_item(
     }
 }
 
-fn forward_menu_events(world: &mut World) {
+fn forward_menu_events(
+    mut commands: Commands,
+    menu_entries: Query<(Entity, &OsMenuEntry)>,
+    definitions: Query<&CommandDefinition>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut invocations: MessageWriter<CommandInvocation>,
+    mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
+    mut last_menu_command: ResMut<LastMenuCommandAt>,
+) {
     let drained = {
         let mut events = PENDING_MENU_EVENTS.lock();
         if events.is_empty() {
@@ -396,40 +489,30 @@ fn forward_menu_events(world: &mut World) {
     };
 
     if !drained.is_empty() {
-        world.resource_mut::<LastMenuCommandAt>().0 = Some(std::time::Instant::now());
+        last_menu_command.0 = Some(std::time::Instant::now());
     }
-    let definitions = {
-        let mut query = world.query::<&CommandDefinition>();
-        query.iter(world).cloned().collect::<Vec<_>>()
-    };
     for event_id in drained {
-        if crate::bookmark::forward_menu_event(world, &event_id) {
+        let selected = menu_entries
+            .iter()
+            .find_map(|(entity, entry)| entry.matches(&event_id).then_some(entity));
+        if let Some(entity) = selected {
+            commands.trigger(OsMenuSelect::new(entity));
+            commands.entity(entity).despawn();
             continue;
         }
         if event_id == "app_quit" {
-            handle_quit_request(world);
+            hide_windows.write(crate::runtime::HideAllWindowsRequest);
         } else if definitions
             .iter()
             .any(|definition| definition.id == event_id)
         {
-            let caller = {
-                let mut q = world.query_filtered::<Entity, With<vmux_core::team::User>>();
-                q.iter(world).next().unwrap_or(Entity::PLACEHOLDER)
-            };
-            world
-                .resource_mut::<Messages<CommandInvocation>>()
-                .write(CommandInvocation::new(caller, event_id));
+            let caller = users.iter().next().unwrap_or(Entity::PLACEHOLDER);
+            invocations.write(CommandInvocation::new(caller, event_id));
         } else {
             #[cfg(feature = "tray")]
             crate::tray::PENDING_TRAY_EVENTS.lock().push(event_id);
         }
     }
-}
-
-fn handle_quit_request(world: &mut World) {
-    world
-        .resource_mut::<Messages<crate::runtime::HideAllWindowsRequest>>()
-        .write(crate::runtime::HideAllWindowsRequest);
 }
 
 fn remember_stack_close_commands(
@@ -505,6 +588,7 @@ fn hide_window_on_close_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::message::Messages;
     use bevy::window::Window;
     use vmux_command::CommandPlugin;
     use vmux_layout::settings::{
