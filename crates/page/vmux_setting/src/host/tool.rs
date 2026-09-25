@@ -1,18 +1,17 @@
-use super::{
+use vmux_mcp::tool::{
     McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue};
+use vmux_api::protocol::{AgentCommand, AgentQuery, JsonValue};
 
-pub(super) struct SettingToolPlugin;
+pub struct SettingToolPlugin;
 
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(McpToolPlugin::<SettingTool>::new(include_str!(
-            "setting.ron"
+            "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
         .add_systems(
@@ -44,7 +43,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<SettingTool>) {
                     commands.entity(request).insert(args);
                 }
                 Err(message) => {
-                    commands.entity(request).insert(ToolDispatchError(message));
+                    commands.entity(request).insert(ToolDispatchError::new(message));
                 }
             }
         }

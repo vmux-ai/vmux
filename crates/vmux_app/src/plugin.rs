@@ -57,6 +57,8 @@ impl Plugin for VmuxCorePlugin {
             vmux_command::CommandPlugin,
             vmux_setting::SettingsPlugin,
         ));
+        #[cfg(feature = "mcp")]
+        app.add_plugins(crate::tool::ApplicationToolPlugin);
     }
 }
 

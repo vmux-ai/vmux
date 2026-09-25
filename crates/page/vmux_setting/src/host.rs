@@ -3,6 +3,7 @@ mod projection;
 mod runtime;
 mod schema;
 mod state;
+mod tool;
 
 use bevy::{ecs::message::MessageReader, prelude::*};
 use vmux_command::ReadCommandRequests;
@@ -17,6 +18,7 @@ pub use runtime::{
     TerminalSettings, TerminalTheme, UpdateChannel,
 };
 pub use state::Settings;
+pub use tool::SettingToolPlugin;
 pub use vmux_command::event::SearchEngine;
 
 pub struct SettingsPlugin;
@@ -28,6 +30,7 @@ impl Plugin for SettingsPlugin {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins((
             SettingsRuntimePlugin,
+            tool::SettingToolPlugin,
             state::StatePlugin,
             projection::ProjectionPlugin,
             appearance::AppearancePlugin,

@@ -1,18 +1,17 @@
-use super::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet,
+use vmux_mcp::tool::{
+    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::AgentCommand;
+use vmux_api::protocol::{AgentCommand, AgentQuery};
 
-pub(super) struct KnowledgeToolPlugin;
+pub struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(McpToolPlugin::<KnowledgeTool>::new(include_str!(
-            "knowledge.ron"
+            "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
         .add_systems(
@@ -84,23 +83,11 @@ struct WriteKnowledgeArgs {
     content: String,
 }
 
-#[derive(Component)]
-pub(crate) struct VaultStatusExecution;
-
-fn vault_status(
-    mut commands: Commands,
-    calls: ToolCalls<KnowledgeTool>,
-    protocol_requests: Query<(), With<crate::protocol_runtime::McpRequest>>,
-) {
-    for (request, call, _) in calls.matching(KnowledgeTool::VaultStatus) {
-        if protocol_requests.contains(request) {
-            commands.entity(request).insert(VaultStatusExecution);
-        } else {
-            commands.entity(request).insert(ToolDispatchError(format!(
-                "tool {} requires MCP protocol context",
-                call.name
-            )));
-        }
+fn vault_status(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
+    for (request, _, _) in calls.matching(KnowledgeTool::VaultStatus) {
+        commands
+            .entity(request)
+            .insert(ToolQuery(Ok(AgentQuery::VaultStatus)));
     }
 }
 
@@ -127,7 +114,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<KnowledgeTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError(message));
+            commands.entity(request).insert(ToolDispatchError::new(message));
         }
     }
 }

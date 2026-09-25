@@ -52,7 +52,9 @@ url = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_flex = { path = "../../vmux_flex" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_mcp = { path = "../../host/vmux_mcp" }
 vmux_path = { path = "../../vmux_path" }
+vmux_service = { path = "../../host/vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 vmux_api = { path = "../../vmux_api" }

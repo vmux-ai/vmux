@@ -67,6 +67,8 @@ impl Plugin for LayoutPlugin {
             .add_plugins(UiEventPlugin::<(PageReady,)>::default())
             .add_observer(mark_webview_page_ready)
             .add_plugins((
+                crate::tool::LayoutToolPlugin,
+                crate::bookmark_tool::BookmarkToolPlugin,
                 ProfilePlugin,
                 LayoutUiProjectionPlugin,
                 LayoutOverlayPlugin,

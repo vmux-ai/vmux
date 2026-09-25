@@ -1,20 +1,28 @@
-use super::{
+use vmux_mcp::tool::{
     McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::{
-    AgentCommand, AgentPaneDirection, AgentQuery, PlacementMode, ProcessId,
+use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+use vmux_api::protocol::{
+    AgentCommand, AgentPaneDirection, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage,
+    PlacementMode, ProcessId, ServiceMessage,
 };
+use vmux_mcp::protocol::{McpExecution, McpRequest};
+use vmux_service::client::ServiceConnection;
 
-pub(super) struct WorkspaceToolPlugin;
+const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
+const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+pub struct WorkspaceToolPlugin;
 
 impl Plugin for WorkspaceToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(McpToolPlugin::<WorkspaceTool>::new(include_str!(
-            "workspace.ron"
+            "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
         .add_systems(
@@ -181,7 +189,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError(message));
+            commands.entity(request).insert(ToolDispatchError::new(message));
         }
     }
 }
@@ -209,6 +217,7 @@ fn open_page(
 fn open_file(
     mut commands: Commands,
     requests: Query<(Entity, &ToolCall, &OpenFileArgs), Added<OpenFileArgs>>,
+    protocol_requests: Query<&McpRequest>,
 ) {
     for (entity, call, args) in &requests {
         let command = call.require_anchor().and_then(|anchor| {
@@ -228,11 +237,30 @@ fn open_file(
                 focus: args.focus,
             })
         });
-        commands.entity(entity).insert(ToolCommand(command));
+        match command {
+            Ok(command) if protocol_requests.contains(entity) => {
+                let requested = args.path.clone();
+                let anchor = call.anchor();
+                commands.entity(entity).insert(McpExecution::new(async move {
+                    if !Path::new(&requested).is_absolute() {
+                        return Err("open_file.path must be an absolute path".to_string());
+                    }
+                    scoped_existing_path(anchor, Path::new(&requested), "open_file").await?;
+                    run_agent_command(command, anchor).await
+                }));
+            }
+            command => {
+                commands.entity(entity).insert(ToolCommand(command));
+            }
+        }
     }
 }
 
-fn run(mut commands: Commands, requests: Query<(Entity, &ToolCall, &RunArgs), Added<RunArgs>>) {
+fn run(
+    mut commands: Commands,
+    requests: Query<(Entity, &ToolCall, &RunArgs), Added<RunArgs>>,
+    protocol_requests: Query<&McpRequest>,
+) {
     for (entity, call, args) in &requests {
         let command = call.require_anchor().and_then(|anchor| {
             let placement_override =
@@ -243,8 +271,8 @@ fn run(mut commands: Commands, requests: Query<(Entity, &ToolCall, &RunArgs), Ad
             }
             if let Some(interpreter) = args.shell.as_ref().filter(|value| !value.trim().is_empty())
             {
-                command = crate::host_quote::HostQuote::handing_to(
-                    &call.host_shell,
+                command = vmux_mcp::host_quote::HostQuote::handing_to(
+                    call.host_shell(),
                     interpreter,
                     &command,
                 )?;
@@ -285,7 +313,23 @@ fn run(mut commands: Commands, requests: Query<(Entity, &ToolCall, &RunArgs), Ad
             };
             Ok(command)
         });
-        commands.entity(entity).insert(ToolCommand(command));
+        match command {
+            Ok(command) => {
+                if let Ok(request) = protocol_requests.get(entity) {
+                    commands.entity(entity).insert(McpExecution::new(run_blocking(
+                        command,
+                        request.run_block_timeout(),
+                    )));
+                } else {
+                    commands.entity(entity).insert(ToolCommand(Ok(command)));
+                }
+            }
+            Err(message) => {
+                commands
+                    .entity(entity)
+                    .insert(ToolCommand(Err(message)));
+            }
+        }
     }
 }
 
@@ -395,5 +439,273 @@ fn read_terminal(
             .map(|process_id| AgentQuery::ReadTerminal { process_id })
             .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string());
         commands.entity(entity).insert(ToolQuery(query));
+    }
+}
+
+async fn agent_working_directory(anchor: Option<ProcessId>) -> Result<PathBuf, String> {
+    let Some(anchor) = anchor else {
+        return std::env::current_dir()
+            .and_then(|path| path.canonicalize())
+            .map_err(|error| format!("cannot resolve current directory: {error}"));
+    };
+    let connection = ServiceConnection::connect()
+        .await
+        .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
+    match agent_query(&connection, AgentQuery::WorkingDirectory { anchor }).await? {
+        AgentQueryResult::Text(path) => PathBuf::from(path)
+            .canonicalize()
+            .map_err(|error| format!("cannot resolve agent working directory: {error}")),
+        AgentQueryResult::Error(message) => Err(message),
+        _ => Err("unexpected agent working directory response".to_string()),
+    }
+}
+
+fn resolve_scoped_existing_path(scope: &Path, requested: &Path) -> Option<PathBuf> {
+    let path = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        scope.join(requested)
+    };
+    let path = path.canonicalize().ok()?;
+    path.starts_with(scope).then_some(path)
+}
+
+async fn scoped_existing_path(
+    anchor: Option<ProcessId>,
+    requested: &Path,
+    tool: &str,
+) -> Result<PathBuf, String> {
+    let scope = agent_working_directory(anchor).await?;
+    resolve_scoped_existing_path(&scope, requested).ok_or_else(|| {
+        format!(
+            "{tool}: path is outside the selected project; call select_project and wait for user approval first"
+        )
+    })
+}
+
+fn output_since(baseline: &str, final_text: &str) -> String {
+    final_text
+        .strip_prefix(baseline)
+        .unwrap_or(final_text)
+        .trim_matches('\n')
+        .trim_end()
+        .to_string()
+}
+
+fn run_done_token(request_id: AgentRequestId) -> String {
+    let mut token = String::with_capacity(32);
+    for byte in request_id.0 {
+        use std::fmt::Write;
+        let _ = write!(&mut token, "{byte:02x}");
+    }
+    token
+}
+
+fn blocking_run_with_marker(mut run: AgentCommand, request_id: AgentRequestId) -> AgentCommand {
+    match &mut run {
+        AgentCommand::Run { done_marker, .. }
+        | AgentCommand::RunWithPlacementOverride { done_marker, .. } => {
+            *done_marker = Some(run_done_token(request_id));
+        }
+        _ => {}
+    }
+    run
+}
+
+fn run_result(
+    process_id: &str,
+    exit: Option<i32>,
+    output: &str,
+    timed_out: bool,
+    run_block_timeout: Duration,
+) -> Value {
+    let mut text = format!("terminal: {process_id}\n");
+    match exit {
+        Some(code) => text.push_str(&format!("exit: {code}\n")),
+        None if timed_out => text.push_str(&format!(
+            "note: still running after {}s; call read_terminal({process_id}) to read more\n",
+            run_block_timeout.as_secs()
+        )),
+        None => {}
+    }
+    text.push_str("output:\n");
+    text.push_str(output);
+    json!({ "content": [{"type": "text", "text": text}] })
+}
+
+fn run_completion_exit(
+    result: AgentQueryResult,
+    token: &str,
+    process_id: ProcessId,
+    allow_missing_process: bool,
+) -> Result<Option<i32>, String> {
+    match result {
+        AgentQueryResult::RunCompletion {
+            token: Some(done_token),
+            exit: Some(exit),
+        } if done_token == token => Ok(Some(exit)),
+        AgentQueryResult::RunCompletion { .. } => Ok(None),
+        AgentQueryResult::Error(message)
+            if allow_missing_process && message == format!("process not found: {process_id}") =>
+        {
+            Ok(None)
+        }
+        AgentQueryResult::Error(message) => Err(message),
+        other => Err(format!(
+            "run: unexpected run-completion result for {process_id}: {other:?}"
+        )),
+    }
+}
+
+async fn run_blocking(
+    run: AgentCommand,
+    run_block_timeout: Duration,
+) -> Result<Value, String> {
+    let connection = ServiceConnection::connect()
+        .await
+        .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
+    let request_id = AgentRequestId::new();
+    let token = run_done_token(request_id);
+    let run = blocking_run_with_marker(run, request_id);
+    connection
+        .send(&ClientMessage::AgentCommand {
+            request_id,
+            anchor: None,
+            command: run,
+        })
+        .await
+        .map_err(|error| format!("cannot send run command: {error}"))?;
+
+    let process_id = loop {
+        let Some(message) = connection
+            .recv()
+            .await
+            .map_err(|error| format!("cannot read service response: {error}"))?
+        else {
+            return Err("vmux_service disconnected".to_string());
+        };
+        match message {
+            ServiceMessage::AgentCommandResult {
+                request_id: received,
+                result,
+            } if received == request_id => match result {
+                vmux_api::protocol::AgentCommandResult::Text(process_id) => break process_id,
+                vmux_api::protocol::AgentCommandResult::Error(message) => return Err(message),
+                other => return Err(format!("run: unexpected result: {other:?}")),
+            },
+            ServiceMessage::Error { message } => return Err(message),
+            _ => {}
+        }
+    };
+
+    let process_id = process_id
+        .parse::<ProcessId>()
+        .map_err(|_| format!("run: service returned an invalid terminal id: {process_id}"))?;
+    let start = Instant::now();
+    let baseline_text = read_full_text(&connection, process_id).await;
+    let deadline = start + run_block_timeout;
+    let materialize_deadline = start + RUN_PROCESS_MATERIALIZE_TIMEOUT;
+    let mut process_materialized = false;
+    loop {
+        let result = agent_query(&connection, AgentQuery::RunCompletion { process_id }).await?;
+        let materialized_now = matches!(&result, AgentQueryResult::RunCompletion { .. });
+        let allow_missing_process = !process_materialized && Instant::now() < materialize_deadline;
+        let exit = run_completion_exit(result, &token, process_id, allow_missing_process)?;
+        process_materialized |= materialized_now;
+        if let Some(exit) = exit {
+            let final_text = read_full_text(&connection, process_id).await;
+            let output = output_since(&baseline_text, &final_text);
+            return Ok(run_result(
+                &process_id.to_string(),
+                Some(exit),
+                &output,
+                false,
+                run_block_timeout,
+            ));
+        }
+        if Instant::now() >= deadline {
+            let final_text = read_full_text(&connection, process_id).await;
+            let output = output_since(&baseline_text, &final_text);
+            return Ok(run_result(
+                &process_id.to_string(),
+                None,
+                &output,
+                true,
+                run_block_timeout,
+            ));
+        }
+        tokio::time::sleep(RUN_POLL_INTERVAL).await;
+    }
+}
+
+async fn agent_query(
+    connection: &ServiceConnection,
+    query: AgentQuery,
+) -> Result<AgentQueryResult, String> {
+    let request_id = AgentRequestId::new();
+    connection
+        .send(&ClientMessage::AgentQuery { request_id, query })
+        .await
+        .map_err(|error| format!("cannot send query: {error}"))?;
+    loop {
+        let Some(message) = connection
+            .recv()
+            .await
+            .map_err(|error| format!("cannot read query response: {error}"))?
+        else {
+            return Err("vmux_service disconnected".to_string());
+        };
+        match message {
+            ServiceMessage::AgentQueryResult {
+                request_id: received,
+                result,
+            } if received == request_id => return Ok(result),
+            ServiceMessage::Error { message } => return Err(message),
+            _ => {}
+        }
+    }
+}
+
+async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -> String {
+    match agent_query(connection, AgentQuery::ReadTerminalFull { process_id }).await {
+        Ok(AgentQueryResult::Text(text)) => text,
+        _ => String::new(),
+    }
+}
+
+async fn run_agent_command(
+    command: AgentCommand,
+    anchor: Option<ProcessId>,
+) -> Result<Value, String> {
+    let request_id = AgentRequestId::new();
+    let connection = ServiceConnection::connect()
+        .await
+        .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
+    connection
+        .send(&ClientMessage::AgentCommand {
+            request_id,
+            anchor,
+            command,
+        })
+        .await
+        .map_err(|error| format!("cannot send agent command: {error}"))?;
+    loop {
+        let Some(message) = connection
+            .recv()
+            .await
+            .map_err(|error| format!("cannot read service response: {error}"))?
+        else {
+            return Err("vmux_service disconnected".to_string());
+        };
+        match message {
+            ServiceMessage::AgentCommandResult {
+                request_id: received,
+                result,
+            } if received == request_id => {
+                return vmux_mcp::protocol::command_result_to_mcp_response(result);
+            }
+            ServiceMessage::Error { message } => return Err(message),
+            _ => {}
+        }
     }
 }

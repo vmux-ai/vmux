@@ -13,6 +13,7 @@ pub struct KnowledgePlugin;
 
 impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(crate::KnowledgeToolPlugin);
         app.world_mut()
             .spawn((PAGE_MANIFEST, KnowledgeIndexRuntime::default()));
         app.init_resource::<KnowledgeIndex>()

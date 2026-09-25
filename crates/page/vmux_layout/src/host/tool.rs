@@ -1,17 +1,16 @@
-use super::{
+use vmux_mcp::tool::{
     McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue, layout};
+use vmux_api::protocol::{AgentCommand, AgentQuery, JsonValue, layout};
 
-pub(super) struct LayoutToolPlugin;
+pub struct LayoutToolPlugin;
 
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<LayoutTool>::new(include_str!("layout.ron")))
+        app.add_plugins(McpToolPlugin::<LayoutTool>::new(include_str!("tool.ron")))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
@@ -50,7 +49,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError(message));
+            commands.entity(request).insert(ToolDispatchError::new(message));
         }
     }
 }
@@ -60,7 +59,7 @@ fn read_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
         commands
             .entity(request)
             .insert(ToolQuery(Ok(AgentQuery::ReadLayout {
-                anchor: call.anchor,
+                anchor: call.anchor(),
             })));
     }
 }

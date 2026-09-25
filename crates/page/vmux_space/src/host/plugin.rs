@@ -24,6 +24,7 @@ impl Plugin for SpacePlugin {
         app.add_plugins(crate::ui::SpacesPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins(vmux_command::CommandTypePlugin::<OpenRequest>::default())
+            .add_plugins(super::SpaceToolPlugin)
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
             .init_resource::<ActiveSpace>()
