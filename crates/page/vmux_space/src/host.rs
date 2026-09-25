@@ -4,6 +4,7 @@ pub mod plugin;
 pub mod project;
 pub mod snapshot_updater;
 pub mod spaces;
+mod tool;
 
 type SpacesUiStateUpdates = vmux_core::host::UiState<vmux_api::space::SpacesUiState>;
 
@@ -20,6 +21,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 pub use plugin::{SaveSpaceRequest, SpacePlugin};
 pub use project::{ExpandedProjectDirs, SpaceProjects};
 pub use spaces::{ActiveSpace, Spaces};
+pub use tool::SpaceToolPlugin;
 pub use vmux_api::space::{
     SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest,
     SpaceRenameRequest,

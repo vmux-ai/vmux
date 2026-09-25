@@ -33,7 +33,9 @@ pub mod snapshot_updater;
 pub mod spawn;
 pub mod strategy;
 pub mod toast;
+mod tool;
 pub mod url;
+mod visual_tool;
 pub mod workspace;
 
 #[cfg(test)]
@@ -67,6 +69,8 @@ pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
 pub use runtime::cli::strategy::CliAgentStrategy;
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
+pub use tool::WorkspaceToolPlugin;
+pub use visual_tool::VisualToolPlugin;
 pub use url::{AgentKind, AgentUrl};
 pub use vmux_session::room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,

@@ -1,19 +1,18 @@
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::AgentCommand;
+use vmux_service::protocol::AgentCommand;
 
-use super::{
+use vmux_mcp::tool::{
     McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet,
     ToolRequestSet,
 };
 
-pub(super) struct TerminalToolPlugin;
+pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(McpToolPlugin::<TerminalTool>::new(include_str!(
-            "terminal.ron"
+            "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
         .add_systems(Update, dispatch.in_set(ToolDispatchSet));
@@ -41,7 +40,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<TerminalTool>) {
                 commands.entity(request).insert(args);
             }
             Err(message) => {
-                commands.entity(request).insert(ToolDispatchError(message));
+                commands.entity(request).insert(ToolDispatchError::new(message));
             }
         }
     }

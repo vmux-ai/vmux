@@ -27,7 +27,8 @@ desktop = [
     "terminal",
 ]
 mobile = ["dep:vmux_chat", "dep:vmux_start", "dep:vmux_team"]
-mcp = ["dep:vmux_mcp", "dep:vmux_tool"]
+mcp = ["dep:bevy_ecs", "dep:serde", "dep:vmux_mcp", "dep:vmux_tool"]
+tools = ["agent", "browser", "mcp", "simulator"]
 core = [
     "dep:vmux_command",
     "dep:vmux_core",
@@ -59,7 +60,10 @@ start = ["core", "dep:vmux_start"]
 
 [dependencies]
 bevy_app = { workspace = true }
+bevy_ecs = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 vmux_agent = { path = "../page/vmux_agent", optional = true }
+vmux_api = { path = "../vmux_api" }
 vmux_browser = { path = "../vmux_browser", optional = true }
 vmux_chat = { path = "../page/vmux_chat", optional = true }
 vmux_command = { path = "../page/vmux_command", optional = true }
@@ -84,3 +88,6 @@ vmux_tool = { path = "../vmux_tool", optional = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+serde_json = { workspace = true }

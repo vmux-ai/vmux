@@ -1,17 +1,16 @@
-use super::{
+use vmux_mcp::tool::{
     McpToolPlugin, ToolCall, ToolCalls, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::{AgentQuery, SimulatorButton, SimulatorInput};
+use vmux_api::protocol::{AgentQuery, SimulatorButton, SimulatorInput};
 
-pub(super) struct VisualToolPlugin;
+pub struct VisualToolPlugin;
 
 impl Plugin for VisualToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<VisualTool>::new(include_str!("visual.ron")))
+        app.add_plugins(McpToolPlugin::<VisualTool>::new(include_str!("visual_tool.ron")))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
@@ -150,7 +149,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<VisualTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError(message));
+            commands.entity(request).insert(ToolDispatchError::new(message));
         }
     }
 }

@@ -1,19 +1,72 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::{AgentCommand, JsonValue};
+use vmux_api::protocol::{AgentCommand, JsonValue};
 
-use super::{
+use vmux_mcp::tool::{
     McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet,
     ToolRequestSet,
 };
 
-pub(super) struct ApplicationToolPlugin;
+pub struct ToolPlugin;
+
+impl Plugin for ToolPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(ApplicationToolPlugin);
+        #[cfg(feature = "browser")]
+        app.add_plugins(vmux_browser::BrowserToolPlugin);
+        #[cfg(feature = "editor")]
+        app.add_plugins(vmux_editor::FileToolPlugin);
+        #[cfg(feature = "knowledge")]
+        app.add_plugins(vmux_knowledge::KnowledgeToolPlugin);
+        #[cfg(feature = "layout")]
+        app.add_plugins((
+            vmux_layout::tool::LayoutToolPlugin,
+            vmux_layout::bookmark_tool::BookmarkToolPlugin,
+        ));
+        #[cfg(feature = "core")]
+        app.add_plugins(vmux_setting::SettingToolPlugin);
+        #[cfg(feature = "space")]
+        app.add_plugins(vmux_space::SpaceToolPlugin);
+        #[cfg(feature = "terminal")]
+        app.add_plugins(vmux_terminal::TerminalToolPlugin);
+        #[cfg(feature = "agent")]
+        app.add_plugins((
+            vmux_agent::WorkspaceToolPlugin,
+            vmux_agent::VisualToolPlugin,
+        ));
+    }
+}
+
+impl ToolPlugin {
+    pub fn server(
+        anchor: Option<vmux_api::protocol::ProcessId>,
+        acp_session: bool,
+        acp_terminals: bool,
+        run_block_timeout: std::time::Duration,
+        shell: String,
+    ) -> vmux_mcp::protocol::McpServer {
+        let mut app = App::new();
+        app.add_plugins((
+            Self,
+            vmux_mcp::protocol::McpPlugin::new(
+                anchor,
+                acp_session,
+                acp_terminals,
+                run_block_timeout,
+                shell,
+            ),
+        ));
+        vmux_mcp::protocol::McpServer::from(app)
+    }
+}
+
+pub struct ApplicationToolPlugin;
 
 impl Plugin for ApplicationToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(McpToolPlugin::<ApplicationTool>::new(include_str!(
-            "application.ron"
+            "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
         .add_systems(
@@ -64,7 +117,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<ApplicationTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError(message));
+            commands.entity(request).insert(ToolDispatchError::new(message));
         }
     }
 }

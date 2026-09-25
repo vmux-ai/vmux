@@ -21,7 +21,9 @@ mod page;
 mod scroll;
 mod snapshot;
 mod state;
+mod tool;
 mod window_drag;
+pub use tool::BrowserToolPlugin;
 pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
 pub use host_focus::{HostFocusIntent, KeyboardContext, KeyboardContextSet};
 pub use navigation::OpenHistoryRequest;
@@ -110,6 +112,7 @@ impl Plugin for BrowserPlugin {
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
             vmux_command::command_bar::CommandBarPlugin,
+            BrowserToolPlugin,
             platform::BrowserPlatformPlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,

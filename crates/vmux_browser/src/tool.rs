@@ -1,19 +1,18 @@
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::{AgentCommand, AgentQuery};
+use vmux_api::protocol::{AgentCommand, AgentQuery};
 
-use super::{
+use vmux_mcp::tool::{
     McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
 
-pub(super) struct BrowserToolPlugin;
+pub struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(McpToolPlugin::<BrowserTool>::new(include_str!(
-            "browser.ron"
+            "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
         .add_systems(
@@ -165,7 +164,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
             }
             BrowserTool::Snapshot => {
                 if call
-                    .arguments
+                    .arguments()
                     .get("target")
                     .is_some_and(|value| !value.is_null() && !value.is_string())
                 {
@@ -181,7 +180,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError(message));
+            commands.entity(request).insert(ToolDispatchError::new(message));
         }
     }
 }
@@ -278,7 +277,7 @@ fn snapshot(
             .entity(entity)
             .insert(ToolQuery(Ok(AgentQuery::BrowserSnapshot {
                 pane: BrowserPane::from(args.target.clone()).into(),
-                anchor: call.anchor,
+                anchor: call.anchor(),
             })));
     }
 }
@@ -298,7 +297,7 @@ fn scroll(
                 pane: BrowserPane::from(target).into(),
                 to,
                 delta,
-                anchor: call.anchor,
+                anchor: call.anchor(),
             })));
     }
 }

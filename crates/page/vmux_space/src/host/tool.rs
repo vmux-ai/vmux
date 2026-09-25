@@ -1,17 +1,16 @@
-use super::{
+use vmux_mcp::tool::{
     McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
-use bevy_app::{App, Plugin, Update};
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_client::protocol::{AgentCommand, AgentQuery, AgentSpaceCommand};
+use vmux_api::protocol::{AgentCommand, AgentQuery, AgentSpaceCommand};
 
-pub(super) struct SpaceToolPlugin;
+pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<SpaceTool>::new(include_str!("space.ron")))
+        app.add_plugins(McpToolPlugin::<SpaceTool>::new(include_str!("tool.ron")))
             .add_systems(Update, parse.in_set(ToolRequestSet))
             .add_systems(
                 Update,
@@ -63,7 +62,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<SpaceTool>) {
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError(message));
+            commands.entity(request).insert(ToolDispatchError::new(message));
         }
     }
 }

@@ -177,15 +177,15 @@ fn fail_agent_tool_calls(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_service::protocol::AgentCommand;
+    use vmux_service::protocol::AgentQuery;
 
     #[derive(Resource, Default)]
-    struct CapturedAgentCommands(Vec<AgentCommand>);
+    struct CapturedAgentQueries(Vec<AgentQuery>);
 
-    impl CapturedAgentCommands {
-        fn read(mut requests: MessageReader<AgentCommandRequest>, mut captured: ResMut<Self>) {
+    impl CapturedAgentQueries {
+        fn read(mut requests: MessageReader<AgentQueryRequest>, mut captured: ResMut<Self>) {
             for request in requests.read() {
-                captured.0.push(request.command.clone());
+                captured.0.push(request.query.clone());
             }
         }
     }
@@ -195,16 +195,16 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            vmux_mcp::tool::BuiltinToolPlugin,
+            crate::VisualToolPlugin,
             ToolCallPlugin,
         ))
         .add_message::<AgentToolCallRequest>()
         .add_message::<AgentCommandRequest>()
         .add_message::<AgentQueryRequest>()
-        .init_resource::<CapturedAgentCommands>()
+        .init_resource::<CapturedAgentQueries>()
         .add_systems(
             Update,
-            CapturedAgentCommands::read.after(vmux_mcp::tool::ToolDispatchFlush),
+            CapturedAgentQueries::read.after(vmux_mcp::tool::ToolDispatchFlush),
         );
         app.update();
 
@@ -213,17 +213,14 @@ mod tests {
             .write(AgentToolCallRequest {
                 request_id: AgentRequestId::new(),
                 sid: "agent".to_string(),
-                name: "notify".to_string(),
-                args: vmux_api::json::JsonValue::from(serde_json::json!({"body": "done"})),
+                name: "screenshot".to_string(),
+                args: vmux_api::json::JsonValue::from(serde_json::json!({})),
             });
         app.update();
 
         assert!(matches!(
-            app.world().resource::<CapturedAgentCommands>().0.as_slice(),
-            [AgentCommand::Notify {
-                title: None,
-                body: Some(body),
-            }] if body == "done"
+            app.world().resource::<CapturedAgentQueries>().0.as_slice(),
+            [AgentQuery::Screenshot { pane: None }]
         ));
     }
 }

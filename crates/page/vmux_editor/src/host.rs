@@ -17,6 +17,7 @@ impl Plugin for EditorPlugin {
             .spawn(vmux_core::HostSpawnRoute::scheme("file"));
         app.add_plugins((
             contract::ContractPlugin,
+            tool::FileToolPlugin,
             lsp::LspPlugin,
             app_key::KeyPlugin,
             search::SearchPlugin,
@@ -74,6 +75,7 @@ pub mod lsp;
 pub mod markdown;
 pub mod palette;
 pub mod shape;
+pub mod tool;
 
 pub(crate) mod app_key;
 pub(crate) mod dir;
@@ -101,3 +103,4 @@ pub use explorer::{GlobalSearchRequest, StackExplorerVisibility};
 pub use lsp::LspPlugin;
 pub use page_open::restore_file_view_bundle;
 pub use status::FileViewModeRequest;
+pub use tool::FileToolPlugin;

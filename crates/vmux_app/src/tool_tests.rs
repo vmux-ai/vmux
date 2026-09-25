@@ -1,8 +1,193 @@
-use super::*;
-use vmux_client::protocol::{
-    AgentBookmarkCommand, AgentCommand, AgentQuery, AgentSpaceCommand, SimulatorButton,
-    SimulatorInput,
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::prelude::*;
+use bevy_ecs::system::RunSystemOnce;
+use serde::{Deserialize, Serialize};
+use vmux_api::protocol::{
+    AgentBookmarkCommand, AgentCommand, AgentQuery, AgentSpaceCommand, JsonValue, ProcessId,
+    SimulatorButton, SimulatorInput,
 };
+use vmux_mcp::protocol::{McpExecution, McpRequest};
+use vmux_mcp::tool::{
+    McpToolPlugin, ShellNote, ToolCall, ToolCallPolicy, ToolCommand, ToolDefinition,
+    ToolDispatchError, ToolDispatchSet, ToolQuery, ToolRegistry,
+};
+
+use crate::ToolPlugin;
+
+#[derive(Clone, Debug)]
+enum DispatchTarget {
+    Command(AgentCommand),
+    Query(AgentQuery),
+}
+
+enum TestToolDispatch {
+    Target(DispatchTarget),
+    Protocol,
+}
+
+fn tool_app() -> App {
+    let mut app = App::new();
+    app.add_plugins(ToolPlugin);
+    app.update();
+    app
+}
+
+fn tool_definitions_in(
+    world: &mut World,
+    acp_session: bool,
+    acp_terminals: bool,
+    shell: &str,
+) -> Vec<ToolDefinition> {
+    let shell = shell.to_string();
+    world
+        .run_system_once(move |tools: ToolRegistry| {
+            tools.definitions(acp_session, acp_terminals, &shell)
+        })
+        .expect("tool catalog system must run")
+}
+
+fn tool_definitions_filtered(
+    acp_session: bool,
+    acp_terminals: bool,
+    shell: &str,
+) -> Vec<ToolDefinition> {
+    let mut app = tool_app();
+    tool_definitions_in(app.world_mut(), acp_session, acp_terminals, shell)
+}
+
+fn tool_definitions() -> Vec<ToolDefinition> {
+    tool_definitions_filtered(false, false, "")
+}
+
+fn dispatch_tool_call(
+    app: &mut App,
+    name: &str,
+    arguments: serde_json::Value,
+    anchor: Option<ProcessId>,
+    host_shell: &str,
+    acp_session: bool,
+    acp_terminals: bool,
+) -> Result<TestToolDispatch, String> {
+    let normalized = vmux_mcp::tool::canonical_tool_name(name).to_string();
+    let name = name.to_string();
+    let host_shell = host_shell.to_string();
+    let call = app
+        .world_mut()
+        .run_system_once(move |tools: ToolRegistry| {
+            tools.call(
+                &name,
+                arguments.clone(),
+                anchor,
+                &host_shell,
+                ToolCallPolicy::registered(acp_session, acp_terminals),
+            )
+        })
+        .map_err(|error| error.to_string())??;
+    let request = app
+        .world_mut()
+        .spawn((call, McpRequest::new(std::time::Duration::from_secs(50))))
+        .id();
+    app.update();
+    let dispatched = if let Some(result) = app.world_mut().entity_mut(request).take::<ToolCommand>()
+    {
+        result
+            .0
+            .map(DispatchTarget::Command)
+            .map(TestToolDispatch::Target)
+    } else if let Some(result) = app.world_mut().entity_mut(request).take::<ToolQuery>() {
+        result
+            .0
+            .map(DispatchTarget::Query)
+            .map(TestToolDispatch::Target)
+    } else if app.world().get::<McpExecution>(request).is_some() {
+        Ok(TestToolDispatch::Protocol)
+    } else if let Some(error) = app
+        .world_mut()
+        .entity_mut(request)
+        .take::<ToolDispatchError>()
+    {
+        Err(error.message().to_string())
+    } else {
+        Err(format!("tool {normalized} did not produce a dispatch"))
+    };
+    app.world_mut().despawn(request);
+    dispatched
+}
+
+fn find_tool(world: &mut World, name: &str) -> Option<Entity> {
+    let name = name.to_string();
+    world
+        .run_system_once(move |tools: ToolRegistry| {
+            tools
+                .call(
+                    &name,
+                    serde_json::Value::Null,
+                    None,
+                    "",
+                    ToolCallPolicy::registered(false, false),
+                )
+                .ok()
+                .and_then(|call| call.tool())
+        })
+        .ok()
+        .flatten()
+}
+
+fn dispatch_from_tool_call(
+    name: &str,
+    arguments: serde_json::Value,
+) -> Result<DispatchTarget, String> {
+    dispatch_with_anchor(name, arguments, None)
+}
+
+fn dispatch_agent_tool_call(
+    name: &str,
+    arguments: serde_json::Value,
+) -> Result<DispatchTarget, String> {
+    let normalized = vmux_mcp::tool::canonical_tool_name(name);
+    match dispatch_from_tool_call(normalized, arguments.clone()) {
+        Ok(target) => Ok(target),
+        Err(message) if message == format!("unknown tool: {normalized}") => {
+            Ok(DispatchTarget::Command(AgentCommand::InvokeCommand {
+                id: normalized.to_string(),
+                args: JsonValue::from(arguments),
+            }))
+        }
+        Err(message) => Err(message),
+    }
+}
+
+fn dispatch_with_anchor(
+    name: &str,
+    arguments: serde_json::Value,
+    anchor: Option<ProcessId>,
+) -> Result<DispatchTarget, String> {
+    dispatch_in_shell(name, arguments, anchor, "")
+}
+
+fn dispatch_in_shell(
+    name: &str,
+    arguments: serde_json::Value,
+    anchor: Option<ProcessId>,
+    host_shell: &str,
+) -> Result<DispatchTarget, String> {
+    let mut app = tool_app();
+    match dispatch_tool_call(
+        &mut app,
+        name,
+        arguments,
+        anchor,
+        host_shell,
+        false,
+        false,
+    )? {
+        TestToolDispatch::Target(target) => Ok(target),
+        TestToolDispatch::Protocol => Err(format!(
+            "tool {} requires MCP protocol context",
+            vmux_mcp::tool::canonical_tool_name(name)
+        )),
+    }
+}
 
 #[derive(Clone, Component, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -90,7 +275,7 @@ fn extension_plugin_registers_and_dispatches_its_manifest() {
 #[test]
 fn owning_world_dispatches_tool_entities() {
     let mut app = App::new();
-    app.add_plugins(BuiltinToolPlugin);
+    app.add_plugins(ToolPlugin);
     app.update();
 
     let call = app
@@ -101,7 +286,7 @@ fn owning_world_dispatches_tool_entities() {
                 serde_json::json!({"body": "hello"}),
                 None,
                 "",
-                ToolCallPolicy::strict(false, false),
+                ToolCallPolicy::registered(false, false),
             )
         })
         .unwrap()
@@ -126,45 +311,16 @@ fn owning_world_dispatches_tool_entities() {
 }
 
 #[test]
-fn typed_input_schema_serializes_to_mcp_json() {
-    let manifest = ToolManifest::<ExtensionTool>::from_ron(EXTENSION_TOOLS);
-    let (seed, _) = manifest.0.into_iter().next().unwrap().into_seed();
-    assert_eq!(
-        seed.input_schema.to_json(),
-        serde_json::json!({
-            "type": "object",
-            "required": ["text"],
-            "properties": {"text": {"type": "string"}},
-            "additionalProperties": false,
-        })
-    );
-}
-
-#[test]
-#[should_panic(expected = "array input schema must define items")]
-fn typed_input_schema_rejects_an_array_without_items() {
-    ToolManifest::<ExtensionTool>::from_ron(
-        r#"
-        [(
-            kind: echo,
-            description: "Invalid",
-            input_schema: (type: Array),
-        )]
-        "#,
-    );
-}
-
-#[test]
 fn runtime_commands_merge_into_the_local_tool_catalog() {
     let local = vec![ToolDefinition {
         name: "read_file".to_string(),
         description: "Read file".to_string(),
         input_schema: serde_json::json!({"type": "object"}),
     }];
-    let commands = vec![vmux_client::protocol::AgentCommandTool {
+    let commands = vec![vmux_api::protocol::AgentCommandTool {
         name: "terminal_clear".to_string(),
         description: "Clear Terminal".to_string(),
-        input_schema: vmux_client::protocol::JsonValue::from(
+        input_schema: vmux_api::protocol::JsonValue::from(
             serde_json::json!({"type": "object", "additionalProperties": false}),
         ),
     }];
@@ -191,10 +347,10 @@ fn runtime_commands_cannot_shadow_local_tools() {
         description: "Read file".to_string(),
         input_schema: serde_json::json!({"type": "object"}),
     }];
-    let commands = vec![vmux_client::protocol::AgentCommandTool {
+    let commands = vec![vmux_api::protocol::AgentCommandTool {
         name: "read_file".to_string(),
         description: "Command".to_string(),
-        input_schema: vmux_client::protocol::JsonValue::from(serde_json::json!({"type": "object"})),
+        input_schema: vmux_api::protocol::JsonValue::from(serde_json::json!({"type": "object"})),
     }];
 
     assert_eq!(
@@ -205,15 +361,15 @@ fn runtime_commands_cannot_shadow_local_tools() {
 
 #[test]
 fn the_run_tool_teaches_the_shell_it_will_actually_use() {
-    let plain = super::ShellNote::for_shell("/bin/zsh");
+    let plain = ShellNote::for_shell("/bin/zsh");
     assert_eq!(plain, " The shell is zsh.");
 
-    let nu = super::ShellNote::for_shell("/opt/homebrew/bin/nu");
+    let nu = ShellNote::for_shell("/opt/homebrew/bin/nu");
     assert!(nu.contains("out+err>"), "{nu}");
     assert!(nu.contains("bash -c"), "{nu}");
 
-    assert_eq!(super::ShellNote::for_shell(""), "");
-    assert_eq!(super::ShellNote::for_shell("   "), "");
+    assert_eq!(ShellNote::for_shell(""), "");
+    assert_eq!(ShellNote::for_shell("   "), "");
 }
 
 #[test]
@@ -266,8 +422,8 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
     definitions.sort_unstable();
     assert_eq!(definitions, expected);
 
-    let anchor = Some(vmux_client::protocol::ProcessId::new());
-    let mut app = builtin_tool_app();
+    let anchor = Some(vmux_api::protocol::ProcessId::new());
+    let mut app = tool_app();
     for name in expected {
         match dispatch_tool_call(
             &mut app,
@@ -289,14 +445,14 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
 
 #[test]
 fn aliases_resolve_to_the_same_tool_entity() {
-    let mut app = builtin_tool_app();
-    let select = find_tool(app.world_mut(), "select_project").unwrap().0;
+    let mut app = tool_app();
+    let select = find_tool(app.world_mut(), "select_project").unwrap();
     assert_eq!(
-        find_tool(app.world_mut(), "select_workspace").unwrap().0,
+        find_tool(app.world_mut(), "select_workspace").unwrap(),
         select
     );
     assert_eq!(
-        find_tool(app.world_mut(), "choose_workspace").unwrap().0,
+        find_tool(app.world_mut(), "choose_workspace").unwrap(),
         select
     );
     let execution = dispatch_tool_call(
@@ -314,7 +470,7 @@ fn aliases_resolve_to_the_same_tool_entity() {
 
 #[test]
 fn read_file_rejects_a_zero_offset() {
-    let mut app = builtin_tool_app();
+    let mut app = tool_app();
     let error = dispatch_tool_call(
         &mut app,
         "read_file",
@@ -671,9 +827,9 @@ fn agent_tool_dispatch_preserves_runtime_command_name_and_arguments() {
         target,
         DispatchTarget::Command(AgentCommand::InvokeCommand { id, args })
             if id == "terminal_clear"
-                && args == vmux_client::protocol::JsonValue::Object(vec![(
+                && args == vmux_api::protocol::JsonValue::Object(vec![(
                     "unexpected".to_string(),
-                    vmux_client::protocol::JsonValue::Bool(true),
+                    vmux_api::protocol::JsonValue::Bool(true),
                 )])
     ));
 }
@@ -785,7 +941,7 @@ fn cli_toolset_lists_resume_in_acp() {
 
 #[test]
 fn resume_in_acp_dispatches_with_anchor() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target =
         dispatch_with_anchor("resume_in_acp", serde_json::json!({}), Some(anchor)).unwrap();
     assert!(matches!(
@@ -797,7 +953,7 @@ fn resume_in_acp_dispatches_with_anchor() {
 
 #[test]
 fn conversation_title_dispatches_model_summary_to_agent_session() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "set_conversation_title",
         serde_json::json!({"title": "  Refine model-generated summaries  "}),
@@ -821,7 +977,7 @@ fn conversation_title_dispatches_model_summary_to_agent_session() {
 
 #[test]
 fn knowledge_write_dispatches_validated_note_to_host() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "write_knowledge",
         serde_json::json!({
@@ -849,7 +1005,7 @@ fn knowledge_write_dispatches_validated_note_to_host() {
 
 #[test]
 fn knowledge_read_tools_dispatch_with_bounds_and_anchor() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let search = dispatch_with_anchor(
         "search_knowledge",
         serde_json::json!({"query": "  Obsidian links  ", "limit": 12}),
@@ -887,7 +1043,7 @@ fn knowledge_read_tools_dispatch_with_bounds_and_anchor() {
 
 #[test]
 fn project_tools_dispatch_with_anchor_and_branch() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let definitions = tool_definitions()
         .into_iter()
         .map(|definition| (definition.name.clone(), definition))
@@ -1077,7 +1233,7 @@ fn select_tab_dispatches_to_tab_select_id() {
         command,
         AgentCommand::InvokeCommand {
             id: "tab_select_3".to_string(),
-            args: vmux_client::protocol::JsonValue::Object(Vec::new()),
+            args: vmux_api::protocol::JsonValue::Object(Vec::new()),
         }
     );
 }
@@ -1105,14 +1261,14 @@ fn screenshot_dispatches_to_query_with_and_without_pane() {
     let target = dispatch_from_tool_call("screenshot", serde_json::json!({})).unwrap();
     assert!(matches!(
         target,
-        DispatchTarget::Query(vmux_client::protocol::AgentQuery::Screenshot { pane: None })
+        DispatchTarget::Query(vmux_api::protocol::AgentQuery::Screenshot { pane: None })
     ));
 
     let target =
         dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "stack:7" })).unwrap();
     assert!(matches!(
         target,
-        DispatchTarget::Query(vmux_client::protocol::AgentQuery::Screenshot { pane: Some(p) })
+        DispatchTarget::Query(vmux_api::protocol::AgentQuery::Screenshot { pane: Some(p) })
             if p == "stack:7"
     ));
 
@@ -1120,7 +1276,7 @@ fn screenshot_dispatches_to_query_with_and_without_pane() {
         dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "  " })).unwrap();
     assert!(matches!(
         target,
-        DispatchTarget::Query(vmux_client::protocol::AgentQuery::Screenshot { pane: None })
+        DispatchTarget::Query(vmux_api::protocol::AgentQuery::Screenshot { pane: None })
     ));
 
     assert!(dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": 123 })).is_err());
@@ -1204,7 +1360,7 @@ fn dispatch_read_layout_routes_to_query() {
 
 #[test]
 fn open_page_without_direction_is_auto() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "open_page",
         serde_json::json!({"url": "https://x.com"}),
@@ -1221,7 +1377,7 @@ fn open_page_without_direction_is_auto() {
 
 #[test]
 fn open_page_default_does_not_request_focus() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "open_page",
         serde_json::json!({"url": "https://x.com"}),
@@ -1238,7 +1394,7 @@ fn open_page_default_does_not_request_focus() {
 
 #[test]
 fn open_file_default_does_not_request_focus() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "open_file",
         serde_json::json!({"path": "/tmp/example.rs"}),
@@ -1255,7 +1411,7 @@ fn open_file_default_does_not_request_focus() {
 
 #[test]
 fn open_page_with_direction_is_explicit() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "open_page",
         serde_json::json!({"url": "https://x.com", "direction": "left"}),
@@ -1266,7 +1422,7 @@ fn open_page_with_direction_is_explicit() {
         DispatchTarget::Command(AgentCommand::OpenBeside { direction, .. }) => {
             assert_eq!(
                 direction,
-                Some(vmux_client::protocol::AgentPaneDirection::Left)
+                Some(vmux_api::protocol::AgentPaneDirection::Left)
             );
         }
         other => panic!("expected OpenBeside, got {other:?}"),
@@ -1275,7 +1431,7 @@ fn open_page_with_direction_is_explicit() {
 
 #[test]
 fn open_page_dispatch_uses_anchor() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "open_page",
         serde_json::json!({"direction": "right", "url": "vmux://terminal/"}),
@@ -1301,7 +1457,7 @@ fn open_page_dispatch_uses_anchor() {
 
 #[test]
 fn open_vault_dispatch_focuses_confirmed_provider() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "open_vault",
         serde_json::json!({"provider": "github"}),
@@ -1331,7 +1487,7 @@ fn open_vault_dispatch_focuses_confirmed_provider() {
 
 #[test]
 fn run_dispatch_uses_anchor() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "run",
         serde_json::json!({"command": "echo hi"}),
@@ -1355,7 +1511,7 @@ fn run_dispatch_uses_anchor() {
 
 #[test]
 fn run_dispatch_tracks_explicit_placement_override() {
-    let anchor = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     let bare = dispatch_with_anchor(
         "run",
         serde_json::json!({"command": "echo hi"}),
@@ -1414,8 +1570,8 @@ fn run_tool_documents_default_placement_policy() {
 
 #[test]
 fn run_with_terminal_targets_existing() {
-    let anchor = vmux_client::protocol::ProcessId::new();
-    let term = vmux_client::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
+    let term = vmux_api::protocol::ProcessId::new();
     let target = dispatch_with_anchor(
         "run",
         serde_json::json!({"command": "ls", "terminal": term.to_string()}),
@@ -1442,9 +1598,9 @@ fn run_with_terminal_targets_existing() {
 
 #[test]
 fn run_beside_and_mode_dispatch() {
-    use vmux_client::protocol::PlacementMode;
-    let anchor = vmux_client::protocol::ProcessId::new();
-    let beside = vmux_client::protocol::ProcessId::new();
+    use vmux_api::protocol::PlacementMode;
+    let anchor = vmux_api::protocol::ProcessId::new();
+    let beside = vmux_api::protocol::ProcessId::new();
 
     let target = dispatch_with_anchor(
         "run",
@@ -1504,7 +1660,7 @@ fn run_beside_and_mode_dispatch() {
 
 #[test]
 fn read_terminal_dispatch_routes_to_query() {
-    let pid = vmux_client::protocol::ProcessId::new();
+    let pid = vmux_api::protocol::ProcessId::new();
     let target = dispatch_from_tool_call(
         "read_terminal",
         serde_json::json!({"terminal": pid.to_string()}),
@@ -1512,7 +1668,7 @@ fn read_terminal_dispatch_routes_to_query() {
     .unwrap();
     assert!(matches!(
         target,
-        DispatchTarget::Query(vmux_client::protocol::AgentQuery::ReadTerminal { .. })
+        DispatchTarget::Query(vmux_api::protocol::AgentQuery::ReadTerminal { .. })
     ));
     assert!(
         dispatch_from_tool_call("read_terminal", serde_json::json!({"terminal": "bad"})).is_err()
@@ -1522,15 +1678,15 @@ fn read_terminal_dispatch_routes_to_query() {
 
 #[test]
 fn dispatch_update_layout_parses_payload() {
-    let layout = vmux_client::protocol::layout::LayoutSnapshot {
-        tabs: vec![vmux_client::protocol::layout::Tab {
+    let layout = vmux_api::protocol::layout::LayoutSnapshot {
+        tabs: vec![vmux_api::protocol::layout::Tab {
             id: Some("tab:1".to_string()),
             name: "Work".to_string(),
             is_active: true,
-            root: vmux_client::protocol::layout::LayoutNode::Pane {
+            root: vmux_api::protocol::layout::LayoutNode::Pane {
                 id: Some("pane:2".to_string()),
                 is_zoomed: true,
-                stacks: vec![vmux_client::protocol::layout::Stack {
+                stacks: vec![vmux_api::protocol::layout::Stack {
                     id: Some("stack:3".to_string()),
                     title: "Terminal".to_string(),
                     url: "vmux://terminal/".to_string(),
@@ -1542,7 +1698,7 @@ fn dispatch_update_layout_parses_payload() {
                 }],
             },
         }],
-        focused: vmux_client::protocol::layout::Focus {
+        focused: vmux_api::protocol::layout::Focus {
             tab: Some("tab:1".to_string()),
             pane: Some("pane:2".to_string()),
             stack: Some("stack:3".to_string()),
