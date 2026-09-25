@@ -3,7 +3,7 @@ use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::{
     CefShutdownState, PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use vmux_flex::prelude::*;
 
 use super::bridge::{BridgeIdentity, ExtensionBridgeServer};
@@ -13,14 +13,12 @@ pub(crate) struct ExtensionBridgePagePlugin;
 
 impl Plugin for ExtensionBridgePagePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ExtensionBridgeLifecycle>()
-            .init_resource::<ExtensionInfrastructureEntities>()
-            .add_systems(
-                Update,
-                (stop_extension_bridge_pages, spawn_extension_bridge_pages)
-                    .chain()
-                    .before(bevy_cef::prelude::CefSystems::CreateAndResize),
-            );
+        app.add_systems(
+            Update,
+            (stop_extension_bridge_pages, spawn_extension_bridge_pages)
+                .chain()
+                .before(bevy_cef::prelude::CefSystems::CreateAndResize),
+        );
     }
 }
 
@@ -36,51 +34,53 @@ pub enum ExtensionBridgeRole {
     ConformanceEcho,
 }
 
-#[derive(Resource, Default)]
-pub(crate) struct ExtensionBridgeLifecycle {
-    stopping: bool,
-    spawned: HashMap<(String, ExtensionBridgeRole), Entity>,
-}
+#[derive(Component)]
+pub(crate) struct ExtensionInfrastructureWebview;
 
-#[derive(Resource, Default)]
-pub(crate) struct ExtensionInfrastructureEntities(HashSet<Entity>);
+#[derive(Component)]
+pub(crate) struct RetiredExtensionInfrastructureWebview(Entity);
 
-impl ExtensionInfrastructureEntities {
+impl RetiredExtensionInfrastructureWebview {
+    pub(crate) fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+
     pub(crate) fn contains(&self, entity: Entity) -> bool {
-        self.0.contains(&entity)
-    }
-
-    pub(crate) fn insert(&mut self, entity: Entity) {
-        self.0.insert(entity);
+        self.0 == entity
     }
 }
 
-pub fn stop_extension_bridge_pages(
+#[derive(Component)]
+struct ExtensionBridgeStopping;
+
+fn stop_extension_bridge_pages(
     mut exits: MessageReader<AppExit>,
-    mut lifecycle: ResMut<ExtensionBridgeLifecycle>,
     pages: Query<Entity, With<ExtensionBridgeWebview>>,
+    stopping: Query<(), With<ExtensionBridgeStopping>>,
     mut commands: Commands,
 ) {
     if exits.read().count() == 0 {
         return;
     }
-    lifecycle.stopping = true;
+    if stopping.is_empty() {
+        commands.spawn(ExtensionBridgeStopping);
+    }
     for entity in &pages {
+        commands.spawn(RetiredExtensionInfrastructureWebview::new(entity));
         commands.entity(entity).despawn();
     }
 }
 
-pub fn spawn_extension_bridge_pages(
+fn spawn_extension_bridge_pages(
     mut commands: Commands,
     prepared: Res<PreparedExtensions>,
     server: Res<ExtensionBridgeServer>,
     primary_window: Query<(), With<PrimaryWindow>>,
     added_primary_window: Query<(), Added<PrimaryWindow>>,
-    pages: Query<Entity, With<ExtensionBridgeWebview>>,
+    pages: Query<(Entity, &ExtensionBridgeWebview)>,
     mut removed_pages: RemovedComponents<ExtensionBridgeWebview>,
     shutdown: Option<Res<CefShutdownState>>,
-    mut lifecycle: ResMut<ExtensionBridgeLifecycle>,
-    mut infrastructure: ResMut<ExtensionInfrastructureEntities>,
+    stopping: Query<(), With<ExtensionBridgeStopping>>,
     mut initialized: Local<bool>,
 ) {
     let should_reconcile = !*initialized
@@ -92,14 +92,14 @@ pub fn spawn_extension_bridge_pages(
     if !should_reconcile {
         return;
     }
-    if lifecycle.stopping
+    if !stopping.is_empty()
         || shutdown.is_some_and(|state| state.started())
         || primary_window.is_empty()
     {
         return;
     }
     let conformance = super::broker::extension_conformance_enabled();
-    let desired = prepared
+    let mut desired = prepared
         .0
         .iter()
         .flat_map(|runtime| {
@@ -113,75 +113,60 @@ pub fn spawn_extension_bridge_pages(
             roles
         })
         .collect::<HashSet<_>>();
-    lifecycle.spawned.retain(|key, entity| {
-        if desired.contains(key) && pages.contains(*entity) {
-            return true;
+    for (entity, page) in &pages {
+        let key = (page.extension_id.clone(), page.role);
+        if desired.remove(&key) {
+            continue;
         }
-        if pages.contains(*entity) {
-            commands.entity(*entity).despawn();
-        }
-        false
-    });
+        commands.spawn(RetiredExtensionInfrastructureWebview::new(entity));
+        commands.entity(entity).despawn();
+    }
     for runtime in &prepared.0 {
         let identity = server
             .identity(&runtime.extension_id)
             .unwrap_or_else(|| panic!("missing bridge identity for {}", runtime.extension_id));
-        let transport = (runtime.extension_id.clone(), ExtensionBridgeRole::Transport);
-        if !lifecycle
-            .spawned
-            .get(&transport)
-            .is_some_and(|entity| pages.contains(*entity))
-        {
-            let entity = commands
-                .spawn((
-                    ExtensionBridgeWebview {
-                        extension_id: runtime.extension_id.clone(),
-                        role: ExtensionBridgeRole::Transport,
-                    },
-                    WebviewSource::new(format!(
-                        "chrome-extension://{}/vmux_bridge.html",
-                        runtime.extension_id
-                    )),
-                    PrivatePreloadScripts::from([bridge_config_source(
-                        &server,
-                        identity,
-                        conformance,
-                    )]),
-                    WebviewSize(Vec2::ONE),
-                    WebviewMaxFrameRate(1),
-                    Visibility::Hidden,
-                ))
-                .id();
-            infrastructure.insert(entity);
-            lifecycle.spawned.insert(transport, entity);
-        }
-        let echo = (
-            runtime.extension_id.clone(),
+        for role in [
+            ExtensionBridgeRole::Transport,
             ExtensionBridgeRole::ConformanceEcho,
-        );
-        if conformance
-            && !lifecycle
-                .spawned
-                .get(&echo)
-                .is_some_and(|entity| pages.contains(*entity))
-        {
-            let entity = commands
-                .spawn((
-                    ExtensionBridgeWebview {
-                        extension_id: runtime.extension_id.clone(),
-                        role: ExtensionBridgeRole::ConformanceEcho,
-                    },
-                    WebviewSource::new(format!(
+        ] {
+            if role == ExtensionBridgeRole::ConformanceEcho && !conformance {
+                continue;
+            }
+            let key = (runtime.extension_id.clone(), role);
+            if !desired.remove(&key) {
+                continue;
+            }
+            let mut entity = commands.spawn((
+                ExtensionBridgeWebview {
+                    extension_id: runtime.extension_id.clone(),
+                    role,
+                },
+                ExtensionInfrastructureWebview,
+                WebviewSize(Vec2::ONE),
+                WebviewMaxFrameRate(1),
+                Visibility::Hidden,
+            ));
+            match role {
+                ExtensionBridgeRole::Transport => {
+                    entity.insert((
+                        WebviewSource::new(format!(
+                            "chrome-extension://{}/vmux_bridge.html",
+                            runtime.extension_id
+                        )),
+                        PrivatePreloadScripts::from([bridge_config_source(
+                            &server,
+                            identity,
+                            conformance,
+                        )]),
+                    ));
+                }
+                ExtensionBridgeRole::ConformanceEcho => {
+                    entity.insert(WebviewSource::new(format!(
                         "chrome-extension://{}/echo.html",
                         runtime.extension_id
-                    )),
-                    WebviewSize(Vec2::ONE),
-                    WebviewMaxFrameRate(1),
-                    Visibility::Hidden,
-                ))
-                .id();
-            infrastructure.insert(entity);
-            lifecycle.spawned.insert(echo, entity);
+                    )));
+                }
+            }
         }
     }
 }
@@ -233,8 +218,6 @@ mod tests {
         let identity = bridge.identity(EXTENSION_ID).unwrap().clone();
         app.insert_resource(PreparedExtensions(vec![runtime]))
             .insert_resource(bridge)
-            .init_resource::<ExtensionBridgeLifecycle>()
-            .init_resource::<ExtensionInfrastructureEntities>()
             .add_message::<AppExit>()
             .add_systems(
                 Update,
@@ -284,8 +267,8 @@ mod tests {
         assert!(app.world().get::<vmux_layout::Browser>(entity).is_none());
         assert!(
             app.world()
-                .resource::<ExtensionInfrastructureEntities>()
-                .contains(entity)
+                .get::<ExtensionInfrastructureWebview>(entity)
+                .is_some()
         );
         assert_eq!(
             app.world_mut()
@@ -306,6 +289,12 @@ mod tests {
                 .iter(app.world())
                 .count(),
             0
+        );
+        assert!(
+            app.world_mut()
+                .query::<&RetiredExtensionInfrastructureWebview>()
+                .iter(app.world())
+                .any(|retired| retired.contains(entity))
         );
     }
 }
