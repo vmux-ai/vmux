@@ -5,28 +5,56 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
 use super::GitUpdateSet;
-use super::job::{Emit, JobKind};
+use super::job::{
+    AmendJob, BranchLogJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob,
+    DeleteBranchJob, DiffJob, DiscardJob, Emit, FastForwardJob, FetchJob, GitTask, HunkJob,
+    MergeJob, PullJob, PushJob, RebaseJob, RepositoryJob, RevertJob, StageAllJob, StageJob,
+    StashDropJob, StashPopJob, StashPushJob, UnstageJob,
+};
 
 pub(super) struct JobPlugin;
 
 impl Plugin for JobPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(queue_git_job)
-            .add_observer(queue_git_job_failure)
-            .add_systems(
-                Update,
-                (poll_git_jobs, deliver_git_outputs, start_git_jobs)
-                    .chain()
-                    .in_set(GitUpdateSet::Jobs),
-            );
+        app.add_observer(queue_git_job_failure).add_systems(
+            Update,
+            (
+                poll_git_jobs,
+                deliver_git_outputs,
+                bevy::ecs::schedule::ApplyDeferred,
+                (
+                    start_git_jobs::<RepositoryJob>,
+                    start_git_jobs::<BranchLogJob>,
+                    start_git_jobs::<DiffJob>,
+                    start_git_jobs::<StageJob>,
+                    start_git_jobs::<UnstageJob>,
+                    start_git_jobs::<DiscardJob>,
+                    start_git_jobs::<CommitJob>,
+                    start_git_jobs::<FetchJob>,
+                    start_git_jobs::<PullJob>,
+                    start_git_jobs::<PushJob>,
+                    start_git_jobs::<StageAllJob>,
+                    start_git_jobs::<HunkJob>,
+                ),
+                (
+                    start_git_jobs::<AmendJob>,
+                    start_git_jobs::<CheckoutCommitJob>,
+                    start_git_jobs::<CherryPickJob>,
+                    start_git_jobs::<CreateBranchJob>,
+                    start_git_jobs::<DeleteBranchJob>,
+                    start_git_jobs::<FastForwardJob>,
+                    start_git_jobs::<MergeJob>,
+                    start_git_jobs::<RebaseJob>,
+                    start_git_jobs::<RevertJob>,
+                    start_git_jobs::<StashDropJob>,
+                    start_git_jobs::<StashPopJob>,
+                    start_git_jobs::<StashPushJob>,
+                ),
+            )
+                .chain()
+                .in_set(GitUpdateSet::Jobs),
+        );
     }
-}
-
-#[derive(EntityEvent)]
-pub(super) struct GitJobRequest {
-    #[event_target]
-    pub(super) webview: Entity,
-    pub(super) job: JobKind,
 }
 
 #[derive(EntityEvent)]
@@ -43,12 +71,15 @@ pub(super) struct GitJob {
     webview: Entity,
 }
 
+impl GitJob {
+    pub(super) fn new(webview: Entity) -> Self {
+        Self { webview }
+    }
+}
+
 #[derive(Component)]
 #[relationship_target(relationship = GitJob)]
 pub(super) struct GitJobs(Vec<Entity>);
-
-#[derive(Component)]
-struct PendingGitJob(JobKind);
 
 #[derive(Component)]
 struct RunningGitJob {
@@ -57,30 +88,22 @@ struct RunningGitJob {
 
 #[derive(Component)]
 struct GitJobOutput {
-    webview: Entity,
     emits: Vec<Emit>,
 }
 
-fn queue_git_job(trigger: On<GitJobRequest>, mut commands: Commands) {
+fn queue_git_job_failure(trigger: On<GitJobFailure>, mut commands: Commands) {
     commands.spawn((
-        GitJob {
-            webview: trigger.event().webview,
+        GitJob::new(trigger.event().webview),
+        GitJobOutput {
+            emits: vec![Emit::Error(crate::event::GitOperationError {
+                message: trigger.event().message.clone(),
+            })],
         },
-        PendingGitJob(trigger.event().job.clone()),
     ));
 }
 
-fn queue_git_job_failure(trigger: On<GitJobFailure>, mut commands: Commands) {
-    commands.spawn(GitJobOutput {
-        webview: trigger.event().webview,
-        emits: vec![Emit::Error(crate::event::GitOperationError {
-            message: trigger.event().message.clone(),
-        })],
-    });
-}
-
-fn poll_git_jobs(mut jobs: Query<(Entity, &GitJob, &mut RunningGitJob)>, mut commands: Commands) {
-    for (entity, job, mut running) in &mut jobs {
+fn poll_git_jobs(mut jobs: Query<(Entity, &mut RunningGitJob)>, mut commands: Commands) {
+    for (entity, mut running) in &mut jobs {
         if !running.thread.as_ref().is_some_and(JoinHandle::is_finished) {
             continue;
         }
@@ -93,15 +116,12 @@ fn poll_git_jobs(mut jobs: Query<(Entity, &GitJob, &mut RunningGitJob)>, mut com
         commands
             .entity(entity)
             .remove::<RunningGitJob>()
-            .insert(GitJobOutput {
-                webview: job.webview,
-                emits,
-            });
+            .insert(GitJobOutput { emits });
     }
 }
 
 fn deliver_git_outputs(
-    mut outputs: Query<(Entity, &mut GitJobOutput)>,
+    mut outputs: Query<(Entity, &GitJob, &mut GitJobOutput)>,
     mut pages: Query<&mut vmux_core::PageMetadata>,
     mut views: Query<(
         &mut super::state::GitState,
@@ -113,8 +133,8 @@ fn deliver_git_outputs(
     mut commands: Commands,
 ) {
     let wake = wake.as_deref().map(|wake| (**wake).clone());
-    for (entity, mut output) in &mut outputs {
-        let webview = output.webview;
+    for (entity, job, mut output) in &mut outputs {
+        let webview = job.webview;
         for emit in std::mem::take(&mut output.emits) {
             match emit {
                 Emit::Repository(event) => {
@@ -179,12 +199,12 @@ fn deliver_git_outputs(
                             });
                         }
                         if !view.workspace().is_empty() {
-                            commands.trigger(GitJobRequest {
-                                webview,
-                                job: JobKind::Repository {
+                            commands.spawn((
+                                GitJob::new(webview),
+                                RepositoryJob {
                                     path: view.workspace().into(),
                                 },
-                            });
+                            ));
                         }
                     } else if let Ok(mut file) = files.get_mut(webview) {
                         let refresh = file.apply_result(event, wake.clone());
@@ -204,9 +224,9 @@ fn deliver_git_outputs(
     }
 }
 
-fn start_git_jobs(
+fn start_git_jobs<J: GitTask>(
     queues: Query<&GitJobs>,
-    pending: Query<&PendingGitJob>,
+    pending: Query<&J>,
     running: Query<(), With<RunningGitJob>>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -222,21 +242,18 @@ fn start_git_jobs(
         let Ok(job) = pending.get(entity) else {
             continue;
         };
-        let kind = job.0.clone();
+        let job = job.clone();
         let wake = wake.clone();
         let thread = std::thread::spawn(move || {
-            let emits = kind.run();
+            let emits = job.run();
             if let Some(wake) = wake {
                 let _ = wake.send_event(WinitUserEvent::WakeUp);
             }
             emits
         });
-        commands
-            .entity(entity)
-            .remove::<PendingGitJob>()
-            .insert(RunningGitJob {
-                thread: Some(thread),
-            });
+        commands.entity(entity).remove::<J>().insert(RunningGitJob {
+            thread: Some(thread),
+        });
     }
 }
 
@@ -253,19 +270,19 @@ mod tests {
         let first = app
             .world_mut()
             .spawn((
-                GitJob { webview },
-                PendingGitJob(JobKind::Repository {
+                GitJob::new(webview),
+                RepositoryJob {
                     path: root.path().join("first"),
-                }),
+                },
             ))
             .id();
         let second = app
             .world_mut()
             .spawn((
-                GitJob { webview },
-                PendingGitJob(JobKind::Repository {
+                GitJob::new(webview),
+                RepositoryJob {
                     path: root.path().join("second"),
-                }),
+                },
             ))
             .id();
 
@@ -280,7 +297,7 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<RunningGitJob>(first).is_some());
-        assert!(app.world().get::<PendingGitJob>(second).is_some());
+        assert!(app.world().get::<RepositoryJob>(second).is_some());
         assert!(app.world().get::<RunningGitJob>(second).is_none());
     }
 }

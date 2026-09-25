@@ -11,8 +11,12 @@ use crate::event::{
     GitStashDropRequest, GitStashPopRequest, GitStashPushRequest, GitUnstageRequest,
 };
 
-use super::job::JobKind;
-use super::job_runner::GitJobRequest;
+use super::job::{
+    AmendJob, CheckoutCommitJob, CherryPickJob, CommitJob, CreateBranchJob, DeleteBranchJob,
+    DiscardJob, FastForwardJob, FetchJob, HunkJob, MergeJob, PullJob, PushJob, RebaseJob,
+    RevertJob, StageAllJob, StageJob, StashDropJob, StashPopJob, StashPushJob, UnstageJob,
+};
+use super::job_runner::GitJob;
 
 pub(super) struct ChangesPlugin;
 
@@ -59,10 +63,10 @@ fn on_stage_request(trigger: On<UiInput<GitStageRequest>>, mut commands: Command
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Stage { repo_root, path },
-    });
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        StageJob { repo_root, path },
+    ));
 }
 
 fn on_unstage_request(trigger: On<UiInput<GitUnstageRequest>>, mut commands: Commands) {
@@ -70,10 +74,10 @@ fn on_unstage_request(trigger: On<UiInput<GitUnstageRequest>>, mut commands: Com
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Unstage { repo_root, path },
-    });
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        UnstageJob { repo_root, path },
+    ));
 }
 
 fn on_discard_request(trigger: On<UiInput<GitDiscardRequest>>, mut commands: Commands) {
@@ -81,21 +85,21 @@ fn on_discard_request(trigger: On<UiInput<GitDiscardRequest>>, mut commands: Com
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Discard { repo_root, path },
-    });
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        DiscardJob { repo_root, path },
+    ));
 }
 
 fn on_commit_request(trigger: On<UiInput<GitCommitRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Commit {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        CommitJob {
             path: request.path.clone().into(),
             message: request.message.clone(),
         },
-    });
+    ));
 }
 
 fn on_fetch_request(
@@ -106,23 +110,22 @@ fn on_fetch_request(
     if let Ok(mut view) = views.get_mut(trigger.event().webview) {
         view.start_fetch();
     }
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Fetch {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        FetchJob {
             path: trigger.event().payload.path.clone().into(),
         },
-    });
+    ));
 }
 
 fn on_amend_request(trigger: On<UiInput<GitAmendRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        AmendJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
         },
-    });
+    ));
 }
 
 fn on_checkout_commit_request(
@@ -130,24 +133,24 @@ fn on_checkout_commit_request(
     mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        CheckoutCommitJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            commit: request.commit.clone(),
         },
-    });
+    ));
 }
 
 fn on_cherry_pick_request(trigger: On<UiInput<GitCherryPickRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        CherryPickJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            commit: request.commit.clone(),
         },
-    });
+    ));
 }
 
 fn on_create_branch_request(
@@ -159,13 +162,14 @@ fn on_create_branch_request(
     if let Ok(mut controller) = controllers.get_mut(trigger.event().webview) {
         controller.begin_branch_creation(request.branch.clone());
     }
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        CreateBranchJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            branch: request.branch.clone(),
+            start_point: request.start_point.clone(),
         },
-    });
+    ));
 }
 
 fn on_delete_branch_request(
@@ -186,46 +190,46 @@ fn on_delete_branch_request(
     {
         return;
     }
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        DeleteBranchJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            branch: request.branch.clone(),
         },
-    });
+    ));
 }
 
 fn on_fast_forward_request(trigger: On<UiInput<GitFastForwardRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        FastForwardJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            branch: request.branch.clone(),
         },
-    });
+    ));
 }
 
 fn on_merge_request(trigger: On<UiInput<GitMergeRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        MergeJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            branch: request.branch.clone(),
         },
-    });
+    ));
 }
 
 fn on_rebase_request(trigger: On<UiInput<GitRebaseRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        RebaseJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            branch: request.branch.clone(),
         },
-    });
+    ));
 }
 
 fn on_revert_request(
@@ -246,13 +250,13 @@ fn on_revert_request(
     {
         return;
     }
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        RevertJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            commit: request.commit.clone(),
         },
-    });
+    ));
 }
 
 fn on_stash_drop_request(
@@ -273,62 +277,61 @@ fn on_stash_drop_request(
     {
         return;
     }
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        StashDropJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            reference: request.reference.clone(),
         },
-    });
+    ));
 }
 
 fn on_stash_pop_request(trigger: On<UiInput<GitStashPopRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        StashPopJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
+            reference: request.reference.clone(),
         },
-    });
+    ));
 }
 
 fn on_stash_push_request(trigger: On<UiInput<GitStashPushRequest>>, mut commands: Commands) {
     let request = &trigger.event().payload;
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Operation {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        StashPushJob {
             repo_root: request.repo_root.clone().into(),
-            operation: request.operation(),
         },
-    });
+    ));
 }
 
 fn on_pull_request(trigger: On<UiInput<GitPullRequest>>, mut commands: Commands) {
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Pull {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        PullJob {
             path: trigger.event().payload.path.clone().into(),
         },
-    });
+    ));
 }
 
 fn on_push_request(trigger: On<UiInput<GitPushRequest>>, mut commands: Commands) {
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Push {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        PushJob {
             path: trigger.event().payload.path.clone().into(),
         },
-    });
+    ));
 }
 
 fn on_stage_all_request(trigger: On<UiInput<GitStageAllRequest>>, mut commands: Commands) {
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::StageAll {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        StageAllJob {
             path: trigger.event().payload.path.clone().into(),
         },
-    });
+    ));
 }
 
 fn on_hunk_request(trigger: On<UiInput<GitHunkRequest>>, mut commands: Commands) {
@@ -336,13 +339,13 @@ fn on_hunk_request(trigger: On<UiInput<GitHunkRequest>>, mut commands: Commands)
     let repo_root = PathBuf::from(&request.repo_root);
     let path =
         super::runner::RequestPath::new(&request.path, &request.path_bytes).resolve(&repo_root);
-    commands.trigger(GitJobRequest {
-        webview: trigger.event().webview,
-        job: JobKind::Hunk {
+    commands.spawn((
+        GitJob::new(trigger.event().webview),
+        HunkJob {
             repo_root,
             path,
             hunk: request.hunk,
             accept: request.accept,
         },
-    });
+    ));
 }
