@@ -10,7 +10,11 @@ use crate::host::viewport::FileViewport;
 use crate::wrap::WrapView;
 
 #[derive(Component, Clone, Debug)]
-#[require(vmux_core::host::FileUiStateUpdates, FileDocumentRevision)]
+#[require(
+    vmux_core::host::FileUiStateUpdates,
+    FileDocumentRevision,
+    crate::host::panel::FilePanel
+)]
 pub struct FileView {
     pub path: PathBuf,
 }

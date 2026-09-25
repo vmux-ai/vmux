@@ -12,6 +12,7 @@ use vmux_core::event::{
 };
 
 use crate::host::editor::{Editor, FileView};
+use crate::host::panel::{FilePanelMovement, FilePanelOperation, FilePanelRequest};
 use crate::host::shape::BufferShape;
 
 pub(crate) struct KeyPlugin;
@@ -25,12 +26,16 @@ impl Plugin for KeyPlugin {
             .add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
             .add_systems(Update, apply_status_picks)
             .add_observer(echo_key_command)
+            .add_observer(dispatch_panel_command)
             .add_observer(open_status_picker);
     }
 }
 
 #[derive(Component)]
 struct FileKeyBinding(FileKey);
+
+#[derive(Component)]
+struct FilePanelKeyBinding(FilePanelOperation);
 
 fn spawn_commands(mut commands: Commands) {
     for (definition, key) in [
@@ -48,31 +53,6 @@ fn spawn_commands(mut commands: Commands) {
             FileKey::RevealInExplorer,
         ),
         (
-            CommandDefinition::new("file_panel_next", "Next Panel Row", "Editor")
-                .hidden()
-                .direct_when("ArrowDown", Some("files.panel")),
-            FileKey::PanelNext,
-        ),
-        (
-            CommandDefinition::new("file_panel_previous", "Previous Panel Row", "Editor")
-                .hidden()
-                .direct_when("ArrowUp", Some("files.panel")),
-            FileKey::PanelPrevious,
-        ),
-        (
-            CommandDefinition::new("file_panel_choose", "Choose Panel Row", "Editor")
-                .hidden()
-                .direct_when("Enter", Some("files.panel"))
-                .direct_when("Tab", Some("files.panel")),
-            FileKey::PanelChoose,
-        ),
-        (
-            CommandDefinition::new("file_panel_dismiss", "Close Panel", "Editor")
-                .hidden()
-                .direct_when("Escape", Some("files.panel")),
-            FileKey::PanelDismiss,
-        ),
-        (
             CommandDefinition::new("file_find", "Find In File", "Editor")
                 .direct_when("Super+f", Some("files")),
             FileKey::Find { forward: true },
@@ -85,6 +65,37 @@ fn spawn_commands(mut commands: Commands) {
         ),
     ] {
         commands.spawn((definition, FileKeyBinding(key)));
+    }
+    for (definition, operation) in [
+        (
+            CommandDefinition::new("file_panel_next", "Next Panel Row", "Editor")
+                .hidden()
+                .direct_when("ArrowDown", Some("files.panel"))
+                .direct_when("j", Some("files.panel")),
+            FilePanelOperation::Move(FilePanelMovement::Next),
+        ),
+        (
+            CommandDefinition::new("file_panel_previous", "Previous Panel Row", "Editor")
+                .hidden()
+                .direct_when("ArrowUp", Some("files.panel"))
+                .direct_when("k", Some("files.panel")),
+            FilePanelOperation::Move(FilePanelMovement::Previous),
+        ),
+        (
+            CommandDefinition::new("file_panel_choose", "Choose Panel Row", "Editor")
+                .hidden()
+                .direct_when("Enter", Some("files.panel"))
+                .direct_when("Tab", Some("files.panel")),
+            FilePanelOperation::Choose,
+        ),
+        (
+            CommandDefinition::new("file_panel_dismiss", "Close Panel", "Editor")
+                .hidden()
+                .direct_when("Escape", Some("files.panel")),
+            FilePanelOperation::Dismiss,
+        ),
+    ] {
+        commands.spawn((definition, FilePanelKeyBinding(operation)));
     }
 }
 
@@ -102,6 +113,20 @@ fn echo_key_command(
             &key.0,
         ),
     );
+}
+
+fn dispatch_panel_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<&FilePanelKeyBinding>,
+    mut commands: Commands,
+) {
+    let Ok(key) = keys.get(trigger.event().command()) else {
+        return;
+    };
+    commands.trigger(FilePanelRequest::new(
+        trigger.event().invocation().caller,
+        key.0,
+    ));
 }
 
 fn open_status_picker(
@@ -216,12 +241,21 @@ mod tests {
     #[derive(Resource, Default)]
     struct Echoed(Vec<(Entity, FileKey)>);
 
+    #[derive(Resource, Default)]
+    struct PanelRequests(Vec<Entity>);
+
     impl Echoed {
         fn record(trigger: On<FileUiStateWrite>, mut echoed: ResMut<Self>) {
             let FileUiStatePatch::Key(key) = trigger.event().patch() else {
                 return;
             };
             echoed.0.push((trigger.event().webview(), *key));
+        }
+    }
+
+    impl PanelRequests {
+        fn record(trigger: On<FilePanelRequest>, mut seen: ResMut<Self>) {
+            seen.0.push(trigger.event_target());
         }
     }
 
@@ -235,7 +269,9 @@ mod tests {
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
                 .add_message::<FileStatusPicked>()
                 .init_resource::<Echoed>()
-                .add_observer(Echoed::record);
+                .init_resource::<PanelRequests>()
+                .add_observer(Echoed::record)
+                .add_observer(PanelRequests::record);
             app
         }
 
@@ -248,24 +284,16 @@ mod tests {
     }
 
     #[test]
-    fn a_resolved_key_reaches_only_the_page_that_sent_it() {
+    fn a_panel_key_reaches_host_ecs_for_only_the_page_that_sent_it() {
         let mut app = Echo::app();
         let pressed = app.world_mut().spawn_empty().id();
         let other = app.world_mut().spawn_empty().id();
 
         Echo::issue(&mut app, pressed, "file_panel_choose");
 
-        assert_eq!(
-            app.world().resource::<Echoed>().0,
-            vec![(pressed, FileKey::PanelChoose)]
-        );
-        assert!(
-            !app.world()
-                .resource::<Echoed>()
-                .0
-                .iter()
-                .any(|(entity, _)| *entity == other)
-        );
+        assert_eq!(app.world().resource::<PanelRequests>().0, vec![pressed]);
+        assert!(app.world().resource::<Echoed>().0.is_empty());
+        assert!(!app.world().resource::<PanelRequests>().0.contains(&other));
     }
 
     #[derive(Resource, Default)]

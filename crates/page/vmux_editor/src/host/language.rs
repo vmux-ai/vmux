@@ -1,10 +1,8 @@
-use std::path::PathBuf;
-
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::*;
 
-use crate::edit::{EditCommand, Selection};
+use crate::edit::EditCommand;
 use crate::event::*;
 use crate::host::editing::EditRequest;
 use crate::host::editor::{Editor, FileView};
@@ -21,8 +19,6 @@ impl Plugin for LanguagePlugin {
             FileRenameRequest,
             FileCodeActionPick,
             FileCompletionRequest,
-            FileGotoRequest,
-            FileCompletionCommit,
         )>::default())
             .add_plugins(UiEventPlugin::<FileEditorOperationRequests>::default())
             .add_observer(on_editor_hover)
@@ -54,8 +50,6 @@ impl Plugin for LanguagePlugin {
             .add_observer(on_file_editor_change_all_occurrences_request)
             .add_observer(on_file_code_action_pick)
             .add_observer(on_file_completion_request)
-            .add_observer(on_file_goto_request)
-            .add_observer(on_file_completion_commit)
             .add_observer(on_wiki_completion_request)
             .add_systems(Update, flush_lsp_changes);
     }
@@ -272,36 +266,24 @@ impl WikiCompletion {
             prefix,
         })
     }
-}
 
-fn emit_wiki_completion(
-    completion: WikiCompletion,
-    entity: Entity,
-    index: &vmux_core::knowledge::KnowledgeIndex,
-    browsers: &Browsers,
-    commands: &mut Commands,
-) {
-    if !browsers.can_emit_to(&entity) {
-        return;
+    fn result(
+        self,
+        entity: Entity,
+        index: &vmux_core::knowledge::KnowledgeIndex,
+    ) -> crate::host::panel::CompletionResult {
+        let items = index
+            .completions(&self.prefix, 32)
+            .into_iter()
+            .map(|(title, relative)| CompletionItem {
+                label: title.clone(),
+                insert_text: format!("{title}]]"),
+                detail: relative,
+                kind: "knowledge".to_string(),
+            })
+            .collect();
+        crate::host::panel::CompletionResult::new(entity, items, self.replace_from_col, self.line)
     }
-    let items = index
-        .completions(&completion.prefix, 32)
-        .into_iter()
-        .map(|(title, relative)| CompletionItem {
-            label: title.clone(),
-            insert_text: format!("{title}]]"),
-            detail: relative,
-            kind: "knowledge".to_string(),
-        })
-        .collect();
-    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-        entity,
-        &FileCompletions {
-            items,
-            replace_from_col: completion.replace_from_col,
-            line: completion.line,
-        },
-    ));
 }
 
 fn on_editor_hover(
@@ -504,7 +486,6 @@ fn on_wiki_completion_request(
     trigger: On<WikiCompletionRequest>,
     views: Query<&Editor>,
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let Some(index) = index.as_deref() else {
@@ -517,7 +498,7 @@ fn on_wiki_completion_request(
     let Some(completion) = WikiCompletion::for_edit(edit, index) else {
         return;
     };
-    emit_wiki_completion(completion, entity, index, &browsers, &mut commands);
+    commands.trigger(completion.result(entity, index));
 }
 
 fn on_file_hover_request(
@@ -732,7 +713,6 @@ fn on_file_completion_request(
     trigger: On<UiInput<FileCompletionRequest>>,
     views: Query<&Editor>,
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut manager: ResMut<crate::lsp::manager::LspManager>,
 ) {
@@ -744,7 +724,7 @@ fn on_file_completion_request(
     if let Some(index) = index.as_deref()
         && let Some(completion) = WikiCompletion::for_edit(edit, index)
     {
-        emit_wiki_completion(completion, entity, index, &browsers, &mut commands);
+        commands.trigger(completion.result(entity, index));
         return;
     }
     let position = edit.lsp_position_at_cell(request.line, request.col);
@@ -755,48 +735,6 @@ fn on_file_completion_request(
         position.utf16_col,
         position.word_start_col(),
     );
-}
-
-fn on_file_goto_request(
-    trigger: On<UiInput<FileGotoRequest>>,
-    mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
-) {
-    let entity = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let path = PathBuf::from(&request.path);
-    let line_text = crate::lsp::manager::disk_line(&path, request.line);
-    let utf16_col = crate::lsp::manager::char_to_utf16_col(&line_text, request.col);
-    goto.write(crate::lsp::manager::LspGoto {
-        entity,
-        path,
-        line: request.line,
-        utf16_col,
-    });
-}
-
-fn on_file_completion_commit(
-    trigger: On<UiInput<FileCompletionCommit>>,
-    mut views: Query<&mut Editor>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let request = trigger.event().payload.clone();
-    let Ok(mut edit) = views.get_mut(entity) else {
-        return;
-    };
-    let start = edit
-        .core
-        .buffer
-        .coords_to_char(request.line as usize, request.replace_from_col as usize);
-    let head = edit.core.primary().head;
-    edit.core.selections = vec![Selection {
-        anchor: start.min(head),
-        head: start.max(head),
-    }];
-    commands.trigger(EditRequest::new(
-        entity,
-        vec![EditCommand::InsertText(request.text)],
-    ));
 }
 
 fn flush_lsp_changes(

@@ -1,10 +1,10 @@
 use super::{
     ExplorerFocusEvent, ExplorerFsResult, ExplorerPanelEvent, ExplorerSearchEvent,
-    ExplorerTreeEvent, FileCodeActions, FileCompletions, FileCursorEvent, FileDiagnostics,
-    FileDirEvent, FileDirtyEvent, FileEditFailure, FileEncodingEvent, FileErrorEvent, FileHover,
-    FileKey, FileKeymapEvent, FileLspStatus, FileMediaEvent, FileMetaEvent, FileNoteEvent,
-    FilePreviewEvent, FileReferences, FileRenamePrompt, FileScrollByEvent, FileShapeEvent,
-    FileThemeEvent, FileTidyPromptEvent, FileViewModeEvent, FileViewportPatch, LspInstallProgress,
+    ExplorerTreeEvent, FileCodeActions, FileCursorEvent, FileDiagnostics, FileDirEvent,
+    FileDirtyEvent, FileEditFailure, FileEncodingEvent, FileErrorEvent, FileHover, FileKey,
+    FileKeymapEvent, FileLspStatus, FileMediaEvent, FileMetaEvent, FileNoteEvent, FilePanelState,
+    FilePreviewEvent, FileRenamePrompt, FileScrollByEvent, FileShapeEvent, FileThemeEvent,
+    FileTidyPromptEvent, FileViewModeEvent, FileViewportPatch, LspInstallProgress,
     LspPackageStatus, OpenEditorsEvent, OutlineEvent,
 };
 use vmux_api::git::FileGitState;
@@ -42,8 +42,7 @@ pub enum FileUiStatePatch {
     CodeActions(FileCodeActions),
     EditFailed(FileEditFailure),
     RenameBegin(FileRenamePrompt),
-    References(FileReferences),
-    Completion(FileCompletions),
+    Panel(FilePanelState),
     GitState(FileGitState),
     Key(FileKey),
 }

@@ -484,10 +484,6 @@ impl From<CommandBarPicker> for FileStatusPickerOpen {
 pub enum FileKey {
     ToggleExplorer,
     RevealInExplorer,
-    PanelNext,
-    PanelPrevious,
-    PanelChoose,
-    PanelDismiss,
     Find { forward: bool },
     FindClose,
     FindInFiles,

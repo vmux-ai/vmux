@@ -32,7 +32,7 @@ use toolbar::{EditorTabStrip, FindBar, VimStatus};
 
 use crate::breadcrumb::EditorBreadcrumbs;
 use crate::explorer::{EditorTabCommand, SidebarView};
-use crate::page_key::{Completions, FilePage as FilePageState, use_file_keys};
+use crate::page_key::{FilePage as FilePageState, use_file_keys};
 use crate::page_model::{
     CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, clamp_selection,
     editor_drag_started, gutter_width, note_cursor_activation, severity_color_class, span_style,
@@ -190,37 +190,18 @@ pub fn Page() -> Element {
     let mut lsp_hover = use_signal(|| Option::<FileHover>::None);
     let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
     let ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
-    let mut refs = use_signal(Vec::<RefItem>::new);
-    let mut refs_sel = use_signal(|| 0usize);
-    let mut refs_open = use_signal(|| false);
-    let mut comps = use_signal(Vec::<CompletionItem>::new);
-    let mut comp_open = use_signal(|| false);
-    let mut comp_sel = use_signal(|| 0usize);
-    let mut comp_anchor = use_signal(|| (0u32, 0u32));
+    let mut panel = use_signal(FilePanelState::default);
+    let mut panel_focus_revision = use_signal(|| 0u64);
     let mut last_scroll_req = use_signal(|| 0u32);
     let explorer = ExplorerPane::new(page_width);
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
     let mut doc_title = use_signal(String::new);
     let is_markdown = use_memo(move || document_kind() == FileDocumentKind::Markdown);
 
-    let completions = Completions {
-        open: comp_open,
-        anchor: comp_anchor,
-        items: comps,
-        lines,
-        cursor,
-    };
-    let comp_filtered = use_memo(move || completions.matching());
     let file_page = FilePageState {
         mode,
         explorer,
-        completion_open: comp_open,
-        completion_selection: comp_sel,
-        completion_anchor: comp_anchor,
-        completions: comp_filtered,
-        references_open: refs_open,
-        reference_selection: refs_sel,
-        references: refs,
+        panel,
         find_open,
         find_forward,
         sidebar_view,
@@ -521,23 +502,25 @@ pub fn Page() -> Element {
         })
     });
 
-    let references_event = use_file_ui::<FileReferences>();
+    let panel_event = use_file_ui::<FilePanelState>();
     use_effect(move || {
-        references_event.for_each(|e| {
-            refs.set(e.items);
-            refs_sel.set(0);
-            refs_open.set(true);
-            FocusClaim::new("refs-panel").request();
-        })
-    });
-
-    let completion_event = use_file_ui::<FileCompletions>();
-    use_effect(move || {
-        completion_event.for_each(|e| {
-            comp_open.set(!e.items.is_empty());
-            comps.set(e.items);
-            comp_sel.set(0);
-            comp_anchor.set((e.line, e.replace_from_col));
+        panel_event.for_each(|state| {
+            let focus = state.focus;
+            panel.set(state);
+            if focus.revision <= panel_focus_revision() {
+                return;
+            }
+            panel_focus_revision.set(focus.revision);
+            spawn(async move {
+                sleep_ms(0).await;
+                match focus.target {
+                    FilePanelFocusTarget::None => {}
+                    FilePanelFocusTarget::References => {
+                        FocusClaim::new("refs-panel").request();
+                    }
+                    FilePanelFocusTarget::Editor => focus_file_input(),
+                }
+            });
         })
     });
 
@@ -680,10 +663,6 @@ pub fn Page() -> Element {
             parent_path.set(d.parent_path);
             git_path.set(d.abs_path);
             mode.set(Mode::Dir);
-            comp_open.set(false);
-            comps.set(Vec::new());
-            refs_open.set(false);
-            refs.set(Vec::new());
             diagnostics.set(Vec::new());
             hover_diag.set(None);
             lsp_status.set(None);
@@ -815,8 +794,20 @@ pub fn Page() -> Element {
     };
     let measure_text = vec!["X".repeat(MEASURE_COLS); MEASURE_ROWS].join("\n");
     let measure_wide_text = MEASURE_WIDE_GLYPH.repeat(MEASURE_COLS);
-    let comp_filtered: Vec<CompletionItem> = comp_filtered();
-    let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
+    let panel_state = panel();
+    let panel_selection = panel_state.selected as usize;
+    let (references, comp_filtered, comp_anchor) = match panel_state.content {
+        Some(FilePanelContent::References { items }) => (items, Vec::new(), (0, 0)),
+        Some(FilePanelContent::Completion {
+            items,
+            replace_from_col,
+            line,
+        }) => (Vec::new(), items, (line, replace_from_col)),
+        None => (Vec::new(), Vec::new(), (0, 0)),
+    };
+    let refs_open = !references.is_empty();
+    let comp_open = !comp_filtered.is_empty();
+    let comp_sel_clamped = panel_selection.min(comp_filtered.len().saturating_sub(1));
 
     rsx! {
         if !doc_title().is_empty() {
@@ -1366,7 +1357,7 @@ pub fn Page() -> Element {
                                                         keymap: keymap(),
                                                         note_cursor,
                                                         note_dragging,
-                                                        comp_open: editing && comp_open(),
+                                                        comp_open: editing && comp_open,
                                                         comp_filtered: if editing {
                                                             comp_filtered.clone()
                                                         } else {
@@ -1805,8 +1796,8 @@ pub fn Page() -> Element {
                                         }
 
                                         {
-                                            (comp_open() && !comp_filtered.is_empty()).then(|| {
-                                                let (cline, cfrom) = comp_anchor();
+                                            comp_open.then(|| {
+                                                let (cline, cfrom) = comp_anchor;
                                                 let top = cline as f64 * ch + ch;
                                                 let left = gutter + ruler.x_of_char(cline, cfrom);
                                                 rsx! {
@@ -1817,6 +1808,10 @@ pub fn Page() -> Element {
                                                             div {
                                                                 key: "{i}",
                                                                 class: if i == comp_sel_clamped { "flex items-center gap-2 px-3 py-1 bg-primary/15" } else { "flex items-center gap-2 px-3 py-1" },
+                                                                onmousedown: move |event: Event<MouseData>| {
+                                                                    event.prevent_default();
+                                                                    let _ = send(&FilePanelPick { index: i as u32 });
+                                                                },
                                                                 span { class: "truncate", "{it.label}" }
                                                                 if !it.detail.is_empty() {
                                                                     span { class: "ml-auto truncate text-[10px] text-foreground/40", "{it.detail}" }
@@ -1895,7 +1890,11 @@ pub fn Page() -> Element {
             }
 
             EditorContextMenu { position: ctx_menu, offered: lsp_capabilities }
-            ReferencesPanel { open: refs_open, items: refs, selected: refs_sel }
+            ReferencesPanel {
+                open: refs_open,
+                items: references,
+                selected: panel_selection,
+            }
         }
         }
 

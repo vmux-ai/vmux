@@ -1003,7 +1003,7 @@ fn drain_lsp_requests(
     mut edit_w: MessageWriter<LspRequestedEdit>,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{FileCompletions, FileHover, FileReferences, OutlineEvent, RefItem};
+    use vmux_core::event::{FileHover, OutlineEvent, RefItem};
     let drained = std::mem::take(&mut manager.inflight);
     let mut still = Vec::new();
     for f in drained {
@@ -1105,28 +1105,19 @@ fn drain_lsp_requests(
                         }
                     })
                     .collect();
-                if !items.is_empty() && ready {
-                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-                        f.entity,
-                        &FileReferences { items },
-                    ));
-                }
+                commands.trigger(crate::host::panel::ReferencesResult::new(f.entity, items));
             }
             ReqKind::Completion {
                 line,
                 replace_from_col,
             } => {
                 let items = parse_completion(&value);
-                if ready {
-                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-                        f.entity,
-                        &FileCompletions {
-                            items,
-                            replace_from_col,
-                            line,
-                        },
-                    ));
-                }
+                commands.trigger(crate::host::panel::CompletionResult::new(
+                    f.entity,
+                    items,
+                    replace_from_col,
+                    line,
+                ));
             }
             ReqKind::Folding { path } => {
                 folds_w.write(LspFolds {
