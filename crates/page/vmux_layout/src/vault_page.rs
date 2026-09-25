@@ -22,7 +22,12 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
     title = "Vault",
     component = Page,
     subtree,
-    takes = vmux_core::PageMetadata
+    takes = vmux_core::PageMetadata,
+    manifest,
+    title_message_id = "vault-title",
+    keywords = ["vault", "sync", "git", "backup", "dotfiles", "knowledge"],
+    icon = vmux_core::BuiltinIcon::Vault,
+    command_bar
 )]
 pub struct VaultPage;
 
