@@ -14,6 +14,7 @@ use crate::format::{
 use crate::state::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
 use dioxus::prelude::*;
+use vmux_api::command_bar::CommandBarQuery;
 use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::composer::{
@@ -22,7 +23,7 @@ use vmux_ui::components::composer::{
 use vmux_ui::components::composer_bar::{
     ComposerChip, ComposerMenu, ComposerMenuKind, use_composer_menu,
 };
-use vmux_ui::components::mcp_menu::{McpConnections, McpQuery, use_mcp_connections};
+use vmux_ui::components::mcp_menu::{McpConnections, use_mcp_connections};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
 use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state_root};
@@ -385,7 +386,8 @@ impl Chat {
 
     pub fn filtered_mcp_servers(&self) -> Vec<vmux_api::mcp::McpServerEntry> {
         let draft = self.draft();
-        let Some(query) = McpQuery::read(&draft) else {
+        let command_bar_query = CommandBarQuery(&draft);
+        let Some(query) = command_bar_query.mcp_filter() else {
             return Vec::new();
         };
         self.mcp.filtered(query)
@@ -406,7 +408,7 @@ impl Chat {
     pub fn mcp_menu_open(&self) -> bool {
         #[cfg(host)]
         {
-            McpQuery::read(&self.draft()).is_some()
+            CommandBarQuery(&self.draft()).mcp_filter().is_some()
         }
         #[cfg(not(host))]
         {

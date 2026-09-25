@@ -81,12 +81,15 @@ pub struct CommandPaletteDraftRequest {
     pub query: String,
     pub start: bool,
     pub target_url: String,
+    pub selected: u32,
+    pub navigating: bool,
 }
 
 #[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
 pub struct CommandPaletteSelectionRequest {
     pub open_id: super::OpenId,
     pub selected: u32,
+    pub navigating: bool,
 }
 
 #[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]

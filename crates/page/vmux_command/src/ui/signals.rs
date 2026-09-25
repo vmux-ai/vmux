@@ -1,10 +1,9 @@
-use crate::event::{CommandBarKey, CommandBarOpenEvent, OpenId};
+use crate::event::{CommandBarOpenEvent, OpenId};
 use dioxus::prelude::*;
 use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::hooks::MenuDirection;
 use vmux_ui::launcher::keyboard::{CtrlKeyCapture, TextEditCommand, ctrl_key_capture_for_code};
-use vmux_ui::launcher::palette::{PaletteDraft, PaletteMode, PaletteRows, PaletteState};
+use vmux_ui::launcher::palette::{PaletteDraft, PaletteMode, PaletteState};
 
 pub const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 
@@ -16,6 +15,7 @@ pub struct PaletteSignals {
     pub target_url: Signal<String>,
     pub last_open_id: Signal<OpenId>,
     pub last_focus_open_id: Signal<OpenId>,
+    pub last_input_revision: Signal<u64>,
 }
 
 pub fn use_palette_signals() -> PaletteSignals {
@@ -26,6 +26,7 @@ pub fn use_palette_signals() -> PaletteSignals {
         target_url: use_signal(String::new),
         last_open_id: use_signal(|| OpenId(u64::MAX)),
         last_focus_open_id: use_signal(|| OpenId(u64::MAX)),
+        last_input_revision: use_signal(|| 0),
     }
 }
 
@@ -79,48 +80,28 @@ impl PaletteSignals {
         self.nav_mode.set(true);
     }
 
+    pub fn apply_host_input(
+        &mut self,
+        revision: u64,
+        query: &str,
+        selected: usize,
+        navigating: bool,
+        input_id: &'static str,
+    ) {
+        if revision == 0 || revision == (self.last_input_revision)() {
+            return;
+        }
+        self.last_input_revision.set(revision);
+        self.query.set(query.to_string());
+        self.selected.set(selected);
+        self.nav_mode.set(navigating);
+        TextCaret::in_field(input_id).to_end();
+    }
+
     pub fn watch(&self) {
         let _ = (self.query)();
         let _ = (self.selected)();
         let _ = (self.nav_mode)();
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct PaletteKeys {
-    pub rows: Memo<PaletteRows>,
-    pub signals: PaletteSignals,
-    pub on_dismiss: EventHandler<()>,
-}
-
-impl PaletteKeys {
-    pub fn apply(&mut self, key: CommandBarKey) {
-        match key {
-            CommandBarKey::Next => self.move_selection(MenuDirection::Next),
-            CommandBarKey::Previous => self.move_selection(MenuDirection::Previous),
-            CommandBarKey::Complete => self.accept_completion(),
-            CommandBarKey::Dismiss => self.on_dismiss.call(()),
-        }
-    }
-
-    fn move_selection(&mut self, direction: MenuDirection) {
-        let rows = self.rows.read();
-        let landed = rows.step(rows.selected(*self.signals.selected.peek()), direction);
-        drop(rows);
-        self.signals.highlight(landed);
-        TextCaret::in_field(COMMAND_BAR_INPUT_ID).to_end();
-    }
-
-    fn accept_completion(&mut self) {
-        let rows = self.rows.read();
-        if rows.ghost.is_empty() {
-            return;
-        }
-        let completed = rows.completed(&self.signals.query.peek());
-        drop(rows);
-        self.signals.query.set(completed.clone());
-        self.signals.selected.set(0);
-        TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(completed.len());
     }
 }
 

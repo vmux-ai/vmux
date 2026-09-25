@@ -122,6 +122,7 @@ impl PaletteRows {
             ghost: self.ghost.clone(),
             start_prompt_mode: self.start_prompt_mode,
             mode: self.mode,
+            ..Default::default()
         }
     }
 

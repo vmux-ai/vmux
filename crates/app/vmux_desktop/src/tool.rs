@@ -865,18 +865,13 @@ impl DesktopToolRequest for ToolAdoptRequest {
         if self.id.trim().is_empty() {
             return Err("package name is required".to_string());
         }
-        if self.provider == ToolProvider::Dotfiles {
-            if self.value.trim().is_empty() {
-                return Err("dotfile path is required".to_string());
-            }
-            let destination = store.adopt_dotfile(Path::new(self.value.trim()), self.id.trim())?;
-            return Ok(format!("adopted {}", destination.display()));
+        if matches!(self.provider, ToolProvider::Dotfiles | ToolProvider::Mcp) {
+            return Err(format!(
+                "{} adopt request reached the desktop fallback",
+                self.provider.id()
+            ));
         }
-        if self.provider == ToolProvider::Mcp {
-            store.import_discovered_mcp_server(&self.id)?;
-        } else {
-            set_manifest_entry(store, self.provider, &self.id, true)?;
-        }
+        set_manifest_entry(store, self.provider, &self.id, true)?;
         Ok(format!("{} is now managed", self.id))
     }
 }
@@ -2798,7 +2793,7 @@ fn scan_mcp(
     manifest: &mut ToolsManifest,
     errors: &mut Vec<String>,
 ) -> ToolCategory {
-    let (discovered, discovery_errors) = store.discover_mcp_servers();
+    let (discovered, discovery_errors) = vmux_tool::discover_mcp_servers_at(store.home());
     errors.extend(
         discovery_errors
             .into_iter()
@@ -3048,14 +3043,7 @@ fn import_provider(
         }
         ToolProvider::Acp => import_scanned_inventory(store, provider, scan_acp(false)?),
         ToolProvider::Lsp => import_scanned_inventory(store, provider, scan_lsp(false)?),
-        ToolProvider::Mcp => {
-            let imported = if path.is_empty() {
-                store.import_default_mcp_configs()?
-            } else {
-                store.import_mcp_config(Path::new(path))?
-            };
-            Ok(format!("imported {imported} MCP server(s)"))
-        }
+        ToolProvider::Mcp => Err("MCP import request reached the desktop fallback".to_string()),
         ToolProvider::Dotfiles => {
             if path.is_empty() {
                 let packages = store.dotfile_packages()?;

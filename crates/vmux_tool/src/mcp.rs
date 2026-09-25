@@ -24,8 +24,10 @@ impl Plugin for McpToolPlugin {
         .add_systems(
             Update,
             (
+                locate_mcp_configs,
                 discover_mcp_servers_system,
                 import_mcp_config_system,
+                import_default_mcp_configs_system,
                 import_mcp_server_system,
                 forget_mcp_server_system,
                 finish_tool_operation::<DiscoveredMcpServers>,
@@ -57,9 +59,16 @@ fn route_import(
         }
         let value = request.value.trim();
         let operation = if value.is_empty() {
-            ImportMcpConfig::discovered()
+            commands.entity(entity).insert((
+                ToolStoreOperation,
+                DiscoverMcpServers,
+                ImportDefaultMcpConfigs,
+            ));
+            continue;
         } else {
-            ImportMcpConfig::new(value)
+            ImportMcpConfig {
+                path: PathBuf::from(value),
+            }
         };
         commands
             .entity(entity)
@@ -76,9 +85,13 @@ fn route_adopt(
         if request.provider != ToolProvider::Mcp || request.id.trim().is_empty() {
             continue;
         }
-        commands
-            .entity(entity)
-            .insert((ToolStoreOperation, ImportMcpServer::new(request.id.trim())));
+        commands.entity(entity).insert((
+            ToolStoreOperation,
+            DiscoverMcpServers,
+            ImportMcpServer {
+                name: request.id.trim().to_string(),
+            },
+        ));
     }
 }
 
@@ -91,9 +104,12 @@ fn route_forget(
         if request.provider != ToolProvider::Mcp || request.id.trim().is_empty() {
             continue;
         }
-        commands
-            .entity(entity)
-            .insert((ToolStoreOperation, ForgetMcpServer::new(request.id.trim())));
+        commands.entity(entity).insert((
+            ToolStoreOperation,
+            ForgetMcpServer {
+                name: request.id.trim().to_string(),
+            },
+        ));
     }
 }
 
@@ -149,29 +165,24 @@ fn complete_server_forget(
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct DiscoverMcpServers;
+struct DiscoverMcpServers;
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
-pub struct DiscoveredMcpServers {
-    pub servers: BTreeMap<String, DiscoveredMcpServer>,
-    pub errors: Vec<String>,
+struct DiscoveredMcpServers {
+    servers: BTreeMap<String, DiscoveredMcpServer>,
+    errors: Vec<String>,
 }
 
-fn discover_mcp_servers_system(
-    operations: Query<
-        (Entity, &ToolStoreTarget),
-        (
-            With<DiscoverMcpServers>,
-            Without<ToolOperationTask<DiscoveredMcpServers>>,
-            Without<DiscoveredMcpServers>,
-            Without<ToolOperationFailure>,
-        ),
-    >,
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+struct McpConfigSources(Vec<PathBuf>);
+
+fn locate_mcp_configs(
+    operations: Query<(Entity, &ToolStoreTarget), Added<DiscoverMcpServers>>,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
+        let Ok(store) = stores.get(target.entity()) else {
             commands.entity(entity).insert(ToolOperationFailure::new(
                 "tool store entity is unavailable",
             ));
@@ -179,33 +190,44 @@ fn discover_mcp_servers_system(
         };
         commands
             .entity(entity)
+            .insert(McpConfigSources(default_mcp_config_paths_in(store.home())));
+    }
+}
+
+fn discover_mcp_servers_system(
+    operations: Query<
+        (Entity, &McpConfigSources),
+        (
+            With<DiscoverMcpServers>,
+            Without<ToolOperationTask<DiscoveredMcpServers>>,
+            Without<DiscoveredMcpServers>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, sources) in &operations {
+        let sources = sources.0.clone();
+        commands
+            .entity(entity)
             .insert(ToolOperationTask::spawn(move || {
-                let (servers, errors) = store.discover_mcp_servers();
+                let (servers, errors) = discover_mcp_servers_in(&sources);
                 Ok(DiscoveredMcpServers { servers, errors })
             }));
     }
 }
 
-#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
-pub struct ImportMcpConfig {
-    path: Option<PathBuf>,
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct ImportMcpConfig {
+    path: PathBuf,
 }
 
-impl ImportMcpConfig {
-    pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self {
-            path: Some(path.into()),
-        }
-    }
-
-    pub const fn discovered() -> Self {
-        Self { path: None }
-    }
-}
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ImportDefaultMcpConfigs;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImportedMcpConfig {
-    pub servers: usize,
+struct ImportedMcpConfig {
+    servers: usize,
 }
 
 fn import_mcp_config_system(
@@ -231,34 +253,60 @@ fn import_mcp_config_system(
         commands
             .entity(entity)
             .insert(ToolOperationTask::spawn(move || {
-                let servers = match path {
-                    Some(path) => store.import_mcp_config(&path)?,
-                    None => store.import_default_mcp_configs()?,
-                };
+                let servers = import_mcp_config_in(&store, &path)?;
+                Ok(ImportedMcpConfig { servers })
+            }));
+    }
+}
+
+fn import_default_mcp_configs_system(
+    operations: Query<
+        (Entity, &DiscoveredMcpServers, &ToolStoreTarget),
+        (
+            With<ImportDefaultMcpConfigs>,
+            Without<ToolOperationTask<ImportedMcpConfig>>,
+            Without<ImportedMcpConfig>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, discovered, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let discovered = discovered.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let servers = import_discovered_mcp_configs_in(&store, &discovered)?;
                 Ok(ImportedMcpConfig { servers })
             }));
     }
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct ImportMcpServer {
+struct ImportMcpServer {
     name: String,
 }
 
-impl ImportMcpServer {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
-    }
-}
-
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct ImportedMcpServer {
-    pub name: String,
+struct ImportedMcpServer {
+    name: String,
 }
 
 fn import_mcp_server_system(
     operations: Query<
-        (Entity, &ImportMcpServer, &ToolStoreTarget),
+        (
+            Entity,
+            &ImportMcpServer,
+            &DiscoveredMcpServers,
+            &ToolStoreTarget,
+        ),
         (
             Without<ToolOperationTask<ImportedMcpServer>>,
             Without<ImportedMcpServer>,
@@ -268,7 +316,7 @@ fn import_mcp_server_system(
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
-    for (entity, operation, target) in &operations {
+    for (entity, operation, discovered, target) in &operations {
         let Ok(store) = stores.get(target.entity()).cloned() else {
             commands.entity(entity).insert(ToolOperationFailure::new(
                 "tool store entity is unavailable",
@@ -276,29 +324,24 @@ fn import_mcp_server_system(
             continue;
         };
         let name = operation.name.clone();
+        let discovered = discovered.clone();
         commands
             .entity(entity)
             .insert(ToolOperationTask::spawn(move || {
-                store.import_discovered_mcp_server(&name)?;
+                import_discovered_mcp_server_in(&store, &name, &discovered)?;
                 Ok(ImportedMcpServer { name })
             }));
     }
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct ForgetMcpServer {
+struct ForgetMcpServer {
     name: String,
 }
 
-impl ForgetMcpServer {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
-    }
-}
-
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct ForgottenMcpServer {
-    pub name: String,
+struct ForgottenMcpServer {
+    name: String,
 }
 
 fn forget_mcp_server_system(
@@ -399,117 +442,72 @@ pub struct DiscoveredMcpServer {
 }
 
 pub fn default_mcp_config_paths() -> Vec<PathBuf> {
-    ToolStore::current().default_mcp_config_paths()
+    default_mcp_config_paths_in(ToolStore::current().home())
 }
 
-impl ToolStore {
-    pub fn default_mcp_config_paths(&self) -> Vec<PathBuf> {
-        let home = self.home();
-        [
-            home.join(".codex/config.toml"),
-            home.join(".claude.json"),
-            home.join(".vibe/config.toml"),
-            home.join(".mcp.json"),
-        ]
-        .into_iter()
-        .filter(|path| path.is_file())
-        .collect()
-    }
-
-    pub fn discover_mcp_servers(&self) -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
-        let mut discovered = BTreeMap::<String, DiscoveredMcpServer>::new();
-        let mut errors = Vec::new();
-        for path in self.default_mcp_config_paths() {
-            match parse_mcp_config_file(&path) {
-                Ok(servers) => {
-                    for (name, definition) in servers {
-                        match discovered.get_mut(&name) {
-                            Some(existing) => {
-                                existing.conflict |= existing.definition != definition;
-                                existing.sources.push(path.clone());
-                            }
-                            None => {
-                                discovered.insert(
-                                    name,
-                                    DiscoveredMcpServer {
-                                        definition,
-                                        sources: vec![path.clone()],
-                                        conflict: false,
-                                    },
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(error) => errors.push(format!("{}: {error}", path.display())),
-            }
-        }
-        (discovered, errors)
-    }
-
-    pub fn import_mcp_config(&self, path: &Path) -> Result<usize, String> {
-        self.migrate_legacy_storage()?;
-        let path = self.expand_user_path(path)?;
-        import_mcp_config_to(&path, &self.manifest_path())
-    }
-
-    pub fn import_default_mcp_configs(&self) -> Result<usize, String> {
-        let (discovered, errors) = self.discover_mcp_servers();
-        if !errors.is_empty() {
-            return Err(errors.join("\n"));
-        }
-        let conflicts = discovered
-            .iter()
-            .filter(|(_, server)| server.conflict)
-            .map(|(name, _)| name.as_str())
-            .collect::<Vec<_>>();
-        if !conflicts.is_empty() {
-            return Err(format!(
-                "conflicting MCP definitions: {}",
-                conflicts.join(", ")
-            ));
-        }
-        let mut manifest = self.load()?;
-        let mut imported = 0;
-        for (name, server) in discovered {
-            if name == "vmux" {
-                continue;
-            }
-            imported += usize::from(manifest.mcp.servers.get(&name) != Some(&server.definition));
-            manifest.mcp.servers.insert(name, server.definition);
-        }
-        self.save(&manifest)?;
-        Ok(imported)
-    }
-
-    pub fn import_discovered_mcp_server(&self, name: &str) -> Result<(), String> {
-        let (discovered, errors) = self.discover_mcp_servers();
-        if !errors.is_empty() {
-            return Err(errors.join("\n"));
-        }
-        let server = discovered
-            .get(name)
-            .ok_or_else(|| format!("MCP server not found: {name}"))?;
-        if server.conflict {
-            return Err(format!(
-                "MCP server {name} has conflicting definitions; import an explicit config path"
-            ));
-        }
-        let mut manifest = self.load()?;
-        manifest
-            .mcp
-            .servers
-            .insert(name.to_string(), server.definition.clone());
-        self.save(&manifest)
-    }
+fn default_mcp_config_paths_in(home: &Path) -> Vec<PathBuf> {
+    [
+        home.join(".codex/config.toml"),
+        home.join(".claude.json"),
+        home.join(".vibe/config.toml"),
+        home.join(".mcp.json"),
+    ]
+    .into_iter()
+    .filter(|path| path.is_file())
+    .collect()
 }
 
 pub fn discover_mcp_servers() -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
-    ToolStore::current().discover_mcp_servers()
+    discover_mcp_servers_at(ToolStore::current().home())
+}
+
+pub fn discover_mcp_servers_at(
+    home: &Path,
+) -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
+    discover_mcp_servers_in(&default_mcp_config_paths_in(home))
+}
+
+fn discover_mcp_servers_in(
+    paths: &[PathBuf],
+) -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
+    let mut discovered = BTreeMap::<String, DiscoveredMcpServer>::new();
+    let mut errors = Vec::new();
+    for path in paths {
+        match parse_mcp_config_file(path) {
+            Ok(servers) => {
+                for (name, definition) in servers {
+                    match discovered.get_mut(&name) {
+                        Some(existing) => {
+                            existing.conflict |= existing.definition != definition;
+                            existing.sources.push(path.clone());
+                        }
+                        None => {
+                            discovered.insert(
+                                name,
+                                DiscoveredMcpServer {
+                                    definition,
+                                    sources: vec![path.clone()],
+                                    conflict: false,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            Err(error) => errors.push(format!("{}: {error}", path.display())),
+        }
+    }
+    (discovered, errors)
 }
 
 pub fn import_mcp_config(path: &Path) -> Result<usize, String> {
-    ToolStore::current().import_mcp_config(path)
+    import_mcp_config_in(&ToolStore::current(), path)
+}
+
+fn import_mcp_config_in(store: &ToolStore, path: &Path) -> Result<usize, String> {
+    store.migrate_legacy_storage()?;
+    let path = store.expand_user_path(path)?;
+    import_mcp_config_to(&path, &store.manifest_path())
 }
 
 pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
@@ -532,11 +530,75 @@ pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, 
 }
 
 pub fn import_default_mcp_configs() -> Result<usize, String> {
-    ToolStore::current().import_default_mcp_configs()
+    let store = ToolStore::current();
+    let (servers, errors) = discover_mcp_servers_in(&default_mcp_config_paths_in(store.home()));
+    import_discovered_mcp_configs_in(&store, &DiscoveredMcpServers { servers, errors })
+}
+
+fn import_discovered_mcp_configs_in(
+    store: &ToolStore,
+    discovered: &DiscoveredMcpServers,
+) -> Result<usize, String> {
+    if !discovered.errors.is_empty() {
+        return Err(discovered.errors.join("\n"));
+    }
+    let mut conflicts = Vec::new();
+    for (name, server) in &discovered.servers {
+        if server.conflict {
+            conflicts.push(name.as_str());
+        }
+    }
+    if !conflicts.is_empty() {
+        return Err(format!(
+            "conflicting MCP definitions: {}",
+            conflicts.join(", ")
+        ));
+    }
+    let mut manifest = store.load()?;
+    let mut imported = 0;
+    for (name, server) in &discovered.servers {
+        if name == "vmux" {
+            continue;
+        }
+        imported += usize::from(manifest.mcp.servers.get(name) != Some(&server.definition));
+        manifest
+            .mcp
+            .servers
+            .insert(name.clone(), server.definition.clone());
+    }
+    store.save(&manifest)?;
+    Ok(imported)
 }
 
 pub fn import_discovered_mcp_server(name: &str) -> Result<(), String> {
-    ToolStore::current().import_discovered_mcp_server(name)
+    let store = ToolStore::current();
+    let (servers, errors) = discover_mcp_servers_in(&default_mcp_config_paths_in(store.home()));
+    import_discovered_mcp_server_in(&store, name, &DiscoveredMcpServers { servers, errors })
+}
+
+fn import_discovered_mcp_server_in(
+    store: &ToolStore,
+    name: &str,
+    discovered: &DiscoveredMcpServers,
+) -> Result<(), String> {
+    if !discovered.errors.is_empty() {
+        return Err(discovered.errors.join("\n"));
+    }
+    let server = discovered
+        .servers
+        .get(name)
+        .ok_or_else(|| format!("MCP server not found: {name}"))?;
+    if server.conflict {
+        return Err(format!(
+            "MCP server {name} has conflicting definitions; import an explicit config path"
+        ));
+    }
+    let mut manifest = store.load()?;
+    manifest
+        .mcp
+        .servers
+        .insert(name.to_string(), server.definition.clone());
+    store.save(&manifest)
 }
 
 pub fn parse_mcp_config_file(path: &Path) -> Result<BTreeMap<String, McpServerManifest>, String> {
