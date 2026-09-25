@@ -38,25 +38,6 @@ impl GitRepositoryPicker {
             .filter(|home| home.is_dir())
             .unwrap_or_else(|| PathBuf::from("/"))
     }
-
-    fn task(
-        path: PathBuf,
-        proxy: Option<bevy::winit::EventLoopProxy<WinitUserEvent>>,
-    ) -> Task<Option<PathBuf>> {
-        let initial = Self::initial_directory(&path);
-        IoTaskPool::get().spawn(async move {
-            let selected = rfd::AsyncFileDialog::new()
-                .set_title("Choose Git repository")
-                .set_directory(initial)
-                .pick_folder()
-                .await
-                .map(|folder| folder.path().to_path_buf());
-            if let Some(proxy) = proxy {
-                let _ = proxy.send_event(WinitUserEvent::WakeUp);
-            }
-            selected
-        })
-    }
 }
 
 fn on_repository_picker_request(
@@ -71,10 +52,20 @@ fn on_repository_picker_request(
     }
     let path = PathBuf::from(&trigger.event().payload.path);
     let proxy = proxy.as_deref().map(|proxy| (**proxy).clone());
-    commands.spawn(PendingGitRepositoryPicker {
-        webview,
-        task: GitRepositoryPicker::task(path, proxy),
+    let initial = GitRepositoryPicker::initial_directory(&path);
+    let task = IoTaskPool::get().spawn(async move {
+        let selected = rfd::AsyncFileDialog::new()
+            .set_title("Choose Git repository")
+            .set_directory(initial)
+            .pick_folder()
+            .await
+            .map(|folder| folder.path().to_path_buf());
+        if let Some(proxy) = proxy {
+            let _ = proxy.send_event(WinitUserEvent::WakeUp);
+        }
+        selected
     });
+    commands.spawn(PendingGitRepositoryPicker { webview, task });
 }
 
 fn poll_repository_pickers(
