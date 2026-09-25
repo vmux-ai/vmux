@@ -34,7 +34,7 @@ struct PendingAgentToolCall {
 fn handle_agent_tool_calls(
     mut commands: Commands,
     mut reader: MessageReader<AgentToolCallRequest>,
-    tools: Res<vmux_mcp::tool::ToolCatalog>,
+    tools: vmux_mcp::tool::ToolRegistry,
     service: Option<Res<ServiceClient>>,
 ) {
     for request in reader.read() {

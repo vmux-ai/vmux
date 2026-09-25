@@ -14,7 +14,7 @@ mod workspace;
 use runtime::ToolCalls;
 pub use runtime::{
     BuiltinToolPlugin, DispatchTarget, McpToolPlugin, RegisterTools, ShellNote, ToolCall,
-    ToolCallPolicy, ToolCatalog, ToolDefinition, ToolDispatchError, ToolDispatchFlush,
-    ToolDispatchResult, ToolDispatchSet, ToolRequestSet, ToolRuntimePlugin,
+    ToolCallPolicy, ToolDefinition, ToolDispatchError, ToolDispatchFlush, ToolDispatchResult,
+    ToolDispatchSet, ToolRegistry, ToolRequestSet, ToolRuntimePlugin,
 };
 pub(crate) use runtime::{ProtocolTool, ToolExecution, ToolOutcome, canonical_tool_name};
