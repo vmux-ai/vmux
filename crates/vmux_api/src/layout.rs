@@ -83,10 +83,7 @@ pub struct Stack {
     pub process_id: Option<String>,
 }
 
-#[vmux_api::contract]
-#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator))]
-#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
-#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext)))]
+#[vmux_api::contract(recursive)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LayoutNode {
     Split {
@@ -95,7 +92,6 @@ pub enum LayoutNode {
         direction: SplitDirection,
         #[serde(default)]
         flex_weights: Vec<f32>,
-        #[rkyv(omit_bounds)]
         children: Vec<LayoutNode>,
     },
     Pane {

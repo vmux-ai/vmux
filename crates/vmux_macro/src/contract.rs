@@ -2,11 +2,53 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
-use syn::{DeriveInput, Path, Token};
+use syn::{Data, DeriveInput, Path, Token, parse_quote};
 
-pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
-    let derives = Punctuated::<Path, Token![,]>::parse_terminated.parse2(args)?;
-    Ok(expand_with_derives(input, derives.iter()))
+pub(crate) fn expand(args: TokenStream, mut input: DeriveInput) -> syn::Result<TokenStream> {
+    let args = Punctuated::<Path, Token![,]>::parse_terminated.parse2(args)?;
+    let recursive = args.iter().any(|arg| arg.is_ident("recursive"));
+    let derives = args.iter().filter(|arg| !arg.is_ident("recursive"));
+    if recursive {
+        add_recursive_rkyv_attributes(&mut input);
+    }
+    Ok(expand_with_derives(input, derives))
+}
+
+fn add_recursive_rkyv_attributes(input: &mut DeriveInput) {
+    input.attrs.push(parse_quote!(
+        #[rkyv(serialize_bounds(
+            __S: rkyv::ser::Writer + rkyv::ser::Allocator,
+            __S::Error: rkyv::rancor::Source
+        ))]
+    ));
+    input.attrs.push(parse_quote!(
+        #[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
+    ));
+    input.attrs.push(parse_quote!(
+        #[rkyv(bytecheck(bounds(
+            __C: rkyv::validation::ArchiveContext,
+            __C::Error: rkyv::rancor::Source
+        )))]
+    ));
+    match &mut input.data {
+        Data::Struct(item) => add_omit_bounds(&mut item.fields),
+        Data::Enum(item) => {
+            for variant in &mut item.variants {
+                add_omit_bounds(&mut variant.fields);
+            }
+        }
+        Data::Union(item) => {
+            for field in &mut item.fields.named {
+                field.attrs.push(parse_quote!(#[rkyv(omit_bounds)]));
+            }
+        }
+    }
+}
+
+fn add_omit_bounds(fields: &mut syn::Fields) {
+    for field in fields {
+        field.attrs.push(parse_quote!(#[rkyv(omit_bounds)]));
+    }
 }
 
 pub(crate) fn expand_with_derives<'a>(
@@ -82,5 +124,38 @@ mod tests {
                 "Eq",
             ]
         );
+    }
+
+    #[test]
+    fn recursive_contract_owns_rkyv_bounds() {
+        let output = expand(
+            quote! { recursive, Eq },
+            parse_quote! {
+                pub enum Node {
+                    Leaf(String),
+                    Branch(Vec<Node>),
+                }
+            },
+        )
+        .unwrap();
+        let file = parse2::<syn::File>(output).unwrap();
+        let Item::Enum(item) = &file.items[0] else {
+            panic!("expected enum");
+        };
+        assert_eq!(
+            item.attrs
+                .iter()
+                .filter(|attribute| attribute.path().is_ident("rkyv"))
+                .count(),
+            3
+        );
+        assert!(item.variants.iter().all(|variant| {
+            variant.fields.iter().all(|field| {
+                field
+                    .attrs
+                    .iter()
+                    .any(|attribute| attribute.path().is_ident("rkyv"))
+            })
+        }));
     }
 }
