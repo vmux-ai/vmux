@@ -5,7 +5,7 @@ use bevy::{
         MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update,
     },
 };
-use bevy_cef::prelude::UiInput;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_cef_core::prelude::CefEmbeddedHost;
 use std::path::{Path, PathBuf};
 pub use vmux_api::PageReady;
@@ -14,7 +14,9 @@ pub struct PagePlugin;
 
 impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(Startup, PageEmbedSet)
+        app.add_plugins(UiEventPlugin::<(PageReady,)>::default())
+            .add_observer(mark_webview_page_ready)
+            .configure_sets(Startup, PageEmbedSet)
             .add_systems(Startup, embed_page_static_assets.in_set(PageEmbedSet));
     }
 }
@@ -270,7 +272,7 @@ impl PageManifest {
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageEmbedSet;
 
-pub fn mark_webview_page_ready(trigger: On<UiInput<PageReady>>, mut commands: Commands) {
+fn mark_webview_page_ready(trigger: On<UiInput<PageReady>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
         .insert(trigger.event().payload);
