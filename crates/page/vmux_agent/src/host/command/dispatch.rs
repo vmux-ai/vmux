@@ -307,7 +307,8 @@ fn handle_browser_commands(
     mut open_stack: MessageWriter<vmux_layout::OpenInNewStackRequest>,
     mut install_extension: MessageWriter<vmux_layout::ExtensionInstallRequest>,
     mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
-    mut browse: AgentBrowserResolve,
+    mut activate: MessageWriter<vmux_layout::active_panes::ActivatePane>,
+    browse: AgentBrowserResolve,
     service: Option<Res<ServiceClient>>,
 ) {
     for request in reader.read() {
@@ -323,9 +324,10 @@ fn handle_browser_commands(
                     } = &request.origin
                 {
                     profile = Some(format!("{anchor:?}"));
-                    if let Some((browser_pane, _)) = browse.claim_browser_pane(*anchor) {
-                        pane = Some(browser_pane.to_bits().to_string());
+                    if let Some(claim) = browse.claim_browser_pane(*anchor) {
+                        pane = Some(claim.pane.to_bits().to_string());
                         new_stack = true;
+                        activate.write(claim.activation);
                     } else if let Some(agent_pane) = browse.agent_pane(*anchor) {
                         open_beside.write(vmux_layout::OpenBesideRequest {
                             pane: agent_pane,
@@ -360,13 +362,23 @@ fn handle_browser_commands(
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserGoBack { pane } => {
-                let pane = browse.command_pane(pane, &request.origin);
-                go_back.write(vmux_layout::BrowserGoBackRequest { pane });
+                let resolved = browse.command_pane(pane, &request.origin);
+                if let Some(request) = resolved.activation {
+                    activate.write(request);
+                }
+                go_back.write(vmux_layout::BrowserGoBackRequest {
+                    pane: resolved.pane,
+                });
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserGoForward { pane } => {
-                let pane = browse.command_pane(pane, &request.origin);
-                go_forward.write(vmux_layout::BrowserGoForwardRequest { pane });
+                let resolved = browse.command_pane(pane, &request.origin);
+                if let Some(request) = resolved.activation {
+                    activate.write(request);
+                }
+                go_forward.write(vmux_layout::BrowserGoForwardRequest {
+                    pane: resolved.pane,
+                });
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserHistorySearch { query, limit } => {

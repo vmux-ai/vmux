@@ -340,11 +340,7 @@ fn drain_agent_launches(
         let validation = vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
             prepared.mcp_revision,
             || {
-                vmux_layout::stack::Stack::clear_children(
-                    request.stack,
-                    &children_q,
-                    &mut commands,
-                );
+                vmux_layout::stack::clear_stack_children(request.stack, &children_q, &mut commands);
                 let terminal = commands
                     .spawn((
                         new_terminal_bundle_with_cwd(&settings, Some(&request.cwd)),

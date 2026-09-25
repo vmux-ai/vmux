@@ -27,7 +27,9 @@ use vmux_setting::AppSettings;
 
 #[cfg(test)]
 use super::input_queue::InputQueuePlugin;
-use super::input_queue::{NextTerminalInputSequence, TerminalInput};
+#[cfg(test)]
+use super::input_queue::pending_terminal_input;
+use super::input_queue::{NextTerminalInputSequence, enqueue_terminal_input};
 use super::loading::AgentLoading;
 use super::mouse::MouseSelectionState;
 use super::process_control::{PendingTerminalSnapshot, ProcessControlPlugin, TerminalGridSize};
@@ -446,7 +448,7 @@ fn open_terminal_page(
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, child_of_q, tabs);
         settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())?
     };
-    vmux_layout::stack::Stack::clear_children(task.stack, children_q, commands);
+    vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
     let title = cwd
         .as_ref()
         .map(|cwd| format!("Terminal ({})", cwd.display()))
@@ -643,7 +645,7 @@ fn respond_terminal_stack_spawn(
             commands.entity(terminal).insert(pid);
         }
         if let Some(data) = request.pending_input.clone() {
-            TerminalInput::enqueue(&mut commands, &mut sequence, terminal, data);
+            enqueue_terminal_input(&mut commands, &mut sequence, terminal, data);
         }
     }
 }
@@ -2404,7 +2406,7 @@ fn handle_terminal_clear_command(
         let Some(terminal) = terminal else {
             continue;
         };
-        TerminalInput::enqueue(&mut commands, &mut sequence, terminal, vec![0x0c]);
+        enqueue_terminal_input(&mut commands, &mut sequence, terminal, vec![0x0c]);
     }
 }
 
@@ -2539,7 +2541,7 @@ mod tests {
                 |In((terminal, data)): In<(Entity, Vec<u8>)>,
                  mut sequence: ResMut<NextTerminalInputSequence>,
                  mut commands: Commands| {
-                    TerminalInput::enqueue(&mut commands, &mut sequence, terminal, data);
+                    enqueue_terminal_input(&mut commands, &mut sequence, terminal, data);
                 },
                 (terminal, b"initial\r".to_vec()),
             )
@@ -2554,7 +2556,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            TerminalInput::pending(app.world_mut(), terminal),
+            pending_terminal_input(app.world_mut(), terminal),
             [b"initial\r".to_vec(), b"next\r".to_vec()]
         );
     }
@@ -2581,7 +2583,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            TerminalInput::pending(app.world_mut(), terminal),
+            pending_terminal_input(app.world_mut(), terminal),
             [b"one\r".to_vec(), b"two\r".to_vec()]
         );
     }
@@ -2635,7 +2637,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            TerminalInput::pending(app.world_mut(), terminal),
+            pending_terminal_input(app.world_mut(), terminal),
             [b"hi".to_vec()]
         );
     }
@@ -3421,7 +3423,7 @@ mod tests {
                 |In((terminal, data)): In<(Entity, Vec<u8>)>,
                  mut sequence: ResMut<NextTerminalInputSequence>,
                  mut commands: Commands| {
-                    TerminalInput::enqueue(&mut commands, &mut sequence, terminal, data);
+                    enqueue_terminal_input(&mut commands, &mut sequence, terminal, data);
                 },
                 (entity, b"queued\r".to_vec()),
             )
@@ -3439,7 +3441,7 @@ mod tests {
         assert!(app.world().get::<ShellOutputSeen>(entity).is_none());
         assert!(app.world().get::<AwaitingProcessCreated>(entity).is_some());
         assert_eq!(
-            TerminalInput::pending(app.world_mut(), entity),
+            pending_terminal_input(app.world_mut(), entity),
             [b"queued\r".to_vec()]
         );
     }

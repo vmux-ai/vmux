@@ -17,10 +17,10 @@ impl Plugin for ChatModelPlugin {
             .add_systems(
                 Update,
                 (
-                    Picker::project
+                    project_model_picker
                         .in_set(ModelProjection)
                         .run_if(resource_changed::<Models>),
-                    Picker::emit
+                    emit_model_picker
                         .after(ModelProjection)
                         .run_if(resource_changed::<Picker>),
                 ),
@@ -37,18 +37,16 @@ pub struct Models(pub RemoteModelState);
 #[derive(Resource, Default)]
 pub struct Picker(pub ModelState);
 
-impl Picker {
-    fn project(models: Res<Models>, mut picker: ResMut<Picker>) {
-        picker.0 = ModelState {
-            current_model_id: models.0.selected_id.clone(),
-            models: models.0.models.clone(),
-            effort_current: models.0.effort.clone(),
-            effort_levels: models.0.effort_levels.clone(),
-            ..ModelState::default()
-        };
-    }
+fn project_model_picker(models: Res<Models>, mut picker: ResMut<Picker>) {
+    picker.0 = ModelState {
+        current_model_id: models.0.selected_id.clone(),
+        models: models.0.models.clone(),
+        effort_current: models.0.effort.clone(),
+        effort_levels: models.0.effort_levels.clone(),
+        ..ModelState::default()
+    };
+}
 
-    fn emit(picker: Res<Picker>, mut projection: ResMut<ChatUiStateProjection>) {
-        projection.write(&picker.0);
-    }
+fn emit_model_picker(picker: Res<Picker>, mut projection: ResMut<ChatUiStateProjection>) {
+    projection.write(&picker.0);
 }

@@ -29,14 +29,14 @@ impl Plugin for ChatRoomPlugin {
             .add_systems(
                 Update,
                 (
-                    Conversation::fold.before(RoomProjection),
-                    Snapshot::project.in_set(RoomProjection).run_if(
+                    fold_conversation.before(RoomProjection),
+                    project_snapshot.in_set(RoomProjection).run_if(
                         resource_changed::<Conversation>
                             .or_else(resource_changed::<Log>)
                             .or_else(resource_changed::<LiveTurn>)
                             .or_else(resource_changed::<Agents>),
                     ),
-                    Snapshot::emit
+                    emit_snapshot
                         .after(RoomProjection)
                         .run_if(resource_changed::<Snapshot>),
                 ),
@@ -70,73 +70,71 @@ impl Default for Conversation {
     }
 }
 
-impl Conversation {
-    fn fold(
-        mut submitted: MessageReader<Submitted>,
-        mut reported: MessageReader<Reported>,
-        mut conversation: ResMut<Conversation>,
-        mut log: ResMut<Log>,
-        mut live: ResMut<LiveTurn>,
-    ) {
-        for Submitted in submitted.read() {
-            if conversation.session.is_some() {
-                conversation.status = RemoteStatus::Streaming;
-            }
+fn fold_conversation(
+    mut submitted: MessageReader<Submitted>,
+    mut reported: MessageReader<Reported>,
+    mut conversation: ResMut<Conversation>,
+    mut log: ResMut<Log>,
+    mut live: ResMut<LiveTurn>,
+) {
+    for Submitted in submitted.read() {
+        if conversation.session.is_some() {
+            conversation.status = RemoteStatus::Streaming;
         }
-        for Reported(event) in reported.read() {
-            match event {
-                RemoteEvent::Session { session } => {
-                    if log
-                        .room_id
-                        .as_ref()
-                        .is_some_and(|room_id| room_id != &session.room_id)
-                    {
-                        *log = Log::default();
-                    }
-                    conversation.status = session.status.clone();
-                    conversation.approval = session.approval.clone();
-                    conversation.session = Some(session.clone());
+    }
+    for Reported(event) in reported.read() {
+        match event {
+            RemoteEvent::Session { session } => {
+                if log
+                    .room_id
+                    .as_ref()
+                    .is_some_and(|room_id| room_id != &session.room_id)
+                {
+                    *log = Log::default();
                 }
-                RemoteEvent::Snapshot {
-                    room_id,
-                    through_seq,
-                    events,
-                } => {
-                    let matches_session = conversation
-                        .session
-                        .as_ref()
-                        .is_none_or(|session| &session.room_id == room_id);
-                    let has_newer_projection =
-                        log.room_id.as_ref() == Some(room_id) && log.through_seq > *through_seq;
-                    if matches_session && !has_newer_projection {
-                        *log = Log {
-                            room_id: Some(room_id.clone()),
-                            through_seq: *through_seq,
-                            events: events.clone(),
-                        };
-                        live.0.clear();
-                    }
-                }
-                RemoteEvent::Delta { room_id, text } => {
-                    let accepts_delta = log
-                        .room_id
-                        .as_ref()
-                        .is_none_or(|current| current == room_id);
-                    if accepts_delta {
-                        if log.room_id.is_none() {
-                            log.room_id = Some(room_id.clone());
-                        }
-                        live.0.push_str(text);
-                    }
-                }
-                RemoteEvent::Status { status } => {
-                    if !matches!(status, RemoteStatus::Streaming) {
-                        conversation.approval = None;
-                    }
-                    conversation.status = status.clone();
-                }
-                RemoteEvent::Approval { approval } => conversation.approval = approval.clone(),
+                conversation.status = session.status.clone();
+                conversation.approval = session.approval.clone();
+                conversation.session = Some(session.clone());
             }
+            RemoteEvent::Snapshot {
+                room_id,
+                through_seq,
+                events,
+            } => {
+                let matches_session = conversation
+                    .session
+                    .as_ref()
+                    .is_none_or(|session| &session.room_id == room_id);
+                let has_newer_projection =
+                    log.room_id.as_ref() == Some(room_id) && log.through_seq > *through_seq;
+                if matches_session && !has_newer_projection {
+                    *log = Log {
+                        room_id: Some(room_id.clone()),
+                        through_seq: *through_seq,
+                        events: events.clone(),
+                    };
+                    live.0.clear();
+                }
+            }
+            RemoteEvent::Delta { room_id, text } => {
+                let accepts_delta = log
+                    .room_id
+                    .as_ref()
+                    .is_none_or(|current| current == room_id);
+                if accepts_delta {
+                    if log.room_id.is_none() {
+                        log.room_id = Some(room_id.clone());
+                    }
+                    live.0.push_str(text);
+                }
+            }
+            RemoteEvent::Status { status } => {
+                if !matches!(status, RemoteStatus::Streaming) {
+                    conversation.approval = None;
+                }
+                conversation.status = status.clone();
+            }
+            RemoteEvent::Approval { approval } => conversation.approval = approval.clone(),
         }
     }
 }
@@ -157,56 +155,54 @@ pub struct Agents(pub Vec<RemoteAgent>);
 #[derive(Resource, Default)]
 pub struct Snapshot(pub ChatSnapshot);
 
-impl Snapshot {
-    fn emit(snapshot: Res<Snapshot>, mut projection: ResMut<ChatUiStateProjection>) {
-        projection.write(&snapshot.0);
-    }
+fn emit_snapshot(snapshot: Res<Snapshot>, mut projection: ResMut<ChatUiStateProjection>) {
+    projection.write(&snapshot.0);
+}
 
-    fn project(
-        conversation: Res<Conversation>,
-        log: Res<Log>,
-        live: Res<LiveTurn>,
-        agents: Res<Agents>,
-        mut snapshot: ResMut<Snapshot>,
-    ) {
-        let Some(session) = conversation.session.as_ref() else {
-            snapshot.0 = ChatSnapshot::default();
-            return;
-        };
-        let running = matches!(session.status, RemoteStatus::Streaming);
-        let items = log.chat_items(&live.0, running);
-        let total = items.len() as u32;
-        let speaker = agents.named(&session.name);
-        let approval = conversation
-            .approval
-            .as_ref()
-            .map(|pending| PendingApproval {
-                call_id: pending.call_id.clone(),
-                name: pending.name.clone(),
-                args: pending.args.clone(),
-            });
-        let error = match &conversation.status {
-            RemoteStatus::Errored(message) => message.clone(),
-            _ => String::new(),
-        };
-        let (agent_icon, agent_segment) = match speaker {
-            Some(agent) => (agent.icon.clone(), agent.id.as_str()),
-            None => (String::new(), ""),
-        };
-        snapshot.0 = ChatSnapshot {
-            messages: items,
-            messages_start: 0,
-            messages_total: total,
-            status: conversation.status.page_status().to_string(),
-            error,
-            approval,
-            agent_name: session.name.clone(),
-            conversation_title: session.name.clone(),
-            agent_icon,
-            accent_color: vmux_api::avatar::agent_color(agent_segment),
-            ..ChatSnapshot::default()
-        };
-    }
+fn project_snapshot(
+    conversation: Res<Conversation>,
+    log: Res<Log>,
+    live: Res<LiveTurn>,
+    agents: Res<Agents>,
+    mut snapshot: ResMut<Snapshot>,
+) {
+    let Some(session) = conversation.session.as_ref() else {
+        snapshot.0 = ChatSnapshot::default();
+        return;
+    };
+    let running = matches!(session.status, RemoteStatus::Streaming);
+    let items = log.chat_items(&live.0, running);
+    let total = items.len() as u32;
+    let speaker = agents.named(&session.name);
+    let approval = conversation
+        .approval
+        .as_ref()
+        .map(|pending| PendingApproval {
+            call_id: pending.call_id.clone(),
+            name: pending.name.clone(),
+            args: pending.args.clone(),
+        });
+    let error = match &conversation.status {
+        RemoteStatus::Errored(message) => message.clone(),
+        _ => String::new(),
+    };
+    let (agent_icon, agent_segment) = match speaker {
+        Some(agent) => (agent.icon.clone(), agent.id.as_str()),
+        None => (String::new(), ""),
+    };
+    snapshot.0 = ChatSnapshot {
+        messages: items,
+        messages_start: 0,
+        messages_total: total,
+        status: conversation.status.page_status().to_string(),
+        error,
+        approval,
+        agent_name: session.name.clone(),
+        conversation_title: session.name.clone(),
+        agent_icon,
+        accent_color: vmux_api::avatar::agent_color(agent_segment),
+        ..ChatSnapshot::default()
+    };
 }
 
 impl Agents {

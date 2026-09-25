@@ -83,7 +83,7 @@ fn apply_planned_documents(
         Ok(prepared) => prepared,
         Err(reason) => return Some(reason),
     };
-    prepared.apply(self_writes, commands).err()
+    apply_prepared_workspace_edit(prepared, self_writes, commands).err()
 }
 
 struct PreparedWorkspaceEdit {
@@ -102,13 +102,17 @@ impl PreparedWorkspaceEdit {
         }
         Ok(Self { documents })
     }
+}
 
-    fn apply(self, self_writes: &mut SelfWrites, commands: &mut Commands) -> Result<(), String> {
-        for document in self.documents {
-            document.apply(self_writes, commands)?;
-        }
-        Ok(())
+fn apply_prepared_workspace_edit(
+    prepared: PreparedWorkspaceEdit,
+    self_writes: &mut SelfWrites,
+    commands: &mut Commands,
+) -> Result<(), String> {
+    for document in prepared.documents {
+        apply_prepared_document(document, self_writes, commands)?;
     }
+    Ok(())
 }
 
 struct PreparedDocument {
@@ -171,24 +175,28 @@ impl PreparedDocument {
             updated,
         })
     }
+}
 
-    fn apply(self, self_writes: &mut SelfWrites, commands: &mut Commands) -> Result<(), String> {
-        if self.targets.is_empty() {
-            vmux_path::AtomicFile::write(self.path.as_path(), self.updated.as_bytes())
-                .map_err(|error| format!("{}: {error}", self.path.as_path().display()))?;
-            self_writes
-                .0
-                .insert(canon(self.path.as_path()), std::time::Instant::now());
-            return Ok(());
-        }
-        for entity in self.targets {
-            commands.trigger(EditRequest::new(
-                entity,
-                vec![EditCommand::ReplaceText(self.updated.clone())],
-            ));
-        }
-        Ok(())
+fn apply_prepared_document(
+    document: PreparedDocument,
+    self_writes: &mut SelfWrites,
+    commands: &mut Commands,
+) -> Result<(), String> {
+    if document.targets.is_empty() {
+        vmux_path::AtomicFile::write(document.path.as_path(), document.updated.as_bytes())
+            .map_err(|error| format!("{}: {error}", document.path.as_path().display()))?;
+        self_writes
+            .0
+            .insert(canon(document.path.as_path()), std::time::Instant::now());
+        return Ok(());
     }
+    for entity in document.targets {
+        commands.trigger(EditRequest::new(
+            entity,
+            vec![EditCommand::ReplaceText(document.updated.clone())],
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

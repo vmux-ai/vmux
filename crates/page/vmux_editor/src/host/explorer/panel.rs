@@ -115,27 +115,23 @@ fn mark_explorer_panel_unsent(views: &Query<Entity, With<FileView>>, commands: &
     }
 }
 
-struct StackExplorerPanel;
-
-impl StackExplorerPanel {
-    fn apply(
-        scope: Entity,
-        visibility: StackExplorerVisibility,
-        revision: StackExplorerRevision,
-        visibilities: &mut Query<&mut StackExplorerVisibility>,
-        revisions: &mut Query<&mut StackExplorerRevision>,
-        commands: &mut Commands,
-    ) {
-        if let Ok(mut state) = visibilities.get_mut(scope) {
-            *state = visibility;
-        } else {
-            commands.entity(scope).insert(visibility);
-        }
-        if let Ok(mut state) = revisions.get_mut(scope) {
-            *state = revision;
-        } else {
-            commands.entity(scope).insert(revision);
-        }
+fn apply_stack_explorer_panel(
+    scope: Entity,
+    visibility: StackExplorerVisibility,
+    revision: StackExplorerRevision,
+    visibilities: &mut Query<&mut StackExplorerVisibility>,
+    revisions: &mut Query<&mut StackExplorerRevision>,
+    commands: &mut Commands,
+) {
+    if let Ok(mut state) = visibilities.get_mut(scope) {
+        *state = visibility;
+    } else {
+        commands.entity(scope).insert(visibility);
+    }
+    if let Ok(mut state) = revisions.get_mut(scope) {
+        *state = revision;
+    } else {
+        commands.entity(scope).insert(revision);
     }
 }
 
@@ -159,7 +155,7 @@ fn on_explorer_panel_set_visible(
         client_id: trigger.event().payload.client_id,
         request_id: trigger.event().payload.request_id,
     };
-    StackExplorerPanel::apply(
+    apply_stack_explorer_panel(
         scope,
         next_visibility,
         next_revision,

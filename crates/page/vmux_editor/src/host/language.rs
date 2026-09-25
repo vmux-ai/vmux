@@ -272,36 +272,36 @@ impl WikiCompletion {
             prefix,
         })
     }
+}
 
-    fn emit(
-        self,
-        entity: Entity,
-        index: &vmux_core::knowledge::KnowledgeIndex,
-        browsers: &Browsers,
-        commands: &mut Commands,
-    ) {
-        if !browsers.can_emit_to(&entity) {
-            return;
-        }
-        let items = index
-            .completions(&self.prefix, 32)
-            .into_iter()
-            .map(|(title, relative)| CompletionItem {
-                label: title.clone(),
-                insert_text: format!("{title}]]"),
-                detail: relative,
-                kind: "knowledge".to_string(),
-            })
-            .collect();
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            entity,
-            &FileCompletions {
-                items,
-                replace_from_col: self.replace_from_col,
-                line: self.line,
-            },
-        ));
+fn emit_wiki_completion(
+    completion: WikiCompletion,
+    entity: Entity,
+    index: &vmux_core::knowledge::KnowledgeIndex,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) {
+    if !browsers.can_emit_to(&entity) {
+        return;
     }
+    let items = index
+        .completions(&completion.prefix, 32)
+        .into_iter()
+        .map(|(title, relative)| CompletionItem {
+            label: title.clone(),
+            insert_text: format!("{title}]]"),
+            detail: relative,
+            kind: "knowledge".to_string(),
+        })
+        .collect();
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &FileCompletions {
+            items,
+            replace_from_col: completion.replace_from_col,
+            line: completion.line,
+        },
+    ));
 }
 
 fn on_editor_hover(
@@ -517,7 +517,7 @@ fn on_wiki_completion_request(
     let Some(completion) = WikiCompletion::for_edit(edit, index) else {
         return;
     };
-    completion.emit(entity, index, &browsers, &mut commands);
+    emit_wiki_completion(completion, entity, index, &browsers, &mut commands);
 }
 
 fn on_file_hover_request(
@@ -744,7 +744,7 @@ fn on_file_completion_request(
     if let Some(index) = index.as_deref()
         && let Some(completion) = WikiCompletion::for_edit(edit, index)
     {
-        completion.emit(entity, index, &browsers, &mut commands);
+        emit_wiki_completion(completion, entity, index, &browsers, &mut commands);
         return;
     }
     let position = edit.lsp_position_at_cell(request.line, request.col);

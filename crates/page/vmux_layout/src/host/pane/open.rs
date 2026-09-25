@@ -353,7 +353,7 @@ fn split_or_extend_for_batch(
     let pending_info = pending_leaf_infos.remove(&anchor);
     pending_leaf_stacks.remove(&anchor);
     let (holder, target) =
-        PaneSplit::spawn_from_leaf(commands, anchor, split_dir, existing_tabs, activate_new);
+        super::spawn_split_from_leaf(commands, anchor, split_dir, existing_tabs, activate_new);
     retired_leaf_panes.insert(anchor);
     let target_size = pending_info
         .as_ref()

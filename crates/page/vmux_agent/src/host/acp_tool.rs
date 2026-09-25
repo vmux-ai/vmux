@@ -146,7 +146,7 @@ fn start_acp_installs(
                     .spawn((
                         name,
                         key.clone(),
-                        AcpInstallJob::spawn(request, wake.clone()),
+                        start_acp_install_job(request, wake.clone()),
                     ))
                     .id();
                 active_jobs.push((key, job));
@@ -289,28 +289,6 @@ impl AcpLaunchStarted {
 }
 
 impl AcpInstallJob {
-    fn spawn(
-        request: AcpInstallRequest,
-        wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
-    ) -> Self {
-        let progress = Arc::new(Mutex::new(None));
-        let sink = AcpInstallProgressSink {
-            pending: progress.clone(),
-            wake,
-        };
-        let thread = std::thread::spawn(move || {
-            let outcome = request.resolve(&sink);
-            sink.notify();
-            outcome
-        });
-        Self {
-            progress,
-            thread: Some(thread),
-            outcome: None,
-            package_reported: false,
-        }
-    }
-
     fn take_progress(&mut self) -> Option<AcpInstallProgress> {
         match self.progress.lock() {
             Ok(mut pending) => pending.take(),
@@ -330,6 +308,28 @@ impl AcpInstallJob {
             package_added: false,
             launch: Err("agent installation failed unexpectedly".to_string()),
         }));
+    }
+}
+
+fn start_acp_install_job(
+    request: AcpInstallRequest,
+    wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
+) -> AcpInstallJob {
+    let progress = Arc::new(Mutex::new(None));
+    let sink = AcpInstallProgressSink {
+        pending: progress.clone(),
+        wake,
+    };
+    let thread = std::thread::spawn(move || {
+        let outcome = request.resolve(&sink);
+        sink.notify();
+        outcome
+    });
+    AcpInstallJob {
+        progress,
+        thread: Some(thread),
+        outcome: None,
+        package_reported: false,
     }
 }
 

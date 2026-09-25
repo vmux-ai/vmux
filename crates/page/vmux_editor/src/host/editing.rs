@@ -216,7 +216,13 @@ fn apply_edit_request(
             let visible = vp.visible_rows(&mut edit);
             let target = (vp.top_row as i64 + *lines as i64).clamp(0, u32::MAX as i64) as u32;
             let target = clamp_top_line(target, visible, vp.rows);
-            vp.scroll_to(target, entity, &browsers, &mut commands);
+            if let Some(scroll) = vp.set_top(target)
+                && browsers.can_emit_to(&entity)
+            {
+                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    entity, &scroll,
+                ));
+            }
             edit.core.top_row = vp.top_row;
             if vp.follow_scrolled_cursor(&mut edit) {
                 cursor_stale = true;
@@ -234,7 +240,13 @@ fn apply_edit_request(
                 crate::edit::command::ScrollPlacement::Center => row.saturating_sub(rows / 2),
                 crate::edit::command::ScrollPlacement::Bottom => row.saturating_sub(rows - 1),
             };
-            vp.scroll_to(target, entity, &browsers, &mut commands);
+            if let Some(scroll) = vp.set_top(target)
+                && browsers.can_emit_to(&entity)
+            {
+                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    entity, &scroll,
+                ));
+            }
             edit.core.top_row = vp.top_row;
             continue;
         }
@@ -420,7 +432,13 @@ fn apply_edit_request(
         }
     }
     if let Some(top) = vp.autoscroll(&mut edit) {
-        vp.scroll_to(top, entity, &browsers, &mut commands);
+        if let Some(scroll) = vp.set_top(top)
+            && browsers.can_emit_to(&entity)
+        {
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                entity, &scroll,
+            ));
+        }
         edit.core.top_row = vp.top_row;
     }
     let vpc = *vp;

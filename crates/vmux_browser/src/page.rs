@@ -245,7 +245,7 @@ fn attach_cef_pages(
     mut commands: Commands,
 ) {
     for (entity, attachment, task) in &attachments {
-        vmux_layout::stack::Stack::clear_children(attachment.stack, &children, &mut commands);
+        vmux_layout::stack::clear_stack_children(attachment.stack, &children, &mut commands);
         commands.entity(attachment.stack).insert(PageMetadata {
             url: attachment.url.clone(),
             title: attachment.title.clone(),
@@ -276,7 +276,7 @@ fn attach_error_pages(
     mut commands: Commands,
 ) {
     for (entity, attachment, task) in &attachments {
-        vmux_layout::stack::Stack::clear_children(attachment.stack, &children, &mut commands);
+        vmux_layout::stack::clear_stack_children(attachment.stack, &children, &mut commands);
         commands.entity(attachment.stack).insert(PageMetadata {
             url: attachment.failure.url.clone(),
             title: attachment.failure.title.clone(),

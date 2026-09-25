@@ -45,27 +45,15 @@ pub(crate) struct FileViewport {
 }
 
 impl FileViewport {
-    pub(crate) fn scroll_to(
-        &mut self,
-        top: u32,
-        entity: Entity,
-        browsers: &Browsers,
-        commands: &mut Commands,
-    ) {
+    pub(crate) fn set_top(&mut self, top: u32) -> Option<FileScrollByEvent> {
         let previous = self.top_row;
         if top == previous {
-            return;
+            return None;
         }
         self.top_row = top;
-        if !browsers.can_emit_to(&entity) {
-            return;
-        }
-        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            entity,
-            &FileScrollByEvent {
-                lines: top as i32 - previous as i32,
-            },
-        ));
+        Some(FileScrollByEvent {
+            lines: top as i32 - previous as i32,
+        })
     }
 
     pub(crate) fn visible_rows(&self, edit: &mut Editor) -> u32 {
@@ -411,7 +399,13 @@ fn sync_editor_wrap_settings(
             let wanted = viewport.autoscroll(&mut edit);
             viewport.top_row = showing;
             if viewport.rows > 0 {
-                viewport.scroll_to(wanted.unwrap_or(0), entity, &browsers, &mut commands);
+                if let Some(scroll) = viewport.set_top(wanted.unwrap_or(0))
+                    && browsers.can_emit_to(&entity)
+                {
+                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                        entity, &scroll,
+                    ));
+                }
                 edit.core.top_row = viewport.top_row;
             }
             commands.trigger(ViewportRenderRequest::new(entity));

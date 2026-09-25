@@ -82,7 +82,7 @@ fn arrange_from_commands(
                 let Some(tab) = tab else {
                     continue;
                 };
-                PaneArrangement::rotate(
+                rotate_panes(
                     tab,
                     direction == SiblingDirection::Next,
                     &all_children,
@@ -94,98 +94,96 @@ fn arrange_from_commands(
                 let Some(tab) = tab else {
                     continue;
                 };
-                PaneArrangement::mirror(tab, direction, &all_children, &splits, &mut commands);
+                mirror_panes(tab, direction, &all_children, &splits, &mut commands);
             }
         }
     }
 }
 
-impl PaneArrangement {
-    fn rotate(
-        tab: Entity,
-        forward: bool,
-        children: &Query<&Children>,
-        leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-        commands: &mut Commands,
-    ) {
-        let mut panes = Vec::new();
-        Self::collect_leaves(tab, children, leaves, &mut panes);
-        if panes.len() <= 1 {
-            return;
-        }
-        let groups = panes
-            .iter()
-            .map(|pane| {
-                children
-                    .get(*pane)
-                    .map(|children| children.iter().collect::<Vec<_>>())
-                    .unwrap_or_default()
-            })
-            .collect::<Vec<_>>();
-        for group in &groups {
-            for child in group {
-                commands.entity(*child).remove::<ChildOf>();
-            }
-        }
-        for (index, group) in groups.into_iter().enumerate() {
-            let destination = if forward {
-                (index + 1) % panes.len()
-            } else {
-                (index + panes.len() - 1) % panes.len()
-            };
-            for child in group {
-                commands.entity(child).insert(ChildOf(panes[destination]));
-            }
+fn rotate_panes(
+    tab: Entity,
+    forward: bool,
+    children: &Query<&Children>,
+    leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    commands: &mut Commands,
+) {
+    let mut panes = Vec::new();
+    collect_leaves(tab, children, leaves, &mut panes);
+    if panes.len() <= 1 {
+        return;
+    }
+    let groups = panes
+        .iter()
+        .map(|pane| {
+            children
+                .get(*pane)
+                .map(|children| children.iter().collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>();
+    for group in &groups {
+        for child in group {
+            commands.entity(*child).remove::<ChildOf>();
         }
     }
-
-    fn mirror(
-        root: Entity,
-        direction: Option<PaneSplitDirection>,
-        children: &Query<&Children>,
-        splits: &Query<&PaneSplit>,
-        commands: &mut Commands,
-    ) {
-        let Ok(descendants) = children.get(root) else {
-            return;
+    for (index, group) in groups.into_iter().enumerate() {
+        let destination = if forward {
+            (index + 1) % panes.len()
+        } else {
+            (index + panes.len() - 1) % panes.len()
         };
-        let descendants = descendants.iter().collect::<Vec<_>>();
-        for child in descendants {
-            let Ok(split) = splits.get(child) else {
-                continue;
-            };
-            if direction.is_none_or(|direction| split.direction == direction)
-                && let Ok(split_children) = children.get(child)
-            {
-                let mut reversed = split_children.iter().collect::<Vec<_>>();
-                reversed.reverse();
-                for entity in &reversed {
-                    commands.entity(*entity).remove::<ChildOf>();
-                }
-                for entity in &reversed {
-                    commands.entity(*entity).insert(ChildOf(child));
-                }
-            }
-            Self::mirror(child, direction, children, splits, commands);
+        for child in group {
+            commands.entity(child).insert(ChildOf(panes[destination]));
         }
     }
+}
 
-    fn collect_leaves(
-        root: Entity,
-        children: &Query<&Children>,
-        leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-        output: &mut Vec<Entity>,
-    ) {
-        if leaves.contains(root) {
-            output.push(root);
-            return;
-        }
-        let Ok(descendants) = children.get(root) else {
-            return;
+fn mirror_panes(
+    root: Entity,
+    direction: Option<PaneSplitDirection>,
+    children: &Query<&Children>,
+    splits: &Query<&PaneSplit>,
+    commands: &mut Commands,
+) {
+    let Ok(descendants) = children.get(root) else {
+        return;
+    };
+    let descendants = descendants.iter().collect::<Vec<_>>();
+    for child in descendants {
+        let Ok(split) = splits.get(child) else {
+            continue;
         };
-        for child in descendants.iter() {
-            Self::collect_leaves(child, children, leaves, output);
+        if direction.is_none_or(|direction| split.direction == direction)
+            && let Ok(split_children) = children.get(child)
+        {
+            let mut reversed = split_children.iter().collect::<Vec<_>>();
+            reversed.reverse();
+            for entity in &reversed {
+                commands.entity(*entity).remove::<ChildOf>();
+            }
+            for entity in &reversed {
+                commands.entity(*entity).insert(ChildOf(child));
+            }
         }
+        mirror_panes(child, direction, children, splits, commands);
+    }
+}
+
+fn collect_leaves(
+    root: Entity,
+    children: &Query<&Children>,
+    leaves: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    output: &mut Vec<Entity>,
+) {
+    if leaves.contains(root) {
+        output.push(root);
+        return;
+    }
+    let Ok(descendants) = children.get(root) else {
+        return;
+    };
+    for child in descendants.iter() {
+        collect_leaves(child, children, leaves, output);
     }
 }
 
@@ -210,7 +208,7 @@ mod tests {
                 move |children: Query<&Children>,
                       leaves: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
                       mut commands: Commands| {
-                    PaneArrangement::rotate(tab, true, &children, &leaves, &mut commands);
+                    rotate_panes(tab, true, &children, &leaves, &mut commands);
                 },
             )
             .unwrap();
@@ -242,7 +240,7 @@ mod tests {
                 move |children: Query<&Children>,
                       splits: Query<&PaneSplit>,
                       mut commands: Commands| {
-                    PaneArrangement::mirror(
+                    mirror_panes(
                         tab,
                         Some(PaneSplitDirection::Row),
                         &children,
@@ -296,7 +294,7 @@ mod tests {
                 move |children: Query<&Children>,
                       splits: Query<&PaneSplit>,
                       mut commands: Commands| {
-                    PaneArrangement::mirror(tab, None, &children, &splits, &mut commands);
+                    mirror_panes(tab, None, &children, &splits, &mut commands);
                 },
             )
             .unwrap();

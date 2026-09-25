@@ -1,9 +1,8 @@
 use bevy::{
     asset::io::embedded::EmbeddedAssetRegistry,
-    ecs::system::SystemParam,
     prelude::{
         App, Commands, Component, Entity, IntoScheduleConfigs, Message, MessageReader,
-        MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update, With,
+        MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update,
     },
 };
 use bevy_cef::prelude::UiInput;
@@ -212,22 +211,6 @@ pub struct HostHistoryStep {
 pub struct HostHistoryTraversed {
     pub webview: Entity,
     pub entry: HostHistoryEntry,
-}
-
-#[derive(SystemParam)]
-pub struct HostHistoryNavigation<'w, 's> {
-    hosted: Query<'w, 's, (), With<HostHistory>>,
-    steps: MessageWriter<'w, HostHistoryStep>,
-}
-
-impl HostHistoryNavigation<'_, '_> {
-    pub fn stepped(&mut self, webview: Entity, delta: HostHistoryDelta) -> bool {
-        if !self.hosted.contains(webview) {
-            return false;
-        }
-        self.steps.write(HostHistoryStep { webview, delta });
-        true
-    }
 }
 
 fn step_host_history(

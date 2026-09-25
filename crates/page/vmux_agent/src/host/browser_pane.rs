@@ -7,7 +7,6 @@ use crate::session::AgentSession;
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentBrowserResolve<'w, 's> {
-    activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
     agent_terms: Query<
         'w,
         's,
@@ -23,6 +22,17 @@ pub(crate) struct AgentBrowserResolve<'w, 's> {
     stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
     browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
     active: Res<'w, vmux_layout::active_panes::ActivePanes>,
+}
+
+pub(crate) struct AgentBrowserPaneClaim {
+    pub(crate) pane: Entity,
+    pub(crate) stack: Option<Entity>,
+    pub(crate) activation: vmux_layout::active_panes::ActivatePane,
+}
+
+pub(crate) struct AgentBrowserPaneResolution {
+    pub(crate) pane: Option<String>,
+    pub(crate) activation: Option<vmux_layout::active_panes::ActivatePane>,
 }
 
 impl AgentBrowserResolve<'_, '_> {
@@ -87,9 +97,9 @@ impl AgentBrowserResolve<'_, '_> {
     }
 
     pub(crate) fn claim_browser_pane(
-        &mut self,
+        &self,
         anchor: vmux_service::protocol::ProcessId,
-    ) -> Option<(Entity, Option<Entity>)> {
+    ) -> Option<AgentBrowserPaneClaim> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
         let kind = self.agent_kind(anchor);
         let profile = vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}"));
@@ -98,8 +108,10 @@ impl AgentBrowserResolve<'_, '_> {
             .get(&profile)
             .filter(|active| active.pane == Some(pane))
             .and_then(|active| active.stack);
-        self.activate
-            .write(vmux_layout::active_panes::ActivatePane {
+        Some(AgentBrowserPaneClaim {
+            pane,
+            stack,
+            activation: vmux_layout::active_panes::ActivatePane {
                 profile,
                 active: vmux_layout::active_panes::ActiveStack {
                     tab: None,
@@ -107,37 +119,56 @@ impl AgentBrowserResolve<'_, '_> {
                     stack,
                     kind,
                 },
-            });
-        Some((pane, stack))
+            },
+        })
     }
 
     pub(crate) fn resolve_pane(
-        &mut self,
+        &self,
         pane: &Option<String>,
         anchor: &Option<vmux_service::protocol::ProcessId>,
-    ) -> Option<String> {
-        if pane.is_some() {
-            return pane.clone();
+    ) -> AgentBrowserPaneResolution {
+        if let Some(pane) = pane {
+            return AgentBrowserPaneResolution {
+                pane: Some(pane.clone()),
+                activation: None,
+            };
         }
-        let anchor = (*anchor)?;
-        let (pane, stack) = self.claim_browser_pane(anchor)?;
-        if let Some(stack) = stack {
-            return Some(vmux_service::protocol::format_id(
+
+        let Some(anchor) = *anchor else {
+            return AgentBrowserPaneResolution {
+                pane: None,
+                activation: None,
+            };
+        };
+        let Some(claim) = self.claim_browser_pane(anchor) else {
+            return AgentBrowserPaneResolution {
+                pane: None,
+                activation: None,
+            };
+        };
+        let pane = if let Some(stack) = claim.stack {
+            vmux_service::protocol::format_id(
                 vmux_service::protocol::NodeKind::Stack,
                 stack.to_bits(),
-            ));
+            )
+        } else {
+            vmux_service::protocol::format_id(
+                vmux_service::protocol::NodeKind::Pane,
+                claim.pane.to_bits(),
+            )
+        };
+        AgentBrowserPaneResolution {
+            pane: Some(pane),
+            activation: Some(claim.activation),
         }
-        Some(vmux_service::protocol::format_id(
-            vmux_service::protocol::NodeKind::Pane,
-            pane.to_bits(),
-        ))
     }
 
     pub(crate) fn command_pane(
-        &mut self,
+        &self,
         pane: &Option<String>,
         origin: &CommandOrigin,
-    ) -> Option<String> {
+    ) -> AgentBrowserPaneResolution {
         let anchor = match origin {
             CommandOrigin::Agent { anchor, .. } => *anchor,
             _ => None,
@@ -163,17 +194,17 @@ mod tests {
     #[derive(Resource, Default)]
     pub(crate) struct BrowserPaneClaimOutput(Option<Entity>);
 
-    pub(crate) fn claim_browser_pane_test_system(
+    fn claim_browser_pane_test_system(
         input: Res<BrowserPaneClaimInput>,
-        mut resolve: AgentBrowserResolve,
+        resolve: AgentBrowserResolve,
         mut out: ResMut<BrowserPaneClaimOutput>,
     ) {
         out.0 = resolve
             .claim_browser_pane(input.anchor)
-            .map(|(pane, _)| pane);
+            .map(|claim| claim.pane);
     }
 
-    pub(crate) fn browser_claim_app() -> (App, ProcessId, Entity) {
+    fn browser_claim_app() -> (App, ProcessId, Entity) {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .init_resource::<BrowserPaneClaimOutput>()

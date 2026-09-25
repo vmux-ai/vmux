@@ -12,7 +12,7 @@ use vmux_command::{
 use vmux_core::{
     HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
     host::{UiStateWrite, page::NativelyHosted},
-    page::{HostHistoryDelta, HostHistoryNavigation, PageReady},
+    page::{HostHistory, HostHistoryDelta, HostHistoryStep, PageReady},
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -234,7 +234,8 @@ fn handle_navigation_requests(
     active_stack: ActiveStack,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     kind_q: Query<(Has<Terminal>, Has<vmux_editor::FileView>)>,
-    mut host_history: HostHistoryNavigation,
+    host_histories: Query<(), With<HostHistory>>,
+    mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
     for request in navigation_requests.read() {
@@ -251,16 +252,30 @@ fn handle_navigation_requests(
         let (is_terminal, _) = kind_q.get(webview).unwrap_or((false, false));
         match request {
             NavigationRequest::Back => {
-                if is_terminal || host_history.stepped(webview, HostHistoryDelta::Back) {
+                if is_terminal {
                     continue;
                 }
-                commands.trigger(RequestGoBack { webview });
+                if host_histories.contains(webview) {
+                    host_history_steps.write(HostHistoryStep {
+                        webview,
+                        delta: HostHistoryDelta::Back,
+                    });
+                } else {
+                    commands.trigger(RequestGoBack { webview });
+                }
             }
             NavigationRequest::Forward => {
-                if is_terminal || host_history.stepped(webview, HostHistoryDelta::Forward) {
+                if is_terminal {
                     continue;
                 }
-                commands.trigger(RequestGoForward { webview });
+                if host_histories.contains(webview) {
+                    host_history_steps.write(HostHistoryStep {
+                        webview,
+                        delta: HostHistoryDelta::Forward,
+                    });
+                } else {
+                    commands.trigger(RequestGoForward { webview });
+                }
             }
             NavigationRequest::Reload => {
                 if is_terminal {
@@ -533,7 +548,7 @@ fn on_side_sheet_resize(
     let resize = trigger.event().payload;
     let next = resize.clamped();
     if width.0 != next {
-        width.apply(next, &mut sheets);
+        apply_side_sheet_width(&mut width, next, &mut sheets);
     }
     if !resize.settled {
         return;
@@ -547,12 +562,25 @@ fn on_side_sheet_resize(
     }
 }
 
+fn apply_side_sheet_width(
+    width: &mut SideSheetWidth,
+    next: f32,
+    sheets: &mut Query<(&SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
+) {
+    width.0 = next;
+    for (position, mut node) in sheets {
+        if *position == SideSheetPosition::Left {
+            node.width = vmux_flex::prelude::Val::Px(next);
+        }
+    }
+}
+
 fn on_side_sheet_stack_activate(
     trigger: On<UiInput<SideSheetStackActivateRequest>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
-    mut activation: StackActivation,
+    mut last_activated: Query<&mut LastActivatedAt>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -573,7 +601,14 @@ fn on_side_sheet_stack_activate(
     let Some(target_stack) = target_stack else {
         return;
     };
-    activation.activate(target_pane, target_stack, &mut commands);
+    let activated_at = LastActivatedAt::now();
+    for entity in [target_pane, target_stack] {
+        if let Ok(mut value) = last_activated.get_mut(entity) {
+            *value = activated_at;
+        } else {
+            commands.entity(entity).insert(activated_at);
+        }
+    }
     hover_intent.target = None;
     hover_intent.last_activation = Some(std::time::Instant::now());
     if let Some(proxy) = proxy {
@@ -683,27 +718,6 @@ fn on_side_sheet_section(
         commands.entity(space).remove::<SideSheetSectionsExpanded>();
     } else {
         commands.entity(space).insert(state);
-    }
-}
-
-#[derive(SystemParam)]
-struct StackActivation<'w, 's> {
-    last_activated: Query<'w, 's, &'static mut LastActivatedAt>,
-}
-
-impl StackActivation<'_, '_> {
-    fn activate(&mut self, pane: Entity, stack: Entity, commands: &mut Commands) {
-        let at = LastActivatedAt::now();
-        self.stamp(pane, at, commands);
-        self.stamp(stack, at, commands);
-    }
-
-    fn stamp(&mut self, entity: Entity, at: LastActivatedAt, commands: &mut Commands) {
-        if let Ok(mut value) = self.last_activated.get_mut(entity) {
-            *value = at;
-            return;
-        }
-        commands.entity(entity).insert(at);
     }
 }
 

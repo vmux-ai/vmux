@@ -23,15 +23,15 @@ impl Plugin for ChatPromptPlugin {
             .add_systems(
                 Update,
                 (
-                    Attachments::fold.in_set(PromptProjection),
-                    Attachments::spend.in_set(PromptProjection),
-                    Attachments::emit
+                    fold_attachments.in_set(PromptProjection),
+                    spend_attachments.in_set(PromptProjection),
+                    emit_attachments
                         .after(PromptProjection)
                         .run_if(resource_changed::<Attachments>),
-                    Media::project
+                    project_media
                         .in_set(PromptProjection)
                         .run_if(resource_changed::<Browsed>),
-                    Media::emit
+                    emit_media
                         .after(PromptProjection)
                         .run_if(resource_changed::<Media>),
                 ),
@@ -58,68 +58,67 @@ pub struct Browsed {
 #[derive(Resource, Default)]
 pub struct Media(pub ChatMediaEntries);
 
-impl Media {
-    fn project(browsed: Res<Browsed>, mut media: ResMut<Media>) {
-        let mut entries = Vec::with_capacity(browsed.entries.len());
-        for entry in &browsed.entries {
-            entries.push(ChatMediaEntry {
-                path: entry.path.clone(),
-                name: entry.name.clone(),
-                parent: entry.parent.clone(),
-                mime_type: entry.mime_type.clone(),
-                is_dir: entry.is_dir,
-                preview_data_url: entry.preview_data_url.clone(),
-            });
-        }
-        media.0 = ChatMediaEntries {
-            request_id: browsed.request_id,
-            query: browsed.query.clone(),
-            entries,
-        };
+fn project_media(browsed: Res<Browsed>, mut media: ResMut<Media>) {
+    let mut entries = Vec::with_capacity(browsed.entries.len());
+    for entry in &browsed.entries {
+        entries.push(ChatMediaEntry {
+            path: entry.path.clone(),
+            name: entry.name.clone(),
+            parent: entry.parent.clone(),
+            mime_type: entry.mime_type.clone(),
+            is_dir: entry.is_dir,
+            preview_data_url: entry.preview_data_url.clone(),
+        });
     }
-
-    fn emit(media: Res<Media>, mut projection: ResMut<ChatUiStateProjection>) {
-        if media.0.request_id == 0 {
-            return;
-        }
-        projection.write(&media.0);
-    }
+    media.0 = ChatMediaEntries {
+        request_id: browsed.request_id,
+        query: browsed.query.clone(),
+        entries,
+    };
 }
 
-impl Attachments {
-    fn emit(attachments: Res<Attachments>, mut projection: ResMut<ChatUiStateProjection>) {
-        if attachments.0.is_empty() {
-            return;
-        }
-        let payload = ChatAttachments {
-            attachments: attachments.0.clone(),
-        };
-        projection.write(&payload);
-        let previews = ChatAttachmentPreviews {
-            attachments: attachments.0.clone(),
-        };
-        projection.write(&previews);
+fn emit_media(media: Res<Media>, mut projection: ResMut<ChatUiStateProjection>) {
+    if media.0.request_id == 0 {
+        return;
     }
+    projection.write(&media.0);
+}
 
-    fn spend(mut submitted: MessageReader<Submitted>, mut attachments: ResMut<Attachments>) {
-        if submitted.read().count() == 0 || attachments.0.is_empty() {
-            return;
-        }
-        attachments.0.clear();
+fn emit_attachments(attachments: Res<Attachments>, mut projection: ResMut<ChatUiStateProjection>) {
+    if attachments.0.is_empty() {
+        return;
     }
+    let payload = ChatAttachments {
+        attachments: attachments.0.clone(),
+    };
+    projection.write(&payload);
+    let previews = ChatAttachmentPreviews {
+        attachments: attachments.0.clone(),
+    };
+    projection.write(&previews);
+}
 
-    fn fold(mut asked: MessageReader<Attach>, mut attachments: ResMut<Attachments>) {
-        for Attach(added) in asked.read() {
-            for attachment in added {
-                if attachments
-                    .0
-                    .iter()
-                    .any(|held| held.path == attachment.path)
-                {
-                    continue;
-                }
-                attachments.0.push(attachment.clone());
+fn spend_attachments(
+    mut submitted: MessageReader<Submitted>,
+    mut attachments: ResMut<Attachments>,
+) {
+    if submitted.read().count() == 0 || attachments.0.is_empty() {
+        return;
+    }
+    attachments.0.clear();
+}
+
+fn fold_attachments(mut asked: MessageReader<Attach>, mut attachments: ResMut<Attachments>) {
+    for Attach(added) in asked.read() {
+        for attachment in added {
+            if attachments
+                .0
+                .iter()
+                .any(|held| held.path == attachment.path)
+            {
+                continue;
             }
+            attachments.0.push(attachment.clone());
         }
     }
 }
