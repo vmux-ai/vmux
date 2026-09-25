@@ -14,8 +14,8 @@ use vmux_layout::{
 };
 
 use crate::{
-    NavPending, PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavSnapshots,
-    send_page_open_response,
+    PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavigationUpdate,
+    apply_pending_navigation_updates, send_page_open_response,
 };
 
 pub(crate) struct PagePlugin;
@@ -24,6 +24,7 @@ impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
+            .add_message::<PendingNavigationUpdate>()
             .configure_sets(
                 Update,
                 (
@@ -50,7 +51,13 @@ impl Plugin for PagePlugin {
                     .chain()
                     .in_set(PageOpenSet::Fallback),
             )
-            .add_systems(Update, respond_page_open_tasks.in_set(PageOpenSet::Respond));
+            .add_systems(Update, respond_page_open_tasks.in_set(PageOpenSet::Respond))
+            .add_systems(
+                Update,
+                apply_pending_navigation_updates
+                    .after(PageOpenSet::Respond)
+                    .after(crate::navigation::handle_browser_navigate_requests),
+            );
     }
 }
 
@@ -313,7 +320,7 @@ fn respond_page_open_tasks(
     children: Query<&Children>,
     browsers: Query<(), With<Browser>>,
     child_of: Query<&ChildOf>,
-    mut pending_nav: ResMut<PendingNavSnapshots>,
+    mut pending_navigation: MessageWriter<PendingNavigationUpdate>,
     mut commands: Commands,
 ) {
     for (entity, task, error, await_snapshot) in &tasks {
@@ -336,15 +343,12 @@ fn respond_page_open_tasks(
                 .get(task.stack)
                 .ok()
                 .map(|child_of| child_of.get().to_bits().to_string());
-            pending_nav.0.insert(
+            pending_navigation.write(PendingNavigationUpdate::set(
                 webview,
-                NavPending {
-                    request_id,
-                    started: await_snapshot.started,
-                    saw_loading: false,
-                    pane,
-                },
-            );
+                request_id,
+                await_snapshot.started,
+                pane,
+            ));
             commands.entity(entity).despawn();
         } else if time
             .elapsed()
