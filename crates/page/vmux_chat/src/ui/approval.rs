@@ -1,6 +1,5 @@
 use super::state::Chat;
-use crate::event::ApprovalDecision;
-use crate::format::approval::ApprovalDetail;
+use crate::event::{ApprovalDecision, ApprovalDetail};
 use dioxus::prelude::*;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -15,7 +14,7 @@ pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
     rsx! {
         ApprovalPanel {
             tool: approval.name,
-            args: approval.args,
+            details: approval.details,
             selected: Some((chat.run.approval_sel)()),
             on_answer: move |decision| chat.answer_approval(approval.call_id.clone(), decision),
         }
@@ -25,11 +24,10 @@ pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
 #[component]
 pub fn ApprovalPanel(
     tool: String,
-    args: vmux_api::json::JsonValue,
+    details: Vec<ApprovalDetail>,
     #[props(default)] selected: Option<usize>,
     on_answer: EventHandler<ApprovalDecision>,
 ) -> Element {
-    let details = ApprovalDetail::rows(&args);
     rsx! {
         div { class: "border-t border-foreground/10 bg-foreground/[0.04] px-4 py-3",
             div { class: "mx-auto flex max-w-3xl flex-col gap-3",

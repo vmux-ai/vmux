@@ -362,11 +362,10 @@ impl ChatProjection {
                 call_id,
                 name,
                 args,
-            } => Some(PendingApproval {
-                call_id: call_id.clone(),
-                name: name.clone(),
-                args: args.clone().into(),
-            }),
+            } => {
+                let args = vmux_api::json::JsonValue::from(args.clone());
+                Some(PendingApproval::new(call_id.clone(), name.clone(), &args))
+            }
             _ => None,
         };
         let (agent_name, accent_color) = profile
@@ -794,10 +793,10 @@ mod tests {
 
         let approval = snapshot.approval.expect("pending approval");
         assert_eq!(approval.name, "vmux.run");
-        assert_eq!(
-            serde_json::Value::try_from(&approval.args).unwrap(),
-            serde_json::json!({"command": "echo hi", "focus": true})
-        );
+        assert_eq!(approval.details[0].label, "Command");
+        assert_eq!(approval.details[0].value, "echo hi");
+        assert_eq!(approval.details[1].label, "Focus");
+        assert_eq!(approval.details[1].value, "true");
     }
 
     #[test]

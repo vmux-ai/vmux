@@ -55,7 +55,90 @@ pub struct ChatSnapshot {
 pub struct PendingApproval {
     pub call_id: String,
     pub name: String,
-    pub args: JsonValue,
+    pub details: Vec<ApprovalDetail>,
+}
+
+impl PendingApproval {
+    pub fn new(call_id: String, name: String, args: &JsonValue) -> Self {
+        Self {
+            call_id,
+            name,
+            details: ApprovalDetail::rows(args),
+        }
+    }
+}
+
+#[vmux_api::contract(Eq)]
+pub struct ApprovalDetail {
+    pub label: String,
+    pub value: String,
+}
+
+impl ApprovalDetail {
+    fn rows(value: &JsonValue) -> Vec<Self> {
+        let mut details = Vec::new();
+        Self::flatten("", value, &mut details);
+        details
+    }
+
+    fn flatten(path: &str, value: &JsonValue, details: &mut Vec<Self>) {
+        if let JsonValue::Object(fields) = value {
+            for (name, value) in fields {
+                let child_path = if path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{path}.{name}")
+                };
+                Self::flatten(&child_path, value, details);
+            }
+            return;
+        }
+        let value = match value {
+            JsonValue::String(value) => value.clone(),
+            other => serde_json::to_string_pretty(&Self::readable(other)).unwrap_or_default(),
+        };
+        details.push(Self {
+            label: Self::label(path),
+            value,
+        });
+    }
+
+    fn readable(value: &JsonValue) -> serde_json::Value {
+        match value {
+            JsonValue::Null => serde_json::Value::Null,
+            JsonValue::Bool(value) => serde_json::Value::Bool(*value),
+            JsonValue::Number(value) => serde_json::from_str(value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.clone())),
+            JsonValue::String(value) => serde_json::Value::String(value.clone()),
+            JsonValue::Array(values) => {
+                serde_json::Value::Array(values.iter().map(Self::readable).collect())
+            }
+            JsonValue::Object(fields) => {
+                let mut object = serde_json::Map::new();
+                for (name, value) in fields {
+                    object.insert(name.clone(), Self::readable(value));
+                }
+                serde_json::Value::Object(object)
+            }
+        }
+    }
+
+    fn label(path: &str) -> String {
+        let path = path.strip_prefix("arguments.").unwrap_or(path);
+        let label = if path.is_empty() { "details" } else { path };
+        label
+            .split('.')
+            .map(|part| {
+                let words = part.replace('_', " ");
+                let mut chars = words.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
 }
 
 #[vmux_api::contract(Default, Eq)]
@@ -337,6 +420,36 @@ mod tests {
         let back = rkyv::from_bytes::<ChatChoiceSelected, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(back.index, 2);
+    }
+
+    #[test]
+    fn pending_approval_projects_nested_details_and_recovers_invalid_numbers() {
+        let args = JsonValue::Object(vec![
+            (
+                "arguments".into(),
+                JsonValue::Object(vec![(
+                    "path".into(),
+                    JsonValue::String("/tmp/SKILL.md".into()),
+                )]),
+            ),
+            ("attempt".into(), JsonValue::Number("invalid".into())),
+        ]);
+
+        let approval = PendingApproval::new("call-1".into(), "read_file".into(), &args);
+
+        assert_eq!(
+            approval.details,
+            vec![
+                ApprovalDetail {
+                    label: "Path".into(),
+                    value: "/tmp/SKILL.md".into(),
+                },
+                ApprovalDetail {
+                    label: "Attempt".into(),
+                    value: "\"invalid\"".into(),
+                },
+            ]
+        );
     }
 
     #[test]
