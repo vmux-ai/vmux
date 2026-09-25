@@ -14,28 +14,16 @@ use crate::manifest::{
     ToolStore, ToolsManifest, expand_user_path, load_manifest_from, write_manifest_to,
 };
 use crate::{
-    ToolOperation, ToolOperationCompletion, ToolOperationPlugin, ToolOperationRequest,
-    ToolOperationRouteSet, ToolStoreOperation, ToolStoreTarget,
+    ToolOperationCompletion, ToolOperationFailure, ToolOperationRequest, ToolOperationRouteFlush,
+    ToolOperationRouteSet, ToolOperationTask, ToolStoreOperation, ToolStoreTarget,
+    finish_tool_operation,
 };
 
 pub(crate) struct DotfileToolPlugin;
 
 impl Plugin for DotfileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            ToolOperationPlugin::<DiscoverDotfilePackages>::default(),
-            ToolOperationPlugin::<PlanDotfilePackage>::default(),
-            ToolOperationPlugin::<ImportDotfiles>::default(),
-            ToolOperationPlugin::<ImportAvailableDotfiles>::default(),
-            ToolOperationPlugin::<LinkDotfilePackage>::default(),
-        ))
-        .add_plugins((
-            ToolOperationPlugin::<DisableDotfilePackage>::default(),
-            ToolOperationPlugin::<UnlinkDotfilePackage>::default(),
-            ToolOperationPlugin::<ApplyEnabledDotfiles>::default(),
-            ToolOperationPlugin::<AdoptDotfile>::default(),
-        ))
-        .add_systems(
+        app.add_systems(
             Update,
             (
                 route_import,
@@ -47,6 +35,36 @@ impl Plugin for DotfileToolPlugin {
                 route_unlink,
             )
                 .in_set(ToolOperationRouteSet),
+        )
+        .add_systems(
+            Update,
+            (
+                discover_dotfile_packages_system,
+                plan_dotfile_package_system,
+                import_dotfiles_system,
+                import_available_dotfiles_system,
+                link_dotfile_package_system,
+                disable_dotfile_package_system,
+                unlink_dotfile_package_system,
+                apply_enabled_dotfiles_system,
+                adopt_dotfile_system,
+            )
+                .after(ToolOperationRouteFlush),
+        )
+        .add_systems(
+            Update,
+            (
+                finish_tool_operation::<DiscoveredDotfilePackages>,
+                finish_tool_operation::<DotfilePlan>,
+                finish_tool_operation::<ImportedDotfiles>,
+                finish_tool_operation::<ImportedAvailableDotfiles>,
+                finish_tool_operation::<LinkedDotfilePackage>,
+                finish_tool_operation::<DisabledDotfilePackage>,
+                finish_tool_operation::<UnlinkedDotfilePackage>,
+                finish_tool_operation::<AppliedEnabledDotfiles>,
+                finish_tool_operation::<AdoptedDotfile>,
+            )
+                .after(ToolOperationRouteFlush),
         )
         .add_systems(
             Update,
@@ -239,13 +257,33 @@ pub struct DiscoveredDotfilePackages {
     pub packages: Vec<String>,
 }
 
-impl ToolOperation for DiscoverDotfilePackages {
-    type Output = DiscoveredDotfilePackages;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        Ok(DiscoveredDotfilePackages {
-            packages: store.dotfile_packages()?,
-        })
+fn discover_dotfile_packages_system(
+    operations: Query<
+        (Entity, &ToolStoreTarget),
+        (
+            With<DiscoverDotfilePackages>,
+            Without<ToolOperationTask<DiscoveredDotfilePackages>>,
+            Without<DiscoveredDotfilePackages>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                Ok(DiscoveredDotfilePackages {
+                    packages: store.dotfile_packages()?,
+                })
+            }));
     }
 }
 
@@ -262,11 +300,31 @@ impl PlanDotfilePackage {
     }
 }
 
-impl ToolOperation for PlanDotfilePackage {
-    type Output = DotfilePlan;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        store.plan_dotfile_package(&self.package)
+fn plan_dotfile_package_system(
+    operations: Query<
+        (Entity, &PlanDotfilePackage, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<DotfilePlan>>,
+            Without<DotfilePlan>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let package = operation.package.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                store.plan_dotfile_package(&package)
+            }));
     }
 }
 
@@ -286,12 +344,32 @@ pub struct ImportedDotfiles {
     pub packages: usize,
 }
 
-impl ToolOperation for ImportDotfiles {
-    type Output = ImportedDotfiles;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let packages = store.import_dotfiles(&self.path)?;
-        Ok(ImportedDotfiles { packages })
+fn import_dotfiles_system(
+    operations: Query<
+        (Entity, &ImportDotfiles, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<ImportedDotfiles>>,
+            Without<ImportedDotfiles>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let path = operation.path.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let packages = store.import_dotfiles(&path)?;
+                Ok(ImportedDotfiles { packages })
+            }));
     }
 }
 
@@ -303,19 +381,39 @@ pub struct ImportedAvailableDotfiles {
     pub packages: usize,
 }
 
-impl ToolOperation for ImportAvailableDotfiles {
-    type Output = ImportedAvailableDotfiles;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let packages = store.dotfile_packages()?;
-        let mut manifest = store.load()?;
-        let mut imported = 0;
-        for package in packages {
-            imported += usize::from(!manifest.dotfiles.packages.contains(&package));
-            manifest.set_dotfile_package(&package, true);
-        }
-        store.save(&manifest)?;
-        Ok(ImportedAvailableDotfiles { packages: imported })
+fn import_available_dotfiles_system(
+    operations: Query<
+        (Entity, &ToolStoreTarget),
+        (
+            With<ImportAvailableDotfiles>,
+            Without<ToolOperationTask<ImportedAvailableDotfiles>>,
+            Without<ImportedAvailableDotfiles>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let packages = store.dotfile_packages()?;
+                let mut manifest = store.load()?;
+                let mut imported = 0;
+                for package in packages {
+                    imported += usize::from(!manifest.dotfiles.packages.contains(&package));
+                    manifest.set_dotfile_package(&package, true);
+                }
+                store.save(&manifest)?;
+                Ok(ImportedAvailableDotfiles { packages: imported })
+            }));
     }
 }
 
@@ -337,15 +435,35 @@ pub struct LinkedDotfilePackage {
     pub files: usize,
 }
 
-impl ToolOperation for LinkDotfilePackage {
-    type Output = LinkedDotfilePackage;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let mut manifest = store.load()?;
-        manifest.set_dotfile_package(&self.package, true);
-        store.save(&manifest)?;
-        let files = store.apply_dotfile_package(&self.package)?;
-        Ok(LinkedDotfilePackage { files })
+fn link_dotfile_package_system(
+    operations: Query<
+        (Entity, &LinkDotfilePackage, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<LinkedDotfilePackage>>,
+            Without<LinkedDotfilePackage>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let package = operation.package.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let mut manifest = store.load()?;
+                manifest.set_dotfile_package(&package, true);
+                store.save(&manifest)?;
+                let files = store.apply_dotfile_package(&package)?;
+                Ok(LinkedDotfilePackage { files })
+            }));
     }
 }
 
@@ -367,12 +485,32 @@ pub struct DisabledDotfilePackage {
     pub files: usize,
 }
 
-impl ToolOperation for DisableDotfilePackage {
-    type Output = DisabledDotfilePackage;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let files = store.disable_and_unlink_dotfile_package(&self.package)?;
-        Ok(DisabledDotfilePackage { files })
+fn disable_dotfile_package_system(
+    operations: Query<
+        (Entity, &DisableDotfilePackage, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<DisabledDotfilePackage>>,
+            Without<DisabledDotfilePackage>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let package = operation.package.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let files = store.disable_and_unlink_dotfile_package(&package)?;
+                Ok(DisabledDotfilePackage { files })
+            }));
     }
 }
 
@@ -394,12 +532,32 @@ pub struct UnlinkedDotfilePackage {
     pub files: usize,
 }
 
-impl ToolOperation for UnlinkDotfilePackage {
-    type Output = UnlinkedDotfilePackage;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let files = store.unlink_dotfile_package(&self.package)?;
-        Ok(UnlinkedDotfilePackage { files })
+fn unlink_dotfile_package_system(
+    operations: Query<
+        (Entity, &UnlinkDotfilePackage, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<UnlinkedDotfilePackage>>,
+            Without<UnlinkedDotfilePackage>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let package = operation.package.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let files = store.unlink_dotfile_package(&package)?;
+                Ok(UnlinkedDotfilePackage { files })
+            }));
     }
 }
 
@@ -411,13 +569,33 @@ pub struct AppliedEnabledDotfiles {
     pub files: usize,
 }
 
-impl ToolOperation for ApplyEnabledDotfiles {
-    type Output = AppliedEnabledDotfiles;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let manifest = store.load()?;
-        let files = store.apply_enabled_dotfiles(&manifest)?;
-        Ok(AppliedEnabledDotfiles { files })
+fn apply_enabled_dotfiles_system(
+    operations: Query<
+        (Entity, &ToolStoreTarget),
+        (
+            With<ApplyEnabledDotfiles>,
+            Without<ToolOperationTask<AppliedEnabledDotfiles>>,
+            Without<AppliedEnabledDotfiles>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let manifest = store.load()?;
+                let files = store.apply_enabled_dotfiles(&manifest)?;
+                Ok(AppliedEnabledDotfiles { files })
+            }));
     }
 }
 
@@ -441,12 +619,33 @@ pub struct AdoptedDotfile {
     pub path: PathBuf,
 }
 
-impl ToolOperation for AdoptDotfile {
-    type Output = AdoptedDotfile;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let path = store.adopt_dotfile(&self.path, &self.package)?;
-        Ok(AdoptedDotfile { path })
+fn adopt_dotfile_system(
+    operations: Query<
+        (Entity, &AdoptDotfile, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<AdoptedDotfile>>,
+            Without<AdoptedDotfile>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let path = operation.path.clone();
+        let package = operation.package.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let path = store.adopt_dotfile(&path, &package)?;
+                Ok(AdoptedDotfile { path })
+            }));
     }
 }
 

@@ -8,8 +8,6 @@ mod manifest;
 mod mcp;
 mod npm;
 
-use std::marker::PhantomData;
-
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
@@ -126,12 +124,6 @@ impl ToolOperationCompletion {
     }
 }
 
-pub trait ToolOperation: Component + Clone {
-    type Output: Component;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String>;
-}
-
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToolStoreTarget(Entity);
 
@@ -149,79 +141,34 @@ impl ToolStoreTarget {
 pub struct ToolOperationFailure(String);
 
 impl ToolOperationFailure {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+
     pub fn message(&self) -> &str {
         &self.0
     }
 }
 
 #[derive(Component)]
-struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
+pub(crate) struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
 
-pub struct ToolOperationPlugin<O>(PhantomData<fn() -> O>);
-
-impl<O> Default for ToolOperationPlugin<O> {
-    fn default() -> Self {
-        Self(PhantomData)
+impl<T: Component> ToolOperationTask<T> {
+    pub(crate) fn spawn(operation: impl FnOnce() -> Result<T, String> + Send + 'static) -> Self {
+        Self(IoTaskPool::get().spawn(async move { operation() }))
     }
 }
 
-impl<O> Plugin for ToolOperationPlugin<O>
-where
-    O: ToolOperation,
-{
-    fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ToolRuntimePlugin>() {
-            app.add_plugins(ToolRuntimePlugin);
-        }
-        app.add_systems(
-            Update,
-            (start_operation::<O>, finish_operation::<O>).chain(),
-        );
-    }
-}
-
-fn start_operation<O>(
-    operations: Query<
-        (Entity, &O, &ToolStoreTarget),
-        (
-            Without<ToolOperationTask<O::Output>>,
-            Without<O::Output>,
-            Without<ToolOperationFailure>,
-        ),
-    >,
-    stores: Query<&ToolStore>,
+pub(crate) fn finish_tool_operation<T: Component>(
+    mut operations: Query<(Entity, &mut ToolOperationTask<T>)>,
     mut commands: Commands,
-) where
-    O: ToolOperation,
-{
-    for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()) else {
-            commands.entity(entity).insert(ToolOperationFailure(
-                "tool store entity is unavailable".to_string(),
-            ));
-            continue;
-        };
-        let operation = operation.clone();
-        let store = store.clone();
-        let task = IoTaskPool::get().spawn(async move { operation.execute(&store) });
-        commands
-            .entity(entity)
-            .insert(ToolOperationTask::<O::Output>(task));
-    }
-}
-
-fn finish_operation<O>(
-    mut operations: Query<(Entity, &mut ToolOperationTask<O::Output>)>,
-    mut commands: Commands,
-) where
-    O: ToolOperation,
-{
+) {
     for (entity, mut operation) in &mut operations {
         let Some(result) = future::block_on(future::poll_once(&mut operation.0)) else {
             continue;
         };
         let mut entity = commands.entity(entity);
-        entity.remove::<ToolOperationTask<O::Output>>();
+        entity.remove::<ToolOperationTask<T>>();
         match result {
             Ok(output) => {
                 entity.insert(output);

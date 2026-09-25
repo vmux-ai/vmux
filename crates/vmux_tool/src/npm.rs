@@ -9,16 +9,24 @@ use crate::manifest::{
     write_manifest_to,
 };
 use crate::{
-    ToolOperation, ToolOperationCompletion, ToolOperationPlugin, ToolOperationRequest,
-    ToolOperationRouteSet, ToolStoreOperation, ToolStoreTarget,
+    ToolOperationCompletion, ToolOperationFailure, ToolOperationRequest, ToolOperationRouteFlush,
+    ToolOperationRouteSet, ToolOperationTask, ToolStoreOperation, ToolStoreTarget,
+    finish_tool_operation,
 };
 
 pub(crate) struct NpmToolPlugin;
 
 impl Plugin for NpmToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolOperationPlugin::<ImportNpmManifest>::default())
-            .add_systems(Update, route.in_set(ToolOperationRouteSet))
+        app.add_systems(Update, route.in_set(ToolOperationRouteSet))
+            .add_systems(
+                Update,
+                (
+                    import_npm_manifest_system,
+                    finish_tool_operation::<ImportedNpmManifest>,
+                )
+                    .after(ToolOperationRouteFlush),
+            )
             .add_systems(Update, complete);
     }
 }
@@ -75,12 +83,32 @@ pub struct ImportedNpmManifest {
     pub packages: usize,
 }
 
-impl ToolOperation for ImportNpmManifest {
-    type Output = ImportedNpmManifest;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let packages = store.import_npm_manifest(&self.path)?;
-        Ok(ImportedNpmManifest { packages })
+fn import_npm_manifest_system(
+    operations: Query<
+        (Entity, &ImportNpmManifest, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<ImportedNpmManifest>>,
+            Without<ImportedNpmManifest>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let path = operation.path.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let packages = store.import_npm_manifest(&path)?;
+                Ok(ImportedNpmManifest { packages })
+            }));
     }
 }
 

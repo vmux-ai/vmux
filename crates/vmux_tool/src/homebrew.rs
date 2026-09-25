@@ -10,16 +10,24 @@ use crate::manifest::{
     write_manifest_to,
 };
 use crate::{
-    ToolOperation, ToolOperationCompletion, ToolOperationPlugin, ToolOperationRequest,
-    ToolOperationRouteSet, ToolStoreOperation, ToolStoreTarget,
+    ToolOperationCompletion, ToolOperationFailure, ToolOperationRequest, ToolOperationRouteFlush,
+    ToolOperationRouteSet, ToolOperationTask, ToolStoreOperation, ToolStoreTarget,
+    finish_tool_operation,
 };
 
 pub(crate) struct HomebrewToolPlugin;
 
 impl Plugin for HomebrewToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolOperationPlugin::<ImportBrewfile>::default())
-            .add_systems(Update, route.in_set(ToolOperationRouteSet))
+        app.add_systems(Update, route.in_set(ToolOperationRouteSet))
+            .add_systems(
+                Update,
+                (
+                    import_brewfile_system,
+                    finish_tool_operation::<ImportedBrewfile>,
+                )
+                    .after(ToolOperationRouteFlush),
+            )
             .add_systems(Update, complete);
     }
 }
@@ -80,12 +88,32 @@ pub struct ImportedBrewfile {
     pub casks: usize,
 }
 
-impl ToolOperation for ImportBrewfile {
-    type Output = ImportedBrewfile;
-
-    fn execute(&self, store: &ToolStore) -> Result<Self::Output, String> {
-        let (formulae, casks) = store.import_brewfile(&self.path)?;
-        Ok(ImportedBrewfile { formulae, casks })
+fn import_brewfile_system(
+    operations: Query<
+        (Entity, &ImportBrewfile, &ToolStoreTarget),
+        (
+            Without<ToolOperationTask<ImportedBrewfile>>,
+            Without<ImportedBrewfile>,
+            Without<ToolOperationFailure>,
+        ),
+    >,
+    stores: Query<&ToolStore>,
+    mut commands: Commands,
+) {
+    for (entity, operation, target) in &operations {
+        let Ok(store) = stores.get(target.entity()).cloned() else {
+            commands.entity(entity).insert(ToolOperationFailure::new(
+                "tool store entity is unavailable",
+            ));
+            continue;
+        };
+        let path = operation.path.clone();
+        commands
+            .entity(entity)
+            .insert(ToolOperationTask::spawn(move || {
+                let (formulae, casks) = store.import_brewfile(&path)?;
+                Ok(ImportedBrewfile { formulae, casks })
+            }));
     }
 }
 
