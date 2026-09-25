@@ -31,7 +31,7 @@ use text_geometry::RowRuler;
 use toolbar::{EditorTabStrip, FindBar, VimStatus};
 
 use crate::breadcrumb::EditorBreadcrumbs;
-use crate::explorer::{EditorTabCommand, SidebarView};
+use crate::explorer::SidebarView;
 use crate::page_key::{FilePage as FilePageState, use_file_keys};
 use crate::page_model::{
     CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, clamp_selection,
@@ -939,7 +939,7 @@ pub fn Page() -> Element {
                             }
                             "Escape" => {
                                 e.prevent_default();
-                                EditorTabCommand { path: git_path() }.close();
+                                let _ = send(&ExplorerCloseEditor { path: git_path() });
                             }
                             "h" | "ArrowLeft" => {
                                 let pp = parent_path();

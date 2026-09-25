@@ -77,7 +77,7 @@ pub(super) fn BookmarksSection(
             class: "glass group relative z-30 mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
-                BookmarkContextTarget::Root.request();
+                let _ = send(&BookmarkMenuRootRequest);
             },
             div {
                 "data-bookmark-drop": "root",
@@ -453,7 +453,12 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
                 div { class: "pointer-events-none absolute inset-0 z-10 rounded-md ring-2 ring-primary/70" }
             }
             BookmarkContextMenu {
-                target: BookmarkContextTarget::Pin { uuid: row.uuid.clone() },
+                on_open: {
+                    let uuid = row.uuid.clone();
+                    move |_| {
+                        let _ = send(&BookmarkMenuPinRequest { uuid: uuid.clone() });
+                    }
+                },
                 trigger: rsx! {
                     div {
                         "data-bookmark-drag-source": "true",
@@ -804,9 +809,15 @@ fn BookmarkFolder(
                 }
             } else {
                 BookmarkContextMenu {
-                    target: BookmarkContextTarget::Folder {
-                        uuid: folder.uuid.clone(),
-                        active_page: active_metadata,
+                    on_open: {
+                        let uuid = folder.uuid.clone();
+                        let active_page = active_metadata.clone();
+                        move |_| {
+                            let _ = send(&BookmarkMenuFolderRequest {
+                                uuid: uuid.clone(),
+                                active_page: active_page.clone(),
+                            });
+                        }
                     },
                     trigger: rsx! {
                         div {
@@ -1077,7 +1088,12 @@ fn BookmarkEntry(
             }
         } else {
             BookmarkContextMenu {
-                target: BookmarkContextTarget::Entry { uuid: row.uuid.clone() },
+                on_open: {
+                    let uuid = row.uuid.clone();
+                    move |_| {
+                        let _ = send(&BookmarkMenuEntryRequest { uuid: uuid.clone() });
+                    }
+                },
                 trigger: rsx! {
                     div {
                         "data-bookmark-drag-source": "true",
@@ -1213,7 +1229,7 @@ pub(super) fn SideSheetContextMenuContent(children: Element) -> Element {
 }
 
 #[component]
-fn BookmarkContextMenu(target: BookmarkContextTarget, trigger: Element, menu: Element) -> Element {
+fn BookmarkContextMenu(on_open: EventHandler<()>, trigger: Element, menu: Element) -> Element {
     #[cfg(target_os = "macos")]
     {
         let _ = menu;
@@ -1225,7 +1241,7 @@ fn BookmarkContextMenu(target: BookmarkContextTarget, trigger: Element, menu: El
                 oncontextmenu: move |event: Event<MouseData>| {
                     event.prevent_default();
                     event.stop_propagation();
-                    target.request();
+                    on_open.call(());
                 },
                 {trigger}
             }
@@ -1233,48 +1249,11 @@ fn BookmarkContextMenu(target: BookmarkContextTarget, trigger: Element, menu: El
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = target;
+        let _ = on_open;
         rsx! {
             LayoutContextMenu {
                 ContextMenuTrigger { attributes: vec![], {trigger} }
                 {menu}
-            }
-        }
-    }
-}
-
-#[derive(Clone, PartialEq)]
-enum BookmarkContextTarget {
-    Root,
-    Pin {
-        uuid: String,
-    },
-    Entry {
-        uuid: String,
-    },
-    Folder {
-        uuid: String,
-        active_page: Option<PageMetadata>,
-    },
-}
-
-impl BookmarkContextTarget {
-    fn request(&self) {
-        match self {
-            Self::Root => {
-                let _ = send(&BookmarkMenuRootRequest);
-            }
-            Self::Pin { uuid } => {
-                let _ = send(&BookmarkMenuPinRequest { uuid: uuid.clone() });
-            }
-            Self::Entry { uuid } => {
-                let _ = send(&BookmarkMenuEntryRequest { uuid: uuid.clone() });
-            }
-            Self::Folder { uuid, active_page } => {
-                let _ = send(&BookmarkMenuFolderRequest {
-                    uuid: uuid.clone(),
-                    active_page: active_page.clone(),
-                });
             }
         }
     }

@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_core::event::FileFindRequest;
+use vmux_core::event::{ExplorerCloseEditor, FileFindRequest, FileOpenEvent};
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -7,7 +7,6 @@ use vmux_ui::ime::use_ime_guard;
 use vmux_ui::scroll::ScrollIntoView;
 
 use super::{FIND_INPUT_ID, focus_file_input};
-use crate::explorer::EditorTabCommand;
 use crate::page_model::EditorTabItem;
 
 #[component]
@@ -184,10 +183,8 @@ pub(super) fn EditorTabStrip(tabs: Vec<EditorTabItem>) -> Element {
 
 #[component]
 fn EditorTab(tab: EditorTabItem) -> Element {
-    let command = EditorTabCommand {
-        path: tab.path.clone(),
-    };
-    let close_command = command.clone();
+    let open_path = tab.path.clone();
+    let close_path = tab.path.clone();
     let class = match tab.active {
         true => {
             "group flex h-7 min-w-0 max-w-[14rem] shrink-0 cursor-default items-center gap-1.5 rounded-md bg-foreground/[0.10] px-2.5 text-ui text-foreground"
@@ -206,7 +203,11 @@ fn EditorTab(tab: EditorTabItem) -> Element {
             id: tab.element_id(),
             class,
             title: "{tab.path}",
-            onclick: move |_| command.open(),
+            onclick: move |_| {
+                let _ = send(&FileOpenEvent {
+                    path: open_path.clone(),
+                });
+            },
             TypeIcon { path: tab.path.clone(), is_dir: tab.is_dir, class: "h-4 w-4 shrink-0 opacity-80" }
             span { class: "truncate", "{tab.name}" }
             if !tab.context.is_empty() {
@@ -219,7 +220,9 @@ fn EditorTab(tab: EditorTabItem) -> Element {
                 title: close_title,
                 onclick: move |event: Event<MouseData>| {
                     event.stop_propagation();
-                    close_command.close();
+                    let _ = send(&ExplorerCloseEditor {
+                        path: close_path.clone(),
+                    });
                 },
                 if tab.dirty {
                     span { class: "h-1.5 w-1.5 rounded-full bg-primary group-hover:hidden" }
