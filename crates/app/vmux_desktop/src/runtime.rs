@@ -39,7 +39,11 @@ impl Plugin for RuntimePlugin {
             .add_message::<QuitRequest>()
             .add_systems(Update, show_all_windows.after(hide_all_windows))
             .add_systems(Update, request_quit.after(show_all_windows))
-            .add_systems(Update, resolve_quit_confirmation.after(request_quit))
+            .add_systems(Update, start_quit_confirmation.after(request_quit))
+            .add_systems(
+                Update,
+                resolve_quit_confirmation.after(start_quit_confirmation),
+            )
             .add_systems(Update, sync_winit_power_mode.after(request_quit));
         #[cfg(not(feature = "tray"))]
         app.add_systems(Update, sync_winit_power_mode.after(hide_all_windows));
@@ -63,17 +67,24 @@ pub(crate) struct ShowAllWindowsRequest;
 pub(crate) struct QuitRequest;
 
 #[cfg(feature = "tray")]
-#[derive(Resource)]
+#[derive(Component)]
 struct QuitConfirmation {
-    task: Task<bool>,
+    count: usize,
+    wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
 }
 
 #[cfg(feature = "tray")]
-impl QuitConfirmation {
-    fn start(
-        count: usize,
-        wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
-    ) -> Self {
+#[derive(Component)]
+struct QuitConfirmationTask(Task<bool>);
+
+#[cfg(feature = "tray")]
+fn start_quit_confirmation(
+    confirmations: Query<(Entity, &QuitConfirmation), Added<QuitConfirmation>>,
+    mut commands: Commands,
+) {
+    for (entity, confirmation) in &confirmations {
+        let count = confirmation.count;
+        let wake = confirmation.wake.clone();
         let task = IoTaskPool::get().spawn(async move {
             let description = if count == 1 {
                 "A terminal is still running. Quit anyway?".to_string()
@@ -92,11 +103,7 @@ impl QuitConfirmation {
             }
             matches!(result, rfd::MessageDialogResult::Ok)
         });
-        Self { task }
-    }
-
-    fn poll(&mut self) -> Option<bool> {
-        future::block_on(future::poll_once(&mut self.task))
+        commands.entity(entity).insert(QuitConfirmationTask(task));
     }
 }
 
@@ -229,20 +236,20 @@ fn show_all_windows(
 fn request_quit(
     mut requests: MessageReader<QuitRequest>,
     terminals: Query<(), (With<Terminal>, Without<PtyExited>)>,
-    confirmation: Option<Res<QuitConfirmation>>,
+    confirmation: Query<(), With<QuitConfirmation>>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut exits: MessageWriter<AppExit>,
     mut commands: Commands,
 ) {
-    if requests.read().count() == 0 || confirmation.is_some() {
+    if requests.read().count() == 0 || !confirmation.is_empty() {
         return;
     }
     let live = terminals.iter().count();
     if live > 0 {
-        commands.insert_resource(QuitConfirmation::start(
-            live,
-            wake.map(|proxy| (**proxy).clone()),
-        ));
+        commands.spawn(QuitConfirmation {
+            count: live,
+            wake: wake.map(|proxy| (**proxy).clone()),
+        });
         return;
     }
     exits.write(AppExit::Success);
@@ -250,20 +257,18 @@ fn request_quit(
 
 #[cfg(feature = "tray")]
 fn resolve_quit_confirmation(
-    confirmation: Option<ResMut<QuitConfirmation>>,
+    mut confirmations: Query<(Entity, &mut QuitConfirmationTask)>,
     mut exits: MessageWriter<AppExit>,
     mut commands: Commands,
 ) {
-    let Some(mut confirmation) = confirmation else {
-        return;
-    };
-    let confirmed = confirmation.poll();
-    let Some(confirmed) = confirmed else {
-        return;
-    };
-    commands.remove_resource::<QuitConfirmation>();
-    if confirmed {
-        exits.write(AppExit::Success);
+    for (entity, mut confirmation) in &mut confirmations {
+        let Some(confirmed) = future::block_on(future::poll_once(&mut confirmation.0)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        if confirmed {
+            exits.write(AppExit::Success);
+        }
     }
 }
 
