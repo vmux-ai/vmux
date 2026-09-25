@@ -80,6 +80,7 @@ pub struct CommandPaletteDraftRequest {
     pub open_id: super::OpenId,
     pub query: String,
     pub start: bool,
+    pub target_url: String,
 }
 
 #[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]

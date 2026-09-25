@@ -1,10 +1,9 @@
 use vmux_api::agent::supports_inline_agent_transition;
-use vmux_api::chat::SlashCommandEntry;
 use vmux_api::command_bar::{
     AgentModels, AgentModes, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
-    CommandBarPromptContext, CommandBarQuery, ExCommandName, ExRequest, HistoryEntry,
-    InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest, SwitchSpaceRequest,
-    SwitchTabRequest, TerminalRequest, is_data_uri,
+    CommandBarPromptContext, CommandBarQuery, CommandPaletteProjection, ExCommandName, ExRequest,
+    HistoryEntry, InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest,
+    SwitchSpaceRequest, SwitchTabRequest, TerminalRequest, is_data_uri,
 };
 use vmux_api::open_target::OpenTarget;
 use vmux_api::prompt_media::ChatAttachment;
@@ -23,6 +22,8 @@ use crate::launcher::results::{
 };
 use crate::list_nav::MenuDirection;
 
+pub use vmux_api::command_bar::PaletteMode;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaletteSurface {
     Modal,
@@ -32,116 +33,6 @@ pub enum PaletteSurface {
 impl PaletteSurface {
     pub const fn is_start(self) -> bool {
         matches!(self, Self::Start)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PaletteMode {
-    #[default]
-    Search,
-    Command,
-    Ex,
-    Path,
-    Url,
-    Slash,
-    Picking(CommandBarPicker),
-}
-
-impl PaletteMode {
-    pub fn infer(query: &str, asserted: Option<CommandBarPicker>) -> Self {
-        Self::read(query, asserted, &[])
-    }
-
-    pub fn read(
-        query: &str,
-        asserted: Option<CommandBarPicker>,
-        slash_commands: &[SlashCommandEntry],
-    ) -> Self {
-        if let Some(picker) = asserted {
-            return Self::Picking(picker);
-        }
-        if ExLine::claims(query) {
-            return Self::Ex;
-        }
-        let trimmed = query.trim();
-        if trimmed.starts_with('>') {
-            return Self::Command;
-        }
-        if Self::names_a_command(query, slash_commands) {
-            return Self::Slash;
-        }
-        if trimmed.starts_with('/') || trimmed.starts_with('~') {
-            return Self::Path;
-        }
-        if trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')) {
-            return Self::Url;
-        }
-        Self::Search
-    }
-
-    fn names_a_command(query: &str, slash_commands: &[SlashCommandEntry]) -> bool {
-        if query.trim() == "/" {
-            return !slash_commands.is_empty();
-        }
-        let held = CommandBarQuery(query);
-        let Some((name, _)) = held.slash_token() else {
-            return false;
-        };
-        let lowered = name.to_lowercase();
-        slash_commands
-            .iter()
-            .any(|command| command.name().starts_with(&lowered))
-    }
-
-    pub fn opened(state: &CommandBarOpenEvent) -> Self {
-        Self::infer(&state.url, state.picker)
-    }
-
-    pub const fn is_ex(self) -> bool {
-        matches!(self, Self::Ex)
-    }
-
-    pub const fn is_space(self) -> bool {
-        matches!(self, Self::Picking(CommandBarPicker::Space))
-    }
-
-    pub const fn picking(self) -> Option<CommandBarPicker> {
-        match self {
-            Self::Picking(picker) => Some(picker),
-            _ => None,
-        }
-    }
-
-    pub const fn prefix(self) -> &'static str {
-        match self {
-            Self::Ex => ":",
-            Self::Command => ">",
-            Self::Path | Self::Slash => "/",
-            Self::Search | Self::Url | Self::Picking(_) => "",
-        }
-    }
-
-    pub fn opens_at_end(self, query: &str) -> bool {
-        let prefix = self.prefix();
-        !prefix.is_empty() && query == prefix
-    }
-
-    pub fn label(self) -> String {
-        match self {
-            Self::Ex => translate("palette-mode-ex"),
-            Self::Command => translate("palette-mode-command"),
-            Self::Path => translate("palette-mode-path"),
-            Self::Slash => translate("palette-mode-slash"),
-            Self::Picking(picker) => {
-                let id = picker.label();
-                if id.is_empty() {
-                    String::new()
-                } else {
-                    translate(id)
-                }
-            }
-            Self::Search | Self::Url => String::new(),
-        }
     }
 }
 
@@ -212,6 +103,28 @@ pub struct PaletteRows {
 }
 
 impl PaletteRows {
+    pub fn from_projection(projection: &CommandPaletteProjection) -> Self {
+        Self {
+            items: projection.rows.clone(),
+            prompt_targets: projection.prompt_targets.clone(),
+            default_target: projection.default_target.clone(),
+            ghost: projection.ghost.clone(),
+            start_prompt_mode: projection.start_prompt_mode,
+            mode: projection.mode,
+        }
+    }
+
+    pub fn projection(&self) -> CommandPaletteProjection {
+        CommandPaletteProjection {
+            rows: self.items.clone(),
+            prompt_targets: self.prompt_targets.clone(),
+            default_target: self.default_target.clone(),
+            ghost: self.ghost.clone(),
+            start_prompt_mode: self.start_prompt_mode,
+            mode: self.mode,
+        }
+    }
+
     pub fn build(
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,

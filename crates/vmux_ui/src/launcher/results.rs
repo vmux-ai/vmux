@@ -2,10 +2,12 @@ use crate::i18n::translate;
 use vmux_api::PageIcon;
 use vmux_api::chat::{ResumableSessionEntry, SlashCommand};
 use vmux_api::command_bar::{
-    CommandBarCommandEntry, CommandBarPage, CommandBarPick, CommandBarPickRow, CommandBarPicker,
+    CommandBarCommandEntry, CommandBarPage, CommandBarPickRow, CommandBarPicker,
     CommandBarRecentFile, CommandBarSpace, CommandBarTab, CommandBarWorkDir, HistoryEntry,
     SearchEngine,
 };
+
+pub use vmux_api::command_bar::{CommandBarResultItem, ResumeSection};
 
 pub struct SlashRows;
 
@@ -63,33 +65,6 @@ impl SlashRows {
             rows.push(CommandBarResultItem::ResumePending { row });
         }
         rows
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResumeSection {
-    pub agent: String,
-    pub project: String,
-    pub branch: String,
-    pub count: usize,
-}
-
-impl From<&ResumableSessionEntry> for ResumeSection {
-    fn from(entry: &ResumableSessionEntry) -> Self {
-        let agent = match entry.agent_name.is_empty() {
-            true => entry.kind.clone(),
-            false => entry.agent_name.clone(),
-        };
-        let project = match entry.project.is_empty() {
-            true => entry.subtitle.clone(),
-            false => entry.project.clone(),
-        };
-        Self {
-            agent,
-            project,
-            branch: entry.branch.clone(),
-            count: 0,
-        }
     }
 }
 
@@ -160,95 +135,6 @@ impl PickerRows {
         }
         rows
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CommandBarResultItem {
-    Pick {
-        label: String,
-        pick: CommandBarPick,
-    },
-    Terminal {
-        path: String,
-    },
-    Editor {
-        path: String,
-    },
-    Stack {
-        title: String,
-        url: String,
-        icon: PageIcon,
-        pane_id: u64,
-        tab_index: usize,
-        location: String,
-    },
-    Space {
-        id: String,
-        name: String,
-        profile: String,
-        is_active: bool,
-        tab_count: usize,
-    },
-    Command {
-        id: String,
-        name: String,
-        shortcut: String,
-    },
-    Ex {
-        name: String,
-        hint: String,
-    },
-    Page {
-        url: String,
-        title: String,
-        icon: PageIcon,
-        shortcut: String,
-        prompt_target: bool,
-    },
-    Navigate {
-        url: String,
-    },
-    Search {
-        engine: SearchEngine,
-        query: String,
-    },
-    File {
-        path: String,
-        is_dir: bool,
-        project: String,
-        relative: String,
-    },
-    History {
-        url: String,
-        title: String,
-        favicon_url: String,
-        visit_count: u32,
-        last_visited_at: i64,
-    },
-    WorkDir {
-        path: String,
-        is_dir: bool,
-    },
-    RecentFile {
-        url: String,
-        title: String,
-    },
-    Slash {
-        name: String,
-        hint: String,
-    },
-    Resume {
-        entry: Box<ResumableSessionEntry>,
-        section: Option<ResumeSection>,
-    },
-    ResumePending {
-        row: usize,
-    },
-    PartialIndex,
-    MoreMatches {
-        shown: usize,
-        total: usize,
-    },
 }
 
 fn looks_like_path(s: &str) -> bool {
