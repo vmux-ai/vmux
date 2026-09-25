@@ -48,6 +48,7 @@ impl Plugin for StartPlugin {
             .add_observer(on_start_select_workspace)
             .add_observer(on_start_branches_request)
             .add_observer(on_start_go_to_branch)
+            .add_observer(apply_chosen_project)
             .add_systems(
                 Update,
                 (
@@ -235,7 +236,6 @@ fn on_start_select_workspace(
 
 fn drain_start_workspace_pickers(
     mut pending: Query<(Entity, &mut PendingStartWorkspacePicker)>,
-    mut tabs: Query<&mut Tab>,
     mut commands: Commands,
 ) {
     for (entity, mut picker) in &mut pending {
@@ -249,7 +249,11 @@ fn drain_start_workspace_pickers(
             if initialize_git {
                 let _ = vmux_git::worktree::repository_init(&path);
             }
-            ChosenProject { path }.apply(picker.tab, &mut tabs, &mut commands);
+            commands.trigger(ChosenProject {
+                tab: picker.tab,
+                path,
+                worktree: None,
+            });
         }
         commands.entity(entity).despawn();
     }
@@ -340,7 +344,6 @@ fn on_start_go_to_branch(
     trigger: On<UiInput<vmux_api::command_bar::StartGoToBranch>>,
     child_of: Query<&ChildOf>,
     tab_query: Query<(), With<Tab>>,
-    mut tabs: Query<&mut Tab>,
     mut commands: Commands,
 ) {
     let mut current = trigger.event().webview;
@@ -362,52 +365,67 @@ fn on_start_go_to_branch(
         let Ok(path) = std::path::PathBuf::from(checkout).canonicalize() else {
             return;
         };
-        ChosenProject { path }.apply(tab, &mut tabs, &mut commands);
+        commands.trigger(ChosenProject {
+            tab,
+            path,
+            worktree: None,
+        });
         return;
     }
     let Ok(root) = std::path::PathBuf::from(&evt.project).canonicalize() else {
         return;
     };
-    ChosenProject { path: root.clone() }.apply(tab, &mut tabs, &mut commands);
-    if evt.branch.trim().is_empty() {
-        return;
-    }
-    commands.entity(tab).insert(TabWorktree {
+    let worktree = (!evt.branch.trim().is_empty()).then(|| TabWorktree {
         repo_root: root.to_string_lossy().into_owned(),
         checkout_dir: String::new(),
         branch: evt.branch.clone(),
         base_ref: String::new(),
     });
+    commands.trigger(ChosenProject {
+        tab,
+        path: root,
+        worktree,
+    });
 }
 
+#[derive(EntityEvent)]
 struct ChosenProject {
+    #[event_target]
+    tab: Entity,
     path: std::path::PathBuf,
+    worktree: Option<TabWorktree>,
 }
 
-impl ChosenProject {
-    fn apply(&self, tab_entity: Entity, tabs: &mut Query<&mut Tab>, commands: &mut Commands) {
-        let Ok(mut tab) = tabs.get_mut(tab_entity) else {
-            return;
-        };
-        let dir = self.path.to_string_lossy().into_owned();
-        tab.startup_dir = Some(dir.clone());
-        if vmux_layout::worktree::is_generated_tab_name(&tab.name)
-            && let Some(name) = self.path.file_name().and_then(|name| name.to_str())
-            && !name.is_empty()
-        {
-            tab.name = name.to_string();
-        }
-        commands
-            .entity(tab_entity)
-            .insert((
-                TabWorkspace { project_dir: dir },
-                vmux_layout::tab::TabDirDecided,
-            ))
-            .remove::<(
-                TabWorktree,
-                vmux_layout::worktree::TabWorktreeReady,
-                vmux_layout::tab::TabWorktreeUnavailable,
-            )>();
+fn apply_chosen_project(
+    trigger: On<ChosenProject>,
+    mut tabs: Query<&mut Tab>,
+    mut commands: Commands,
+) {
+    let request = trigger.event();
+    let Ok(mut tab) = tabs.get_mut(request.tab) else {
+        return;
+    };
+    let dir = request.path.to_string_lossy().into_owned();
+    tab.startup_dir = Some(dir.clone());
+    if vmux_layout::worktree::is_generated_tab_name(&tab.name)
+        && let Some(name) = request.path.file_name().and_then(|name| name.to_str())
+        && !name.is_empty()
+    {
+        tab.name = name.to_string();
+    }
+    let mut entity = commands.entity(request.tab);
+    entity
+        .insert((
+            TabWorkspace { project_dir: dir },
+            vmux_layout::tab::TabDirDecided,
+        ))
+        .remove::<(
+            TabWorktree,
+            vmux_layout::worktree::TabWorktreeReady,
+            vmux_layout::tab::TabWorktreeUnavailable,
+        )>();
+    if let Some(worktree) = &request.worktree {
+        entity.insert(worktree.clone());
     }
 }
 
