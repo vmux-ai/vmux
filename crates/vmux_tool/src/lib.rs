@@ -213,8 +213,6 @@ fn complete_failed_store_operation(
 }
 
 #[cfg(test)]
-use dotfiles::{apply_enabled_dotfiles_in, disable_and_unlink_dotfile_package_in};
-#[cfg(test)]
 use homebrew::{sync_manifest_from_brewfile, write_brewfile_to};
 #[cfg(test)]
 use manifest::migrate_legacy_storage_in;

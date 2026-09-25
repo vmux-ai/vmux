@@ -5,6 +5,7 @@ use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
 
 use crate::dotfiles::DotfilesManifest;
+use crate::homebrew::{sync_manifest_from_brewfile, write_managed_brewfile};
 use crate::mcp::McpManifest;
 
 const MANIFEST_VERSION: u32 = 1;
@@ -174,9 +175,9 @@ impl ToolStore {
         let mut manifest = ToolsManifest::read(&self.manifest_path())?;
         let brewfile = self.brewfile_path();
         if brewfile.is_file() {
-            self.sync_manifest_from_brewfile(&mut manifest, &brewfile)?;
+            sync_manifest_from_brewfile(&mut manifest, &brewfile)?;
         } else {
-            self.write_managed_brewfile(&manifest)?;
+            write_managed_brewfile(self, &manifest)?;
         }
         Ok(manifest)
     }
@@ -184,7 +185,7 @@ impl ToolStore {
     pub fn save(&self, manifest: &ToolsManifest) -> Result<(), String> {
         self.migrate_legacy_storage()?;
         manifest.write_to(&self.manifest_path())?;
-        self.write_managed_brewfile(manifest)
+        write_managed_brewfile(self, manifest)
     }
 
     pub(crate) fn migrate_legacy_storage(&self) -> Result<(), String> {

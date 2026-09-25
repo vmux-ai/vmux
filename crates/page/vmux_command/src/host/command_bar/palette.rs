@@ -508,7 +508,6 @@ fn project_palette(
             history: snapshot.0.history.clone(),
             sessions: snapshot.0.sessions.clone(),
             sessions_pending: snapshot.0.sessions_loading,
-            ..Default::default()
         };
         let surface = match input.start {
             true => PaletteSurface::Start,

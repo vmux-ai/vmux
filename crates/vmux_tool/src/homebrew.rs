@@ -111,7 +111,7 @@ fn import_brewfile_system(
         commands
             .entity(entity)
             .insert(ToolOperationTask::spawn(move || {
-                let (formulae, casks) = store.import_brewfile(&path)?;
+                let (formulae, casks) = import_brewfile_in(&store, &path)?;
                 Ok(ImportedBrewfile { formulae, casks })
             }));
     }
@@ -128,7 +128,7 @@ pub fn brewfile_path() -> PathBuf {
 }
 
 pub fn import_brewfile(path: &Path) -> Result<(usize, usize), String> {
-    ToolStore::current().import_brewfile(path)
+    import_brewfile_in(&ToolStore::current(), path)
 }
 
 pub fn import_brewfile_to(path: &Path, manifest_path: &Path) -> Result<(usize, usize), String> {
@@ -179,30 +179,23 @@ fn set_packages(manifest: &mut ToolsManifest, provider: &str, packages: Vec<Stri
     manifest.normalize();
 }
 
-impl ToolStore {
-    pub fn import_brewfile(&self, path: &Path) -> Result<(usize, usize), String> {
-        self.migrate_legacy_storage()?;
-        let source_path = self.expand_user_path(path)?;
-        let source = std::fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
-        let imported = import_brewfile_to(&source_path, &self.manifest_path())?;
-        vmux_path::AtomicFile::write(self.brewfile_path(), source.as_bytes())
-            .map_err(|error| error.to_string())?;
-        let manifest = ToolsManifest::read(&self.manifest_path())?;
-        self.write_managed_brewfile(&manifest)?;
-        Ok(imported)
-    }
+fn import_brewfile_in(store: &ToolStore, path: &Path) -> Result<(usize, usize), String> {
+    store.migrate_legacy_storage()?;
+    let source_path = store.expand_user_path(path)?;
+    let source = std::fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
+    let imported = import_brewfile_to(&source_path, &store.manifest_path())?;
+    vmux_path::AtomicFile::write(store.brewfile_path(), source.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let manifest = ToolsManifest::read(&store.manifest_path())?;
+    write_managed_brewfile(store, &manifest)?;
+    Ok(imported)
+}
 
-    pub(crate) fn sync_manifest_from_brewfile(
-        &self,
-        manifest: &mut ToolsManifest,
-        path: &Path,
-    ) -> Result<(), String> {
-        sync_manifest_from_brewfile(manifest, path)
-    }
-
-    pub(crate) fn write_managed_brewfile(&self, manifest: &ToolsManifest) -> Result<(), String> {
-        write_brewfile_to(&self.brewfile_path(), manifest)
-    }
+pub(crate) fn write_managed_brewfile(
+    store: &ToolStore,
+    manifest: &ToolsManifest,
+) -> Result<(), String> {
+    write_brewfile_to(&store.brewfile_path(), manifest)
 }
 
 pub(crate) fn write_brewfile_to(path: &Path, manifest: &ToolsManifest) -> Result<(), String> {
