@@ -97,7 +97,7 @@ fn update_palette_media_draft(
     let Some(query) = query else {
         return;
     };
-    MediaRequestDelay::spawn(target, generation, query, &mut commands);
+    spawn_media_request_delay(target, generation, query, &mut commands);
 }
 
 fn remove_palette_attachment(
@@ -211,14 +211,17 @@ impl PaletteMedia {
 #[derive(Component)]
 struct MediaRequestDelay(RequestDelay);
 
-impl MediaRequestDelay {
-    fn spawn(target: Entity, generation: u64, query: String, commands: &mut Commands) {
-        commands.spawn((
-            Name::new("Command Palette Media Request"),
-            Self(RequestDelay::new(target, generation, query, MEDIA_DEBOUNCE)),
-            PendingPaletteRequest,
-        ));
-    }
+fn spawn_media_request_delay(
+    target: Entity,
+    generation: u64,
+    query: String,
+    commands: &mut Commands,
+) {
+    commands.spawn((
+        Name::new("Command Palette Media Request"),
+        MediaRequestDelay(RequestDelay::new(target, generation, query, MEDIA_DEBOUNCE)),
+        PendingPaletteRequest,
+    ));
 }
 
 fn dispatch_media_request(

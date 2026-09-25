@@ -186,47 +186,49 @@ impl MouseSessionState {
     }
 }
 
-impl MouseTerminalEffect {
-    fn send(self, service: &ServiceHandle, process_id: ProcessId) {
-        match self {
-            Self::ForwardInput(data) => {
-                service.send(ClientMessage::ProcessInput { process_id, data });
-            }
-            Self::EnterCopyMode => {
-                service.send(ClientMessage::EnterCopyMode { process_id });
-            }
-            Self::ExitCopyMode => {
-                service.send(ClientMessage::ExitCopyMode { process_id });
-            }
-            Self::SetSelection(range) => {
-                service.send(ClientMessage::SetSelection { process_id, range });
-            }
-            Self::ExtendSelectionTo { col, row } => {
-                service.send(ClientMessage::ExtendSelectionTo {
-                    process_id,
-                    col,
-                    row,
-                });
-            }
-            Self::SelectWordAt { col, row } => {
-                service.send(ClientMessage::SelectWordAt {
-                    process_id,
-                    col,
-                    row,
-                });
-            }
-            Self::SelectLineAt { row } => {
-                service.send(ClientMessage::SelectLineAt { process_id, row });
-            }
+fn send_mouse_effect(effect: MouseTerminalEffect, service: &ServiceHandle, process_id: ProcessId) {
+    match effect {
+        MouseTerminalEffect::ForwardInput(data) => {
+            service.send(ClientMessage::ProcessInput { process_id, data });
+        }
+        MouseTerminalEffect::EnterCopyMode => {
+            service.send(ClientMessage::EnterCopyMode { process_id });
+        }
+        MouseTerminalEffect::ExitCopyMode => {
+            service.send(ClientMessage::ExitCopyMode { process_id });
+        }
+        MouseTerminalEffect::SetSelection(range) => {
+            service.send(ClientMessage::SetSelection { process_id, range });
+        }
+        MouseTerminalEffect::ExtendSelectionTo { col, row } => {
+            service.send(ClientMessage::ExtendSelectionTo {
+                process_id,
+                col,
+                row,
+            });
+        }
+        MouseTerminalEffect::SelectWordAt { col, row } => {
+            service.send(ClientMessage::SelectWordAt {
+                process_id,
+                col,
+                row,
+            });
+        }
+        MouseTerminalEffect::SelectLineAt { row } => {
+            service.send(ClientMessage::SelectLineAt { process_id, row });
         }
     }
+}
 
-    fn update_copy_mode(&self, state: &mut LocalCopyModeState, process_id: ProcessId) {
-        match self {
-            Self::EnterCopyMode => state.set(process_id, true),
-            Self::ExitCopyMode => state.set(process_id, false),
-            _ => {}
-        }
+fn update_copy_mode(
+    effect: &MouseTerminalEffect,
+    state: &mut LocalCopyModeState,
+    process_id: ProcessId,
+) {
+    match effect {
+        MouseTerminalEffect::EnterCopyMode => state.set(process_id, true),
+        MouseTerminalEffect::ExitCopyMode => state.set(process_id, false),
+        _ => {}
     }
 }
 
@@ -277,8 +279,8 @@ fn on_term_mouse(
         .is_some_and(|mode| mode.mouse_capture);
     let selection = selections.per_process.entry(process_id).or_default();
     for effect in selection.apply(event, mouse_capture, Instant::now()) {
-        effect.update_copy_mode(&mut copy_mode, process_id);
-        effect.send(&service.0, process_id);
+        update_copy_mode(&effect, &mut copy_mode, process_id);
+        send_mouse_effect(effect, &service.0, process_id);
     }
 }
 

@@ -48,6 +48,7 @@ pub use tree::{
     Pane, PaneSplit, PaneSplitDirection, direction_to_split, first_leaf_descendant,
     leaf_pane_bundle, split_leaf_into_two, split_or_extend, split_root_bundle,
 };
+pub(crate) use tree::{set_split_direction, spawn_split_from_leaf};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ArrangementSet;

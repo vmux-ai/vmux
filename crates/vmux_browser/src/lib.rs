@@ -1031,7 +1031,7 @@ mod tests {
         ) {
             for (entity, task) in &tasks {
                 if task.url.starts_with("vmux://terminal/") {
-                    vmux_layout::stack::Stack::clear_children(
+                    vmux_layout::stack::clear_stack_children(
                         task.stack,
                         &children_q,
                         &mut commands,
@@ -1039,7 +1039,7 @@ mod tests {
                     commands.spawn((Browser, Terminal, ChildOf(task.stack)));
                     commands.entity(entity).insert(PageOpenHandled);
                 } else if task.url.starts_with("vmux://sessions/") {
-                    vmux_layout::stack::Stack::clear_children(
+                    vmux_layout::stack::clear_stack_children(
                         task.stack,
                         &children_q,
                         &mut commands,

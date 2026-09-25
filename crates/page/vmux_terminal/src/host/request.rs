@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use vmux_service::protocol::ProcessId;
 
-use crate::host::input_queue::{InputQueuePlugin, NextTerminalInputSequence, TerminalInput};
+use crate::host::input_queue::{
+    InputQueuePlugin, NextTerminalInputSequence, enqueue_terminal_input,
+};
 use crate::host::plugin::{ServiceMessageSet, TerminalStackSpawnRequest};
 use crate::host::process_index::TerminalProcessIndex;
 use crate::{ProcessExited, Terminal};
@@ -62,7 +64,7 @@ fn handle_terminal_send_requests(
         let Some(terminal) = target else {
             continue;
         };
-        TerminalInput::enqueue(&mut commands, &mut sequence, terminal, text.into_bytes());
+        enqueue_terminal_input(&mut commands, &mut sequence, terminal, text.into_bytes());
     }
 }
 
@@ -87,7 +89,7 @@ fn handle_run_shell_requests(
         if matches!(mode, ShellMode::Active)
             && let Some(terminal) = crate::target::active_terminal_for_tab(focus.stack, &terminals)
         {
-            TerminalInput::enqueue(&mut commands, &mut sequence, terminal, input);
+            enqueue_terminal_input(&mut commands, &mut sequence, terminal, input);
             continue;
         }
         let Some(terminal_stack_spawns) = terminal_stack_spawns.as_mut() else {

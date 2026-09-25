@@ -84,8 +84,8 @@ fn update_palette_search_draft(
         return;
     }
     search.query.clone_from(&request.query);
-    search.complete(target, &mut snapshot, &mut commands);
-    search.suggest(target, &mut snapshot, &mut commands);
+    request_completion(target, &mut search, &mut snapshot, &mut commands);
+    request_history_suggestions(target, &mut search, &mut snapshot, &mut commands);
 }
 
 fn receive_palette_completion(
@@ -128,52 +128,53 @@ fn receive_palette_history(
     snapshot.0.history.clone_from(&response.entries);
 }
 
-impl PaletteSearch {
-    fn complete(
-        &mut self,
-        target: Entity,
-        snapshot: &mut PaletteSnapshot,
-        commands: &mut Commands,
-    ) {
-        let generation = self.completion_generation.advance();
-        snapshot.0.completions.clear();
-        snapshot.0.completions_partial = false;
-        snapshot.0.completions_total = 0;
-        let Some(query) = CompletionQuery::parse(&self.query) else {
-            return;
-        };
-        CompletionRequestDelay::spawn(target, generation, query, commands);
-    }
-
-    fn suggest(&mut self, target: Entity, snapshot: &mut PaletteSnapshot, commands: &mut Commands) {
-        let generation = self.history_generation.advance();
-        snapshot.0.history.clear();
-        if self.start {
-            return;
-        }
-        let Some(query) = HistoryQuery::parse(&self.query) else {
-            return;
-        };
-        HistoryRequestDelay::spawn(target, generation, query.to_string(), commands);
-    }
+fn request_completion(
+    target: Entity,
+    search: &mut PaletteSearch,
+    snapshot: &mut PaletteSnapshot,
+    commands: &mut Commands,
+) {
+    let generation = search.completion_generation.advance();
+    snapshot.0.completions.clear();
+    snapshot.0.completions_partial = false;
+    snapshot.0.completions_total = 0;
+    let Some(query) = CompletionQuery::parse(&search.query) else {
+        return;
+    };
+    spawn_completion_delay(target, generation, query, commands);
 }
 
 #[derive(Component)]
 struct CompletionRequestDelay(RequestDelay);
 
-impl CompletionRequestDelay {
-    fn spawn(target: Entity, generation: u64, query: String, commands: &mut Commands) {
-        commands.spawn((
-            Name::new("Command Palette Completion Debounce"),
-            Self(RequestDelay::new(
-                target,
-                generation,
-                query,
-                COMPLETION_DEBOUNCE,
-            )),
-            PendingPaletteRequest,
-        ));
+fn spawn_completion_delay(target: Entity, generation: u64, query: String, commands: &mut Commands) {
+    commands.spawn((
+        Name::new("Command Palette Completion Debounce"),
+        CompletionRequestDelay(RequestDelay::new(
+            target,
+            generation,
+            query,
+            COMPLETION_DEBOUNCE,
+        )),
+        PendingPaletteRequest,
+    ));
+}
+
+fn request_history_suggestions(
+    target: Entity,
+    search: &mut PaletteSearch,
+    snapshot: &mut PaletteSnapshot,
+    commands: &mut Commands,
+) {
+    let generation = search.history_generation.advance();
+    snapshot.0.history.clear();
+    if search.start {
+        return;
     }
+    let Some(query) = HistoryQuery::parse(&search.query) else {
+        return;
+    };
+    spawn_history_delay(target, generation, query.to_string(), commands);
 }
 
 fn dispatch_completion_request(
@@ -205,19 +206,17 @@ fn dispatch_completion_request(
 #[derive(Component)]
 struct HistoryRequestDelay(RequestDelay);
 
-impl HistoryRequestDelay {
-    fn spawn(target: Entity, generation: u64, query: String, commands: &mut Commands) {
-        commands.spawn((
-            Name::new("Command Palette History Debounce"),
-            Self(RequestDelay::new(
-                target,
-                generation,
-                query,
-                HISTORY_DEBOUNCE,
-            )),
-            PendingPaletteRequest,
-        ));
-    }
+fn spawn_history_delay(target: Entity, generation: u64, query: String, commands: &mut Commands) {
+    commands.spawn((
+        Name::new("Command Palette History Debounce"),
+        HistoryRequestDelay(RequestDelay::new(
+            target,
+            generation,
+            query,
+            HISTORY_DEBOUNCE,
+        )),
+        PendingPaletteRequest,
+    ));
 }
 
 fn dispatch_history_request(

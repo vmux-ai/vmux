@@ -411,15 +411,20 @@ fn route_browser_queries(
     service: Option<Res<ServiceClient>>,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
     mut scroll_writer: MessageWriter<BrowserScrollRequest>,
-    mut browse: AgentBrowserResolve,
+    mut activate: MessageWriter<vmux_layout::active_panes::ActivatePane>,
+    browse: AgentBrowserResolve,
 ) {
     let Some(_) = service else { return };
     for request in reader.read() {
         match &request.query {
             AgentQuery::BrowserSnapshot { pane, anchor } => {
+                let resolved = browse.resolve_pane(pane, anchor);
+                if let Some(request) = resolved.activation {
+                    activate.write(request);
+                }
                 snapshot_writer.write(BrowserSnapshotRequest {
                     request_id: request.request_id.0,
-                    pane: browse.resolve_pane(pane, anchor),
+                    pane: resolved.pane,
                     webview: None,
                 });
             }
@@ -429,9 +434,13 @@ fn route_browser_queries(
                 delta,
                 anchor,
             } => {
+                let resolved = browse.resolve_pane(pane, anchor);
+                if let Some(request) = resolved.activation {
+                    activate.write(request);
+                }
                 scroll_writer.write(BrowserScrollRequest {
                     request_id: request.request_id.0,
-                    pane: browse.resolve_pane(pane, anchor),
+                    pane: resolved.pane,
                     to: to.clone(),
                     delta: *delta,
                 });

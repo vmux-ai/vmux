@@ -20,9 +20,9 @@ impl Plugin for KnowledgePlugin {
             .add_systems(
                 Update,
                 (
-                    KnowledgeWatch::drain,
-                    KnowledgeIndexRuntime::start,
-                    KnowledgeIndexTask::finish,
+                    drain_knowledge_watch,
+                    start_knowledge_index,
+                    finish_knowledge_index,
                 )
                     .chain(),
             );
@@ -88,18 +88,21 @@ impl KnowledgeWatch {
             receiver,
         })
     }
+}
 
-    fn drain(watch: Option<NonSend<Self>>, mut runtime: Single<&mut KnowledgeIndexRuntime>) {
-        let Some(watch) = watch else {
-            return;
-        };
-        if watch
-            .receiver
-            .try_iter()
-            .any(|result| result.is_ok_and(|event| !matches!(event.kind, EventKind::Access(_))))
-        {
-            runtime.invalidate();
-        }
+fn drain_knowledge_watch(
+    watch: Option<NonSend<KnowledgeWatch>>,
+    mut runtime: Single<&mut KnowledgeIndexRuntime>,
+) {
+    let Some(watch) = watch else {
+        return;
+    };
+    if watch
+        .receiver
+        .try_iter()
+        .any(|result| result.is_ok_and(|event| !matches!(event.kind, EventKind::Access(_))))
+    {
+        runtime.invalidate();
     }
 }
 
@@ -123,28 +126,28 @@ impl KnowledgeIndexRuntime {
         self.dirty = true;
         self.generation = self.generation.wrapping_add(1);
     }
+}
 
-    fn start(
-        mut runtime: Single<&mut Self>,
-        pending: Query<(), With<KnowledgeIndexTask>>,
-        wake: Option<Res<EventLoopProxyWrapper>>,
-        mut commands: Commands,
-    ) {
-        if !runtime.dirty || !pending.is_empty() {
-            return;
-        }
-        let generation = runtime.generation;
-        let wake = wake.map(|wrapper| (**wrapper).clone());
-        let task = IoTaskPool::get().spawn(async move {
-            let result = KnowledgeIndex::build(&vault_dir()).map_err(|error| error.to_string());
-            if let Some(wake) = wake {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
-            }
-            result
-        });
-        runtime.dirty = false;
-        commands.spawn(KnowledgeIndexTask { generation, task });
+fn start_knowledge_index(
+    mut runtime: Single<&mut KnowledgeIndexRuntime>,
+    pending: Query<(), With<KnowledgeIndexTask>>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    if !runtime.dirty || !pending.is_empty() {
+        return;
     }
+    let generation = runtime.generation;
+    let wake = wake.map(|wrapper| (**wrapper).clone());
+    let task = IoTaskPool::get().spawn(async move {
+        let result = KnowledgeIndex::build(&vault_dir()).map_err(|error| error.to_string());
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        result
+    });
+    runtime.dirty = false;
+    commands.spawn(KnowledgeIndexTask { generation, task });
 }
 
 #[derive(Component)]
@@ -153,26 +156,24 @@ struct KnowledgeIndexTask {
     task: Task<Result<KnowledgeIndex, String>>,
 }
 
-impl KnowledgeIndexTask {
-    fn finish(
-        mut tasks: Query<(Entity, &mut Self)>,
-        mut runtime: Single<&mut KnowledgeIndexRuntime>,
-        mut index: ResMut<KnowledgeIndex>,
-        mut commands: Commands,
-    ) {
-        for (entity, mut task) in &mut tasks {
-            let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
-                continue;
-            };
-            commands.entity(entity).despawn();
-            if task.generation != runtime.generation {
-                runtime.dirty = true;
-                continue;
-            }
-            match result {
-                Ok(next) => *index = next,
-                Err(error) => warn!("knowledge index refresh failed: {error}"),
-            }
+fn finish_knowledge_index(
+    mut tasks: Query<(Entity, &mut KnowledgeIndexTask)>,
+    mut runtime: Single<&mut KnowledgeIndexRuntime>,
+    mut index: ResMut<KnowledgeIndex>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        if task.generation != runtime.generation {
+            runtime.dirty = true;
+            continue;
+        }
+        match result {
+            Ok(next) => *index = next,
+            Err(error) => warn!("knowledge index refresh failed: {error}"),
         }
     }
 }

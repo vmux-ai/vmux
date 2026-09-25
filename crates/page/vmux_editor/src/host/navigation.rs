@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
-use vmux_core::event::{FileErrorEvent, FileOpenEvent, KnowledgeLinkOpen};
+use vmux_core::event::{FileErrorEvent, FileOpenEvent, FileScrollByEvent, KnowledgeLinkOpen};
 
 use crate::edit::Selection;
 use crate::host::editor::{Editor, FileDocumentRevision, FileView};
@@ -199,7 +199,16 @@ fn goto_caret(
         .coords_to_char(line, character_column as usize);
     edit.core.set_caret(caret);
     if let Some(top) = viewport.autoscroll(edit) {
-        viewport.scroll_to(top, entity, browsers, commands);
+        if let Some(scroll) = viewport.set_top(top)
+            && browsers.can_emit_to(&entity)
+        {
+            commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                entity,
+                &FileScrollByEvent {
+                    lines: scroll.lines,
+                },
+            ));
+        }
         edit.core.top_row = viewport.top_row;
     }
 }

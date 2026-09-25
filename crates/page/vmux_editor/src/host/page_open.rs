@@ -155,7 +155,7 @@ fn handle_file_page_open(
                 view
             }
             None => {
-                vmux_layout::stack::Stack::clear_children(task.stack, &children, &mut commands);
+                vmux_layout::stack::clear_stack_children(task.stack, &children, &mut commands);
                 commands
                     .spawn((new_file_view_bundle(&page_url, path), ChildOf(task.stack)))
                     .id()

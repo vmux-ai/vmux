@@ -60,33 +60,31 @@ pub(crate) struct TerminalInput {
     data: Vec<u8>,
 }
 
-impl TerminalInput {
-    pub(crate) fn enqueue(
-        commands: &mut Commands,
-        sequence: &mut NextTerminalInputSequence,
-        terminal: Entity,
-        data: Vec<u8>,
-    ) {
-        commands.spawn((
-            Self {
-                sequence: sequence.take(),
-                data,
-            },
-            TerminalInputTarget { terminal },
-        ));
-    }
+pub(crate) fn enqueue_terminal_input(
+    commands: &mut Commands,
+    sequence: &mut NextTerminalInputSequence,
+    terminal: Entity,
+    data: Vec<u8>,
+) {
+    commands.spawn((
+        TerminalInput {
+            sequence: sequence.take(),
+            data,
+        },
+        TerminalInputTarget { terminal },
+    ));
+}
 
-    #[cfg(test)]
-    pub(crate) fn pending(world: &mut World, terminal: Entity) -> Vec<Vec<u8>> {
-        let mut query = world.query::<(&Self, &TerminalInputTarget)>();
-        let mut pending = query
-            .iter(world)
-            .filter(|(_, target)| target.get() == terminal)
-            .map(|(input, _)| (input.sequence, input.data.clone()))
-            .collect::<Vec<_>>();
-        pending.sort_by_key(|(sequence, _)| *sequence);
-        pending.into_iter().map(|(_, data)| data).collect()
-    }
+#[cfg(test)]
+pub(crate) fn pending_terminal_input(world: &mut World, terminal: Entity) -> Vec<Vec<u8>> {
+    let mut query = world.query::<(&TerminalInput, &TerminalInputTarget)>();
+    let mut pending = query
+        .iter(world)
+        .filter(|(_, target)| target.get() == terminal)
+        .map(|(input, _)| (input.sequence, input.data.clone()))
+        .collect::<Vec<_>>();
+    pending.sort_by_key(|(sequence, _)| *sequence);
+    pending.into_iter().map(|(_, data)| data).collect()
 }
 
 fn enqueue_terminal_reinput(
@@ -103,7 +101,7 @@ fn enqueue_terminal_reinput(
         if !terminals.contains(terminal) {
             continue;
         }
-        TerminalInput::enqueue(&mut commands, &mut sequence, terminal, request.data.clone());
+        enqueue_terminal_input(&mut commands, &mut sequence, terminal, request.data.clone());
     }
 }
 

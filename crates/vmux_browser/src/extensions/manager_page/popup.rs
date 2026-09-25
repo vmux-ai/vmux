@@ -36,28 +36,26 @@ pub(crate) struct ExtensionPopup {
     pub(crate) extension_id: String,
 }
 
-impl ExtensionPopup {
-    fn close(
-        owner: Entity,
-        popups: &Query<(Entity, &Self)>,
-        browsers: &Browsers,
-        commands: &mut Commands,
-    ) {
-        let mut closed = false;
-        for (entity, popup) in popups {
-            if popup.owner != owner {
-                continue;
-            }
-            browsers.hide_child_window(&entity);
-            commands.entity(entity).try_despawn();
-            closed = true;
+fn close_extension_popup(
+    owner: Entity,
+    popups: &Query<(Entity, &ExtensionPopup)>,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) {
+    let mut closed = false;
+    for (entity, popup) in popups {
+        if popup.owner != owner {
+            continue;
         }
-        if closed {
-            commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
-                owner,
-                &ExtensionPopupEvent::default(),
-            ));
-        }
+        browsers.hide_child_window(&entity);
+        commands.entity(entity).try_despawn();
+        closed = true;
+    }
+    if closed {
+        commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
+            owner,
+            &ExtensionPopupEvent::default(),
+        ));
     }
 }
 
@@ -130,7 +128,7 @@ fn on_open_request(
     let Some(owner) = owner else {
         return;
     };
-    ExtensionPopup::close(owner, &popups, &browsers, &mut commands);
+    close_extension_popup(owner, &popups, &browsers, &mut commands);
     commands
         .spawn(Browser::new_with_title(&url, &entry.name))
         .insert((
@@ -176,7 +174,7 @@ fn on_close_request(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    ExtensionPopup::close(trigger.event().webview, &popups, &browsers, &mut commands);
+    close_extension_popup(trigger.event().webview, &popups, &browsers, &mut commands);
 }
 
 fn inject_sizing(

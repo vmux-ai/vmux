@@ -133,7 +133,7 @@ fn open_native_pages(world: &mut World) {
         .collect::<Vec<_>>();
     let mut wanted = Vec::new();
     for registration in registered {
-        for entity in registration.placement().claim(world, registration) {
+        for entity in claim_native_pages(world, registration) {
             wanted.push((entity, registration));
         }
     }
@@ -145,7 +145,7 @@ fn open_native_pages(world: &mut World) {
         .query_filtered::<Entity, With<PrimaryWindow>>()
         .single(world)
         .ok();
-    let embedder = match PageEmbedder::load(world) {
+    let embedder = match load_page_embedder(world) {
         Ok(embedder) => embedder,
         Err(reason) => {
             report_waiting(reason);
@@ -384,7 +384,6 @@ fn appearance_of(mode: ColorScheme) -> Appearance {
 trait NativePagePlacementExt {
     fn paints_in_front(self) -> bool;
     fn pointer_order(self, capturing: bool) -> Option<SiblingOrder>;
-    fn claim(self, world: &mut World, registration: NativePageRegistration) -> Vec<Entity>;
     fn bounds(
         self,
         entity: Entity,
@@ -406,30 +405,6 @@ impl NativePagePlacementExt for NativePagePlacement {
             NativePagePlacement::Layout if !capturing => Some(SiblingOrder::Back),
             NativePagePlacement::Layout | NativePagePlacement::Modal => Some(SiblingOrder::Front),
             NativePagePlacement::Pane => None,
-        }
-    }
-
-    fn claim(self, world: &mut World, registration: NativePageRegistration) -> Vec<Entity> {
-        match self {
-            NativePagePlacement::Layout => world
-                .query_filtered::<Entity, With<LayoutCef>>()
-                .iter(world)
-                .collect(),
-            NativePagePlacement::Pane | NativePagePlacement::Modal => {
-                let candidates = world
-                    .query_filtered::<(Entity, &PageMetadata), (With<HostsPage>, Without<LayoutCef>)>()
-                    .iter(world)
-                    .map(|(entity, metadata)| (entity, metadata.url.clone()))
-                    .collect::<Vec<_>>();
-                let mut claimed = Vec::new();
-                for (entity, url) in candidates {
-                    if registration.answers_for(world, entity, &url) {
-                        claimed.push(entity);
-                    }
-                }
-
-                claimed
-            }
         }
     }
 
@@ -458,6 +433,29 @@ impl NativePagePlacementExt for NativePagePlacement {
     }
 }
 
+fn claim_native_pages(world: &mut World, registration: NativePageRegistration) -> Vec<Entity> {
+    match registration.placement() {
+        NativePagePlacement::Layout => world
+            .query_filtered::<Entity, With<LayoutCef>>()
+            .iter(world)
+            .collect(),
+        NativePagePlacement::Pane | NativePagePlacement::Modal => {
+            let candidates = world
+                .query_filtered::<(Entity, &PageMetadata), (With<HostsPage>, Without<LayoutCef>)>()
+                .iter(world)
+                .map(|(entity, metadata)| (entity, metadata.url.clone()))
+                .collect::<Vec<_>>();
+            let mut claimed = Vec::new();
+            for (entity, url) in candidates {
+                if registration.answers_for(world, entity, &url) {
+                    claimed.push(entity);
+                }
+            }
+            claimed
+        }
+    }
+}
+
 #[derive(Clone)]
 struct PageEmbedder {
     bin_ipc: async_channel::Sender<BinIpcEventRaw>,
@@ -467,25 +465,6 @@ struct PageEmbedder {
 }
 
 impl PageEmbedder {
-    fn load(world: &mut World) -> Result<Self, &'static str> {
-        let Some(requester) = world.get_resource::<Requester>().cloned() else {
-            return Err("no Requester resource, the CEF custom scheme plugin has not built yet");
-        };
-        let Some(bin_ipc) = world.get_resource::<BinIpcEventRawSender>() else {
-            return Err("no BinIpcEventRawSender resource, the cef ipc plugin has not built yet");
-        };
-        let Some(metadata) = world.get_resource::<NativePageMetadataSender>() else {
-            return Err("no native page metadata sender");
-        };
-
-        Ok(Self {
-            bin_ipc: bin_ipc.0.clone(),
-            metadata: metadata.clone(),
-            requester,
-            waker: PageWaker::from_proxy(world.get_resource::<EventLoopProxyWrapper>()),
-        })
-    }
-
     fn embed(&self, entity: Entity, url: &str) -> Embedding {
         let page_url = Rc::new(RefCell::new(url.to_string()));
         Embedding {
@@ -506,6 +485,25 @@ impl PageEmbedder {
             waker: Rc::new(self.waker.clone()),
         }
     }
+}
+
+fn load_page_embedder(world: &World) -> Result<PageEmbedder, &'static str> {
+    let Some(requester) = world.get_resource::<Requester>().cloned() else {
+        return Err("no Requester resource, the CEF custom scheme plugin has not built yet");
+    };
+    let Some(bin_ipc) = world.get_resource::<BinIpcEventRawSender>() else {
+        return Err("no BinIpcEventRawSender resource, the cef ipc plugin has not built yet");
+    };
+    let Some(metadata) = world.get_resource::<NativePageMetadataSender>() else {
+        return Err("no native page metadata sender");
+    };
+
+    Ok(PageEmbedder {
+        bin_ipc: bin_ipc.0.clone(),
+        metadata: metadata.clone(),
+        requester,
+        waker: PageWaker::from_proxy(world.get_resource::<EventLoopProxyWrapper>()),
+    })
 }
 
 #[derive(Clone)]

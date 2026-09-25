@@ -59,78 +59,74 @@ enum CloseTarget {
     Stack(Entity),
 }
 
-impl CloseTarget {
-    fn confirm(self, world: &mut World) {
-        match self {
-            Self::Pane(pane) => {
-                let Ok(mut entity_mut) = world.get_entity_mut(pane) else {
-                    return;
-                };
-                entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
+fn confirm_close_target(target: CloseTarget, world: &mut World) {
+    match target {
+        CloseTarget::Pane(pane) => {
+            let Ok(mut entity_mut) = world.get_entity_mut(pane) else {
+                return;
+            };
+            entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
 
-                let mut current = pane;
-                for _ in 0..10 {
-                    if world
-                        .get_entity(current)
-                        .is_ok_and(|e| e.contains::<crate::tab::Tab>())
-                    {
-                        if let Ok(mut entity_mut) = world.get_entity_mut(current) {
-                            entity_mut.insert(LastActivatedAt::now());
-                        }
-                        break;
+            let mut current = pane;
+            for _ in 0..10 {
+                if world
+                    .get_entity(current)
+                    .is_ok_and(|e| e.contains::<crate::tab::Tab>())
+                {
+                    if let Ok(mut entity_mut) = world.get_entity_mut(current) {
+                        entity_mut.insert(LastActivatedAt::now());
                     }
-                    if let Some(child_of) = world.get::<ChildOf>(current) {
-                        current = child_of.get();
-                    } else {
-                        break;
-                    }
+                    break;
                 }
-                world
-                    .resource_mut::<Messages<CloseRequest>>()
-                    .write(CloseRequest);
+                if let Some(child_of) = world.get::<ChildOf>(current) {
+                    current = child_of.get();
+                } else {
+                    break;
+                }
             }
-            Self::Stack(stack) => {
-                let Some(parent_pane) = world.get::<ChildOf>(stack).map(|child| child.get()) else {
-                    return;
-                };
-                let sibling_stacks: Vec<Entity> = world
+            world
+                .resource_mut::<Messages<CloseRequest>>()
+                .write(CloseRequest);
+        }
+        CloseTarget::Stack(stack) => {
+            let Some(parent_pane) = world.get::<ChildOf>(stack).map(|child| child.get()) else {
+                return;
+            };
+            let sibling_stacks: Vec<Entity> = world
+                .get::<Children>(parent_pane)
+                .map(|children| {
+                    children
+                        .iter()
+                        .filter(|&entity| entity != stack && world.get::<Stack>(entity).is_some())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let was_active = {
+                let mut query = world.query::<(Entity, &LastActivatedAt)>();
+                let stacks_with_timestamp: Vec<(Entity, LastActivatedAt)> = world
                     .get::<Children>(parent_pane)
                     .map(|children| {
                         children
                             .iter()
-                            .filter(|&entity| {
-                                entity != stack && world.get::<Stack>(entity).is_some()
-                            })
+                            .filter_map(|entity| query.get(world, entity).ok())
+                            .filter(|(entity, _)| world.get::<Stack>(*entity).is_some())
+                            .map(|(entity, timestamp)| (entity, *timestamp))
                             .collect()
                     })
                     .unwrap_or_default();
-                let was_active = {
-                    let mut query = world.query::<(Entity, &LastActivatedAt)>();
-                    let stacks_with_timestamp: Vec<(Entity, LastActivatedAt)> = world
-                        .get::<Children>(parent_pane)
-                        .map(|children| {
-                            children
-                                .iter()
-                                .filter_map(|entity| query.get(world, entity).ok())
-                                .filter(|(entity, _)| world.get::<Stack>(*entity).is_some())
-                                .map(|(entity, timestamp)| (entity, *timestamp))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    stacks_with_timestamp
-                        .iter()
-                        .max_by_key(|(_, timestamp)| timestamp.0)
-                        .map(|(entity, _)| *entity)
-                        == Some(stack)
-                };
+                stacks_with_timestamp
+                    .iter()
+                    .max_by_key(|(_, timestamp)| timestamp.0)
+                    .map(|(entity, _)| *entity)
+                    == Some(stack)
+            };
 
-                world.despawn(stack);
-                if was_active
-                    && let Some(&next) = sibling_stacks.first()
-                    && let Ok(mut entity_mut) = world.get_entity_mut(next)
-                {
-                    entity_mut.insert(LastActivatedAt::now());
-                }
+            world.despawn(stack);
+            if was_active
+                && let Some(&next) = sibling_stacks.first()
+                && let Ok(mut entity_mut) = world.get_entity_mut(next)
+            {
+                entity_mut.insert(LastActivatedAt::now());
             }
         }
     }
@@ -330,7 +326,7 @@ fn close_panes(
             commands.entity(sibling).remove::<ChildOf>();
             commands.queue(move |world: &mut World| {
                 world.despawn(sibling);
-                PaneSplit::set_direction(world, parent, direction);
+                super::set_split_direction(world, parent, direction);
             });
         } else {
             new_active_pane = parent;
@@ -394,7 +390,7 @@ fn process_close_dialogs(world: &mut World) {
     if let Some((target, confirmed)) = resolved
         && confirmed
     {
-        target.confirm(world);
+        confirm_close_target(target, world);
     }
     if world.resource::<CloseDialog>().0.is_some() {
         return;

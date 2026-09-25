@@ -90,21 +90,6 @@ pub enum SideSheetPosition {
 #[derive(Resource)]
 pub struct SideSheetWidth(pub f32);
 
-impl SideSheetWidth {
-    pub fn apply(
-        &mut self,
-        width: f32,
-        sheets: &mut Query<(&SideSheetPosition, &mut Node), With<SideSheet>>,
-    ) {
-        self.0 = width;
-        for (position, mut node) in sheets {
-            if *position == SideSheetPosition::Left {
-                node.width = Val::Px(width);
-            }
-        }
-    }
-}
-
 fn sync_side_sheet_visibility(
     settings: Res<LayoutSettings>,
     mut width_res: ResMut<SideSheetWidth>,

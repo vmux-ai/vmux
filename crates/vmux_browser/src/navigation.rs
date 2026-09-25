@@ -5,7 +5,7 @@ use vmux_command::{
     CommandDefinition, CommandDispatch, CommandRuntimePlugin, ReadCommandRequests,
     RegisterCommandDefinitions,
 };
-use vmux_core::page::{HostHistoryDelta, HostHistoryNavigation};
+use vmux_core::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::Browser;
@@ -170,7 +170,8 @@ fn handle_browser_go_back_requests(
     pane_children: Query<&Children, With<Pane>>,
     stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut host_history: HostHistoryNavigation,
+    host_histories: Query<(), With<HostHistory>>,
+    mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -191,7 +192,11 @@ fn handle_browser_go_back_requests(
         ) else {
             continue;
         };
-        if host_history.stepped(webview, HostHistoryDelta::Back) {
+        if host_histories.contains(webview) {
+            host_history_steps.write(HostHistoryStep {
+                webview,
+                delta: HostHistoryDelta::Back,
+            });
             continue;
         }
         commands.trigger(bevy_cef::prelude::RequestGoBack { webview });
@@ -207,7 +212,8 @@ fn handle_browser_go_forward_requests(
     pane_children: Query<&Children, With<Pane>>,
     stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut host_history: HostHistoryNavigation,
+    host_histories: Query<(), With<HostHistory>>,
+    mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -228,7 +234,11 @@ fn handle_browser_go_forward_requests(
         ) else {
             continue;
         };
-        if host_history.stepped(webview, HostHistoryDelta::Forward) {
+        if host_histories.contains(webview) {
+            host_history_steps.write(HostHistoryStep {
+                webview,
+                delta: HostHistoryDelta::Forward,
+            });
             continue;
         }
         commands.trigger(bevy_cef::prelude::RequestGoForward { webview });

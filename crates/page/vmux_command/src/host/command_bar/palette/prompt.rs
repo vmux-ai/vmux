@@ -67,7 +67,7 @@ fn request_palette_prompt_history(
         prompt.loaded = None;
         snapshot.0.prompt_history.clear();
     }
-    prompt.request_history(target, &mut commands);
+    request_history(target, &mut prompt, &mut commands);
 }
 
 fn receive_palette_prompt_history(
@@ -93,29 +93,27 @@ fn receive_palette_prompt_history(
         snapshot.0.prompt_history.clone_from(&response.prompts);
         prompt.loaded = Some(flight.context);
     }
-    prompt.request_history(target, &mut commands);
+    request_history(target, &mut prompt, &mut commands);
 }
 
-impl PalettePrompt {
-    fn request_history(&mut self, target: Entity, commands: &mut Commands) {
-        if self.inflight.is_some() || self.desired == self.loaded {
-            return;
-        }
-        let Some(context) = self.desired.clone() else {
-            return;
-        };
-        self.inflight = Some(PromptFlight {
-            open_generation: self.open.generation(),
-            context: context.clone(),
-        });
-        commands.trigger(UiInput {
-            webview: target,
-            payload: PromptHistoryRequest {
-                agent: context.agent,
-                cwd: context.cwd,
-            },
-        });
+fn request_history(target: Entity, prompt: &mut PalettePrompt, commands: &mut Commands) {
+    if prompt.inflight.is_some() || prompt.desired == prompt.loaded {
+        return;
     }
+    let Some(context) = prompt.desired.clone() else {
+        return;
+    };
+    prompt.inflight = Some(PromptFlight {
+        open_generation: prompt.open.generation(),
+        context: context.clone(),
+    });
+    commands.trigger(UiInput {
+        webview: target,
+        payload: PromptHistoryRequest {
+            agent: context.agent,
+            cwd: context.cwd,
+        },
+    });
 }
 
 #[derive(Clone, PartialEq, Eq)]

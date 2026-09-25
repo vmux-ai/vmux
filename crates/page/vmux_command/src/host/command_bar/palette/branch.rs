@@ -66,7 +66,7 @@ fn request_palette_branches(
     branch.desired.clone_from(&request.project);
     snapshot.0.branch_project.clear();
     snapshot.0.branches.clear();
-    branch.request_branches(target, &mut commands);
+    request_branches(target, &mut branch, &mut commands);
 }
 
 fn receive_palette_branches(
@@ -95,24 +95,22 @@ fn receive_palette_branches(
         snapshot.0.branch_project.clone_from(&response.project);
         snapshot.0.branches.clone_from(&response.branches);
     }
-    branch.request_branches(target, &mut commands);
+    request_branches(target, &mut branch, &mut commands);
 }
 
-impl PaletteBranch {
-    fn request_branches(&mut self, target: Entity, commands: &mut Commands) {
-        if self.inflight.is_some() || self.desired.trim().is_empty() {
-            return;
-        }
-        let project = self.desired.clone();
-        self.inflight = Some(BranchFlight {
-            open_generation: self.open.generation(),
-            project: project.clone(),
-        });
-        commands.trigger(UiInput {
-            webview: target,
-            payload: StartBranchesRequest { project },
-        });
+fn request_branches(target: Entity, branch: &mut PaletteBranch, commands: &mut Commands) {
+    if branch.inflight.is_some() || branch.desired.trim().is_empty() {
+        return;
     }
+    let project = branch.desired.clone();
+    branch.inflight = Some(BranchFlight {
+        open_generation: branch.open.generation(),
+        project: project.clone(),
+    });
+    commands.trigger(UiInput {
+        webview: target,
+        payload: StartBranchesRequest { project },
+    });
 }
 
 struct BranchFlight {

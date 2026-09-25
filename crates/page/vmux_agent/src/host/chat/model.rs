@@ -372,8 +372,8 @@ struct AcpModelRequestCounter(u64);
 struct AcpModeRequestCounter(u64);
 
 pub(super) struct ModelProjection {
-    state: ModelState,
-    slash_commands: SlashCommands,
+    pub(super) state: ModelState,
+    pub(super) slash_commands: SlashCommands,
 }
 
 impl ModelProjection {
@@ -409,21 +409,6 @@ impl ModelProjection {
         }
     }
 
-    pub(super) fn write(self, webview: Entity, commands: &mut Commands) {
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-                webview,
-                &self.state,
-            ),
-        );
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-                webview,
-                &self.slash_commands,
-            ),
-        );
-    }
-
     fn options(model: &AcpModelState) -> Vec<ModelOptionEntry> {
         model
             .models
@@ -437,7 +422,7 @@ impl ModelProjection {
     }
 }
 
-pub(super) struct ModeProjection(ModeState);
+pub(super) struct ModeProjection(pub(super) ModeState);
 
 impl From<Option<&AcpModeState>> for ModeProjection {
     fn from(mode: Option<&AcpModeState>) -> Self {
@@ -448,16 +433,6 @@ impl From<Option<&AcpModeState>> for ModeProjection {
             },
             None => ModeState::default(),
         })
-    }
-}
-
-impl ModeProjection {
-    pub(super) fn write(self, webview: Entity, commands: &mut Commands) {
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
-                webview, &self.0,
-            ),
-        );
     }
 }
 
@@ -595,13 +570,13 @@ fn push_acp_model_state_to_page(
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
-        ModelProjection::new(
+        let projection = ModelProjection::new(
             Some(model_state),
             cross,
             &session.agent_id,
             settings.as_deref(),
-        )
-        .write(webview, &mut commands);
+        );
+        write_model_projection(webview, projection, &mut commands);
     }
 }
 
@@ -630,8 +605,8 @@ fn push_removed_acp_model_state_to_page(
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
-        ModelProjection::new(None, cross, &session.agent_id, settings.as_deref())
-            .write(webview, &mut commands);
+        let projection = ModelProjection::new(None, cross, &session.agent_id, settings.as_deref());
+        write_model_projection(webview, projection, &mut commands);
     }
 }
 
@@ -650,7 +625,11 @@ fn push_acp_mode_state_to_page(
             continue;
         };
         if browsers.can_emit_to(&webview) {
-            ModeProjection::from(Some(mode_state)).write(webview, &mut commands);
+            write_mode_projection(
+                webview,
+                ModeProjection::from(Some(mode_state)),
+                &mut commands,
+            );
         }
     }
 }
@@ -670,9 +649,33 @@ fn push_removed_acp_mode_state_to_page(
             continue;
         };
         if browsers.can_emit_to(&webview) {
-            ModeProjection::from(None).write(webview, &mut commands);
+            write_mode_projection(webview, ModeProjection::from(None), &mut commands);
         }
     }
+}
+
+fn write_model_projection(webview: Entity, projection: ModelProjection, commands: &mut Commands) {
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.state,
+        ),
+    );
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.slash_commands,
+        ),
+    );
+}
+
+fn write_mode_projection(webview: Entity, projection: ModeProjection, commands: &mut Commands) {
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ),
+    );
 }
 
 fn on_select_model(

@@ -104,36 +104,41 @@ impl TabWorkspaceSelection {
             worktree: Some((metadata, ready)),
         })
     }
+}
 
-    fn apply(self, tab_entity: Entity, tab: &mut Tab, commands: &mut Commands) -> String {
-        tab.startup_dir = Some(self.startup_dir.clone());
-        if crate::worktree::is_generated_tab_name(&tab.name)
-            && let Some(name) = std::path::Path::new(&self.project_dir)
-                .file_name()
-                .and_then(|name| name.to_str())
-            && !name.is_empty()
-        {
-            tab.name = name.to_string();
-        }
-        let mut entity = commands.entity(tab_entity);
-        entity.insert((
-            TabWorkspace {
-                project_dir: self.project_dir,
-            },
-            TabDirDecided,
-        ));
-        match self.worktree {
-            Some((metadata, ready)) => {
-                entity
-                    .insert((metadata, ready))
-                    .remove::<TabWorktreeUnavailable>();
-            }
-            None => {
-                entity.remove::<(TabWorktree, TabWorktreeReady, TabWorktreeUnavailable)>();
-            }
-        }
-        self.startup_dir
+fn apply_tab_workspace_selection(
+    selection: TabWorkspaceSelection,
+    tab_entity: Entity,
+    tab: &mut Tab,
+    commands: &mut Commands,
+) -> String {
+    tab.startup_dir = Some(selection.startup_dir.clone());
+    if crate::worktree::is_generated_tab_name(&tab.name)
+        && let Some(name) = std::path::Path::new(&selection.project_dir)
+            .file_name()
+            .and_then(|name| name.to_str())
+        && !name.is_empty()
+    {
+        tab.name = name.to_string();
     }
+    let mut entity = commands.entity(tab_entity);
+    entity.insert((
+        TabWorkspace {
+            project_dir: selection.project_dir,
+        },
+        TabDirDecided,
+    ));
+    match selection.worktree {
+        Some((metadata, ready)) => {
+            entity
+                .insert((metadata, ready))
+                .remove::<TabWorktreeUnavailable>();
+        }
+        None => {
+            entity.remove::<(TabWorktree, TabWorktreeReady, TabWorktreeUnavailable)>();
+        }
+    }
+    selection.startup_dir
 }
 
 fn on_page_context_request(
@@ -206,7 +211,9 @@ fn on_project_activate(
     let result = match tab_entity {
         Some(tab_entity) => match tabs.get_mut(tab_entity) {
             Ok(mut tab) => TabWorkspaceSelection::resolve(path, branch, checkout, &managed_root.0)
-                .map(|selection| selection.apply(tab_entity, &mut tab, &mut commands)),
+                .map(|selection| {
+                    apply_tab_workspace_selection(selection, tab_entity, &mut tab, &mut commands)
+                }),
             Err(error) => Err(error.to_string()),
         },
         None => Err("tab workspace is unavailable".to_string()),

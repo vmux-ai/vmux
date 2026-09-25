@@ -43,22 +43,19 @@ impl Plugin for SimulatorPlugin {
             .add_systems(
                 Update,
                 (
-                    Self::start_device_attachments,
-                    Self::finish_device_attachments,
-                    Self::announce,
+                    start_device_attachments,
+                    finish_device_attachments,
+                    announce_simulator,
                 )
                     .chain(),
             )
             .add_systems(
                 Update,
-                Self::sync_stream_activity
-                    .after(Self::finish_device_attachments)
+                sync_stream_activity
+                    .after(finish_device_attachments)
                     .after(SimulatorFocusSet),
             )
-            .add_systems(
-                Update,
-                Self::handle_screenshot_requests.in_set(SimulatorInputSet),
-            )
+            .add_systems(Update, handle_screenshot_requests.in_set(SimulatorInputSet))
             .add_plugins(input::SimulatorInputPlugin);
 
         #[cfg(target_os = "macos")]
@@ -188,178 +185,173 @@ struct AttachedDevice {
 }
 
 impl SimulatorPlugin {
-    const URL_PREFIX: &'static str = "vmux://simulator/";
-
     #[cfg(target_os = "macos")]
     pub fn exit_helper_if_requested() {
         core_simulator::exit_if_requested();
     }
+}
 
-    fn start_device_attachments(
-        views: SimulatorAttachmentCandidates,
-        wake: Option<Res<EventLoopProxyWrapper>>,
-        mut commands: Commands,
-    ) {
-        for (entity, metadata, attached_route, device, starting, failed) in &views {
-            let Ok(route) = SimulatorRoute::try_from(metadata.url.as_str()) else {
-                continue;
-            };
-            let matches = attached_route.is_some_and(|current| current.0 == route)
-                || device.is_some_and(|device| device.matches_route(&route));
-            if matches && (starting || failed || device.is_some()) {
+fn start_device_attachments(
+    views: SimulatorAttachmentCandidates,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, metadata, attached_route, device, starting, failed) in &views {
+        let Ok(route) = SimulatorRoute::try_from(metadata.url.as_str()) else {
+            continue;
+        };
+        let matches = attached_route.is_some_and(|current| current.0 == route)
+            || device.is_some_and(|device| device.matches_route(&route));
+        if matches && (starting || failed || device.is_some()) {
+            continue;
+        }
+        commands.entity(entity).remove::<(
+            DeviceAttachment,
+            AttachmentFailed,
+            Axe,
+            HidBroker,
+            input::SimulatorKeyboard,
+            SimulatorDevice,
+            DevicePoints,
+            DevicePixels,
+            StreamServer,
+            UiState<SimulatorReady>,
+            input::DeviceTouchSession,
+        )>();
+        let wake = wake.as_ref().map(|wrapper| (**wrapper).clone());
+        let attached_route = route.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            let result = AttachedDevice::start(&route);
+            if let Some(proxy) = wake {
+                let _ = proxy.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands
+            .entity(entity)
+            .insert((AttachedRoute(attached_route), DeviceAttachment(task)));
+    }
+}
+
+fn finish_device_attachments(
+    mut attachments: Query<(Entity, &mut DeviceAttachment)>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    #[cfg(target_os = "macos")] mut keyboard: MessageWriter<
+        core_simulator::HardwareKeyboardSetRequest,
+    >,
+    mut commands: Commands,
+) {
+    for (entity, mut attachment) in &mut attachments {
+        let Some(result) = future::block_on(future::poll_once(&mut attachment.0)) else {
+            continue;
+        };
+        commands.entity(entity).remove::<DeviceAttachment>();
+        let attached = match result {
+            Ok(attached) => attached,
+            Err(error) => {
+                error!("could not attach an iOS Simulator: {error}");
+                commands.entity(entity).insert(AttachmentFailed);
                 continue;
             }
-            commands.entity(entity).remove::<(
-                DeviceAttachment,
-                AttachmentFailed,
-                Axe,
-                HidBroker,
-                input::SimulatorKeyboard,
-                SimulatorDevice,
-                DevicePoints,
-                DevicePixels,
-                StreamServer,
-                UiState<SimulatorReady>,
-                input::DeviceTouchSession,
-            )>();
-            let wake = wake.as_ref().map(|wrapper| (**wrapper).clone());
-            let attached_route = route.clone();
-            let task = IoTaskPool::get().spawn(async move {
-                let result = AttachedDevice::start(&route);
-                if let Some(proxy) = wake {
-                    let _ = proxy.send_event(WinitUserEvent::WakeUp);
-                }
-                result
-            });
-            commands
-                .entity(entity)
-                .insert((AttachedRoute(attached_route), DeviceAttachment(task)));
+        };
+        info!(
+            "mirroring {} on loopback port {}",
+            attached.device.name,
+            attached.server.port()
+        );
+        #[cfg(target_os = "macos")]
+        keyboard.write(core_simulator::HardwareKeyboardSetRequest {
+            udid: attached.device.udid.clone(),
+            enabled: false,
+        });
+        let mut entity_commands = commands.entity(entity);
+        if let Some((width, height)) = attached.points {
+            entity_commands.insert(DevicePoints(width, height));
+        }
+        if let Some((width, height)) = attached.pixels {
+            entity_commands.insert(DevicePixels(width, height));
+        }
+        entity_commands.insert((
+            attached.server,
+            attached.device,
+            attached.hid,
+            attached.keyboard,
+            attached.axe,
+            input::DeviceTouchSession::default(),
+        ));
+        if let Some(wake) = wake.as_deref() {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
         }
     }
+}
 
-    fn finish_device_attachments(
-        mut attachments: Query<(Entity, &mut DeviceAttachment)>,
-        wake: Option<Res<EventLoopProxyWrapper>>,
-        #[cfg(target_os = "macos")] mut keyboard: MessageWriter<
-            core_simulator::HardwareKeyboardSetRequest,
-        >,
-        mut commands: Commands,
-    ) {
-        for (entity, mut attachment) in &mut attachments {
-            let Some(result) = future::block_on(future::poll_once(&mut attachment.0)) else {
-                continue;
-            };
-            commands.entity(entity).remove::<DeviceAttachment>();
-            let attached = match result {
-                Ok(attached) => attached,
-                Err(error) => {
-                    error!("could not attach an iOS Simulator: {error}");
-                    commands.entity(entity).insert(AttachmentFailed);
-                    continue;
-                }
-            };
-            info!(
-                "mirroring {} on loopback port {}",
-                attached.device.name,
-                attached.server.port()
-            );
-            #[cfg(target_os = "macos")]
-            keyboard.write(core_simulator::HardwareKeyboardSetRequest {
-                udid: attached.device.udid.clone(),
-                enabled: false,
-            });
-            let mut entity_commands = commands.entity(entity);
-            if let Some((width, height)) = attached.points {
-                entity_commands.insert(DevicePoints(width, height));
-            }
-            if let Some((width, height)) = attached.pixels {
-                entity_commands.insert(DevicePixels(width, height));
-            }
-            entity_commands.insert((
-                attached.server,
-                attached.device,
-                attached.hid,
-                attached.keyboard,
-                attached.axe,
-                input::DeviceTouchSession::default(),
-            ));
-            if let Some(wake) = wake.as_deref() {
-                let _ = wake.send_event(WinitUserEvent::WakeUp);
+fn announce_simulator(
+    views: SimulatorViews,
+    attachments: Query<(&StreamServer, &SimulatorDevice)>,
+    mut commands: Commands,
+) {
+    for (entity, meta, child_of, announced) in views.iter() {
+        if !meta.url.starts_with(PAGE_URL) {
+            continue;
+        }
+        let payload = match attachments.get(entity) {
+            Ok((server, device)) => SimulatorReady {
+                port: server.port(),
+                capability: server.capability().to_string(),
+                version: device
+                    .version
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+                device_name: device.name.clone(),
+                frame_width: server.frame_width(),
+                frame_height: server.frame_height(),
+                frame_stride: server.frame_stride(),
+            },
+            Err(_) => SimulatorReady::default(),
+        };
+        if let Ok((_, device)) = attachments.get(entity)
+            && let Some(canonical_url) = device.canonical_url()
+            && meta.url != canonical_url
+        {
+            let mut canonical = meta.clone();
+            canonical.url = canonical_url;
+            commands.entity(entity).insert(canonical.clone());
+            if let Some(child_of) = child_of {
+                commands.entity(child_of.parent()).insert(canonical);
             }
         }
+        if announced.is_some_and(|announced| announced.current() == Some(&payload)) {
+            continue;
+        }
+        commands.trigger(UiStateWrite::<SimulatorReady>::from_event(entity, &payload));
     }
+}
 
-    fn announce(
-        views: SimulatorViews,
-        attachments: Query<(&StreamServer, &SimulatorDevice)>,
-        mut commands: Commands,
-    ) {
-        for (entity, meta, child_of, announced) in views.iter() {
-            if !meta.url.starts_with(Self::URL_PREFIX) {
-                continue;
-            }
-            let payload = match attachments.get(entity) {
-                Ok((server, device)) => SimulatorReady {
-                    port: server.port(),
-                    capability: server.capability().to_string(),
-                    version: device
-                        .version
-                        .as_ref()
-                        .map(ToString::to_string)
-                        .unwrap_or_default(),
-                    device_name: device.name.clone(),
-                    frame_width: server.frame_width(),
-                    frame_height: server.frame_height(),
-                    frame_stride: server.frame_stride(),
-                },
-                Err(_) => SimulatorReady::default(),
-            };
-            if let Ok((_, device)) = attachments.get(entity)
-                && let Some(canonical_url) = device.canonical_url()
-                && meta.url != canonical_url
-            {
-                let mut canonical = meta.clone();
-                canonical.url = canonical_url;
-                commands.entity(entity).insert(canonical.clone());
-                if let Some(child_of) = child_of {
-                    commands.entity(child_of.parent()).insert(canonical);
-                }
-            }
-            if announced.is_some_and(|announced| announced.current() == Some(&payload)) {
-                continue;
-            }
-            commands.trigger(UiStateWrite::<SimulatorReady>::from_event(entity, &payload));
-        }
+fn sync_stream_activity(active: Res<ActiveSimulatorView>, streams: Query<(Entity, &StreamServer)>) {
+    for (entity, stream) in &streams {
+        stream.set_active(active.0 == Some(entity));
     }
+}
 
-    fn sync_stream_activity(
-        active: Res<ActiveSimulatorView>,
-        streams: Query<(Entity, &StreamServer)>,
-    ) {
-        for (entity, stream) in &streams {
-            stream.set_active(active.0 == Some(entity));
-        }
-    }
-
-    fn handle_screenshot_requests(
-        mut requests: MessageReader<SimulatorScreenshotRequest>,
-        mut responses: MessageWriter<SimulatorScreenshotResponse>,
-        active: Res<ActiveSimulatorView>,
-        attachments: Query<(Entity, &SimulatorDevice, &Axe)>,
-    ) {
-        for request in requests.read() {
-            let result = match active.select(attachments.iter().map(|(entity, _, _)| entity)) {
-                Some(entity) => {
-                    let (_, device, axe) = attachments.get(entity).unwrap();
-                    SimulatorScreenshot::capture(request.request_id, device, axe)
-                }
-                None => Err("no iOS Simulator is attached".to_string()),
-            };
-            responses.write(SimulatorScreenshotResponse {
-                request_id: request.request_id,
-                result,
-            });
-        }
+fn handle_screenshot_requests(
+    mut requests: MessageReader<SimulatorScreenshotRequest>,
+    mut responses: MessageWriter<SimulatorScreenshotResponse>,
+    active: Res<ActiveSimulatorView>,
+    attachments: Query<(Entity, &SimulatorDevice, &Axe)>,
+) {
+    for request in requests.read() {
+        let result = match active.select(attachments.iter().map(|(entity, _, _)| entity)) {
+            Some(entity) => {
+                let (_, device, axe) = attachments.get(entity).unwrap();
+                SimulatorScreenshot::capture(request.request_id, device, axe)
+            }
+            None => Err("no iOS Simulator is attached".to_string()),
+        };
+        responses.write(SimulatorScreenshotResponse {
+            request_id: request.request_id,
+            result,
+        });
     }
 }
 

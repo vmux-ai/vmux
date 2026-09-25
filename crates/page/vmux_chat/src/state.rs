@@ -13,7 +13,7 @@ impl Plugin for ChatUiStatePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChatUiStateProjection>()
             .add_message::<PageEmit>()
-            .add_systems(Last, ChatUiStateProjection::emit);
+            .add_systems(Last, emit_ui_state);
     }
 }
 
@@ -52,21 +52,24 @@ impl ChatUiStateProjection {
     {
         self.patches.push(payload.clone().into());
     }
+}
 
-    fn emit(mut projection: ResMut<Self>, mut emits: MessageWriter<PageEmit>) {
-        if projection.patches.is_empty() {
-            return;
-        }
-        projection.sequence = projection.sequence.wrapping_add(1).max(1);
-        let state = ChatUiState {
-            sequence: projection.sequence,
-            patches: std::mem::take(&mut projection.patches),
-        };
-        let Some(emit) = PageEmit::from_state(&state) else {
-            return;
-        };
-        emits.write(emit);
+fn emit_ui_state(
+    mut projection: ResMut<ChatUiStateProjection>,
+    mut emits: MessageWriter<PageEmit>,
+) {
+    if projection.patches.is_empty() {
+        return;
     }
+    projection.sequence = projection.sequence.wrapping_add(1).max(1);
+    let state = ChatUiState {
+        sequence: projection.sequence,
+        patches: std::mem::take(&mut projection.patches),
+    };
+    let Some(emit) = PageEmit::from_state(&state) else {
+        return;
+    };
+    emits.write(emit);
 }
 
 #[cfg(test)]

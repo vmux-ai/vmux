@@ -30,43 +30,45 @@ pub struct PaneSplit {
     pub direction: PaneSplitDirection,
 }
 
-impl PaneSplit {
-    pub(crate) fn set_direction(world: &mut World, entity: Entity, direction: PaneSplitDirection) {
-        if let Some(mut split) = world.get_mut::<Self>(entity) {
-            split.direction = direction;
-        }
-        if let Some(mut node) = world.get_mut::<Node>(entity) {
-            node.flex_direction = direction.flex_direction();
-            let gaps = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
-            node.column_gap = gaps.column_gap;
-            node.row_gap = gaps.row_gap;
-        }
+pub(crate) fn set_split_direction(
+    world: &mut World,
+    entity: Entity,
+    direction: PaneSplitDirection,
+) {
+    if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
+        split.direction = direction;
     }
+    if let Some(mut node) = world.get_mut::<Node>(entity) {
+        node.flex_direction = direction.flex_direction();
+        let gaps = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
+        node.column_gap = gaps.column_gap;
+        node.row_gap = gaps.row_gap;
+    }
+}
 
-    pub(crate) fn spawn_from_leaf(
-        commands: &mut Commands,
-        active: Entity,
-        direction: PaneSplitDirection,
-        existing_tabs: &[Entity],
-        activate_new: bool,
-    ) -> (Entity, Entity) {
-        let new_activity = if activate_new {
-            LastActivatedAt::now()
-        } else {
-            LastActivatedAt(0)
-        };
-        let existing = commands
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-            .id();
-        let new = commands
-            .spawn((leaf_pane_bundle(), new_activity, ChildOf(active)))
-            .id();
-        for tab in existing_tabs {
-            commands.entity(*tab).insert(ChildOf(existing));
-        }
-        commands.entity(active).insert(split_root_bundle(direction));
-        (existing, new)
+pub(crate) fn spawn_split_from_leaf(
+    commands: &mut Commands,
+    active: Entity,
+    direction: PaneSplitDirection,
+    existing_tabs: &[Entity],
+    activate_new: bool,
+) -> (Entity, Entity) {
+    let new_activity = if activate_new {
+        LastActivatedAt::now()
+    } else {
+        LastActivatedAt(0)
+    };
+    let existing = commands
+        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
+        .id();
+    let new = commands
+        .spawn((leaf_pane_bundle(), new_activity, ChildOf(active)))
+        .id();
+    for tab in existing_tabs {
+        commands.entity(*tab).insert(ChildOf(existing));
     }
+    commands.entity(active).insert(split_root_bundle(direction));
+    (existing, new)
 }
 
 #[derive(Reflect, Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -156,7 +158,7 @@ pub fn split_leaf_into_two(
     existing_tabs: &[Entity],
     activate_new: bool,
 ) -> Entity {
-    PaneSplit::spawn_from_leaf(commands, active, direction, existing_tabs, activate_new).1
+    spawn_split_from_leaf(commands, active, direction, existing_tabs, activate_new).1
 }
 
 pub fn split_or_extend(

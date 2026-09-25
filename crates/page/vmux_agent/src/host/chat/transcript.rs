@@ -358,9 +358,25 @@ fn sync_chat_to_ready_views(
                 )
             })
             .unwrap_or((false, None, None, String::new()));
-        ModelProjection::new(model_state, cross, &agent_key, settings.as_deref())
-            .write(webview, &mut commands);
-        ModeProjection::from(mode_state).write(webview, &mut commands);
+        let model = ModelProjection::new(model_state, cross, &agent_key, settings.as_deref());
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview,
+                &model.state,
+            ),
+        );
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview,
+                &model.slash_commands,
+            ),
+        );
+        let mode = ModeProjection::from(mode_state);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview, &mode.0,
+            ),
+        );
         commands.entity(webview).insert(ChatSynced);
     }
 }

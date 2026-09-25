@@ -224,7 +224,7 @@ fn handle_close_stack_requests(
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        closer.close(*request, &mut commands);
+        close_stack(*request, &mut closer, &mut commands);
     }
 }
 
@@ -244,159 +244,170 @@ struct StackCloser<'w, 's> {
     page_open_requests: MessageWriter<'w, PageOpenRequest>,
 }
 
-impl StackCloser<'_, '_> {
-    fn close(&mut self, request: CloseStackRequest, commands: &mut Commands) {
-        let Ok(pane) = self.child_of.get(request.stack).map(Relationship::get) else {
-            return;
-        };
-        let Ok(children) = self.pane_children.get(pane) else {
-            return;
-        };
-        let stacks_in_pane: Vec<Entity> = children
-            .iter()
-            .filter(|&e| self.stacks.contains(e))
-            .collect();
+fn close_stack(request: CloseStackRequest, closer: &mut StackCloser, commands: &mut Commands) {
+    let Ok(pane) = closer.child_of.get(request.stack).map(Relationship::get) else {
+        return;
+    };
+    let Ok(children) = closer.pane_children.get(pane) else {
+        return;
+    };
+    let stacks_in_pane: Vec<Entity> = children
+        .iter()
+        .filter(|&entity| closer.stacks.contains(entity))
+        .collect();
 
-        if stacks_in_pane.len() <= 1 {
-            if request.reason == CloseStackReason::Tidying {
-                return;
-            }
-            self.close_last_stack_in_pane(pane, request.stack, commands);
+    if stacks_in_pane.len() <= 1 {
+        if request.reason == CloseStackReason::Tidying {
             return;
         }
-
-        let was_active =
-            active_stack_in_pane(pane, &self.pane_children, &self.stack_ts) == Some(request.stack);
-        commands.entity(request.stack).despawn();
-        if !was_active {
-            return;
-        }
-        let successor = active_among(
-            stacks_in_pane
-                .iter()
-                .filter(|&&e| e != request.stack)
-                .filter_map(|&e| self.stack_ts.get(e).ok()),
-        );
-        if let Some(successor) = successor {
-            commands.entity(successor).insert(LastActivatedAt::now());
-        }
+        close_last_stack_in_pane(pane, request.stack, closer, commands);
+        return;
     }
 
-    fn close_last_stack_in_pane(&mut self, pane: Entity, stack: Entity, commands: &mut Commands) {
-        if let Some(tab) = self.active_tab.get()
-            && self.closes_the_tab(tab, stack)
-        {
-            return;
-        }
-
-        let split_parent = match self.child_of.get(pane).map(Relationship::get) {
-            Ok(parent) if self.splits.contains(parent) => Some(parent),
-            _ => None,
-        };
-        let Some(parent) = split_parent else {
-            commands.entity(stack).despawn();
-            let replacement = commands
-                .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                .id();
-            self.page_open_requests.write(PageOpenRequest {
-                target: PageOpenTarget::Stack(replacement),
-                url: vmux_core::EffectiveStartupUrl::resolve(self.startup_url.as_deref()),
-                request_id: None,
-            });
-            return;
-        };
-
-        commands.entity(stack).despawn();
-        let Ok(siblings) = self.pane_children.get(parent) else {
-            return;
-        };
-        let pane_siblings: Vec<Entity> = siblings
+    let was_active =
+        active_stack_in_pane(pane, &closer.pane_children, &closer.stack_ts) == Some(request.stack);
+    commands.entity(request.stack).despawn();
+    if !was_active {
+        return;
+    }
+    let successor = active_among(
+        stacks_in_pane
             .iter()
-            .filter(|&e| e != pane && (self.leaf_panes.contains(e) || self.splits.contains(e)))
-            .collect();
+            .filter(|&&entity| entity != request.stack)
+            .filter_map(|&entity| closer.stack_ts.get(entity).ok()),
+    );
+    if let Some(successor) = successor {
+        commands.entity(successor).insert(LastActivatedAt::now());
+    }
+}
 
-        if pane_siblings.len() >= 2 {
-            commands.entity(pane).despawn();
-            let new_active_pane = pane_siblings
-                .iter()
-                .copied()
-                .max_by_key(|&e| self.pane_ts.get(e).map(|(_, t)| t.0).unwrap_or(0))
-                .unwrap_or(pane_siblings[0]);
-            let focus_leaf =
-                first_leaf_descendant(new_active_pane, &self.pane_children, &self.leaf_panes);
-            commands.entity(focus_leaf).insert(LastActivatedAt::now());
-            if let Some(next) = self.first_stack_to_activate(focus_leaf) {
-                commands.entity(next).insert(LastActivatedAt::now());
-            }
-            return;
-        }
+fn close_last_stack_in_pane(
+    pane: Entity,
+    stack: Entity,
+    closer: &mut StackCloser,
+    commands: &mut Commands,
+) {
+    if let Some(tab) = closer.active_tab.get()
+        && closes_tab(tab, stack, closer)
+    {
+        return;
+    }
 
-        let Some(sibling) = pane_siblings.into_iter().next() else {
-            return;
-        };
-        let sibling_children: Vec<Entity> = self
-            .pane_children
-            .get(sibling)
-            .map(|c| c.iter().collect())
-            .unwrap_or_default();
-
-        for &child in &sibling_children {
-            commands.entity(child).insert(ChildOf(parent));
-        }
-
-        let new_active_pane;
-        if self.splits.contains(sibling) {
-            let sibling_direction = self
-                .splits
-                .get(sibling)
-                .map(|s| s.direction)
-                .unwrap_or_default();
-            new_active_pane = first_leaf_descendant(sibling, &self.pane_children, &self.leaf_panes);
-            commands.entity(sibling).remove::<ChildOf>();
-            commands.queue(move |world: &mut World| {
-                world.despawn(sibling);
-                PaneSplit::set_direction(world, parent, sibling_direction);
-            });
-        } else {
-            new_active_pane = parent;
-            commands.entity(parent).remove::<PaneSplit>();
-            commands.entity(parent).insert(Node {
-                flex_grow: 1.0,
-                flex_basis: Val::Px(0.0),
-                align_items: AlignItems::Stretch,
-                justify_content: JustifyContent::Stretch,
-                ..default()
-            });
-            commands.entity(sibling).despawn();
-        }
-
-        commands.entity(pane).despawn();
-        commands
-            .entity(new_active_pane)
-            .insert(LastActivatedAt::now());
-        let next = self.first_stack_to_activate(new_active_pane).or_else(|| {
-            sibling_children
-                .iter()
-                .copied()
-                .find(|&e| self.stacks.contains(e))
+    let split_parent = match closer.child_of.get(pane).map(Relationship::get) {
+        Ok(parent) if closer.splits.contains(parent) => Some(parent),
+        _ => None,
+    };
+    let Some(parent) = split_parent else {
+        commands.entity(stack).despawn();
+        let replacement = commands
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .id();
+        closer.page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(replacement),
+            url: vmux_core::EffectiveStartupUrl::resolve(closer.startup_url.as_deref()),
+            request_id: None,
         });
-        if let Some(next) = next {
+        return;
+    };
+
+    commands.entity(stack).despawn();
+    let Ok(siblings) = closer.pane_children.get(parent) else {
+        return;
+    };
+    let pane_siblings: Vec<Entity> = siblings
+        .iter()
+        .filter(|&entity| {
+            entity != pane && (closer.leaf_panes.contains(entity) || closer.splits.contains(entity))
+        })
+        .collect();
+
+    if pane_siblings.len() >= 2 {
+        commands.entity(pane).despawn();
+        let new_active_pane = pane_siblings
+            .iter()
+            .copied()
+            .max_by_key(|&entity| {
+                closer
+                    .pane_ts
+                    .get(entity)
+                    .map(|(_, time)| time.0)
+                    .unwrap_or(0)
+            })
+            .unwrap_or(pane_siblings[0]);
+        let focus_leaf =
+            first_leaf_descendant(new_active_pane, &closer.pane_children, &closer.leaf_panes);
+        commands.entity(focus_leaf).insert(LastActivatedAt::now());
+        if let Some(next) = first_stack_to_activate(focus_leaf, closer) {
             commands.entity(next).insert(LastActivatedAt::now());
         }
+        return;
     }
 
-    fn first_stack_to_activate(&self, pane: Entity) -> Option<Entity> {
-        active_stack_in_pane(pane, &self.pane_children, &self.stack_ts)
-            .or_else(|| first_stack_in_pane(pane, &self.pane_children, &self.stacks))
+    let Some(sibling) = pane_siblings.into_iter().next() else {
+        return;
+    };
+    let sibling_children: Vec<Entity> = closer
+        .pane_children
+        .get(sibling)
+        .map(|children| children.iter().collect())
+        .unwrap_or_default();
+
+    for &child in &sibling_children {
+        commands.entity(child).insert(ChildOf(parent));
     }
 
-    fn closes_the_tab(&mut self, tab: Entity, stack: Entity) -> bool {
-        if entity_tree_contains_stack_other_than(tab, stack, &self.all_children, &self.stacks) {
-            return false;
-        }
-        self.close_tab_requests.write(CloseTabRequest { tab });
-        true
+    let new_active_pane;
+    if closer.splits.contains(sibling) {
+        let sibling_direction = closer
+            .splits
+            .get(sibling)
+            .map(|split| split.direction)
+            .unwrap_or_default();
+        new_active_pane = first_leaf_descendant(sibling, &closer.pane_children, &closer.leaf_panes);
+        commands.entity(sibling).remove::<ChildOf>();
+        commands.queue(move |world: &mut World| {
+            world.despawn(sibling);
+            crate::pane::set_split_direction(world, parent, sibling_direction);
+        });
+    } else {
+        new_active_pane = parent;
+        commands.entity(parent).remove::<PaneSplit>();
+        commands.entity(parent).insert(Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            align_items: AlignItems::Stretch,
+            justify_content: JustifyContent::Stretch,
+            ..default()
+        });
+        commands.entity(sibling).despawn();
     }
+
+    commands.entity(pane).despawn();
+    commands
+        .entity(new_active_pane)
+        .insert(LastActivatedAt::now());
+    let next = first_stack_to_activate(new_active_pane, closer).or_else(|| {
+        sibling_children
+            .iter()
+            .copied()
+            .find(|&entity| closer.stacks.contains(entity))
+    });
+    if let Some(next) = next {
+        commands.entity(next).insert(LastActivatedAt::now());
+    }
+}
+
+fn first_stack_to_activate(pane: Entity, closer: &StackCloser) -> Option<Entity> {
+    active_stack_in_pane(pane, &closer.pane_children, &closer.stack_ts)
+        .or_else(|| first_stack_in_pane(pane, &closer.pane_children, &closer.stacks))
+}
+
+fn closes_tab(tab: Entity, stack: Entity, closer: &mut StackCloser) -> bool {
+    if entity_tree_contains_stack_other_than(tab, stack, &closer.all_children, &closer.stacks) {
+        return false;
+    }
+    closer.close_tab_requests.write(CloseTabRequest { tab });
+    true
 }
 
 #[derive(Component, Reflect, Default)]
@@ -408,14 +419,12 @@ pub struct Stack {
     pub scroll_y: f32,
 }
 
-impl Stack {
-    pub fn clear_children(entity: Entity, children: &Query<&Children>, commands: &mut Commands) {
-        let Ok(children) = children.get(entity) else {
-            return;
-        };
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
+pub fn clear_stack_children(entity: Entity, children: &Query<&Children>, commands: &mut Commands) {
+    let Ok(children) = children.get(entity) else {
+        return;
+    };
+    for child in children.iter() {
+        commands.entity(child).try_despawn();
     }
 }
 
@@ -851,7 +860,7 @@ mod tests {
         struct Target(Entity);
 
         fn clear(target: Res<Target>, children: Query<&Children>, mut commands: Commands) {
-            Stack::clear_children(target.0, &children, &mut commands);
+            clear_stack_children(target.0, &children, &mut commands);
         }
 
         let mut app = App::new();
