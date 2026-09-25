@@ -876,7 +876,8 @@ fn link_tool(request: ToolLinkRequest, store: &ToolStore) -> Result<String, Stri
         return Err("link is only valid for dotfiles".to_string());
     }
     set_manifest_entry(store, request.provider, &request.id, true)?;
-    let linked = store.apply_dotfile_package(&request.id)?;
+    let linked =
+        vmux_tool::apply_dotfile_package_in(&store.dotfiles_dir(), store.home(), &request.id)?;
     Ok(format!("linked {linked} file(s)"))
 }
 
@@ -887,7 +888,13 @@ fn unlink_tool(request: ToolUnlinkRequest, store: &ToolStore) -> Result<String, 
     if request.provider != ToolProvider::Dotfiles {
         return Err("unlink is only valid for dotfiles".to_string());
     }
-    let removed = store.disable_and_unlink_dotfile_package(&request.id)?;
+    let _ = store.load()?;
+    let removed = vmux_tool::disable_and_unlink_dotfile_package_in(
+        &store.manifest_path(),
+        &store.dotfiles_dir(),
+        store.home(),
+        &request.id,
+    )?;
     Ok(format!("unlinked {removed} file(s)"))
 }
 
@@ -2845,7 +2852,7 @@ fn scan_mcp(
 }
 
 fn scan_dotfiles(store: &ToolStore, manifest: &mut ToolsManifest) -> ToolCategory {
-    let discovered = store.dotfile_packages().unwrap_or_default();
+    let discovered = vmux_tool::dotfile_packages_in(&store.dotfiles_dir());
     for package in &discovered {
         manifest.set_dotfile_package(package, true);
     }
@@ -2854,42 +2861,44 @@ fn scan_dotfiles(store: &ToolStore, manifest: &mut ToolsManifest) -> ToolCategor
     let mut items = Vec::new();
     for package in package_names {
         let managed = manifest.dotfiles.packages.contains(&package);
-        let (status, detail, operations) = match store.plan_dotfile_package(&package) {
-            Ok(plan) => {
-                let detail = format!(
-                    "{} linked · {} missing · {} conflicts",
-                    plan.linked(),
-                    plan.missing(),
-                    plan.conflicts()
-                );
-                let status = if plan.conflicts() > 0 {
-                    ToolStatus::Conflict
-                } else if plan.missing() > 0 {
-                    if managed {
-                        ToolStatus::Missing
+        let (status, detail, operations) =
+            match vmux_tool::plan_dotfile_package_in(&store.dotfiles_dir(), store.home(), &package)
+            {
+                Ok(plan) => {
+                    let detail = format!(
+                        "{} linked · {} missing · {} conflicts",
+                        plan.linked(),
+                        plan.missing(),
+                        plan.conflicts()
+                    );
+                    let status = if plan.conflicts() > 0 {
+                        ToolStatus::Conflict
+                    } else if plan.missing() > 0 {
+                        if managed {
+                            ToolStatus::Missing
+                        } else {
+                            ToolStatus::Available
+                        }
                     } else {
-                        ToolStatus::Available
-                    }
-                } else {
-                    ToolStatus::Installed
-                };
-                let operations = if managed {
-                    vec![ToolOperationKind::Link, ToolOperationKind::Unlink]
-                } else {
-                    vec![ToolOperationKind::Link]
-                };
-                (status, detail, operations)
-            }
-            Err(error) => (
-                ToolStatus::Missing,
-                error,
-                if managed {
-                    vec![ToolOperationKind::Unlink]
-                } else {
-                    Vec::new()
-                },
-            ),
-        };
+                        ToolStatus::Installed
+                    };
+                    let operations = if managed {
+                        vec![ToolOperationKind::Link, ToolOperationKind::Unlink]
+                    } else {
+                        vec![ToolOperationKind::Link]
+                    };
+                    (status, detail, operations)
+                }
+                Err(error) => (
+                    ToolStatus::Missing,
+                    error,
+                    if managed {
+                        vec![ToolOperationKind::Unlink]
+                    } else {
+                        Vec::new()
+                    },
+                ),
+            };
         items.push(ToolItem {
             provider: ToolProvider::Dotfiles,
             id: package.clone(),
@@ -2989,8 +2998,7 @@ fn import_provider(
     match provider {
         ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => {
             if !path.is_empty() {
-                let (formulae, casks) = store.import_brewfile(Path::new(path))?;
-                Ok(format!("imported {formulae} formulae and {casks} casks"))
+                Err("Brewfile import request reached the desktop fallback".to_string())
             } else {
                 let formulae = scan_homebrew(false, false)?;
                 let casks = scan_homebrew(true, false)?;
@@ -3004,8 +3012,7 @@ fn import_provider(
         }
         ToolProvider::Npm => {
             if !path.is_empty() {
-                let imported = store.import_npm_manifest(Path::new(path))?;
-                Ok(format!("imported {imported} NPM package(s)"))
+                Err("NPM manifest import request reached the desktop fallback".to_string())
             } else {
                 import_scanned_inventory(store, provider, scan_npm(false)?)
             }
@@ -3014,20 +3021,7 @@ fn import_provider(
         ToolProvider::Lsp => import_scanned_inventory(store, provider, scan_lsp(false)?),
         ToolProvider::Mcp => Err("MCP import request reached the desktop fallback".to_string()),
         ToolProvider::Dotfiles => {
-            if path.is_empty() {
-                let packages = store.dotfile_packages()?;
-                let mut manifest = store.load()?;
-                let mut imported = 0;
-                for package in packages {
-                    imported += usize::from(!manifest.dotfiles.packages.contains(&package));
-                    manifest.set_dotfile_package(&package, true);
-                }
-                store.save(&manifest)?;
-                Ok(format!("imported {imported} dotfile package(s)"))
-            } else {
-                let imported = store.import_dotfiles(Path::new(path))?;
-                Ok(format!("imported {imported} dotfile package(s)"))
-            }
+            Err("dotfile import request reached the desktop fallback".to_string())
         }
     }
 }
@@ -3073,7 +3067,8 @@ fn apply_manifest(store: &ToolStore) -> Result<String, String> {
         install_provider(store, item.provider, &item.id)?;
         installed += 1;
     }
-    let linked = store.apply_enabled_dotfiles(&manifest)?;
+    let linked =
+        vmux_tool::apply_enabled_dotfiles_in(&manifest, &store.dotfiles_dir(), store.home())?;
     Ok(format!(
         "installed {installed} package(s), linked {linked} file(s)"
     ))
@@ -3128,7 +3123,7 @@ fn install_provider(store: &ToolStore, provider: ToolProvider, id: &str) -> Resu
             )?;
         }
         ToolProvider::Dotfiles => {
-            store.apply_dotfile_package(id)?;
+            vmux_tool::apply_dotfile_package_in(&store.dotfiles_dir(), store.home(), id)?;
         }
         ToolProvider::Mcp => return Err("MCP servers are configuration, not packages".into()),
     }
@@ -3153,7 +3148,8 @@ fn uninstall_provider(store: &ToolStore, provider: ToolProvider, id: &str) -> Re
                 .map_err(|error| error.to_string())?;
         }
         ToolProvider::Dotfiles => {
-            store.unlink_dotfile_package(id)?;
+            let _ = store.load()?;
+            vmux_tool::unlink_dotfile_package_in(&store.dotfiles_dir(), store.home(), id)?;
         }
         ToolProvider::Mcp => return Err("forget the MCP server instead".to_string()),
     }

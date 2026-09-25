@@ -103,6 +103,8 @@ struct NotifyArgs {
     body: Option<String>,
 }
 
+type AddedToolRequest<T> = (With<ToolCall>, Added<T>);
+
 fn parse(mut commands: Commands, calls: ToolCalls<ApplicationTool>) {
     for (request, call, tool) in calls.iter() {
         let parsed = match tool {
@@ -124,7 +126,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<ApplicationTool>) {
 
 fn open_command_bar(
     mut commands: Commands,
-    requests: Query<(Entity, &OpenCommandBarArgs), (With<ToolCall>, Added<OpenCommandBarArgs>)>,
+    requests: Query<(Entity, &OpenCommandBarArgs), AddedToolRequest<OpenCommandBarArgs>>,
 ) {
     for (entity, args) in &requests {
         let result = match args.mode.as_deref().unwrap_or("default") {
@@ -143,7 +145,7 @@ fn open_command_bar(
 
 fn rename_profile(
     mut commands: Commands,
-    requests: Query<(Entity, &RenameProfileArgs), (With<ToolCall>, Added<RenameProfileArgs>)>,
+    requests: Query<(Entity, &RenameProfileArgs), AddedToolRequest<RenameProfileArgs>>,
 ) {
     for (entity, args) in &requests {
         let name = args.name.trim();
@@ -160,7 +162,7 @@ fn rename_profile(
 
 fn notify(
     mut commands: Commands,
-    requests: Query<(Entity, &NotifyArgs), (With<ToolCall>, Added<NotifyArgs>)>,
+    requests: Query<(Entity, &NotifyArgs), AddedToolRequest<NotifyArgs>>,
 ) {
     for (entity, args) in &requests {
         commands

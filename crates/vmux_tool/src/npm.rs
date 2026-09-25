@@ -106,22 +106,20 @@ fn import_npm_manifest_system(
         commands
             .entity(entity)
             .insert(ToolOperationTask::spawn(move || {
-                let packages = store.import_npm_manifest(&path)?;
+                let packages = import_npm_manifest_in(&store, &path)?;
                 Ok(ImportedNpmManifest { packages })
             }));
     }
 }
 
 pub fn import_npm_manifest(path: &Path) -> Result<usize, String> {
-    ToolStore::current().import_npm_manifest(path)
+    import_npm_manifest_in(&ToolStore::current(), path)
 }
 
-impl ToolStore {
-    pub fn import_npm_manifest(&self, path: &Path) -> Result<usize, String> {
-        self.migrate_legacy_storage()?;
-        let path = self.expand_user_path(path)?;
-        import_npm_manifest_to(&path, &self.manifest_path())
-    }
+fn import_npm_manifest_in(store: &ToolStore, path: &Path) -> Result<usize, String> {
+    store.migrate_legacy_storage()?;
+    let path = store.expand_user_path(path)?;
+    import_npm_manifest_to(&path, &store.manifest_path())
 }
 
 pub fn import_npm_manifest_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
