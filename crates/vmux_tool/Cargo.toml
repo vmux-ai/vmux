@@ -16,6 +16,17 @@ vmux_path = { path = "../vmux_path" }
 vmux_profile = { path = "../vmux_profile" }
 vmux_core = { path = "../vmux_core" }
 
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+ring = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+vmux_api = { path = "../vmux_api" }
+vmux_layout = { path = "../page/vmux_layout" }
+
 [dev-dependencies]
 tempfile = "3"
 

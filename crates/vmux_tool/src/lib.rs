@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+#[cfg(not(target_os = "ios"))]
+mod connection;
 mod dotfiles;
 mod homebrew;
 mod manifest;
@@ -16,6 +18,8 @@ use vmux_core::tool::{
     ToolLinkRequest, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
 };
 
+#[cfg(not(target_os = "ios"))]
+pub use connection::McpConnectionPlugin;
 pub use dotfiles::*;
 pub use homebrew::*;
 pub use manifest::*;

@@ -10237,6 +10237,7 @@ dependencies = [
  "vmux_start",
  "vmux_team",
  "vmux_terminal",
+ "vmux_tool",
 ]
 
 [[package]]
@@ -10651,25 +10652,15 @@ name = "vmux_mcp"
 version = "0.0.34"
 dependencies = [
  "base64 0.22.1",
- "bevy",
  "bevy_app",
- "bevy_cef",
  "bevy_ecs",
- "parking_lot",
- "reqwest",
- "ring",
  "ron 0.8.1",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
- "url",
- "uuid",
  "vmux_api",
  "vmux_client",
- "vmux_core",
- "vmux_layout",
- "vmux_tool",
 ]
 
 [[package]]
@@ -11001,14 +10992,23 @@ dependencies = [
 name = "vmux_tool"
 version = "0.0.34"
 dependencies = [
+ "bevy",
  "bevy_app",
+ "bevy_cef",
  "bevy_ecs",
  "bevy_tasks",
+ "parking_lot",
+ "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",
  "toml",
+ "url",
+ "uuid",
+ "vmux_api",
  "vmux_core",
+ "vmux_layout",
  "vmux_path",
  "vmux_profile",
 ]
