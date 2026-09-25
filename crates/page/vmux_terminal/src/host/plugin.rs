@@ -89,7 +89,7 @@ impl Plugin for TerminalServicePlugin {
     fn build(&self, app: &mut App) {
         let service_wake = service_wake_callback(app);
         ensure_service_started();
-        app.insert_resource(ServiceConnectRetry::new());
+        app.world_mut().spawn(ServiceConnectRetry::new());
         app.insert_resource(ServiceWakeCallback(service_wake))
             .add_plugins(TerminalUpdatePlugin)
             .add_systems(
@@ -164,7 +164,7 @@ impl Plugin for TerminalUpdatePlugin {
             .add_systems(
                 Update,
                 (
-                    try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
+                    try_connect_service,
                     resolve_pending_terminal_cwd,
                     poll_service_messages
                         .in_set(WriteCommandRequests)
@@ -236,7 +236,7 @@ pub struct RestartPty {
     pub entity: Entity,
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 struct ServiceConnectRetry {
     timer: Timer,
     next_delay_ms: u64,
@@ -809,57 +809,25 @@ fn broadcast_service_unavailable(
 }
 
 fn try_connect_service(
-    mut retry: ResMut<ServiceConnectRetry>,
+    mut retries: Query<(Entity, &mut ServiceConnectRetry)>,
     time: Res<Time>,
     mut commands: Commands,
     wake: Res<ServiceWakeCallback>,
     terminal_webviews: Query<Entity, With<Terminal>>,
 ) {
-    retry.timer.tick(time.delta());
-    if !retry.timer.just_finished() {
-        return;
-    }
-
-    retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
-
-    let sock = vmux_service::ServicePaths::current().socket();
-    if !sock.exists() {
-        if retry.remaining_attempts == 0 {
-            tracing::warn!("service socket never appeared — giving up");
-            commands.remove_resource::<ServiceConnectRetry>();
-            broadcast_service_unavailable(
-                &terminal_webviews,
-                &mut commands,
-                "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
-            );
-        } else {
-            retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
-            retry.timer = Timer::new(
-                std::time::Duration::from_millis(retry.next_delay_ms),
-                TimerMode::Once,
-            );
+    for (entity, mut retry) in &mut retries {
+        retry.timer.tick(time.delta());
+        if !retry.timer.just_finished() {
+            continue;
         }
-        return;
-    }
 
-    match ServiceHandle::connect_with_wake(wake.0.clone()) {
-        Some(handle) => {
-            tracing::info!("connected to service after retry");
-            handle.send(ClientMessage::SubscribeAgentCommands);
-            commands.insert_resource(ServiceClient(handle));
-            commands.remove_resource::<ServiceConnectRetry>();
-            broadcast_service_unavailable(&terminal_webviews, &mut commands, String::new());
-        }
-        None => {
+        retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
+
+        let sock = vmux_service::ServicePaths::current().socket();
+        if !sock.exists() {
             if retry.remaining_attempts == 0 {
-                tracing::error!("failed to connect to service after all retries");
-                let log_path = vmux_service::ServicePaths::current().log();
-                if let Ok(log) = std::fs::read_to_string(&log_path)
-                    && !log.is_empty()
-                {
-                    tracing::error!(service_log = %log, "service log contents");
-                }
-                commands.remove_resource::<ServiceConnectRetry>();
+                tracing::warn!("service socket never appeared — giving up");
+                commands.entity(entity).despawn();
                 broadcast_service_unavailable(
                     &terminal_webviews,
                     &mut commands,
@@ -871,6 +839,41 @@ fn try_connect_service(
                     std::time::Duration::from_millis(retry.next_delay_ms),
                     TimerMode::Once,
                 );
+            }
+            continue;
+        }
+
+        match ServiceHandle::connect_with_wake(wake.0.clone()) {
+            Some(handle) => {
+                tracing::info!("connected to service after retry");
+                handle.send(ClientMessage::SubscribeAgentCommands);
+                commands.insert_resource(ServiceClient(handle));
+                commands.entity(entity).despawn();
+                broadcast_service_unavailable(&terminal_webviews, &mut commands, String::new());
+            }
+            None => {
+                if retry.remaining_attempts == 0 {
+                    tracing::error!("failed to connect to service after all retries");
+                    let log_path = vmux_service::ServicePaths::current().log();
+                    if let Ok(log) = std::fs::read_to_string(&log_path)
+                        && !log.is_empty()
+                    {
+                        tracing::error!(service_log = %log, "service log contents");
+                    }
+                    commands.entity(entity).despawn();
+                    broadcast_service_unavailable(
+                        &terminal_webviews,
+                        &mut commands,
+                        "vmux service unavailable \u{2014} run `vmux service logs` for details."
+                            .into(),
+                    );
+                } else {
+                    retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
+                    retry.timer = Timer::new(
+                        std::time::Duration::from_millis(retry.next_delay_ms),
+                        TimerMode::Once,
+                    );
+                }
             }
         }
     }
