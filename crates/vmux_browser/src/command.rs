@@ -21,10 +21,9 @@ use vmux_layout::event::{
     SideSheetStackActivateRequest, SideSheetStackCloseRequest, SideSheetStackCreateRequest,
 };
 use vmux_layout::{
-    Header, LayoutCef,
+    Header, LayoutCef, ReloadRevision,
     event::{
         HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
-        ReloadEffect,
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{
@@ -502,40 +501,42 @@ fn on_header_address_focus(
 
 fn on_reload_notify_header(
     _trigger: On<RequestReload>,
-    layouts: Query<(Entity, &HostWindow), (With<LayoutCef>, With<PageReady>)>,
+    mut layouts: Query<
+        (Entity, &HostWindow, &mut ReloadRevision),
+        (With<LayoutCef>, With<PageReady>),
+    >,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     mut commands: Commands,
 ) {
-    let Some(cef_e) = focused_window.0.and_then(|window| {
+    let Some((cef_e, mut revision)) = focused_window.0.and_then(|window| {
         layouts
-            .iter()
-            .find_map(|(entity, host)| (host.0 == window).then_some(entity))
+            .iter_mut()
+            .find_map(|(entity, host, revision)| (host.0 == window).then_some((entity, revision)))
     }) else {
         return;
     };
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
-        cef_e,
-        &ReloadEffect,
-    ));
+    let effect = revision.next_effect();
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
 }
 
 fn on_hard_reload_notify_header(
     _trigger: On<RequestReloadIgnoreCache>,
-    layouts: Query<(Entity, &HostWindow), (With<LayoutCef>, With<PageReady>)>,
+    mut layouts: Query<
+        (Entity, &HostWindow, &mut ReloadRevision),
+        (With<LayoutCef>, With<PageReady>),
+    >,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     mut commands: Commands,
 ) {
-    let Some(cef_e) = focused_window.0.and_then(|window| {
+    let Some((cef_e, mut revision)) = focused_window.0.and_then(|window| {
         layouts
-            .iter()
-            .find_map(|(entity, host)| (host.0 == window).then_some(entity))
+            .iter_mut()
+            .find_map(|(entity, host, revision)| (host.0 == window).then_some((entity, revision)))
     }) else {
         return;
     };
-    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
-        cef_e,
-        &ReloadEffect,
-    ));
+    let effect = revision.next_effect();
+    commands.trigger(UiStateWrite::<LayoutUiState>::from_event(cef_e, &effect));
 }
 
 fn on_side_sheet_resize(

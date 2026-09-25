@@ -16,8 +16,18 @@ impl Plugin for LayoutCefPlugin {
 pub struct Browser;
 
 #[derive(Component)]
-#[require(crate::LayoutUiStateUpdates)]
+#[require(crate::LayoutUiStateUpdates, ReloadRevision)]
 pub struct LayoutCef;
+
+#[derive(Component, Default)]
+pub struct ReloadRevision(u64);
+
+impl ReloadRevision {
+    pub fn next_effect(&mut self) -> crate::event::ReloadEffect {
+        self.0 = self.0.wrapping_add(1).max(1);
+        crate::event::ReloadEffect { revision: self.0 }
+    }
+}
 
 #[derive(Component)]
 pub struct Loading;

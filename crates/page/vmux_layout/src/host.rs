@@ -40,7 +40,7 @@ mod webview_reveal;
 mod zoom;
 
 pub use cef::{
-    Browser, LayoutCef, Loading, NavigationState, apply_cef_state_from_webview,
+    Browser, LayoutCef, Loading, NavigationState, ReloadRevision, apply_cef_state_from_webview,
     mirror_metadata_to_url,
 };
 pub use contract::LayoutContractPlugin;
