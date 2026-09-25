@@ -19,7 +19,6 @@ pub fn Page() -> Element {
     use_context_provider(|| state);
     let GitPageState {
         snapshot,
-        controller,
         branch_prompt,
         mut shortcut_help,
         ..
@@ -53,10 +52,7 @@ pub fn Page() -> Element {
                     },
                     repeat: event.is_auto_repeating(),
                 };
-                let captured = request.captures_browser_default(
-                    &controller(),
-                    snapshot().repository.is_some(),
-                );
+                let captured = request.captures_browser_default(snapshot().repository.is_some());
                 if send(&request).is_ok() && captured {
                     event.prevent_default();
                     event.stop_propagation();
