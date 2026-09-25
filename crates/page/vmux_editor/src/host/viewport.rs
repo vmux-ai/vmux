@@ -42,6 +42,7 @@ pub(crate) struct FileViewport {
     pub(crate) wrap_columns: u16,
     pub(crate) word_wrap: vmux_core::editor::WordWrap,
     pub(crate) word_wrap_column: u16,
+    pub(crate) scroll_revision: u64,
 }
 
 impl FileViewport {
@@ -51,7 +52,9 @@ impl FileViewport {
             return None;
         }
         self.top_row = top;
+        self.scroll_revision = self.scroll_revision.wrapping_add(1).max(1);
         Some(FileScrollByEvent {
+            revision: self.scroll_revision,
             lines: top as i32 - previous as i32,
         })
     }
@@ -553,6 +556,7 @@ mod tests {
                 wrap_columns: 0,
                 word_wrap: vmux_core::editor::WordWrap::Off,
                 word_wrap_column: 80,
+                scroll_revision: 0,
             };
             (edit, viewport)
         }
@@ -590,6 +594,7 @@ mod tests {
                         wrap_columns: 0,
                         word_wrap: vmux_core::editor::WordWrap::Off,
                         word_wrap_column: 80,
+                        scroll_revision: 0,
                     },
                     EditorKeymap(vmux_core::editor::KeymapKind::Vscode.make(&[], "\\")),
                 ))
@@ -631,6 +636,7 @@ mod tests {
                 wrap_columns,
                 word_wrap: vmux_core::editor::WordWrap::On,
                 word_wrap_column: 80,
+                scroll_revision: 0,
             }
         }
 

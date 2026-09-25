@@ -127,11 +127,25 @@ pub(super) struct ExplorerState {
     root: PathBuf,
     open_editors: Vec<PathBuf>,
     focus_path: Option<PathBuf>,
+    focus_revision: u64,
     active_editor: Option<PathBuf>,
     active_editor_is_dir: bool,
 }
 
 impl ExplorerState {
+    pub(super) fn focus_effect(
+        &mut self,
+        path: &Path,
+        reveal: vmux_core::event::ExplorerReveal,
+    ) -> vmux_core::event::ExplorerFocusEvent {
+        self.focus_revision = self.focus_revision.wrapping_add(1).max(1);
+        vmux_core::event::ExplorerFocusEvent {
+            revision: self.focus_revision,
+            path: path.to_string_lossy().into_owned(),
+            reveal,
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn open_editors(&self) -> &[PathBuf] {
         &self.open_editors

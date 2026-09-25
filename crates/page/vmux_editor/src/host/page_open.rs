@@ -43,6 +43,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
                 wrap_columns: 0,
                 word_wrap: vmux_core::editor::WordWrap::default(),
                 word_wrap_column: 80,
+                scroll_revision: 0,
             },
             ExplorerState::default(),
             Browser,

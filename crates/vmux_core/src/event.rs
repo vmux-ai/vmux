@@ -32,7 +32,6 @@ mod file_event_tests {
             root_name: "VMUX".into(),
             root_path: "/r".into(),
             current_path: "/r/src/lib.rs".into(),
-            focus_path: "/r/src/lib.rs".into(),
             loading: false,
             rows: vec![TreeRow {
                 name: "src".into(),

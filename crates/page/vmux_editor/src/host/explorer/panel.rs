@@ -189,6 +189,7 @@ fn on_explorer_panel_set_visible(
                 entity,
                 &file_view.path,
                 vmux_core::event::ExplorerReveal::Followed,
+                &mut state,
                 &browsers,
                 &mut commands,
             );

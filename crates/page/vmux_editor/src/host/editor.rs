@@ -342,6 +342,7 @@ mod tests {
                         wrap_columns: 0,
                         word_wrap: vmux_core::editor::WordWrap::default(),
                         word_wrap_column: 80,
+                        scroll_revision: 0,
                     },
                     PageMetadata::default(),
                 ))

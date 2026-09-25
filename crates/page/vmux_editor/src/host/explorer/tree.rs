@@ -188,16 +188,14 @@ pub(super) fn emit_explorer_focus(
     entity: Entity,
     current: &Path,
     reveal: ExplorerReveal,
+    state: &mut ExplorerState,
     browsers: &Browsers,
     commands: &mut Commands,
 ) {
     if browsers.can_emit_to(&entity) {
+        let effect = state.focus_effect(current, reveal);
         commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
-            entity,
-            &ExplorerFocusEvent {
-                path: current.to_string_lossy().into_owned(),
-                reveal,
-            },
+            entity, &effect,
         ));
     }
 }
@@ -318,6 +316,7 @@ fn reveal_on_file_change(
             entity,
             &view.path,
             ExplorerReveal::Followed,
+            &mut state,
             browsers,
             &mut commands,
         );
@@ -342,13 +341,9 @@ fn emit_explorer_tree(
             path == &state.root || rows.iter().any(|row| Path::new(&row.path) == path)
         });
         let focus_path = if focus_ready {
-            state
-                .focus_path
-                .take()
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default()
+            state.focus_path.take()
         } else {
-            String::new()
+            None
         };
         commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
@@ -356,11 +351,20 @@ fn emit_explorer_tree(
                 root_name: ExplorerRoot::name(&state.root),
                 root_path: state.root.to_string_lossy().into_owned(),
                 current_path: view.path.to_string_lossy().into_owned(),
-                focus_path,
                 loading: trees.is_loading(&state.root, &state.root),
                 rows,
             },
         ));
+        if let Some(focus_path) = focus_path {
+            emit_explorer_focus(
+                entity,
+                &focus_path,
+                ExplorerReveal::Followed,
+                &mut state,
+                &browsers,
+                &mut commands,
+            );
+        }
         commands.entity(entity).remove::<ExplorerTreeDirty>();
     }
 }
@@ -453,6 +457,7 @@ fn on_explorer_reveal_current(
             entity,
             &view.path,
             ExplorerReveal::Requested,
+            &mut state,
             &browsers,
             &mut commands,
         );

@@ -293,6 +293,7 @@ pub struct FileScrollEvent {
 
 #[vmux_api::contract(Copy, Eq, Default)]
 pub struct FileScrollByEvent {
+    pub revision: u64,
     pub lines: i32,
 }
 

@@ -945,6 +945,7 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
     let hit_focus = TreeFocus {
         key: use_signal(String::new),
     };
+    let mut focus_revision = use_signal(|| 0u64);
     let mut query = search.query;
     let ime = use_ime_guard();
 
@@ -957,6 +958,10 @@ fn SearchView(view: Signal<SidebarView>) -> Element {
     let focus_event = use_file_ui::<ExplorerFocusEvent>();
     use_effect(move || {
         focus_event.for_each(|event| {
+            if event.revision <= *focus_revision.peek() {
+                return;
+            }
+            focus_revision.set(event.revision);
             search.showing(&event.path);
         })
     });
@@ -1267,6 +1272,7 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
         generation: row_generation,
     };
     let focus_generation = use_signal(|| 0u32);
+    let mut focus_revision = use_signal(|| 0u64);
     let scroller = use_signal(|| None::<Rc<MountedData>>);
     let files_list = use_signal(|| None::<Rc<MountedData>>);
     let files_top = use_signal(|| 0usize);
@@ -1322,15 +1328,15 @@ pub fn ExplorerPanel(visible: Signal<bool>, caret_line: u32, view: Signal<Sideba
             current_path.set(e.current_path);
             root_loading.set(e.loading);
             tree.reconcile(e.rows);
-            if visible() && !e.focus_path.is_empty() {
-                tree_focus.at(e.focus_path.clone());
-                schedule_tree_focus(e.focus_path, focus_generation, ExplorerReveal::Followed);
-            }
         })
     });
     let focus_event = use_file_ui::<ExplorerFocusEvent>();
     use_effect(move || {
         focus_event.for_each(|e| {
+            if e.revision <= *focus_revision.peek() {
+                return;
+            }
+            focus_revision.set(e.revision);
             if current_path() != e.path {
                 current_path.set(e.path.clone());
             }
