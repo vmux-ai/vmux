@@ -12,7 +12,7 @@ use objc2_app_kit::{NSApplication, NSMenuItem};
 #[cfg(target_os = "macos")]
 use objc2_foundation::MainThreadMarker;
 use parking_lot::Mutex;
-use std::sync::LazyLock;
+use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use vmux_browser::HostFocusIntent;
 #[cfg(target_os = "macos")]
@@ -123,7 +123,9 @@ impl OsMenuSelect {
     }
 }
 
-static PENDING_MENU_EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+#[derive(Component, Clone)]
+struct OsMenuInbox(Arc<Mutex<Vec<String>>>);
+
 const WINDOW_CLOSE_SUPPRESSION_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
     std::time::Duration::from_millis(1500);
@@ -162,13 +164,16 @@ fn setup(world: &mut World) {
         .get_resource::<bevy::winit::EventLoopProxyWrapper>()
         .map(|w| (**w).clone());
 
+    let inbox = OsMenuInbox(Arc::new(Mutex::new(Vec::new())));
+    let callback_inbox = inbox.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        PENDING_MENU_EVENTS.lock().push(event.id.0.clone());
+        callback_inbox.0.lock().push(event.id.0.clone());
         if let Some(proxy) = &proxy {
             let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
         }
     }));
 
+    world.spawn((Name::new("OS menu runtime"), inbox));
     world.insert_non_send(OsMenuResource {
         menu,
         context_menu: None,
@@ -473,6 +478,7 @@ fn sync_close_menu_item(
 
 fn forward_menu_events(
     mut commands: Commands,
+    inbox: Option<Single<&OsMenuInbox>>,
     menu_entries: Query<(Entity, &OsMenuEntry)>,
     definitions: Query<&CommandDefinition>,
     users: Query<Entity, With<vmux_core::team::User>>,
@@ -481,7 +487,10 @@ fn forward_menu_events(
     mut last_menu_command: ResMut<LastMenuCommandAt>,
 ) {
     let drained = {
-        let mut events = PENDING_MENU_EVENTS.lock();
+        let Some(inbox) = inbox else {
+            return;
+        };
+        let mut events = inbox.0.lock();
         if events.is_empty() {
             return;
         }
