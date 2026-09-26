@@ -1,7 +1,7 @@
 use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use vmux_api::protocol::{AgentRequest, SharedAgentCommand, SharedMessage, SharedResponse};
+use vmux_api::protocol::{SharedAgentCommand, SharedMessage, SharedResponse};
 use vmux_api::room::{
     ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteAgent, RemoteApproval,
     RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
@@ -134,15 +134,13 @@ impl Api {
         sid: &str,
         request: &PromptRequest,
     ) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(
-            sid,
-            AgentRequest::Input {
-                text: request.text.clone(),
-                context: None,
-                attachments: request.attachments.clone(),
-                preferred_mode: None,
-            },
-        );
+        let message = SharedMessage::AgentInput {
+            sid: sid.to_string(),
+            text: request.text.clone(),
+            context: None,
+            attachments: request.attachments.clone(),
+            preferred_mode: None,
+        };
         self.applied(self.quic.request(message).await)
     }
 
@@ -160,7 +158,9 @@ impl Api {
     }
 
     pub(crate) async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(sid, AgentRequest::Cancel);
+        let message = SharedMessage::AgentCancel {
+            sid: sid.to_string(),
+        };
         self.applied(self.quic.request(message).await)
     }
 
@@ -169,13 +169,11 @@ impl Api {
         sid: &str,
         request: &ApprovalRequest,
     ) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(
-            sid,
-            AgentRequest::Approve {
-                call_id: request.call_id.clone(),
-                decision: request.decision,
-            },
-        );
+        let message = SharedMessage::AgentApprove {
+            sid: sid.to_string(),
+            call_id: request.call_id.clone(),
+            decision: request.decision,
+        };
         self.applied(self.quic.request(message).await)
     }
 
@@ -197,12 +195,10 @@ impl Api {
         sid: &str,
         query: &str,
     ) -> Result<Vec<RemoteMediaEntry>, ApiError> {
-        let request = SharedMessage::agent(
-            sid,
-            AgentRequest::ListMedia {
-                query: query.to_string(),
-            },
-        );
+        let request = SharedMessage::AgentListMedia {
+            sid: sid.to_string(),
+            query: query.to_string(),
+        };
         match self.quic.request(request).await {
             Ok(SharedResponse::Media(entries)) => Ok(entries),
             Ok(_) => Err(ApiError::Message(translate(

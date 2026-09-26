@@ -184,10 +184,10 @@ impl AgentQueryRoutes<'_> {
             AgentQuery::ListCommands => {
                 self.commands.write(CommandListRequest { request_id });
             }
-            AgentQuery::ReadTerminal { .. }
-            | AgentQuery::ReadTerminalFull { .. }
-            | AgentQuery::CommandExit { .. }
-            | AgentQuery::RunCompletion { .. } => {}
+            AgentQuery::ReadProcessOutput { .. }
+            | AgentQuery::ReadProcessTranscript { .. }
+            | AgentQuery::ProcessCommandExit { .. }
+            | AgentQuery::ProcessRunCompletion { .. } => {}
         }
     }
 }

@@ -66,16 +66,16 @@ pub enum AgentQuery {
     ReadLayout {
         anchor: Option<ProcessId>,
     },
-    ReadTerminal {
+    ReadProcessOutput {
         process_id: ProcessId,
     },
-    ReadTerminalFull {
+    ReadProcessTranscript {
         process_id: ProcessId,
     },
-    CommandExit {
+    ProcessCommandExit {
         process_id: ProcessId,
     },
-    RunCompletion {
+    ProcessRunCompletion {
         process_id: ProcessId,
     },
     GetSettings,

@@ -482,7 +482,7 @@ fn read_terminal(
         let query = args
             .terminal
             .parse()
-            .map(|process_id| AgentQuery::ReadTerminal { process_id })
+            .map(|process_id| AgentQuery::ReadProcessOutput { process_id })
             .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string());
         commands.entity(entity).insert(ToolQuery(query));
     }
@@ -708,7 +708,7 @@ async fn run_completion(
     connection
         .send(&ClientMessage::AgentQuery {
             request_id,
-            query: AgentQuery::RunCompletion { process_id },
+            query: AgentQuery::ProcessRunCompletion { process_id },
         })
         .await
         .map_err(|error| format!("cannot send query: {error}"))?;
@@ -721,7 +721,7 @@ async fn run_completion(
             return Err("vmux_service disconnected".to_string());
         };
         match message {
-            ServiceMessage::AgentRunCompletionResult {
+            ServiceMessage::ProcessRunCompletionResult {
                 request_id: received,
                 result,
             } if received == request_id => return Ok(result),
@@ -736,7 +736,7 @@ async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -
     if connection
         .send(&ClientMessage::AgentQuery {
             request_id,
-            query: AgentQuery::ReadTerminalFull { process_id },
+            query: AgentQuery::ReadProcessTranscript { process_id },
         })
         .await
         .is_err()
@@ -748,7 +748,7 @@ async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -
             return String::new();
         };
         match message {
-            ServiceMessage::AgentTerminalReadFullResult {
+            ServiceMessage::ProcessTranscriptResult {
                 request_id: received,
                 result,
             } if received == request_id => return result.unwrap_or_default(),

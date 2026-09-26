@@ -584,10 +584,10 @@ async fn agent_query(
 fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId> {
     match message {
         ServiceMessage::AgentLayoutResult { request_id, .. }
-        | ServiceMessage::AgentTerminalReadResult { request_id, .. }
-        | ServiceMessage::AgentTerminalReadFullResult { request_id, .. }
-        | ServiceMessage::AgentCommandExitResult { request_id, .. }
-        | ServiceMessage::AgentRunCompletionResult { request_id, .. }
+        | ServiceMessage::ProcessOutputResult { request_id, .. }
+        | ServiceMessage::ProcessTranscriptResult { request_id, .. }
+        | ServiceMessage::ProcessCommandExitResult { request_id, .. }
+        | ServiceMessage::ProcessRunCompletionResult { request_id, .. }
         | ServiceMessage::AgentSettingsResult { request_id, .. }
         | ServiceMessage::AgentSpacesResult { request_id, .. }
         | ServiceMessage::AgentScreenshotResult { request_id, .. }
@@ -633,10 +633,10 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
                 "content": [{"type": "text", "text": text}]
             })
         }
-        ServiceMessage::AgentTerminalReadResult {
+        ServiceMessage::ProcessOutputResult {
             result: Ok(text), ..
         }
-        | ServiceMessage::AgentTerminalReadFullResult {
+        | ServiceMessage::ProcessTranscriptResult {
             result: Ok(text), ..
         }
         | ServiceMessage::AgentBrowserSnapshotResult {
@@ -691,7 +691,7 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
                 "content": [{"type": "text", "text": text}]
             })
         }
-        ServiceMessage::AgentCommandExitResult {
+        ServiceMessage::ProcessCommandExitResult {
             result: Ok(result), ..
         } => {
             let exit = result
@@ -701,7 +701,7 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
                 "content": [{"type": "text", "text": format!("{{\"seq\":{},\"exit\":{exit}}}", result.sequence)}]
             })
         }
-        ServiceMessage::AgentRunCompletionResult {
+        ServiceMessage::ProcessRunCompletionResult {
             result: Ok(result), ..
         } => {
             let token = result
@@ -758,19 +758,19 @@ pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
             result: Err(message),
             ..
         }
-        | ServiceMessage::AgentTerminalReadResult {
+        | ServiceMessage::ProcessOutputResult {
             result: Err(message),
             ..
         }
-        | ServiceMessage::AgentTerminalReadFullResult {
+        | ServiceMessage::ProcessTranscriptResult {
             result: Err(message),
             ..
         }
-        | ServiceMessage::AgentCommandExitResult {
+        | ServiceMessage::ProcessCommandExitResult {
             result: Err(message),
             ..
         }
-        | ServiceMessage::AgentRunCompletionResult {
+        | ServiceMessage::ProcessRunCompletionResult {
             result: Err(message),
             ..
         }

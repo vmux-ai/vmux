@@ -1,42 +1,40 @@
 use vmux_api::protocol::{
-    AgentAttachment, AgentRequest, ApprovalDecision, ClientMessage, SharedAgentCommand,
-    SharedMessage,
+    AgentAttachment, ApprovalDecision, ClientMessage, SharedAgentCommand, SharedMessage,
 };
 
 const FROZEN_PREFIX: usize = 48;
 
 #[rustfmt::skip]
 const FROZEN: [(&str, &str); 7] = [
-    ("Agent/Attach",    "210000000000000073ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000"),
-    ("Agent/Input",     "210000000000000073ffffffffffffff0100000074ffffffffffffff000000000000000000000000d8ffffff00000000"),
-    ("Agent/Cancel",    "210000000000000073ffffffffffffff0200000000000000000000000000000000000000000000000000000000000000"),
-    ("Agent/Approve",   "210000000000000073ffffffffffffff0300000063ffffffffffffff0000000000000000000000000000000000000000"),
-    ("Agent/ListMedia", "210000000000000073ffffffffffffff0400000071ffffffffffffff0000000000000000000000000000000000000000"),
-    ("ListSessions",    "210000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-    ("AgentCommand",    "210000000200000001000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentAttach",    "320000000000000073ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentInput",     "320000000100000073ffffffffffffff74ffffffffffffff000000000000000000000000dcffffff0000000000000000"),
+    ("AgentCancel",    "320000000200000073ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentApprove",   "320000000300000073ffffffffffffff63ffffffffffffff000000000000000000000000000000000000000000000000"),
+    ("AgentListMedia", "320000000400000073ffffffffffffff71ffffffffffffff000000000000000000000000000000000000000000000000"),
+    ("ListSessions",   "320000000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentCommand",   "320000000600000001000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 ];
 
 fn samples() -> Vec<SharedMessage> {
     vec![
-        SharedMessage::agent("s", AgentRequest::Attach),
-        SharedMessage::agent(
-            "s",
-            AgentRequest::Input {
-                text: "t".into(),
-                context: None,
-                attachments: Vec::<AgentAttachment>::new(),
-                preferred_mode: None,
-            },
-        ),
-        SharedMessage::agent("s", AgentRequest::Cancel),
-        SharedMessage::agent(
-            "s",
-            AgentRequest::Approve {
-                call_id: "c".into(),
-                decision: ApprovalDecision::Allow,
-            },
-        ),
-        SharedMessage::agent("s", AgentRequest::ListMedia { query: "q".into() }),
+        SharedMessage::AgentAttach { sid: "s".into() },
+        SharedMessage::AgentInput {
+            sid: "s".into(),
+            text: "t".into(),
+            context: None,
+            attachments: Vec::<AgentAttachment>::new(),
+            preferred_mode: None,
+        },
+        SharedMessage::AgentCancel { sid: "s".into() },
+        SharedMessage::AgentApprove {
+            sid: "s".into(),
+            call_id: "c".into(),
+            decision: ApprovalDecision::Allow,
+        },
+        SharedMessage::AgentListMedia {
+            sid: "s".into(),
+            query: "q".into(),
+        },
         SharedMessage::ListSessions,
         SharedMessage::AgentCommand(SharedAgentCommand::ListAgents),
     ]
@@ -44,13 +42,11 @@ fn samples() -> Vec<SharedMessage> {
 
 fn name_of(message: &SharedMessage) -> &'static str {
     match message {
-        SharedMessage::Agent { request, .. } => match request {
-            AgentRequest::Attach => "Agent/Attach",
-            AgentRequest::Input { .. } => "Agent/Input",
-            AgentRequest::Cancel => "Agent/Cancel",
-            AgentRequest::Approve { .. } => "Agent/Approve",
-            AgentRequest::ListMedia { .. } => "Agent/ListMedia",
-        },
+        SharedMessage::AgentAttach { .. } => "AgentAttach",
+        SharedMessage::AgentInput { .. } => "AgentInput",
+        SharedMessage::AgentCancel { .. } => "AgentCancel",
+        SharedMessage::AgentApprove { .. } => "AgentApprove",
+        SharedMessage::AgentListMedia { .. } => "AgentListMedia",
         SharedMessage::ListSessions => "ListSessions",
         SharedMessage::AgentCommand(_) => "AgentCommand",
     }
@@ -88,19 +84,18 @@ fn every_shared_variant_still_encodes_to_its_frozen_bytes() {
 
 #[test]
 fn a_frame_round_trips_with_its_payload_intact() {
-    let bytes = encode(SharedMessage::agent(
-        "s",
-        AgentRequest::Approve {
-            call_id: "c".into(),
-            decision: ApprovalDecision::Allow,
-        },
-    ));
+    let bytes = encode(SharedMessage::AgentApprove {
+        sid: "s".into(),
+        call_id: "c".into(),
+        decision: ApprovalDecision::Allow,
+    });
 
     let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).expect("decode");
 
-    let ClientMessage::Shared(SharedMessage::Agent {
+    let ClientMessage::Shared(SharedMessage::AgentApprove {
         sid,
-        request: AgentRequest::Approve { call_id, decision },
+        call_id,
+        decision,
     }) = decoded
     else {
         panic!("decoded to the wrong variant");

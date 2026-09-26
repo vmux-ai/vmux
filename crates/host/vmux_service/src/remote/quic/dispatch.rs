@@ -1,6 +1,4 @@
-use vmux_api::protocol::{
-    AgentRequest, SharedAgentCommand, SharedFailure, SharedMessage, SharedResponse,
-};
+use vmux_api::protocol::{SharedAgentCommand, SharedFailure, SharedMessage, SharedResponse};
 use vmux_api::room::{ClientOpId, RemoteSession};
 
 use super::super::server::{MAX_PROMPT_BYTES, RemoteState};
@@ -11,7 +9,38 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
     match request {
         SharedMessage::ListSessions => SharedResponse::Sessions(sessions(state).await),
 
-        SharedMessage::Agent { sid, request } => agent(state, &sid, request).await,
+        SharedMessage::AgentAttach { sid } => attach(state, &sid).await,
+
+        SharedMessage::AgentInput {
+            sid,
+            text,
+            context,
+            attachments,
+            preferred_mode,
+        } => prompt(state, &sid, text, context, attachments, preferred_mode).await,
+
+        SharedMessage::AgentCancel { sid } => {
+            push_input(state, &sid, AcpInput::Cancel, SessionInput::Cancel).await
+        }
+
+        SharedMessage::AgentApprove {
+            sid,
+            call_id,
+            decision,
+        } => {
+            push_input(
+                state,
+                &sid,
+                AcpInput::Approve {
+                    call_id: call_id.clone(),
+                    decision,
+                },
+                SessionInput::Approve { call_id, decision },
+            )
+            .await
+        }
+
+        SharedMessage::AgentListMedia { sid, query } => media(state, &sid, query).await,
 
         SharedMessage::AgentCommand(command) => {
             let Some(client_op_id) = new_chat_op_id(&command) else {
@@ -32,56 +61,26 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
     }
 }
 
-async fn agent(state: &RemoteState, sid: &str, request: AgentRequest) -> SharedResponse {
-    match request {
-        AgentRequest::Attach => {
-            if session_exists(state, sid).await {
-                SharedResponse::Ok
-            } else {
-                SharedResponse::Failed(SharedFailure::NotFound)
-            }
-        }
+async fn attach(state: &RemoteState, sid: &str) -> SharedResponse {
+    if session_exists(state, sid).await {
+        SharedResponse::Ok
+    } else {
+        SharedResponse::Failed(SharedFailure::NotFound)
+    }
+}
 
-        AgentRequest::Input {
-            text,
-            context,
-            attachments,
-            preferred_mode,
-        } => prompt(state, sid, text, context, attachments, preferred_mode).await,
-
-        AgentRequest::Cancel => {
-            push_input(state, sid, AcpInput::Cancel, SessionInput::Cancel).await
-        }
-
-        AgentRequest::Approve { call_id, decision } => {
-            push_input(
-                state,
-                sid,
-                AcpInput::Approve {
-                    call_id: call_id.clone(),
-                    decision,
-                },
-                SessionInput::Approve { call_id, decision },
-            )
-            .await
-        }
-
-        AgentRequest::ListMedia { query } => {
-            if !session_exists(state, sid).await {
-                return SharedResponse::Failed(SharedFailure::NotFound);
-            }
-            if query.len() > super::super::server::MAX_MEDIA_QUERY_BYTES {
-                return SharedResponse::Failed(SharedFailure::Invalid);
-            }
-            match tokio::task::spawn_blocking(move || {
-                super::super::server::remote_media_entries(&query)
-            })
-            .await
-            {
-                Ok(entries) => SharedResponse::Media(entries),
-                Err(_) => SharedResponse::Failed(SharedFailure::Internal),
-            }
-        }
+async fn media(state: &RemoteState, sid: &str, query: String) -> SharedResponse {
+    if !session_exists(state, sid).await {
+        return SharedResponse::Failed(SharedFailure::NotFound);
+    }
+    if query.len() > super::super::server::MAX_MEDIA_QUERY_BYTES {
+        return SharedResponse::Failed(SharedFailure::Invalid);
+    }
+    match tokio::task::spawn_blocking(move || super::super::server::remote_media_entries(&query))
+        .await
+    {
+        Ok(entries) => SharedResponse::Media(entries),
+        Err(_) => SharedResponse::Failed(SharedFailure::Internal),
     }
 }
 
@@ -208,15 +207,13 @@ mod tests {
     }
 
     fn prompt_of(length: usize) -> SharedMessage {
-        SharedMessage::agent(
-            "s",
-            AgentRequest::Input {
-                text: "x".repeat(length),
-                context: None,
-                attachments: Vec::new(),
-                preferred_mode: None,
-            },
-        )
+        SharedMessage::AgentInput {
+            sid: "s".into(),
+            text: "x".repeat(length),
+            context: None,
+            attachments: Vec::new(),
+            preferred_mode: None,
+        }
     }
 
     #[tokio::test]
@@ -242,15 +239,13 @@ mod tests {
 
         let response = dispatch(
             &state,
-            SharedMessage::agent(
-                "s",
-                AgentRequest::Input {
-                    text: "   ".into(),
-                    context: None,
-                    attachments: Vec::new(),
-                    preferred_mode: None,
-                },
-            ),
+            SharedMessage::AgentInput {
+                sid: "s".into(),
+                text: "   ".into(),
+                context: None,
+                attachments: Vec::new(),
+                preferred_mode: None,
+            },
         )
         .await;
 
@@ -281,14 +276,16 @@ mod tests {
         let state = empty_state();
 
         for request in [
-            SharedMessage::agent("ghost", AgentRequest::Cancel),
-            SharedMessage::agent("ghost", AgentRequest::Attach),
-            SharedMessage::agent(
-                "ghost",
-                AgentRequest::ListMedia {
-                    query: String::new(),
-                },
-            ),
+            SharedMessage::AgentCancel {
+                sid: "ghost".into(),
+            },
+            SharedMessage::AgentAttach {
+                sid: "ghost".into(),
+            },
+            SharedMessage::AgentListMedia {
+                sid: "ghost".into(),
+                query: String::new(),
+            },
         ] {
             assert!(
                 matches!(

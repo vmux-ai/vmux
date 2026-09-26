@@ -1,6 +1,7 @@
+use bevy_ecs::prelude::Component;
 use clap::{Args, Subcommand};
 
-#[derive(Debug, Args)]
+#[derive(Args, Clone, Component, Debug)]
 pub struct RemoteArgs {
     #[arg(long)]
     pub reset: bool,
@@ -8,7 +9,7 @@ pub struct RemoteArgs {
     pub command: Option<RemoteCommand>,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 pub enum RemoteCommand {
     List,
     Revoke { client_id: String },
@@ -16,7 +17,7 @@ pub enum RemoteCommand {
 
 impl RemoteArgs {
     #[cfg(target_os = "macos")]
-    fn run(&self) -> std::io::Result<i32> {
+    pub(crate) fn execute(&self) -> std::io::Result<i32> {
         use std::time::Duration;
 
         match &self.command {
@@ -59,7 +60,7 @@ impl RemoteArgs {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn run(&self) -> std::io::Result<i32> {
+    pub(crate) fn execute(&self) -> std::io::Result<i32> {
         eprintln!("vmux remote is currently macOS-only");
         Ok(2)
     }
@@ -78,8 +79,4 @@ impl RemoteArgs {
         }
         agent.ensure_running(vmux_service::DaemonBinary::current()?.path())
     }
-}
-
-pub fn run(args: RemoteArgs) -> std::io::Result<i32> {
-    args.run()
 }

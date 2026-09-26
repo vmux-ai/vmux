@@ -1,8 +1,8 @@
 use super::{
     AgentAttachment, AgentBookmarks, AgentCommand, AgentCommandExit, AgentCommandResult,
-    AgentCommandTool, AgentImage, AgentQuery, AgentRecording, AgentRequest, AgentRequestId,
-    AgentRunCompletion, AgentSpace, CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer,
-    ProcessInfo, SharedEvent, SharedMessage,
+    AgentCommandTool, AgentImage, AgentQuery, AgentRecording, AgentRequestId, AgentRunCompletion,
+    AgentSpace, CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo,
+    SharedEvent, SharedMessage,
 };
 use crate::{ProcessId, TermCursor, TermLine, TermSelectionRange};
 
@@ -97,19 +97,19 @@ pub enum ClientMessage {
         request_id: AgentRequestId,
         result: Result<crate::protocol::layout::LayoutSnapshot, String>,
     },
-    AgentTerminalReadResult {
+    ProcessOutputResult {
         request_id: AgentRequestId,
         result: Result<String, String>,
     },
-    AgentTerminalReadFullResult {
+    ProcessTranscriptResult {
         request_id: AgentRequestId,
         result: Result<String, String>,
     },
-    AgentCommandExitResult {
+    ProcessCommandExitResult {
         request_id: AgentRequestId,
         result: Result<AgentCommandExit, String>,
     },
-    AgentRunCompletionResult {
+    ProcessRunCompletionResult {
         request_id: AgentRequestId,
         result: Result<AgentRunCompletion, String>,
     },
@@ -229,15 +229,13 @@ impl ClientMessage {
         context: Option<String>,
         attachments: Vec<AgentAttachment>,
     ) -> Self {
-        SharedMessage::agent(
+        SharedMessage::AgentInput {
             sid,
-            AgentRequest::Input {
-                text,
-                context,
-                attachments,
-                preferred_mode: None,
-            },
-        )
+            text,
+            context,
+            attachments,
+            preferred_mode: None,
+        }
         .into()
     }
 
@@ -248,15 +246,13 @@ impl ClientMessage {
         attachments: Vec<AgentAttachment>,
         preferred_mode: Option<String>,
     ) -> Self {
-        SharedMessage::agent(
+        SharedMessage::AgentInput {
             sid,
-            AgentRequest::Input {
-                text,
-                context,
-                attachments,
-                preferred_mode,
-            },
-        )
+            text,
+            context,
+            attachments,
+            preferred_mode,
+        }
         .into()
     }
 }
@@ -339,19 +335,19 @@ pub enum ServiceMessage {
         request_id: AgentRequestId,
         result: Result<crate::protocol::layout::LayoutSnapshot, String>,
     },
-    AgentTerminalReadResult {
+    ProcessOutputResult {
         request_id: AgentRequestId,
         result: Result<String, String>,
     },
-    AgentTerminalReadFullResult {
+    ProcessTranscriptResult {
         request_id: AgentRequestId,
         result: Result<String, String>,
     },
-    AgentCommandExitResult {
+    ProcessCommandExitResult {
         request_id: AgentRequestId,
         result: Result<AgentCommandExit, String>,
     },
-    AgentRunCompletionResult {
+    ProcessRunCompletionResult {
         request_id: AgentRequestId,
         result: Result<AgentRunCompletion, String>,
     },

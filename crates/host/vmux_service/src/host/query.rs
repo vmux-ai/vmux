@@ -4,93 +4,81 @@ use bevy::prelude::*;
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 
 use crate::process::ProcessManager;
-use crate::protocol::ProcessId;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CommandExitState {
-    pub(crate) sequence: u64,
-    pub(crate) exit: Option<i32>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RunCompletionState {
-    pub(crate) token: Option<String>,
-    pub(crate) exit: Option<i32>,
-}
+use crate::protocol::{AgentCommandExit, AgentRunCompletion, ProcessId};
 
 #[derive(Component)]
-struct ReadTerminal {
+struct ProcessOutputQuery {
     process_id: ProcessId,
     response: Option<oneshot::Sender<Result<String, String>>>,
 }
 
 #[derive(Component)]
-struct ReadTerminalFull {
+struct ProcessTranscriptQuery {
     process_id: ProcessId,
     response: Option<oneshot::Sender<Result<String, String>>>,
 }
 
 #[derive(Component)]
-struct ReadCommandExit {
+struct ProcessCommandExitQuery {
     process_id: ProcessId,
-    response: Option<oneshot::Sender<Result<CommandExitState, String>>>,
+    response: Option<oneshot::Sender<Result<AgentCommandExit, String>>>,
 }
 
 #[derive(Component)]
-struct ReadRunCompletion {
+struct ProcessRunCompletionQuery {
     process_id: ProcessId,
-    response: Option<oneshot::Sender<Result<RunCompletionState, String>>>,
+    response: Option<oneshot::Sender<Result<AgentRunCompletion, String>>>,
 }
 
-struct TerminalQueryReceivers {
-    visible: mpsc::UnboundedReceiver<ReadTerminal>,
-    full: mpsc::UnboundedReceiver<ReadTerminalFull>,
-    command_exit: mpsc::UnboundedReceiver<ReadCommandExit>,
-    run_completion: mpsc::UnboundedReceiver<ReadRunCompletion>,
+struct ProcessQueryReceivers {
+    output: mpsc::UnboundedReceiver<ProcessOutputQuery>,
+    transcript: mpsc::UnboundedReceiver<ProcessTranscriptQuery>,
+    command_exit: mpsc::UnboundedReceiver<ProcessCommandExitQuery>,
+    run_completion: mpsc::UnboundedReceiver<ProcessRunCompletionQuery>,
 }
 
 #[derive(Component)]
-struct TerminalQueryInbox(Mutex<TerminalQueryReceivers>);
+struct ProcessQueryInbox(Mutex<ProcessQueryReceivers>);
 
 #[derive(Component)]
-struct ServiceProcesses(Arc<AsyncMutex<ProcessManager>>);
+struct ProcessRuntime(Arc<AsyncMutex<ProcessManager>>);
 
 #[derive(Clone)]
-pub(crate) struct TerminalQueryBridge {
-    visible: mpsc::UnboundedSender<ReadTerminal>,
-    full: mpsc::UnboundedSender<ReadTerminalFull>,
-    command_exit: mpsc::UnboundedSender<ReadCommandExit>,
-    run_completion: mpsc::UnboundedSender<ReadRunCompletion>,
+pub(crate) struct ProcessQueries {
+    output: mpsc::UnboundedSender<ProcessOutputQuery>,
+    transcript: mpsc::UnboundedSender<ProcessTranscriptQuery>,
+    command_exit: mpsc::UnboundedSender<ProcessCommandExitQuery>,
+    run_completion: mpsc::UnboundedSender<ProcessRunCompletionQuery>,
     wake: mpsc::UnboundedSender<ProcessId>,
 }
 
-impl TerminalQueryBridge {
-    fn new(wake: mpsc::UnboundedSender<ProcessId>) -> (Self, TerminalQueryReceivers) {
-        let (visible, visible_rx) = mpsc::unbounded_channel();
-        let (full, full_rx) = mpsc::unbounded_channel();
+impl ProcessQueries {
+    fn new(wake: mpsc::UnboundedSender<ProcessId>) -> (Self, ProcessQueryReceivers) {
+        let (output, output_rx) = mpsc::unbounded_channel();
+        let (transcript, transcript_rx) = mpsc::unbounded_channel();
         let (command_exit, command_exit_rx) = mpsc::unbounded_channel();
         let (run_completion, run_completion_rx) = mpsc::unbounded_channel();
         (
             Self {
-                visible,
-                full,
+                output,
+                transcript,
                 command_exit,
                 run_completion,
                 wake,
             },
-            TerminalQueryReceivers {
-                visible: visible_rx,
-                full: full_rx,
+            ProcessQueryReceivers {
+                output: output_rx,
+                transcript: transcript_rx,
                 command_exit: command_exit_rx,
                 run_completion: run_completion_rx,
             },
         )
     }
 
-    pub(crate) async fn visible_text(&self, process_id: ProcessId) -> Result<String, String> {
+    pub(crate) async fn output(&self, process_id: ProcessId) -> Result<String, String> {
         let (response, receiver) = oneshot::channel();
-        self.visible
-            .send(ReadTerminal {
+        self.output
+            .send(ProcessOutputQuery {
                 process_id,
                 response: Some(response),
             })
@@ -103,10 +91,10 @@ impl TerminalQueryBridge {
             .map_err(|_| "service query was cancelled".to_string())?
     }
 
-    pub(crate) async fn full_text(&self, process_id: ProcessId) -> Result<String, String> {
+    pub(crate) async fn transcript(&self, process_id: ProcessId) -> Result<String, String> {
         let (response, receiver) = oneshot::channel();
-        self.full
-            .send(ReadTerminalFull {
+        self.transcript
+            .send(ProcessTranscriptQuery {
                 process_id,
                 response: Some(response),
             })
@@ -122,10 +110,10 @@ impl TerminalQueryBridge {
     pub(crate) async fn command_exit(
         &self,
         process_id: ProcessId,
-    ) -> Result<CommandExitState, String> {
+    ) -> Result<AgentCommandExit, String> {
         let (response, receiver) = oneshot::channel();
         self.command_exit
-            .send(ReadCommandExit {
+            .send(ProcessCommandExitQuery {
                 process_id,
                 response: Some(response),
             })
@@ -141,10 +129,10 @@ impl TerminalQueryBridge {
     pub(crate) async fn run_completion(
         &self,
         process_id: ProcessId,
-    ) -> Result<RunCompletionState, String> {
+    ) -> Result<AgentRunCompletion, String> {
         let (response, receiver) = oneshot::channel();
         self.run_completion
-            .send(ReadRunCompletion {
+            .send(ProcessRunCompletionQuery {
                 process_id,
                 response: Some(response),
             })
@@ -158,28 +146,28 @@ impl TerminalQueryBridge {
     }
 }
 
-pub(crate) struct DaemonQueryPlugin {
+pub(crate) struct ProcessQueryPlugin {
     manager: Arc<AsyncMutex<ProcessManager>>,
-    receivers: Mutex<Option<TerminalQueryReceivers>>,
+    receivers: Mutex<Option<ProcessQueryReceivers>>,
 }
 
-impl DaemonQueryPlugin {
+impl ProcessQueryPlugin {
     pub(crate) fn new(
         manager: Arc<AsyncMutex<ProcessManager>>,
         wake: mpsc::UnboundedSender<ProcessId>,
-    ) -> (Self, TerminalQueryBridge) {
-        let (bridge, receivers) = TerminalQueryBridge::new(wake);
+    ) -> (Self, ProcessQueries) {
+        let (queries, receivers) = ProcessQueries::new(wake);
         (
             Self {
                 manager,
                 receivers: Mutex::new(Some(receivers)),
             },
-            bridge,
+            queries,
         )
     }
 }
 
-impl Plugin for DaemonQueryPlugin {
+impl Plugin for ProcessQueryPlugin {
     fn build(&self, app: &mut App) {
         let receivers = self
             .receivers
@@ -189,16 +177,16 @@ impl Plugin for DaemonQueryPlugin {
             .expect("daemon query plugin can only be built once");
         app.world_mut().spawn((
             Name::new("vmux service process runtime"),
-            ServiceProcesses(Arc::clone(&self.manager)),
-            TerminalQueryInbox(Mutex::new(receivers)),
+            ProcessRuntime(Arc::clone(&self.manager)),
+            ProcessQueryInbox(Mutex::new(receivers)),
         ));
         app.add_systems(
             Update,
             (
-                receive_terminal_queries,
+                receive_process_queries,
                 ApplyDeferred,
-                answer_visible_terminal_queries,
-                answer_full_terminal_queries,
+                answer_process_output_queries,
+                answer_process_transcript_queries,
                 answer_command_exit_queries,
                 answer_run_completion_queries,
                 poll_service_processes,
@@ -208,14 +196,14 @@ impl Plugin for DaemonQueryPlugin {
     }
 }
 
-fn receive_terminal_queries(inbox: Single<&TerminalQueryInbox>, mut commands: Commands) {
+fn receive_process_queries(inbox: Single<&ProcessQueryInbox>, mut commands: Commands) {
     let Ok(mut receivers) = inbox.0.lock() else {
         return;
     };
-    while let Ok(request) = receivers.visible.try_recv() {
+    while let Ok(request) = receivers.output.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = receivers.full.try_recv() {
+    while let Ok(request) = receivers.transcript.try_recv() {
         commands.spawn(request);
     }
     while let Ok(request) = receivers.command_exit.try_recv() {
@@ -226,9 +214,9 @@ fn receive_terminal_queries(inbox: Single<&TerminalQueryInbox>, mut commands: Co
     }
 }
 
-fn answer_visible_terminal_queries(
-    processes: Single<&ServiceProcesses>,
-    mut requests: Query<(Entity, &mut ReadTerminal)>,
+fn answer_process_output_queries(
+    processes: Single<&ProcessRuntime>,
+    mut requests: Query<(Entity, &mut ProcessOutputQuery)>,
     mut commands: Commands,
 ) {
     let Ok(manager) = processes.0.try_lock() else {
@@ -247,9 +235,9 @@ fn answer_visible_terminal_queries(
     }
 }
 
-fn answer_full_terminal_queries(
-    processes: Single<&ServiceProcesses>,
-    mut requests: Query<(Entity, &mut ReadTerminalFull)>,
+fn answer_process_transcript_queries(
+    processes: Single<&ProcessRuntime>,
+    mut requests: Query<(Entity, &mut ProcessTranscriptQuery)>,
     mut commands: Commands,
 ) {
     let Ok(manager) = processes.0.try_lock() else {
@@ -269,8 +257,8 @@ fn answer_full_terminal_queries(
 }
 
 fn answer_command_exit_queries(
-    processes: Single<&ServiceProcesses>,
-    mut requests: Query<(Entity, &mut ReadCommandExit)>,
+    processes: Single<&ProcessRuntime>,
+    mut requests: Query<(Entity, &mut ProcessCommandExitQuery)>,
     mut commands: Commands,
 ) {
     let Ok(manager) = processes.0.try_lock() else {
@@ -282,7 +270,7 @@ fn answer_command_exit_queries(
             .get(&request.process_id)
             .map(|process| {
                 let (sequence, exit) = process.command_status();
-                CommandExitState { sequence, exit }
+                AgentCommandExit { sequence, exit }
             })
             .ok_or_else(|| format!("process not found: {}", request.process_id));
         if let Some(response) = request.response.take() {
@@ -293,8 +281,8 @@ fn answer_command_exit_queries(
 }
 
 fn answer_run_completion_queries(
-    processes: Single<&ServiceProcesses>,
-    mut requests: Query<(Entity, &mut ReadRunCompletion)>,
+    processes: Single<&ProcessRuntime>,
+    mut requests: Query<(Entity, &mut ProcessRunCompletionQuery)>,
     mut commands: Commands,
 ) {
     let Ok(manager) = processes.0.try_lock() else {
@@ -309,7 +297,7 @@ fn answer_run_completion_queries(
                     Some((token, exit)) => (Some(token), Some(exit)),
                     None => (None, None),
                 };
-                RunCompletionState { token, exit }
+                AgentRunCompletion { token, exit }
             })
             .ok_or_else(|| format!("process not found: {}", request.process_id));
         if let Some(response) = request.response.take() {
@@ -319,7 +307,7 @@ fn answer_run_completion_queries(
     }
 }
 
-fn poll_service_processes(processes: Single<&ServiceProcesses>) {
+fn poll_service_processes(processes: Single<&ProcessRuntime>) {
     let Ok(mut manager) = processes.0.try_lock() else {
         return;
     };
@@ -336,11 +324,11 @@ mod tests {
         let manager = Arc::new(AsyncMutex::new(ProcessManager::new(
             mpsc::unbounded_channel().0,
         )));
-        let (plugin, bridge) = DaemonQueryPlugin::new(manager, wake);
+        let (plugin, queries) = ProcessQueryPlugin::new(manager, wake);
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, plugin));
         let process_id = ProcessId::new();
-        let query = tokio::spawn(async move { bridge.visible_text(process_id).await });
+        let query = tokio::spawn(async move { queries.output(process_id).await });
         for _ in 0..4 {
             tokio::task::yield_now().await;
             app.update();

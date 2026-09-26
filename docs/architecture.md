@@ -111,6 +111,10 @@ rkyv with a 64 MiB cap. A remote client opens one bidirectional QUIC stream per 
 carrying an rkyv `SharedMessage` and `SharedResponse`. The relay's control connection is
 the odd one: a JSON hello, then opaque DATAGRAM frames it cannot read.
 
+Remote agent operations are flat `SharedMessage` variants rather than a nested request enum.
+The QUIC application protocol is `vmux/5`; changing the positional rkyv wire contract requires
+another ALPN version.
+
 `AgentQuery` is the serialized request discriminant. Replies use operation-specific
 `ServiceMessage` variants with typed `Result<T, String>` payloads; there is no shared
 `AgentQueryResult` bag passed through host ECS. Browser snapshot and scroll replies remain
@@ -474,6 +478,10 @@ are both native panes, so anything keyed on `HostFocusIntent::NativePane` alone 
 answer to two pages that want opposite things. Absence of the marker means platform text
 editing, which is the default a new page wants.
 
+The AppKit keyboard callback is only a transport adapter. It sends typed values through an
+inbox component; ECS systems translate them into command, simulator, fullscreen, and quit
+messages. AppKit does not retain pending application state.
+
 ---
 
 ## Pages, and the trust boundary
@@ -708,6 +716,13 @@ React-style, in one atomic transaction.
 A remote client is strictly a client — the server half of `vmux_service` is compiled out.
 `vmux_service` also owns its local connection, daemon control, paths, pairing, and authorization
 APIs; these are facets of one service boundary rather than a separate generic client domain.
+Persistent processes and their query runtime belong to this service boundary. Terminal pages
+render and control those processes, but the service names and exposes process operations without
+depending on terminal page concepts.
+
+The CLI uses Clap only to parse argv. A finite command becomes an operation-specific component in
+a short-lived Bevy app, asynchronous work is attached as task components, and `AppExit` follows a
+typed result. Long-running MCP stdio remains a dedicated runtime.
 
 Two cfg aliases decide that split, emitted by `crates/build_platform_cfg.rs`: **`ui`** is
 iOS or macOS, the surfaces that run pages; **`host`** is everything that is not iOS, the

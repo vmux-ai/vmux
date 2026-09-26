@@ -316,11 +316,7 @@ async fn stream_session_events(
     mut send: quinn::SendStream,
     request: SharedMessage,
 ) {
-    let SharedMessage::Agent {
-        sid,
-        request: vmux_api::protocol::AgentRequest::Attach,
-    } = request
-    else {
+    let SharedMessage::AgentAttach { sid } = request else {
         return;
     };
     let Some(mut events) = subscribe(state, &sid).await else {
@@ -631,10 +627,9 @@ mod live {
         let (connection, _) = harness.pair(&DeviceId::new("test-device")).await;
 
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
-        let body = rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::agent(
-            "ghost",
-            vmux_api::protocol::AgentRequest::Attach,
-        ))
+        let body = rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::AgentAttach {
+            sid: "ghost".into(),
+        })
         .expect("encode");
         CONTROL
             .open(

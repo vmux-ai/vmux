@@ -156,13 +156,13 @@ fn handle_approval_reply(
             store.remember(&acp.agent_id, &acp.cwd, name);
         }
     }
-    service_requests.write(ServiceRequest(ClientMessage::Shared(SharedMessage::agent(
-        sid,
-        vmux_api::protocol::AgentRequest::Approve {
+    service_requests.write(ServiceRequest(ClientMessage::Shared(
+        SharedMessage::AgentApprove {
+            sid,
             call_id: reply.call_id.clone(),
             decision: reply.decision,
         },
-    ))));
+    )));
     *state = AgentRunState::Streaming;
 }
 
