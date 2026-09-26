@@ -1,9 +1,9 @@
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
+use crate::{RelayToken, RemoteAuthorizationStore};
 use base64::Engine;
 use tokio::sync::Mutex;
-use crate::{RelayToken, RemoteAuthorizationStore};
 
 use crate::RemotePaths;
 use crate::acp::AcpSessionManager;

@@ -2,6 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use vmux_api::space::ProjectBranch;
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
@@ -263,7 +264,7 @@ fn drain_start_workspace_pickers(
 struct StartBranchRead {
     webview: Entity,
     project: String,
-    task: bevy::tasks::Task<Vec<vmux_api::space::ProjectBranch>>,
+    task: Task<Vec<ProjectBranch>>,
 }
 
 impl StartBranchRead {
@@ -281,7 +282,7 @@ impl StartBranchRead {
                 for holder in holders {
                     let checkout = holder.checkout_path();
                     let label = holder.checkout_label();
-                    branches.push(vmux_api::space::ProjectBranch {
+                    branches.push(ProjectBranch {
                         branch: holder.branch,
                         checkout,
                         label,

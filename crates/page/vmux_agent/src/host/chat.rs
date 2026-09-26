@@ -1,9 +1,9 @@
+mod composer;
 mod key;
 mod media;
 pub(crate) mod model;
 mod prompt;
 mod resume;
-mod slash;
 mod tab;
 mod transcript;
 mod workspace;
@@ -25,9 +25,9 @@ impl Plugin for AgentChatPagePlugin {
             key::ChatKeyPlugin,
             media::ChatMediaPlugin,
             model::ChatModelPlugin,
+            composer::ChatComposerPlugin,
             prompt::ChatPromptPlugin,
             resume::ChatResumePlugin,
-            slash::ChatSlashPlugin,
             tab::ChatTabPlugin,
             transcript::ChatTranscriptPlugin,
             vmux_core::host::UiStatePlugin::<vmux_chat::state::ChatUiState>::default(),
@@ -57,7 +57,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     ChatMediaProjection,
     ChatResumeProjection,
     ChatBranchesProjection,
-    slash::ChatComposerProjection
+    composer::ChatComposerProjection
 )]
 pub struct AgentChatView;
 

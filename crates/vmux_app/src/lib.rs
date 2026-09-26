@@ -2,11 +2,11 @@ pub mod extension;
 #[cfg(feature = "mobile")]
 mod mobile;
 mod plugin;
+pub mod prelude;
 #[cfg(feature = "mcp")]
 mod tool;
 #[cfg(all(test, feature = "tools"))]
 mod tool_tests;
-pub mod prelude;
 
 #[cfg(feature = "mobile")]
 pub use mobile::VmuxMobilePlugin;
