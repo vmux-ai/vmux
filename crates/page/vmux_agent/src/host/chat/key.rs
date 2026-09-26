@@ -45,7 +45,7 @@ fn echo_key_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_chat::state::{ChatUiState, ChatUiStatePatch};
+    use vmux_chat::state::ChatUiState;
     use vmux_command::CommandInvocation;
     use vmux_core::host::UiStateWrite;
 
@@ -54,10 +54,10 @@ mod tests {
 
     impl Echoed {
         fn record(trigger: On<UiStateWrite<ChatUiState>>, mut echoed: ResMut<Self>) {
-            let ChatUiStatePatch::Key(key) = trigger.event().patch() else {
+            let Some(key) = trigger.event().patch().key else {
                 return;
             };
-            echoed.0.push((trigger.event().webview(), *key));
+            echoed.0.push((trigger.event().webview(), key));
         }
     }
 
