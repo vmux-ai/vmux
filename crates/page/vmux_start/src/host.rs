@@ -55,6 +55,7 @@ impl Plugin for StartPlugin {
                 (
                     sync_live_start_pages,
                     drain_start_workspace_pickers,
+                    start_branch_reads,
                     drain_start_branch_reads,
                 ),
             );
@@ -82,7 +83,6 @@ struct StartPromptContextParams<'w, 's> {
         ),
     >,
     command_bar: Res<'w, CommandBarProjection>,
-    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
     warmed_branches_for: Local<'s, String>,
 }
 
@@ -261,19 +261,31 @@ fn drain_start_workspace_pickers(
 }
 
 #[derive(Component)]
+struct StartBranchQuery {
+    webview: Entity,
+    project: String,
+}
+
+#[derive(Component)]
 struct StartBranchRead {
     webview: Entity,
     project: String,
     task: Task<Vec<ProjectBranch>>,
 }
 
-impl StartBranchRead {
-    fn start(webview: Entity, project: &str, wake: vmux_core::host::wake::Wake) -> Option<Self> {
-        let project = project.trim().to_string();
+fn start_branch_reads(
+    queries: Query<(Entity, &StartBranchQuery), Added<StartBranchQuery>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, query) in &queries {
+        let project = query.project.trim().to_string();
         if project.is_empty() {
-            return None;
+            commands.entity(entity).despawn();
+            continue;
         }
         let root = std::path::PathBuf::from(&project);
+        let wake = vmux_core::host::wake::Wake::beside(proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let _wake = wake;
             let mut branches = Vec::new();
@@ -293,27 +305,23 @@ impl StartBranchRead {
             }
             branches
         });
-        Some(Self {
-            webview,
+        commands.entity(entity).insert(StartBranchRead {
+            webview: query.webview,
             project,
             task,
-        })
+        });
+        commands.entity(entity).remove::<StartBranchQuery>();
     }
 }
 
 fn on_start_branches_request(
     trigger: On<UiInput<vmux_api::command_bar::StartBranchesRequest>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let Some(read) = StartBranchRead::start(
-        trigger.event().webview,
-        &trigger.event().payload.project,
-        vmux_core::host::wake::Wake::from_resource(proxy),
-    ) else {
-        return;
-    };
-    commands.spawn(read);
+    commands.spawn(StartBranchQuery {
+        webview: trigger.event().webview,
+        project: trigger.event().payload.project.clone(),
+    });
 }
 
 fn drain_start_branch_reads(
@@ -547,14 +555,11 @@ fn sync_live_start_pages(
         *prompt_context.warmed_branches_for = project.clone();
     }
     for (e, focus_requested) in targets {
-        if warm_branches
-            && let Some(read) = StartBranchRead::start(
-                e,
-                &project,
-                vmux_core::host::wake::Wake::beside(prompt_context.proxy.as_deref()),
-            )
-        {
-            commands.spawn(read);
+        if warm_branches {
+            commands.spawn(StartBranchQuery {
+                webview: e,
+                project: project.clone(),
+            });
         }
         commands.trigger(vmux_core::host::UiStateWrite::<
             vmux_api::command_bar::CommandBarUiState,
