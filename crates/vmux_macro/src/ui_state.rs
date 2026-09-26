@@ -83,74 +83,12 @@ pub(crate) fn derive_state(input: &DeriveInput) -> syn::Result<TokenStream> {
 }
 
 pub(crate) fn derive_patch(input: &DeriveInput) -> syn::Result<TokenStream> {
-    match &input.data {
-        Data::Enum(data) => derive_enum_patch(input, data),
-        Data::Struct(data) => derive_struct_patch(input, data),
-        _ => Err(syn::Error::new_spanned(
+    let Data::Struct(data) = &input.data else {
+        return Err(syn::Error::new_spanned(
             &input.ident,
-            "UiStatePatch requires an enum or struct",
-        )),
-    }
-}
-
-fn derive_enum_patch(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenStream> {
-    let ident = &input.ident;
-    let generics = &input.generics;
-    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
-    let mut implementations = Vec::new();
-
-    for variant in &data.variants {
-        let Fields::Unnamed(fields) = &variant.fields else {
-            return Err(syn::Error::new_spanned(
-                &variant.fields,
-                "UiStatePatch variants require one unnamed field",
-            ));
-        };
-        if fields.unnamed.len() != 1 {
-            return Err(syn::Error::new_spanned(
-                fields,
-                "UiStatePatch variants require one unnamed field",
-            ));
-        }
-        let stored = &fields.unnamed[0].ty;
-        let payload = boxed_inner(stored).unwrap_or(stored);
-        let variant = &variant.ident;
-        let constructor = if boxed_inner(stored).is_some() {
-            quote! { ::std::boxed::Box::new(payload) }
-        } else {
-            quote! { payload }
-        };
-        let payload_ref = if boxed_inner(stored).is_some() {
-            quote! { payload.as_ref() }
-        } else {
-            quote! { payload }
-        };
-        implementations.push(quote! {
-            impl #impl_generics ::core::convert::From<#payload>
-                for #ident #type_generics #where_clause
-            {
-                fn from(payload: #payload) -> Self {
-                    Self::#variant(#constructor)
-                }
-            }
-
-            impl #impl_generics ::vmux_api::UiStatePatch<#payload>
-                for #ident #type_generics #where_clause
-            {
-                fn payload(&self) -> ::core::option::Option<&#payload> {
-                    let Self::#variant(payload) = self else {
-                        return ::core::option::Option::None;
-                    };
-                    ::core::option::Option::Some(#payload_ref)
-                }
-            }
-        });
-    }
-
-    Ok(quote! { #(#implementations)* })
-}
-
-fn derive_struct_patch(input: &DeriveInput, data: &syn::DataStruct) -> syn::Result<TokenStream> {
+            "UiStatePatch requires a named-field struct",
+        ));
+    };
     let ident = &input.ident;
     let Fields::Named(fields) = &data.fields else {
         return Err(syn::Error::new_spanned(
@@ -292,9 +230,9 @@ mod tests {
     #[test]
     fn patch_maps_each_payload_type() {
         let input = parse_quote! {
-            pub enum EditorPatch {
-                Meta(MetaEvent),
-                Cursor(CursorEvent),
+            pub struct EditorPatch {
+                pub meta: Option<MetaEvent>,
+                pub cursor: Option<CursorEvent>,
             }
         };
         let output = derive_patch(&input).unwrap();
@@ -306,8 +244,8 @@ mod tests {
     #[test]
     fn boxed_patch_maps_the_unboxed_payload_type() {
         let input = parse_quote! {
-            pub enum EditorPatch {
-                Snapshot(Box<Snapshot>),
+            pub struct EditorPatch {
+                pub snapshot: Option<Box<Snapshot>>,
             }
         };
         let output = derive_patch(&input).unwrap();
@@ -317,21 +255,6 @@ mod tests {
         assert!(rendered.contains("From < Snapshot >"));
         assert!(rendered.contains("UiStatePatch < Snapshot >"));
         assert!(rendered.contains("Box :: new (payload)"));
-        assert!(rendered.contains("payload . as_ref ()"));
-    }
-
-    #[test]
-    fn struct_patch_maps_each_optional_field() {
-        let input = parse_quote! {
-            pub struct EditorPatch {
-                pub meta: Option<MetaEvent>,
-                pub snapshot: Option<Box<Snapshot>>,
-            }
-        };
-        let output = derive_patch(&input).unwrap();
-        let file = parse2::<syn::File>(output).unwrap();
-
-        assert_eq!(file.items.len(), 4);
-        assert!(file.items.iter().all(|item| matches!(item, Item::Impl(_))));
+        assert!(rendered.contains("self . snapshot . as_deref ()"));
     }
 }

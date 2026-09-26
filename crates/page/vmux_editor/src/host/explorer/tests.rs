@@ -486,7 +486,7 @@ impl SentReveals {
             return;
         };
         for patch in event.patches {
-            if let FileUiStatePatch::ExplorerFocus(event) = patch {
+            if let Some(event) = patch.explorer_focus {
                 sent.0.push(event.reveal);
             }
         }

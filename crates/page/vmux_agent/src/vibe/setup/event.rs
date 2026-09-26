@@ -25,10 +25,10 @@ pub struct AgentSetupResult {
     pub ok: bool,
 }
 
-#[vmux_api::ui_state_patch]
-pub enum AgentSetupUiStatePatch {
-    Prereq(AgentSetupPrereqStatus),
-    Result(AgentSetupResult),
+#[vmux_api::ui_state_patch(Default)]
+pub struct AgentSetupUiStatePatch {
+    pub prereq: Option<AgentSetupPrereqStatus>,
+    pub result: Option<AgentSetupResult>,
 }
 
 #[vmux_api::ui_state(Default)]

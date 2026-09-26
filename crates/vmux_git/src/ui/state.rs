@@ -5,7 +5,6 @@ use vmux_ui::scroll::ScrollIntoView;
 use crate::event::GitOperation;
 use crate::state::{
     GitBranchPrompt, GitDirectoryState, GitPageControllerState, GitPageSnapshot, GitUiState,
-    GitUiStatePatch,
 };
 
 #[derive(Clone, Copy)]
@@ -48,41 +47,41 @@ impl GitPageState {
             }
             handled_ui_sequence.set(event.sequence);
             for patch in &event.patches {
-                match patch {
-                    GitUiStatePatch::Snapshot(snapshot) => self.apply_snapshot(*snapshot.clone()),
-                    GitUiStatePatch::Directory(directory) => {
-                        let mut current = self.directory;
-                        current.set(*directory.clone());
+                if let Some(snapshot) = &patch.snapshot {
+                    self.apply_snapshot(*snapshot.clone());
+                }
+                if let Some(directory) = &patch.directory {
+                    let mut current = self.directory;
+                    current.set(*directory.clone());
+                }
+                if let Some(controller) = &patch.controller {
+                    let mut current = self.controller;
+                    current.set(*controller.clone());
+                }
+                if let Some(request) = &patch.branch_prompt {
+                    if matches!(&request.prompt, GitBranchPrompt::Create { .. }) {
+                        let mut draft = self.branch_draft;
+                        draft.set(String::new());
                     }
-                    GitUiStatePatch::Controller(controller) => {
-                        let mut current = self.controller;
-                        current.set(*controller.clone());
-                    }
-                    GitUiStatePatch::BranchPrompt(request) => {
-                        if matches!(&request.prompt, GitBranchPrompt::Create { .. }) {
-                            let mut draft = self.branch_draft;
-                            draft.set(String::new());
-                        }
-                        let mut prompt = self.branch_prompt;
-                        prompt.set(Some(request.prompt.clone()));
-                    }
-                    GitUiStatePatch::SelectionReveal(request) => {
-                        ScrollIntoView::nearest(&request.id);
-                    }
-                    GitUiStatePatch::ShortcutHelpToggle(_) => {
-                        let mut help = self.shortcut_help;
-                        help.toggle();
-                    }
-                    GitUiStatePatch::Context(_) => self.reset_local_render_state(),
-                    GitUiStatePatch::Workspace(workspace) => {
-                        if workspace.error.is_empty()
-                            && !workspace.path.is_empty()
-                            && workspace.path != self.workspace()
-                        {
-                            self.reset_local_render_state();
-                        }
-                    }
-                    GitUiStatePatch::RepositoryPicked(_) => {}
+                    let mut prompt = self.branch_prompt;
+                    prompt.set(Some(request.prompt.clone()));
+                }
+                if let Some(request) = &patch.selection_reveal {
+                    ScrollIntoView::nearest(&request.id);
+                }
+                if patch.shortcut_help_toggle.is_some() {
+                    let mut help = self.shortcut_help;
+                    help.toggle();
+                }
+                if patch.context.is_some() {
+                    self.reset_local_render_state();
+                }
+                if let Some(workspace) = &patch.workspace
+                    && workspace.error.is_empty()
+                    && !workspace.path.is_empty()
+                    && workspace.path != self.workspace()
+                {
+                    self.reset_local_render_state();
                 }
             }
         });

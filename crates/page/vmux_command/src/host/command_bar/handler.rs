@@ -1909,11 +1909,9 @@ mod tests {
             .resource::<EmittedToPage>()
             .0
             .iter()
-            .find(|(_, patch)| matches!(patch, CommandBarUiStatePatch::Snapshot(_)))
+            .find(|(_, patch)| patch.snapshot.is_some())
             .expect("no open payload emitted");
-        let CommandBarUiStatePatch::Snapshot(snapshot) = patch else {
-            unreachable!()
-        };
+        let snapshot = patch.snapshot.as_ref().unwrap();
         *snapshot.clone()
     }
 

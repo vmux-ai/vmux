@@ -7,9 +7,9 @@ pub struct SpacesListEvent {
     pub selected: u32,
 }
 
-#[vmux_api::ui_state_patch]
-pub enum SpacesUiStatePatch {
-    Snapshot(Box<SpacesListEvent>),
+#[vmux_api::ui_state_patch(Default)]
+pub struct SpacesUiStatePatch {
+    pub snapshot: Option<Box<SpacesListEvent>>,
 }
 
 #[vmux_api::ui_state(Default, target = "spaces")]

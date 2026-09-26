@@ -69,34 +69,34 @@ impl TerminalState {
     }
 
     fn apply(self, patch: &TerminalUiStatePatch) {
-        match patch {
-            TerminalUiStatePatch::ServiceUnavailable(event) => {
-                let mut service_error = self.service_error;
-                service_error.set(event.message.clone());
-            }
-            TerminalUiStatePatch::Viewport(patch) => self.apply_viewport(patch),
-            TerminalUiStatePatch::Theme(event) => {
-                let mut theme = self.theme;
-                theme.set(Some(event.clone()));
-            }
-            TerminalUiStatePatch::Title(event) => {
-                let mut raw_title = self.raw_title;
-                raw_title.set(event.title.clone());
-            }
-            TerminalUiStatePatch::Loading(event) => {
-                let mut loading = self.loading;
-                let mut prompt_draft = self.prompt_draft;
-                loading.set(if event.loading {
-                    Some((event.label.clone(), event.segment.clone()))
-                } else {
-                    prompt_draft.set((String::new(), false));
-                    None
-                });
-            }
-            TerminalUiStatePatch::PromptDraft(event) => {
-                let mut prompt_draft = self.prompt_draft;
-                prompt_draft.set((event.draft.clone(), event.skipped));
-            }
+        if let Some(event) = &patch.service_unavailable {
+            let mut service_error = self.service_error;
+            service_error.set(event.message.clone());
+        }
+        if let Some(viewport) = &patch.viewport {
+            self.apply_viewport(viewport);
+        }
+        if let Some(event) = &patch.theme {
+            let mut theme = self.theme;
+            theme.set(Some(event.clone()));
+        }
+        if let Some(event) = &patch.title {
+            let mut raw_title = self.raw_title;
+            raw_title.set(event.title.clone());
+        }
+        if let Some(event) = &patch.loading {
+            let mut loading = self.loading;
+            let mut prompt_draft = self.prompt_draft;
+            loading.set(if event.loading {
+                Some((event.label.clone(), event.segment.clone()))
+            } else {
+                prompt_draft.set((String::new(), false));
+                None
+            });
+        }
+        if let Some(event) = &patch.prompt_draft {
+            let mut prompt_draft = self.prompt_draft;
+            prompt_draft.set((event.draft.clone(), event.skipped));
         }
     }
 

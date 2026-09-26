@@ -219,17 +219,17 @@ impl Default for GitPageSnapshot {
     }
 }
 
-#[vmux_api::ui_state_patch]
-pub enum GitUiStatePatch {
-    Context(GitPageContext),
-    RepositoryPicked(GitRepositoryPicked),
-    Workspace(GitWorkspaceChanged),
-    Snapshot(Box<GitPageSnapshot>),
-    Directory(Box<GitDirectoryState>),
-    Controller(Box<GitPageControllerState>),
-    BranchPrompt(GitBranchPromptRequested),
-    SelectionReveal(GitSelectionReveal),
-    ShortcutHelpToggle(GitShortcutHelpToggle),
+#[vmux_api::ui_state_patch(Default)]
+pub struct GitUiStatePatch {
+    pub context: Option<GitPageContext>,
+    pub repository_picked: Option<GitRepositoryPicked>,
+    pub workspace: Option<GitWorkspaceChanged>,
+    pub snapshot: Option<Box<GitPageSnapshot>>,
+    pub directory: Option<Box<GitDirectoryState>>,
+    pub controller: Option<Box<GitPageControllerState>>,
+    pub branch_prompt: Option<GitBranchPromptRequested>,
+    pub selection_reveal: Option<GitSelectionReveal>,
+    pub shortcut_help_toggle: Option<GitShortcutHelpToggle>,
 }
 
 #[vmux_api::ui_state(Default, target = "git")]
@@ -263,12 +263,19 @@ mod tests {
         let decoded = rkyv::from_bytes::<GitUiState, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded.sequence, 2);
-        assert!(matches!(
-            decoded.patches.as_slice(),
-            [
-                GitUiStatePatch::Context(GitPageContext { working_directory, .. }),
-                GitUiStatePatch::Snapshot(snapshot),
-            ] if working_directory == "/tmp" && snapshot.workspace == "/tmp/repo"
-        ));
+        assert_eq!(
+            decoded.patches[0]
+                .context
+                .as_ref()
+                .map(|context| context.working_directory.as_str()),
+            Some("/tmp")
+        );
+        assert_eq!(
+            decoded.patches[1]
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.workspace.as_str()),
+            Some("/tmp/repo")
+        );
     }
 }

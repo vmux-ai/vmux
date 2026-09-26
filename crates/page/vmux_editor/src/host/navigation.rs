@@ -511,7 +511,7 @@ mod tests {
                 .resource::<Emitted>()
                 .0
                 .iter()
-                .any(|patch| matches!(patch, FileUiStatePatch::ScrollBy(_))),
+                .any(|patch| patch.scroll_by.is_some()),
             "the window was repainted at row {top}, so a page still parked at row 0 \
              would render the band off screen unless the move is announced: {:?}",
             session.app.world().resource::<Emitted>().0

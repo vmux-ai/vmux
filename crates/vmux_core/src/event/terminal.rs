@@ -144,14 +144,14 @@ pub struct TermTitleEvent {
     pub title: String,
 }
 
-#[vmux_api::ui_state_patch]
-pub enum TerminalUiStatePatch {
-    ServiceUnavailable(ServiceUnavailableEvent),
-    Viewport(TermViewportPatch),
-    Theme(TermThemeEvent),
-    Title(TermTitleEvent),
-    Loading(TermLoadingEvent),
-    PromptDraft(AgentPromptDraftEvent),
+#[vmux_api::ui_state_patch(Default)]
+pub struct TerminalUiStatePatch {
+    pub service_unavailable: Option<ServiceUnavailableEvent>,
+    pub viewport: Option<TermViewportPatch>,
+    pub theme: Option<TermThemeEvent>,
+    pub title: Option<TermTitleEvent>,
+    pub loading: Option<TermLoadingEvent>,
+    pub prompt_draft: Option<AgentPromptDraftEvent>,
 }
 
 #[vmux_api::ui_state(Default, target = "terminal")]
@@ -184,12 +184,7 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let decoded = rkyv::from_bytes::<TerminalUiState, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded.sequence, 5);
-        assert!(matches!(
-            decoded.patches.as_slice(),
-            [
-                TerminalUiStatePatch::Title(_),
-                TerminalUiStatePatch::Loading(_)
-            ]
-        ));
+        assert!(decoded.patches[0].title.is_some());
+        assert!(decoded.patches[1].loading.is_some());
     }
 }

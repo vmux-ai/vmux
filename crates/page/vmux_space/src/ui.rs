@@ -2,7 +2,7 @@
 
 use crate::event::{
     SpaceAttachRequest, SpaceCreateRequest, SpaceDeleteRequest, SpaceRenameRequest, SpaceRow,
-    SpacesListEvent, SpacesUiState, SpacesUiStatePatch,
+    SpacesListEvent, SpacesUiState,
 };
 use dioxus::prelude::*;
 use vmux_core::event::team::{TeamEvent, TeamProfileSwitchRequest};
@@ -38,8 +38,9 @@ pub fn Page() -> Element {
         }
         handled_sequence.set(update.sequence);
         for patch in &update.patches {
-            let SpacesUiStatePatch::Snapshot(snapshot) = patch;
-            state.set(*snapshot.clone());
+            if let Some(snapshot) = &patch.snapshot {
+                state.set(*snapshot.clone());
+            }
         }
     });
 
