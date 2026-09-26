@@ -497,10 +497,6 @@ impl<R: Send + Sync + 'static> VaultOperationRequest<R> {
     fn new(request: R) -> Self {
         Self(request)
     }
-
-    fn request(&self) -> &R {
-        &self.0
-    }
 }
 
 #[derive(Component)]
@@ -1515,7 +1511,7 @@ macro_rules! vault_launch_system {
                 return;
             };
             for (entity, operation) in &operations {
-                let request = operation.request().clone();
+                let request = operation.0.clone();
                 let service = recovery.service();
                 let generated_recovery_key = if $take_key {
                     recovery.take_pending_key()

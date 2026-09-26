@@ -15,9 +15,9 @@ use crate::manifest::{
     ToolStore, ToolsManifest, expand_user_path, load_manifest_from, write_manifest_to,
 };
 use crate::{
-    ToolOperationCompletion, ToolOperationFailure, ToolOperationRequest, ToolOperationRouteFlush,
-    ToolOperationRouteSet, ToolOperationTask, ToolStoreOperation, ToolStoreTarget,
-    finish_tool_operation,
+    ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
+    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
+    ToolStoreTarget, finish_tool_operation,
 };
 
 pub(crate) struct DotfileToolPlugin;
@@ -85,7 +85,7 @@ fn route_import(
     mut commands: Commands,
 ) {
     for (entity, operation) in &requests {
-        let request = operation.request();
+        let request = &operation.0;
         if request.provider != ToolProvider::Dotfiles {
             continue;
         }
@@ -104,7 +104,7 @@ fn route_adopt(
     mut commands: Commands,
 ) {
     for (entity, operation) in &requests {
-        let request = operation.request();
+        let request = &operation.0;
         if request.provider != ToolProvider::Dotfiles
             || request.id.trim().is_empty()
             || request.value.trim().is_empty()
@@ -118,135 +118,153 @@ fn route_adopt(
     }
 }
 
-macro_rules! route_link_request {
-    ($name:ident, $request:ty) => {
-        fn $name(
-            requests: Query<(Entity, &ToolOperationRequest<$request>), Added<ToolStoreTarget>>,
-            mut commands: Commands,
-        ) {
-            for (entity, operation) in &requests {
-                let request = operation.request();
-                if request.provider != ToolProvider::Dotfiles || request.id.trim().is_empty() {
-                    continue;
-                }
-                commands.entity(entity).insert((
-                    ToolStoreOperation,
-                    LinkDotfilePackage::new(request.id.trim()),
-                ));
-            }
+fn route_install(
+    requests: Query<(Entity, &ToolOperationRequest<ToolInstallRequest>), Added<ToolStoreTarget>>,
+    mut commands: Commands,
+) {
+    for (entity, operation) in &requests {
+        let request = &operation.0;
+        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+            commands.entity(entity).insert((
+                ToolStoreOperation,
+                LinkDotfilePackage::new(request.id.trim()),
+            ));
         }
-    };
+    }
 }
 
-route_link_request!(route_install, ToolInstallRequest);
-route_link_request!(route_update, ToolUpdateRequest);
-route_link_request!(route_link, ToolLinkRequest);
-
-macro_rules! route_disable_request {
-    ($name:ident, $request:ty) => {
-        fn $name(
-            requests: Query<(Entity, &ToolOperationRequest<$request>), Added<ToolStoreTarget>>,
-            mut commands: Commands,
-        ) {
-            for (entity, operation) in &requests {
-                let request = operation.request();
-                if request.provider != ToolProvider::Dotfiles || request.id.trim().is_empty() {
-                    continue;
-                }
-                commands.entity(entity).insert((
-                    ToolStoreOperation,
-                    DisableDotfilePackage::new(request.id.trim()),
-                ));
-            }
+fn route_update(
+    requests: Query<(Entity, &ToolOperationRequest<ToolUpdateRequest>), Added<ToolStoreTarget>>,
+    mut commands: Commands,
+) {
+    for (entity, operation) in &requests {
+        let request = &operation.0;
+        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+            commands.entity(entity).insert((
+                ToolStoreOperation,
+                LinkDotfilePackage::new(request.id.trim()),
+            ));
         }
-    };
+    }
 }
 
-route_disable_request!(route_uninstall, ToolUninstallRequest);
-route_disable_request!(route_unlink, ToolUnlinkRequest);
+fn route_link(
+    requests: Query<(Entity, &ToolOperationRequest<ToolLinkRequest>), Added<ToolStoreTarget>>,
+    mut commands: Commands,
+) {
+    for (entity, operation) in &requests {
+        let request = &operation.0;
+        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+            commands.entity(entity).insert((
+                ToolStoreOperation,
+                LinkDotfilePackage::new(request.id.trim()),
+            ));
+        }
+    }
+}
+
+fn route_uninstall(
+    requests: Query<(Entity, &ToolOperationRequest<ToolUninstallRequest>), Added<ToolStoreTarget>>,
+    mut commands: Commands,
+) {
+    for (entity, operation) in &requests {
+        let request = &operation.0;
+        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+            commands.entity(entity).insert((
+                ToolStoreOperation,
+                DisableDotfilePackage::new(request.id.trim()),
+            ));
+        }
+    }
+}
+
+fn route_unlink(
+    requests: Query<(Entity, &ToolOperationRequest<ToolUnlinkRequest>), Added<ToolStoreTarget>>,
+    mut commands: Commands,
+) {
+    for (entity, operation) in &requests {
+        let request = &operation.0;
+        if request.provider == ToolProvider::Dotfiles && !request.id.trim().is_empty() {
+            commands.entity(entity).insert((
+                ToolStoreOperation,
+                DisableDotfilePackage::new(request.id.trim()),
+            ));
+        }
+    }
+}
 
 fn complete_import(
     operations: Query<
         (Entity, &ImportedDotfiles),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
     >,
     mut commands: Commands,
 ) {
     for (entity, output) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::succeeded(format!(
-                "imported {} dotfile package(s)",
-                output.packages
-            )));
+        commands.entity(entity).insert((
+            ToolOperationFinished,
+            ToolOperationSucceeded(format!("imported {} dotfile package(s)", output.packages)),
+        ));
     }
 }
 
 fn complete_available_import(
     operations: Query<
         (Entity, &ImportedAvailableDotfiles),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
     >,
     mut commands: Commands,
 ) {
     for (entity, output) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::succeeded(format!(
-                "imported {} dotfile package(s)",
-                output.packages
-            )));
+        commands.entity(entity).insert((
+            ToolOperationFinished,
+            ToolOperationSucceeded(format!("imported {} dotfile package(s)", output.packages)),
+        ));
     }
 }
 
 fn complete_link(
     operations: Query<
         (Entity, &LinkedDotfilePackage),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
     >,
     mut commands: Commands,
 ) {
     for (entity, output) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::succeeded(format!(
-                "linked {} file(s)",
-                output.files
-            )));
+        commands.entity(entity).insert((
+            ToolOperationFinished,
+            ToolOperationSucceeded(format!("linked {} file(s)", output.files)),
+        ));
     }
 }
 
 fn complete_disable(
     operations: Query<
         (Entity, &DisabledDotfilePackage),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
     >,
     mut commands: Commands,
 ) {
     for (entity, output) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::succeeded(format!(
-                "unlinked {} file(s)",
-                output.files
-            )));
+        commands.entity(entity).insert((
+            ToolOperationFinished,
+            ToolOperationSucceeded(format!("unlinked {} file(s)", output.files)),
+        ));
     }
 }
 
 fn complete_adoption(
     operations: Query<
         (Entity, &AdoptedDotfile),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
     >,
     mut commands: Commands,
 ) {
     for (entity, output) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::succeeded(format!(
-                "adopted {}",
-                output.path.display()
-            )));
+        commands.entity(entity).insert((
+            ToolOperationFinished,
+            ToolOperationSucceeded(format!("adopted {}", output.path.display())),
+        ));
     }
 }
 
@@ -265,16 +283,17 @@ fn discover_dotfile_packages_system(
             With<DiscoverDotfilePackages>,
             Without<ToolOperationTask<DiscoveredDotfilePackages>>,
             Without<DiscoveredDotfilePackages>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -308,16 +327,17 @@ fn plan_dotfile_package_system(
         (
             Without<ToolOperationTask<DotfilePlan>>,
             Without<DotfilePlan>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -353,16 +373,17 @@ fn import_dotfiles_system(
         (
             Without<ToolOperationTask<ImportedDotfiles>>,
             Without<ImportedDotfiles>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -394,16 +415,17 @@ fn import_available_dotfiles_system(
             With<ImportAvailableDotfiles>,
             Without<ToolOperationTask<ImportedAvailableDotfiles>>,
             Without<ImportedAvailableDotfiles>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -448,16 +470,17 @@ fn link_dotfile_package_system(
         (
             Without<ToolOperationTask<LinkedDotfilePackage>>,
             Without<LinkedDotfilePackage>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -499,16 +522,17 @@ fn disable_dotfile_package_system(
         (
             Without<ToolOperationTask<DisabledDotfilePackage>>,
             Without<DisabledDotfilePackage>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -552,16 +576,17 @@ fn unlink_dotfile_package_system(
         (
             Without<ToolOperationTask<UnlinkedDotfilePackage>>,
             Without<UnlinkedDotfilePackage>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -592,16 +617,17 @@ fn apply_enabled_dotfiles_system(
             With<ApplyEnabledDotfiles>,
             Without<ToolOperationTask<AppliedEnabledDotfiles>>,
             Without<AppliedEnabledDotfiles>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -642,16 +668,17 @@ fn adopt_dotfile_system(
         (
             Without<ToolOperationTask<AdoptedDotfile>>,
             Without<AdoptedDotfile>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };

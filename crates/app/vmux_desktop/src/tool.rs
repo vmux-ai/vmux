@@ -14,8 +14,8 @@ use vmux_core::tool::{
     ToolsUiState,
 };
 use vmux_tool::{
-    ExternalToolOperation, ToolOperationCompletion, ToolOperationRequest, ToolStore,
-    ToolStoreOperation, ToolStoreTarget, ToolsManifest,
+    ExternalToolOperation, ToolOperationFailed, ToolOperationRequest, ToolOperationSucceeded,
+    ToolStore, ToolStoreOperation, ToolStoreTarget, ToolsManifest,
 };
 
 pub(crate) struct ToolUiPlugin;
@@ -78,7 +78,14 @@ impl Plugin for ToolUiPlugin {
                 start_tool_import,
             ),
         )
-        .add_systems(Update, drain_tool_store_operations.before(emit_tools_state));
+        .add_systems(
+            Update,
+            (
+                drain_succeeded_tool_store_operations,
+                drain_failed_tool_store_operations,
+            )
+                .before(emit_tools_state),
+        );
     }
 }
 
@@ -404,7 +411,7 @@ fn queue_tool_operation<R: Clone + Send + Sync + 'static>(
             target,
             operation,
         },
-        ToolOperationRequest::new(request),
+        ToolOperationRequest(request),
     ));
 }
 
@@ -519,7 +526,7 @@ fn start_tool_operation(
     commands
         .entity(entity)
         .remove::<PendingToolOperation>()
-        .insert(ToolStoreTarget::new(store));
+        .insert(ToolStoreTarget(store));
 }
 
 macro_rules! external_tool_system {
@@ -533,10 +540,10 @@ macro_rules! external_tool_system {
             mut commands: Commands,
         ) {
             for (entity, operation, target) in &operations {
-                let Ok(store) = stores.get(target.entity()).cloned() else {
+                let Ok(store) = stores.get(target.0).cloned() else {
                     continue;
                 };
-                let request = operation.request().clone();
+                let request = operation.0.clone();
                 let task = IoTaskPool::get().spawn(async move { $execute(request, &store) });
                 commands
                     .entity(entity)
@@ -639,9 +646,9 @@ fn drain_tool_operations(
     }
 }
 
-fn drain_tool_store_operations(
+fn drain_succeeded_tool_store_operations(
     operations: Query<
-        (Entity, &ToolOperationContext, &ToolOperationCompletion),
+        (Entity, &ToolOperationContext, &ToolOperationSucceeded),
         With<ToolStoreOperation>,
     >,
     mut registry: Query<&mut ToolRegistry>,
@@ -656,13 +663,29 @@ fn drain_tool_store_operations(
             subscriber.complete(
                 operation.operation_id,
                 operation.operation.clone(),
-                completion.success(),
-                completion.message().to_string(),
+                true,
+                completion.0.clone(),
             );
         }
-        if completion.success() {
-            state.dirty = true;
-            state.generation = state.generation.wrapping_add(1);
+        state.dirty = true;
+        state.generation = state.generation.wrapping_add(1);
+        commands.entity(entity).despawn();
+    }
+}
+
+fn drain_failed_tool_store_operations(
+    operations: Query<(Entity, &ToolOperationContext, &ToolOperationFailed)>,
+    mut subscribers: Query<&mut ToolSubscriber>,
+    mut commands: Commands,
+) {
+    for (entity, operation, failure) in &operations {
+        if let Ok(mut subscriber) = subscribers.get_mut(operation.target) {
+            subscriber.complete(
+                operation.operation_id,
+                operation.operation.clone(),
+                false,
+                failure.0.clone(),
+            );
         }
         commands.entity(entity).despawn();
     }
