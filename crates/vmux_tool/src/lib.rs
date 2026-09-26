@@ -6,6 +6,8 @@ mod dotfiles;
 #[cfg(ui)]
 mod extension;
 mod homebrew;
+#[cfg(all(host, ui))]
+mod host;
 mod manifest;
 mod mcp;
 mod npm;
@@ -25,6 +27,8 @@ use vmux_core::tool::{
 pub use connection::McpConnectionPlugin;
 pub use dotfiles::*;
 pub use homebrew::*;
+#[cfg(all(host, ui))]
+pub use host::{ToolScanOutput, ToolScanRequest};
 pub use manifest::*;
 pub use mcp::*;
 pub use npm::*;
@@ -46,7 +50,8 @@ impl Plugin for ToolPlugin {
         ));
 
         #[cfg(all(host, ui))]
-        app.add_systems(bevy_app::Startup, spawn_tool_page);
+        app.add_plugins(host::ToolHostPlugin)
+            .add_systems(bevy_app::Startup, spawn_tool_page);
     }
 }
 
@@ -301,7 +306,11 @@ brew "ripgrep"
         std::fs::write(&package_json, r#"{"dependencies":{"typescript":"^5"}}"#).unwrap();
         let store = ToolStore::new(temp.path(), temp.path());
         let mut app = App::new();
-        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolPlugin));
+        app.add_plugins((
+            bevy_app::TaskPoolPlugin::default(),
+            ToolRuntimePlugin,
+            npm::NpmToolPlugin,
+        ));
         let store_entity = app.world_mut().spawn(store.clone()).id();
         let operation = app
             .world_mut()
@@ -355,7 +364,11 @@ brew "ripgrep"
         .unwrap();
         let store = ToolStore::new(config, home);
         let mut app = App::new();
-        app.add_plugins((bevy_app::TaskPoolPlugin::default(), ToolPlugin));
+        app.add_plugins((
+            bevy_app::TaskPoolPlugin::default(),
+            ToolRuntimePlugin,
+            mcp::McpToolPlugin,
+        ));
         let store_entity = app.world_mut().spawn(store.clone()).id();
         let operation = app
             .world_mut()
