@@ -10326,8 +10326,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "vmux_app",
- "vmux_client",
  "vmux_mcp",
+ "vmux_service",
  "vmux_tool",
  "vmux_transport",
 ]
@@ -10681,7 +10681,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "vmux_api",
- "vmux_client",
+ "vmux_service",
 ]
 
 [[package]]
@@ -10814,6 +10814,7 @@ dependencies = [
  "portable-pty",
  "quinn",
  "reqwest",
+ "ring",
  "rkyv",
  "rustls-pemfile",
  "serde",
@@ -10829,11 +10830,11 @@ dependencies = [
  "url",
  "uuid",
  "vmux_api",
- "vmux_client",
  "vmux_core",
  "vmux_git",
  "vmux_native",
  "vmux_path",
+ "vmux_profile",
  "vmux_transport",
  "vmux_ui",
  "vte",

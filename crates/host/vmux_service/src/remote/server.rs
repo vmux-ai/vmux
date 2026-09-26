@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use base64::Engine;
 use tokio::sync::Mutex;
-use vmux_client::{RelayToken, RemoteAuthorizationStore};
+use crate::{RelayToken, RemoteAuthorizationStore};
 
 use crate::RemotePaths;
 use crate::acp::AcpSessionManager;

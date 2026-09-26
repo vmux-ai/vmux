@@ -4,7 +4,7 @@ use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
-use vmux_client::protocol::{AgentCommand, AgentQuery, JsonValue, ProcessId};
+use vmux_service::protocol::{AgentCommand, AgentQuery, JsonValue, ProcessId};
 
 use vmux_api::InputSchema;
 
@@ -264,7 +264,7 @@ impl ToolRegistry<'_, '_> {
 impl ToolDefinition {
     pub fn merge_commands(
         mut definitions: Vec<Self>,
-        commands: Vec<vmux_client::protocol::AgentCommandTool>,
+        commands: Vec<vmux_service::protocol::AgentCommandTool>,
     ) -> Result<Vec<Self>, String> {
         for command in commands {
             let input_schema = Value::try_from(&command.input_schema)

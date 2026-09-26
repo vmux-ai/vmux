@@ -189,7 +189,7 @@ mod tests {
         let (agent_tx, _) = broadcast::channel(8);
         RemoteState {
             relay_token: Arc::from("token"),
-            authorizations: Arc::new(Mutex::new(vmux_client::RemoteAuthorizationStore::new(
+            authorizations: Arc::new(Mutex::new(crate::RemoteAuthorizationStore::new(
                 tempfile::tempdir()
                     .unwrap()
                     .keep()

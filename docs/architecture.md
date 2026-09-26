@@ -699,6 +699,8 @@ React-style, in one atomic transaction.
 | Android | remote client | configured, no platform code yet |
 
 A remote client is strictly a client — the server half of `vmux_service` is compiled out.
+`vmux_service` also owns its local connection, daemon control, paths, pairing, and authorization
+APIs; these are facets of one service boundary rather than a separate generic client domain.
 
 Two cfg aliases decide that split, emitted by `crates/build_platform_cfg.rs`: **`ui`** is
 iOS or macOS, the surfaces that run pages; **`host`** is everything that is not iOS, the
@@ -717,7 +719,6 @@ crates/
 │   ├── vmux_desktop
 │   └── vmux_mobile
 ├── host/                   runtime with no UI, owns state
-│   ├── vmux_client
 │   ├── vmux_mcp
 │   ├── vmux_transport
 │   └── vmux_service

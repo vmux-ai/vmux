@@ -3,8 +3,35 @@ use crate::{DaemonBinary, DaemonIdentity, ServicePaths};
 use bevy_ecs::resource::Resource;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::io::BufReader;
+use tokio::net::UnixStream;
+use tokio::sync::Mutex as TokioMutex;
 
-pub use vmux_client::client::ServiceConnection;
+pub struct ServiceConnection {
+    reader: TokioMutex<BufReader<tokio::net::unix::OwnedReadHalf>>,
+    writer: TokioMutex<tokio::net::unix::OwnedWriteHalf>,
+}
+
+impl ServiceConnection {
+    pub async fn connect() -> std::io::Result<Self> {
+        let stream = UnixStream::connect(ServicePaths::current().socket()).await?;
+        let (reader, writer) = stream.into_split();
+        Ok(Self {
+            reader: TokioMutex::new(BufReader::new(reader)),
+            writer: TokioMutex::new(writer),
+        })
+    }
+
+    pub async fn send(&self, message: &ClientMessage) -> std::io::Result<()> {
+        let mut writer = self.writer.lock().await;
+        crate::write_message!(&mut *writer, message)
+    }
+
+    pub async fn recv(&self) -> std::io::Result<Option<ServiceMessage>> {
+        let mut reader = self.reader.lock().await;
+        crate::read_message!(&mut *reader, ServiceMessage)
+    }
+}
 
 #[derive(Resource)]
 pub struct ServiceClient(pub ServiceHandle);

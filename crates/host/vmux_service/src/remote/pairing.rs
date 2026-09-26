@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use std::path::Path;
 
-use crate::paths::RemotePaths;
+use crate::RemotePaths;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Relay {
