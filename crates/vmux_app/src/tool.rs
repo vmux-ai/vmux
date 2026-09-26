@@ -1,10 +1,12 @@
 use bevy_app::{App, Plugin, Update};
+use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentCommand, JsonValue};
+use vmux_core::JsonArguments;
 
 use vmux_mcp::tool::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet,
+    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet,
     ToolRequestSet,
 };
 
@@ -103,30 +105,37 @@ struct NotifyArgs {
     body: Option<String>,
 }
 
-type AddedToolRequest<T> = (With<ToolCall>, Added<T>);
-
-fn parse(mut commands: Commands, calls: ToolCalls<ApplicationTool>) {
-    for (request, call, tool) in calls.iter() {
+fn parse(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments, &ApplicationTool), AddedTool<ApplicationTool>>,
+) {
+    for (request, name, arguments, tool) in &calls {
         let parsed = match tool {
-            ApplicationTool::OpenCommandBar => call.parse::<OpenCommandBarArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            ApplicationTool::RenameProfile => call.parse::<RenameProfileArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            ApplicationTool::Notify => call.parse::<NotifyArgs>().map(|args| {
+            ApplicationTool::OpenCommandBar => arguments
+                .parse::<OpenCommandBarArgs>(name.as_str())
+                .map(|args| {
+                    commands.entity(request).insert(args);
+                }),
+            ApplicationTool::RenameProfile => arguments
+                .parse::<RenameProfileArgs>(name.as_str())
+                .map(|args| {
+                    commands.entity(request).insert(args);
+                }),
+            ApplicationTool::Notify => arguments.parse::<NotifyArgs>(name.as_str()).map(|args| {
                 commands.entity(request).insert(args);
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError::new(message));
+            commands
+                .entity(request)
+                .insert(ToolDispatchError::new(message));
         }
     }
 }
 
 fn open_command_bar(
     mut commands: Commands,
-    requests: Query<(Entity, &OpenCommandBarArgs), AddedToolRequest<OpenCommandBarArgs>>,
+    requests: Query<(Entity, &OpenCommandBarArgs), AddedTool<OpenCommandBarArgs>>,
 ) {
     for (entity, args) in &requests {
         let result = match args.mode.as_deref().unwrap_or("default") {
@@ -145,7 +154,7 @@ fn open_command_bar(
 
 fn rename_profile(
     mut commands: Commands,
-    requests: Query<(Entity, &RenameProfileArgs), AddedToolRequest<RenameProfileArgs>>,
+    requests: Query<(Entity, &RenameProfileArgs), AddedTool<RenameProfileArgs>>,
 ) {
     for (entity, args) in &requests {
         let name = args.name.trim();
@@ -160,10 +169,7 @@ fn rename_profile(
     }
 }
 
-fn notify(
-    mut commands: Commands,
-    requests: Query<(Entity, &NotifyArgs), AddedToolRequest<NotifyArgs>>,
-) {
+fn notify(mut commands: Commands, requests: Query<(Entity, &NotifyArgs), AddedTool<NotifyArgs>>) {
     for (entity, args) in &requests {
         commands
             .entity(entity)

@@ -1,10 +1,11 @@
-use vmux_mcp::tool::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
-    ToolRequestSet,
-};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentCommand, AgentQuery, JsonValue, layout};
+use vmux_core::{JsonArguments, ProcessAnchor};
+use vmux_mcp::tool::{
+    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
+    ToolRequestSet,
+};
 
 pub struct LayoutToolPlugin;
 
@@ -37,36 +38,51 @@ struct SelectTabArgs {
 #[serde(transparent)]
 struct UpdateLayoutArgs(layout::LayoutSnapshot);
 
-fn parse(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
-    for (request, call, tool) in calls.iter() {
+fn parse(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments, &LayoutTool), AddedTool<LayoutTool>>,
+) {
+    for (request, name, arguments, tool) in &calls {
         let parsed = match tool {
             LayoutTool::ReadLayout => continue,
-            LayoutTool::UpdateLayout => call.parse::<UpdateLayoutArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            LayoutTool::SelectTab => call.parse::<SelectTabArgs>().map(|args| {
+            LayoutTool::UpdateLayout => {
+                arguments
+                    .parse::<UpdateLayoutArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    })
+            }
+            LayoutTool::SelectTab => arguments.parse::<SelectTabArgs>(name.as_str()).map(|args| {
                 commands.entity(request).insert(args);
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError::new(message));
+            commands
+                .entity(request)
+                .insert(ToolDispatchError::new(message));
         }
     }
 }
 
-fn read_layout(mut commands: Commands, calls: ToolCalls<LayoutTool>) {
-    for (request, call, _) in calls.matching(LayoutTool::ReadLayout) {
+fn read_layout(
+    mut commands: Commands,
+    calls: Query<(Entity, &LayoutTool, Option<&ProcessAnchor>), AddedTool<LayoutTool>>,
+) {
+    for (request, tool, anchor) in &calls {
+        if *tool != LayoutTool::ReadLayout {
+            continue;
+        }
         commands
             .entity(request)
             .insert(ToolQuery(Ok(AgentQuery::ReadLayout {
-                anchor: call.anchor(),
+                anchor: anchor.map(|anchor| anchor.0),
             })));
     }
 }
 
 fn update_layout(
     mut commands: Commands,
-    requests: Query<(Entity, &UpdateLayoutArgs), (With<ToolCall>, Added<UpdateLayoutArgs>)>,
+    requests: Query<(Entity, &UpdateLayoutArgs), AddedTool<UpdateLayoutArgs>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -79,7 +95,7 @@ fn update_layout(
 
 fn select_tab(
     mut commands: Commands,
-    requests: Query<(Entity, &SelectTabArgs), (With<ToolCall>, Added<SelectTabArgs>)>,
+    requests: Query<(Entity, &SelectTabArgs), AddedTool<SelectTabArgs>>,
 ) {
     for (entity, args) in &requests {
         let index = args.index;

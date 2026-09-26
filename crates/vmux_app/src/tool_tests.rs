@@ -1,15 +1,17 @@
 use bevy_app::{App, Plugin, Update};
+use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::RunSystemOnce;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{
     AgentBookmarkCommand, AgentCommand, AgentQuery, AgentSpaceCommand, JsonValue, ProcessId,
     SimulatorButton, SimulatorInput,
 };
+use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_mcp::tool::{
-    McpToolPlugin, ShellNote, ToolCall, ToolCallPolicy, ToolCommand, ToolDefinition,
-    ToolDispatchError, ToolDispatchSet, ToolQuery, ToolRegistry,
+    AcpSessionContext, AcpTerminalContext, AddedTool, McpToolPlugin, ShellNote, ToolCall,
+    ToolCatalog, ToolCatalogRequest, ToolCommand, ToolDefinition, ToolDispatchError,
+    ToolDispatchSet, ToolInvocation, ToolQuery, ToolTarget,
 };
 
 use crate::ToolPlugin;
@@ -33,17 +35,29 @@ fn tool_app() -> App {
 }
 
 fn tool_definitions_in(
-    world: &mut World,
+    app: &mut App,
     acp_session: bool,
     acp_terminals: bool,
     shell: &str,
 ) -> Vec<ToolDefinition> {
-    let shell = shell.to_string();
-    world
-        .run_system_once(move |tools: ToolRegistry| {
-            tools.definitions(acp_session, acp_terminals, &shell)
-        })
-        .expect("tool catalog system must run")
+    let mut request = app
+        .world_mut()
+        .spawn((ToolCatalogRequest, HostShell(shell.to_string())));
+    if acp_session {
+        request.insert(AcpSessionContext);
+    }
+    if acp_terminals {
+        request.insert(AcpTerminalContext);
+    }
+    let request = request.id();
+    app.update();
+    let catalog = app
+        .world_mut()
+        .entity_mut(request)
+        .take::<ToolCatalog>()
+        .expect("tool catalog request must produce a result");
+    app.world_mut().despawn(request);
+    catalog.0
 }
 
 fn tool_definitions_filtered(
@@ -52,7 +66,7 @@ fn tool_definitions_filtered(
     shell: &str,
 ) -> Vec<ToolDefinition> {
     let mut app = tool_app();
-    tool_definitions_in(app.world_mut(), acp_session, acp_terminals, shell)
+    tool_definitions_in(&mut app, acp_session, acp_terminals, shell)
 }
 
 fn tool_definitions() -> Vec<ToolDefinition> {
@@ -68,25 +82,48 @@ fn dispatch_tool_call(
     acp_session: bool,
     acp_terminals: bool,
 ) -> Result<TestToolDispatch, String> {
+    dispatch_tool_call_with_protocol(
+        app,
+        name,
+        arguments,
+        anchor,
+        host_shell,
+        acp_session,
+        acp_terminals,
+        false,
+    )
+}
+
+fn dispatch_tool_call_with_protocol(
+    app: &mut App,
+    name: &str,
+    arguments: serde_json::Value,
+    anchor: Option<ProcessId>,
+    host_shell: &str,
+    acp_session: bool,
+    acp_terminals: bool,
+    protocol: bool,
+) -> Result<TestToolDispatch, String> {
     let normalized = vmux_mcp::tool::canonical_tool_name(name).to_string();
-    let name = name.to_string();
-    let host_shell = host_shell.to_string();
-    let call = app
-        .world_mut()
-        .run_system_once(move |tools: ToolRegistry| {
-            tools.call(
-                &name,
-                arguments.clone(),
-                anchor,
-                &host_shell,
-                ToolCallPolicy::registered(acp_session, acp_terminals),
-            )
-        })
-        .map_err(|error| error.to_string())??;
-    let request = app
-        .world_mut()
-        .spawn((call, McpRequest::new(std::time::Duration::from_secs(50))))
-        .id();
+    let mut request = app.world_mut().spawn((
+        Name::new(name.to_string()),
+        JsonArguments(arguments),
+        HostShell(host_shell.to_string()),
+        ToolInvocation,
+    ));
+    if let Some(anchor) = anchor {
+        request.insert(ProcessAnchor(anchor));
+    }
+    if acp_session {
+        request.insert(AcpSessionContext);
+    }
+    if acp_terminals {
+        request.insert(AcpTerminalContext);
+    }
+    if protocol {
+        request.insert(McpRequest::new(std::time::Duration::from_secs(50)));
+    }
+    let request = request.id();
     app.update();
     let dispatched = if let Some(result) = app.world_mut().entity_mut(request).take::<ToolCommand>()
     {
@@ -114,23 +151,22 @@ fn dispatch_tool_call(
     dispatched
 }
 
-fn find_tool(world: &mut World, name: &str) -> Option<Entity> {
-    let name = name.to_string();
-    world
-        .run_system_once(move |tools: ToolRegistry| {
-            tools
-                .call(
-                    &name,
-                    serde_json::Value::Null,
-                    None,
-                    "",
-                    ToolCallPolicy::registered(false, false),
-                )
-                .ok()
-                .and_then(|call| call.tool())
-        })
-        .ok()
-        .flatten()
+fn find_tool(app: &mut App, name: &str) -> Option<Entity> {
+    let request = app
+        .world_mut()
+        .spawn((
+            Name::new(name.to_string()),
+            JsonArguments(serde_json::Value::Null),
+            ToolInvocation,
+        ))
+        .id();
+    app.update();
+    let tool = app
+        .world()
+        .get::<ToolTarget>(request)
+        .map(|target| target.0);
+    app.world_mut().despawn(request);
+    tool
 }
 
 fn dispatch_from_tool_call(
@@ -172,15 +208,7 @@ fn dispatch_in_shell(
     host_shell: &str,
 ) -> Result<DispatchTarget, String> {
     let mut app = tool_app();
-    match dispatch_tool_call(
-        &mut app,
-        name,
-        arguments,
-        anchor,
-        host_shell,
-        false,
-        false,
-    )? {
+    match dispatch_tool_call(&mut app, name, arguments, anchor, host_shell, false, false)? {
         TestToolDispatch::Target(target) => Ok(target),
         TestToolDispatch::Protocol => Err(format!(
             "tool {} requires MCP protocol context",
@@ -225,14 +253,18 @@ impl Plugin for ExtensionToolPlugin {
 
 fn dispatch_extension_tools(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &ExtensionTool), Added<ExtensionTool>>,
+    requests: Query<(Entity, &Name, &JsonArguments, &ExtensionTool), AddedTool<ExtensionTool>>,
 ) {
-    for (entity, call, tool) in &requests {
+    for (entity, name, arguments, tool) in &requests {
         let command = match tool {
-            ExtensionTool::Echo => call.parse::<EchoArgs>().map(|args| AgentCommand::Notify {
-                title: Some("Extension".to_string()),
-                body: Some(args.text),
-            }),
+            ExtensionTool::Echo => {
+                arguments
+                    .parse::<EchoArgs>(name.as_str())
+                    .map(|args| AgentCommand::Notify {
+                        title: Some("Extension".to_string()),
+                        body: Some(args.text),
+                    })
+            }
         };
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -244,7 +276,7 @@ fn extension_plugin_registers_and_dispatches_its_manifest() {
     app.add_plugins(ExtensionToolPlugin);
     app.update();
 
-    let definitions = tool_definitions_in(app.world_mut(), false, false, "");
+    let definitions = tool_definitions_in(&mut app, false, false, "");
     assert_eq!(
         definitions
             .iter()
@@ -278,20 +310,14 @@ fn owning_world_dispatches_tool_entities() {
     app.add_plugins(ToolPlugin);
     app.update();
 
-    let call = app
+    let request = app
         .world_mut()
-        .run_system_once(|tools: ToolRegistry| {
-            tools.call(
-                "notify",
-                serde_json::json!({"body": "hello"}),
-                None,
-                "",
-                ToolCallPolicy::registered(false, false),
-            )
-        })
-        .unwrap()
-        .unwrap();
-    let request = app.world_mut().spawn(call).id();
+        .spawn((
+            Name::new("notify"),
+            JsonArguments(serde_json::json!({"body": "hello"})),
+            ToolInvocation,
+        ))
+        .id();
     app.update();
 
     let command = app
@@ -446,16 +472,10 @@ fn tool_entities_have_the_exact_definition_and_dispatch_set() {
 #[test]
 fn aliases_resolve_to_the_same_tool_entity() {
     let mut app = tool_app();
-    let select = find_tool(app.world_mut(), "select_project").unwrap();
-    assert_eq!(
-        find_tool(app.world_mut(), "select_workspace").unwrap(),
-        select
-    );
-    assert_eq!(
-        find_tool(app.world_mut(), "choose_workspace").unwrap(),
-        select
-    );
-    let execution = dispatch_tool_call(
+    let select = find_tool(&mut app, "select_project").unwrap();
+    assert_eq!(find_tool(&mut app, "select_workspace").unwrap(), select);
+    assert_eq!(find_tool(&mut app, "choose_workspace").unwrap(), select);
+    let execution = dispatch_tool_call_with_protocol(
         &mut app,
         "vmux_read_file",
         serde_json::json!({"path": "/tmp/example"}),
@@ -463,6 +483,7 @@ fn aliases_resolve_to_the_same_tool_entity() {
         "",
         false,
         false,
+        true,
     )
     .unwrap();
     assert!(matches!(execution, TestToolDispatch::Protocol));

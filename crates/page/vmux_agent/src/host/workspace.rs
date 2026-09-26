@@ -456,7 +456,7 @@ fn drain_workspace_picker_tasks(
     mut acp_sessions: Query<&mut vmux_session::AcpSession>,
     child_of: Query<&ChildOf>,
     mut commands: Commands,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
@@ -553,7 +553,7 @@ pub(super) fn send_pending_agent_continuations(
         Option<&AgentSession>,
         Option<&mut crate::run_state::AgentRunState>,
     )>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
 ) {
     for (entity, continuation, acp, page, cli, state) in &mut sessions {

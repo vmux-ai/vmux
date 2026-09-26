@@ -10,8 +10,8 @@ mod page_life;
 
 mod native_bridge;
 mod native_layout;
-mod platform;
 mod navigation;
+mod platform;
 mod present;
 
 use crate::page_life::spawn_popup_stacks;
@@ -23,10 +23,10 @@ mod snapshot;
 mod state;
 mod tool;
 mod window_drag;
-pub use tool::BrowserToolPlugin;
 pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
 pub use host_focus::{HostFocusIntent, KeyboardContext, KeyboardContextSet};
 pub use navigation::OpenHistoryRequest;
+pub use tool::BrowserToolPlugin;
 pub use window_drag::WindowDragRegion;
 
 pub use native_bridge::NativeBridge;
@@ -695,7 +695,7 @@ struct PageOpenAwaitSnapshot {
 }
 
 fn send_page_open_response(
-    service: &Option<Res<vmux_service::client::ServiceClient>>,
+    service: &Option<Single<&vmux_service::client::ServiceClient>>,
     request_id: Option<[u8; 16]>,
     result: Result<(), String>,
 ) {
@@ -758,7 +758,7 @@ impl PendingNavigationUpdate {
 fn apply_pending_navigation_updates(
     mut updates: MessageReader<PendingNavigationUpdate>,
     existing: Query<(Entity, &PendingNavigationSnapshot)>,
-    service: Option<Res<vmux_service::client::ServiceClient>>,
+    service: Option<Single<&vmux_service::client::ServiceClient>>,
     mut commands: Commands,
 ) {
     let mut pending = existing

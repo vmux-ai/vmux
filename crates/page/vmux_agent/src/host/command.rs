@@ -32,18 +32,3 @@ impl Plugin for CommandPlugin {
         .add_plugins((dispatch::DispatchPlugin, tool_call::ToolCallPlugin));
     }
 }
-
-struct CommandArguments(serde_json::Value);
-
-impl TryFrom<&vmux_api::json::JsonValue> for CommandArguments {
-    type Error = String;
-
-    fn try_from(input: &vmux_api::json::JsonValue) -> Result<Self, Self::Error> {
-        let value = serde_json::Value::try_from(input)
-            .map_err(|error| format!("invalid JSON arguments: {error}"))?;
-        if !value.is_object() {
-            return Err("command arguments must be a JSON object".to_string());
-        }
-        Ok(Self(value))
-    }
-}

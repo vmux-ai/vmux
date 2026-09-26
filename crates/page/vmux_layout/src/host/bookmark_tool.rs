@@ -1,10 +1,11 @@
-use vmux_mcp::tool::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
-    ToolRequestSet,
-};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentBookmarkCommand, AgentBookmarkPage, AgentCommand, AgentQuery};
+use vmux_core::JsonArguments;
+use vmux_mcp::tool::{
+    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
+    ToolRequestSet,
+};
 
 pub struct BookmarkToolPlugin;
 
@@ -81,45 +82,66 @@ struct BookmarkFolderCreateArgs {
     name: String,
 }
 
-fn list(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
-    for (request, _, _) in calls.matching(BookmarkTool::BookmarkList) {
+fn list(mut commands: Commands, calls: Query<(Entity, &BookmarkTool), AddedTool<BookmarkTool>>) {
+    for (request, tool) in &calls {
+        if *tool != BookmarkTool::BookmarkList {
+            continue;
+        }
         commands
             .entity(request)
             .insert(ToolQuery(Ok(AgentQuery::BookmarkList)));
     }
 }
 
-fn parse(mut commands: Commands, calls: ToolCalls<BookmarkTool>) {
-    for (request, call, tool) in calls.iter() {
-        let parsed = match tool {
-            BookmarkTool::BookmarkList => continue,
-            BookmarkTool::BookmarkAdd => call.parse::<BookmarkAddArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            BookmarkTool::BookmarkRemove => call.parse::<BookmarkRemoveArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            BookmarkTool::BookmarkPin => call.parse::<BookmarkPinArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            BookmarkTool::BookmarkUnpin => call.parse::<BookmarkUnpinArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            BookmarkTool::BookmarkFolderCreate => {
-                call.parse::<BookmarkFolderCreateArgs>().map(|args| {
-                    commands.entity(request).insert(args);
-                })
-            }
-        };
+fn parse(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments, &BookmarkTool), AddedTool<BookmarkTool>>,
+) {
+    for (request, name, arguments, tool) in &calls {
+        let parsed =
+            match tool {
+                BookmarkTool::BookmarkList => continue,
+                BookmarkTool::BookmarkAdd => {
+                    arguments
+                        .parse::<BookmarkAddArgs>(name.as_str())
+                        .map(|args| {
+                            commands.entity(request).insert(args);
+                        })
+                }
+                BookmarkTool::BookmarkRemove => arguments
+                    .parse::<BookmarkRemoveArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    }),
+                BookmarkTool::BookmarkPin => {
+                    arguments
+                        .parse::<BookmarkPinArgs>(name.as_str())
+                        .map(|args| {
+                            commands.entity(request).insert(args);
+                        })
+                }
+                BookmarkTool::BookmarkUnpin => arguments
+                    .parse::<BookmarkUnpinArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    }),
+                BookmarkTool::BookmarkFolderCreate => arguments
+                    .parse::<BookmarkFolderCreateArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    }),
+            };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError::new(message));
+            commands
+                .entity(request)
+                .insert(ToolDispatchError::new(message));
         }
     }
 }
 
 fn add(
     mut commands: Commands,
-    requests: Query<(Entity, &BookmarkAddArgs), (With<ToolCall>, Added<BookmarkAddArgs>)>,
+    requests: Query<(Entity, &BookmarkAddArgs), AddedTool<BookmarkAddArgs>>,
 ) {
     for (entity, args) in &requests {
         let command =
@@ -139,7 +161,7 @@ fn add(
 
 fn remove(
     mut commands: Commands,
-    requests: Query<(Entity, &BookmarkRemoveArgs), (With<ToolCall>, Added<BookmarkRemoveArgs>)>,
+    requests: Query<(Entity, &BookmarkRemoveArgs), AddedTool<BookmarkRemoveArgs>>,
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_remove.uuid is required")
@@ -150,7 +172,7 @@ fn remove(
 
 fn pin(
     mut commands: Commands,
-    requests: Query<(Entity, &BookmarkPinArgs), (With<ToolCall>, Added<BookmarkPinArgs>)>,
+    requests: Query<(Entity, &BookmarkPinArgs), AddedTool<BookmarkPinArgs>>,
 ) {
     for (entity, args) in &requests {
         let command = match args {
@@ -177,7 +199,7 @@ fn pin(
 
 fn unpin(
     mut commands: Commands,
-    requests: Query<(Entity, &BookmarkUnpinArgs), (With<ToolCall>, Added<BookmarkUnpinArgs>)>,
+    requests: Query<(Entity, &BookmarkUnpinArgs), AddedTool<BookmarkUnpinArgs>>,
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_unpin.uuid is required")
@@ -188,10 +210,7 @@ fn unpin(
 
 fn create_folder(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &BookmarkFolderCreateArgs),
-        (With<ToolCall>, Added<BookmarkFolderCreateArgs>),
-    >,
+    requests: Query<(Entity, &BookmarkFolderCreateArgs), AddedTool<BookmarkFolderCreateArgs>>,
 ) {
     for (entity, args) in &requests {
         let command =

@@ -28,6 +28,7 @@ vmux_native = { path = "../../vmux_native" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 base64 = "0.22"
+bevy = { workspace = true }
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 libc = "0.2"

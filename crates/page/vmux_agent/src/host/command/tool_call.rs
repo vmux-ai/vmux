@@ -4,7 +4,7 @@ use vmux_service::protocol::{AgentRequestId, ClientMessage};
 
 use crate::events::{AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin};
 
-use super::{CommandArguments, CommandSet};
+use super::CommandSet;
 
 pub(super) struct ToolCallPlugin;
 
@@ -14,7 +14,7 @@ impl Plugin for ToolCallPlugin {
             Update,
             handle_agent_tool_calls
                 .in_set(CommandSet::ToolCalls)
-                .before(vmux_mcp::tool::ToolRequestSet),
+                .before(vmux_mcp::tool::ToolResolveSet),
         )
         .add_systems(
             Update,
@@ -38,12 +38,11 @@ struct PendingAgentToolCall {
 fn handle_agent_tool_calls(
     mut commands: Commands,
     mut reader: MessageReader<AgentToolCallRequest>,
-    tools: vmux_mcp::tool::ToolRegistry,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for request in reader.read() {
-        let arguments = match CommandArguments::try_from(&request.args) {
-            Ok(arguments) => arguments.0,
+        let arguments = match vmux_core::JsonArguments::try_from(&request.args) {
+            Ok(arguments) => arguments,
             Err(message) => {
                 if let Some(service) = service.as_ref() {
                     service.0.send(ClientMessage::AgentToolResult {
@@ -55,32 +54,16 @@ fn handle_agent_tool_calls(
                 continue;
             }
         };
-        match tools.call(
-            &request.name,
+        commands.spawn((
+            Name::new(request.name.clone()),
             arguments,
-            None,
-            "",
-            vmux_mcp::tool::ToolCallPolicy::agent(),
-        ) {
-            Ok(call) => {
-                commands.spawn((
-                    call,
-                    PendingAgentToolCall {
-                        request_id: request.request_id,
-                        sid: request.sid.clone(),
-                    },
-                ));
-            }
-            Err(message) => {
-                if let Some(service) = service.as_ref() {
-                    service.0.send(ClientMessage::AgentToolResult {
-                        request_id: request.request_id,
-                        content: message,
-                        is_error: true,
-                    });
-                }
-            }
-        }
+            vmux_mcp::tool::ToolInvocation,
+            vmux_mcp::tool::ToolCommandFallback,
+            PendingAgentToolCall {
+                request_id: request.request_id,
+                sid: request.sid.clone(),
+            },
+        ));
     }
 }
 
@@ -91,7 +74,7 @@ fn finish_agent_tool_commands(
         Added<vmux_mcp::tool::ToolCommand>,
     >,
     mut command_writer: MessageWriter<AgentCommandRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for (entity, pending, result) in &calls {
         match &result.0 {
@@ -126,7 +109,7 @@ fn finish_agent_tool_queries(
         Added<vmux_mcp::tool::ToolQuery>,
     >,
     mut query_writer: MessageWriter<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for (entity, pending, result) in &calls {
         match &result.0 {
@@ -160,7 +143,7 @@ fn fail_agent_tool_calls(
         ),
         Added<vmux_mcp::tool::ToolDispatchError>,
     >,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for (entity, pending, error) in &calls {
         if let Some(service) = service.as_ref() {
@@ -193,19 +176,15 @@ mod tests {
     #[test]
     fn agent_tools_dispatch_through_the_owning_world() {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            crate::VisualToolPlugin,
-            ToolCallPlugin,
-        ))
-        .add_message::<AgentToolCallRequest>()
-        .add_message::<AgentCommandRequest>()
-        .add_message::<AgentQueryRequest>()
-        .init_resource::<CapturedAgentQueries>()
-        .add_systems(
-            Update,
-            CapturedAgentQueries::read.after(vmux_mcp::tool::ToolDispatchFlush),
-        );
+        app.add_plugins((MinimalPlugins, crate::VisualToolPlugin, ToolCallPlugin))
+            .add_message::<AgentToolCallRequest>()
+            .add_message::<AgentCommandRequest>()
+            .add_message::<AgentQueryRequest>()
+            .init_resource::<CapturedAgentQueries>()
+            .add_systems(
+                Update,
+                CapturedAgentQueries::read.after(vmux_mcp::tool::ToolDispatchFlush),
+            );
         app.update();
 
         app.world_mut()

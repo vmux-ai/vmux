@@ -117,7 +117,7 @@ impl AgentSpaceCatalog {
 
 fn route_layout_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut writer: MessageWriter<vmux_layout::apply::LayoutSnapshotRequest>,
 ) {
     let Some(_) = service else { return };
@@ -134,7 +134,7 @@ fn route_layout_queries(
 
 fn answer_working_directory_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     browse: AgentBrowserResolve,
     tabs: Query<&vmux_layout::tab::Tab>,
 ) {
@@ -162,7 +162,7 @@ fn answer_working_directory_queries(
 
 fn answer_settings_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     settings: Res<AppSettings>,
 ) {
     let Some(service) = service else { return };
@@ -183,7 +183,7 @@ fn answer_settings_queries(
 
 fn answer_space_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     spaces: Query<
         (
             Entity,
@@ -218,7 +218,7 @@ fn answer_space_queries(
 
 fn answer_command_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     commands: Query<&vmux_command::CommandDefinition>,
 ) {
     let Some(service) = service else { return };
@@ -240,7 +240,7 @@ fn answer_command_queries(
 
 fn answer_vault_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for request in reader.read() {
@@ -256,7 +256,7 @@ fn answer_vault_queries(
 
 fn answer_bookmark_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     pins: Query<
         (
             &vmux_core::Uuid,
@@ -370,7 +370,7 @@ fn answer_bookmark_queries(
 
 fn route_capture_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut screenshot_writer: MessageWriter<ScreenshotRequest>,
     mut record_start_writer: MessageWriter<RecordStartRequest>,
     mut record_stop_writer: MessageWriter<RecordStopRequest>,
@@ -410,7 +410,7 @@ fn route_capture_queries(
 
 fn route_browser_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
     mut scroll_writer: MessageWriter<BrowserScrollRequest>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
@@ -454,7 +454,7 @@ fn route_browser_queries(
 
 fn route_simulator_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut control_writer: MessageWriter<vmux_simulator::SimulatorControlRequest>,
     mut screenshot_writer: MessageWriter<vmux_simulator::SimulatorScreenshotRequest>,
 ) {
@@ -479,7 +479,7 @@ fn route_simulator_queries(
 
 fn forward_layout_apply_responses(
     mut reader: MessageReader<vmux_layout::apply::LayoutApplyResponse>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
@@ -496,7 +496,7 @@ fn forward_layout_apply_responses(
 
 fn forward_layout_snapshot_responses(
     mut reader: MessageReader<vmux_layout::apply::LayoutSnapshotResponse>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
@@ -523,7 +523,7 @@ fn screenshot_response_to_query_result(
 
 fn forward_screenshot_responses(
     mut reader: MessageReader<ScreenshotResponse>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
@@ -536,7 +536,7 @@ fn forward_screenshot_responses(
 
 fn forward_snapshot_responses(
     mut reader: MessageReader<BrowserSnapshotResponse>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
@@ -549,7 +549,7 @@ fn forward_snapshot_responses(
 
 fn forward_navigation_snapshot_responses(
     mut reader: MessageReader<BrowserNavigationSnapshotResponse>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
@@ -573,7 +573,7 @@ fn record_start_response_to_query_result(result: &Result<u32, String>) -> AgentQ
 
 fn forward_record_start_responses(
     mut reader: MessageReader<RecordStartResponse>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
@@ -601,7 +601,7 @@ fn record_stop_response_to_query_result(
 
 fn forward_record_stop_responses(
     mut reader: MessageReader<RecordStopResponse>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
@@ -614,7 +614,7 @@ fn forward_record_stop_responses(
 
 fn forward_simulator_control_responses(
     mut reader: MessageReader<vmux_simulator::SimulatorControlResponse>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
@@ -631,7 +631,7 @@ fn forward_simulator_control_responses(
 
 fn forward_simulator_screenshot_responses(
     mut reader: MessageReader<vmux_simulator::SimulatorScreenshotResponse>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {

@@ -1,23 +1,22 @@
-use vmux_mcp::tool::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
-    ToolRequestSet,
-};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentCommand, AgentQuery, JsonValue};
+use vmux_core::JsonArguments;
+use vmux_mcp::tool::{
+    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
+    ToolRequestSet,
+};
 
 pub struct SettingToolPlugin;
 
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<SettingTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(
-            Update,
-            (get_settings, update_settings).in_set(ToolDispatchSet),
-        );
+        app.add_plugins(McpToolPlugin::<SettingTool>::new(include_str!("tool.ron")))
+            .add_systems(Update, parse.in_set(ToolRequestSet))
+            .add_systems(
+                Update,
+                (get_settings, update_settings).in_set(ToolDispatchSet),
+            );
     }
 }
 
@@ -35,23 +34,34 @@ struct UpdateSettingsArgs {
     value: serde_json::Value,
 }
 
-fn parse(mut commands: Commands, calls: ToolCalls<SettingTool>) {
-    for (request, call, tool) in calls.iter() {
+fn parse(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments, &SettingTool), AddedTool<SettingTool>>,
+) {
+    for (request, name, arguments, tool) in &calls {
         if *tool == SettingTool::UpdateSettings {
-            match call.parse::<UpdateSettingsArgs>() {
+            match arguments.parse::<UpdateSettingsArgs>(name.as_str()) {
                 Ok(args) => {
                     commands.entity(request).insert(args);
                 }
                 Err(message) => {
-                    commands.entity(request).insert(ToolDispatchError::new(message));
+                    commands
+                        .entity(request)
+                        .insert(ToolDispatchError::new(message));
                 }
             }
         }
     }
 }
 
-fn get_settings(mut commands: Commands, calls: ToolCalls<SettingTool>) {
-    for (request, _, _) in calls.matching(SettingTool::GetSettings) {
+fn get_settings(
+    mut commands: Commands,
+    calls: Query<(Entity, &SettingTool), AddedTool<SettingTool>>,
+) {
+    for (request, tool) in &calls {
+        if *tool != SettingTool::GetSettings {
+            continue;
+        }
         commands
             .entity(request)
             .insert(ToolQuery(Ok(AgentQuery::GetSettings)));
@@ -60,7 +70,7 @@ fn get_settings(mut commands: Commands, calls: ToolCalls<SettingTool>) {
 
 fn update_settings(
     mut commands: Commands,
-    requests: Query<(Entity, &UpdateSettingsArgs), (With<ToolCall>, Added<UpdateSettingsArgs>)>,
+    requests: Query<(Entity, &UpdateSettingsArgs), AddedTool<UpdateSettingsArgs>>,
 ) {
     for (entity, args) in &requests {
         let command = if args.path.trim().is_empty() {

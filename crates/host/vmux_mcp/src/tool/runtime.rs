@@ -4,7 +4,8 @@ use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
-use vmux_service::protocol::{AgentCommand, AgentQuery, JsonValue, ProcessId};
+use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
+use vmux_service::protocol::{AgentCommand, AgentQuery, JsonValue};
 
 use vmux_api::InputSchema;
 
@@ -17,12 +18,18 @@ impl Plugin for ToolRuntimePlugin {
         app.configure_sets(
             Update,
             (
+                ToolResolveSet,
+                ToolRouteSet,
                 ToolRequestSet,
                 ToolRequestFlush,
                 ToolDispatchSet,
                 ToolDispatchFlush,
             )
                 .chain(),
+        )
+        .add_systems(
+            Update,
+            (resolve_tool_catalogs, resolve_tool_invocations).in_set(ToolResolveSet),
         )
         .add_systems(
             Update,
@@ -61,7 +68,7 @@ where
         app.world_mut()
             .spawn(McpToolManifest::<T>::new(self.manifest));
         app.add_systems(Startup, register_mcp_tools::<T>.in_set(RegisterTools))
-            .add_systems(Update, route_mcp_tools::<T>.in_set(ToolRequestSet));
+            .add_systems(Update, route_mcp_tools::<T>.in_set(ToolRouteSet));
     }
 }
 
@@ -100,7 +107,7 @@ fn register_mcp_tools<T>(
                 ToolDescription(seed.description),
                 ToolInputSchema(seed.input_schema),
                 ToolAccess(seed.availability),
-                ToolOrder(order),
+                RegistrationOrder(order),
                 kind,
             ));
             if seed.shell_aware {
@@ -111,14 +118,26 @@ fn register_mcp_tools<T>(
     }
 }
 
-fn route_mcp_tools<T>(mut commands: Commands, calls: ToolCalls<T>)
-where
+fn route_mcp_tools<T>(
+    mut commands: Commands,
+    calls: Query<(Entity, &ToolTarget), Added<ToolCall>>,
+    tools: Query<&T>,
+) where
     T: Component + Clone,
 {
-    for (request, _, tool) in calls.iter() {
+    for (request, target) in &calls {
+        let Ok(tool) = tools.get(target.0) else {
+            continue;
+        };
         commands.entity(request).insert(tool.clone());
     }
 }
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+pub struct ToolResolveSet;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct ToolRouteSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub struct ToolRequestSet;
@@ -150,63 +169,52 @@ type ToolEntity<'w> = (
     &'w ToolDescription,
     &'w ToolInputSchema,
     &'w ToolAccess,
-    &'w ToolOrder,
+    &'w RegistrationOrder,
     Option<&'w ShellAware>,
 );
 
-#[derive(bevy_ecs::system::SystemParam)]
-pub struct ToolRegistry<'w, 's> {
-    tools: Query<'w, 's, ToolEntity<'static>, With<McpTool>>,
-}
+#[derive(Component, Clone, Copy)]
+pub struct ToolCatalogRequest;
 
-#[derive(Clone, Copy)]
-pub struct ToolCallPolicy {
-    acp_session: bool,
-    acp_terminals: bool,
-    allow_command: bool,
-}
+#[derive(Component, Clone, Debug)]
+pub struct ToolCatalog(pub Vec<ToolDefinition>);
 
-impl ToolCallPolicy {
-    pub const fn mcp(acp_session: bool, acp_terminals: bool) -> Self {
-        Self {
-            acp_session,
-            acp_terminals,
-            allow_command: true,
-        }
-    }
+#[derive(Component, Clone, Copy)]
+pub struct ToolInvocation;
 
-    pub const fn agent() -> Self {
-        Self {
-            acp_session: false,
-            acp_terminals: false,
-            allow_command: true,
-        }
-    }
+#[derive(Component, Clone, Copy)]
+pub struct ToolCommandFallback;
 
-    pub const fn registered(acp_session: bool, acp_terminals: bool) -> Self {
-        Self {
-            acp_session,
-            acp_terminals,
-            allow_command: false,
-        }
-    }
-}
+#[derive(Component, Clone, Copy)]
+pub struct AcpSessionContext;
 
-impl ToolRegistry<'_, '_> {
-    pub fn definitions(
-        &self,
-        acp_session: bool,
-        acp_terminals: bool,
-        shell: &str,
-    ) -> Vec<ToolDefinition> {
+#[derive(Component, Clone, Copy)]
+pub struct AcpTerminalContext;
+
+fn resolve_tool_catalogs(
+    requests: Query<
+        (
+            Entity,
+            Option<&HostShell>,
+            Has<AcpSessionContext>,
+            Has<AcpTerminalContext>,
+        ),
+        Added<ToolCatalogRequest>,
+    >,
+    tools: Query<ToolEntity<'static>, With<McpTool>>,
+    mut commands: Commands,
+) {
+    for (request_entity, shell, acp_session, acp_terminals) in &requests {
         let mut definitions = Vec::new();
-        for (_, name, _, description, schema, access, order, shell_aware) in &self.tools {
+        for (_, name, _, description, schema, access, order, shell_aware) in &tools {
             if !access.0.allows(acp_session, acp_terminals) {
                 continue;
             }
             let mut description = description.0.clone();
             if shell_aware.is_some() {
-                description.push_str(&ShellNote::for_shell(shell));
+                description.push_str(&ShellNote::for_shell(
+                    shell.map_or("", |shell| shell.0.as_str()),
+                ));
             }
             definitions.push((
                 order.0,
@@ -218,46 +226,71 @@ impl ToolRegistry<'_, '_> {
             ));
         }
         definitions.sort_by_key(|(order, _)| *order);
-        definitions
+        let definitions = definitions
             .into_iter()
             .map(|(_, definition)| definition)
-            .collect()
+            .collect();
+        commands
+            .entity(request_entity)
+            .insert(ToolCatalog(definitions));
     }
+}
 
-    pub fn call(
-        &self,
-        name: &str,
-        arguments: Value,
-        anchor: Option<ProcessId>,
-        host_shell: &str,
-        policy: ToolCallPolicy,
-    ) -> Result<ToolCall, String> {
-        let normalized = canonical_tool_name(name);
-        for (entity, name, aliases, _, _, access, _, _) in &self.tools {
+fn resolve_tool_invocations(
+    invocations: Query<
+        (
+            Entity,
+            &Name,
+            &JsonArguments,
+            Has<AcpSessionContext>,
+            Has<AcpTerminalContext>,
+            Has<ToolCommandFallback>,
+        ),
+        Added<ToolInvocation>,
+    >,
+    tools: Query<ToolEntity<'static>, With<McpTool>>,
+    mut commands: Commands,
+) {
+    for (request_entity, requested_name, _, acp_session, acp_terminals, command_fallback) in
+        &invocations
+    {
+        let normalized = canonical_tool_name(requested_name.as_str());
+        let mut matched = None;
+        for (tool_entity, name, aliases, _, _, access, _, _) in &tools {
             if name.as_str() != normalized && !aliases.0.iter().any(|alias| alias == normalized) {
                 continue;
             }
-            if !access.0.allows(policy.acp_session, policy.acp_terminals) {
-                return Err(format!("tool {normalized} is unavailable for ACP sessions"));
+            if !access.0.allows(acp_session, acp_terminals) {
+                commands
+                    .entity(request_entity)
+                    .insert(ToolDispatchError::new(format!(
+                        "tool {normalized} is unavailable for ACP sessions"
+                    )));
+                matched = Some(());
+                break;
             }
-            return Ok(ToolCall {
-                tool: Some(entity),
-                name: name.as_str().to_string(),
-                arguments,
-                anchor,
-                host_shell: host_shell.to_string(),
-            });
+            commands.entity(request_entity).insert((
+                Name::new(name.as_str().to_string()),
+                ToolCall,
+                ToolTarget(tool_entity),
+            ));
+            matched = Some(());
+            break;
         }
-        if policy.allow_command {
-            return Ok(ToolCall {
-                tool: None,
-                name: normalized.to_string(),
-                arguments,
-                anchor,
-                host_shell: host_shell.to_string(),
-            });
+        if matched.is_some() {
+            continue;
         }
-        Err(format!("unknown tool: {normalized}"))
+        if command_fallback {
+            commands
+                .entity(request_entity)
+                .insert((Name::new(normalized.to_string()), ToolCall));
+        } else {
+            commands
+                .entity(request_entity)
+                .insert(ToolDispatchError::new(format!(
+                    "unknown tool: {normalized}"
+                )));
+        }
     }
 }
 
@@ -326,9 +359,6 @@ pub(crate) struct ToolInputSchema(pub(crate) InputSchema);
 pub(crate) struct ToolAccess(pub(crate) ToolAvailability);
 
 #[derive(Component)]
-pub(crate) struct ToolOrder(pub(crate) u32);
-
-#[derive(Component)]
 pub(crate) struct ShellAware;
 
 #[derive(Component, Clone, Debug)]
@@ -347,87 +377,29 @@ impl ToolDispatchError {
 #[derive(Component, Default)]
 pub(super) struct NextToolOrder(u32);
 
-#[derive(Clone, Component)]
-pub struct ToolCall {
-    tool: Option<Entity>,
-    pub(crate) name: String,
-    pub(crate) arguments: Value,
-    pub(crate) anchor: Option<ProcessId>,
-    pub(crate) host_shell: String,
-}
+#[derive(Clone, Copy, Component)]
+pub struct ToolCall;
 
-impl ToolCall {
-    pub fn name(&self) -> &str {
-        &self.name
-    }
+pub type AddedTool<T> = (With<ToolCall>, Added<T>);
 
-    pub fn anchor(&self) -> Option<ProcessId> {
-        self.anchor
-    }
+#[derive(Clone, Copy, Component)]
+pub struct ToolTarget(pub Entity);
 
-    pub fn host_shell(&self) -> &str {
-        &self.host_shell
-    }
-
-    pub fn arguments(&self) -> &Value {
-        &self.arguments
-    }
-
-    pub fn tool(&self) -> Option<Entity> {
-        self.tool
-    }
-
-    pub fn parse<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
-        serde_json::from_value(self.arguments.clone())
-            .map_err(|error| format!("{}: invalid arguments: {error}", self.name))
-    }
-
-    pub fn require_anchor(&self) -> Result<ProcessId, String> {
-        self.anchor.ok_or_else(|| {
-            format!(
-                "{} requires an agent anchor (not available to this client)",
-                self.name
-            )
-        })
-    }
-}
-
-type PendingCommandCalls<'w, 's> =
-    Query<'w, 's, (Entity, &'static ToolCall), (Added<ToolCall>, Without<ToolCommand>)>;
+type PendingCommandCalls<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Name, &'static JsonArguments),
+    (Added<ToolCall>, Without<ToolTarget>, Without<ToolCommand>),
+>;
 
 fn dispatch_command_calls(mut commands: Commands, calls: PendingCommandCalls) {
-    for (entity, call) in &calls {
-        if call.tool.is_some() {
-            continue;
-        }
+    for (entity, name, arguments) in &calls {
         commands
             .entity(entity)
             .insert(ToolCommand(Ok(AgentCommand::InvokeCommand {
-                id: call.name.clone(),
-                args: JsonValue::from(call.arguments.clone()),
+                id: name.as_str().to_string(),
+                args: JsonValue::from(arguments.0.clone()),
             })));
-    }
-}
-
-#[derive(bevy_ecs::system::SystemParam)]
-pub struct ToolCalls<'w, 's, T: Component> {
-    calls: Query<'w, 's, (Entity, &'static ToolCall), Added<ToolCall>>,
-    tools: Query<'w, 's, &'static T>,
-}
-
-impl<'w, 's, T: Component> ToolCalls<'w, 's, T> {
-    pub fn iter(&self) -> impl Iterator<Item = (Entity, &ToolCall, &T)> {
-        self.calls.iter().filter_map(|(request, call)| {
-            let tool = call.tool?;
-            self.tools.get(tool).ok().map(|tool| (request, call, tool))
-        })
-    }
-
-    pub fn matching(&self, kind: T) -> impl Iterator<Item = (Entity, &ToolCall, &T)>
-    where
-        T: Copy + PartialEq,
-    {
-        self.iter().filter(move |(_, _, tool)| **tool == kind)
     }
 }
 

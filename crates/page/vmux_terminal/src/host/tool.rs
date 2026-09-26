@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use vmux_core::JsonArguments;
 use vmux_service::protocol::AgentCommand;
 
 use vmux_mcp::tool::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet,
+    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet,
     ToolRequestSet,
 };
 
@@ -11,11 +12,9 @@ pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<TerminalTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(Update, dispatch.in_set(ToolDispatchSet));
+        app.add_plugins(McpToolPlugin::<TerminalTool>::new(include_str!("tool.ron")))
+            .add_systems(Update, parse.in_set(ToolRequestSet))
+            .add_systems(Update, dispatch.in_set(ToolDispatchSet));
     }
 }
 
@@ -33,14 +32,22 @@ struct TerminalSendArgs {
     enter: Option<bool>,
 }
 
-fn parse(mut commands: Commands, calls: ToolCalls<TerminalTool>) {
-    for (request, call, _) in calls.matching(TerminalTool::TerminalSend) {
-        match call.parse::<TerminalSendArgs>() {
+fn parse(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments, &TerminalTool), AddedTool<TerminalTool>>,
+) {
+    for (request, name, arguments, tool) in &calls {
+        if *tool != TerminalTool::TerminalSend {
+            continue;
+        }
+        match arguments.parse::<TerminalSendArgs>(name.as_str()) {
             Ok(args) => {
                 commands.entity(request).insert(args);
             }
             Err(message) => {
-                commands.entity(request).insert(ToolDispatchError::new(message));
+                commands
+                    .entity(request)
+                    .insert(ToolDispatchError::new(message));
             }
         }
     }
@@ -48,7 +55,7 @@ fn parse(mut commands: Commands, calls: ToolCalls<TerminalTool>) {
 
 fn dispatch(
     mut commands: Commands,
-    requests: Query<(Entity, &TerminalSendArgs), (With<ToolCall>, Added<TerminalSendArgs>)>,
+    requests: Query<(Entity, &TerminalSendArgs), AddedTool<TerminalSendArgs>>,
 ) {
     for (entity, args) in &requests {
         let text = if args.enter.unwrap_or(false) {

@@ -43,7 +43,8 @@ impl Plugin for ProviderAgentPlugin {
                 Update,
                 (
                     ensure_prompt_queue,
-                    spawn_provider_session_on_add,
+                    request_provider_session_spawn.before(vmux_mcp::tool::ToolResolveSet),
+                    spawn_provider_session.after(vmux_mcp::tool::ToolResolveSet),
                     send_provider_agent_input,
                     consume_provider_agent_stream.after(approval::ApprovalSyncSet),
                     attach_last_run_state_kind,
@@ -83,16 +84,32 @@ fn attach_last_run_state_kind(
     }
 }
 
-fn spawn_provider_session_on_add(
-    q: Query<(&AgentSession, Option<&AgentApprovalPolicy>), Added<AgentSession>>,
-    service: Option<Res<ServiceClient>>,
-    tools: vmux_mcp::tool::ToolRegistry,
+fn request_provider_session_spawn(q: Query<Entity, Added<AgentSession>>, mut commands: Commands) {
+    for entity in &q {
+        commands
+            .entity(entity)
+            .insert(vmux_mcp::tool::ToolCatalogRequest);
+    }
+}
+
+fn spawn_provider_session(
+    q: Query<
+        (
+            Entity,
+            &AgentSession,
+            Option<&AgentApprovalPolicy>,
+            &vmux_mcp::tool::ToolCatalog,
+        ),
+        Added<vmux_mcp::tool::ToolCatalog>,
+    >,
+    service: Option<Single<&ServiceClient>>,
     commands: Query<&vmux_command::CommandDefinition>,
+    mut ecs: Commands,
 ) {
     let Some(service) = service else {
         return;
     };
-    for (session, policy) in &q {
+    for (entity, session, policy, catalog) in &q {
         if session.variant != AgentVariant::Page {
             continue;
         }
@@ -104,7 +121,7 @@ fn spawn_provider_session_on_add(
             .filter_map(vmux_command::CommandDefinition::agent_tool)
             .collect();
         let definitions = match vmux_mcp::tool::ToolDefinition::merge_commands(
-            tools.definitions(false, false, ""),
+            catalog.0.clone(),
             command_tools,
         ) {
             Ok(definitions) => definitions,
@@ -135,12 +152,15 @@ fn spawn_provider_session_on_add(
             session.sid.clone(),
             vmux_api::protocol::AgentRequest::Attach,
         )));
+        ecs.entity(entity)
+            .remove::<vmux_mcp::tool::ToolCatalogRequest>()
+            .remove::<vmux_mcp::tool::ToolCatalog>();
     }
 }
 
 fn send_provider_agent_input(
     mut q: Query<(&AgentSession, &mut AgentRunState, &mut PromptQueue)>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
@@ -183,7 +203,7 @@ fn ensure_prompt_queue(
 fn close_provider_session_on_remove(
     trigger: On<Remove, AgentSession>,
     sessions: Query<&AgentSession>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
@@ -222,7 +242,7 @@ fn consume_provider_agent_stream(
         Option<&ImportedConversation>,
     )>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
 ) {
     let by_sid: std::collections::HashMap<String, Entity> = q
