@@ -12,7 +12,7 @@ use vmux_service::protocol::{ClientMessage, ProcessId};
 use crate::Terminal;
 use crate::plugin::{ServiceClient, reattach_terminal_bundle};
 use crate::process_index::TerminalProcessIndex;
-use vmux_core::KeyboardOwner;
+use vmux_core::{KeyboardOwner, Order};
 use vmux_layout::{
     native_open::{HostedPage, HostedPagePlugin},
     pane::{Pane, PaneSplit},
@@ -23,18 +23,8 @@ pub struct ProcessesMonitorPlugin;
 
 impl Plugin for ProcessesMonitorPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ServiceProcessList>()
-            .init_resource::<ProcessUsage>()
-            .init_resource::<VmuxProcessList>()
-            .init_resource::<SysinfoState>()
-            .insert_resource(ProcessesPollTimer(Timer::from_seconds(
-                1.0,
-                TimerMode::Repeating,
-            )))
-            .insert_resource(SysinfoPollTimer(Timer::from_seconds(
-                1.0,
-                TimerMode::Repeating,
-            )))
+        app.add_message::<ServiceProcessSnapshot>()
+            .add_systems(Startup, spawn_process_monitor)
             .add_plugins(UiEventPlugin::<(
                 ProcessNavigateEvent,
                 ProcessKillEvent,
@@ -47,11 +37,13 @@ impl Plugin for ProcessesMonitorPlugin {
             .add_systems(
                 Update,
                 (
+                    reconcile_service_processes,
                     request_process_list,
                     sample_process_usage,
                     broadcast_to_monitors,
                 )
-                    .chain(),
+                    .chain()
+                    .after(crate::plugin::ServiceMessageSet),
             )
             .add_systems(
                 Update,
@@ -110,32 +102,147 @@ fn open_services(
     }
 }
 
-#[derive(Resource, Default)]
-pub struct ServiceProcessList {
-    pub processes: Vec<vmux_service::protocol::ProcessInfo>,
+#[derive(Message)]
+pub(crate) struct ServiceProcessSnapshot(pub(crate) Vec<vmux_service::protocol::ProcessInfo>);
+
+#[derive(Component)]
+struct ProcessMonitor {
+    process_poll: Timer,
+    sysinfo_poll: Timer,
+    system: sysinfo::System,
 }
 
-#[derive(Clone, Copy, Default, Debug, PartialEq)]
+impl Default for ProcessMonitor {
+    fn default() -> Self {
+        Self {
+            process_poll: Timer::from_seconds(1.0, TimerMode::Repeating),
+            sysinfo_poll: Timer::from_seconds(1.0, TimerMode::Repeating),
+            system: sysinfo::System::new(),
+        }
+    }
+}
+
+#[derive(Component)]
+struct ProcessMonitorDirty;
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ServiceProcessId(ProcessId);
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ProcessPid(u32);
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct ServiceProcess {
+    shell: String,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+    uptime_secs: u64,
+}
+
+impl From<&vmux_service::protocol::ProcessInfo> for ServiceProcess {
+    fn from(process: &vmux_service::protocol::ProcessInfo) -> Self {
+        Self {
+            shell: process.shell.clone(),
+            cwd: process.cwd.clone(),
+            cols: process.cols,
+            rows: process.rows,
+            uptime_secs: process.created_at_secs,
+        }
+    }
+}
+
+impl ServiceProcess {
+    fn entry(
+        &self,
+        id: ServiceProcessId,
+        pid: ProcessPid,
+        usage: Usage,
+        attached: bool,
+    ) -> ProcessEntry {
+        ProcessEntry {
+            id: id.0.to_string(),
+            managed: true,
+            shell: self.shell.clone(),
+            cwd: self.cwd.clone(),
+            cols: self.cols,
+            rows: self.rows,
+            pid: pid.0,
+            uptime_secs: self.uptime_secs,
+            cpu_percent: usage.cpu_percent,
+            mem_bytes: usage.mem_bytes,
+            attached,
+            preview_lines: Vec::new(),
+        }
+    }
+}
+
+#[derive(Component, Clone, Copy, Default, Debug, PartialEq)]
 pub struct Usage {
     pub cpu_percent: f32,
     pub mem_bytes: u64,
 }
 
-#[derive(Resource, Default)]
-pub struct ProcessUsage(pub HashMap<u32, Usage>);
-
-#[derive(Clone, Debug, PartialEq)]
-struct VmuxProcess {
-    shell: String,
-    cwd: String,
-    pid: u32,
-    uptime_secs: u64,
-    cpu_percent: f32,
-    mem_bytes: u64,
+impl Usage {
+    fn subtree(root: u32, processes: &HashMap<u32, ProcSample>) -> Self {
+        let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (&pid, sample) in processes {
+            if let Some(parent) = sample.parent {
+                children.entry(parent).or_default().push(pid);
+            }
+        }
+        let mut total = Self::default();
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![root];
+        while let Some(pid) = stack.pop() {
+            if !seen.insert(pid) {
+                continue;
+            }
+            if let Some(sample) = processes.get(&pid) {
+                total.cpu_percent += sample.cpu;
+                total.mem_bytes += sample.mem;
+                if let Some(children) = children.get(&pid) {
+                    stack.extend(children.iter().copied());
+                }
+            }
+        }
+        total
+    }
 }
 
-#[derive(Resource, Default)]
-struct VmuxProcessList(Vec<VmuxProcess>);
+#[derive(Component, Clone, Debug, PartialEq)]
+struct LocalVmuxProcess {
+    shell: String,
+    cwd: String,
+    uptime_secs: u64,
+}
+
+impl LocalVmuxProcess {
+    fn matches(name: &str, executable: &str) -> bool {
+        if name.to_ascii_lowercase().contains("vmux") {
+            return true;
+        }
+        let executable_name = executable.rsplit('/').next().unwrap_or(executable);
+        executable_name.to_ascii_lowercase().contains("vmux")
+    }
+
+    fn entry(&self, pid: ProcessPid, usage: Usage) -> ProcessEntry {
+        ProcessEntry {
+            id: format!("system:{}", pid.0),
+            managed: false,
+            shell: self.shell.clone(),
+            cwd: self.cwd.clone(),
+            cols: 0,
+            rows: 0,
+            pid: pid.0,
+            uptime_secs: self.uptime_secs,
+            cpu_percent: usage.cpu_percent,
+            mem_bytes: usage.mem_bytes,
+            attached: false,
+            preview_lines: Vec::new(),
+        }
+    }
+}
 
 struct ProcSample {
     parent: Option<u32>,
@@ -143,49 +250,48 @@ struct ProcSample {
     mem: u64,
 }
 
-fn subtree_usage(root: u32, procs: &HashMap<u32, ProcSample>) -> Usage {
-    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for (&pid, s) in procs {
-        if let Some(parent) = s.parent {
-            children.entry(parent).or_default().push(pid);
-        }
-    }
-    let mut total = Usage::default();
-    let mut seen = std::collections::HashSet::new();
-    let mut stack = vec![root];
-    while let Some(pid) = stack.pop() {
-        if !seen.insert(pid) {
-            continue;
-        }
-        if let Some(s) = procs.get(&pid) {
-            total.cpu_percent += s.cpu;
-            total.mem_bytes += s.mem;
-            if let Some(kids) = children.get(&pid) {
-                stack.extend(kids.iter().copied());
-            }
-        }
-    }
-    total
+fn spawn_process_monitor(mut commands: Commands) {
+    commands.spawn((Name::new("Process monitor"), ProcessMonitor::default()));
 }
 
-#[derive(Resource)]
-struct ProcessesPollTimer(Timer);
-
-#[derive(Resource)]
-struct SysinfoPollTimer(Timer);
-
-#[derive(Resource)]
-struct SysinfoState(sysinfo::System);
-
-impl Default for SysinfoState {
-    fn default() -> Self {
-        Self(sysinfo::System::new())
+fn reconcile_service_processes(
+    mut snapshots: MessageReader<ServiceProcessSnapshot>,
+    existing: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
+    runtime: Query<Entity, With<ProcessMonitor>>,
+    mut commands: Commands,
+) {
+    let Some(snapshot) = snapshots.read().last() else {
+        return;
+    };
+    let mut by_id = HashMap::new();
+    for (entity, id) in &existing {
+        by_id.insert(id.0, entity);
+    }
+    for (index, process) in snapshot.0.iter().enumerate() {
+        let components = (
+            Name::new(format!("Service process {}", process.id)),
+            ServiceProcessId(process.id),
+            ProcessPid(process.pid),
+            Order(index as u32),
+            ServiceProcess::from(process),
+        );
+        if let Some(entity) = by_id.remove(&process.id) {
+            commands.entity(entity).insert(components);
+        } else {
+            commands.spawn((components, Usage::default()));
+        }
+    }
+    for entity in by_id.into_values() {
+        commands.entity(entity).despawn();
+    }
+    if let Ok(entity) = runtime.single() {
+        commands.entity(entity).insert(ProcessMonitorDirty);
     }
 }
 
 fn request_process_list(
     time: Res<Time>,
-    mut timer: ResMut<ProcessesPollTimer>,
+    mut runtime: Query<&mut ProcessMonitor>,
     service: Option<Res<ServiceClient>>,
     monitors: Query<(), With<ProcessesMonitor>>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
@@ -193,8 +299,11 @@ fn request_process_list(
     if monitors.is_empty() {
         return;
     }
-    timer.0.tick(time.delta());
-    if (!claimed.is_empty() || timer.0.just_finished())
+    let Ok(mut runtime) = runtime.single_mut() else {
+        return;
+    };
+    runtime.process_poll.tick(time.delta());
+    if (!claimed.is_empty() || runtime.process_poll.just_finished())
         && let Some(service) = service
     {
         service.0.send(ClientMessage::ListProcesses);
@@ -203,23 +312,25 @@ fn request_process_list(
 
 fn sample_process_usage(
     time: Res<Time>,
-    mut timer: ResMut<SysinfoPollTimer>,
+    mut runtime: Query<(Entity, &mut ProcessMonitor)>,
     monitors: Query<(), With<ProcessesMonitor>>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
-    process_list: Res<ServiceProcessList>,
-    mut sys: ResMut<SysinfoState>,
-    mut usage: ResMut<ProcessUsage>,
-    mut vmux_processes: ResMut<VmuxProcessList>,
+    mut service_processes: Query<(&ProcessPid, &mut Usage), With<ServiceProcess>>,
+    local_processes: Query<(Entity, &ProcessPid), With<LocalVmuxProcess>>,
+    mut commands: Commands,
 ) {
     if monitors.is_empty() {
         return;
     }
-    timer.0.tick(time.delta());
-    if claimed.is_empty() && !timer.0.just_finished() {
+    let Ok((runtime_entity, mut runtime)) = runtime.single_mut() else {
+        return;
+    };
+    runtime.sysinfo_poll.tick(time.delta());
+    if claimed.is_empty() && !runtime.sysinfo_poll.just_finished() {
         return;
     }
 
-    sys.0.refresh_processes_specifics(
+    runtime.system.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::All,
         true,
         sysinfo::ProcessRefreshKind::nothing()
@@ -229,39 +340,37 @@ fn sample_process_usage(
             .with_cwd(sysinfo::UpdateKind::OnlyIfNotSet),
     );
 
-    let procs: HashMap<u32, ProcSample> = sys
-        .0
-        .processes()
-        .iter()
-        .map(|(pid, p)| {
-            (
-                pid.as_u32(),
-                ProcSample {
-                    parent: p.parent().map(|pp| pp.as_u32()),
-                    cpu: p.cpu_usage(),
-                    mem: p.memory(),
-                },
-            )
-        })
-        .collect();
-
-    let mut map = HashMap::with_capacity(process_list.processes.len());
-    for info in &process_list.processes {
-        map.insert(info.pid, subtree_usage(info.pid, &procs));
+    let mut samples = HashMap::new();
+    for (pid, process) in runtime.system.processes() {
+        samples.insert(
+            pid.as_u32(),
+            ProcSample {
+                parent: process.parent().map(|parent| parent.as_u32()),
+                cpu: process.cpu_usage(),
+                mem: process.memory(),
+            },
+        );
     }
-    usage.0 = map;
 
-    let mut found = Vec::new();
-    for (pid, process) in sys.0.processes() {
+    for (pid, mut usage) in &mut service_processes {
+        *usage = Usage::subtree(pid.0, &samples);
+    }
+
+    let mut existing = HashMap::new();
+    for (entity, pid) in &local_processes {
+        existing.insert(pid.0, entity);
+    }
+    for (pid, process) in runtime.system.processes() {
         let name = process.name().to_string_lossy().into_owned();
         let executable = process
             .exe()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default();
-        if !is_vmux_process(&name, &executable) {
+        if !LocalVmuxProcess::matches(&name, &executable) {
             continue;
         }
-        found.push(VmuxProcess {
+        let pid = ProcessPid(pid.as_u32());
+        let details = LocalVmuxProcess {
             shell: if executable.is_empty() {
                 name
             } else {
@@ -271,104 +380,83 @@ fn sample_process_usage(
                 .cwd()
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_default(),
-            pid: pid.as_u32(),
             uptime_secs: process.run_time(),
+        };
+        let usage = Usage {
             cpu_percent: process.cpu_usage(),
             mem_bytes: process.memory(),
-        });
-    }
-    found.sort_by_key(|process| process.pid);
-    vmux_processes.0 = found;
-}
-
-fn is_vmux_process(name: &str, executable: &str) -> bool {
-    if name.to_ascii_lowercase().contains("vmux") {
-        return true;
-    }
-    let executable_name = executable.rsplit('/').next().unwrap_or(executable);
-    executable_name.to_ascii_lowercase().contains("vmux")
-}
-
-fn build_process_entries(
-    processes: &[vmux_service::protocol::ProcessInfo],
-    usage: &ProcessUsage,
-    attached_ids: &std::collections::HashSet<String>,
-    vmux_processes: &[VmuxProcess],
-) -> Vec<ProcessEntry> {
-    let managed_pids = processes
-        .iter()
-        .map(|process| process.pid)
-        .collect::<std::collections::HashSet<_>>();
-    let mut entries = Vec::with_capacity(processes.len() + vmux_processes.len());
-    for info in processes {
-        let usage = usage.0.get(&info.pid).copied().unwrap_or_default();
-        entries.push(ProcessEntry {
-            id: info.id.to_string(),
-            managed: true,
-            shell: info.shell.clone(),
-            cwd: info.cwd.clone(),
-            cols: info.cols,
-            rows: info.rows,
-            pid: info.pid,
-            uptime_secs: info.created_at_secs,
-            cpu_percent: usage.cpu_percent,
-            mem_bytes: usage.mem_bytes,
-            attached: attached_ids.contains(&info.id.to_string()),
-            preview_lines: Vec::new(),
-        });
-    }
-    for process in vmux_processes {
-        if managed_pids.contains(&process.pid) {
-            continue;
+        };
+        if let Some(entity) = existing.remove(&pid.0) {
+            commands.entity(entity).insert((details, usage));
+        } else {
+            commands.spawn((
+                Name::new(format!("Vmux process {}", pid.0)),
+                pid,
+                details,
+                usage,
+            ));
         }
-        entries.push(ProcessEntry {
-            id: format!("system:{}", process.pid),
-            managed: false,
-            shell: process.shell.clone(),
-            cwd: process.cwd.clone(),
-            cols: 0,
-            rows: 0,
-            pid: process.pid,
-            uptime_secs: process.uptime_secs,
-            cpu_percent: process.cpu_percent,
-            mem_bytes: process.mem_bytes,
-            attached: false,
-            preview_lines: Vec::new(),
-        });
     }
-    entries
+    for entity in existing.into_values() {
+        commands.entity(entity).despawn();
+    }
+    commands.entity(runtime_entity).insert(ProcessMonitorDirty);
 }
 
 fn broadcast_to_monitors(
-    process_list: Res<ServiceProcessList>,
-    usage: Res<ProcessUsage>,
-    vmux_processes: Res<VmuxProcessList>,
+    runtime: Query<(Entity, Has<ProcessMonitorDirty>), With<ProcessMonitor>>,
+    service_processes: Query<(
+        &ServiceProcessId,
+        &ProcessPid,
+        &ServiceProcess,
+        &Usage,
+        &Order,
+    )>,
+    local_processes: Query<(&ProcessPid, &LocalVmuxProcess, &Usage)>,
     service: Option<Res<ServiceClient>>,
     monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
     mut commands: Commands,
 ) {
-    if monitors.is_empty()
-        || !(process_list.is_changed()
-            || usage.is_changed()
-            || vmux_processes.is_changed()
-            || !claimed.is_empty())
-    {
+    if monitors.is_empty() {
+        return;
+    }
+    let Ok((runtime_entity, dirty)) = runtime.single() else {
+        return;
+    };
+    if !dirty && claimed.is_empty() {
         return;
     }
 
     let connected = service.is_some();
-
-    let attached_ids: std::collections::HashSet<String> =
-        terminal_pids.iter().map(|pid| pid.to_string()).collect();
-
-    let processes = build_process_entries(
-        &process_list.processes,
-        &usage,
-        &attached_ids,
-        &vmux_processes.0,
-    );
+    let attached_ids: std::collections::HashSet<ProcessId> =
+        terminal_pids.iter().copied().collect();
+    let mut managed_pids = std::collections::HashSet::new();
+    let mut ordered = Vec::new();
+    for (id, pid, process, usage, order) in &service_processes {
+        managed_pids.insert(pid.0);
+        ordered.push((
+            order.0,
+            process.entry(*id, *pid, *usage, attached_ids.contains(&id.0)),
+        ));
+    }
+    ordered.sort_by_key(|(order, _)| *order);
+    let mut processes =
+        Vec::with_capacity(service_processes.iter().len() + local_processes.iter().len());
+    for (_, process) in ordered {
+        processes.push(process);
+    }
+    let mut local = Vec::new();
+    for (pid, process, usage) in &local_processes {
+        if !managed_pids.contains(&pid.0) {
+            local.push((pid.0, process.entry(*pid, *usage)));
+        }
+    }
+    local.sort_by_key(|(pid, _)| *pid);
+    for (_, process) in local {
+        processes.push(process);
+    }
 
     let state = ProcessesUiState {
         connected,
@@ -378,6 +466,9 @@ fn broadcast_to_monitors(
     for entity in &monitors {
         commands.trigger(UiStateWrite::<ProcessesUiState>::from_event(entity, &state));
     }
+    commands
+        .entity(runtime_entity)
+        .remove::<ProcessMonitorDirty>();
 }
 
 fn on_process_navigate(
@@ -429,7 +520,8 @@ fn on_process_navigate(
 fn on_process_kill(
     trigger: On<UiInput<ProcessKillEvent>>,
     service: Option<Res<ServiceClient>>,
-    mut process_list: ResMut<ServiceProcessList>,
+    service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
+    runtime: Query<Entity, With<ProcessMonitor>>,
     process_index: Res<TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
@@ -440,7 +532,14 @@ fn on_process_kill(
 
     if let Ok(process_id) = pid.parse::<ProcessId>() {
         service.0.send(ClientMessage::KillProcess { process_id });
-        remove_processes_from_cached_list(&mut process_list, [process_id]);
+        for (entity, id) in &service_processes {
+            if id.0 == process_id {
+                commands.entity(entity).despawn();
+            }
+        }
+        if let Ok(entity) = runtime.single() {
+            commands.entity(entity).insert(ProcessMonitorDirty);
+        }
         service.0.send(ClientMessage::ListProcesses);
 
         if let Some(entity) = process_index.get(&process_id)
@@ -457,18 +556,23 @@ fn on_process_kill(
 fn on_process_kill_all(
     _trigger: On<UiInput<ProcessKillAllEvent>>,
     service: Option<Res<ServiceClient>>,
-    mut process_list: ResMut<ServiceProcessList>,
+    service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
+    runtime: Query<Entity, With<ProcessMonitor>>,
     process_index: Res<TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
-    let process_ids: Vec<ProcessId> = process_list.processes.iter().map(|info| info.id).collect();
+    let process_ids: Vec<(Entity, ProcessId)> = service_processes
+        .iter()
+        .map(|(entity, id)| (entity, id.0))
+        .collect();
 
-    for process_id in &process_ids {
+    for (process_entity, process_id) in &process_ids {
         service.0.send(ClientMessage::KillProcess {
             process_id: *process_id,
         });
+        commands.entity(*process_entity).despawn();
 
         if let Some(entity) = process_index.get(process_id)
             && let Ok(content_child_of) = terminals.get(entity)
@@ -477,22 +581,11 @@ fn on_process_kill_all(
         }
     }
     if !process_ids.is_empty() {
-        remove_processes_from_cached_list(&mut process_list, process_ids);
+        if let Ok(entity) = runtime.single() {
+            commands.entity(entity).insert(ProcessMonitorDirty);
+        }
         service.0.send(ClientMessage::ListProcesses);
     }
-}
-
-fn remove_processes_from_cached_list(
-    process_list: &mut ServiceProcessList,
-    process_ids: impl IntoIterator<Item = ProcessId>,
-) {
-    let process_ids: std::collections::HashSet<ProcessId> = process_ids.into_iter().collect();
-    if process_ids.is_empty() {
-        return;
-    }
-    process_list
-        .processes
-        .retain(|info| !process_ids.contains(&info.id));
 }
 
 #[cfg(test)]
@@ -516,17 +609,39 @@ mod tests {
     }
 
     #[test]
-    fn remove_process_from_cached_list_is_optimistic() {
+    fn service_process_snapshots_reconcile_entities() {
         let keep = process_id(1);
-        let kill = process_id(2);
-        let mut list = ServiceProcessList {
-            processes: vec![process_info(keep), process_info(kill)],
-        };
+        let remove = process_id(2);
+        let mut app = App::new();
+        app.add_message::<ServiceProcessSnapshot>()
+            .add_systems(Startup, spawn_process_monitor)
+            .add_systems(Update, reconcile_service_processes);
+        app.world_mut().write_message(ServiceProcessSnapshot(vec![
+            process_info(keep),
+            process_info(remove),
+        ]));
+        app.update();
 
-        remove_processes_from_cached_list(&mut list, [kill]);
+        let mut ids = app
+            .world_mut()
+            .query_filtered::<&ServiceProcessId, With<ServiceProcess>>()
+            .iter(app.world())
+            .map(|id| id.0)
+            .collect::<Vec<_>>();
+        ids.sort_by_key(|id| id.0);
+        assert_eq!(ids, vec![keep, remove]);
 
-        assert_eq!(list.processes.len(), 1);
-        assert_eq!(list.processes[0].id, keep);
+        app.world_mut()
+            .write_message(ServiceProcessSnapshot(vec![process_info(keep)]));
+        app.update();
+
+        let ids = app
+            .world_mut()
+            .query_filtered::<&ServiceProcessId, With<ServiceProcess>>()
+            .iter(app.world())
+            .map(|id| id.0)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![keep]);
     }
 
     #[test]
@@ -564,7 +679,7 @@ mod tests {
                 mem: 999,
             },
         );
-        let u = subtree_usage(1, &procs);
+        let u = Usage::subtree(1, &procs);
         assert_eq!(u.cpu_percent, 16.0);
         assert_eq!(u.mem_bytes, 350);
     }
@@ -572,78 +687,68 @@ mod tests {
     #[test]
     fn subtree_usage_missing_root_is_zero() {
         let procs = HashMap::new();
-        assert_eq!(subtree_usage(5, &procs), Usage::default());
+        assert_eq!(Usage::subtree(5, &procs), Usage::default());
     }
 
     #[test]
-    fn build_entries_attaches_usage() {
+    fn service_process_entry_attaches_usage() {
         let id = process_id(1);
-        let mut usage = ProcessUsage::default();
-        usage.0.insert(
-            42,
+        let entry = ServiceProcess::from(&process_info(id)).entry(
+            ServiceProcessId(id),
+            ProcessPid(42),
             Usage {
                 cpu_percent: 12.5,
                 mem_bytes: 332 * 1024 * 1024,
             },
+            false,
         );
-        let entries = build_process_entries(&[process_info(id)], &usage, &Default::default(), &[]);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].pid, 42);
-        assert_eq!(entries[0].cpu_percent, 12.5);
-        assert_eq!(entries[0].mem_bytes, 332 * 1024 * 1024);
-        assert!(!entries[0].attached);
+        assert_eq!(entry.pid, 42);
+        assert_eq!(entry.cpu_percent, 12.5);
+        assert_eq!(entry.mem_bytes, 332 * 1024 * 1024);
+        assert!(!entry.attached);
     }
 
     #[test]
-    fn build_entries_defaults_usage_when_missing() {
-        let entries = build_process_entries(
-            &[process_info(process_id(1))],
-            &ProcessUsage::default(),
-            &Default::default(),
-            &[],
+    fn service_process_entry_defaults_usage() {
+        let id = process_id(1);
+        let entry = ServiceProcess::from(&process_info(id)).entry(
+            ServiceProcessId(id),
+            ProcessPid(42),
+            Usage::default(),
+            false,
         );
-        assert_eq!(entries[0].cpu_percent, 0.0);
-        assert_eq!(entries[0].mem_bytes, 0);
+        assert_eq!(entry.cpu_percent, 0.0);
+        assert_eq!(entry.mem_bytes, 0);
     }
 
     #[test]
-    fn build_entries_includes_unmanaged_vmux_processes_without_duplicates() {
-        let process = VmuxProcess {
+    fn local_vmux_process_entry_is_unmanaged() {
+        let process = LocalVmuxProcess {
             shell: "/Applications/Vmux.app/Contents/MacOS/vmux_desktop".to_string(),
             cwd: "/tmp".to_string(),
-            pid: 42,
             uptime_secs: 10,
-            cpu_percent: 3.0,
-            mem_bytes: 1024,
         };
-        let entries = build_process_entries(
-            &[],
-            &ProcessUsage::default(),
-            &Default::default(),
-            std::slice::from_ref(&process),
+        let entry = process.entry(
+            ProcessPid(42),
+            Usage {
+                cpu_percent: 3.0,
+                mem_bytes: 1024,
+            },
         );
-        assert_eq!(entries.len(), 1);
-        assert!(!entries[0].managed);
-        assert_eq!(entries[0].pid, 42);
-
-        let entries = build_process_entries(
-            &[process_info(process_id(1))],
-            &ProcessUsage::default(),
-            &Default::default(),
-            &[process],
-        );
-        assert_eq!(entries.len(), 1);
-        assert!(entries[0].managed);
+        assert!(!entry.managed);
+        assert_eq!(entry.pid, 42);
+        assert_eq!(entry.cpu_percent, 3.0);
+        assert_eq!(entry.mem_bytes, 1024);
     }
 
     #[test]
     fn vmux_process_match_uses_process_or_executable_name() {
-        assert!(is_vmux_process("vmux_desktop Helper", ""));
-        assert!(is_vmux_process(
+        assert!(LocalVmuxProcess::matches("vmux_desktop Helper", ""));
+        assert!(LocalVmuxProcess::matches(
             "helper",
             "/Applications/Vmux.app/Contents/MacOS/vmux_service"
         ));
-        assert!(!is_vmux_process(
+        assert!(!LocalVmuxProcess::matches(
             "codex",
             "/Users/test/.vmux/projects/repo/codex"
         ));

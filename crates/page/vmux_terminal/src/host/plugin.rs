@@ -907,6 +907,7 @@ struct PollServiceWriters<'w> {
     agent_command_results: MessageWriter<'w, vmux_service::agent_events::AgentCommandResultEvent>,
     agent_query_results: MessageWriter<'w, vmux_service::agent_events::AgentQueryResultEvent>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
+    process_snapshot: MessageWriter<'w, crate::processes_monitor::ServiceProcessSnapshot>,
     command_lifecycle: MessageWriter<'w, CommandLifecycleEvent>,
     osc_title: MessageWriter<'w, OscTitleChanged>,
     bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
@@ -1271,8 +1272,9 @@ fn poll_service_messages(
                 }
             }
             ServiceMessage::ProcessList { processes } => {
-                commands
-                    .insert_resource(crate::processes_monitor::ServiceProcessList { processes });
+                writers
+                    .process_snapshot
+                    .write(crate::processes_monitor::ServiceProcessSnapshot(processes));
             }
             ServiceMessage::Error { message } => {
                 if let Some(stale_pid) = missing_process_id(&message)
