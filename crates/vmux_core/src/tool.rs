@@ -214,3 +214,57 @@ pub struct ToolImportRequest {
     pub provider: ToolProvider,
     pub value: String,
 }
+
+impl From<ToolInstallRequest> for ToolOperationKey {
+    fn from(request: ToolInstallRequest) -> Self {
+        Self::new(request.provider, ToolOperationKind::Install, request.id)
+    }
+}
+
+impl From<ToolUpdateRequest> for ToolOperationKey {
+    fn from(request: ToolUpdateRequest) -> Self {
+        Self::new(request.provider, ToolOperationKind::Update, request.id)
+    }
+}
+
+impl From<ToolUninstallRequest> for ToolOperationKey {
+    fn from(request: ToolUninstallRequest) -> Self {
+        Self::new(request.provider, ToolOperationKind::Uninstall, request.id)
+    }
+}
+
+impl From<ToolForgetRequest> for ToolOperationKey {
+    fn from(request: ToolForgetRequest) -> Self {
+        Self::new(request.provider, ToolOperationKind::Forget, request.id)
+    }
+}
+
+impl From<ToolAdoptRequest> for ToolOperationKey {
+    fn from(request: ToolAdoptRequest) -> Self {
+        Self::new(request.provider, ToolOperationKind::Adopt, request.id)
+    }
+}
+
+impl From<ToolLinkRequest> for ToolOperationKey {
+    fn from(request: ToolLinkRequest) -> Self {
+        Self::new(request.provider, ToolOperationKind::Link, request.id)
+    }
+}
+
+impl From<ToolUnlinkRequest> for ToolOperationKey {
+    fn from(request: ToolUnlinkRequest) -> Self {
+        Self::new(request.provider, ToolOperationKind::Unlink, request.id)
+    }
+}
+
+impl From<ToolApplyRequest> for ToolOperationKey {
+    fn from(_: ToolApplyRequest) -> Self {
+        Self::new(ToolProvider::Dotfiles, ToolOperationKind::Apply, "")
+    }
+}
+
+impl From<ToolImportRequest> for ToolOperationKey {
+    fn from(request: ToolImportRequest) -> Self {
+        Self::new(request.provider, ToolOperationKind::Import, "")
+    }
+}
