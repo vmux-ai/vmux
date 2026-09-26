@@ -4,7 +4,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use crate::{McpServerManifest, McpTransport, load_manifest, write_manifest};
+use crate::{McpServerManifest, McpTransport, ToolStore};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
@@ -426,7 +426,7 @@ impl McpCatalog {
     }
 
     fn snapshot(result: Option<McpServerResult>) -> McpServers {
-        let manifest = load_manifest().unwrap_or_default();
+        let manifest = ToolStore::current().load().unwrap_or_default();
         let mut servers = Vec::new();
         let mut catalog_ids = BTreeSet::new();
         for entry in Self::ENTRIES {
@@ -564,7 +564,8 @@ impl McpConnection {
         let entry = McpCatalog::get(id).ok_or_else(|| format!("Unknown MCP server: {id}"))?;
         McpCredentialAccess::write(|| {
             let credentials = McpCredentialStorage::load(id)?;
-            let original = load_manifest()?;
+            let store = ToolStore::current();
+            let original = store.load()?;
             let server = original
                 .mcp
                 .servers
@@ -577,9 +578,9 @@ impl McpConnection {
             }
             let mut updated = original.clone();
             updated.mcp.servers.remove(id);
-            write_manifest(&updated)?;
+            store.save(&updated)?;
             if let Err(error) = McpCredentialStorage::remove(id) {
-                let manifest_rollback = write_manifest(&original);
+                let manifest_rollback = store.save(&original);
                 let credentials_rollback = credentials
                     .as_ref()
                     .map(|credentials| McpCredentialStorage::store(id, credentials))
@@ -708,7 +709,8 @@ impl McpConnection {
     }
 
     fn write_manifest(entry: McpCatalogEntry) -> Result<(), String> {
-        let mut manifest = load_manifest()?;
+        let store = ToolStore::current();
+        let mut manifest = store.load()?;
         if let Some(server) = manifest.mcp.servers.get(entry.id)
             && !entry.owns(server)
         {
@@ -721,11 +723,11 @@ impl McpConnection {
             .mcp
             .servers
             .insert(entry.id.to_string(), entry.server());
-        write_manifest(&manifest)
+        store.save(&manifest)
     }
 
     fn ensure_catalog_slot(entry: McpCatalogEntry) -> Result<(), String> {
-        let manifest = load_manifest()?;
+        let manifest = ToolStore::current().load()?;
         let Some(server) = manifest.mcp.servers.get(entry.id) else {
             return Ok(());
         };

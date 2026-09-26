@@ -6,10 +6,7 @@ use bevy_ecs::prelude::*;
 use bevy_tasks::IoTaskPool;
 use vmux_core::tool::{ToolImportRequest, ToolProvider};
 
-use crate::manifest::{
-    ToolStore, ToolsManifest, add_packages, expand_user_path, load_manifest_from, normalize_names,
-    write_manifest_to,
-};
+use crate::manifest::{ToolStore, ToolsManifest, normalize_names};
 use crate::{
     ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
     ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
@@ -135,16 +132,16 @@ pub fn import_brewfile(path: &Path) -> Result<(usize, usize), String> {
 }
 
 pub fn import_brewfile_to(path: &Path, manifest_path: &Path) -> Result<(usize, usize), String> {
-    let path = expand_user_path(path)?;
+    let path = ToolStore::current().expand_user_path(path)?;
     let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let imported = parse_brewfile(&source);
     if imported.formulae.is_empty() && imported.casks.is_empty() {
         return Err(format!("no formulae or casks found in {}", path.display()));
     }
-    let mut manifest = load_manifest_from(manifest_path)?;
-    let formulae = add_packages(&mut manifest, "homebrew-formula", &imported.formulae);
-    let casks = add_packages(&mut manifest, "homebrew-cask", &imported.casks);
-    write_manifest_to(manifest_path, &manifest)?;
+    let mut manifest = ToolsManifest::read(manifest_path)?;
+    let formulae = manifest.add_packages("homebrew-formula", &imported.formulae);
+    let casks = manifest.add_packages("homebrew-cask", &imported.casks);
+    manifest.write_to(manifest_path)?;
     Ok((formulae, casks))
 }
 

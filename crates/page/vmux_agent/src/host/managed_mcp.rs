@@ -9,7 +9,7 @@ use vmux_tool::{McpServerManifest, McpTransport};
 
 #[cfg(not(test))]
 pub fn load() -> BTreeMap<String, McpServerManifest> {
-    match vmux_tool::load_manifest() {
+    match vmux_tool::ToolStore::current().load() {
         Ok(manifest) => manifest.mcp.servers,
         Err(error) => {
             bevy::log::warn!("managed MCP servers unavailable: {error}");
