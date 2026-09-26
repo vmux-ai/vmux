@@ -73,7 +73,7 @@ impl Plugin for AgentSessionPlugin {
                 super::follow::FollowPlugin,
                 super::page_open::PageOpenPlugin,
                 super::provider::ProviderPlugin,
-                super::query::QueryPlugin,
+                super::query::AgentQueryPlugin,
                 super::self_command::SelfCommandPlugin,
                 session::AgentSessionLifecyclePlugin,
                 super::snapshot_updater::SnapshotPlugin,
