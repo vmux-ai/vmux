@@ -1,16 +1,22 @@
 use bevy::prelude::*;
-use vmux_service::protocol::AgentCommand as ServiceAgentCommand;
+use vmux_api::protocol::AgentCommand as ServiceAgentCommand;
 
 use crate::events::AgentCommandRequest;
 use crate::session::SessionId;
 
 pub(super) struct AttentionPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct TurnEndedSet;
+
 impl Plugin for AttentionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (agent_bell_to_attention, handle_agent_turn_ended)
+            (
+                agent_bell_to_attention,
+                handle_agent_turn_ended.in_set(TurnEndedSet),
+            )
                 .chain()
                 .after(vmux_layout::stack::ComputeFocusSet),
         )
@@ -19,7 +25,7 @@ impl Plugin for AttentionPlugin {
             (mark_agent_done, clear_agent_done)
                 .chain()
                 .after(vmux_layout::stack::ComputeFocusSet)
-                .after(super::follow::tidy_on_agent_attention),
+                .after(crate::tidy::TidySet),
         );
     }
 }
@@ -27,7 +33,7 @@ impl Plugin for AttentionPlugin {
 fn agent_bell_to_attention(
     mut reader: MessageReader<vmux_core::notify::BellReceived>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
-    agents: Query<(Entity, &vmux_service::protocol::ProcessId), With<vmux_core::team::Agent>>,
+    agents: Query<(Entity, &vmux_api::protocol::ProcessId), With<vmux_core::team::Agent>>,
 ) {
     for ev in reader.read() {
         if let Some((entity, _)) = agents.iter().find(|(_, pid)| **pid == ev.process_id) {
@@ -170,15 +176,16 @@ fn clear_agent_done(
     }
 }
 
-pub(super) fn handle_agent_turn_ended(
+fn handle_agent_turn_ended(
     mut reader: MessageReader<AgentCommandRequest>,
-    agents: Query<(Entity, &vmux_service::protocol::ProcessId), With<vmux_core::team::Agent>>,
+    agents: Query<(Entity, &vmux_api::protocol::ProcessId), With<vmux_core::team::Agent>>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
 ) {
     for request in reader.read() {
-        let ServiceAgentCommand::TurnEnded { anchor } = &request.command else {
+        let ServiceAgentCommand::TurnEnded(command) = &request.command else {
             continue;
         };
+        let anchor = &command.anchor;
         if let Some((entity, _)) = agents.iter().find(|(_, pid)| *pid == anchor) {
             attention.write(vmux_core::notify::AgentAttention {
                 entity,
@@ -205,7 +212,7 @@ mod tests {
 
     pub(crate) fn spawn_agent_with_pid(
         app: &mut App,
-        pid: vmux_service::protocol::ProcessId,
+        pid: vmux_api::protocol::ProcessId,
     ) -> Entity {
         app.world_mut()
             .spawn((
@@ -235,23 +242,25 @@ mod tests {
         app
     }
 
-    pub(crate) fn send_turn_ended(app: &mut App, anchor: vmux_service::protocol::ProcessId) {
+    pub(crate) fn send_turn_ended(app: &mut App, anchor: vmux_api::protocol::ProcessId) {
         app.world_mut()
             .resource_mut::<bevy::ecs::message::Messages<AgentCommandRequest>>()
             .write(AgentCommandRequest {
-                request_id: vmux_service::protocol::AgentRequestId::new(),
+                request_id: vmux_api::protocol::AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::TurnEnded { anchor },
+                command: ServiceAgentCommand::TurnEnded(vmux_api::protocol::AgentTurnEnded {
+                    anchor,
+                }),
             });
     }
 
     #[test]
     pub(crate) fn turn_ended_resolves_to_agent_attention() {
         let mut app = turn_end_test_app();
-        let pid = vmux_service::protocol::ProcessId::new();
+        let pid = vmux_api::protocol::ProcessId::new();
         let agent = spawn_agent_with_pid(&mut app, pid);
         send_turn_ended(&mut app, pid);
         app.update();
@@ -261,15 +270,15 @@ mod tests {
     #[test]
     pub(crate) fn turn_ended_unknown_anchor_emits_nothing() {
         let mut app = turn_end_test_app();
-        let _agent = spawn_agent_with_pid(&mut app, vmux_service::protocol::ProcessId::new());
-        send_turn_ended(&mut app, vmux_service::protocol::ProcessId::new());
+        let _agent = spawn_agent_with_pid(&mut app, vmux_api::protocol::ProcessId::new());
+        send_turn_ended(&mut app, vmux_api::protocol::ProcessId::new());
         app.update();
         assert!(attentions(&app).is_empty());
     }
 
     #[test]
     pub(crate) fn bell_resolves_to_agent_attention() {
-        use vmux_service::protocol::ProcessId;
+        use vmux_api::protocol::ProcessId;
         let mut app = bell_test_app();
         let pid = ProcessId::new();
         let agent = spawn_agent_with_pid(&mut app, pid);
@@ -282,7 +291,7 @@ mod tests {
 
     #[test]
     pub(crate) fn bell_unknown_process_id_emits_nothing() {
-        use vmux_service::protocol::ProcessId;
+        use vmux_api::protocol::ProcessId;
         let mut app = bell_test_app();
         let _agent = spawn_agent_with_pid(&mut app, ProcessId::new());
         app.world_mut()

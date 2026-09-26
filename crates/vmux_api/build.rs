@@ -1,0 +1,15 @@
+#[path = "../build_platform_cfg.rs"]
+mod build_platform_cfg;
+
+fn main() {
+    build_platform_cfg::emit();
+    emit_bevy_linked();
+}
+
+fn emit_bevy_linked() {
+    println!("cargo::rustc-check-cfg=cfg(bevy_linked)");
+
+    if std::env::var_os("CARGO_FEATURE_BEVY").is_some() {
+        println!("cargo::rustc-cfg=bevy_linked");
+    }
+}

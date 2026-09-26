@@ -1,36 +1,40 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_wire::page::PageEmit;
-use vmux_wire::prompt_media::{
-    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachment, ChatAttachments,
-    ChatMediaEntries, ChatMediaEntry,
-};
-use vmux_wire::room::RemoteMediaEntry;
+use std::collections::HashMap;
+use vmux_api::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntry};
+use vmux_api::room::RemoteMediaEntry;
 
+use crate::event::ChatMediaState;
 use crate::room::Submitted;
+use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
 
 pub struct ChatPromptPlugin;
 
 impl Plugin for ChatPromptPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ChatUiStatePlugin>() {
+            app.add_plugins(ChatUiStatePlugin);
+        }
         app.add_message::<Attach>()
+            .add_message::<RemoveAttachment>()
             .add_message::<Submitted>()
-            .add_message::<PageEmit>()
             .init_resource::<Attachments>()
+            .init_resource::<AttachmentPreviews>()
             .init_resource::<Browsed>()
             .init_resource::<Media>()
             .add_systems(
                 Update,
                 (
-                    Attachments::fold.in_set(PromptProjection),
-                    Attachments::spend.in_set(PromptProjection),
-                    Attachments::emit
+                    (fold_attachments, remove_attachments, spend_attachments)
+                        .chain()
+                        .in_set(PromptProjection),
+                    emit_attachments
                         .after(PromptProjection)
                         .run_if(resource_changed::<Attachments>),
-                    Media::project
+                    project_media
                         .in_set(PromptProjection)
                         .run_if(resource_changed::<Browsed>),
-                    Media::emit
+                    emit_media
                         .after(PromptProjection)
                         .run_if(resource_changed::<Media>),
                 ),
@@ -44,8 +48,36 @@ struct PromptProjection;
 #[derive(Message)]
 pub struct Attach(pub Vec<ChatAttachment>);
 
+#[derive(Message)]
+pub struct RemoveAttachment(pub String);
+
 #[derive(Resource, Default, PartialEq)]
 pub struct Attachments(pub Vec<ChatAttachment>);
+
+#[derive(Resource, Default, PartialEq)]
+pub struct AttachmentPreviews(HashMap<String, ChatAttachment>);
+
+impl AttachmentPreviews {
+    pub(crate) fn hydrate(&self, attachments: &mut [ChatAttachment]) -> bool {
+        let mut changed = false;
+        for attachment in attachments {
+            if !attachment.preview_data_url.is_empty() {
+                continue;
+            }
+            let Some(preview) = self.0.get(&attachment.path) else {
+                continue;
+            };
+            if preview.preview_data_url.is_empty() {
+                continue;
+            }
+            attachment
+                .preview_data_url
+                .clone_from(&preview.preview_data_url);
+            changed = true;
+        }
+        changed
+    }
+}
 
 #[derive(Resource, Default, PartialEq)]
 pub struct Browsed {
@@ -55,73 +87,79 @@ pub struct Browsed {
 }
 
 #[derive(Resource, Default)]
-pub struct Media(pub ChatMediaEntries);
+pub struct Media(pub ChatMediaState);
 
-impl Media {
-    fn project(browsed: Res<Browsed>, mut media: ResMut<Media>) {
-        let mut entries = Vec::with_capacity(browsed.entries.len());
-        for entry in &browsed.entries {
-            entries.push(ChatMediaEntry {
-                path: entry.path.clone(),
-                name: entry.name.clone(),
-                parent: entry.parent.clone(),
-                mime_type: entry.mime_type.clone(),
-                is_dir: entry.is_dir,
-                preview_data_url: entry.preview_data_url.clone(),
-            });
-        }
-        media.0 = ChatMediaEntries {
-            request_id: browsed.request_id,
-            query: browsed.query.clone(),
-            entries,
-        };
+fn project_media(browsed: Res<Browsed>, mut media: ResMut<Media>) {
+    let mut entries = Vec::with_capacity(browsed.entries.len());
+    for entry in &browsed.entries {
+        entries.push(ChatMediaEntry {
+            path: entry.path.clone(),
+            name: entry.name.clone(),
+            parent: entry.parent.clone(),
+            mime_type: entry.mime_type.clone(),
+            is_dir: entry.is_dir,
+            preview_data_url: entry.preview_data_url.clone(),
+        });
     }
+    media.0 = ChatMediaState {
+        request_id: browsed.request_id,
+        query: browsed.query.clone(),
+        entries,
+        loading: false,
+    };
+}
 
-    fn emit(media: Res<Media>, mut emits: MessageWriter<PageEmit>) {
-        if media.0.request_id == 0 {
-            return;
+fn emit_media(media: Res<Media>, mut projection: ResMut<ChatUiStateProjection>) {
+    if media.0.request_id == 0 {
+        return;
+    }
+    projection.write(&media.0);
+}
+
+fn emit_attachments(attachments: Res<Attachments>, mut projection: ResMut<ChatUiStateProjection>) {
+    let payload = ChatAttachments {
+        attachments: attachments.0.clone(),
+    };
+    projection.write(&payload);
+}
+
+fn spend_attachments(
+    mut submitted: MessageReader<Submitted>,
+    mut attachments: ResMut<Attachments>,
+) {
+    if submitted.read().count() == 0 || attachments.0.is_empty() {
+        return;
+    }
+    attachments.0.clear();
+}
+
+fn fold_attachments(
+    mut asked: MessageReader<Attach>,
+    mut attachments: ResMut<Attachments>,
+    mut previews: ResMut<AttachmentPreviews>,
+) {
+    for Attach(added) in asked.read() {
+        for attachment in added {
+            if attachment.preview_data_url.is_empty() {
+                continue;
+            }
+            previews
+                .0
+                .insert(attachment.path.clone(), attachment.clone());
         }
-        let Some(emit) = PageEmit::of(CHAT_MEDIA_ENTRIES_EVENT, &media.0) else {
-            return;
-        };
-        emits.write(emit);
+        ChatAttachments {
+            attachments: added.clone(),
+        }
+        .merge_into(&mut attachments.0);
     }
 }
 
-impl Attachments {
-    fn emit(attachments: Res<Attachments>, mut emits: MessageWriter<PageEmit>) {
-        if attachments.0.is_empty() {
-            return;
-        }
-        let payload = ChatAttachments {
-            attachments: attachments.0.clone(),
-        };
-        let Some(emit) = PageEmit::of(CHAT_ATTACHMENTS_EVENT, &payload) else {
-            return;
-        };
-        emits.write(emit);
-    }
-
-    fn spend(mut submitted: MessageReader<Submitted>, mut attachments: ResMut<Attachments>) {
-        if submitted.read().count() == 0 || attachments.0.is_empty() {
-            return;
-        }
-        attachments.0.clear();
-    }
-
-    fn fold(mut asked: MessageReader<Attach>, mut attachments: ResMut<Attachments>) {
-        for Attach(added) in asked.read() {
-            for attachment in added {
-                if attachments
-                    .0
-                    .iter()
-                    .any(|held| held.path == attachment.path)
-                {
-                    continue;
-                }
-                attachments.0.push(attachment.clone());
-            }
-        }
+fn remove_attachments(
+    mut removed: MessageReader<RemoveAttachment>,
+    mut attachments: ResMut<Attachments>,
+) {
+    for RemoveAttachment(path) in removed.read() {
+        attachments.0.retain(|attachment| attachment.path != *path);
     }
 }
 
@@ -159,6 +197,13 @@ mod tests {
             self.0.update();
         }
 
+        fn remove(&mut self, path: &str) {
+            self.0
+                .world_mut()
+                .write_message(RemoveAttachment(path.to_string()));
+            self.0.update();
+        }
+
         fn paths(&self) -> Vec<&str> {
             let mut paths = Vec::new();
             for attachment in &self.0.world().resource::<Attachments>().0 {
@@ -182,6 +227,15 @@ mod tests {
         let mut started = Started::empty();
         started.attach(&["a.png", "b.png"]);
         started.submit();
+
+        assert!(started.paths().is_empty());
+    }
+
+    #[test]
+    fn removing_the_last_attachment_empties_the_pile() {
+        let mut started = Started::empty();
+        started.attach(&["a.png"]);
+        started.remove("a.png");
 
         assert!(started.paths().is_empty());
     }

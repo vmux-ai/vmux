@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
-use vmux_remote::framing::{Frame, FrameStream};
-use vmux_remote::quic::endpoint::SelfSignedIdentity;
-use vmux_remote::quic::tunnel::TunnelSocket;
-use vmux_remote::quic::{Accepted, MessageType, RelaySetup};
-use vmux_remote::{DeviceId, PeerRole};
+use vmux_transport::framing::{Frame, FrameStream};
+use vmux_transport::quic::endpoint::SelfSignedIdentity;
+use vmux_transport::quic::tunnel::TunnelSocket;
+use vmux_transport::quic::{Accepted, MessageType, RelaySetup};
+use vmux_transport::{DeviceId, PeerRole};
 
 use super::super::server::RemoteState;
 use crate::RemotePaths;
@@ -41,7 +41,7 @@ impl Registration {
                 return SessionEnd::Unregistered(format!("desktop identity: {error}"));
             }
         };
-        match Self::open(&state.token).await {
+        match Self::open(&state.relay_token).await {
             Ok(registration) => registration.serve(state, &identity, liveness).await,
             Err(reason) => SessionEnd::Unregistered(reason),
         }
@@ -53,11 +53,9 @@ impl Registration {
         let address = resolve(relay.url()).await?;
         let server_name = host_of(relay.url())?;
 
-        let endpoint = vmux_remote::quic::endpoint::Trust::Relay {
-            host: server_name.clone(),
-        }
-        .endpoint(address)
-        .map_err(|error| format!("relay client endpoint: {error}"))?;
+        let endpoint = vmux_transport::quic::endpoint::Trust::Relay
+            .endpoint(address)
+            .map_err(|error| format!("relay client endpoint: {error}"))?;
         let control = endpoint
             .connect(address, &server_name)
             .map_err(|error| format!("relay dial {} at {address}: {error}", relay.url()))?
@@ -236,7 +234,7 @@ async fn resolve(relay_url: &str) -> Result<std::net::SocketAddr, String> {
     let parsed = url::Url::parse(relay_url).map_err(|error| format!("relay url: {error}"))?;
     let host = parsed.host_str().ok_or("relay url has no host")?;
     let port = parsed.port().unwrap_or(443);
-    vmux_remote::quic::endpoint::resolve_preferring_ipv4(host, port).await
+    vmux_transport::quic::endpoint::resolve_preferring_ipv4(host, port).await
 }
 
 fn host_of(relay_url: &str) -> Result<String, String> {

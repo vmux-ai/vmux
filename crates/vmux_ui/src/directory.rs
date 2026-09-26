@@ -11,7 +11,7 @@ use crate::scroll::ScrollIntoView;
 use crate::util::cn;
 
 #[derive(Clone, PartialEq)]
-pub enum DirectoryNavigatorAction {
+pub enum DirectoryNavigatorEvent {
     Select { index: usize, entry: FileDirEntry },
     Ascend { target: String },
     Descend { target: String },
@@ -27,13 +27,12 @@ pub fn DirectoryNavigator(
     children: Option<Vec<FileDirEntry>>,
     selected: usize,
     thumbs: HashMap<String, String>,
-    show_hidden: bool,
     preview: Element,
-    on_action: EventHandler<DirectoryNavigatorAction>,
+    on_event: EventHandler<DirectoryNavigatorEvent>,
 ) -> Element {
     let clicks = DirectoryClick {
         pending: use_signal(|| Option::<PendingOpen>::None),
-        on_action,
+        on_event,
     };
     let current_name = path
         .trim_end_matches('/')
@@ -41,8 +40,6 @@ pub fn DirectoryNavigator(
         .next()
         .unwrap_or_default()
         .to_string();
-    let parent_entries = visible_directory_entries(&parent_entries, show_hidden);
-    let entries = visible_directory_entries(&entries, show_hidden);
     let keyboard_entries = entries.clone();
     let keyboard_path = path.clone();
 
@@ -67,7 +64,7 @@ pub fn DirectoryNavigator(
                     event.prevent_default();
                     event.stop_propagation();
                     if let Some(entry) = keyboard_entries.get(index).cloned() {
-                        on_action.call(DirectoryNavigatorAction::Select { index, entry });
+                        on_event.call(DirectoryNavigatorEvent::Select { index, entry });
                         ScrollIntoView::nearest(&format!("dir-row-{index}"));
                     }
                     return;
@@ -77,20 +74,20 @@ pub fn DirectoryNavigator(
                         event.prevent_default();
                         event.stop_propagation();
                         if let Some(entry) = keyboard_entries.get(selected).cloned() {
-                            on_action.call(DirectoryNavigatorAction::Open { entry });
+                            on_event.call(DirectoryNavigatorEvent::Open { entry });
                         }
                     }
                     "h" | "ArrowLeft" => {
                         event.prevent_default();
                         event.stop_propagation();
-                        on_action.call(DirectoryNavigatorAction::Ascend {
+                        on_event.call(DirectoryNavigatorEvent::Ascend {
                             target: keyboard_path.clone(),
                         });
                     }
                     "." => {
                         event.prevent_default();
                         event.stop_propagation();
-                        on_action.call(DirectoryNavigatorAction::ToggleHidden);
+                        on_event.call(DirectoryNavigatorEvent::ToggleHidden);
                     }
                     _ => {}
                 }
@@ -109,7 +106,7 @@ pub fn DirectoryNavigator(
                                 onclick: move |event: Event<MouseData>| {
                                     event.stop_propagation();
                                     clicks.shift(
-                                        DirectoryNavigatorAction::Ascend { target: target.clone() },
+                                        DirectoryNavigatorEvent::Ascend { target: target.clone() },
                                         row.clone(),
                                         event.client_coordinates(),
                                     );
@@ -137,7 +134,7 @@ pub fn DirectoryNavigator(
                                     event.stop_propagation();
                                     clicks.select(index, row.clone(), event.client_coordinates());
                                 },
-                                ondoubleclick: move |_| on_action.call(DirectoryNavigatorAction::Open { entry: opened.clone() }),
+                                ondoubleclick: move |_| on_event.call(DirectoryNavigatorEvent::Open { entry: opened.clone() }),
                                 DirectoryEntryVisual { entry: entry.clone(), thumb: thumbs.get(&entry.path).cloned() }
                                 span { class: "truncate text-xs", "{entry.name}" }
                             }
@@ -148,7 +145,7 @@ pub fn DirectoryNavigator(
 
             if let Some(children) = children {
                 div { class: DIRECTORY_PANE_CLASS,
-                    for entry in visible_directory_entries(&children, show_hidden) {
+                    for entry in children {
                         {
                             let row = entry.clone();
                             let target = entry.path.clone();
@@ -160,7 +157,7 @@ pub fn DirectoryNavigator(
                                     onclick: move |event: Event<MouseData>| {
                                         event.stop_propagation();
                                         clicks.shift(
-                                            DirectoryNavigatorAction::Descend { target: target.clone() },
+                                            DirectoryNavigatorEvent::Descend { target: target.clone() },
                                             row.clone(),
                                             event.client_coordinates(),
                                         );
@@ -209,17 +206,6 @@ pub fn DirectoryEntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Eleme
     }
 }
 
-pub fn visible_directory_entries(entries: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
-    if show_hidden {
-        return entries.to_vec();
-    }
-    entries
-        .iter()
-        .filter(|entry| !entry.name.starts_with('.'))
-        .cloned()
-        .collect()
-}
-
 const DOUBLE_CLICK_MS: i64 = 500;
 const DOUBLE_CLICK_SLOP_PX: f64 = 6.0;
 
@@ -241,7 +227,7 @@ impl PendingOpen {
 #[derive(Clone, Copy)]
 struct DirectoryClick {
     pending: Signal<Option<PendingOpen>>,
-    on_action: EventHandler<DirectoryNavigatorAction>,
+    on_event: EventHandler<DirectoryNavigatorEvent>,
 }
 
 impl DirectoryClick {
@@ -249,15 +235,15 @@ impl DirectoryClick {
         if self.take_open(at) {
             return;
         }
-        self.on_action
-            .call(DirectoryNavigatorAction::Select { index, entry });
+        self.on_event
+            .call(DirectoryNavigatorEvent::Select { index, entry });
     }
 
-    fn shift(mut self, action: DirectoryNavigatorAction, entry: FileDirEntry, at: ClientPoint) {
+    fn shift(mut self, event: DirectoryNavigatorEvent, entry: FileDirEntry, at: ClientPoint) {
         if self.take_open(at) {
             return;
         }
-        self.on_action.call(action);
+        self.on_event.call(event);
         self.pending.set(Some(PendingOpen {
             entry,
             at: now_millis(),
@@ -278,7 +264,7 @@ impl DirectoryClick {
             return false;
         }
         self.pending.set(None);
-        self.on_action.call(DirectoryNavigatorAction::Open {
+        self.on_event.call(DirectoryNavigatorEvent::Open {
             entry: pending.entry,
         });
         true

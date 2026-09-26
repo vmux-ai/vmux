@@ -55,7 +55,7 @@ impl Capture {
     }
 }
 
-enum Action {
+enum ConformanceCommand {
     Capture {
         target: String,
         browser: PathBuf,
@@ -75,8 +75,8 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
-    match parse_action(std::env::args().skip(1).collect())? {
-        Action::Capture {
+    match parse_command(std::env::args().skip(1).collect())? {
+        ConformanceCommand::Capture {
             target,
             browser,
             output,
@@ -92,7 +92,7 @@ fn run() -> Result<(), String> {
             )
             .map_err(|error| error.to_string())
         }
-        Action::Compare {
+        ConformanceCommand::Compare {
             baseline,
             candidate,
         } => {
@@ -107,7 +107,7 @@ fn run() -> Result<(), String> {
     }
 }
 
-fn parse_action(args: Vec<String>) -> Result<Action, String> {
+fn parse_command(args: Vec<String>) -> Result<ConformanceCommand, String> {
     let Some(command) = args.first().map(String::as_str) else {
         return Err(usage());
     };
@@ -118,13 +118,13 @@ fn parse_action(args: Vec<String>) -> Result<Action, String> {
             if target != "chrome" && target != "vmux" {
                 return Err("--target must be chrome or vmux".into());
             }
-            Ok(Action::Capture {
+            Ok(ConformanceCommand::Capture {
                 target,
                 browser: required(&values, "browser")?.into(),
                 output: required(&values, "output")?.into(),
             })
         }
-        "compare" => Ok(Action::Compare {
+        "compare" => Ok(ConformanceCommand::Compare {
             baseline: required(&values, "baseline")?.into(),
             candidate: required(&values, "candidate")?.into(),
         }),

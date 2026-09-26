@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::agent::AgentKind;
-pub use vmux_wire::avatar::{AvatarSpec, hash_color, initials_of};
+pub use vmux_api::avatar::{AvatarSpec, hash_color, initials_of};
 
 #[derive(Component, Clone, Debug)]
 pub struct Profile {

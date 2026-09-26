@@ -911,6 +911,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "vmux_api",
  "zeroize",
 ]
 
@@ -10167,12 +10168,12 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "similar",
  "tempfile",
  "tokio",
  "toml",
  "url",
  "uuid",
+ "vmux_api",
  "vmux_chat",
  "vmux_clipboard",
  "vmux_command",
@@ -10182,7 +10183,7 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_mcp",
- "vmux_remote",
+ "vmux_path",
  "vmux_service",
  "vmux_session",
  "vmux_setting",
@@ -10190,8 +10191,53 @@ dependencies = [
  "vmux_space",
  "vmux_start",
  "vmux_terminal",
+ "vmux_tool",
+ "vmux_transport",
  "vmux_ui",
- "vmux_wire",
+]
+
+[[package]]
+name = "vmux_api"
+version = "0.0.34"
+dependencies = [
+ "bevy_ecs",
+ "bevy_reflect",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "unicode-segmentation",
+ "url",
+ "uuid",
+ "vmux_macro",
+]
+
+[[package]]
+name = "vmux_app"
+version = "0.0.34"
+dependencies = [
+ "bevy_app",
+ "vmux_agent",
+ "vmux_browser",
+ "vmux_chat",
+ "vmux_command",
+ "vmux_core",
+ "vmux_editor",
+ "vmux_flex",
+ "vmux_git",
+ "vmux_history",
+ "vmux_knowledge",
+ "vmux_layout",
+ "vmux_macro",
+ "vmux_service",
+ "vmux_setting",
+ "vmux_shortcut",
+ "vmux_simulator",
+ "vmux_space",
+ "vmux_start",
+ "vmux_team",
+ "vmux_terminal",
+ "vmux_tool",
+ "vmux_vault",
 ]
 
 [[package]]
@@ -10224,7 +10270,7 @@ dependencies = [
  "url",
  "uuid",
  "vmux_agent",
- "vmux_chat",
+ "vmux_api",
  "vmux_command",
  "vmux_core",
  "vmux_editor",
@@ -10235,14 +10281,11 @@ dependencies = [
  "vmux_native",
  "vmux_service",
  "vmux_setting",
- "vmux_shortcut",
- "vmux_simulator",
  "vmux_space",
  "vmux_start",
- "vmux_team",
  "vmux_terminal",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
  "wry",
  "zip",
 ]
@@ -10260,12 +10303,11 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
- "similar",
  "unicode-segmentation",
+ "vmux_api",
  "vmux_core",
- "vmux_service",
+ "vmux_native",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10273,29 +10315,30 @@ name = "vmux_cli"
 version = "0.0.34"
 dependencies = [
  "assert_cmd",
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
  "clap",
  "predicates",
  "serde_json",
  "tempfile",
  "tokio",
- "vmux_client",
+ "vmux_agent",
+ "vmux_api",
+ "vmux_browser",
+ "vmux_command",
+ "vmux_editor",
+ "vmux_knowledge",
+ "vmux_layout",
  "vmux_mcp",
- "vmux_profile",
-]
-
-[[package]]
-name = "vmux_client"
-version = "0.0.34"
-dependencies = [
- "chrono",
- "libc",
- "rkyv",
- "tokio",
- "tracing",
- "url",
- "vmux_profile",
- "vmux_remote",
- "vmux_wire",
+ "vmux_service",
+ "vmux_setting",
+ "vmux_simulator",
+ "vmux_space",
+ "vmux_team",
+ "vmux_terminal",
+ "vmux_tool",
+ "vmux_transport",
 ]
 
 [[package]]
@@ -10319,25 +10362,18 @@ dependencies = [
  "ignore",
  "muda 0.19.2",
  "rkyv",
+ "ron 0.8.1",
  "serde",
  "serde_json",
  "tempfile",
  "url",
+ "vmux_api",
  "vmux_core",
  "vmux_flex",
  "vmux_history",
  "vmux_macro",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
-]
-
-[[package]]
-name = "vmux_command_mcp"
-version = "0.0.34"
-dependencies = [
- "serde_json",
- "vmux_command",
- "vmux_macro",
 ]
 
 [[package]]
@@ -10355,13 +10391,15 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "similar",
  "tempfile",
  "toml",
  "url",
  "uuid",
+ "vmux_api",
  "vmux_flex",
+ "vmux_path",
  "vmux_profile",
- "vmux_wire",
  "zip",
 ]
 
@@ -10401,9 +10439,7 @@ dependencies = [
  "objc2-user-notifications 0.3.2",
  "parking_lot",
  "raw-window-handle 0.6.2",
- "reqwest",
  "rfd 0.15.4",
- "ring",
  "rkyv",
  "ron 0.8.1",
  "semver",
@@ -10417,6 +10453,8 @@ dependencies = [
  "url",
  "uuid",
  "vmux_agent",
+ "vmux_api",
+ "vmux_app",
  "vmux_browser",
  "vmux_clipboard",
  "vmux_command",
@@ -10435,8 +10473,8 @@ dependencies = [
  "vmux_start",
  "vmux_team",
  "vmux_terminal",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10476,15 +10514,20 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "url",
+ "vmux_api",
  "vmux_command",
  "vmux_core",
  "vmux_flex",
  "vmux_git",
  "vmux_layout",
+ "vmux_mcp",
+ "vmux_native",
+ "vmux_path",
+ "vmux_service",
  "vmux_setting",
  "vmux_space",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
  "zip",
 ]
 
@@ -10515,8 +10558,10 @@ dependencies = [
  "tempfile",
  "two-face",
  "url",
+ "vmux_api",
  "vmux_core",
  "vmux_native",
+ "vmux_path",
  "vmux_ui",
 ]
 
@@ -10534,9 +10579,10 @@ dependencies = [
  "rkyv",
  "ron 0.8.1",
  "serde",
+ "vmux_api",
  "vmux_core",
+ "vmux_native",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10544,17 +10590,16 @@ name = "vmux_knowledge"
 version = "0.0.34"
 dependencies = [
  "bevy",
- "bevy_cef",
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",
  "notify",
- "rkyv",
  "serde",
  "tempfile",
+ "vmux_api",
  "vmux_core",
  "vmux_git",
- "vmux_layout",
+ "vmux_tool",
 ]
 
 [[package]]
@@ -10582,22 +10627,28 @@ dependencies = [
  "sha2",
  "tempfile",
  "uuid",
+ "vmux_api",
  "vmux_command",
  "vmux_core",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
+ "vmux_macro",
+ "vmux_native",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
 name = "vmux_macro"
 version = "0.0.34"
 dependencies = [
+ "heck 0.5.0",
  "muda 0.19.2",
  "proc-macro2",
  "quote",
+ "ron 0.8.1",
+ "serde",
  "syn 2.0.117",
 ]
 
@@ -10606,13 +10657,15 @@ name = "vmux_mcp"
 version = "0.0.34"
 dependencies = [
  "base64 0.22.1",
- "serde",
+ "bevy_app",
+ "bevy_ecs",
  "serde_json",
  "tempfile",
  "tokio",
- "vmux_client",
- "vmux_command_mcp",
- "vmux_macro",
+ "vmux_api",
+ "vmux_core",
+ "vmux_service",
+ "vmux_tool",
 ]
 
 [[package]]
@@ -10642,13 +10695,16 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "url",
+ "uuid",
+ "vmux_api",
+ "vmux_app",
  "vmux_chat",
- "vmux_remote",
+ "vmux_path",
  "vmux_service",
  "vmux_start",
  "vmux_team",
+ "vmux_transport",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10656,6 +10712,8 @@ name = "vmux_native"
 version = "0.0.34"
 dependencies = [
  "base64 0.22.1",
+ "bevy_app",
+ "bevy_ecs",
  "dioxus",
  "dioxus-core",
  "dioxus-html",
@@ -10670,8 +10728,16 @@ dependencies = [
  "tokio",
  "tracing",
  "vmux_clipboard",
+ "vmux_macro",
  "vmux_ui",
  "wry",
+]
+
+[[package]]
+name = "vmux_path"
+version = "0.0.34"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]
@@ -10689,25 +10755,9 @@ dependencies = [
  "tempfile",
  "toml",
  "url",
- "vmux_wire",
+ "vmux_api",
+ "vmux_path",
  "zeroize",
-]
-
-[[package]]
-name = "vmux_remote"
-version = "0.0.34"
-dependencies = [
- "bytes",
- "quinn",
- "rcgen",
- "ring",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "webpki-roots",
 ]
 
 [[package]]
@@ -10717,6 +10767,7 @@ dependencies = [
  "agent-client-protocol",
  "alacritty_terminal",
  "base64 0.22.1",
+ "bevy",
  "bevy_app",
  "bevy_ecs",
  "chrono",
@@ -10731,6 +10782,7 @@ dependencies = [
  "portable-pty",
  "quinn",
  "reqwest",
+ "ring",
  "rkyv",
  "rustls-pemfile",
  "serde",
@@ -10744,12 +10796,14 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
- "vmux_client",
+ "vmux_api",
  "vmux_core",
  "vmux_git",
- "vmux_remote",
+ "vmux_native",
+ "vmux_path",
+ "vmux_profile",
+ "vmux_transport",
  "vmux_ui",
- "vmux_wire",
  "vte",
 ]
 
@@ -10761,7 +10815,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "serde",
- "vmux_wire",
+ "vmux_api",
 ]
 
 [[package]]
@@ -10778,11 +10832,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "vmux_api",
  "vmux_command",
  "vmux_core",
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
+ "vmux_macro",
+ "vmux_native",
+ "vmux_path",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -10796,9 +10855,11 @@ dependencies = [
  "dioxus",
  "rkyv",
  "serde",
+ "vmux_api",
  "vmux_command",
  "vmux_core",
  "vmux_layout",
+ "vmux_native",
  "vmux_ui",
 ]
 
@@ -10819,9 +10880,11 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+ "vmux_api",
  "vmux_core",
+ "vmux_native",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10840,15 +10903,17 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "vmux_api",
  "vmux_command",
  "vmux_core",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
  "vmux_layout",
+ "vmux_native",
  "vmux_setting",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10865,14 +10930,15 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "vmux_api",
  "vmux_command",
  "vmux_core",
  "vmux_flex",
  "vmux_git",
  "vmux_layout",
+ "vmux_native",
  "vmux_space",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10889,13 +10955,15 @@ dependencies = [
  "serde",
  "serde_json",
  "vmux_agent",
+ "vmux_api",
  "vmux_command",
  "vmux_core",
  "vmux_layout",
+ "vmux_native",
  "vmux_service",
  "vmux_space",
+ "vmux_tool",
  "vmux_ui",
- "vmux_wire",
 ]
 
 [[package]]
@@ -10908,24 +10976,73 @@ dependencies = [
  "dioxus",
  "libc",
  "portable-pty",
- "rfd 0.15.4",
  "rkyv",
  "serde",
+ "serde_json",
  "sysinfo",
  "tempfile",
  "tracing",
  "unicode-width",
  "url",
+ "vmux_api",
  "vmux_clipboard",
  "vmux_command",
  "vmux_core",
  "vmux_flex",
  "vmux_history",
  "vmux_layout",
+ "vmux_macro",
+ "vmux_native",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
+ "vmux_tool",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_tool"
+version = "0.0.34"
+dependencies = [
+ "bevy",
+ "bevy_app",
+ "bevy_cef",
+ "bevy_ecs",
+ "bevy_tasks",
+ "dioxus",
+ "parking_lot",
+ "reqwest",
+ "ring",
+ "ron 0.8.1",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "url",
+ "uuid",
+ "vmux_api",
+ "vmux_core",
+ "vmux_native",
+ "vmux_path",
+ "vmux_profile",
+ "vmux_ui",
+]
+
+[[package]]
+name = "vmux_transport"
+version = "0.0.34"
+dependencies = [
+ "bytes",
+ "quinn",
+ "rcgen",
+ "ring",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -10941,24 +11058,26 @@ dependencies = [
  "sys-locale",
  "tokio",
  "unic-langid",
+ "vmux_api",
  "vmux_clipboard",
  "vmux_core",
- "vmux_wire",
 ]
 
 [[package]]
-name = "vmux_wire"
+name = "vmux_vault"
 version = "0.0.34"
 dependencies = [
+ "bevy",
+ "bevy_cef",
  "bevy_ecs",
- "bevy_reflect",
- "rkyv",
- "serde",
- "serde_json",
- "unicode-segmentation",
- "url",
- "uuid",
- "vmux_macro",
+ "dioxus",
+ "notify",
+ "parking_lot",
+ "rfd 0.15.4",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_native",
+ "vmux_ui",
 ]
 
 [[package]]

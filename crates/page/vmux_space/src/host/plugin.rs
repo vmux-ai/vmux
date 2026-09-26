@@ -6,35 +6,56 @@ use vmux_core::page::PageReady;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::native_open::HostedPagePlugin;
 use vmux_layout::stack::Stack;
-use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
+use vmux_layout::{LayoutUiStateUpdates, TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
+use super::SpacesUiStateUpdates;
 use crate::event::{
-    ProjectCommandEvent, SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow,
-    SpacesListEvent,
+    ProjectActivateRequest, ProjectForgetRequest, SPACES_PAGE_URL, SpaceAttachRequest,
+    SpaceCreateRequest, SpaceDeleteRequest, SpaceOpenPageRequest, SpaceRenameRequest, SpaceRow,
+    SpacesListEvent, SpacesUiState,
 };
-use crate::spaces::{ActiveSpace, Spaces};
+use crate::spaces::{ActiveSpace, SpaceSelection, Spaces, SpacesPageSnapshot};
 
 pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::ui::SpacesPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        app.add_plugins(vmux_layout::LayoutContractPlugin)
+        app.add_plugins(vmux_command::CommandTypePlugin::<OpenRequest>::default())
+            .add_plugins(super::SpaceToolPlugin)
+            .add_plugins(vmux_layout::LayoutContractPlugin)
+            .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
             .init_resource::<ActiveSpace>()
-            .init_resource::<vmux_layout::space::ActiveSpaceEntity>()
             .init_resource::<vmux_layout::window::FocusedWindow>()
             .add_message::<SaveSpaceRequest>()
-            .add_message::<SpaceCommandRequest>()
-            .add_systems(Update, relay_space_command_requests)
+            .add_message::<SpaceAttachRequest>()
+            .add_message::<SpaceCreateRequest>()
+            .add_message::<SpaceDeleteRequest>()
+            .add_message::<SpaceOpenPageRequest>()
+            .add_message::<SpaceRenameRequest>()
             .add_systems(
                 Update,
-                (sync_active_space_record, update_effective_startup_url).chain(),
+                (
+                    relay_space_requests::<SpaceAttachRequest>,
+                    relay_space_requests::<SpaceCreateRequest>,
+                    relay_space_requests::<SpaceDeleteRequest>,
+                    relay_space_requests::<SpaceOpenPageRequest>,
+                    relay_space_requests::<SpaceRenameRequest>,
+                ),
+            )
+            .add_systems(
+                Update,
+                (sync_active_space_record, update_effective_startup_url)
+                    .chain()
+                    .after(vmux_layout::space::CurrentSpaceSet),
             )
             .add_systems(
                 Update,
                 update_effective_startup_dir
                     .in_set(vmux_layout::settings::EffectiveStartupDirSet)
-                    .before(vmux_command::ReadAppCommands),
+                    .before(vmux_command::ReadCommandRequests),
             )
             .add_systems(Update, sync_space_name_to_id)
             .add_systems(
@@ -53,25 +74,35 @@ impl Plugin for SpacePlugin {
             .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
             .add_systems(
                 Update,
-                respond_spaces_spawn.in_set(vmux_command::ReadAppCommands),
+                respond_spaces_spawn.in_set(vmux_command::ReadCommandRequests),
             )
             .add_plugins((
                 HostedPagePlugin::<Spaces>::default(),
                 super::key::SpaceKeyPlugin,
                 super::project::SpaceProjectPlugin,
-                crate::snapshot_updater::SpaceSnapshotPlugin,
-                BinEventEmitterPlugin::<(
-                    SpaceCommandEvent,
-                    ProjectCommandEvent,
+                crate::snapshot_updater::SnapshotPlugin,
+                UiEventPlugin::<(
+                    SpaceAttachRequest,
+                    SpaceCreateRequest,
+                    SpaceDeleteRequest,
+                    SpaceOpenPageRequest,
+                    SpaceRenameRequest,
+                    ProjectActivateRequest,
+                    ProjectForgetRequest,
                     vmux_core::event::ProjectTreeToggle,
-                )>::for_hosts(&["spaces", "layout"]),
+                )>::default(),
             ))
-            .add_observer(on_space_command)
-            .add_observer(on_project_command)
+            .add_observer(on_space_attach)
+            .add_observer(on_space_create)
+            .add_observer(on_space_delete)
+            .add_observer(on_space_open_page)
+            .add_observer(on_space_rename)
+            .add_observer(on_project_activate)
+            .add_observer(on_project_forget)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(
                 Update,
-                handle_open_in_new_space.in_set(vmux_command::ReadAppCommands),
+                handle_open_in_new_space.in_set(vmux_command::ReadCommandRequests),
             )
             .add_systems(Update, broadcast_spaces_to_views);
     }
@@ -82,11 +113,28 @@ pub struct SaveSpaceRequest {
     pub path: PathBuf,
 }
 
-#[derive(Message, Clone)]
-pub struct SpaceCommandRequest {
-    pub command: String,
-    pub space_id: Option<String>,
-    pub name: Option<String>,
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct OpenRequest {
+    pub url: Option<String>,
+}
+
+impl vmux_command::CommandRequest for OpenRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("plugin.ron"))
+            .select(&["open_in_new_space"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for OpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "open_in_new_space")
+            .then(|| Self {
+                url: invocation.argument("url"),
+            })
+            .ok_or(())
+    }
 }
 
 fn update_effective_startup_url(
@@ -104,7 +152,13 @@ fn update_effective_startup_url(
 
 fn update_effective_startup_dir(
     settings: Option<Res<vmux_setting::AppSettings>>,
-    active: Option<Res<vmux_layout::space::ActiveSpaceEntity>>,
+    current: Query<
+        (Entity, Ref<vmux_layout::space::SpaceId>),
+        (
+            With<vmux_layout::space::Space>,
+            With<vmux_layout::space::CurrentSpace>,
+        ),
+    >,
     spaces: Query<
         (
             Entity,
@@ -115,16 +169,12 @@ fn update_effective_startup_dir(
     >,
     mut effective: ResMut<vmux_layout::settings::EffectiveStartupDir>,
 ) {
-    let selected = active
-        .as_deref()
-        .and_then(|active| active.0)
-        .and_then(|entity| spaces.get(entity).ok().map(|(_, id, _)| (entity, id)))
-        .or_else(|| {
-            spaces
-                .iter()
-                .find(|(_, _, is_active)| *is_active)
-                .map(|(entity, id, _)| (entity, id))
-        });
+    let selected = current.iter().next().or_else(|| {
+        spaces
+            .iter()
+            .find(|(_, _, is_active)| *is_active)
+            .map(|(entity, id, _)| (entity, id))
+    });
     let fallback = spaces.iter().next().map(|(entity, id, _)| (entity, id));
     let Some((entity, id)) = selected.or(fallback) else {
         if effective.0.is_some() {
@@ -157,7 +207,7 @@ fn update_effective_startup_dir(
 struct SpacesListSent;
 
 fn reset_spaces_sent_marker_on_page_ready(
-    trigger: On<BinReceive<PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     spaces_views: Query<(), With<Spaces>>,
     cef_views: Query<(), With<vmux_layout::LayoutCef>>,
     mut commands: Commands,
@@ -170,23 +220,25 @@ fn reset_spaces_sent_marker_on_page_ready(
 }
 
 fn sync_active_space_record(
-    active_entity: Option<Res<vmux_layout::space::ActiveSpaceEntity>>,
+    current: Query<
+        (&vmux_layout::space::SpaceId, &Name),
+        (
+            With<vmux_layout::space::Space>,
+            With<vmux_layout::space::CurrentSpace>,
+        ),
+    >,
     spaces: Query<
         (&vmux_layout::space::SpaceId, &Name, Has<vmux_core::Active>),
         With<vmux_layout::space::Space>,
     >,
     mut active: ResMut<ActiveSpace>,
 ) {
-    let selected = active_entity
-        .as_deref()
-        .and_then(|active| active.0)
-        .and_then(|entity| spaces.get(entity).ok().map(|(id, name, _)| (id, name)))
-        .or_else(|| {
-            spaces
-                .iter()
-                .find(|(_, _, is_active)| *is_active)
-                .map(|(id, name, _)| (id, name))
-        });
+    let selected = current.iter().next().or_else(|| {
+        spaces
+            .iter()
+            .find(|(_, _, is_active)| *is_active)
+            .map(|(id, name, _)| (id, name))
+    });
     if let Some((id, name)) = selected
         && (active.record.id != id.0 || active.record.name != name.as_str())
     {
@@ -265,22 +317,16 @@ fn space_rows_from_world(
 fn broadcast_spaces_to_views(
     spaces: SpaceListQuery,
     tab_q: Query<(), With<vmux_layout::tab::Tab>>,
-    pending_spaces: Query<Entity, (With<Spaces>, With<PageReady>, Without<SpacesListSent>)>,
-    sent_spaces: Query<Entity, (With<Spaces>, With<PageReady>, With<SpacesListSent>)>,
-    pending_cef: Query<
-        Entity,
+    mut views: Query<
         (
-            With<vmux_layout::LayoutCef>,
-            With<PageReady>,
-            Without<SpacesListSent>,
+            Entity,
+            Option<&mut SpaceSelection>,
+            Option<&SpacesPageSnapshot>,
+            Has<SpacesListSent>,
         ),
-    >,
-    sent_cef: Query<
-        Entity,
         (
-            With<vmux_layout::LayoutCef>,
             With<PageReady>,
-            With<SpacesListSent>,
+            Or<(With<Spaces>, With<vmux_layout::LayoutCef>)>,
         ),
     >,
     browsers: NonSend<Browsers>,
@@ -288,87 +334,100 @@ fn broadcast_spaces_to_views(
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
-    mut last_body: Local<std::collections::HashMap<Entity, SpacesListEvent>>,
+    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
+    spaces_ui: Query<(), With<SpacesUiStateUpdates>>,
     mut commands: Commands,
 ) {
-    let pending_total = pending_spaces.iter().count() + pending_cef.iter().count();
-    let sent_total = sent_spaces.iter().count() + sent_cef.iter().count();
-    if pending_total == 0 && sent_total == 0 {
-        return;
-    }
-    for (entity, pending) in pending_spaces
-        .iter()
-        .chain(pending_cef.iter())
-        .map(|entity| (entity, true))
-        .chain(
-            sent_spaces
-                .iter()
-                .chain(sent_cef.iter())
-                .map(|entity| (entity, false)),
-        )
-    {
+    for (entity, selection, snapshot, sent) in &mut views {
         let host = vmux_layout::window::host_window_of(entity, &child_of, &host_windows);
         let main = host.and_then(|host| main_for_window(host, &mains, &child_of, &host_windows));
-        let payload = SpacesListEvent {
-            spaces: space_rows_from_world(&spaces, &tab_q, settings.as_deref(), main),
+        let rows = space_rows_from_world(&spaces, &tab_q, settings.as_deref(), main);
+        let active = rows
+            .iter()
+            .position(|space| space.is_active)
+            .unwrap_or_default();
+        let selected = if let Some(mut selection) = selection {
+            if !sent {
+                selection.0 = active;
+            } else {
+                selection.0 = selection.0.min(rows.len().saturating_sub(1));
+            }
+            selection.0
+        } else {
+            active
         };
-        if !pending && last_body.get(&entity) == Some(&payload) {
+        let payload = SpacesListEvent {
+            spaces: rows,
+            selected: selected as u32,
+        };
+        if sent && snapshot.is_some_and(|snapshot| snapshot.0 == payload) {
             continue;
         }
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            SPACES_LIST_EVENT,
-            &payload,
-        ));
-        commands.entity(entity).insert(SpacesListSent);
-        last_body.insert(entity, payload);
+        if layout_ui.contains(entity) {
+            commands
+                .entity(entity)
+                .insert(vmux_layout::projection::SpacesProjection(payload.clone()));
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_layout::state::LayoutUiState,
+            >::from_event(entity, &payload));
+        }
+        if spaces_ui.contains(entity) {
+            commands.trigger(vmux_core::host::UiStateWrite::<SpacesUiState>::from_event(
+                entity, &payload,
+            ));
+        }
+        commands
+            .entity(entity)
+            .insert((SpacesListSent, SpacesPageSnapshot(payload)));
     }
 }
 
-fn on_project_command(
-    trigger: On<BinReceive<ProjectCommandEvent>>,
+fn on_project_activate(
+    trigger: On<UiInput<ProjectActivateRequest>>,
     active: Option<Res<ActiveSpace>>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
 ) {
-    let evt = &trigger.event().payload;
     let (Some(active), Some(mut settings)) = (active, settings) else {
         return;
     };
-    let Some(path) = evt.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) else {
-        return;
-    };
     let space_id = active.record.id.clone();
-    let changed = match evt.command.as_str() {
-        "activate" => settings
-            .bypass_change_detection()
-            .activate_space_project(&space_id, path),
-        "forget" => settings
-            .bypass_change_detection()
-            .forget_space_project(&space_id, path),
-        _ => false,
-    };
+    let changed = settings
+        .bypass_change_detection()
+        .activate_space_project(&space_id, trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
         saves.write(vmux_setting::SettingsSaveRequest);
     }
 }
 
-fn relay_space_command_requests(
-    mut reader: MessageReader<SpaceCommandRequest>,
-    mut commands: Commands,
+fn on_project_forget(
+    trigger: On<UiInput<ProjectForgetRequest>>,
+    active: Option<Res<ActiveSpace>>,
+    settings: Option<ResMut<vmux_setting::AppSettings>>,
+    mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
 ) {
+    let (Some(active), Some(mut settings)) = (active, settings) else {
+        return;
+    };
+    let space_id = active.record.id.clone();
+    let changed = settings
+        .bypass_change_detection()
+        .forget_space_project(&space_id, trigger.event().payload.path.trim());
+    if changed {
+        settings.set_changed();
+        saves.write(vmux_setting::SettingsSaveRequest);
+    }
+}
+
+fn relay_space_requests<T: Message + Clone>(mut reader: MessageReader<T>, mut commands: Commands) {
     for request in reader.read() {
-        commands.trigger(BinReceive {
+        commands.trigger(UiInput {
             webview: Entity::PLACEHOLDER,
-            payload: SpaceCommandEvent {
-                command: request.command.clone(),
-                space_id: request.space_id.clone(),
-                name: request.name.clone(),
-            },
+            payload: request.clone(),
         });
     }
 }
@@ -437,7 +496,7 @@ struct SpaceViewTemplate {
 }
 
 impl SpaceViewTemplate {
-    fn of(spaces: &SpaceListQuery, id: &str) -> Option<Self> {
+    fn find(spaces: &SpaceListQuery, id: &str) -> Option<Self> {
         spaces
             .iter()
             .filter(|(_, candidate, _, _, _, _, _)| candidate.0 == id)
@@ -461,26 +520,25 @@ impl SpaceViewTemplate {
             })
     }
 
-    fn spawn(
+    fn bundle(&self, main: Entity) -> impl Bundle {
+        (
+            vmux_layout::space::Space,
+            vmux_layout::space::SpaceId(self.id.clone()),
+            Name::new(self.name.clone()),
+            vmux_core::Order(self.order),
+            vmux_core::Active,
+            vmux_history::LastActivatedAt::now(),
+            vmux_layout::space::space_view_bundle(),
+            ChildOf(main),
+        )
+    }
+
+    fn layout_request(
         &self,
-        main: Entity,
+        space: Entity,
         window: Entity,
         settings: Option<&vmux_setting::AppSettings>,
-        layout_requests: &mut MessageWriter<TabLayoutSpawnRequest>,
-        commands: &mut Commands,
-    ) -> Entity {
-        let space = commands
-            .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId(self.id.clone()),
-                Name::new(self.name.clone()),
-                vmux_core::Order(self.order),
-                vmux_core::Active,
-                vmux_history::LastActivatedAt::now(),
-                vmux_layout::space::space_view_bundle(),
-                ChildOf(main),
-            ))
-            .id();
+    ) -> TabLayoutSpawnRequest {
         let startup_dir = settings.and_then(|settings| settings.startup_dir(&self.id));
         let content = settings
             .map(|settings| settings.startup_url(&self.id))
@@ -490,7 +548,7 @@ impl SpaceViewTemplate {
                 pending_prompt: None,
             })
             .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
-        layout_requests.write(TabLayoutSpawnRequest {
+        TabLayoutSpawnRequest {
             space,
             primary_window: window,
             name: None,
@@ -498,8 +556,7 @@ impl SpaceViewTemplate {
             content,
             clear_pending_stack: true,
             focus: true,
-        });
-        space
+        }
     }
 }
 
@@ -519,266 +576,289 @@ fn sync_space_name_to_id(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn on_space_command(
-    trigger: On<BinReceive<SpaceCommandEvent>>,
+fn on_space_rename(
+    trigger: On<UiInput<SpaceRenameRequest>>,
     spaces: SpaceQuery,
-    space_list: SpaceListQuery,
     tabs: SpaceTabQuery,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    let name = request.name.trim();
+    if name.is_empty() {
+        return;
+    }
+    if !spaces
+        .iter()
+        .any(|(_, id, _, _, _)| id.0 == request.space_id)
+    {
+        return;
+    }
+    let existing: std::collections::HashSet<String> = spaces
+        .iter()
+        .filter(|(_, id, _, _, _)| id.0 != request.space_id)
+        .map(|(_, id, _, _, _)| id.0.clone())
+        .collect();
+    let new_id = crate::model::unique_space_id_among(&existing, name);
+    for (entity, id, _, _, _) in spaces.iter() {
+        if id.0 != request.space_id {
+            continue;
+        }
+        commands.entity(entity).insert((
+            Name::new(new_id.clone()),
+            vmux_layout::space::SpaceId(new_id.clone()),
+        ));
+    }
+    if new_id == request.space_id {
+        return;
+    }
+    for (tab, id, _, _) in tabs.iter() {
+        if id.0 == request.space_id {
+            commands
+                .entity(tab)
+                .insert(vmux_layout::space::SpaceId(new_id.clone()));
+        }
+    }
+}
+
+fn on_space_open_page(
+    trigger: On<UiInput<SpaceOpenPageRequest>>,
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     host_windows: Query<&HostWindow>,
     focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
     focus: Option<Res<vmux_layout::stack::FocusedStack>>,
     mut spawn_requests: Option<MessageWriter<PageOpenRequest>>,
-    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    mut active_id: ResMut<vmux_layout::space::ActiveSpaceId>,
-    stack_q: Query<(Entity, &PageMetadata), With<Stack>>,
-    child_of_q: Query<&ChildOf>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
+    stacks: Query<(Entity, &PageMetadata), With<Stack>>,
+    child_of: Query<&ChildOf>,
     mut commands: Commands,
 ) {
-    let evt = &trigger.event().payload;
-    if evt.command == "rename" {
-        let Some(id) = evt.space_id.as_deref() else {
-            return;
-        };
-        let Some(name) = evt.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) else {
-            return;
-        };
-        if !spaces.iter().any(|(_, sid, _, _, _)| sid.0 == id) {
-            return;
-        }
-        let existing: std::collections::HashSet<String> = spaces
-            .iter()
-            .filter(|(_, sid, _, _, _)| sid.0 != id)
-            .map(|(_, sid, _, _, _)| sid.0.clone())
-            .collect();
-        let new_id = crate::model::unique_space_id_among(&existing, name);
-        let renamed_active = active_id.0.as_deref() == Some(id)
-            || spaces
-                .iter()
-                .any(|(_, sid, is_active, _, _)| sid.0 == id && is_active);
-        for (entity, sid, _, _, _) in spaces.iter() {
-            if sid.0 != id {
-                continue;
-            }
-            commands.entity(entity).insert((
-                Name::new(new_id.clone()),
-                vmux_layout::space::SpaceId(new_id.clone()),
-            ));
-        }
-        if new_id != id {
-            for (tab, sid, _, _) in tabs.iter() {
-                if sid.0 != id {
-                    continue;
-                }
-                commands
-                    .entity(tab)
-                    .insert(vmux_layout::space::SpaceId(new_id.clone()));
-            }
-            if renamed_active {
-                active_id.0 = Some(new_id.clone());
-            }
-        }
-        return;
-    }
-
     let window = host_windows
         .get(trigger.event().webview)
         .ok()
         .map(|host| host.0)
         .or_else(|| focused_window.as_deref().and_then(|focused| focused.0));
     let Some(window) = window else { return };
-    let Some(main) = main_for_window(window, &mains, &child_of_q, &host_windows) else {
+    let Some(_) = main_for_window(window, &mains, &child_of, &host_windows) else {
         return;
     };
-
-    if evt.command == "open_page" {
-        if let Some((existing, _)) = stack_q.iter().find(|(stack, meta)| {
-            meta.url == SPACES_PAGE_URL
-                && vmux_layout::window::host_window_of(*stack, &child_of_q, &host_windows)
-                    == Some(window)
-        }) {
-            vmux_core::focus_pane_entity(existing, &mut commands, &child_of_q);
-            return;
-        }
-        let Some(focus_res) = focus.as_deref() else {
-            return;
-        };
-        let Some(pane) = focus_res.pane else {
-            return;
-        };
-        let Some(spawn_requests) = spawn_requests.as_mut() else {
-            return;
-        };
-        let stack = commands
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                vmux_history::LastActivatedAt::now(),
-                ChildOf(pane),
-            ))
-            .id();
-        spawn_requests.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(stack),
-            url: SPACES_PAGE_URL.to_string(),
-            request_id: None,
-        });
+    if let Some((existing, _)) = stacks.iter().find(|(stack, metadata)| {
+        metadata.url == SPACES_PAGE_URL
+            && vmux_layout::window::host_window_of(*stack, &child_of, &host_windows) == Some(window)
+    }) {
+        vmux_core::focus_pane_entity(existing, &mut commands, &child_of);
         return;
     }
+    let Some(pane) = focus.as_deref().and_then(|focus| focus.pane) else {
+        return;
+    };
+    let Some(spawn_requests) = spawn_requests.as_mut() else {
+        return;
+    };
+    let stack = commands
+        .spawn((
+            vmux_layout::stack::stack_bundle(),
+            vmux_history::LastActivatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+    spawn_requests.write(PageOpenRequest {
+        target: PageOpenTarget::Stack(stack),
+        url: SPACES_PAGE_URL.to_string(),
+        request_id: None,
+    });
+}
 
-    if evt.command == "delete" {
-        let Some(id) = evt.space_id.as_deref() else {
-            return;
-        };
-        let logical_ids: std::collections::HashSet<&str> = spaces
+#[allow(clippy::too_many_arguments)]
+fn on_space_delete(
+    trigger: On<UiInput<SpaceDeleteRequest>>,
+    spaces: SpaceQuery,
+    space_list: SpaceListQuery,
+    tabs: SpaceTabQuery,
+    mains: Query<Entity, With<vmux_layout::window::Main>>,
+    host_windows: Query<&HostWindow>,
+    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
+    child_of: Query<&ChildOf>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    mut commands: Commands,
+) {
+    let window = host_windows
+        .get(trigger.event().webview)
+        .ok()
+        .map(|host| host.0)
+        .or_else(|| focused_window.as_deref().and_then(|focused| focused.0));
+    let Some(window) = window else { return };
+    let Some(_) = main_for_window(window, &mains, &child_of, &host_windows) else {
+        return;
+    };
+    let id = trigger.event().payload.space_id.as_str();
+    let logical_ids: std::collections::HashSet<&str> = spaces
+        .iter()
+        .map(|(_, id, _, _, _)| id.0.as_str())
+        .collect();
+    if logical_ids.len() <= 1 {
+        return;
+    }
+    let Some(fallback) = SpaceViewTemplate::first_other(&space_list, id) else {
+        return;
+    };
+    let mut affected_mains = Vec::new();
+    for (entity, space_id, _, _, parent) in spaces.iter() {
+        if space_id.0 != id {
+            continue;
+        }
+        if !affected_mains.contains(&parent.parent()) {
+            affected_mains.push(parent.parent());
+        }
+        commands.entity(entity).despawn();
+    }
+    if affected_mains.is_empty() {
+        return;
+    }
+    for affected_main in affected_mains {
+        deactivate_spaces_in_main(&spaces, affected_main, &mut commands);
+        if let Some((target_entity, _, _, _, _)) = spaces
             .iter()
-            .map(|(_, id, _, _, _)| id.0.as_str())
-            .collect();
-        if logical_ids.len() <= 1 {
-            return;
+            .filter(|(_, space_id, _, _, parent)| {
+                space_id.0 != id && parent.parent() == affected_main
+            })
+            .min_by_key(|(_, _, _, order, _)| order.map(|order| order.0).unwrap_or(u32::MAX))
+        {
+            commands
+                .entity(target_entity)
+                .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
+            bump_space_tab(&tabs, target_entity, &mut commands);
+            continue;
         }
-        let Some(fallback) = SpaceViewTemplate::first_other(&space_list, id) else {
-            return;
+        let Some(affected_window) =
+            vmux_layout::window::host_window_of(affected_main, &child_of, &host_windows)
+        else {
+            continue;
         };
-        let mut affected_mains = Vec::new();
-        for (entity, sid, _, _, parent) in spaces.iter() {
-            if sid.0 != id {
-                continue;
-            }
-            if !affected_mains.contains(&parent.parent()) {
-                affected_mains.push(parent.parent());
-            }
-            commands.entity(entity).despawn();
-        }
-        if affected_mains.is_empty() {
-            return;
-        }
-        for affected_main in affected_mains {
-            deactivate_spaces_in_main(&spaces, affected_main, &mut commands);
-            if let Some((target_entity, target_id, _, _, _)) = spaces
-                .iter()
-                .filter(|(_, sid, _, _, parent)| sid.0 != id && parent.parent() == affected_main)
-                .min_by_key(|(_, _, _, order, _)| order.map(|o| o.0).unwrap_or(u32::MAX))
-            {
-                commands
-                    .entity(target_entity)
-                    .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
-                bump_space_tab(&tabs, target_entity, &mut commands);
-                if affected_main == main {
-                    active_id.0 = Some(target_id.0.clone());
-                }
-                continue;
-            }
-            let Some(affected_window) =
-                vmux_layout::window::host_window_of(affected_main, &child_of_q, &host_windows)
-            else {
-                continue;
-            };
-            fallback.spawn(
-                affected_main,
-                affected_window,
-                settings.as_deref(),
-                &mut layout_requests,
-                &mut commands,
-            );
-            if affected_main == main {
-                active_id.0 = Some(fallback.id.clone());
-            }
-        }
-        return;
-    }
-
-    match evt.command.as_str() {
-        "attach" => {
-            let Some(id) = evt.space_id.as_deref() else {
-                return;
-            };
-            let local = spaces
-                .iter()
-                .find(|(_, sid, _, _, parent)| sid.0 == id && parent.parent() == main);
-            let Some((entity, _, is_active, _, _)) = local else {
-                let Some(template) = SpaceViewTemplate::of(&space_list, id) else {
-                    return;
-                };
-                deactivate_spaces_in_main(&spaces, main, &mut commands);
-                template.spawn(
-                    main,
-                    window,
-                    settings.as_deref(),
-                    &mut layout_requests,
-                    &mut commands,
-                );
-                active_id.0 = Some(id.to_string());
-                return;
-            };
-            if !is_active {
-                deactivate_spaces_in_main(&spaces, main, &mut commands);
-                commands
-                    .entity(entity)
-                    .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
-                active_id.0 = Some(id.to_string());
-                bump_space_tab(&tabs, entity, &mut commands);
-            }
-        }
-        "new" => {
-            let count = spaces
-                .iter()
-                .filter(|(_, _, _, _, parent)| parent.parent() == main)
-                .count();
-            let name = evt
-                .name
-                .clone()
-                .filter(|n| !n.trim().is_empty())
-                .unwrap_or_else(|| format!("Space {}", count + 1));
-            let existing: std::collections::HashSet<String> = spaces
-                .iter()
-                .map(|(_, sid, _, _, _)| sid.0.clone())
-                .collect();
-            let id = crate::model::unique_space_id_among(&existing, &name);
-            let order = spaces
-                .iter()
-                .filter(|(_, _, _, _, parent)| parent.parent() == main)
-                .filter_map(|(_, _, _, order, _)| order.map(|o| o.0))
-                .max()
-                .map(|max| max + 1)
-                .unwrap_or(0);
-            deactivate_spaces_in_main(&spaces, main, &mut commands);
-            let space = commands
-                .spawn((
-                    vmux_layout::space::Space,
-                    vmux_layout::space::SpaceId(id.clone()),
-                    Name::new(id.clone()),
-                    vmux_core::Order(order),
-                    vmux_core::Active,
-                    vmux_history::LastActivatedAt::now(),
-                    vmux_layout::space::space_view_bundle(),
-                    ChildOf(main),
-                ))
-                .id();
-            active_id.0 = Some(id.clone());
-            let startup_dir = settings
-                .as_deref()
-                .and_then(|settings| settings.startup_dir(&id));
-            layout_requests.write(TabLayoutSpawnRequest {
-                space,
-                primary_window: window,
-                name: None,
-                startup_dir,
-                content: TabLayoutSpawnContent::Url {
-                    url: SPACES_PAGE_URL.to_string(),
-                    pending_prompt: None,
-                },
-                clear_pending_stack: true,
-                focus: true,
-            });
-        }
-        _ => {}
+        let space = commands.spawn(fallback.bundle(affected_main)).id();
+        layout_requests.write(fallback.layout_request(space, affected_window, settings.as_deref()));
     }
 }
 
 #[allow(clippy::too_many_arguments)]
+fn on_space_attach(
+    trigger: On<UiInput<SpaceAttachRequest>>,
+    spaces: SpaceQuery,
+    space_list: SpaceListQuery,
+    tabs: SpaceTabQuery,
+    mains: Query<Entity, With<vmux_layout::window::Main>>,
+    host_windows: Query<&HostWindow>,
+    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
+    child_of: Query<&ChildOf>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    mut commands: Commands,
+) {
+    let window = host_windows
+        .get(trigger.event().webview)
+        .ok()
+        .map(|host| host.0)
+        .or_else(|| focused_window.as_deref().and_then(|focused| focused.0));
+    let Some(window) = window else { return };
+    let Some(main) = main_for_window(window, &mains, &child_of, &host_windows) else {
+        return;
+    };
+    let id = trigger.event().payload.space_id.as_str();
+    let local = spaces
+        .iter()
+        .find(|(_, space_id, _, _, parent)| space_id.0 == id && parent.parent() == main);
+    let Some((entity, _, is_active, _, _)) = local else {
+        let Some(template) = SpaceViewTemplate::find(&space_list, id) else {
+            return;
+        };
+        deactivate_spaces_in_main(&spaces, main, &mut commands);
+        let space = commands.spawn(template.bundle(main)).id();
+        layout_requests.write(template.layout_request(space, window, settings.as_deref()));
+        return;
+    };
+    if is_active {
+        return;
+    }
+    deactivate_spaces_in_main(&spaces, main, &mut commands);
+    commands
+        .entity(entity)
+        .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
+    bump_space_tab(&tabs, entity, &mut commands);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn on_space_create(
+    trigger: On<UiInput<SpaceCreateRequest>>,
+    spaces: SpaceQuery,
+    mains: Query<Entity, With<vmux_layout::window::Main>>,
+    host_windows: Query<&HostWindow>,
+    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
+    child_of: Query<&ChildOf>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    mut commands: Commands,
+) {
+    let window = host_windows
+        .get(trigger.event().webview)
+        .ok()
+        .map(|host| host.0)
+        .or_else(|| focused_window.as_deref().and_then(|focused| focused.0));
+    let Some(window) = window else { return };
+    let Some(main) = main_for_window(window, &mains, &child_of, &host_windows) else {
+        return;
+    };
+    let count = spaces
+        .iter()
+        .filter(|(_, _, _, _, parent)| parent.parent() == main)
+        .count();
+    let requested_name = trigger.event().payload.name.trim();
+    let name = if requested_name.is_empty() {
+        format!("Space {}", count + 1)
+    } else {
+        requested_name.to_string()
+    };
+    let existing: std::collections::HashSet<String> =
+        spaces.iter().map(|(_, id, _, _, _)| id.0.clone()).collect();
+    let id = crate::model::unique_space_id_among(&existing, &name);
+    let order = spaces
+        .iter()
+        .filter(|(_, _, _, _, parent)| parent.parent() == main)
+        .filter_map(|(_, _, _, order, _)| order.map(|order| order.0))
+        .max()
+        .map(|max| max + 1)
+        .unwrap_or(0);
+    deactivate_spaces_in_main(&spaces, main, &mut commands);
+    let space = commands
+        .spawn((
+            vmux_layout::space::Space,
+            vmux_layout::space::SpaceId(id.clone()),
+            Name::new(id.clone()),
+            vmux_core::Order(order),
+            vmux_core::Active,
+            vmux_history::LastActivatedAt::now(),
+            vmux_layout::space::space_view_bundle(),
+            ChildOf(main),
+        ))
+        .id();
+    let startup_dir = settings
+        .as_deref()
+        .and_then(|settings| settings.startup_dir(&id));
+    layout_requests.write(TabLayoutSpawnRequest {
+        space,
+        primary_window: window,
+        name: None,
+        startup_dir,
+        content: TabLayoutSpawnContent::Url {
+            url: SPACES_PAGE_URL.to_string(),
+            pending_prompt: None,
+        },
+        clear_pending_stack: true,
+        focus: true,
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
 fn handle_open_in_new_space(
-    mut reader: MessageReader<vmux_command::AppCommand>,
+    mut reader: MessageReader<OpenRequest>,
     spaces: SpaceQuery,
     mains: Query<Entity, With<vmux_layout::window::Main>>,
     child_of: Query<&ChildOf>,
@@ -786,17 +866,10 @@ fn handle_open_in_new_space(
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     settings: Option<Res<vmux_setting::AppSettings>>,
-    mut active_id: ResMut<vmux_layout::space::ActiveSpaceId>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
-    for cmd in reader.read() {
-        let vmux_command::AppCommand::Browser(vmux_command::BrowserCommand::Open(
-            vmux_command::open::OpenCommand::InNewSpace { url },
-        )) = cmd
-        else {
-            continue;
-        };
+    for request in reader.read() {
         let Some(window) = focused_window.0 else {
             continue;
         };
@@ -834,11 +907,11 @@ fn handle_open_in_new_space(
                 ChildOf(main),
             ))
             .id();
-        active_id.0 = Some(id.clone());
         let startup_dir = settings
             .as_deref()
             .and_then(|settings| settings.startup_dir(&id));
-        let content = url
+        let content = request
+            .url
             .as_deref()
             .filter(|url| !url.is_empty())
             .map(|url| TabLayoutSpawnContent::Url {
@@ -886,10 +959,31 @@ mod tests {
     use super::*;
     use crate::model::{SpaceRecord, bootstrap_profile_name};
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_command::CommandRequest;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
+
+    #[test]
+    fn space_mcp_definition_dispatches_to_the_typed_request() {
+        let definitions = OpenRequest::definitions();
+        let tools = definitions
+            .iter()
+            .filter_map(vmux_command::CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["open_in_new_space"],
+        );
+        let invocation =
+            vmux_command::CommandInvocation::new(Entity::PLACEHOLDER, "open_in_new_space")
+                .with_arguments(serde_json::json!({"url": "https://vmux.ai"}));
+        assert!(OpenRequest::try_from(&invocation).is_ok());
+    }
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -1000,7 +1094,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_space_command);
+            .add_observer(on_space_attach);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.insert_resource(vmux_layout::window::FocusedWindow(Some(second_window)));
@@ -1039,12 +1133,10 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(HostWindow(second_window)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
-            payload: SpaceCommandEvent {
-                command: "attach".to_string(),
-                space_id: Some("shared".to_string()),
-                name: None,
+            payload: SpaceAttachRequest {
+                space_id: "shared".to_string(),
             },
         });
         app.update();
@@ -1082,7 +1174,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_space_command);
+            .add_observer(on_space_delete);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.insert_resource(vmux_layout::window::FocusedWindow(Some(second_window)));
@@ -1117,12 +1209,10 @@ mod tests {
         ));
         let webview = app.world_mut().spawn(HostWindow(second_window)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
-            payload: SpaceCommandEvent {
-                command: "delete".to_string(),
-                space_id: Some("shared".to_string()),
-                name: None,
+            payload: SpaceDeleteRequest {
+                space_id: "shared".to_string(),
             },
         });
         app.update();
@@ -1265,7 +1355,7 @@ mod tests {
         );
     }
 
-    fn project_command_app(active: &str, projects: Vec<vmux_setting::SpaceProject>) -> App {
+    fn project_request_app(active: &str, projects: Vec<vmux_setting::SpaceProject>) -> App {
         let mut settings = test_settings();
         settings.spaces.insert(
             "work".into(),
@@ -1286,18 +1376,16 @@ mod tests {
                     profile: bootstrap_profile_name(),
                 },
             })
-            .add_observer(on_project_command);
+            .add_observer(on_project_activate)
+            .add_observer(on_project_forget);
         app
     }
 
-    fn run_project_command(app: &mut App, command: &str, path: &str) {
+    fn run_project_request<T: Send + Sync + 'static>(app: &mut App, request: T) {
         let webview = app.world_mut().spawn_empty().id();
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
-            payload: ProjectCommandEvent {
-                command: command.into(),
-                path: Some(path.into()),
-            },
+            payload: request,
         });
         app.update();
     }
@@ -1316,7 +1404,7 @@ mod tests {
 
     #[test]
     fn activating_a_project_moves_only_the_space_default() {
-        let mut app = project_command_app(
+        let mut app = project_request_app(
             "/repo/alpha",
             vec![
                 vmux_setting::SpaceProject::at("/repo/alpha"),
@@ -1343,7 +1431,15 @@ mod tests {
             })
             .collect();
 
-        run_project_command(&mut app, "activate", "/repo/beta");
+        run_project_request(
+            &mut app,
+            ProjectActivateRequest {
+                path: "/repo/beta".into(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: None,
+            },
+        );
 
         assert_eq!(space_state(&app).1.as_deref(), Some("/repo/beta"));
         let after: Vec<Option<String>> = tabs
@@ -1362,7 +1458,7 @@ mod tests {
 
     #[test]
     fn forgetting_the_active_project_falls_back_to_one_that_remains() {
-        let mut app = project_command_app(
+        let mut app = project_request_app(
             "/repo/beta",
             vec![
                 vmux_setting::SpaceProject::at("/repo/alpha"),
@@ -1370,7 +1466,12 @@ mod tests {
             ],
         );
 
-        run_project_command(&mut app, "forget", "/repo/beta");
+        run_project_request(
+            &mut app,
+            ProjectForgetRequest {
+                path: "/repo/beta".into(),
+            },
+        );
 
         assert_eq!(
             space_state(&app),
@@ -1380,12 +1481,20 @@ mod tests {
 
     #[test]
     fn activating_a_project_the_space_does_not_hold_is_ignored() {
-        let mut app = project_command_app(
+        let mut app = project_request_app(
             "/repo/alpha",
             vec![vmux_setting::SpaceProject::at("/repo/alpha")],
         );
 
-        run_project_command(&mut app, "activate", "/repo/elsewhere");
+        run_project_request(
+            &mut app,
+            ProjectActivateRequest {
+                path: "/repo/elsewhere".into(),
+                branch: String::new(),
+                checkout: String::new(),
+                pane_id: None,
+            },
+        );
 
         assert_eq!(space_state(&app).1.as_deref(), Some("/repo/alpha"));
     }
@@ -1556,7 +1665,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .add_observer(on_space_command);
+            .add_observer(on_space_rename);
         app.world_mut().spawn(bevy::window::PrimaryWindow);
         let main = app.world_mut().spawn(vmux_layout::window::Main).id();
         let space = app
@@ -1566,6 +1675,7 @@ mod tests {
                 vmux_layout::space::SpaceId("rename-src-test".to_string()),
                 Name::new("rename-src-test"),
                 vmux_core::Active,
+                vmux_layout::space::CurrentSpace,
                 ChildOf(main),
             ))
             .id();
@@ -1579,12 +1689,11 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: Entity::PLACEHOLDER,
-            payload: SpaceCommandEvent {
-                command: "rename".to_string(),
-                space_id: Some("rename-src-test".to_string()),
-                name: Some("Vmux Ai/Vmux".to_string()),
+            payload: SpaceRenameRequest {
+                space_id: "rename-src-test".to_string(),
+                name: "Vmux Ai/Vmux".to_string(),
             },
         });
         app.update();
@@ -1605,12 +1714,10 @@ mod tests {
                 .map(|s| s.0.clone()),
             Some("vmux-ai/vmux".to_string())
         );
-        assert_eq!(
+        assert!(
             app.world()
-                .resource::<vmux_layout::space::ActiveSpaceId>()
-                .0
-                .as_deref(),
-            Some("vmux-ai/vmux")
+                .get::<vmux_layout::space::CurrentSpace>(space)
+                .is_some()
         );
     }
 }

@@ -1,0 +1,53 @@
+[
+    (
+        id: "open_in_new_stack",
+        label: "Open in New Stack",
+        group: "Browser > Open",
+        accelerator: Some("super+n"),
+        mcp: Some((
+            description: "Open the URL as a new stack inside the currently focused pane. Stacks are the in-pane tab strip: the current stack stays alive and a new one is added next to it, becoming active. Use when the user wants to preserve the current page and view a new one alongside, in the same pane.",
+            input_schema: Some((
+                type: Object,
+                properties: {
+                    "url": (
+                        type: String,
+                        description: Some("Absolute URL to open in the new stack. If omitted, opens the startup URL."),
+                    ),
+                },
+            )),
+        )),
+    ),
+    (
+        id: "stack_close",
+        label: "Close Stack",
+        group: "Layout > Stack",
+        accelerator: Some("super+w"),
+        shortcuts: [(shortcut: Chord("Ctrl+b, Shift+x"), when: None)],
+    ),
+    (
+        id: "stack_next",
+        label: "Next Stack",
+        group: "Layout > Stack",
+        accelerator: Some("super+shift+n"),
+        shortcuts: [(shortcut: Direct("Super+Shift+J"), when: None)],
+    ),
+    (
+        id: "stack_previous",
+        label: "Previous Stack",
+        group: "Layout > Stack",
+        accelerator: Some("super+shift+p"),
+        shortcuts: [(shortcut: Direct("Super+Shift+K"), when: None)],
+    ),
+    (
+        id: "stack_swap_prev",
+        label: "Move Stack Left",
+        group: "Layout > Stack",
+        shortcuts: [(shortcut: Chord("Ctrl+b, <"), when: None)],
+    ),
+    (
+        id: "stack_swap_next",
+        label: "Move Stack Right",
+        group: "Layout > Stack",
+        shortcuts: [(shortcut: Chord("Ctrl+b, >"), when: None)],
+    ),
+]

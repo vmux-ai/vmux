@@ -1,9 +1,12 @@
 mod appearance;
+mod projection;
 mod runtime;
-mod view;
+mod schema;
+mod state;
+mod tool;
 
 use bevy::{ecs::message::MessageReader, prelude::*};
-use vmux_command::ReadAppCommands;
+use vmux_command::ReadCommandRequests;
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 
 pub use appearance::{ColorSchemeChanged, ResolvedColorScheme, ResolvedScheme, SystemAppearance};
@@ -14,22 +17,27 @@ pub use runtime::{
     ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides, SpaceProject, StartupDir,
     TerminalSettings, TerminalTheme, UpdateChannel,
 };
-pub use view::Settings;
+pub use state::Settings;
+pub use tool::SettingToolPlugin;
 pub use vmux_command::event::SearchEngine;
 
 pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::ui::SettingsPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins((
             SettingsRuntimePlugin,
-            view::SettingsViewPlugin,
+            tool::SettingToolPlugin,
+            state::StatePlugin,
+            projection::ProjectionPlugin,
             appearance::AppearancePlugin,
             vmux_layout::LayoutContractPlugin,
         ))
         .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
-        .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands));
+        .add_systems(Update, respond_settings_spawn.in_set(ReadCommandRequests));
     }
 }
 

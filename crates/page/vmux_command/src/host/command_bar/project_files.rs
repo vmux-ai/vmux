@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::Entity;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
+use bevy::winit::EventLoopProxyWrapper;
 use ignore::WalkBuilder;
 
 use crate::event::{CommandBarRecentFile, PathCompleteResponse, PathEntry};
@@ -19,6 +20,7 @@ const MAX_PENDING_ASKS: usize = 8;
 #[derive(Clone)]
 pub struct Asked {
     pub webview: Entity,
+    pub request_id: u64,
     pub query: String,
     roots: Vec<PathBuf>,
     answered_with: u64,
@@ -39,8 +41,9 @@ impl ProjectCompletions {
         }
     }
 
-    pub fn response(self) -> PathCompleteResponse {
+    pub fn response(self, request_id: u64) -> PathCompleteResponse {
         PathCompleteResponse {
+            request_id,
             completions: self.entries,
             truncated: self.partial,
             total: u32::try_from(self.total).unwrap_or(u32::MAX),
@@ -60,17 +63,20 @@ impl ProjectIndex {
         &mut self,
         roots: &[PathBuf],
         bias: &RankBias,
+        request_id: u64,
         query: &str,
         webview: Entity,
+        proxy: Option<&EventLoopProxyWrapper>,
     ) -> Option<ProjectCompletions> {
-        self.remember(webview, query, roots);
-        self.sync(roots);
+        self.remember(webview, request_id, query, roots);
+        self.sync(roots, proxy);
         self.rank(roots, query, bias)
     }
 
-    fn remember(&mut self, webview: Entity, query: &str, roots: &[PathBuf]) {
+    fn remember(&mut self, webview: Entity, request_id: u64, query: &str, roots: &[PathBuf]) {
         let asked = Asked {
             webview,
+            request_id,
             query: query.to_string(),
             roots: roots.to_vec(),
             answered_with: self.generation,
@@ -87,8 +93,8 @@ impl ProjectIndex {
         self.asked.push(asked);
     }
 
-    pub fn warm(&mut self, roots: &[PathBuf]) {
-        self.sync(roots);
+    pub fn warm(&mut self, roots: &[PathBuf], proxy: Option<&EventLoopProxyWrapper>) {
+        self.sync(roots, proxy);
     }
 
     pub fn pending(&self) -> Vec<Asked> {
@@ -100,10 +106,11 @@ impl ProjectIndex {
         webview: Entity,
         roots: &[PathBuf],
         bias: &RankBias,
+        proxy: Option<&EventLoopProxyWrapper>,
     ) -> Option<ProjectCompletions> {
         let at = self.asked.iter().position(|ask| ask.webview == webview)?;
         let query = self.asked[at].query.clone();
-        self.sync(roots);
+        self.sync(roots, proxy);
         if self.asked[at].answered_with == self.generation {
             self.forget_once_complete(webview);
             return None;
@@ -163,7 +170,7 @@ impl ProjectIndex {
         wanted
     }
 
-    fn sync(&mut self, roots: &[PathBuf]) {
+    fn sync(&mut self, roots: &[PathBuf], proxy: Option<&EventLoopProxyWrapper>) {
         let roots = &self.wanted(roots);
         let held = self.roots.len();
         self.roots.retain(|index| roots.contains(&index.root));
@@ -172,10 +179,10 @@ impl ProjectIndex {
         }
         for root in roots {
             let Some(at) = self.roots.iter().position(|index| &index.root == root) else {
-                self.roots.push(RootIndex::start(root));
+                self.roots.push(RootIndex::start(root, proxy));
                 continue;
             };
-            if self.roots[at].advance() {
+            if self.roots[at].advance(proxy) {
                 self.generation += 1;
             }
         }
@@ -190,20 +197,23 @@ struct RootIndex {
 }
 
 impl RootIndex {
-    fn start(root: &Path) -> Self {
+    fn start(root: &Path, proxy: Option<&EventLoopProxyWrapper>) -> Self {
         let mut started = Self {
             root: root.to_path_buf(),
             walk: None,
             built_at: None,
             walking: None,
         };
-        started.rewalk();
+        started.rewalk(vmux_core::host::wake::Wake::beside(proxy));
         started
     }
 
-    fn rewalk(&mut self) {
+    fn rewalk(&mut self, wake: vmux_core::host::wake::Wake) {
         let walked = self.root.clone();
-        self.walking = Some(IoTaskPool::get().spawn(async move { ProjectWalk::of(&walked) }));
+        self.walking = Some(IoTaskPool::get().spawn(async move {
+            let _wake = wake;
+            ProjectWalk::scan(&walked)
+        }));
     }
 
     fn walking(&self) -> bool {
@@ -214,7 +224,7 @@ impl RootIndex {
         self.walk.as_ref()
     }
 
-    fn advance(&mut self) -> bool {
+    fn advance(&mut self, proxy: Option<&EventLoopProxyWrapper>) -> bool {
         if let Some(task) = &mut self.walking {
             let Some(walk) = block_on(future::poll_once(task)) else {
                 return false;
@@ -225,7 +235,7 @@ impl RootIndex {
             return true;
         }
         if self.built_at.is_some_and(|at| at.elapsed() > INDEX_TTL) {
-            self.rewalk();
+            self.rewalk(vmux_core::host::wake::Wake::beside(proxy));
         }
         false
     }
@@ -240,16 +250,16 @@ struct WalkedPath {
 
 impl WalkedPath {
     fn file(relative: String) -> Self {
-        Self::of(relative, false)
+        Self::new(relative, false)
     }
 
     fn directory(relative: String) -> Self {
-        Self::of(relative, true)
+        Self::new(relative, true)
     }
 
-    fn of(relative: String, is_dir: bool) -> Self {
+    fn new(relative: String, is_dir: bool) -> Self {
         let lowered = relative.to_lowercase();
-        let held = PathMask::of(&lowered);
+        let held = PathMask::from(lowered.as_str());
         let folded = if lowered == relative {
             None
         } else {
@@ -286,7 +296,7 @@ impl ProjectWalk {
         }
     }
 
-    fn of(root: &Path) -> Self {
+    fn scan(root: &Path) -> Self {
         let mut walked = Self::holding(MAX_INDEXED_PATHS);
         let walk = WalkBuilder::new(root)
             .hidden(true)
@@ -342,7 +352,7 @@ pub struct RankBias {
 }
 
 impl RankBias {
-    pub fn of(active: Option<&str>, recent: &[CommandBarRecentFile]) -> Self {
+    pub fn new(active: Option<&str>, recent: &[CommandBarRecentFile]) -> Self {
         let mut opened = Vec::with_capacity(recent.len());
         for file in recent {
             let Some(path) = file.url.strip_prefix("file://") else {
@@ -393,7 +403,7 @@ struct FuzzyRank;
 
 impl FuzzyRank {
     fn across(roots: &[(&Path, &[WalkedPath])], bias: &RankBias, query: &str) -> Ranked {
-        let wanted = FuzzyQuery::of(query);
+        let wanted = FuzzyQuery::parse(query);
         let mut best = TopMatches::holding(MAX_RESULTS);
         for favoured in [true, false] {
             for (root, paths) in roots {
@@ -481,7 +491,7 @@ impl<'a> TopMatches<'a> {
                     .join(&found.path.relative)
                     .to_string_lossy()
                     .into_owned(),
-                project: ProjectLabel::of(found.root),
+                project: ProjectLabel::from_root(found.root),
             });
         }
         Ranked { entries, total }
@@ -511,7 +521,7 @@ impl Match<'_> {
 struct ProjectLabel;
 
 impl ProjectLabel {
-    fn of(root: &Path) -> String {
+    fn from_root(root: &Path) -> String {
         let Some(name) = root.file_name() else {
             return root.to_string_lossy().into_owned();
         };
@@ -522,15 +532,17 @@ impl ProjectLabel {
 #[derive(Clone, Copy, Default)]
 struct PathMask(u64);
 
-impl PathMask {
-    fn of(folded: &str) -> Self {
+impl From<&str> for PathMask {
+    fn from(folded: &str) -> Self {
         let mut held = 0u64;
         for c in folded.chars() {
             held |= Self::bit(c);
         }
         Self(held)
     }
+}
 
+impl PathMask {
     fn bit(c: char) -> u64 {
         if c.is_ascii_lowercase() {
             return 1 << (c as u8 - b'a');
@@ -556,12 +568,12 @@ struct FuzzyQuery {
 }
 
 impl FuzzyQuery {
-    fn of(query: &str) -> Self {
+    fn parse(query: &str) -> Self {
         let mut terms = Vec::new();
         let mut needed = PathMask::default();
         for term in query.split_whitespace() {
             let term = term.to_lowercase();
-            needed = needed.with(PathMask::of(&term));
+            needed = needed.with(PathMask::from(term.as_str()));
             terms.push(term);
         }
         Self { terms, needed }
@@ -574,7 +586,7 @@ impl FuzzyQuery {
         let folded = path.folded();
         let mut total = 0;
         for term in &self.terms {
-            total += FuzzyScore::of(folded, term)?;
+            total += FuzzyScore::score(folded, term)?;
         }
         Some(total)
     }
@@ -583,7 +595,7 @@ impl FuzzyQuery {
 struct FuzzyScore;
 
 impl FuzzyScore {
-    fn of(lowered: &str, needle: &str) -> Option<i32> {
+    fn score(lowered: &str, needle: &str) -> Option<i32> {
         if needle.is_empty() {
             return Some(0);
         }
@@ -662,7 +674,7 @@ mod tests {
 
         fn indexed(&self) -> Vec<String> {
             let mut named = Vec::new();
-            for path in &ProjectWalk::of(self.dir.path()).paths {
+            for path in &ProjectWalk::scan(self.dir.path()).paths {
                 let suffix = if path.is_dir { "/" } else { "" };
                 named.push(format!("{}{suffix}", path.relative));
             }
@@ -747,9 +759,9 @@ mod tests {
         ];
         for term in terms {
             let term = term.to_lowercase();
-            let needed = PathMask::of(&term);
+            let needed = PathMask::from(term.as_str());
             for path in &paths {
-                if FuzzyScore::of(path.folded(), &term).is_none() {
+                if FuzzyScore::score(path.folded(), &term).is_none() {
                     continue;
                 }
                 assert!(
@@ -824,7 +836,7 @@ mod tests {
 
     #[test]
     fn a_query_whose_letters_are_out_of_order_does_not_match() {
-        assert!(FuzzyScore::of("src/handler.rs", "rendlah").is_none());
+        assert!(FuzzyScore::score("src/handler.rs", "rendlah").is_none());
     }
 
     #[test]
@@ -897,7 +909,7 @@ mod tests {
                     title: String::new(),
                 });
             }
-            Self::of(None, &recent)
+            Self::new(None, &recent)
         }
     }
 
@@ -916,7 +928,7 @@ mod tests {
             "the shallow path wins on its own, so the lift is what this test measures"
         );
 
-        let lifted = FuzzyRank::listed(&roots, &RankBias::of(Some("/code/vmux"), &[]), "main.rs");
+        let lifted = FuzzyRank::listed(&roots, &RankBias::new(Some("/code/vmux"), &[]), "main.rs");
         assert_eq!(lifted[0].project, "vmux");
         assert_eq!(lifted[0].name, "client/crates/app/vmux_mobile/src/main.rs");
     }
@@ -930,7 +942,7 @@ mod tests {
                 (Path::new("/code/active"), active.as_slice()),
                 (Path::new("/code/other"), other.as_slice()),
             ],
-            &RankBias::of(Some("/code/active"), &[]),
+            &RankBias::new(Some("/code/active"), &[]),
             "handler",
         );
 
@@ -1040,7 +1052,7 @@ mod tests {
         fn answer(&mut self, webview: Entity, roots: &[PathBuf]) -> ProjectCompletions {
             let bias = RankBias::after_visiting(&[]);
             for _ in 0..500 {
-                if let Some(answered) = self.settled_for(webview, roots, &bias) {
+                if let Some(answered) = self.settled_for(webview, roots, &bias, None) {
                     return answered;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1065,8 +1077,8 @@ mod tests {
 
         let mut index = ProjectIndex::default();
         let bias = RankBias::after_visiting(&[]);
-        index.matches(&roots_one, &bias, "marker", first);
-        index.matches(&roots_two, &bias, "marker", second);
+        index.matches(&roots_one, &bias, 1, "marker", first, None);
+        index.matches(&roots_two, &bias, 2, "marker", second, None);
 
         let answered_one = index.answer(first, &roots_one);
         let answered_two = index.answer(second, &roots_two);

@@ -1,15 +1,15 @@
 use bevy::prelude::*;
 use vmux_command::snapshot::{
-    CommandBarSpacesSnapshot, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,
+    CommandBarProjection, CommandBarWorkspaceSnapshot, WriteCommandBarSnapshots,
 };
 use vmux_ui::i18n::Locale;
 
 use crate::settings::ResolvedLocale;
 use crate::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
 
-pub(crate) struct WorkspaceSnapshotPlugin;
+pub(crate) struct SnapshotPlugin;
 
-impl Plugin for WorkspaceSnapshotPlugin {
+impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
@@ -20,13 +20,12 @@ impl Plugin for WorkspaceSnapshotPlugin {
 
 fn publish_workspace_snapshot(
     tab_gather: TabGatherParams,
-    spaces: Res<CommandBarSpacesSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
     projects: Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
-    mut snapshot: ResMut<CommandBarWorkspaceSnapshot>,
+    mut state: ResMut<CommandBarProjection>,
 ) {
     let active_tab = tab_gather.active_tab.get();
-    let project_root = ProjectRoot::of(active_tab, &projects);
+    let project_root = ProjectRoot::resolve(active_tab, &projects);
     let (_, pane, stack) = crate::stack::focused_stack(
         active_tab,
         &tab_gather.all_children,
@@ -49,7 +48,7 @@ fn publish_workspace_snapshot(
         &tab_gather.stack_q,
         &tab_gather.browser_meta,
         &tab_gather.child_of_q,
-        &spaces.active_space_name,
+        &state.spaces.active_space_name,
         &locale,
     );
     let next = CommandBarWorkspaceSnapshot {
@@ -59,15 +58,15 @@ fn publish_workspace_snapshot(
         stack_count: tab_gather.stack_q.iter().count(),
         project_root,
     };
-    if *snapshot != next {
-        *snapshot = next;
+    if state.workspace != next {
+        state.workspace = next;
     }
 }
 
 struct ProjectRoot;
 
 impl ProjectRoot {
-    fn of(
+    fn resolve(
         active_tab: Option<Entity>,
         projects: &Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
     ) -> Option<String> {

@@ -1,0 +1,9 @@
+[
+    (
+        id: "stack_reopen",
+        label: "Reopen Closed Page",
+        group: "Layout > Stack",
+        accelerator: Some("super+shift+t"),
+        shortcuts: [(shortcut: Direct("Ctrl+Shift+T"), when: None)],
+    ),
+]

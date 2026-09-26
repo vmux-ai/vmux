@@ -1,4 +1,3 @@
-use crate::{AppCommand, BrowserCommand, OpenCommand, PaneDirection, PaneOpenMode, PaneTarget};
 use bevy::ecs::component::Component;
 use bevy::ecs::resource::Resource;
 use bevy::input::keyboard::KeyCode;
@@ -8,6 +7,7 @@ use vmux_core::input::{ClaimedKey, KeyClaims, KeyModifiers};
 #[derive(Resource, Debug, Clone, Default)]
 pub struct Keymap {
     bindings: Vec<(Source, Binding)>,
+    registered: std::collections::BTreeSet<String>,
     pub chord_timeout_ms: u64,
 }
 
@@ -28,12 +28,21 @@ const DEFAULT_CHORD_TIMEOUT_MS: u64 = 1000;
 
 impl Keymap {
     pub fn defaults() -> Self {
-        let mut keymap = Self {
+        Self {
             bindings: Vec::new(),
+            registered: std::collections::BTreeSet::new(),
             chord_timeout_ms: DEFAULT_CHORD_TIMEOUT_MS,
-        };
-        keymap.extend(Source::Default, AppCommand::default_shortcuts());
+        }
+    }
+
+    pub fn defaults_with(definitions: &[crate::definition::CommandDefinition]) -> Self {
+        let mut keymap = Self::defaults();
+        crate::definition::CommandDefinition::extend_keymap(definitions, &mut keymap);
         keymap
+    }
+
+    pub fn register<'a>(&mut self, ids: impl IntoIterator<Item = &'a str>) {
+        self.registered.extend(ids.into_iter().map(str::to_string));
     }
 
     pub fn extend(&mut self, source: Source, bindings: impl IntoIterator<Item = Binding>) {
@@ -64,7 +73,7 @@ impl Keymap {
         }
     }
 
-    pub fn direct(&self, pressed: &KeyCombo) -> Option<AppCommand> {
+    pub fn direct(&self, pressed: &KeyCombo) -> Option<String> {
         self.in_context(KeyContext::NONE).direct(pressed)
     }
 
@@ -72,8 +81,12 @@ impl Keymap {
         self.in_context(KeyContext::NONE).has_chord_prefix(pressed)
     }
 
-    pub fn chord(&self, prefix: &KeyCombo, pressed: &KeyCombo) -> Option<AppCommand> {
+    pub fn chord(&self, prefix: &KeyCombo, pressed: &KeyCombo) -> Option<String> {
         self.in_context(KeyContext::NONE).chord(prefix, pressed)
+    }
+
+    fn recognizes(&self, id: &str) -> bool {
+        self.registered.contains(id)
     }
 }
 
@@ -92,22 +105,26 @@ impl KeymapView<'_> {
             })
     }
 
-    pub fn direct(&self, pressed: &KeyCombo) -> Option<AppCommand> {
+    pub fn direct(&self, pressed: &KeyCombo) -> Option<String> {
         self.applicable()
             .find_map(|binding| match &binding.shortcut {
-                Shortcut::Direct(combo) if combo == pressed => {
-                    AppCommand::from_shortcut_id(&binding.command)
+                Shortcut::Direct(combo)
+                    if combo == pressed && self.keymap.recognizes(&binding.command) =>
+                {
+                    Some(binding.command.clone())
                 }
                 _ => None,
             })
     }
 
-    pub fn scoped(&self, pressed: &KeyCombo) -> Option<AppCommand> {
+    pub fn scoped(&self, pressed: &KeyCombo) -> Option<String> {
         self.applicable()
             .filter(|binding| binding.when.is_some())
             .find_map(|binding| match &binding.shortcut {
-                Shortcut::Direct(combo) if combo == pressed => {
-                    AppCommand::from_shortcut_id(&binding.command)
+                Shortcut::Direct(combo)
+                    if combo == pressed && self.keymap.recognizes(&binding.command) =>
+                {
+                    Some(binding.command.clone())
                 }
                 _ => None,
             })
@@ -119,7 +136,7 @@ impl KeymapView<'_> {
         )
     }
 
-    pub fn chord(&self, prefix: &KeyCombo, pressed: &KeyCombo) -> Option<AppCommand> {
+    pub fn chord(&self, prefix: &KeyCombo, pressed: &KeyCombo) -> Option<String> {
         if let Some(command) = self.chord_exact(prefix, pressed) {
             return Some(command);
         }
@@ -130,13 +147,15 @@ impl KeymapView<'_> {
         self.chord_exact(prefix, &inherited)
     }
 
-    fn chord_exact(&self, prefix: &KeyCombo, second: &KeyCombo) -> Option<AppCommand> {
+    fn chord_exact(&self, prefix: &KeyCombo, second: &KeyCombo) -> Option<String> {
         self.applicable()
             .find_map(|binding| match &binding.shortcut {
                 Shortcut::Chord(bound_prefix, bound_second)
-                    if bound_prefix == prefix && bound_second == second =>
+                    if bound_prefix == prefix
+                        && bound_second == second
+                        && self.keymap.recognizes(&binding.command) =>
                 {
-                    AppCommand::from_shortcut_id(&binding.command)
+                    Some(binding.command.clone())
                 }
                 _ => None,
             })
@@ -148,8 +167,9 @@ impl KeymapView<'_> {
                 if &binding.shortcut != shortcut {
                     return None;
                 }
-                AppCommand::from_shortcut_id(&binding.command)
-                    .map(|_| binding.command.as_str() == command)
+                self.keymap
+                    .recognizes(&binding.command)
+                    .then_some(binding.command.as_str() == command)
             })
             .unwrap_or(false)
     }
@@ -157,7 +177,7 @@ impl KeymapView<'_> {
     pub fn claims(&self) -> KeyClaims {
         let mut keys: Vec<ClaimedKey> = Vec::new();
         for binding in self.applicable() {
-            if AppCommand::from_shortcut_id(&binding.command).is_none() {
+            if !self.keymap.recognizes(&binding.command) {
                 continue;
             }
             let combo = match &binding.shortcut {
@@ -173,26 +193,6 @@ impl KeymapView<'_> {
             keys.push(claimed);
         }
         KeyClaims { keys }
-    }
-}
-
-impl AppCommand {
-    pub fn from_shortcut_id(id: &str) -> Option<Self> {
-        let split = |direction| {
-            Some(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InPane {
-                    direction,
-                    target: PaneTarget::NewSplit,
-                    mode: PaneOpenMode::NewStack,
-                    url: None,
-                },
-            )))
-        };
-        match id {
-            "split_v" => split(PaneDirection::Right),
-            "split_h" => split(PaneDirection::Bottom),
-            _ => AppCommand::from_menu_id(id),
-        }
     }
 }
 
@@ -329,7 +329,7 @@ impl KeyCombo {
         key_label(self.key)
     }
 
-    pub fn of(stroke: &vmux_core::input::KeyStroke) -> Option<Self> {
+    pub fn from_stroke(stroke: &vmux_core::input::KeyStroke) -> Option<Self> {
         if stroke.is_modifier_key() {
             return None;
         }
@@ -720,30 +720,33 @@ mod tests {
     #[test]
     fn a_configured_binding_outranks_the_default_on_the_same_key() {
         let mut keymap = Keymap::default();
+        keymap.register([STACK_CLOSE, PANE_CLOSE]);
         keymap.extend(Source::Default, [binding(STACK_CLOSE, None)]);
         keymap.extend(Source::Settings, [binding(PANE_CLOSE, None)]);
 
         assert_eq!(
             keymap.direct(&combo(KeyCode::KeyX)),
-            AppCommand::from_shortcut_id(PANE_CLOSE)
+            Some(PANE_CLOSE.to_string())
         );
     }
 
     #[test]
     fn the_default_still_loses_when_it_arrives_last() {
         let mut keymap = Keymap::default();
+        keymap.register([STACK_CLOSE, PANE_CLOSE]);
         keymap.extend(Source::Settings, [binding(PANE_CLOSE, None)]);
         keymap.extend(Source::Default, [binding(STACK_CLOSE, None)]);
 
         assert_eq!(
             keymap.direct(&combo(KeyCode::KeyX)),
-            AppCommand::from_shortcut_id(PANE_CLOSE)
+            Some(PANE_CLOSE.to_string())
         );
     }
 
     #[test]
     fn a_scoped_binding_wins_only_inside_its_context() {
         let mut keymap = Keymap::default();
+        keymap.register([STACK_CLOSE, PANE_CLOSE]);
         keymap.extend(
             Source::Settings,
             [
@@ -756,19 +759,20 @@ mod tests {
             keymap
                 .in_context(&context(&["chat.selector"]))
                 .direct(&combo(KeyCode::KeyX)),
-            AppCommand::from_shortcut_id(PANE_CLOSE)
+            Some(PANE_CLOSE.to_string())
         );
         assert_eq!(
             keymap
                 .in_context(&context(&["chat"]))
                 .direct(&combo(KeyCode::KeyX)),
-            AppCommand::from_shortcut_id(STACK_CLOSE)
+            Some(STACK_CLOSE.to_string())
         );
     }
 
     #[test]
     fn a_scoped_binding_never_matches_an_absent_context() {
         let mut keymap = Keymap::default();
+        keymap.register([PANE_CLOSE]);
         keymap.extend(
             Source::Settings,
             [binding(PANE_CLOSE, Some("chat.selector"))],
@@ -779,22 +783,38 @@ mod tests {
 
     #[test]
     fn an_explicit_second_stroke_modifier_wins_before_inherited_modifier_normalization() {
-        use crate::{LayoutCommand, PaneCommand};
-
-        let keymap = Keymap::defaults();
+        let mut keymap = Keymap::default();
+        keymap.register(["resize_pane_left", "select_pane_left"]);
+        keymap.extend(
+            Source::Default,
+            [
+                Binding {
+                    shortcut: Shortcut::Chord(
+                        modified(KeyCode::KeyB, CTRL),
+                        modified(KeyCode::ArrowLeft, CTRL),
+                    ),
+                    command: "resize_pane_left".to_string(),
+                    when: None,
+                },
+                Binding {
+                    shortcut: Shortcut::Chord(
+                        modified(KeyCode::KeyB, CTRL),
+                        modified(KeyCode::KeyH, CTRL),
+                    ),
+                    command: "select_pane_left".to_string(),
+                    when: None,
+                },
+            ],
+        );
         let prefix = modified(KeyCode::KeyB, CTRL);
 
         assert_eq!(
             keymap.chord(&prefix, &modified(KeyCode::ArrowLeft, CTRL)),
-            Some(AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::ResizeLeft
-            )))
+            Some("resize_pane_left".to_string())
         );
         assert_eq!(
             keymap.chord(&prefix, &modified(KeyCode::KeyH, CTRL)),
-            Some(AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft
-            )))
+            Some("select_pane_left".to_string())
         );
     }
 
@@ -896,6 +916,7 @@ mod tests {
     #[test]
     fn the_claimed_set_follows_the_context() {
         let mut keymap = Keymap::default();
+        keymap.register([STACK_CLOSE, PANE_CLOSE]);
         keymap.extend(
             Source::Settings,
             [
@@ -973,28 +994,53 @@ mod tests {
         })));
     }
 
+    fn space_keymap() -> Keymap {
+        let definitions = vec![
+            crate::CommandDefinition::new("space_next", "Next Space", "Layout > Space")
+                .hidden()
+                .direct_when("ArrowDown", Some("spaces"))
+                .direct_when("Ctrl+n", Some("spaces"))
+                .direct_when("Ctrl+j", Some("spaces")),
+            crate::CommandDefinition::new("space_previous", "Previous Space", "Layout > Space")
+                .hidden()
+                .direct_when("ArrowUp", Some("spaces"))
+                .direct_when("Ctrl+p", Some("spaces"))
+                .direct_when("Ctrl+k", Some("spaces")),
+            crate::CommandDefinition::new("space_attach", "Open Selected Space", "Layout > Space")
+                .hidden()
+                .direct_when("Enter", Some("spaces")),
+            crate::CommandDefinition::new(
+                "space_delete",
+                "Delete Selected Space",
+                "Layout > Space",
+            )
+            .hidden()
+            .direct_when("Delete", Some("spaces"))
+            .direct_when("Backspace", Some("spaces")),
+        ];
+        Keymap::defaults_with(&definitions)
+    }
+
     #[test]
     fn the_spaces_page_resolves_every_chord_it_hands_over() {
-        use crate::{LayoutCommand, SpaceCommand};
-
-        let keymap = Keymap::defaults();
+        let keymap = space_keymap();
         let on_spaces = context(&["spaces"]);
         let table = [
-            (combo(KeyCode::ArrowDown), SpaceCommand::Next),
-            (modified(KeyCode::KeyN, CTRL), SpaceCommand::Next),
-            (modified(KeyCode::KeyJ, CTRL), SpaceCommand::Next),
-            (combo(KeyCode::ArrowUp), SpaceCommand::Previous),
-            (modified(KeyCode::KeyP, CTRL), SpaceCommand::Previous),
-            (modified(KeyCode::KeyK, CTRL), SpaceCommand::Previous),
-            (combo(KeyCode::Enter), SpaceCommand::Attach),
-            (combo(KeyCode::Delete), SpaceCommand::Delete),
-            (combo(KeyCode::Backspace), SpaceCommand::Delete),
+            (combo(KeyCode::ArrowDown), "space_next"),
+            (modified(KeyCode::KeyN, CTRL), "space_next"),
+            (modified(KeyCode::KeyJ, CTRL), "space_next"),
+            (combo(KeyCode::ArrowUp), "space_previous"),
+            (modified(KeyCode::KeyP, CTRL), "space_previous"),
+            (modified(KeyCode::KeyK, CTRL), "space_previous"),
+            (combo(KeyCode::Enter), "space_attach"),
+            (combo(KeyCode::Delete), "space_delete"),
+            (combo(KeyCode::Backspace), "space_delete"),
         ];
 
         for (pressed, expected) in table {
             assert_eq!(
                 keymap.in_context(&on_spaces).scoped(&pressed),
-                Some(AppCommand::Layout(LayoutCommand::Space(expected))),
+                Some(expected.to_string()),
                 "{pressed:?}"
             );
             let claimed = pressed.claimed().expect("a bound chord is claimable");
@@ -1011,7 +1057,7 @@ mod tests {
 
     #[test]
     fn a_spaces_chord_means_nothing_off_the_spaces_page() {
-        let keymap = Keymap::defaults();
+        let keymap = space_keymap();
 
         for pressed in [
             combo(KeyCode::Backspace),

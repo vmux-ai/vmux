@@ -1,62 +1,135 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
 use vmux_command::host::FileStatusPicked;
 use vmux_command::{
-    AppCommand, BrowserBarCommand, BrowserCommand, CommandIssued, CommandIssuer, ReadAppCommands,
+    CommandDefinitions, CommandDispatch, CommandInvocation, CommandRuntimePlugin,
+    RegisterCommandDefinitions,
 };
 use vmux_core::event::{
-    ExplorerGoto, FILE_KEY_EVENT, FileEncoding, FileEncodingAction, FileEncodingSet, FileIndent,
+    ExplorerGoto, FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileIndent,
     FileKey, FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
-use vmux_wire::command_bar::CommandBarPick;
 
-use crate::host::plugin::{EditState, FileView};
+use crate::host::editor::{Editor, FileView};
+use crate::host::panel::{FilePanelMovement, FilePanelOperation, FilePanelRequest};
 use crate::host::shape::BufferShape;
 
-pub(crate) struct FileKeyPlugin;
+pub(crate) struct KeyPlugin;
 
-impl Plugin for FileKeyPlugin {
+impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(FileStatusPickerOpen,)>::default())
-            .add_systems(Update, echo_key_command.in_set(ReadAppCommands))
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
+        app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
+            .add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
             .add_systems(Update, apply_status_picks)
+            .add_observer(echo_key_command)
+            .add_observer(dispatch_panel_command)
             .add_observer(open_status_picker);
     }
 }
 
-fn echo_key_command(mut issued: MessageReader<CommandIssued>, mut commands: Commands) {
-    for issue in issued.read() {
-        let AppCommand::File(key) = issue.command else {
-            continue;
-        };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            issue.caller,
-            FILE_KEY_EVENT,
-            &FileKey::from(key),
-        ));
-    }
+#[derive(Component)]
+struct FileKeyBinding(FileKey);
+
+#[derive(Component)]
+struct FilePanelKeyBinding(FilePanelOperation);
+
+fn spawn_commands(mut commands: Commands) {
+    let mut definitions = CommandDefinitions::from_ron(include_str!("app_key.ron"));
+    commands.spawn((
+        definitions.take("file_toggle_explorer"),
+        FileKeyBinding(FileKey::ToggleExplorer),
+    ));
+    commands.spawn((
+        definitions.take("file_reveal_in_explorer"),
+        FileKeyBinding(FileKey::RevealInExplorer),
+    ));
+    commands.spawn((
+        definitions.take("file_find"),
+        FileKeyBinding(FileKey::Find { forward: true }),
+    ));
+    commands.spawn((
+        definitions.take("file_find_in_files"),
+        FileKeyBinding(FileKey::FindInFiles),
+    ));
+    commands.spawn((
+        definitions.take("file_panel_next"),
+        FilePanelKeyBinding(FilePanelOperation::Move(FilePanelMovement::Next)),
+    ));
+    commands.spawn((
+        definitions.take("file_panel_previous"),
+        FilePanelKeyBinding(FilePanelOperation::Move(FilePanelMovement::Previous)),
+    ));
+    commands.spawn((
+        definitions.take("file_panel_choose"),
+        FilePanelKeyBinding(FilePanelOperation::Choose),
+    ));
+    commands.spawn((
+        definitions.take("file_panel_dismiss"),
+        FilePanelKeyBinding(FilePanelOperation::Dismiss),
+    ));
+    definitions.assert_all_registered();
+}
+
+fn echo_key_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<&FileKeyBinding>,
+    mut commands: Commands,
+) {
+    let Ok(key) = keys.get(trigger.event().command()) else {
+        return;
+    };
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_core::event::FileUiState>::from_event(
+            trigger.event().invocation().caller,
+            &key.0,
+        ),
+    );
+}
+
+fn dispatch_panel_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<&FilePanelKeyBinding>,
+    mut commands: Commands,
+) {
+    let Ok(key) = keys.get(trigger.event().command()) else {
+        return;
+    };
+    commands.trigger(FilePanelRequest::new(
+        trigger.event().invocation().caller,
+        key.0,
+    ));
 }
 
 fn open_status_picker(
-    trigger: On<BinReceive<FileStatusPickerOpen>>,
+    trigger: On<UiInput<FileStatusPickerOpen>>,
     views: Query<(), With<FileView>>,
-    mut issuer: CommandIssuer,
+    mut invocations: MessageWriter<CommandInvocation>,
 ) {
     let caller = trigger.event().webview;
     if !views.contains(caller) {
         return;
     }
-    let Some(bar) = BrowserBarCommand::opening(trigger.event().payload.picker) else {
-        return;
+    let id = match trigger.event().payload.picker {
+        CommandBarPicker::GotoLine => "browser_open_goto_line",
+        CommandBarPicker::Indent => "browser_open_indentation",
+        CommandBarPicker::LineEnding => "browser_open_line_ending",
+        CommandBarPicker::Encoding => "browser_open_encoding",
+        CommandBarPicker::EncodingReopen => "browser_open_reopen_with_encoding",
+        CommandBarPicker::EncodingSave => "browser_open_save_with_encoding",
+        CommandBarPicker::Space => return,
     };
-    issuer.issue(caller, AppCommand::Browser(BrowserCommand::Bar(bar)));
+    invocations.write(CommandInvocation::new(caller, id));
 }
 
 fn apply_status_picks(
     mut picked: MessageReader<FileStatusPicked>,
     children: Query<&Children>,
     editors: Query<(), With<FileView>>,
-    shapes: Query<&EditState>,
+    shapes: Query<&Editor>,
     mut commands: Commands,
 ) {
     for message in picked.read() {
@@ -72,7 +145,7 @@ fn apply_status_picks(
         match &message.pick {
             CommandBarPick::Picker(_) => {}
             CommandBarPick::GotoLine { line } => {
-                commands.trigger(BinReceive {
+                commands.trigger(UiInput {
                     webview: entity,
                     payload: ExplorerGoto {
                         path: String::new(),
@@ -84,8 +157,8 @@ fn apply_status_picks(
                 let Ok(edit) = shapes.get(entity) else {
                     continue;
                 };
-                let shape = BufferShape::of(&edit.core.buffer.rope);
-                commands.trigger(BinReceive {
+                let shape = BufferShape::detect(&edit.core.buffer.rope);
+                commands.trigger(UiInput {
                     webview: entity,
                     payload: FileShapeSet {
                         indent: FileIndent {
@@ -100,12 +173,12 @@ fn apply_status_picks(
                 let Ok(edit) = shapes.get(entity) else {
                     continue;
                 };
-                let shape = BufferShape::of(&edit.core.buffer.rope);
+                let shape = BufferShape::detect(&edit.core.buffer.rope);
                 let line_ending = match crlf {
                     true => FileLineEnding::Crlf,
                     false => FileLineEnding::Lf,
                 };
-                commands.trigger(BinReceive {
+                commands.trigger(UiInput {
                     webview: entity,
                     payload: FileShapeSet {
                         indent: shape.indent,
@@ -114,17 +187,20 @@ fn apply_status_picks(
                 });
             }
             CommandBarPick::Encoding { label, save } => {
-                let Some(encoding) = FileEncoding::of_label(label) else {
+                let Ok(encoding) = FileEncoding::try_from(label.as_str()) else {
                     continue;
                 };
-                let action = match save {
-                    true => FileEncodingAction::Save,
-                    false => FileEncodingAction::Reopen,
-                };
-                commands.trigger(BinReceive {
-                    webview: entity,
-                    payload: FileEncodingSet { encoding, action },
-                });
+                if *save {
+                    commands.trigger(UiInput {
+                        webview: entity,
+                        payload: FileEncodingSaveRequest { encoding },
+                    });
+                } else {
+                    commands.trigger(UiInput {
+                        webview: entity,
+                        payload: FileEncodingReopenRequest { encoding },
+                    });
+                }
             }
         }
     }
@@ -133,19 +209,27 @@ fn apply_status_picks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_command::FileKeyCommand;
+    use vmux_command::CommandInvocation;
+    use vmux_core::host::FileUiStateWrite;
 
     #[derive(Resource, Default)]
-    struct Echoed(Vec<(Entity, String)>);
+    struct Echoed(Vec<(Entity, FileKey)>);
+
+    #[derive(Resource, Default)]
+    struct PanelRequests(Vec<Entity>);
 
     impl Echoed {
-        fn record(trigger: On<BinHostEmitEvent>, mut echoed: ResMut<Self>) {
-            let decoded = rkyv::from_bytes::<FileKey, rkyv::rancor::Error>(&trigger.payload)
-                .map(|key| format!("{key:?}"))
-                .unwrap_or_else(|_| "undecodable".to_string());
-            echoed
-                .0
-                .push((trigger.webview, format!("{}:{decoded}", trigger.id)));
+        fn record(trigger: On<FileUiStateWrite>, mut echoed: ResMut<Self>) {
+            let Some(key) = trigger.event().patch().key else {
+                return;
+            };
+            echoed.0.push((trigger.event().webview(), key));
+        }
+    }
+
+    impl PanelRequests {
+        fn record(trigger: On<FilePanelRequest>, mut seen: ResMut<Self>) {
+            seen.0.push(trigger.event_target());
         }
     }
 
@@ -155,70 +239,42 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(FileKeyPlugin)
+                .add_plugins(KeyPlugin)
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-                .add_message::<CommandIssued>()
                 .add_message::<FileStatusPicked>()
                 .init_resource::<Echoed>()
-                .add_observer(Echoed::record);
+                .init_resource::<PanelRequests>()
+                .add_observer(Echoed::record)
+                .add_observer(PanelRequests::record);
             app
         }
 
-        fn issue(app: &mut App, caller: Entity, command: AppCommand) {
+        fn issue(app: &mut App, caller: Entity, id: &str) {
             app.world_mut()
-                .resource_mut::<bevy::ecs::message::Messages<CommandIssued>>()
-                .write(CommandIssued { caller, command });
+                .resource_mut::<bevy::ecs::message::Messages<CommandInvocation>>()
+                .write(CommandInvocation::new(caller, id));
             app.update();
         }
     }
 
     #[test]
-    fn a_resolved_key_reaches_only_the_page_that_sent_it() {
+    fn a_panel_key_reaches_host_ecs_for_only_the_page_that_sent_it() {
         let mut app = Echo::app();
         let pressed = app.world_mut().spawn_empty().id();
         let other = app.world_mut().spawn_empty().id();
 
-        Echo::issue(
-            &mut app,
-            pressed,
-            AppCommand::File(FileKeyCommand::PanelChoose),
-        );
+        Echo::issue(&mut app, pressed, "file_panel_choose");
 
-        assert_eq!(
-            app.world().resource::<Echoed>().0,
-            vec![(pressed, format!("{FILE_KEY_EVENT}:PanelChoose"))]
-        );
-        assert!(
-            !app.world()
-                .resource::<Echoed>()
-                .0
-                .iter()
-                .any(|(entity, _)| *entity == other)
-        );
-    }
-
-    #[test]
-    fn a_command_that_is_not_a_file_key_is_left_alone() {
-        let mut app = Echo::app();
-        let caller = app.world_mut().spawn_empty().id();
-
-        Echo::issue(
-            &mut app,
-            caller,
-            AppCommand::Terminal(vmux_command::TerminalCommand::Clear),
-        );
-
+        assert_eq!(app.world().resource::<PanelRequests>().0, vec![pressed]);
         assert!(app.world().resource::<Echoed>().0.is_empty());
+        assert!(!app.world().resource::<PanelRequests>().0.contains(&other));
     }
 
     #[derive(Resource, Default)]
     struct Reopened(Vec<(Entity, FileEncoding)>);
 
     impl Reopened {
-        fn record(trigger: On<BinReceive<FileEncodingSet>>, mut seen: ResMut<Self>) {
-            if trigger.event().payload.action != FileEncodingAction::Reopen {
-                return;
-            }
+        fn record(trigger: On<UiInput<FileEncodingReopenRequest>>, mut seen: ResMut<Self>) {
             seen.0
                 .push((trigger.event().webview, trigger.event().payload.encoding));
         }
@@ -230,9 +286,8 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(FileKeyPlugin)
+                .add_plugins(KeyPlugin)
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-                .add_message::<CommandIssued>()
                 .add_message::<FileStatusPicked>()
                 .init_resource::<Reopened>()
                 .add_observer(Reopened::record);

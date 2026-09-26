@@ -1,14 +1,16 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use super::composer::{ChatComposerProjection, ChatComposerQueriesChanged};
+use super::{AgentChatView, ChatAttachmentProjection};
 use crate::events::{AgentApprovalReply, AgentChoiceSelected};
 use crate::run_state::AgentRunState;
+use vmux_api::protocol::{AgentAttachment, ClientMessage, SharedMessage};
 use vmux_chat::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
-    ChatEscape, ChatResume, ChatSubmit,
+    ChatEscape, ChatResume, ChatStop, ChatSubmit,
 };
-use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{AgentAttachment, ClientMessage, SharedMessage};
+use vmux_service::client::ServiceRequest;
 use vmux_session::AcpSession;
 use vmux_session::{
     AgentConversationTitle, AgentSession, PromptQueue, provisional_conversation_title,
@@ -18,21 +20,20 @@ pub(super) struct ChatPromptPlugin;
 
 impl Plugin for ChatPromptPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
-            ChatSubmit,
-            ChatCancel,
-            ChatEscape,
-            ChatResume,
-            ChatClearQueue,
-            ChatCancelQueuedPrompt,
-        )>::for_hosts(super::CHAT_EVENT_HOSTS))
-            .add_plugins(
-                BinEventEmitterPlugin::<(ChatApproval, ChatChoiceSelected)>::for_hosts(
-                    super::CHAT_EVENT_HOSTS,
-                ),
-            )
+        app.add_message::<ServiceRequest>()
+            .add_plugins(UiEventPlugin::<(
+                ChatSubmit,
+                ChatCancel,
+                ChatStop,
+                ChatEscape,
+                ChatResume,
+                ChatClearQueue,
+                ChatCancelQueuedPrompt,
+            )>::default())
+            .add_plugins(UiEventPlugin::<(ChatApproval, ChatChoiceSelected)>::default())
             .add_observer(on_chat_submit)
             .add_observer(on_chat_cancel)
+            .add_observer(on_chat_stop)
             .add_observer(on_chat_escape)
             .add_observer(on_chat_resume)
             .add_observer(on_chat_clear_queue)
@@ -43,8 +44,15 @@ impl Plugin for ChatPromptPlugin {
 }
 
 fn on_chat_submit(
-    trigger: On<BinReceive<ChatSubmit>>,
-    child_of: Query<&ChildOf>,
+    trigger: On<UiInput<ChatSubmit>>,
+    mut views: Query<
+        (
+            &ChildOf,
+            &mut ChatAttachmentProjection,
+            &mut ChatComposerProjection,
+        ),
+        With<AgentChatView>,
+    >,
     mut sessions: Query<(
         &mut PromptQueue,
         &mut AgentRunState,
@@ -55,8 +63,11 @@ fn on_chat_submit(
     let webview = trigger.event().webview;
     let payload = &trigger.event().payload;
     let text = payload.text.clone();
-    let attachments = payload
-        .attachments
+    let Ok((parent, mut selected, mut composer)) = views.get_mut(webview) else {
+        return;
+    };
+    let attachments = selected
+        .selected
         .iter()
         .filter(|attachment| !attachment.path.is_empty())
         .map(|attachment| AgentAttachment {
@@ -69,9 +80,6 @@ fn on_chat_submit(
     if text.trim().is_empty() && attachments.is_empty() {
         return;
     }
-    let Ok(parent) = child_of.get(webview) else {
-        return;
-    };
     let session = parent.parent();
     if let Ok((mut queue, mut state, title)) = sessions.get_mut(session) {
         if title.is_none()
@@ -82,6 +90,58 @@ fn on_chat_submit(
                 .insert(AgentConversationTitle(title));
         }
         enqueue_prompt(&mut queue, &mut state, text, attachments);
+        let (effect, queries) = composer.effect(String::new(), true);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview, &effect,
+            ),
+        );
+        if let Some(changed) = ChatComposerQueriesChanged::new(webview, queries) {
+            commands.trigger(changed);
+        }
+        if selected.clear_selected() {
+            commands.trigger(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                    webview,
+                    &selected.state(),
+                ),
+            );
+        }
+    }
+}
+
+fn on_chat_stop(
+    trigger: On<UiInput<ChatStop>>,
+    child_of: Query<&ChildOf>,
+    mut sessions: Query<(
+        &mut PromptQueue,
+        &mut AgentRunState,
+        Option<&AcpSession>,
+        Option<&AgentSession>,
+    )>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok((mut queue, mut state, acp, page)) = sessions.get_mut(parent.parent()) else {
+        return;
+    };
+    if queue.items.is_empty() {
+        if queue.flush_pending() {
+            queue.cancel_flush();
+        }
+        cancel_session(acp, page, &mut service_requests);
+        return;
+    }
+    if queue.request_flush() && matches!(*state, AgentRunState::Errored(_)) {
+        *state = AgentRunState::Idle;
+    }
+    if matches!(
+        *state,
+        AgentRunState::Streaming | AgentRunState::AwaitingApproval { .. }
+    ) {
+        cancel_session(acp, page, &mut service_requests);
     }
 }
 
@@ -98,10 +158,10 @@ fn enqueue_prompt(
 }
 
 fn on_chat_cancel(
-    trigger: On<BinReceive<ChatCancel>>,
+    trigger: On<UiInput<ChatCancel>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&mut PromptQueue, Option<&AcpSession>, Option<&AgentSession>)>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
@@ -112,41 +172,40 @@ fn on_chat_cancel(
     if queue.flush_pending() {
         queue.cancel_flush();
     }
-    cancel_session(service.as_deref(), acp, page);
+    cancel_session(acp, page, &mut service_requests);
 }
 
 fn cancel_session(
-    service: Option<&ServiceClient>,
     acp: Option<&AcpSession>,
     page: Option<&AgentSession>,
+    service_requests: &mut MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     let Some(sid) = acp
         .map(|session| session.sid.clone())
         .or_else(|| page.map(|session| session.sid.clone()))
     else {
         return;
     };
-    service.0.send(ClientMessage::Shared(SharedMessage::agent(
-        sid,
-        vmux_wire::protocol::AgentAction::Cancel,
+    service_requests.write(ServiceRequest(ClientMessage::Shared(
+        SharedMessage::AgentCancel { sid },
     )));
 }
 
 fn on_chat_escape(
-    trigger: On<BinReceive<ChatEscape>>,
+    trigger: On<UiInput<ChatEscape>>,
     child_of: Query<&ChildOf>,
+    mut composers: Query<&mut ChatComposerProjection, With<AgentChatView>>,
     mut sessions: Query<(
         &mut PromptQueue,
         &mut AgentRunState,
         Option<&AcpSession>,
         Option<&AgentSession>,
     )>,
-    service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Ok(parent) = child_of.get(trigger.event().webview) else {
+    let webview = trigger.event().webview;
+    let Ok(parent) = child_of.get(webview) else {
         return;
     };
     let Ok((mut queue, mut state, acp, page)) = sessions.get_mut(parent.parent()) else {
@@ -168,12 +227,26 @@ fn on_chat_escape(
         *state = AgentRunState::Idle;
     }
     if running {
-        cancel_session(service.as_deref(), acp, page);
+        cancel_session(acp, page, &mut service_requests);
+    }
+    let Ok(mut composer) = composers.get_mut(webview) else {
+        return;
+    };
+    if !running && queue.items.is_empty() && !composer.draft().is_empty() {
+        let (effect, queries) = composer.effect(String::new(), true);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                webview, &effect,
+            ),
+        );
+        if let Some(changed) = ChatComposerQueriesChanged::new(webview, queries) {
+            commands.trigger(changed);
+        }
     }
 }
 
 fn on_chat_resume(
-    trigger: On<BinReceive<ChatResume>>,
+    trigger: On<UiInput<ChatResume>>,
     child_of: Query<&ChildOf>,
     mut queues: Query<&mut PromptQueue>,
 ) {
@@ -186,7 +259,7 @@ fn on_chat_resume(
 }
 
 fn on_chat_clear_queue(
-    trigger: On<BinReceive<ChatClearQueue>>,
+    trigger: On<UiInput<ChatClearQueue>>,
     child_of: Query<&ChildOf>,
     mut queues: Query<&mut PromptQueue>,
 ) {
@@ -199,7 +272,7 @@ fn on_chat_clear_queue(
 }
 
 fn on_chat_cancel_queued_prompt(
-    trigger: On<BinReceive<ChatCancelQueuedPrompt>>,
+    trigger: On<UiInput<ChatCancelQueuedPrompt>>,
     child_of: Query<&ChildOf>,
     mut queues: Query<&mut PromptQueue>,
 ) {
@@ -212,7 +285,7 @@ fn on_chat_cancel_queued_prompt(
 }
 
 fn on_chat_approval(
-    trigger: On<BinReceive<ChatApproval>>,
+    trigger: On<UiInput<ChatApproval>>,
     child_of: Query<&ChildOf>,
     mut commands: Commands,
 ) {
@@ -228,7 +301,7 @@ fn on_chat_approval(
     });
 }
 
-fn on_chat_choice_selected(trigger: On<BinReceive<ChatChoiceSelected>>, mut commands: Commands) {
+fn on_chat_choice_selected(trigger: On<UiInput<ChatChoiceSelected>>, mut commands: Commands) {
     commands.trigger(AgentChoiceSelected {
         webview: trigger.event().webview,
         index: trigger.event().payload.index as usize,
@@ -239,21 +312,29 @@ fn on_chat_choice_selected(trigger: On<BinReceive<ChatChoiceSelected>>, mut comm
 mod tests {
     use super::*;
 
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_message::<ServiceRequest>();
+        app
+    }
+
     #[test]
     fn first_prompt_updates_conversation_title_immediately() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_submit);
         let session = app
             .world_mut()
             .spawn((PromptQueue::default(), AgentRunState::Idle))
             .id();
-        let webview = app.world_mut().spawn(ChildOf(session)).id();
+        let webview = app
+            .world_mut()
+            .spawn((ChildOf(session), AgentChatView))
+            .id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: ChatSubmit {
                 text: "  make me a new\nJapanese restaurant website  ".into(),
-                attachments: Vec::new(),
             },
         });
         app.world_mut().flush();
@@ -272,11 +353,10 @@ mod tests {
             Some("  make me a new\nJapanese restaurant website  ")
         );
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: ChatSubmit {
                 text: "make it darker".into(),
-                attachments: Vec::new(),
             },
         });
         app.world_mut().flush();
@@ -306,7 +386,7 @@ mod tests {
 
     #[test]
     fn normal_cancel_overrides_pending_flush() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_cancel);
         let mut queue = PromptQueue::default();
         queue.enqueue("queued".into());
@@ -314,7 +394,7 @@ mod tests {
         let stack = app.world_mut().spawn(queue).id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive::<ChatCancel> {
+        app.world_mut().trigger(UiInput::<ChatCancel> {
             webview,
             payload: ChatCancel,
         });
@@ -329,8 +409,36 @@ mod tests {
     }
 
     #[test]
+    fn stop_with_queued_work_flushes_and_rearms_the_session() {
+        let mut app = test_app();
+        app.add_observer(on_chat_stop);
+        let mut queue = PromptQueue::default();
+        queue.enqueue("retry".into());
+        queue.paused = true;
+        let stack = app
+            .world_mut()
+            .spawn((queue, AgentRunState::Errored("failed".into())))
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(UiInput::<ChatStop> {
+            webview,
+            payload: ChatStop,
+        });
+        app.world_mut().flush();
+
+        assert!(matches!(
+            app.world().get::<AgentRunState>(stack),
+            Some(AgentRunState::Idle)
+        ));
+        let queue = app.world().get::<PromptQueue>(stack).unwrap();
+        assert!(queue.flush_pending());
+        assert!(!queue.paused);
+    }
+
+    #[test]
     fn escape_flush_rearms_errored_queue() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_escape);
         let mut queue = PromptQueue::default();
         queue.enqueue("retry".into());
@@ -341,7 +449,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive::<ChatEscape> {
+        app.world_mut().trigger(UiInput::<ChatEscape> {
             webview,
             payload: ChatEscape,
         });
@@ -358,7 +466,7 @@ mod tests {
 
     #[test]
     fn escape_without_queue_clears_stale_flush() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_escape);
         let mut queue = PromptQueue::default();
         queue.enqueue("queued".into());
@@ -370,7 +478,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive::<ChatEscape> {
+        app.world_mut().trigger(UiInput::<ChatEscape> {
             webview,
             payload: ChatEscape,
         });
@@ -385,8 +493,37 @@ mod tests {
     }
 
     #[test]
+    fn idle_escape_clears_the_host_owned_composer_draft() {
+        let mut app = test_app();
+        app.add_observer(on_chat_escape);
+        let stack = app
+            .world_mut()
+            .spawn((PromptQueue::default(), AgentRunState::Idle))
+            .id();
+        let webview = app.world_mut().spawn((ChildOf(stack), AgentChatView)).id();
+        app.world_mut()
+            .get_mut::<ChatComposerProjection>(webview)
+            .unwrap()
+            .effect("draft", false);
+
+        app.world_mut().trigger(UiInput::<ChatEscape> {
+            webview,
+            payload: ChatEscape,
+        });
+        app.world_mut().flush();
+
+        assert_eq!(
+            app.world()
+                .get::<ChatComposerProjection>(webview)
+                .unwrap()
+                .draft(),
+            ""
+        );
+    }
+
+    #[test]
     fn cancel_queued_prompt_removes_only_target() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_cancel_queued_prompt);
         let mut queue = PromptQueue::default();
         queue.enqueue("first".into());
@@ -395,11 +532,10 @@ mod tests {
         let stack = app.world_mut().spawn(queue).id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut()
-            .trigger(BinReceive::<ChatCancelQueuedPrompt> {
-                webview,
-                payload: ChatCancelQueuedPrompt { id: second_id },
-            });
+        app.world_mut().trigger(UiInput::<ChatCancelQueuedPrompt> {
+            webview,
+            payload: ChatCancelQueuedPrompt { id: second_id },
+        });
         app.world_mut().flush();
 
         let queue = app.world().get::<PromptQueue>(stack).unwrap();

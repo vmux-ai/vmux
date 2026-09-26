@@ -5,11 +5,16 @@ type Provide = Box<dyn FnOnce(PageScope<'_>)>;
 #[derive(Default)]
 pub struct Instance(Option<Provide>);
 
-impl Instance {
-    pub fn of(provide: impl FnOnce(PageScope<'_>) + 'static) -> Self {
+impl<F> From<F> for Instance
+where
+    F: for<'a> FnOnce(PageScope<'a>) + 'static,
+{
+    fn from(provide: F) -> Self {
         Self(Some(Box::new(provide)))
     }
+}
 
+impl Instance {
     pub(crate) fn provide_to(self, dom: &VirtualDom) {
         let Some(provide) = self.0 else {
             return;
@@ -52,7 +57,7 @@ mod tests {
 
         let mut page = PageDom::mount(
             Reader,
-            Instance::of(|scope| scope.provide("the failure".to_string())),
+            Instance::from(|scope: PageScope<'_>| scope.provide("the failure".to_string())),
         );
         page.rebuild();
 

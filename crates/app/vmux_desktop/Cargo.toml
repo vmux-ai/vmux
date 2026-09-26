@@ -81,9 +81,7 @@ moonshine-save = { workspace = true }
 muda = "0.19"
 notify = { workspace = true }
 parking_lot = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rfd = { workspace = true }
-ring = { workspace = true }
 ron = { workspace = true }
 semver = { version = "1", optional = true }
 serde = { workspace = true }
@@ -95,6 +93,7 @@ tray-icon = { version = "0.24", optional = true }
 url = { workspace = true }
 uuid = { workspace = true }
 vmux_agent = { path = "../../page/vmux_agent" }
+vmux_app = { path = "../../vmux_app", features = ["desktop"] }
 vmux_browser = { path = "../../vmux_browser" }
 vmux_shortcut = { path = "../../page/vmux_shortcut" }
 vmux_clipboard = { path = "../../vmux_clipboard" }
@@ -113,8 +112,9 @@ vmux_space = { path = "../../page/vmux_space" }
 vmux_simulator = { path = "../../page/vmux_simulator" }
 vmux_team = { path = "../../page/vmux_team" }
 vmux_terminal = { path = "../../page/vmux_terminal" }
+vmux_tool = { path = "../../vmux_tool" }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_api = { path = "../../vmux_api" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 color_quant = { version = "2", optional = true }

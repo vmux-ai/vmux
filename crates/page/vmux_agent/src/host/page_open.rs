@@ -2,16 +2,14 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use vmux_api::protocol::AgentAttachment;
 use vmux_core::KeyboardOwner;
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::{
     PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
-use vmux_service::protocol::AgentAttachment;
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
-
-use crate::session::AgentSessionToEntity;
 
 use super::attach::{
     acp_icon_for_id, acp_profile_name_for_id, acp_registry_agent_for_id, attach_acp_agent_to_stack,
@@ -26,7 +24,7 @@ impl Plugin for PageOpenPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            handle_swap_stack_session.before(super::spawn::handle_spawn_agent_requests),
+            handle_swap_stack_session.before(super::spawn::SpawnRequestSet),
         )
         .add_systems(
             Update,
@@ -76,7 +74,7 @@ struct AgentChatTarget {
 }
 
 impl AgentChatTarget {
-    fn of(url: &str) -> Option<Self> {
+    fn parse(url: &str) -> Option<Self> {
         match crate::AgentUrl::parse(url)? {
             crate::AgentUrl::Page {
                 provider, model, ..
@@ -92,7 +90,7 @@ impl AgentChatTarget {
                 })
             }
             crate::AgentUrl::Acp { id, sid } => {
-                let id = crate::acp_install::agent_url_id(&id);
+                let id = crate::acp_tool::agent_url_id(&id);
                 let url = match sid {
                     Some(sid) => format!("vmux://sessions/{id}/{sid}"),
                     None => format!("vmux://sessions/{id}"),
@@ -104,30 +102,6 @@ impl AgentChatTarget {
             }
             crate::AgentUrl::Cli { .. } => None,
         }
-    }
-
-    fn open(self, stack: Entity, start: Entity, commands: &mut Commands) -> Entity {
-        commands
-            .entity(start)
-            .insert((
-                PageMetadata {
-                    url: self.url,
-                    title: self.title,
-                    bg_color: None,
-                    ..default()
-                },
-                crate::host::chat::AgentChatView,
-                PreparingAgentChatView,
-            ))
-            .remove::<(
-                vmux_start::StartInlineTransitionView,
-                vmux_core::launcher::HostsLauncher,
-                vmux_core::page::PageReady,
-            )>();
-        commands
-            .entity(stack)
-            .insert(vmux_start::StartInlineTransition { webview: start });
-        start
     }
 }
 
@@ -262,9 +236,29 @@ fn prepare_agent_tab_worktrees(
         };
         if !preparing_by_stack.contains_key(&task.stack)
             && let Ok(transition) = transitions.get(task.stack)
-            && let Some(target) = AgentChatTarget::of(&task.url)
+            && let Some(target) = AgentChatTarget::parse(&task.url)
         {
-            let view = target.open(task.stack, transition.webview, &mut commands);
+            let view = transition.webview;
+            commands
+                .entity(view)
+                .insert((
+                    PageMetadata {
+                        url: target.url,
+                        title: target.title,
+                        bg_color: None,
+                        ..default()
+                    },
+                    crate::host::chat::AgentChatView,
+                    PreparingAgentChatView,
+                ))
+                .remove::<(
+                    vmux_start::StartInlineTransitionView,
+                    vmux_core::launcher::HostsLauncher,
+                    vmux_core::page::PageReady,
+                )>();
+            commands
+                .entity(task.stack)
+                .insert(vmux_start::StartInlineTransition { webview: view });
             preparing_by_stack.insert(task.stack, view);
             if let Some(wake) = wake.as_ref() {
                 let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -311,12 +305,12 @@ fn prepare_agent_tab_worktrees(
             continue;
         }
         if metadata.is_none()
-            && AgentCwd::of_tab(tab.startup_dir.as_deref())
+            && AgentCwd::from_tab(tab.startup_dir.as_deref())
                 .stored()
                 .ok()
                 .flatten()
                 .is_none()
-            && AgentCwd::of_tab(Some(&workspace.project_dir))
+            && AgentCwd::from_tab(Some(&workspace.project_dir))
                 .stored()
                 .ok()
                 .flatten()
@@ -481,16 +475,20 @@ fn handle_agent_page_open(
     )>,
     children_q: Query<&Children>,
     agents: Query<&vmux_core::agent::AgentSession>,
+    cli_sessions: Query<(
+        Entity,
+        &vmux_core::agent::AgentSession,
+        &vmux_core::agent::SessionId,
+    )>,
     acp_sessions: Query<&vmux_session::AcpSession>,
     child_of_q: Query<&ChildOf>,
-    agent_to_entity: Option<Res<AgentSessionToEntity>>,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
-    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     transitions: Query<&vmux_start::StartInlineTransition>,
 ) {
     let tasks: Vec<(Entity, PageOpenTask)> = open_q
@@ -499,7 +497,7 @@ fn handle_agent_page_open(
         .map(|(entity, task)| (entity, task.clone()))
         .collect();
     for (entity, task) in tasks {
-        if !task.url.starts_with("vmux://sessions/") && !task.url.starts_with("vmux://agent/") {
+        if !vmux_api::VmuxRoute::parse(&task.url).is_some_and(|route| route.is_agent()) {
             continue;
         }
         let tab = ancestor_agent_tab(task.stack, &child_of_q, &workspace.tabs);
@@ -514,7 +512,7 @@ fn handle_agent_page_open(
             &settings,
             workspace.active_space.as_deref(),
         );
-        let default_cwd = match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
+        let default_cwd = match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
             Ok(Some(path)) => path,
             Ok(None) => match space_startup_dir {
                 Some(dir) => dir.path,
@@ -555,9 +553,9 @@ fn handle_agent_page_open(
             transition_webview,
             &children_q,
             &agents,
+            &cli_sessions,
             &acp_sessions,
             &child_of_q,
-            agent_to_entity.as_deref(),
             idx.as_deref(),
             &kind_q,
             &mut spawn_agent,
@@ -585,7 +583,7 @@ fn handle_agent_page_open(
 fn handle_swap_stack_session(
     mut reader: MessageReader<vmux_core::agent::SwapStackSession>,
     settings: Res<AppSettings>,
-    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     children_q: Query<&Children>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
@@ -604,7 +602,7 @@ fn handle_swap_stack_session(
                 .agent
                 .acp
                 .iter()
-                .any(|cfg| crate::acp_install::agent_ids_match(&cfg.id, id))
+                .any(|cfg| crate::acp_tool::agent_ids_match(&cfg.id, id))
             && acp_registry_agent_for_id(catalog.as_deref(), id).is_none()
         {
             bevy::log::warn!("swap: ACP agent unavailable for '{id}'");
@@ -614,36 +612,27 @@ fn handle_swap_stack_session(
             bevy::log::warn!("swap: cross-agent handoff requires an ACP target");
             continue;
         }
-        let imported = match ev.handoff.as_ref() {
-            Some(handoff) => {
-                let Ok(messages) =
-                    serde_json::from_str::<Vec<crate::Message>>(&handoff.messages_json)
-                else {
-                    bevy::log::warn!("swap: invalid handoff transcript");
-                    continue;
-                };
-                Some((
-                    crate::handoff::ImportedConversation {
-                        source_agent: handoff.source_agent.clone(),
-                        source_kind: handoff.source_kind,
-                        source_sid: handoff.source_sid.clone(),
-                        messages,
-                        truncated: handoff.truncated,
-                        first_prompt: None,
-                    },
-                    crate::handoff::PendingHandoff {
-                        context: handoff.context.clone(),
-                        sent: false,
-                    },
-                ))
-            }
-            None => None,
-        };
+        let imported = ev.handoff.as_ref().map(|handoff| {
+            (
+                crate::handoff::ImportedConversation {
+                    source_agent: handoff.source_agent.clone(),
+                    source_kind: handoff.source_kind,
+                    source_sid: handoff.source_sid.clone(),
+                    messages: handoff.messages.clone(),
+                    truncated: handoff.truncated,
+                    first_prompt: None,
+                },
+                crate::handoff::PendingHandoff {
+                    context: handoff.context.clone(),
+                    sent: false,
+                },
+            )
+        });
 
         commands
             .entity(ev.stack)
             .remove::<vmux_session::AcpSession>()
-            .remove::<crate::client::acp::AcpInstallStarted>()
+            .remove::<crate::acp_tool::AcpLaunchStarted>()
             .remove::<vmux_session::AgentSession>()
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
@@ -653,7 +642,7 @@ fn handle_swap_stack_session(
             .remove::<vmux_core::AgentWorkingDir>()
             .remove::<vmux_core::team::Agent>()
             .remove::<vmux_core::team::Profile>();
-        clear_stack_children(ev.stack, &children_q, &mut commands);
+        vmux_layout::stack::clear_stack_children(ev.stack, &children_q, &mut commands);
 
         match target {
             crate::AgentUrl::Cli { kind, sid } => {
@@ -672,7 +661,7 @@ fn handle_swap_stack_session(
                     .agent
                     .acp
                     .iter()
-                    .find(|cfg| crate::acp_install::agent_ids_match(&cfg.id, &id));
+                    .find(|cfg| crate::acp_tool::agent_ids_match(&cfg.id, &id));
                 let routing_sid = uuid::Uuid::new_v4().to_string();
                 let icon = acp_icon_for_id(catalog.as_deref(), &id);
                 let name = acp_profile_name_for_id(&id, cfg, catalog.as_deref());
@@ -702,16 +691,20 @@ fn handle_agent_page_open_task(
     transition_webview: Option<Entity>,
     children_q: &Query<&Children>,
     agents: &Query<&vmux_core::agent::AgentSession>,
+    cli_sessions: &Query<(
+        Entity,
+        &vmux_core::agent::AgentSession,
+        &vmux_core::agent::SessionId,
+    )>,
     acp_sessions: &Query<&vmux_session::AcpSession>,
     child_of_q: &Query<&ChildOf>,
-    agent_to_entity: Option<&AgentSessionToEntity>,
-    idx: Option<&crate::client::page::strategy_index::PageStrategyIndex>,
-    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<&crate::runtime::provider::index::ProviderStrategyIndex>,
+    kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
     commands: &mut Commands,
     default_cwd: &std::path::Path,
     acp_configs: &[vmux_setting::AcpAgentConfig],
-    catalog: Option<&crate::client::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::acp::AcpCatalog>,
 ) -> Result<(), String> {
     if let Some(kind) = AgentKind::all()
         .into_iter()
@@ -727,7 +720,7 @@ fn handle_agent_page_open_task(
             sid,
         }) => {
             if transition_webview.is_none() {
-                clear_stack_children(task.stack, children_q, commands);
+                vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
             }
             let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
             attach_page_agent_to_stack_with_webview(
@@ -752,7 +745,7 @@ fn handle_agent_page_open_task(
             let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
             let sid = uuid::Uuid::new_v4().to_string();
             if transition_webview.is_none() {
-                clear_stack_children(task.stack, children_q, commands);
+                vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
             }
             attach_page_agent_to_stack_with_webview(
                 task.stack,
@@ -787,8 +780,9 @@ fn handle_agent_page_open_task(
                 }
                 return Ok(());
             }
-            if let Some(map) = agent_to_entity
-                && let Some(&entity) = map.0.get(&(kind, sid.clone()))
+            if let Some((entity, _, _)) = cli_sessions
+                .iter()
+                .find(|(_, session, id)| session.kind == kind && id.0 == sid)
             {
                 vmux_terminal::pid::focus_pane_entity(entity, commands, child_of_q);
                 return Ok(());
@@ -806,7 +800,7 @@ fn handle_agent_page_open_task(
         Some(crate::AgentUrl::Acp { id, sid }) => {
             let cfg = acp_configs
                 .iter()
-                .find(|config| crate::acp_install::agent_ids_match(&config.id, &id));
+                .find(|config| crate::acp_tool::agent_ids_match(&config.id, &id));
             if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
                 if sid.is_none()
                     && let Some(kind) = AgentKind::from_url_segment(&id)
@@ -827,12 +821,12 @@ fn handle_agent_page_open_task(
             }
             if acp_sessions
                 .get(task.stack)
-                .is_ok_and(|session| crate::acp_install::agent_ids_match(&session.agent_id, &id))
+                .is_ok_and(|session| crate::acp_tool::agent_ids_match(&session.agent_id, &id))
             {
                 return Ok(());
             }
             if transition_webview.is_none() {
-                clear_stack_children(task.stack, children_q, commands);
+                vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
             }
             let routing_sid = uuid::Uuid::new_v4().to_string();
             let icon = acp_icon_for_id(catalog, &id);
@@ -917,18 +911,6 @@ fn stack_has_agent_of_kind(
         .unwrap_or(false)
 }
 
-pub(crate) fn clear_stack_children(
-    stack: Entity,
-    children_q: &Query<&Children>,
-    commands: &mut Commands,
-) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
-}
-
 pub(crate) fn attach_agent_spawn_error_to_stack(
     stack: Entity,
     kind: AgentKind,
@@ -936,7 +918,7 @@ pub(crate) fn attach_agent_spawn_error_to_stack(
     children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
-    clear_stack_children(stack, children_q, commands);
+    vmux_layout::stack::clear_stack_children(stack, children_q, commands);
     let title = "Agent failed to start";
     let url = format!("vmux://error/agent/{}/", kind.as_url_segment());
     let message = html_escape(message);
@@ -967,7 +949,7 @@ pub(crate) fn attach_cli_setup_to_stack(
     children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
-    clear_stack_children(stack, children_q, commands);
+    vmux_layout::stack::clear_stack_children(stack, children_q, commands);
     commands
         .entity(stack)
         .remove::<crate::vibe::setup::AgentSetupNavigated>();
@@ -982,6 +964,7 @@ pub(crate) fn attach_cli_setup_to_stack(
     let browser = commands
         .spawn((
             vmux_layout::Browser::new_with_title(&url, &title),
+            crate::vibe::setup::AgentSetupView,
             ChildOf(stack),
         ))
         .id();
@@ -1013,11 +996,10 @@ fn data_url_for_html(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::cli::vibe::VibeStrategy;
     use crate::host::provider::AgentExecutableOverride;
-    use crate::host::spawn::{SpawnPlugin, handle_spawn_agent_requests};
+    use crate::host::spawn::{SpawnPlugin, SpawnRequestSet, SpawnRequestsPlugin};
     use crate::host::test_support::{init_worktree_test_repo, test_settings};
-    use crate::session::{AgentSession, SessionId};
+    use crate::runtime::cli::vibe::VibeStrategy;
     use crate::strategy::AgentStrategies;
     use vmux_terminal::Terminal;
 
@@ -1088,7 +1070,7 @@ mod tests {
                     source_agent: "Codex".into(),
                     source_kind: AgentKind::Codex,
                     source_sid: "cx-1".into(),
-                    messages_json: serde_json::to_string(&messages).unwrap(),
+                    messages: messages.clone(),
                     context: "prior conversation".into(),
                     truncated: false,
                 }),
@@ -1120,7 +1102,7 @@ mod tests {
         let (stack, _child) = spawn_stack_child(&mut app);
         app.world_mut()
             .entity_mut(stack)
-            .insert(crate::client::acp::AcpInstallStarted);
+            .insert(crate::acp_tool::AcpLaunchStarted);
         app.world_mut()
             .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
             .write(vmux_core::agent::SwapStackSession {
@@ -1134,39 +1116,11 @@ mod tests {
 
         assert!(
             app.world()
-                .get::<crate::client::acp::AcpInstallStarted>(stack)
+                .get::<crate::acp_tool::AcpLaunchStarted>(stack)
                 .is_none()
         );
         let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
         assert_eq!(session.resume.as_deref(), Some("session-2"));
-    }
-
-    #[test]
-    pub(crate) fn deep_link_focuses_existing_claude_tab() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::session::AgentSessionToEntity>()
-            .add_systems(Update, crate::session::track_session_id_inserts);
-
-        let entity = app
-            .world_mut()
-            .spawn((
-                AgentSession {
-                    kind: AgentKind::Claude,
-                },
-                SessionId("dl-1".into()),
-            ))
-            .id();
-
-        app.update();
-
-        let map = app
-            .world()
-            .resource::<crate::session::AgentSessionToEntity>();
-        assert_eq!(
-            map.0.get(&(AgentKind::Claude, "dl-1".into())),
-            Some(&entity)
-        );
     }
 
     #[test]
@@ -1176,15 +1130,13 @@ mod tests {
         strategies.register_cli(Box::new(VibeStrategy));
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
+            .add_plugins(SpawnRequestsPlugin)
             .insert_resource(strategies)
             .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
                 (AgentKind::Vibe, false),
             ])))
             .insert_resource(test_settings())
-            .add_systems(
-                Update,
-                (handle_agent_page_open, handle_spawn_agent_requests).chain(),
-            );
+            .add_systems(Update, handle_agent_page_open.before(SpawnRequestSet));
 
         let stack = app
             .world_mut()
@@ -1226,15 +1178,13 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<SpawnAgentInStackRequest>()
+                .add_plugins(SpawnRequestsPlugin)
                 .insert_resource(AgentStrategies::default())
                 .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
                     (kind, false),
                 ])))
                 .insert_resource(settings)
-                .add_systems(
-                    Update,
-                    (handle_agent_page_open, handle_spawn_agent_requests).chain(),
-                );
+                .add_systems(Update, handle_agent_page_open.before(SpawnRequestSet));
 
             let stack = app
                 .world_mut()
@@ -1269,7 +1219,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .insert_resource(crate::client::acp::AcpCatalog {
+            .insert_resource(crate::runtime::acp::AcpCatalog {
                 agents: vec![RegistryAgent {
                     id: "custom-acp".to_string(),
                     name: "Custom ACP".to_string(),
@@ -2246,7 +2196,7 @@ mod tests {
     #[test]
     pub(crate) fn cli_initial_prompt_waits_for_terminal_readiness() {
         let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(crate::client::cli::codex::CodexStrategy));
+        strategies.register_cli(Box::new(crate::runtime::cli::codex::CodexStrategy));
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SpawnPlugin))
             .add_message::<SpawnAgentInStackRequest>()

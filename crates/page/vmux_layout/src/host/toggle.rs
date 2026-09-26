@@ -5,15 +5,19 @@ use crate::side_sheet::SideSheet;
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutCommand};
 use vmux_flex::prelude::*;
+
+use super::command::LayoutRequestSet;
 
 pub struct TogglePlugin;
 
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LayoutHidden>()
-            .add_systems(Update, handle_toggle.in_set(ReadAppCommands))
+        app.add_plugins(vmux_command::CommandTypePlugin::<ToggleLayoutRequest>::default())
+            .add_systems(
+                Update,
+                handle_visibility_requests.in_set(LayoutRequestSet::Handle),
+            )
             .add_systems(
                 PostUpdate,
                 sync_window_padding_to_layout_hidden.before(LayoutSystems::Layout),
@@ -21,31 +25,34 @@ impl Plugin for TogglePlugin {
     }
 }
 
-#[derive(Resource, Default, Debug)]
-pub struct LayoutHidden(std::collections::HashSet<Entity>);
+#[derive(Message)]
+struct ToggleLayoutRequest;
 
-impl LayoutHidden {
-    pub fn is_hidden(&self, window: Entity) -> bool {
-        self.0.contains(&window)
-    }
-
-    fn toggle(&mut self, window: Entity) -> bool {
-        if self.0.remove(&window) {
-            false
-        } else {
-            self.0.insert(window);
-            true
-        }
+impl vmux_command::CommandRequest for ToggleLayoutRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("toggle.ron"))
+            .select(&["toggle_layout"])
     }
 }
 
+impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "toggle_layout").then_some(Self).ok_or(())
+    }
+}
+
+#[derive(Component, Default, Debug)]
+pub struct LayoutHidden;
+
 fn sync_window_padding_to_layout_hidden(
-    hidden: Res<LayoutHidden>,
     settings: Res<LayoutSettings>,
+    hidden_windows: Query<(), With<LayoutHidden>>,
     mut window_q: Query<(&HostWindow, &mut Node), With<VmuxWindow>>,
 ) {
     for (host, mut node) in &mut window_q {
-        let (top, left) = if hidden.is_hidden(host.0) {
+        let (top, left) = if hidden_windows.contains(host.0) {
             (settings.window.pad_top(), settings.window.pad_left())
         } else {
             (0.0, 0.0)
@@ -59,27 +66,26 @@ fn sync_window_padding_to_layout_hidden(
     }
 }
 
-fn handle_toggle(
-    mut reader: MessageReader<AppCommand>,
-    mut hidden: ResMut<LayoutHidden>,
+fn handle_visibility_requests(
+    mut reader: MessageReader<ToggleLayoutRequest>,
     focused_window: Res<crate::window::FocusedWindow>,
+    hidden_windows: Query<(), With<LayoutHidden>>,
     header_q: Query<Entity, With<Header>>,
     sidesheet_q: Query<Entity, With<SideSheet>>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     mut commands: Commands,
 ) {
-    for cmd in reader.read() {
-        if !matches!(
-            cmd,
-            AppCommand::Layout(LayoutCommand::ToggleLayout(ToggleLayoutCommand::Toggle))
-        ) {
-            continue;
-        }
+    for _ in reader.read() {
         let Some(window) = focused_window.0 else {
             continue;
         };
-        let is_hidden = hidden.toggle(window);
+        let is_hidden = !hidden_windows.contains(window);
+        if is_hidden {
+            commands.entity(window).insert(LayoutHidden);
+        } else {
+            commands.entity(window).remove::<LayoutHidden>();
+        }
 
         if is_hidden {
             for entity in header_q.iter().chain(sidesheet_q.iter()).filter(|entity| {
@@ -109,23 +115,9 @@ mod tests {
     use bevy::window::{Monitor, MonitorSelection, PrimaryWindow, WindowMode};
 
     #[test]
-    fn hidden_layout_padding_uses_layout_window_settings() {
-        let source = include_str!("toggle.rs");
-        let sync_fn = source
-            .split("fn sync_window_padding_to_layout_hidden")
-            .nth(1)
-            .and_then(|tail| tail.split("fn handle_toggle").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("settings.window.pad_top()"));
-        assert!(sync_fn.contains("settings.window.pad_left()"));
-    }
-
-    #[test]
     fn visible_fullscreen_layout_clears_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<LayoutHidden>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 16.0 },
@@ -160,7 +152,6 @@ mod tests {
     fn visible_maximized_layout_clears_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<LayoutHidden>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 16.0 },
@@ -204,7 +195,6 @@ mod tests {
     fn hidden_layout_uses_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<LayoutHidden>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: WindowSettings { padding: 16.0 },
@@ -221,11 +211,9 @@ mod tests {
                     ..default()
                 },
                 PrimaryWindow,
+                LayoutHidden,
             ))
             .id();
-        app.world_mut()
-            .resource_mut::<LayoutHidden>()
-            .toggle(window);
         let root = app
             .world_mut()
             .spawn((VmuxWindow, HostWindow(window), Node::default()))
@@ -242,9 +230,8 @@ mod tests {
     fn toggle_changes_only_the_focused_window() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<AppCommand>()
-            .init_resource::<LayoutHidden>()
-            .add_systems(Update, handle_toggle);
+            .add_message::<ToggleLayoutRequest>()
+            .add_systems(Update, handle_visibility_requests);
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.insert_resource(crate::window::FocusedWindow(Some(first_window)));
@@ -267,23 +254,13 @@ mod tests {
             .spawn((SideSheet, Open, ChildOf(second_root)))
             .id();
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::ToggleLayout(
-                ToggleLayoutCommand::Toggle,
-            )));
+            .resource_mut::<Messages<ToggleLayoutRequest>>()
+            .write(ToggleLayoutRequest);
 
         app.update();
 
-        assert!(
-            app.world()
-                .resource::<LayoutHidden>()
-                .is_hidden(first_window)
-        );
-        assert!(
-            !app.world()
-                .resource::<LayoutHidden>()
-                .is_hidden(second_window)
-        );
+        assert!(app.world().entity(first_window).contains::<LayoutHidden>());
+        assert!(!app.world().entity(second_window).contains::<LayoutHidden>());
         assert!(!app.world().entity(first_header).contains::<Open>());
         assert!(!app.world().entity(first_sheet).contains::<Open>());
         assert!(app.world().entity(second_header).contains::<Open>());

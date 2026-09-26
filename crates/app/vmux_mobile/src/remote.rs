@@ -1,12 +1,12 @@
 use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use vmux_ui::i18n::translate;
-use vmux_wire::protocol::{AgentAction, SharedAgentCommand, SharedMessage, SharedResponse};
-use vmux_wire::room::{
+use vmux_api::protocol::{SharedAgentCommand, SharedMessage, SharedResponse};
+use vmux_api::room::{
     ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteAgent, RemoteApproval,
     RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
 };
+use vmux_ui::i18n::translate;
 
 static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -22,6 +22,7 @@ pub(crate) fn next_client_op_id() -> ClientOpId {
 #[derive(Clone)]
 pub(crate) struct Api {
     quic: crate::quic::QuicApi,
+    credentials: Credentials,
 }
 
 #[derive(Debug)]
@@ -50,7 +51,18 @@ impl Api {
         };
         Ok(Self {
             quic: crate::quic::QuicApi::new(endpoint),
+            credentials,
         })
+    }
+
+    pub(crate) async fn paired_credentials(&self) -> Option<Credentials> {
+        let credential = self.quic.credential().await;
+        if !matches!(credential, vmux_transport::ClientCredential::Device(_)) {
+            return None;
+        }
+        let mut credentials = self.credentials.clone();
+        credentials.credential = Some(credential);
+        Some(credentials)
     }
 
     pub(crate) async fn reset_transport(&self) {
@@ -109,7 +121,7 @@ impl Api {
         )
     }
 
-    pub(crate) async fn team(&self) -> Result<Vec<vmux_wire::team::TeamMemberRow>, ApiError> {
+    pub(crate) async fn team(&self) -> Result<Vec<vmux_api::team::TeamMemberRow>, ApiError> {
         broker_json(&self.quic, SharedAgentCommand::ListTeam).await
     }
 
@@ -122,15 +134,13 @@ impl Api {
         sid: &str,
         request: &PromptRequest,
     ) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(
-            sid,
-            AgentAction::Input {
-                text: request.text.clone(),
-                context: None,
-                attachments: request.attachments.clone(),
-                preferred_mode: None,
-            },
-        );
+        let message = SharedMessage::AgentInput {
+            sid: sid.to_string(),
+            text: request.text.clone(),
+            context: None,
+            attachments: request.attachments.clone(),
+            preferred_mode: None,
+        };
         self.applied(self.quic.request(message).await)
     }
 
@@ -148,7 +158,9 @@ impl Api {
     }
 
     pub(crate) async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(sid, AgentAction::Cancel);
+        let message = SharedMessage::AgentCancel {
+            sid: sid.to_string(),
+        };
         self.applied(self.quic.request(message).await)
     }
 
@@ -157,13 +169,11 @@ impl Api {
         sid: &str,
         request: &ApprovalRequest,
     ) -> Result<(), ApiError> {
-        let message = SharedMessage::agent(
-            sid,
-            AgentAction::Approve {
-                call_id: request.call_id.clone(),
-                decision: request.decision,
-            },
-        );
+        let message = SharedMessage::AgentApprove {
+            sid: sid.to_string(),
+            call_id: request.call_id.clone(),
+            decision: request.decision,
+        };
         self.applied(self.quic.request(message).await)
     }
 
@@ -185,12 +195,10 @@ impl Api {
         sid: &str,
         query: &str,
     ) -> Result<Vec<RemoteMediaEntry>, ApiError> {
-        let request = SharedMessage::agent(
-            sid,
-            AgentAction::ListMedia {
-                query: query.to_string(),
-            },
-        );
+        let request = SharedMessage::AgentListMedia {
+            sid: sid.to_string(),
+            query: query.to_string(),
+        };
         match self.quic.request(request).await {
             Ok(SharedResponse::Media(entries)) => Ok(entries),
             Ok(_) => Err(ApiError::Message(translate(
@@ -202,12 +210,12 @@ impl Api {
 }
 
 pub(crate) fn remote_event_from_shared(
-    event: vmux_wire::protocol::SharedEvent,
+    event: vmux_api::protocol::SharedEvent,
 ) -> Option<RemoteEvent> {
-    use vmux_wire::protocol::SharedEvent as Shared;
+    use vmux_api::protocol::SharedEvent as Shared;
     match event {
         Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
-            room_id: vmux_wire::room::RoomId::for_session(&sid),
+            room_id: vmux_api::room::RoomId::for_session(&sid),
             text,
         }),
         Shared::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
@@ -216,21 +224,19 @@ pub(crate) fn remote_event_from_shared(
         Shared::AgentAwaitingApproval {
             call_id,
             name,
-            args_json,
+            args,
             ..
         } => Some(RemoteEvent::Approval {
             approval: Some(RemoteApproval {
                 call_id,
                 name,
-                args_json,
+                args,
             }),
         }),
         Shared::AgentApprovalResolved { .. } => Some(RemoteEvent::Approval { approval: None }),
-        Shared::AgentMessagesSnapshot { sid, messages_json } => {
-            let messages: Vec<vmux_wire::room::Message> =
-                serde_json::from_str(&messages_json).ok()?;
-            let room_id = vmux_wire::room::RoomId::for_session(&sid);
-            let events = vmux_wire::room::RoomEvent::from_messages(&sid, 0, &messages);
+        Shared::AgentMessagesSnapshot { sid, messages } => {
+            let room_id = vmux_api::room::RoomId::for_session(&sid);
+            let events = vmux_api::room::RoomEvent::from_messages(&sid, 0, &messages);
             Some(RemoteEvent::Snapshot {
                 room_id,
                 through_seq: events.len() as u64,
@@ -262,7 +268,7 @@ async fn broker_json<T: serde::de::DeserializeOwned>(
 impl From<crate::quic::QuicError> for ApiError {
     fn from(error: crate::quic::QuicError) -> Self {
         use crate::quic::QuicError;
-        use vmux_wire::protocol::SharedFailure;
+        use vmux_api::protocol::SharedFailure;
         match error {
             QuicError::Unauthorized => Self::Unauthorized,
             QuicError::Refused(SharedFailure::NotFound) => Self::NotFound,

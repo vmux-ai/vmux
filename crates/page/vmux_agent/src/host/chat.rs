@@ -1,3 +1,4 @@
+mod composer;
 mod key;
 mod media;
 pub(crate) mod model;
@@ -8,11 +9,12 @@ mod transcript;
 mod workspace;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use vmux_chat::event::ChatOpenPage;
-
-const CHAT_EVENT_HOSTS: &[&str] = &["sessions", "agent", "start"];
+use vmux_chat::event::{
+    ChatAttachment, ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState,
+    ChatSnapshot, ChatTranscriptState,
+};
 
 pub struct AgentChatPagePlugin;
 
@@ -23,15 +25,15 @@ impl Plugin for AgentChatPagePlugin {
             key::ChatKeyPlugin,
             media::ChatMediaPlugin,
             model::ChatModelPlugin,
+            composer::ChatComposerPlugin,
             prompt::ChatPromptPlugin,
             resume::ChatResumePlugin,
             tab::ChatTabPlugin,
             transcript::ChatTranscriptPlugin,
+            vmux_core::host::UiStatePlugin::<vmux_chat::state::ChatUiState>::default(),
             workspace::ChatWorkspacePlugin,
         ))
-        .add_plugins(BinEventEmitterPlugin::<(ChatOpenPage,)>::for_hosts(
-            CHAT_EVENT_HOSTS,
-        ))
+        .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
         .add_observer(on_chat_open_page);
     }
 }
@@ -47,22 +49,57 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 };
 
 #[derive(Component)]
+#[require(
+    ChatUiStateUpdates,
+    ChatAttachmentProjection,
+    ChatSnapshotProjection,
+    ChatTranscriptProjection,
+    ChatMediaProjection,
+    ChatResumeProjection,
+    ChatBranchesProjection,
+    composer::ChatComposerProjection
+)]
 pub struct AgentChatView;
+
+type ChatUiStateUpdates = vmux_core::host::UiState<vmux_chat::state::ChatUiState>;
+
+#[derive(Component, Default)]
+struct ChatTranscriptProjection {
+    state: ChatTranscriptState,
+    tail: Vec<ChatItem>,
+    tail_start: u32,
+}
+
+#[derive(Component, Default)]
+struct ChatSnapshotProjection(ChatSnapshot);
+
+#[derive(Component, Default)]
+struct ChatAttachmentProjection {
+    selected: Vec<ChatAttachment>,
+    previews: std::collections::HashMap<String, ChatAttachment>,
+    pending: std::collections::HashSet<String>,
+    resolved: std::collections::HashSet<String>,
+}
+
+#[derive(Component, Default)]
+struct ChatMediaProjection(ChatMediaState);
+
+#[derive(Component, Default)]
+struct ChatResumeProjection(ChatResumeState);
+
+#[derive(Component, Default)]
+struct ChatBranchesProjection(ChatBranchesState);
 
 #[derive(Component)]
 pub(crate) struct ChatSynced;
 
 fn on_chat_open_page(
-    trigger: On<BinReceive<ChatOpenPage>>,
-    mut commands: MessageWriter<vmux_command::AppCommand>,
+    trigger: On<UiInput<ChatOpenPage>>,
+    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
     let url = trigger.event().payload.url.clone();
     if url.is_empty() {
         return;
     }
-    commands.write(vmux_command::AppCommand::Browser(
-        vmux_command::BrowserCommand::Open(vmux_command::open::OpenCommand::InNewStack {
-            url: Some(url),
-        }),
-    ));
+    requests.write(vmux_layout::stack::OpenRequest { url: Some(url) });
 }

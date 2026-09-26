@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::{Mutex, mpsc};
@@ -10,6 +10,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::PageMetadata;
 pub use vmux_core::agent::{AgentSession, PendingAgentSession, SessionId};
 
+#[cfg(test)]
 use crate::AgentKind;
 use crate::strategy::AgentStrategies;
 
@@ -18,14 +19,43 @@ pub struct AgentSessionExited {
     pub entity: Entity,
 }
 
-#[derive(Resource, Default, Debug)]
-pub struct AgentSessionToEntity(pub HashMap<(AgentKind, String), Entity>);
+#[derive(Component, Default)]
+struct AgentSessionDiscovery {
+    dirty: bool,
+}
 
-#[derive(Resource, Default, Debug)]
-pub struct AgentSessionDirty(pub bool);
+pub(crate) struct AgentSessionLifecyclePlugin;
+
+impl Plugin for AgentSessionLifecyclePlugin {
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn((
+            Name::new("Agent session discovery"),
+            AgentSessionDiscovery::default(),
+        ));
+        app.add_message::<AgentSessionExited>()
+            .add_systems(Startup, start_agent_session_watchers)
+            .add_systems(
+                Update,
+                (mark_dirty_on_fs_change, mark_dirty_on_pending_added),
+            )
+            .add_systems(
+                Update,
+                (
+                    discover_pending_agent_sessions,
+                    detect_file_end_time_exit,
+                    clear_agent_session_dirty,
+                )
+                    .chain()
+                    .after(mark_dirty_on_fs_change)
+                    .after(mark_dirty_on_pending_added)
+                    .run_if(agent_session_dirty_run_condition),
+            )
+            .add_systems(Update, format_agent_url);
+    }
+}
 
 #[allow(clippy::type_complexity)]
-pub fn format_agent_url(
+fn format_agent_url(
     strategies: Res<AgentStrategies>,
     mut q: Query<
         (Option<&SessionId>, &AgentSession, &mut PageMetadata),
@@ -81,12 +111,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_session_to_entity_starts_empty() {
-        let map = AgentSessionToEntity::default();
-        assert!(map.0.is_empty());
-    }
-
-    #[test]
     fn pending_session_carries_cwd_and_kind() {
         let pending = PendingAgentSession {
             kind: AgentKind::Claude,
@@ -101,7 +125,7 @@ mod tests {
 #[cfg(test)]
 mod url_tests {
     use super::*;
-    use crate::client::cli::vibe::VibeStrategy;
+    use crate::runtime::cli::vibe::VibeStrategy;
 
     fn empty_meta() -> PageMetadata {
         PageMetadata {
@@ -270,45 +294,44 @@ mod url_tests {
     }
 }
 
-pub fn mark_dirty_on_pending_added(
+fn mark_dirty_on_pending_added(
     added_pending: Query<(), Added<PendingAgentSession>>,
     added_session: Query<(), Added<SessionId>>,
-    mut dirty: ResMut<AgentSessionDirty>,
+    mut discovery: Single<&mut AgentSessionDiscovery>,
 ) {
     if !added_pending.is_empty() || !added_session.is_empty() {
-        dirty.0 = true;
+        discovery.dirty = true;
     }
 }
 
-pub fn agent_session_dirty_run_condition(dirty: Res<AgentSessionDirty>) -> bool {
-    dirty.0
+fn agent_session_dirty_run_condition(discovery: Single<&AgentSessionDiscovery>) -> bool {
+    discovery.dirty
 }
 
-pub fn clear_agent_session_dirty(mut dirty: ResMut<AgentSessionDirty>) {
-    dirty.0 = false;
+fn clear_agent_session_dirty(mut discovery: Single<&mut AgentSessionDiscovery>) {
+    discovery.dirty = false;
 }
 
-pub fn discover_pending_agent_sessions(
+fn discover_pending_agent_sessions(
     mut commands: Commands,
     strategies: Res<AgentStrategies>,
-    map: Res<AgentSessionToEntity>,
-    q: Query<(Entity, &PendingAgentSession)>,
+    pending_sessions: Query<(Entity, &PendingAgentSession)>,
+    sessions: Query<(&AgentSession, &SessionId)>,
 ) {
-    for (entity, pending) in &q {
+    for (entity, pending) in &pending_sessions {
         let Some(strategy) = strategies.get_cli(pending.kind) else {
             continue;
         };
-        let claimed: HashSet<String> = map
-            .0
+        let claimed = sessions
             .iter()
-            .filter_map(|((k, id), _)| {
-                if *k == pending.kind {
-                    Some(id.clone())
+            .filter_map(|(session, id)| {
+                if session.kind == pending.kind {
+                    Some(id.0.clone())
                 } else {
                     None
                 }
             })
-            .collect();
+            .collect::<HashSet<_>>();
         if let Some(id) = strategy.discover_session(&pending.cwd, pending.spawn_time, &claimed) {
             commands
                 .entity(entity)
@@ -318,86 +341,13 @@ pub fn discover_pending_agent_sessions(
     }
 }
 
-pub fn track_session_id_inserts(
-    mut map: ResMut<AgentSessionToEntity>,
-    inserted: Query<(Entity, &SessionId, &AgentSession), Added<SessionId>>,
-) {
-    for (entity, SessionId(id), agent) in &inserted {
-        map.0.insert((agent.kind, id.clone()), entity);
-    }
+#[derive(Component)]
+struct AgentSessionWatcher {
+    receiver: Mutex<mpsc::Receiver<()>>,
+    _watcher: RecommendedWatcher,
 }
 
-pub fn track_session_id_removals(
-    mut map: ResMut<AgentSessionToEntity>,
-    mut removed: RemovedComponents<SessionId>,
-) {
-    for entity in removed.read() {
-        map.0.retain(|_, &mut e| e != entity);
-    }
-}
-
-#[cfg(test)]
-mod tracking_tests {
-    use super::*;
-
-    fn make_app() -> App {
-        let mut app = App::new();
-        app.init_resource::<AgentSessionToEntity>().add_systems(
-            Update,
-            (track_session_id_inserts, track_session_id_removals).chain(),
-        );
-        app
-    }
-
-    #[test]
-    fn insert_populates_map_only_for_agent_session_entities() {
-        let mut app = make_app();
-        let with = app
-            .world_mut()
-            .spawn((
-                AgentSession {
-                    kind: AgentKind::Codex,
-                },
-                SessionId("c1".into()),
-            ))
-            .id();
-        let without = app.world_mut().spawn(SessionId("nope".into())).id();
-        app.update();
-        let map = app.world().resource::<AgentSessionToEntity>();
-        assert_eq!(map.0.get(&(AgentKind::Codex, "c1".into())), Some(&with));
-        assert!(!map.0.contains_key(&(AgentKind::Codex, "nope".into())));
-        let _ = without;
-    }
-
-    #[test]
-    fn entity_despawn_removes_session_from_map() {
-        let mut app = make_app();
-        let e = app
-            .world_mut()
-            .spawn((
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                SessionId("v1".into()),
-            ))
-            .id();
-        app.update();
-        app.world_mut().despawn(e);
-        app.update();
-        let map = app.world().resource::<AgentSessionToEntity>();
-        assert!(!map.0.contains_key(&(AgentKind::Vibe, "v1".into())));
-    }
-}
-
-#[derive(Resource)]
-pub struct AgentSessionWatchers {
-    receivers: Vec<Mutex<mpsc::Receiver<()>>>,
-    _watchers: Vec<RecommendedWatcher>,
-}
-
-pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
-    let mut receivers = Vec::new();
-    let mut watchers = Vec::new();
+fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
     for strategy in strategies.cli_strategies() {
         let root = strategy.sessions_root();
         if std::fs::create_dir_all(&root).is_err() {
@@ -416,32 +366,28 @@ pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<Agen
         if watcher.watch(&root, RecursiveMode::Recursive).is_err() {
             continue;
         }
-        watchers.push(watcher);
-        receivers.push(Mutex::new(rx));
+        commands.spawn(AgentSessionWatcher {
+            receiver: Mutex::new(rx),
+            _watcher: watcher,
+        });
     }
-    if receivers.is_empty() {
-        return;
-    }
-    commands.insert_resource(AgentSessionWatchers {
-        receivers,
-        _watchers: watchers,
-    });
 }
 
-pub fn mark_dirty_on_fs_change(
-    watchers: Option<Res<AgentSessionWatchers>>,
-    mut dirty: ResMut<AgentSessionDirty>,
+fn mark_dirty_on_fs_change(
+    watchers: Query<&AgentSessionWatcher>,
+    mut discovery: Single<&mut AgentSessionDiscovery>,
 ) {
-    let Some(watchers) = watchers else { return };
-    for rx in &watchers.receivers {
-        let Ok(rx) = rx.lock() else { continue };
+    for watcher in &watchers {
+        let Ok(rx) = watcher.receiver.lock() else {
+            continue;
+        };
         while rx.try_recv().is_ok() {
-            dirty.0 = true;
+            discovery.dirty = true;
         }
     }
 }
 
-pub fn detect_file_end_time_exit(
+fn detect_file_end_time_exit(
     mut commands: Commands,
     mut exited_writer: MessageWriter<AgentSessionExited>,
     strategies: Res<AgentStrategies>,
@@ -466,7 +412,7 @@ pub fn detect_file_end_time_exit(
 #[cfg(test)]
 mod discovery_tests {
     use super::*;
-    use crate::client::cli::vibe::VibeStrategy;
+    use crate::runtime::cli::vibe::VibeStrategy;
 
     #[test]
     fn pending_with_no_match_keeps_pending() {
@@ -474,7 +420,6 @@ mod discovery_tests {
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
         app.insert_resource(strategies)
-            .init_resource::<AgentSessionToEntity>()
             .add_systems(Update, discover_pending_agent_sessions);
 
         let pending = PendingAgentSession {
@@ -534,7 +479,6 @@ mod discovery_tests {
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(NeverDiscovers));
         app.insert_resource(strategies)
-            .init_resource::<AgentSessionToEntity>()
             .add_systems(Update, discover_pending_agent_sessions);
 
         let pending = PendingAgentSession {

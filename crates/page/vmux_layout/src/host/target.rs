@@ -6,6 +6,12 @@ use crate::pane::{Pane, PaneSplit};
 use crate::stack::Stack;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SiblingDirection {
+    Previous,
+    Next,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowserTarget {
     Pane(Entity),
     Stack(Entity),
@@ -16,8 +22,8 @@ pub fn parse_pane_target(
     s: &str,
     panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
 ) -> Option<Entity> {
-    let bits = match vmux_wire::protocol::parse_id(s) {
-        Ok((vmux_wire::protocol::NodeKind::Pane, bits)) => bits,
+    let bits = match vmux_api::protocol::parse_id(s) {
+        Ok((vmux_api::protocol::NodeKind::Pane, bits)) => bits,
         Ok(_) => return None,
         Err(_) => s.parse::<u64>().ok()?,
     };
@@ -30,13 +36,13 @@ pub fn parse_browser_target(
     panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     stacks: &Query<Entity, With<Stack>>,
 ) -> Option<BrowserTarget> {
-    if let Ok((kind, bits)) = vmux_wire::protocol::parse_id(value) {
+    if let Ok((kind, bits)) = vmux_api::protocol::parse_id(value) {
         let entity = Entity::try_from_bits(bits)?;
         return match kind {
-            vmux_wire::protocol::NodeKind::Pane if panes.contains(entity) => {
+            vmux_api::protocol::NodeKind::Pane if panes.contains(entity) => {
                 Some(BrowserTarget::Pane(entity))
             }
-            vmux_wire::protocol::NodeKind::Stack if stacks.contains(entity) => {
+            vmux_api::protocol::NodeKind::Stack if stacks.contains(entity) => {
                 Some(BrowserTarget::Stack(entity))
             }
             _ => None,

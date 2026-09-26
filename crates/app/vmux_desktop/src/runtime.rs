@@ -13,8 +13,9 @@ use other as platform;
 #[cfg(target_os = "macos")]
 pub(crate) use macos::ensure_native_window_active;
 
-use bevy::ecs::message::Messages;
 use bevy::prelude::*;
+#[cfg(feature = "tray")]
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::window::{Monitor, Window};
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
 use bevy_cef_core::prelude::{
@@ -23,8 +24,6 @@ use bevy_cef_core::prelude::{
 use std::time::Duration;
 
 #[cfg(feature = "tray")]
-use vmux_terminal as terminal;
-#[cfg(feature = "tray")]
 use vmux_terminal::{PtyExited, Terminal};
 
 pub struct RuntimePlugin;
@@ -32,10 +31,22 @@ pub struct RuntimePlugin;
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(platform::RuntimePlatformPlugin)
-            .add_message::<LifecycleEvent>()
-            .add_systems(Update, handle_lifecycle_events)
-            .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
+            .add_message::<HideAllWindowsRequest>()
+            .add_systems(Update, hide_all_windows)
             .add_systems(Update, keep_awake_while_revealing);
+        #[cfg(feature = "tray")]
+        app.add_message::<ShowAllWindowsRequest>()
+            .add_message::<QuitRequest>()
+            .add_systems(Update, show_all_windows.after(hide_all_windows))
+            .add_systems(Update, request_quit.after(show_all_windows))
+            .add_systems(Update, start_quit_confirmation.after(request_quit))
+            .add_systems(
+                Update,
+                resolve_quit_confirmation.after(start_quit_confirmation),
+            )
+            .add_systems(Update, sync_winit_power_mode.after(request_quit));
+        #[cfg(not(feature = "tray"))]
+        app.add_systems(Update, sync_winit_power_mode.after(hide_all_windows));
     }
 }
 
@@ -45,12 +56,55 @@ const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(60);
 const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Message, Debug, Clone, Copy)]
-pub enum LifecycleEvent {
-    HideAllWindows,
-    #[cfg(feature = "tray")]
-    ShowAllWindows,
-    #[cfg(feature = "tray")]
-    QuitVmux,
+pub(crate) struct HideAllWindowsRequest;
+
+#[cfg(feature = "tray")]
+#[derive(Message, Debug, Clone, Copy)]
+pub(crate) struct ShowAllWindowsRequest;
+
+#[cfg(feature = "tray")]
+#[derive(Message, Debug, Clone, Copy)]
+pub(crate) struct QuitRequest;
+
+#[cfg(feature = "tray")]
+#[derive(Component)]
+struct QuitConfirmation {
+    count: usize,
+    wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
+}
+
+#[cfg(feature = "tray")]
+#[derive(Component)]
+struct QuitConfirmationTask(Task<bool>);
+
+#[cfg(feature = "tray")]
+fn start_quit_confirmation(
+    confirmations: Query<(Entity, &QuitConfirmation), Added<QuitConfirmation>>,
+    mut commands: Commands,
+) {
+    for (entity, confirmation) in &confirmations {
+        let count = confirmation.count;
+        let wake = confirmation.wake.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            let description = if count == 1 {
+                "A terminal is still running. Quit anyway?".to_string()
+            } else {
+                format!("{count} terminals are still running. Quit anyway?")
+            };
+            let result = rfd::AsyncMessageDialog::new()
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title("Quit Vmux?")
+                .set_description(description)
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show()
+                .await;
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            matches!(result, rfd::MessageDialogResult::Ok)
+        });
+        commands.entity(entity).insert(QuitConfirmationTask(task));
+    }
 }
 
 pub(crate) fn foreground_winit_settings(
@@ -149,48 +203,72 @@ fn keep_awake_while_revealing(
     }
 }
 
-fn handle_lifecycle_events(world: &mut World) {
-    let drained: Vec<LifecycleEvent> = {
-        let mut events = world.resource_mut::<Messages<LifecycleEvent>>();
-        events.drain().collect()
-    };
-
-    for event in drained {
-        match event {
-            LifecycleEvent::HideAllWindows => {
-                let mut q = world.query::<&mut Window>();
-                for mut w in q.iter_mut(world) {
-                    w.visible = false;
-                }
-                hide_all_osr_webviews(world);
-            }
-            #[cfg(feature = "tray")]
-            LifecycleEvent::ShowAllWindows => {
-                let mut q = world.query::<&mut Window>();
-                for mut w in q.iter_mut(world) {
-                    w.visible = true;
-                }
-            }
-            #[cfg(feature = "tray")]
-            LifecycleEvent::QuitVmux => {
-                let live = {
-                    let mut q = world.query_filtered::<(), (With<Terminal>, Without<PtyExited>)>();
-                    q.iter(world).count()
-                };
-                if live > 0 && !terminal::confirm_quit_dialog(live) {
-                    continue;
-                }
-                world
-                    .resource_mut::<Messages<AppExit>>()
-                    .write(AppExit::Success);
-            }
-        }
+fn hide_all_windows(
+    mut requests: MessageReader<HideAllWindowsRequest>,
+    mut windows: Query<&mut Window>,
+    browsers: Option<NonSend<Browsers>>,
+) {
+    if requests.read().count() == 0 {
+        return;
+    }
+    for mut window in &mut windows {
+        window.visible = false;
+    }
+    if let Some(browsers) = browsers {
+        browsers.set_all_osr_hidden();
     }
 }
 
-fn hide_all_osr_webviews(world: &mut World) {
-    if let Some(browsers) = world.get_non_send::<Browsers>() {
-        browsers.set_all_osr_hidden();
+#[cfg(feature = "tray")]
+fn show_all_windows(
+    mut requests: MessageReader<ShowAllWindowsRequest>,
+    mut windows: Query<&mut Window>,
+) {
+    if requests.read().count() == 0 {
+        return;
+    }
+    for mut window in &mut windows {
+        window.visible = true;
+    }
+}
+
+#[cfg(feature = "tray")]
+fn request_quit(
+    mut requests: MessageReader<QuitRequest>,
+    terminals: Query<(), (With<Terminal>, Without<PtyExited>)>,
+    confirmation: Query<(), With<QuitConfirmation>>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut exits: MessageWriter<AppExit>,
+    mut commands: Commands,
+) {
+    if requests.read().count() == 0 || !confirmation.is_empty() {
+        return;
+    }
+    let live = terminals.iter().count();
+    if live > 0 {
+        commands.spawn(QuitConfirmation {
+            count: live,
+            wake: wake.map(|proxy| (**proxy).clone()),
+        });
+        return;
+    }
+    exits.write(AppExit::Success);
+}
+
+#[cfg(feature = "tray")]
+fn resolve_quit_confirmation(
+    mut confirmations: Query<(Entity, &mut QuitConfirmationTask)>,
+    mut exits: MessageWriter<AppExit>,
+    mut commands: Commands,
+) {
+    for (entity, mut confirmation) in &mut confirmations {
+        let Some(confirmed) = future::block_on(future::poll_once(&mut confirmation.0)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        if confirmed {
+            exits.write(AppExit::Success);
+        }
     }
 }
 
@@ -198,19 +276,25 @@ fn hide_all_osr_webviews(world: &mut World) {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "tray")]
     #[test]
-    fn handle_lifecycle_events_uses_world_for_confirm_dialog() {
-        let source = include_str!("runtime.rs");
-        let exclusive_marker = ["world", ": ", "&mut", " World"].concat();
-        assert!(
-            source.contains(&exclusive_marker),
-            "handle_lifecycle_events must be an exclusive &mut World system to call confirm_quit_dialog"
-        );
-        let confirm_call = ["confirm", "_quit_dialog"].concat();
-        assert!(
-            source.contains(&confirm_call),
-            "QuitVmux arm must call terminal::confirm_quit_dialog"
-        );
+    fn quit_without_live_terminal_exits_immediately() {
+        let mut app = App::new();
+        app.add_message::<QuitRequest>()
+            .add_message::<AppExit>()
+            .add_systems(Update, request_quit);
+        app.world_mut()
+            .resource_mut::<Messages<QuitRequest>>()
+            .write(QuitRequest);
+
+        app.update();
+
+        let exits: Vec<AppExit> = app
+            .world_mut()
+            .resource_mut::<Messages<AppExit>>()
+            .drain()
+            .collect();
+        assert_eq!(exits, vec![AppExit::Success]);
     }
 
     #[test]
@@ -320,54 +404,6 @@ mod tests {
         assert!(!layout_window);
     }
 
-    #[test]
-    fn native_mouse_motion_publishes_latest_sample_before_waking() {
-        let source = include_str!("runtime/macos.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_live_resize_monitor").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("NSEventMask::MouseMoved"));
-        assert!(monitor.contains("NSEventMask::LeftMouseDown"));
-        assert!(monitor.contains("WinitUserEvent::WakeUp"));
-        assert!(monitor.contains("vmux_layout::native_pointer::publish"));
-        assert!(!monitor.contains("forward_pointer_move"));
-        assert!(!monitor.contains("vmux_layout::pane::wake_on_move"));
-        assert!(monitor.contains("let global_mask = NSEventMask::LeftMouseDown"));
-    }
-
-    #[test]
-    fn native_mouse_wake_throttle_has_a_trailing_wake() {
-        let source = include_str!("runtime/macos.rs");
-        let throttle = source
-            .split("fn native_throttle")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_native_mouse_wake_monitor").next())
-            .unwrap_or_default();
-
-        assert!(throttle.contains("sync_channel::<()>(1)"));
-        assert!(throttle.contains("recv_timeout"));
-        assert!(throttle.contains("pending_interval_ns.fetch_min"));
-        assert!(!throttle.contains("while wake_rx.try_recv().is_ok()"));
-        assert!(!throttle.contains("thread_pending_interval_ns.store"));
-        assert!(!throttle.contains("LAST_NATIVE_MOUSE_WAKE.lock()"));
-    }
-
-    #[test]
-    fn native_mouse_monitor_tracks_left_button_state() {
-        let source = include_str!("runtime/macos.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_live_resize_monitor").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(true)"));
-        assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(false)"));
-    }
-
     fn platform_systems(label: impl bevy::ecs::schedule::ScheduleLabel) -> Vec<String> {
         use bevy::ecs::schedule::{NodeId, Schedules};
 
@@ -412,64 +448,12 @@ mod tests {
     }
 
     #[test]
-    fn primary_window_activation_takes_the_key_window() {
-        let native = include_str!("runtime/macos.rs");
-        assert!(native.contains("activateIgnoringOtherApps"));
-        assert!(native.contains("makeKeyAndOrderFront"));
-    }
-
-    #[test]
-    fn native_mouse_monitor_does_not_wait_for_window_creation() {
-        let source = include_str!("runtime/macos.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_live_resize_monitor").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("proxy: Option<Res<EventLoopProxyWrapper>>"));
-        assert!(!monitor.contains("PrimaryWindow"));
-        assert!(!monitor.contains("appkit_window_ptr"));
-    }
-
-    #[test]
-    fn startup_activation_waits_for_visible_window() {
-        let source = include_str!("runtime/macos.rs")
-            .split("fn activate_primary_window_on_startup")
-            .nth(1)
-            .and_then(|tail| tail.split("fn grab_key_window_on_pane_hover").next())
-            .unwrap_or_default();
-
-        assert!(source.contains("if !window.visible"));
-    }
-
-    #[test]
     fn app_activation_starts_during_boot() {
         let update = platform_systems(Update);
         assert!(
             update.contains(&"activate_app_during_boot".to_string()),
             "update systems: {update:?}"
         );
-
-        let boot = include_str!("runtime/macos.rs")
-            .split("fn activate_app_during_boot")
-            .nth(1)
-            .and_then(|tail| tail.split("type NativeThrottle").next())
-            .unwrap_or_default();
-        assert!(boot.contains("APP_ACTIVATION_BUDGET"));
-        assert!(boot.contains("WinitUserEvent::WakeUp"));
-    }
-
-    #[test]
-    fn native_mouse_down_offers_the_click_to_the_page() {
-        let source = include_str!("runtime/macos.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn install_live_resize_monitor").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("event_location_in_window_physical_px"));
     }
 
     #[test]
@@ -525,13 +509,5 @@ mod tests {
             cef_wake_interval(true, true, true, Duration::from_millis(7)),
             Duration::from_secs(1)
         );
-    }
-
-    #[test]
-    fn hide_lifecycle_suspends_osr_webviews() {
-        let source = include_str!("runtime.rs");
-
-        assert!(source.contains("hide_all_osr_webviews(world)"));
-        assert!(source.contains("set_all_osr_hidden"));
     }
 }

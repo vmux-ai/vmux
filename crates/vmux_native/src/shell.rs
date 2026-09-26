@@ -113,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn the_page_keeps_the_document_chrome_it_was_written_against() {
+    fn the_page_keeps_the_document_layout_it_was_written_against() {
         let shell = InterpreterShell::new("main", "vmux://layout")
             .with_head(r#"<base href="/"><link rel="stylesheet" href="./assets/index.css">"#)
             .with_html_attributes(r#"class="h-full""#)

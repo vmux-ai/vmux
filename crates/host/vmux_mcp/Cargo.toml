@@ -11,12 +11,14 @@ path = "src/lib.rs"
 
 [dependencies]
 base64 = "0.22"
-serde = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-vmux_command_mcp = { path = "../vmux_command_mcp" }
-vmux_macro = { path = "../../vmux_macro" }
-vmux_client = { path = "../vmux_client" }
+vmux_api = { path = "../../vmux_api" }
+vmux_core = { path = "../../vmux_core" }
+vmux_service = { path = "../vmux_service" }
+vmux_tool = { path = "../../vmux_tool" }
 
 [dev-dependencies]
 tempfile = "3"

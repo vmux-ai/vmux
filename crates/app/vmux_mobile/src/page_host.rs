@@ -1,34 +1,40 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use bevy_ecs::change_detection::DetectChangesMut;
 use dioxus::core::ReactiveContext;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use vmux_chat::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatEscape, ChatSubmit, MODEL_STATE_EVENT,
-    SelectModel, SetAgentEffort,
+    ChatApproval, ChatCancel, ChatComposerEffect, ChatDraftChanged, ChatEscape,
+    ChatRemoveAttachment, ChatStop, ChatSubmit, SelectModel, SetAgentEffort,
 };
 use vmux_chat::model::{Models, Picker};
-use vmux_chat::prompt::{Attach, Attachments, Browsed};
-use vmux_chat::room::{Reported, Snapshot, Submitted};
-use vmux_start::event::{START_COMMAND_BAR_OPEN_EVENT, StartDataRequest};
+use vmux_chat::prompt::{Attach, Attachments, Browsed, Media, RemoveAttachment};
+use vmux_chat::room::{Conversation, Reported, Snapshot, Submitted};
+use vmux_chat::state::{ChatUiState, ChatUiStateProjection};
+use vmux_start::event::StartDataRequest;
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
-use crate::runtime::World;
-use vmux_ui::hooks::EventListenerError;
-use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
-use vmux_ui::platform::sleep_ms;
-use vmux_wire::command_bar::CommandBarActionEvent;
-use vmux_wire::prompt_media::{
-    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
-    ChatMediaListRequest,
+use crate::runtime::{PageListeners, RuntimeHandle};
+use vmux_api::command_bar::{
+    CommandBarUiState, DismissRequest as CommandBarDismissRequest,
+    ExRequest as CommandBarExRequest, InvokeRequest as CommandBarInvokeRequest,
+    OpenRequest as CommandBarOpenRequest, PickRequest as CommandBarPickRequest,
+    PromptRequest as CommandBarPromptRequest, SwitchSpaceRequest, SwitchTabRequest,
+    TerminalRequest as CommandBarTerminalRequest,
 };
-use vmux_wire::room::{
+use vmux_api::prompt_media::{ChatAttachPaths, ChatAttachment, ChatMediaListRequest};
+use vmux_api::room::{
     AgentAttachment, ApprovalRequest, PromptRequest, RemoteEvent, RemoteMediaEntry, RemoteSession,
     RemoteStatus,
 };
-use vmux_wire::team::TEAM_EVENT;
+use vmux_api::team::TeamEvent;
+use vmux_api::{BinEvent, BinEventTarget};
+use vmux_ui::hooks::EventListenerError;
+use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
+use vmux_ui::platform::sleep_ms;
 
 use crate::remote::next_client_op_id;
 use crate::session::Session;
@@ -40,8 +46,11 @@ const MODEL_FETCH_ATTEMPTS: u8 = 5;
 
 const MODEL_RETRY_INTERVAL_MS: u32 = 1_000;
 
+const MOBILE_PAGE_URLS: &[&str] = &["vmux://sessions/", "vmux://agent/", "vmux://start/"];
+
 pub(crate) struct MobileHost {
     epoch: u64,
+    runtime: RuntimeHandle,
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
     session: Session,
@@ -53,6 +62,7 @@ thread_local! {
 }
 
 pub(crate) fn install(
+    runtime: RuntimeHandle,
     api: Api,
     sessions: Signal<Vec<RemoteSession>>,
     session: Session,
@@ -65,6 +75,7 @@ pub(crate) fn install(
     });
     install_host(Rc::new(MobileHost {
         epoch,
+        runtime,
         api,
         sessions,
         session,
@@ -80,96 +91,153 @@ fn superseded(epoch: u64) -> bool {
 pub(crate) struct ComposerExchange {
     media_request: Signal<Option<ChatMediaListRequest>>,
     offered: Signal<Vec<RemoteMediaEntry>>,
+    draft: Signal<String>,
+    effect_revision: Signal<u64>,
 }
 
 pub(crate) fn use_composer_exchange() -> ComposerExchange {
     ComposerExchange {
         media_request: use_signal(|| None),
         offered: use_signal(Vec::new),
+        draft: use_signal(String::new),
+        effect_revision: use_signal(|| 0),
+    }
+}
+
+impl ComposerExchange {
+    fn change_draft(self, text: String) {
+        let mut draft = self.draft;
+        let mut request = self.media_request;
+        draft.set(text.clone());
+        let query = vmux_api::prompt_media::inline_media_query(&text)
+            .map(|query| query.query.to_string())
+            .unwrap_or_default();
+        if request
+            .peek()
+            .as_ref()
+            .is_some_and(|request| request.query == query)
+        {
+            return;
+        }
+        let request_id = request
+            .peek()
+            .as_ref()
+            .map(|request| request.request_id.wrapping_add(1).max(1))
+            .unwrap_or(1);
+        request.set(Some(ChatMediaListRequest { request_id, query }));
+    }
+
+    fn clear_effect(self) -> Option<ChatComposerEffect> {
+        let mut draft = self.draft;
+        if draft.peek().is_empty() {
+            return None;
+        }
+        let mut revision = self.effect_revision;
+        let next = revision().wrapping_add(1).max(1);
+        revision.set(next);
+        draft.set(String::new());
+        Some(ChatComposerEffect {
+            revision: next,
+            draft: String::new(),
+            focus: true,
+        })
     }
 }
 
 impl PageHost for MobileHost {
-    fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-        if names::<ChatSubmit>(id) {
-            return self.submit(decode(bytes)?);
+    fn send(
+        &self,
+        target: BinEventTarget,
+        id: &str,
+        bytes: &[u8],
+    ) -> Result<(), EventListenerError> {
+        if !target.accepts_any(MOBILE_PAGE_URLS) {
+            return Err(EventListenerError::Unsupported);
         }
-        if names::<ChatCancel>(id) || names::<ChatEscape>(id) {
-            return self.cancel();
+        match id {
+            ChatSubmit::ID => submit(self, decode(bytes)?),
+            ChatDraftChanged::ID => {
+                let payload: ChatDraftChanged = decode(bytes)?;
+                self.composer.change_draft(payload.text);
+                Ok(())
+            }
+            ChatRemoveAttachment::ID => remove_attachment(self, decode(bytes)?),
+            ChatCancel::ID | ChatStop::ID => cancel(self),
+            ChatEscape::ID => escape(self),
+            ChatApproval::ID => approve(self, decode(bytes)?),
+            SelectModel::ID => {
+                let payload: SelectModel = decode(bytes)?;
+                agent_call(self, move |api, sid| async move {
+                    if let Err(error) = api.select_model(&sid, &payload.model_id).await {
+                        tracing::warn!("selecting the model failed: {error:?}");
+                    }
+                })
+            }
+            SetAgentEffort::ID => {
+                let payload: SetAgentEffort = decode(bytes)?;
+                agent_call(self, move |api, sid| async move {
+                    if let Err(error) = api.set_effort(&sid, &payload.level).await {
+                        tracing::warn!("setting the effort failed: {error:?}");
+                    }
+                })
+            }
+            ChatAttachPaths::ID => attach(self, decode(bytes)?),
+            CommandBarPromptRequest::ID => prompt(self, decode(bytes)?),
+            SwitchTabRequest::ID => switch_tab(self, decode(bytes)?),
+            CommandBarDismissRequest::ID => Ok(()),
+            CommandBarOpenRequest::ID
+            | CommandBarTerminalRequest::ID
+            | CommandBarInvokeRequest::ID
+            | SwitchSpaceRequest::ID
+            | CommandBarExRequest::ID
+            | CommandBarPickRequest::ID => Err(EventListenerError::Unsupported),
+            StartDataRequest::ID => Ok(()),
+            _ => Err(EventListenerError::Unsupported),
         }
-        if names::<ChatApproval>(id) {
-            return self.approve(decode(bytes)?);
-        }
-        if names::<SelectModel>(id) {
-            let payload: SelectModel = decode(bytes)?;
-            return self.agent_call(move |api, sid| async move {
-                if let Err(error) = api.select_model(&sid, &payload.model_id).await {
-                    tracing::warn!("selecting the model failed: {error:?}");
-                }
-            });
-        }
-        if names::<SetAgentEffort>(id) {
-            let payload: SetAgentEffort = decode(bytes)?;
-            return self.agent_call(move |api, sid| async move {
-                if let Err(error) = api.set_effort(&sid, &payload.level).await {
-                    tracing::warn!("setting the effort failed: {error:?}");
-                }
-            });
-        }
-        if names::<ChatMediaListRequest>(id) {
-            let mut request = self.composer.media_request;
-            request.set(Some(decode(bytes)?));
-            return Ok(());
-        }
-        if names::<ChatAttachPaths>(id) {
-            return self.attach(decode(bytes)?);
-        }
-        if names::<CommandBarActionEvent>(id) {
-            return self.act(decode(bytes)?);
-        }
-        if names::<StartDataRequest>(id) {
-            return Ok(());
-        }
-        Err(EventListenerError::Unsupported)
     }
 
-    fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
+    fn listen(
+        &self,
+        target: BinEventTarget,
+        id: &str,
+        on_bytes: BytesListener,
+    ) -> Result<(), EventListenerError> {
+        if !target.accepts_any(MOBILE_PAGE_URLS) {
+            return Err(EventListenerError::Unsupported);
+        }
         match id {
-            CHAT_SNAPSHOT_EVENT => {
-                World::with(|world| {
-                    world.listen(CHAT_SNAPSHOT_EVENT, on_bytes);
-                    world.refresh::<Snapshot>();
-                });
+            ChatUiState::ID => {
+                poll_models(self);
+                poll_media(self);
+                let mut runtime = self.runtime.borrow_mut();
+                let world = runtime.app.world_mut();
+                world
+                    .non_send_mut::<PageListeners>()
+                    .0
+                    .insert(ChatUiState::ID.to_string(), on_bytes);
+                mark_changed::<Snapshot>(world);
+                mark_changed::<Attachments>(world);
+                mark_changed::<Media>(world);
+                mark_changed::<Picker>(world);
             }
-            START_COMMAND_BAR_OPEN_EVENT => {
-                World::with(|world| {
-                    world.listen(START_COMMAND_BAR_OPEN_EVENT, on_bytes);
-                    world.refresh::<Launcher>();
-                });
+            CommandBarUiState::ID => {
+                let mut runtime = self.runtime.borrow_mut();
+                let world = runtime.app.world_mut();
+                world
+                    .non_send_mut::<PageListeners>()
+                    .0
+                    .insert(CommandBarUiState::ID.to_string(), on_bytes);
+                mark_changed::<Launcher>(world);
             }
-            CHAT_ATTACHMENTS_EVENT => {
-                World::with(|world| {
-                    world.listen(CHAT_ATTACHMENTS_EVENT, on_bytes);
-                    world.refresh::<Attachments>();
-                });
-            }
-            MODEL_STATE_EVENT => {
-                self.poll_models();
-                World::with(|world| {
-                    world.listen(MODEL_STATE_EVENT, on_bytes);
-                    world.refresh::<Picker>();
-                });
-            }
-            CHAT_MEDIA_ENTRIES_EVENT => {
-                self.poll_media();
-                World::with(|world| world.listen(CHAT_MEDIA_ENTRIES_EVENT, on_bytes));
-            }
-            TEAM_EVENT => {
-                self.poll_team();
-                World::with(|world| {
-                    world.listen(TEAM_EVENT, on_bytes);
-                    world.refresh::<Team>();
-                });
+            TeamEvent::ID => {
+                poll_team(self);
+                let mut runtime = self.runtime.borrow_mut();
+                let world = runtime.app.world_mut();
+                world
+                    .non_send_mut::<PageListeners>()
+                    .0
+                    .insert(TeamEvent::ID.to_string(), on_bytes);
+                mark_changed::<Team>(world);
             }
             _ => return Err(EventListenerError::Unsupported),
         }
@@ -177,219 +245,299 @@ impl PageHost for MobileHost {
     }
 }
 
-impl MobileHost {
-    fn submit(&self, payload: ChatSubmit) -> Result<(), EventListenerError> {
-        if self.session.sid().is_empty() {
-            return Err(EventListenerError::Unsupported);
+fn submit(host: &MobileHost, payload: ChatSubmit) -> Result<(), EventListenerError> {
+    if host.session.sid().is_empty() {
+        return Err(EventListenerError::Unsupported);
+    }
+    let runtime = host.runtime.borrow();
+    let selected = &runtime.app.world().resource::<Attachments>().0;
+    let mut attachments = Vec::with_capacity(selected.len());
+    for attachment in selected {
+        attachments.push(AgentAttachment {
+            path: attachment.path.clone(),
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
+            size: attachment.size,
+        });
+    }
+    drop(runtime);
+    let effect = host.composer.clear_effect();
+    let mut runtime = host.runtime.borrow_mut();
+    let world = runtime.app.world_mut();
+    world.write_message(Submitted);
+    if let Some(effect) = effect {
+        world.resource_mut::<ChatUiStateProjection>().write(&effect);
+    }
+    drop(runtime);
+    let runtime = host.runtime.clone();
+    agent_call(host, move |api, sid| async move {
+        let request = PromptRequest {
+            client_op_id: next_client_op_id(),
+            text: payload.text,
+            attachments,
+        };
+        if let Err(ApiError::Message(message)) = api.send_prompt(&sid, &request).await {
+            report(&runtime, RemoteStatus::Errored(message));
         }
-        let mut attachments = Vec::with_capacity(payload.attachments.len());
-        for attachment in payload.attachments {
-            attachments.push(AgentAttachment {
-                path: attachment.path,
-                name: attachment.name,
-                mime_type: attachment.mime_type,
-                size: attachment.size,
-            });
-        }
-        World::with(|world| world.send(Submitted));
-        self.agent_call(move |api, sid| async move {
-            let request = PromptRequest {
-                client_op_id: next_client_op_id(),
-                text: payload.text,
-                attachments,
-            };
-            if let Err(ApiError::Message(message)) = api.send_prompt(&sid, &request).await {
-                MobileHost::report(RemoteStatus::Errored(message));
-            }
-        })
-    }
-
-    fn report(status: RemoteStatus) {
-        World::with(|world| world.send(Reported(RemoteEvent::Status { status })));
-    }
-
-    fn cancel(&self) -> Result<(), EventListenerError> {
-        self.agent_call(|api, sid| async move {
-            if let Err(error) = api.cancel(&sid).await {
-                tracing::warn!("cancelling failed: {error:?}");
-            }
-        })
-    }
-
-    fn approve(&self, payload: ChatApproval) -> Result<(), EventListenerError> {
-        World::with(|world| world.send(Reported(RemoteEvent::Approval { approval: None })));
-        self.agent_call(move |api, sid| async move {
-            let request = ApprovalRequest {
-                call_id: payload.call_id,
-                decision: payload.decision,
-            };
-            if let Err(error) = api.approve(&sid, &request).await {
-                tracing::warn!("approving failed: {error:?}");
-            }
-        })
-    }
-
-    fn attach(&self, payload: ChatAttachPaths) -> Result<(), EventListenerError> {
-        let offered = self.composer.offered.read();
-        let mut resolved = Vec::with_capacity(payload.paths.len());
-        for path in &payload.paths {
-            for entry in offered.iter() {
-                if &entry.path != path || entry.is_dir {
-                    continue;
-                }
-                resolved.push(ChatAttachment {
-                    path: entry.path.clone(),
-                    name: entry.name.clone(),
-                    mime_type: entry.mime_type.clone(),
-                    size: entry.size,
-                    preview_data_url: entry.preview_data_url.clone(),
-                });
-                break;
-            }
-        }
-        World::with(|world| world.send(Attach(resolved)));
-        Ok(())
-    }
-
-    fn act(&self, action: CommandBarActionEvent) -> Result<(), EventListenerError> {
-        match action {
-            CommandBarActionEvent::Prompt {
-                text, target_url, ..
-            } => {
-                self.session
-                    .start_chat(self.api.clone(), self.sessions, text, target_url);
-                Ok(())
-            }
-            CommandBarActionEvent::SwitchTab { index, .. } => {
-                let Some(session) = self.sessions.read().get(index).cloned() else {
-                    return Err(EventListenerError::Unsupported);
-                };
-                self.session.open(session);
-                Ok(())
-            }
-            CommandBarActionEvent::Dismiss => Ok(()),
-            CommandBarActionEvent::Open { .. }
-            | CommandBarActionEvent::Terminal { .. }
-            | CommandBarActionEvent::Command { .. }
-            | CommandBarActionEvent::Space { .. }
-            | CommandBarActionEvent::Ex { .. }
-            | CommandBarActionEvent::Pick { .. } => Err(EventListenerError::Unsupported),
-        }
-    }
-
-    fn agent_call<F, Fut>(&self, call: F) -> Result<(), EventListenerError>
-    where
-        F: FnOnce(Api, String) -> Fut + 'static,
-        Fut: std::future::Future<Output = ()> + 'static,
-    {
-        let sid = self.session.sid();
-        if sid.is_empty() {
-            return Err(EventListenerError::Unsupported);
-        }
-        let api = self.api.clone();
-        spawn(call(api, sid));
-        Ok(())
-    }
+    })
 }
 
-impl MobileHost {
-    fn poll_models(&self) {
-        let (api, session) = (self.api.clone(), self.session);
-        let epoch = self.epoch;
-        let (rc, mut changed) = ReactiveContext::new();
-        spawn(async move {
-            loop {
-                if superseded(epoch) {
-                    return;
-                }
-                let sid = rc.reset_and_run_in(|| session.sid());
-                let mut attempts = MODEL_FETCH_ATTEMPTS;
-                while !sid.is_empty() && attempts > 0 {
-                    attempts -= 1;
-                    let fetched = api.models(&sid).await;
-                    if superseded(epoch) {
-                        return;
-                    }
-                    match fetched {
-                        Ok(state) => {
-                            World::with(|world| world.insert(Models(state)));
-                            break;
-                        }
-                        Err(ApiError::Unauthorized | ApiError::NotFound) => return,
-                        Err(ApiError::Message(_)) => sleep_ms(MODEL_RETRY_INTERVAL_MS).await,
-                    }
-                }
-                if changed.next().await.is_none() {
-                    return;
-                }
-            }
-        });
-    }
+fn remove_attachment(
+    host: &MobileHost,
+    payload: ChatRemoveAttachment,
+) -> Result<(), EventListenerError> {
+    host.runtime
+        .borrow_mut()
+        .app
+        .world_mut()
+        .write_message(RemoveAttachment(payload.path));
+    Ok(())
+}
 
-    fn poll_media(&self) {
-        let (api, session) = (self.api.clone(), self.session);
-        let composer = self.composer;
-        let mut offered = composer.offered;
-        let epoch = self.epoch;
-        let (rc, mut changed) = ReactiveContext::new();
-        spawn(async move {
-            loop {
-                if superseded(epoch) {
-                    return;
-                }
-                let asked = rc.reset_and_run_in(|| composer.media_request.read().clone());
-                let sid = session.sid();
-                if let Some(request) = asked
-                    && !sid.is_empty()
-                {
-                    let fetched = api.media(&sid, &request.query).await;
-                    if superseded(epoch) {
-                        return;
-                    }
-                    if let Ok(found) = fetched {
-                        offered.set(found.clone());
-                        World::with(|world| {
-                            world.insert(Browsed {
-                                request_id: request.request_id,
-                                query: request.query,
-                                entries: found,
-                            });
-                        });
-                    }
-                }
-                if changed.next().await.is_none() {
-                    return;
-                }
-            }
-        });
-    }
+fn report(runtime: &RuntimeHandle, status: RemoteStatus) {
+    runtime
+        .borrow_mut()
+        .app
+        .world_mut()
+        .write_message(Reported(RemoteEvent::Status { status }));
+}
 
-    fn poll_team(&self) {
-        let (api, epoch) = (self.api.clone(), self.epoch);
-        spawn(async move {
-            loop {
-                if superseded(epoch) {
-                    return;
-                }
-                let fetched = api.team().await;
+fn cancel(host: &MobileHost) -> Result<(), EventListenerError> {
+    agent_call(host, |api, sid| async move {
+        if let Err(error) = api.cancel(&sid).await {
+            tracing::warn!("cancelling failed: {error:?}");
+        }
+    })
+}
+
+fn escape(host: &MobileHost) -> Result<(), EventListenerError> {
+    let running = matches!(
+        &host
+            .runtime
+            .borrow()
+            .app
+            .world()
+            .resource::<Conversation>()
+            .status,
+        RemoteStatus::Streaming
+    );
+    if !running && let Some(effect) = host.composer.clear_effect() {
+        host.runtime
+            .borrow_mut()
+            .app
+            .world_mut()
+            .resource_mut::<ChatUiStateProjection>()
+            .write(&effect);
+    }
+    cancel(host)
+}
+
+fn approve(host: &MobileHost, payload: ChatApproval) -> Result<(), EventListenerError> {
+    host.runtime
+        .borrow_mut()
+        .app
+        .world_mut()
+        .write_message(Reported(RemoteEvent::Approval { approval: None }));
+    agent_call(host, move |api, sid| async move {
+        let request = ApprovalRequest {
+            call_id: payload.call_id,
+            decision: payload.decision,
+        };
+        if let Err(error) = api.approve(&sid, &request).await {
+            tracing::warn!("approving failed: {error:?}");
+        }
+    })
+}
+
+fn attach(host: &MobileHost, payload: ChatAttachPaths) -> Result<(), EventListenerError> {
+    let offered = host.composer.offered.read();
+    let mut resolved = Vec::with_capacity(payload.paths.len());
+    for path in &payload.paths {
+        for entry in offered.iter() {
+            if &entry.path != path || entry.is_dir {
+                continue;
+            }
+            resolved.push(ChatAttachment {
+                path: entry.path.clone(),
+                name: entry.name.clone(),
+                mime_type: entry.mime_type.clone(),
+                size: entry.size,
+                preview_data_url: entry.preview_data_url.clone(),
+            });
+            break;
+        }
+    }
+    host.runtime
+        .borrow_mut()
+        .app
+        .world_mut()
+        .write_message(Attach(resolved));
+    Ok(())
+}
+
+fn prompt(host: &MobileHost, request: CommandBarPromptRequest) -> Result<(), EventListenerError> {
+    crate::session::start_chat(
+        host.runtime.clone(),
+        host.api.clone(),
+        host.sessions,
+        request.text,
+        request.target_url,
+    );
+    Ok(())
+}
+
+fn switch_tab(host: &MobileHost, request: SwitchTabRequest) -> Result<(), EventListenerError> {
+    let Some(session) = host.sessions.read().get(request.index).cloned() else {
+        return Err(EventListenerError::Unsupported);
+    };
+    host.runtime
+        .borrow_mut()
+        .app
+        .world_mut()
+        .write_message(crate::session::OpenSession(session));
+    Ok(())
+}
+
+fn agent_call<F, Fut>(host: &MobileHost, call: F) -> Result<(), EventListenerError>
+where
+    F: FnOnce(Api, String) -> Fut + 'static,
+    Fut: std::future::Future<Output = ()> + 'static,
+{
+    let sid = host.session.sid();
+    if sid.is_empty() {
+        return Err(EventListenerError::Unsupported);
+    }
+    let api = host.api.clone();
+    spawn(call(api, sid));
+    Ok(())
+}
+
+fn poll_models(host: &MobileHost) {
+    let (api, session) = (host.api.clone(), host.session);
+    let runtime = host.runtime.clone();
+    let epoch = host.epoch;
+    let (rc, mut changed) = ReactiveContext::new();
+    spawn(async move {
+        loop {
+            if superseded(epoch) {
+                return;
+            }
+            let sid = rc.reset_and_run_in(|| session.sid());
+            let mut attempts = MODEL_FETCH_ATTEMPTS;
+            while !sid.is_empty() && attempts > 0 {
+                attempts -= 1;
+                let fetched = api.models(&sid).await;
                 if superseded(epoch) {
                     return;
                 }
                 match fetched {
-                    Ok(members) => {
-                        World::with(|world| world.insert(Members(members)));
+                    Ok(state) => {
+                        runtime.borrow_mut().app.insert_resource(Models(state));
+                        break;
                     }
                     Err(ApiError::Unauthorized | ApiError::NotFound) => return,
-                    Err(ApiError::Message(_)) => {}
+                    Err(ApiError::Message(_)) => sleep_ms(MODEL_RETRY_INTERVAL_MS).await,
                 }
-                sleep_ms(TEAM_POLL_INTERVAL_MS).await;
             }
-        });
-    }
+            if changed.next().await.is_none() {
+                return;
+            }
+        }
+    });
 }
 
-fn names<T: ?Sized>(id: &str) -> bool {
-    id == std::any::type_name::<T>()
+fn poll_media(host: &MobileHost) {
+    let (api, session) = (host.api.clone(), host.session);
+    let runtime = host.runtime.clone();
+    let composer = host.composer;
+    let mut offered = composer.offered;
+    let epoch = host.epoch;
+    let (rc, mut changed) = ReactiveContext::new();
+    spawn(async move {
+        loop {
+            if superseded(epoch) {
+                return;
+            }
+            let asked = rc.reset_and_run_in(|| composer.media_request.read().clone());
+            let sid = session.sid();
+            if let Some(request) = asked {
+                if request.query.is_empty() {
+                    offered.set(Vec::new());
+                    runtime.borrow_mut().app.insert_resource(Browsed {
+                        request_id: request.request_id,
+                        query: request.query,
+                        entries: Vec::new(),
+                    });
+                    if changed.next().await.is_none() {
+                        return;
+                    }
+                    continue;
+                }
+                if sid.is_empty() {
+                    if changed.next().await.is_none() {
+                        return;
+                    }
+                    continue;
+                }
+                let fetched = api.media(&sid, &request.query).await;
+                if superseded(epoch) {
+                    return;
+                }
+                let current = composer.media_request.peek();
+                if current.as_ref().is_none_or(|current| {
+                    current.request_id != request.request_id || current.query != request.query
+                }) {
+                    if changed.next().await.is_none() {
+                        return;
+                    }
+                    continue;
+                }
+                if let Ok(found) = fetched {
+                    offered.set(found.clone());
+                    runtime.borrow_mut().app.insert_resource(Browsed {
+                        request_id: request.request_id,
+                        query: request.query,
+                        entries: found,
+                    });
+                }
+            }
+            if changed.next().await.is_none() {
+                return;
+            }
+        }
+    });
+}
+
+fn poll_team(host: &MobileHost) {
+    let (api, epoch) = (host.api.clone(), host.epoch);
+    let runtime = host.runtime.clone();
+    spawn(async move {
+        loop {
+            if superseded(epoch) {
+                return;
+            }
+            let fetched = api.team().await;
+            if superseded(epoch) {
+                return;
+            }
+            match fetched {
+                Ok(members) => {
+                    runtime.borrow_mut().app.insert_resource(Members(members));
+                }
+                Err(ApiError::Unauthorized | ApiError::NotFound) => return,
+                Err(ApiError::Message(_)) => {}
+            }
+            sleep_ms(TEAM_POLL_INTERVAL_MS).await;
+        }
+    });
+}
+
+fn mark_changed<R: bevy_ecs::resource::Resource<Mutability = bevy_ecs::component::Mutable>>(
+    world: &mut bevy_ecs::world::World,
+) {
+    if let Some(mut resource) = world.get_resource_mut::<R>() {
+        resource.set_changed();
+    }
 }
 
 fn decode<T>(bytes: &[u8]) -> Result<T, EventListenerError>

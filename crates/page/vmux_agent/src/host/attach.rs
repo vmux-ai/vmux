@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_command::WriteAppCommands;
-use vmux_core::PageMetadata;
-use vmux_core::agent::AgentKind;
-use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{
+use vmux_api::protocol::{
     AgentCommand as ServiceAgentCommand, AgentCommandResult, ClientMessage, ProcessId,
 };
+use vmux_command::WriteCommandRequests;
+use vmux_core::PageMetadata;
+use vmux_core::agent::AgentKind;
+use vmux_service::client::ServiceRequest;
 use vmux_setting::AppSettings;
 use vmux_terminal::ServiceMessageSet;
 use vmux_terminal::Terminal;
@@ -21,13 +21,13 @@ pub(super) struct AttachPlugin;
 
 impl Plugin for AttachPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_message::<ServiceRequest>().add_systems(
             Update,
             handle_resume_in_acp
-                .in_set(WriteAppCommands)
+                .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
-                .after(super::command::handle_agent_tool_calls)
-                .before(super::command::handle_agent_commands),
+                .after(super::command::CommandSet::ToolCalls)
+                .before(super::command::CommandSet::Commands),
         );
     }
 }
@@ -38,8 +38,8 @@ pub fn attach_page_agent_to_stack(
     model: &str,
     sid: &str,
     commands: &mut Commands,
-    idx: &crate::client::page::strategy_index::PageStrategyIndex,
-    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: &crate::runtime::provider::index::ProviderStrategyIndex,
+    kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) -> Option<()> {
     attach_page_agent_to_stack_with_webview(
         stack, provider, model, sid, None, commands, idx, kind_q,
@@ -54,8 +54,8 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
     sid: &str,
     webview: Option<Entity>,
     commands: &mut Commands,
-    idx: &crate::client::page::strategy_index::PageStrategyIndex,
-    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: &crate::runtime::provider::index::ProviderStrategyIndex,
+    kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) -> Option<()> {
     let entity = idx.get_by_strs(provider, model)?;
     let kind = kind_q.get(entity).ok()?.0;
@@ -140,7 +140,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
     webview: Option<Entity>,
     commands: &mut Commands,
 ) {
-    let agent_id = crate::acp_install::agent_url_id(agent_id);
+    let agent_id = crate::acp_tool::agent_url_id(agent_id);
     let url = match resume {
         Some(acp_sid) => format!("vmux://sessions/{agent_id}/{acp_sid}"),
         None => format!("vmux://sessions/{agent_id}"),
@@ -151,7 +151,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
         bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
         icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
     });
-    let anchor = vmux_service::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     commands.entity(stack).insert((
         vmux_session::AcpSession {
             agent_id: agent_id.to_string(),
@@ -207,17 +207,17 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
 }
 
 pub(crate) fn acp_registry_agent_for_id<'a>(
-    catalog: Option<&'a crate::client::acp::AcpCatalog>,
+    catalog: Option<&'a crate::runtime::acp::AcpCatalog>,
     id: &str,
 ) -> Option<&'a crate::acp_registry::RegistryAgent> {
     catalog?
         .agents
         .iter()
-        .find(|agent| crate::acp_install::agent_ids_match(&agent.id, id))
+        .find(|agent| crate::acp_tool::agent_ids_match(&agent.id, id))
 }
 
 pub(crate) fn acp_icon_for_id(
-    catalog: Option<&crate::client::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::acp::AcpCatalog>,
     id: &str,
 ) -> Option<String> {
     acp_registry_agent_for_id(catalog, id).and_then(|agent| agent.icon.clone())
@@ -226,7 +226,7 @@ pub(crate) fn acp_icon_for_id(
 pub(crate) fn acp_profile_name_for_id(
     id: &str,
     config: Option<&vmux_setting::AcpAgentConfig>,
-    catalog: Option<&crate::client::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::acp::AcpCatalog>,
 ) -> String {
     acp_registry_agent_for_id(catalog, id)
         .map(|agent| agent.name.trim())
@@ -242,7 +242,7 @@ pub(crate) fn acp_profile_name_for_id(
 fn acp_target_id_for_kind(
     kind: AgentKind,
     configs: &[vmux_setting::AcpAgentConfig],
-    catalog: Option<&crate::client::acp::AcpCatalog>,
+    catalog: Option<&crate::runtime::acp::AcpCatalog>,
 ) -> Option<String> {
     configs
         .iter()
@@ -286,14 +286,15 @@ fn handle_resume_in_acp(
         With<Terminal>,
     >,
     settings: Res<AppSettings>,
-    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     mut swap: MessageWriter<vmux_core::agent::SwapStackSession>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
-        let ServiceAgentCommand::ResumeInAcp { anchor } = &request.command else {
+        let ServiceAgentCommand::ResumeInAcp(command) = &request.command else {
             continue;
         };
+        let anchor = &command.anchor;
         let result = if !matches!(
             &request.origin,
             CommandOrigin::Agent {
@@ -340,12 +341,10 @@ fn handle_resume_in_acp(
         } else {
             AgentCommandResult::Error("resume_in_acp: current CLI session not found".to_string())
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(ClientMessage::AgentCommandResponse {
-                request_id: request.request_id,
-                result,
-            });
-        }
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
+            request_id: request.request_id,
+            result,
+        }));
     }
 }
 
@@ -353,7 +352,7 @@ fn handle_resume_in_acp(
 mod tests {
     use super::*;
     use crate::host::test_support::test_settings;
-    use vmux_service::protocol::AgentRequestId;
+    use vmux_api::protocol::AgentRequestId;
     use vmux_terminal::Terminal;
 
     #[test]
@@ -393,7 +392,7 @@ mod tests {
     #[test]
     pub(crate) fn acp_icon_for_id_reads_catalog() {
         use crate::acp_registry::{Distribution, RegistryAgent};
-        let catalog = crate::client::acp::AcpCatalog {
+        let catalog = crate::runtime::acp::AcpCatalog {
             agents: vec![
                 RegistryAgent {
                     id: "mistral-vibe".to_string(),
@@ -441,7 +440,7 @@ mod tests {
             cwd: None,
             version: None,
         };
-        let catalog = crate::client::acp::AcpCatalog {
+        let catalog = crate::runtime::acp::AcpCatalog {
             agents: vec![RegistryAgent {
                 id: "claude-acp".into(),
                 name: "Claude".into(),
@@ -491,6 +490,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AgentCommandRequest>()
+            .add_message::<ServiceRequest>()
             .add_message::<vmux_core::agent::SwapStackSession>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_resume_in_acp);
@@ -520,7 +520,9 @@ mod tests {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::ResumeInAcp { anchor },
+                command: ServiceAgentCommand::ResumeInAcp(vmux_api::protocol::AgentResumeInAcp {
+                    anchor,
+                }),
             });
 
         app.update();

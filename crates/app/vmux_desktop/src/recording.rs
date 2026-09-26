@@ -27,7 +27,7 @@ impl Plugin for RecordingPlugin {
                     drain_recordings,
                 )
                     .chain()
-                    .after(vmux_command::WriteAppCommands),
+                    .after(vmux_command::WriteCommandRequests),
             );
     }
 }
@@ -185,7 +185,7 @@ pub(crate) struct CropRect {
 }
 
 impl CropRect {
-    pub(crate) fn of(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
+    pub(crate) fn from_node(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
         let min = rect.min();
         let left = (min.x.round().max(0.0) as u32).min(img_w.saturating_sub(1));
         let top = (min.y.round().max(0.0) as u32).min(img_h.saturating_sub(1));
@@ -213,7 +213,7 @@ fn resolve_crop(
     let mut entity = Entity::from_bits(bits);
     for _ in 0..8 {
         if let Ok(&computed) = node_q.get(entity) {
-            return Some(CropRect::of(computed, img_w, img_h));
+            return Some(CropRect::from_node(computed, img_w, img_h));
         }
         entity = child_of_q.get(entity).ok()?.get();
     }
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn crop_rect_clamps_to_image() {
-        let r = CropRect::of(
+        let r = CropRect::from_node(
             ComputedNode {
                 size: Vec2::new(80.0, 60.0),
                 center: Vec2::new(100.0, 100.0),

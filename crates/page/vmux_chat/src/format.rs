@@ -1,2 +1,325 @@
-pub mod approval;
-pub mod composer;
+use crate::event::ModelOptionEntry;
+#[cfg(test)]
+use crate::event::ResumableSessionEntry;
+pub(crate) use crate::selector::{SelectorMode, selector_mode};
+use unicode_segmentation::UnicodeSegmentation;
+#[cfg(ui)]
+pub(crate) use vmux_ui::prompt_recall::{
+    PromptHistoryDirection, move_prompt_history, prompt_history_direction,
+};
+
+const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PromptEdit<'a> {
+    Insert(&'a str),
+    Backspace,
+    Delete,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResumeMenuState {
+    Loading,
+    Empty,
+    NoMatch,
+    Results,
+}
+
+pub fn filter_models(models: &[ModelOptionEntry], query: &str) -> Vec<ModelOptionEntry> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return models.to_vec();
+    }
+    models
+        .iter()
+        .filter(|model| {
+            model.id.to_lowercase().contains(&query)
+                || model.name.to_lowercase().contains(&query)
+                || model.description.to_lowercase().contains(&query)
+        })
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn resume_menu_state(
+    active: bool,
+    loading: bool,
+    query: &str,
+    result_count: usize,
+) -> ResumeMenuState {
+    if !active || loading {
+        ResumeMenuState::Loading
+    } else if result_count == 0 && !query.trim().is_empty() {
+        ResumeMenuState::NoMatch
+    } else if result_count == 0 {
+        ResumeMenuState::Empty
+    } else {
+        ResumeMenuState::Results
+    }
+}
+
+pub(crate) fn is_handoff_boundary(message_index: usize, imported_message_count: u32) -> bool {
+    imported_message_count != 0 && message_index + 1 == imported_message_count as usize
+}
+
+pub(crate) fn chat_page_title(generated_title: &str, agent_name: &str) -> String {
+    let title = normalize_chat_page_title(generated_title);
+    if title.is_empty() {
+        normalize_chat_page_title(agent_name)
+    } else {
+        title
+    }
+}
+
+fn normalize_chat_page_title(value: &str) -> String {
+    let mut title = String::new();
+    let mut graphemes_written = 0;
+    let mut pending_space = false;
+    let mut truncated = false;
+
+    for grapheme in value.graphemes(true) {
+        if grapheme.chars().all(char::is_whitespace) {
+            pending_space = !title.is_empty();
+            continue;
+        }
+        let grapheme = grapheme
+            .chars()
+            .filter(|character| !is_disallowed_chat_page_title_char(*character))
+            .collect::<String>();
+        if grapheme.is_empty() {
+            continue;
+        }
+        if pending_space {
+            if graphemes_written >= CHAT_PAGE_TITLE_MAX_GRAPHEMES {
+                truncated = true;
+                break;
+            }
+            title.push(' ');
+            graphemes_written += 1;
+            pending_space = false;
+        }
+        if graphemes_written >= CHAT_PAGE_TITLE_MAX_GRAPHEMES {
+            truncated = true;
+            break;
+        }
+        title.push_str(&grapheme);
+        graphemes_written += 1;
+    }
+
+    if truncated {
+        if let Some((start, _)) = title.grapheme_indices(true).next_back() {
+            title.truncate(start);
+        }
+        title.push('…');
+    }
+    title
+}
+
+fn is_disallowed_chat_page_title_char(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{180E}'
+                | '\u{200B}'
+                | '\u{200E}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+        )
+}
+
+pub(crate) fn edit_prompt(
+    value: &str,
+    selection_start: u32,
+    selection_end: u32,
+    edit: PromptEdit<'_>,
+) -> (String, u32) {
+    let start = utf16_to_byte(value, selection_start);
+    let end = utf16_to_byte(value, selection_end);
+    let (start, end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    let (replace_start, replace_end, replacement) = match edit {
+        PromptEdit::Insert(text) => (start, end, text),
+        PromptEdit::Backspace if start != end => (start, end, ""),
+        PromptEdit::Backspace => {
+            let previous = value[..start]
+                .char_indices()
+                .next_back()
+                .map(|(index, _)| index)
+                .unwrap_or(start);
+            (previous, start, "")
+        }
+        PromptEdit::Delete if start != end => (start, end, ""),
+        PromptEdit::Delete => {
+            let next = value[end..]
+                .chars()
+                .next()
+                .map(|character| end + character.len_utf8())
+                .unwrap_or(end);
+            (end, next, "")
+        }
+    };
+    let mut updated =
+        String::with_capacity(value.len() - (replace_end - replace_start) + replacement.len());
+    updated.push_str(&value[..replace_start]);
+    updated.push_str(replacement);
+    updated.push_str(&value[replace_end..]);
+    let caret_byte = replace_start + replacement.len();
+    let caret_utf16 = updated[..caret_byte].encode_utf16().count() as u32;
+    (updated, caret_utf16)
+}
+
+fn utf16_to_byte(value: &str, offset: u32) -> usize {
+    let mut units = 0u32;
+    for (byte, character) in value.char_indices() {
+        if units >= offset {
+            return byte;
+        }
+        units += character.len_utf16() as u32;
+    }
+    value.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session(sid: &str, title: &str, cwd: &str) -> ResumableSessionEntry {
+        ResumableSessionEntry {
+            sid: sid.into(),
+            title: title.into(),
+            cwd: cwd.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn selector_mode_distinguishes_mcp_and_other_selector_arguments() {
+        assert_eq!(selector_mode("hello"), SelectorMode::None);
+        assert_eq!(selector_mode("/res"), SelectorMode::Commands("res"));
+        assert_eq!(selector_mode("/resume"), SelectorMode::Commands("resume"));
+        assert_eq!(selector_mode("/resume "), SelectorMode::Resume(""));
+        assert_eq!(selector_mode("/model"), SelectorMode::Commands("model"));
+        assert_eq!(selector_mode("/model son"), SelectorMode::Models("son"));
+        assert_eq!(selector_mode("/mcp"), SelectorMode::Mcp(""));
+        assert_eq!(selector_mode("/mcp lin"), SelectorMode::Mcp("lin"));
+        assert_eq!(
+            selector_mode("/resume  SID-9"),
+            SelectorMode::Resume("SID-9")
+        );
+        assert_eq!(selector_mode("/unknown arg"), SelectorMode::None);
+    }
+
+    #[test]
+    fn models_filter_by_name_id_and_description() {
+        let models = vec![
+            ModelOptionEntry {
+                id: "claude-sonnet".into(),
+                name: "Sonnet".into(),
+                description: "Balanced".into(),
+            },
+            ModelOptionEntry {
+                id: "claude-opus".into(),
+                name: "Opus".into(),
+                description: "Most capable".into(),
+            },
+        ];
+        assert_eq!(filter_models(&models, "son")[0].id, "claude-sonnet");
+        assert_eq!(filter_models(&models, "capable")[0].id, "claude-opus");
+        assert_eq!(filter_models(&models, "claude-opus")[0].name, "Opus");
+    }
+
+    #[test]
+    fn resumable_session_matches_sid_title_and_cwd_case_insensitively() {
+        let sessions = [
+            session("SID-ABC", "Fix auth", "/work/api"),
+            session("sid-def", "Docs", "/work/site"),
+        ];
+        assert!(sessions[0].matches("abc"));
+        assert!(sessions[0].matches("AUTH"));
+        assert!(sessions[1].matches("SITE"));
+        assert!(!sessions[0].matches("missing"));
+    }
+
+    #[test]
+    fn resume_menu_distinguishes_loading_from_loaded_empty() {
+        assert_eq!(
+            resume_menu_state(false, false, "", 0),
+            ResumeMenuState::Loading
+        );
+        assert_eq!(
+            resume_menu_state(true, true, "", 0),
+            ResumeMenuState::Loading
+        );
+        assert_eq!(
+            resume_menu_state(true, false, "", 0),
+            ResumeMenuState::Empty
+        );
+        assert_eq!(
+            resume_menu_state(true, false, "missing", 0),
+            ResumeMenuState::NoMatch
+        );
+        assert_eq!(
+            resume_menu_state(true, false, "match", 1),
+            ResumeMenuState::Results
+        );
+    }
+
+    #[test]
+    fn chat_page_title_uses_model_written_summary() {
+        assert_eq!(
+            chat_page_title("  Refine model-generated\n summaries  ", "Codex"),
+            "Refine model-generated summaries"
+        );
+        assert_eq!(chat_page_title("", "Codex"), "Codex");
+    }
+
+    #[test]
+    fn chat_page_title_falls_back_to_agent_and_truncates_topic() {
+        assert_eq!(chat_page_title("", "Codex"), "Codex");
+
+        let generated = "a".repeat(CHAT_PAGE_TITLE_MAX_GRAPHEMES + 10);
+        let title = chat_page_title(&generated, "Codex");
+        assert_eq!(title.graphemes(true).count(), CHAT_PAGE_TITLE_MAX_GRAPHEMES);
+        assert!(title.ends_with('…'));
+        assert_eq!(
+            chat_page_title("Fix \u{202E}\x1b title", "Codex"),
+            "Fix title"
+        );
+        assert_eq!(
+            chat_page_title("Keep 👩‍💻 and فارسی\u{200C}", "Codex"),
+            "Keep 👩‍💻 and فارسی\u{200C}"
+        );
+    }
+
+    #[test]
+    fn prompt_edits_preserve_utf16_caret_semantics() {
+        assert_eq!(
+            edit_prompt("abcd", 1, 3, PromptEdit::Insert("X")),
+            ("aXd".into(), 2)
+        );
+        assert_eq!(
+            edit_prompt("a🙂b", 3, 3, PromptEdit::Backspace),
+            ("ab".into(), 1)
+        );
+        assert_eq!(
+            edit_prompt("a🙂b", 1, 1, PromptEdit::Delete),
+            ("ab".into(), 1)
+        );
+    }
+
+    #[test]
+    fn handoff_divider_appears_after_last_imported_message() {
+        assert!(!is_handoff_boundary(0, 2));
+        assert!(is_handoff_boundary(1, 2));
+        assert!(!is_handoff_boundary(2, 2));
+        assert!(!is_handoff_boundary(0, 0));
+    }
+}

@@ -1,120 +1,56 @@
+use std::path::Path;
 use std::sync::mpsc;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, HostWindow,
-};
+use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use vmux_core::knowledge::{
-    KNOWLEDGE_CREATE_RESULT_EVENT, KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT,
-    KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeIndex, KnowledgeSearchEvent,
-    KnowledgeSearchMatch, KnowledgeSearchRequest, KnowledgeTreeEvent, KnowledgeTreeToggle,
-};
-use vmux_core::page::PageReady;
-use vmux_layout::LayoutCef;
+use vmux_core::knowledge::KnowledgeIndex;
 
-use crate::store::{build_tree, create_entry, ensure_vault, ensure_vault_repository, vault_dir};
+use crate::store::{ensure_vault, ensure_vault_repository, vault_dir};
+
+pub struct KnowledgePlugin;
 
 impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(PAGE_MANIFEST);
-        let vault = vault_dir();
-        if ensure_vault(&vault).is_ok() {
-            if let Err(error) = ensure_vault_repository(&vault) {
-                bevy::log::warn!("knowledge Git initialization failed: {error}");
-            }
-            if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
-                bevy::log::warn!("external agent Knowledge sync failed: {error}");
-            }
-            let (tx, rx) = mpsc::channel();
-            let watch_wake = app
-                .world()
-                .get_resource::<EventLoopProxyWrapper>()
-                .map(|wrapper| (**wrapper).clone());
-            match notify::recommended_watcher(move |result| {
-                if tx.send(result).is_ok()
-                    && let Some(wake) = watch_wake.as_ref()
-                {
-                    let _ = wake.send_event(WinitUserEvent::WakeUp);
-                }
-            }) {
-                Ok(mut watcher) => {
-                    if watcher.watch(&vault, RecursiveMode::Recursive).is_ok() {
-                        app.insert_non_send(KnowledgeWatch {
-                            _watcher: watcher,
-                            rx,
-                        });
-                    }
-                }
-                Err(error) => bevy::log::warn!("knowledge watcher init failed: {error}"),
-            }
-        }
-        app.init_resource::<KnowledgeState>()
-            .init_resource::<KnowledgeIndex>()
+        app.add_plugins(crate::KnowledgeToolPlugin);
+        app.world_mut()
+            .spawn((PAGE_MANIFEST, KnowledgeIndexRuntime::default()));
+        app.init_resource::<KnowledgeIndex>()
             .register_type::<ExpandedKnowledgeDirs>()
-            .add_plugins(BinEventEmitterPlugin::<(
-                KnowledgeSearchRequest,
-                KnowledgeCreateRequest,
-                KnowledgeTreeToggle,
-            )>::default())
             .add_systems(
                 Update,
                 (
                     drain_knowledge_watch,
-                    start_knowledge_tree_scan,
-                    drain_knowledge_tree_scan,
-                    emit_knowledge_tree,
+                    start_knowledge_index,
+                    finish_knowledge_index,
                 )
                     .chain(),
-            )
-            .add_observer(on_knowledge_search)
-            .add_observer(on_knowledge_create)
-            .add_observer(on_knowledge_tree_toggle);
-    }
-}
+            );
 
-#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::knowledge"]
-#[require(moonshine_save::prelude::Save)]
-pub struct ExpandedKnowledgeDirs(Vec<String>);
-
-impl ExpandedKnowledgeDirs {
-    fn toggle(&mut self, path: &str) {
-        if let Some(index) = self.0.iter().position(|held| held == path) {
-            self.0.remove(index);
+        let vault = vault_dir();
+        if let Err(error) = ensure_vault(&vault) {
+            warn!("knowledge vault initialization failed: {error}");
             return;
         }
-        self.0.push(path.to_string());
-    }
-
-    fn holds(&self, path: &str) -> bool {
-        self.0.iter().any(|held| held == path)
+        if let Err(error) = ensure_vault_repository(&vault) {
+            warn!("knowledge Git initialization failed: {error}");
+        }
+        if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
+            warn!("external agent Knowledge sync failed: {error}");
+        }
+        let wake = app
+            .world()
+            .get_resource::<EventLoopProxyWrapper>()
+            .map(|wrapper| (**wrapper).clone());
+        match KnowledgeWatch::watching(&vault, wake) {
+            Ok(watch) => {
+                app.insert_non_send(watch);
+            }
+            Err(error) => warn!("knowledge watcher init failed: {error}"),
+        }
     }
 }
-
-fn on_knowledge_tree_toggle(
-    trigger: On<BinReceive<KnowledgeTreeToggle>>,
-    space_of_pane: vmux_layout::space::SpaceOfPane,
-    mut expanded: Query<&mut ExpandedKnowledgeDirs>,
-    mut commands: Commands,
-) {
-    let Some(space) = space_of_pane.resolve(&trigger.event().payload.pane_id) else {
-        return;
-    };
-    let path = &trigger.event().payload.path;
-    if let Ok(mut dirs) = expanded.get_mut(space) {
-        dirs.toggle(path);
-        return;
-    }
-    let mut dirs = ExpandedKnowledgeDirs::default();
-    dirs.toggle(path);
-    commands.entity(space).insert(dirs);
-}
-
-pub struct KnowledgePlugin;
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "knowledge",
@@ -126,85 +62,104 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
-#[derive(Resource)]
-struct KnowledgeState {
-    dirty: bool,
-    generation: u64,
-    revision: u64,
-    loaded: bool,
-    tree: KnowledgeTreeEvent,
-}
-
-impl Default for KnowledgeState {
-    fn default() -> Self {
-        Self {
-            dirty: true,
-            generation: 1,
-            revision: 0,
-            loaded: false,
-            tree: KnowledgeTreeEvent::default(),
-        }
-    }
-}
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::knowledge"]
+#[require(moonshine_save::prelude::Save)]
+pub struct ExpandedKnowledgeDirs(Vec<String>);
 
 struct KnowledgeWatch {
     _watcher: RecommendedWatcher,
-    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    receiver: mpsc::Receiver<notify::Result<notify::Event>>,
 }
 
-#[derive(Component)]
-struct KnowledgeTreeTask {
-    generation: u64,
-    task: Task<Result<(KnowledgeTreeEvent, KnowledgeIndex), String>>,
+impl KnowledgeWatch {
+    fn watching(root: &Path, wake: Option<EventLoopProxy<WinitUserEvent>>) -> notify::Result<Self> {
+        let (sender, receiver) = mpsc::channel();
+        let mut watcher = notify::recommended_watcher(move |result| {
+            if sender.send(result).is_ok()
+                && let Some(wake) = wake.as_ref()
+            {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+        })?;
+        watcher.watch(root, RecursiveMode::Recursive)?;
+        Ok(Self {
+            _watcher: watcher,
+            receiver,
+        })
+    }
 }
 
 fn drain_knowledge_watch(
-    watch: Option<NonSendMut<KnowledgeWatch>>,
-    mut state: ResMut<KnowledgeState>,
+    watch: Option<NonSend<KnowledgeWatch>>,
+    mut runtime: Single<&mut KnowledgeIndexRuntime>,
 ) {
     let Some(watch) = watch else {
         return;
     };
-    let mut changed = false;
-    for result in watch.rx.try_iter() {
-        changed |= result.is_ok_and(|event| !matches!(event.kind, EventKind::Access(_)));
-    }
-    if changed {
-        state.dirty = true;
-        state.generation = state.generation.wrapping_add(1);
+    if watch
+        .receiver
+        .try_iter()
+        .any(|result| result.is_ok_and(|event| !matches!(event.kind, EventKind::Access(_))))
+    {
+        runtime.invalidate();
     }
 }
 
-fn start_knowledge_tree_scan(
-    mut state: ResMut<KnowledgeState>,
-    pending: Query<(), With<KnowledgeTreeTask>>,
+#[derive(Component)]
+struct KnowledgeIndexRuntime {
+    dirty: bool,
+    generation: u64,
+}
+
+impl Default for KnowledgeIndexRuntime {
+    fn default() -> Self {
+        Self {
+            dirty: true,
+            generation: 1,
+        }
+    }
+}
+
+impl KnowledgeIndexRuntime {
+    fn invalidate(&mut self) {
+        self.dirty = true;
+        self.generation = self.generation.wrapping_add(1);
+    }
+}
+
+fn start_knowledge_index(
+    mut runtime: Single<&mut KnowledgeIndexRuntime>,
+    pending: Query<(), With<KnowledgeIndexTask>>,
     wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    if !state.dirty || !pending.is_empty() {
+    if !runtime.dirty || !pending.is_empty() {
         return;
     }
-    let generation = state.generation;
+    let generation = runtime.generation;
     let wake = wake.map(|wrapper| (**wrapper).clone());
     let task = IoTaskPool::get().spawn(async move {
-        let result = (|| {
-            let root = vault_dir();
-            let tree = build_tree(&root).map_err(|error| error.to_string())?;
-            let index = KnowledgeIndex::build(&root).map_err(|error| error.to_string())?;
-            Ok((tree, index))
-        })();
+        let result = KnowledgeIndex::build(&vault_dir()).map_err(|error| error.to_string());
         if let Some(wake) = wake {
             let _ = wake.send_event(WinitUserEvent::WakeUp);
         }
         result
     });
-    state.dirty = false;
-    commands.spawn(KnowledgeTreeTask { generation, task });
+    runtime.dirty = false;
+    commands.spawn(KnowledgeIndexTask { generation, task });
 }
 
-fn drain_knowledge_tree_scan(
-    mut tasks: Query<(Entity, &mut KnowledgeTreeTask)>,
-    mut state: ResMut<KnowledgeState>,
+#[derive(Component)]
+struct KnowledgeIndexTask {
+    generation: u64,
+    task: Task<Result<KnowledgeIndex, String>>,
+}
+
+fn finish_knowledge_index(
+    mut tasks: Query<(Entity, &mut KnowledgeIndexTask)>,
+    mut runtime: Single<&mut KnowledgeIndexRuntime>,
     mut index: ResMut<KnowledgeIndex>,
     mut commands: Commands,
 ) {
@@ -213,172 +168,13 @@ fn drain_knowledge_tree_scan(
             continue;
         };
         commands.entity(entity).despawn();
-        if task.generation != state.generation {
-            state.dirty = true;
+        if task.generation != runtime.generation {
+            runtime.dirty = true;
             continue;
         }
-        state.tree = match result {
-            Ok((tree, next_index)) => {
-                *index = next_index;
-                tree
-            }
-            Err(error) => KnowledgeTreeEvent {
-                root: vault_dir().to_string_lossy().into_owned(),
-                entries: Vec::new(),
-                error,
-            },
-        };
-        state.loaded = true;
-        state.revision = state.revision.wrapping_add(1);
-    }
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct KnowledgeExpansion<'w, 's> {
-    active: Res<'w, vmux_layout::space::ActiveSpaceEntity>,
-    expanded: Query<'w, 's, &'static ExpandedKnowledgeDirs>,
-    toggled: Query<'w, 's, (), Changed<ExpandedKnowledgeDirs>>,
-}
-
-impl KnowledgeExpansion<'_, '_> {
-    fn just_moved(&self) -> bool {
-        !self.toggled.is_empty() || self.active.is_changed()
-    }
-
-    fn stamp(&self, tree: &mut KnowledgeTreeEvent) {
-        let Some(space) = self.active.0 else {
-            return;
-        };
-        let Ok(open) = self.expanded.get(space) else {
-            return;
-        };
-        for entry in &mut tree.entries {
-            entry.expanded = entry.is_directory && open.holds(&entry.path);
+        match result {
+            Ok(next) => *index = next,
+            Err(error) => warn!("knowledge index refresh failed: {error}"),
         }
     }
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
-struct KnowledgeTreeEmitter<'w, 's> {
-    browsers: NonSend<'w, Browsers>,
-    layout: Query<'w, 's, (Entity, Ref<'static, PageReady>, &'static HostWindow), With<LayoutCef>>,
-    focused_window: Res<'w, vmux_layout::window::FocusedWindow>,
-    last_revision: Local<'s, std::collections::HashMap<Entity, u64>>,
-    pending: Local<'s, std::collections::HashSet<Entity>>,
-    commands: Commands<'w, 's>,
-}
-
-impl KnowledgeTreeEmitter<'_, '_> {
-    fn emit(&mut self, state: &KnowledgeState, expansion: &KnowledgeExpansion) {
-        if !state.loaded {
-            return;
-        }
-        let Some((entity, page_ready, _)) = self
-            .focused_window
-            .0
-            .and_then(|window| self.layout.iter().find(|(_, _, host)| host.0 == window))
-            .or_else(|| self.layout.iter().next())
-        else {
-            return;
-        };
-        if self.last_revision.get(&entity) != Some(&state.revision)
-            || page_ready.is_changed()
-            || expansion.just_moved()
-        {
-            self.pending.insert(entity);
-        }
-        if !self.pending.contains(&entity) {
-            return;
-        }
-        if !self.browsers.can_emit_to(&entity) {
-            return;
-        }
-        let mut tree = state.tree.clone();
-        expansion.stamp(&mut tree);
-        self.commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            KNOWLEDGE_TREE_EVENT,
-            &tree,
-        ));
-        self.pending.remove(&entity);
-        self.last_revision.insert(entity, state.revision);
-    }
-}
-
-fn emit_knowledge_tree(
-    state: Res<KnowledgeState>,
-    expansion: KnowledgeExpansion,
-    mut emitter: KnowledgeTreeEmitter,
-) {
-    emitter.emit(&state, &expansion);
-}
-
-fn on_knowledge_search(
-    trigger: On<BinReceive<KnowledgeSearchRequest>>,
-    index: Res<KnowledgeIndex>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    if !browsers.can_emit_to(&webview) {
-        return;
-    }
-    let query = trigger.event().payload.query.trim().to_string();
-    let matches = index
-        .search(&query, 64)
-        .into_iter()
-        .map(|item| KnowledgeSearchMatch {
-            title: item.title,
-            path: item.path.to_string_lossy().into_owned(),
-            line: item.line + 1,
-            preview: item.preview,
-        })
-        .collect();
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        KNOWLEDGE_SEARCH_EVENT,
-        &KnowledgeSearchEvent { query, matches },
-    ));
-}
-
-fn on_knowledge_create(
-    trigger: On<BinReceive<KnowledgeCreateRequest>>,
-    browsers: NonSend<Browsers>,
-    mut state: ResMut<KnowledgeState>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    if !browsers.can_emit_to(&webview) {
-        return;
-    }
-    let request = &trigger.event().payload;
-    let result = create_entry(
-        &vault_dir(),
-        std::path::Path::new(&request.parent),
-        &request.name,
-        request.is_directory,
-    );
-    let payload = match result {
-        Ok(path) => {
-            state.dirty = true;
-            state.generation = state.generation.wrapping_add(1);
-            KnowledgeCreateResult {
-                ok: true,
-                path: path.to_string_lossy().into_owned(),
-                error: String::new(),
-                is_directory: request.is_directory,
-            }
-        }
-        Err(error) => KnowledgeCreateResult {
-            ok: false,
-            path: String::new(),
-            error,
-            is_directory: request.is_directory,
-        },
-    };
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        KNOWLEDGE_CREATE_RESULT_EVENT,
-        &payload,
-    ));
 }

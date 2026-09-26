@@ -34,10 +34,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 url = { workspace = true }
+uuid = { workspace = true }
 quinn = { workspace = true }
-vmux_remote = { path = "../../host/vmux_remote" }
+vmux_transport = { path = "../../host/vmux_transport" }
+vmux_app = { path = "../../vmux_app", features = ["mobile"] }
+vmux_path = { path = "../../vmux_path" }
 vmux_service = { path = "../../host/vmux_service" }
-vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }
+vmux_api = { path = "../../vmux_api", features = ["bevy"] }
 vmux_chat = { path = "../../page/vmux_chat" }
 vmux_start = { path = "../../page/vmux_start" }
 vmux_team = { path = "../../page/vmux_team" }

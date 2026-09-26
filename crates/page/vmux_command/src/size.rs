@@ -1,4 +1,4 @@
-use vmux_wire::command_bar::OpenId;
+use vmux_api::command_bar::OpenId;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CommandBarSize {

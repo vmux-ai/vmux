@@ -5,8 +5,7 @@ use dioxus_html::{EventData, HtmlEvent, PlatformEventData, RenderedElementBackin
 use dioxus_interpreter_js::MutationState;
 
 use crate::event_request::EventOutcome;
-
-mod converter;
+use crate::page_dom_converter::{LiveElements, MountedBacking};
 
 pub type PageComponent = fn() -> Element;
 
@@ -34,7 +33,7 @@ impl PageDom {
         static ONCE: std::sync::Once = std::sync::Once::new();
 
         ONCE.call_once(|| {
-            dioxus_html::set_event_converter(Box::new(converter::LiveElements::new()));
+            dioxus_html::set_event_converter(Box::new(LiveElements::new()));
         });
     }
 
@@ -88,9 +87,9 @@ impl PageDom {
         } = event;
 
         let data = match data {
-            EventData::Mounted => Rc::new(PlatformEventData::new(Box::new(
-                converter::MountedBacking::of(backing),
-            ))) as Rc<dyn std::any::Any>,
+            EventData::Mounted => Rc::new(PlatformEventData::new(Box::new(MountedBacking::from(
+                backing,
+            )))) as Rc<dyn std::any::Any>,
             data => data.into_any(),
         };
         let event = Event::new(data, bubbles);

@@ -1,0 +1,185 @@
+[
+    (
+        id: "open_in_pane_top",
+        label: "Open in Pane Top",
+        group: "Browser > Open",
+        shortcuts: [(shortcut: Direct("Super+Shift+K"), when: None)],
+    ),
+    (
+        id: "open_in_pane_right",
+        aliases: ["split_v"],
+        label: "Open in Pane Right",
+        group: "Browser > Open",
+        shortcuts: [
+            (shortcut: Direct("Super+Shift+L"), when: None),
+            (shortcut: Chord("Ctrl+b, %"), when: None),
+        ],
+    ),
+    (
+        id: "open_in_pane_bottom",
+        aliases: ["split_h"],
+        label: "Open in Pane Bottom",
+        group: "Browser > Open",
+        shortcuts: [
+            (shortcut: Direct("Super+Shift+J"), when: None),
+            (shortcut: Chord("Ctrl+b, \""), when: None),
+        ],
+    ),
+    (
+        id: "open_in_pane_left",
+        label: "Open in Pane Left",
+        group: "Browser > Open",
+        shortcuts: [(shortcut: Direct("Super+Shift+H"), when: None)],
+    ),
+    (
+        id: "close_pane",
+        label: "Close Pane",
+        group: "Layout > Pane",
+        shortcuts: [(shortcut: Chord("Ctrl+b, x"), when: None)],
+    ),
+    (
+        id: "toggle_pane",
+        label: "Next Pane",
+        group: "Layout > Pane",
+        hidden: true,
+        shortcuts: [(shortcut: Chord("Ctrl+b, o"), when: None)],
+    ),
+    (
+        id: "select_pane_left",
+        label: "Select Left Pane",
+        group: "Layout > Pane",
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, h"), when: None),
+            (shortcut: Chord("Ctrl+b, ArrowLeft"), when: None),
+        ],
+    ),
+    (
+        id: "select_pane_right",
+        label: "Select Right Pane",
+        group: "Layout > Pane",
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, l"), when: None),
+            (shortcut: Chord("Ctrl+b, ArrowRight"), when: None),
+        ],
+    ),
+    (
+        id: "select_pane_up",
+        label: "Select Up Pane",
+        group: "Layout > Pane",
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, k"), when: None),
+            (shortcut: Chord("Ctrl+b, ArrowUp"), when: None),
+        ],
+    ),
+    (
+        id: "select_pane_down",
+        label: "Select Down Pane",
+        group: "Layout > Pane",
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, j"), when: None),
+            (shortcut: Chord("Ctrl+b, ArrowDown"), when: None),
+        ],
+    ),
+    (
+        id: "swap_pane_prev",
+        label: "Swap Pane Previous",
+        group: "Layout > Pane",
+        shortcuts: [(shortcut: Chord("Ctrl+b, {"), when: None)],
+    ),
+    (
+        id: "swap_pane_next",
+        label: "Swap Pane Next",
+        group: "Layout > Pane",
+        shortcuts: [(shortcut: Chord("Ctrl+b, }"), when: None)],
+    ),
+    (
+        id: "rotate_forward",
+        label: "Rotate Forward",
+        group: "Layout > Pane",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, r"), when: None),
+            (shortcut: Chord("Ctrl+b, Ctrl+o"), when: None),
+        ],
+    ),
+    (
+        id: "rotate_backward",
+        label: "Rotate Backward",
+        group: "Layout > Pane",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, Shift+r"), when: None),
+            (shortcut: Chord("Ctrl+b, Alt+o"), when: None),
+        ],
+    ),
+    (
+        id: "mirror_panes",
+        label: "Mirror Panes",
+        group: "Layout > Pane",
+        shortcuts: [(shortcut: Chord("Ctrl+b, m"), when: None)],
+    ),
+    (
+        id: "mirror_panes_horizontal",
+        label: "Mirror Panes Horizontally",
+        group: "Layout > Pane",
+        shortcuts: [(shortcut: Chord("Ctrl+b, Alt+h"), when: None)],
+    ),
+    (
+        id: "mirror_panes_vertical",
+        label: "Mirror Panes Vertically",
+        group: "Layout > Pane",
+        shortcuts: [(shortcut: Chord("Ctrl+b, Alt+v"), when: None)],
+    ),
+    (
+        id: "equalize_pane_size",
+        label: "Equalize Pane Size",
+        group: "Layout > Pane",
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, Shift+e"), when: None),
+            (shortcut: Chord("Ctrl+b, ="), when: None),
+        ],
+    ),
+    (
+        id: "resize_pane_left",
+        label: "Resize Pane Left",
+        group: "Layout > Pane",
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, Ctrl+ArrowLeft"), when: None),
+            (shortcut: Chord("Ctrl+b, Alt+ArrowLeft"), when: None),
+        ],
+    ),
+    (
+        id: "resize_pane_right",
+        label: "Resize Pane Right",
+        group: "Layout > Pane",
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, Ctrl+ArrowRight"), when: None),
+            (shortcut: Chord("Ctrl+b, Alt+ArrowRight"), when: None),
+        ],
+    ),
+    (
+        id: "resize_pane_up",
+        label: "Resize Pane Up",
+        group: "Layout > Pane",
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, Ctrl+ArrowUp"), when: None),
+            (shortcut: Chord("Ctrl+b, Alt+ArrowUp"), when: None),
+        ],
+    ),
+    (
+        id: "resize_pane_down",
+        label: "Resize Pane Down",
+        group: "Layout > Pane",
+        shortcuts: [
+            (shortcut: Chord("Ctrl+b, Ctrl+ArrowDown"), when: None),
+            (shortcut: Chord("Ctrl+b, Alt+ArrowDown"), when: None),
+        ],
+    ),
+    (
+        id: "zoom_pane",
+        label: "Zoom Pane",
+        group: "Layout > Pane",
+        hidden: true,
+        shortcuts: [(shortcut: Chord("Ctrl+b, z"), when: None)],
+    ),
+]

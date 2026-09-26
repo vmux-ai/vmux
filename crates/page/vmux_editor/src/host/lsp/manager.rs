@@ -94,21 +94,22 @@ type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
 const LSP_MAX_BYTES: u64 = crate::highlight::HIGHLIGHT_MAX_BYTES;
 
-pub enum ReqKind {
+enum ReqKind {
     Hover { line: u32, col: u32 },
     Definition,
     References,
-    Rename,
+    Rename { root: PathBuf },
     CodeAction,
-    Formatting { path: PathBuf },
+    Formatting { path: PathBuf, root: PathBuf },
     Completion { line: u32, replace_from_col: u32 },
     Folding { path: PathBuf },
     DocumentSymbol,
     SemanticTokens { key: ServerKey, path: PathBuf },
 }
 
-pub struct InFlight {
-    entity: Entity,
+#[derive(Component)]
+pub(crate) struct LspRequestOperation {
+    target: Entity,
     kind: ReqKind,
     rx: crossbeam_channel::Receiver<serde_json::Value>,
 }
@@ -131,6 +132,7 @@ pub struct LspFolds {
 #[derive(Message)]
 pub struct LspRequestedEdit {
     pub entity: Entity,
+    pub root: PathBuf,
     pub result: Result<lsp_types::WorkspaceEdit, String>,
 }
 pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldRegion> {
@@ -156,8 +158,6 @@ pub struct LspManager {
     failed: HashSet<ServerKey>,
     outbox: LspOutbox,
     events: crossbeam_channel::Sender<ServerEvent>,
-    inflight: Vec<InFlight>,
-    offered_actions: HashMap<Entity, Vec<lsp_types::CodeActionOrCommand>>,
 }
 
 struct StartingServer {
@@ -206,8 +206,6 @@ impl LspManager {
             failed: HashSet::new(),
             outbox,
             events,
-            inflight: Vec::new(),
-            offered_actions: HashMap::new(),
         }
     }
 
@@ -219,8 +217,8 @@ impl LspManager {
         self.open_docs.get(path).map(|doc| doc.version)
     }
 
-    fn menu_actions(&self, path: &Path) -> Vec<vmux_core::event::EditorAction> {
-        use vmux_core::event::EditorAction;
+    fn menu_capabilities(&self, path: &Path) -> Vec<vmux_core::event::EditorCapability> {
+        use vmux_core::event::EditorCapability;
         let Some(doc) = self.open_docs.get(path) else {
             return Vec::new();
         };
@@ -228,30 +226,33 @@ impl LspManager {
             return Vec::new();
         };
         let offered = [
-            (EditorAction::GotoDeclaration, "textDocument/declaration"),
             (
-                EditorAction::GotoTypeDefinition,
+                EditorCapability::GotoDeclaration,
+                "textDocument/declaration",
+            ),
+            (
+                EditorCapability::GotoTypeDefinition,
                 "textDocument/typeDefinition",
             ),
             (
-                EditorAction::GotoImplementation,
+                EditorCapability::GotoImplementation,
                 "textDocument/implementation",
             ),
-            (EditorAction::Rename, "textDocument/rename"),
-            (EditorAction::FormatDocument, "textDocument/formatting"),
+            (EditorCapability::Rename, "textDocument/rename"),
+            (EditorCapability::FormatDocument, "textDocument/formatting"),
             (
-                EditorAction::FormatSelection,
+                EditorCapability::FormatSelection,
                 "textDocument/rangeFormatting",
             ),
-            (EditorAction::CodeAction, "textDocument/codeAction"),
+            (EditorCapability::CodeAction, "textDocument/codeAction"),
         ];
-        let mut actions = Vec::new();
-        for (action, method) in offered {
+        let mut operations = Vec::new();
+        for (operation, method) in offered {
             if client.provides(method) {
-                actions.push(action);
+                operations.push(operation);
             }
         }
-        actions
+        operations
     }
 
     fn ensure_server(
@@ -403,18 +404,12 @@ impl LspManager {
         utf16_col: u32,
         extra: serde_json::Value,
         kind: ReqKind,
-    ) {
-        let Some(doc) = self.open_docs.get(path) else {
-            return;
-        };
-        let Some(uri) = uri_for(path) else {
-            return;
-        };
-        let Some(client) = self.servers.get(&doc.key) else {
-            return;
-        };
+    ) -> Option<LspRequestOperation> {
+        let doc = self.open_docs.get(path)?;
+        let uri = uri_for(path)?;
+        let client = self.servers.get(&doc.key)?;
         if !client.provides(method) {
-            return;
+            return None;
         }
         let mut params = serde_json::json!({
             "textDocument": { "uri": uri },
@@ -426,10 +421,21 @@ impl LspManager {
             }
         }
         let (_, rx) = client.send_request(method, params);
-        self.inflight.push(InFlight { entity, kind, rx });
+        Some(LspRequestOperation {
+            target: entity,
+            kind,
+            rx,
+        })
     }
 
-    pub fn hover(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32, echo_col: u32) {
+    pub(crate) fn hover(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        line: u32,
+        utf16_col: u32,
+        echo_col: u32,
+    ) -> Option<LspRequestOperation> {
         self.send_doc_request(
             entity,
             path,
@@ -441,10 +447,16 @@ impl LspManager {
                 line,
                 col: echo_col,
             },
-        );
+        )
     }
 
-    pub fn definition(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
+    pub(crate) fn definition(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        line: u32,
+        utf16_col: u32,
+    ) -> Option<LspRequestOperation> {
         self.send_doc_request(
             entity,
             path,
@@ -453,22 +465,47 @@ impl LspManager {
             utf16_col,
             serde_json::json!({}),
             ReqKind::Definition,
-        );
+        )
     }
 
-    pub fn declaration(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
-        self.goto(entity, path, "textDocument/declaration", line, utf16_col);
+    pub(crate) fn declaration(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        line: u32,
+        utf16_col: u32,
+    ) -> Option<LspRequestOperation> {
+        self.goto(entity, path, "textDocument/declaration", line, utf16_col)
     }
 
-    pub fn type_definition(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
-        self.goto(entity, path, "textDocument/typeDefinition", line, utf16_col);
+    pub(crate) fn type_definition(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        line: u32,
+        utf16_col: u32,
+    ) -> Option<LspRequestOperation> {
+        self.goto(entity, path, "textDocument/typeDefinition", line, utf16_col)
     }
 
-    pub fn implementation(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
-        self.goto(entity, path, "textDocument/implementation", line, utf16_col);
+    pub(crate) fn implementation(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        line: u32,
+        utf16_col: u32,
+    ) -> Option<LspRequestOperation> {
+        self.goto(entity, path, "textDocument/implementation", line, utf16_col)
     }
 
-    fn goto(&mut self, entity: Entity, path: &Path, method: &str, line: u32, utf16_col: u32) {
+    fn goto(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        method: &str,
+        line: u32,
+        utf16_col: u32,
+    ) -> Option<LspRequestOperation> {
         self.send_doc_request(
             entity,
             path,
@@ -477,10 +514,16 @@ impl LspManager {
             utf16_col,
             serde_json::json!({}),
             ReqKind::Definition,
-        );
+        )
     }
 
-    pub fn references(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
+    pub(crate) fn references(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        line: u32,
+        utf16_col: u32,
+    ) -> Option<LspRequestOperation> {
         self.send_doc_request(
             entity,
             path,
@@ -489,17 +532,17 @@ impl LspManager {
             utf16_col,
             serde_json::json!({ "context": { "includeDeclaration": true } }),
             ReqKind::References,
-        );
+        )
     }
 
-    pub fn code_actions(
+    pub(crate) fn code_actions(
         &mut self,
         entity: Entity,
         path: &Path,
         from_line: u32,
         to_line: u32,
         diagnostics: &[lsp_types::Diagnostic],
-    ) {
+    ) -> Option<LspRequestOperation> {
         let overlapping: Vec<&lsp_types::Diagnostic> = diagnostics
             .iter()
             .filter(|d| d.range.start.line <= to_line && d.range.end.line >= from_line)
@@ -517,17 +560,16 @@ impl LspManager {
                 "context": { "diagnostics": overlapping },
             }),
             ReqKind::CodeAction,
-        );
+        )
     }
 
     pub fn run_code_action(
         &mut self,
-        entity: Entity,
-        index: usize,
         path: &Path,
-    ) -> Option<lsp_types::WorkspaceEdit> {
-        let chosen = self.offered_actions.get(&entity)?.get(index)?;
-        match chosen.clone() {
+        chosen: lsp_types::CodeActionOrCommand,
+    ) -> Option<(PathBuf, lsp_types::WorkspaceEdit)> {
+        let root = self.open_docs.get(path)?.key.0.clone();
+        match chosen {
             lsp_types::CodeActionOrCommand::Command(command) => {
                 self.execute_command(path, &command);
                 None
@@ -536,7 +578,7 @@ impl LspManager {
                 if let Some(command) = &action.command {
                     self.execute_command(path, command);
                 }
-                action.edit
+                action.edit.map(|edit| (root, edit))
             }
         }
     }
@@ -564,18 +606,12 @@ impl LspManager {
         method: &str,
         params_extra: serde_json::Value,
         kind: ReqKind,
-    ) {
-        let Some(doc) = self.open_docs.get(path) else {
-            return;
-        };
-        let Some(uri) = uri_for(path) else {
-            return;
-        };
-        let Some(client) = self.servers.get(&doc.key) else {
-            return;
-        };
+    ) -> Option<LspRequestOperation> {
+        let doc = self.open_docs.get(path)?;
+        let uri = uri_for(path)?;
+        let client = self.servers.get(&doc.key)?;
         if !client.provides(method) {
-            return;
+            return None;
         }
         let mut params = serde_json::json!({ "textDocument": { "uri": uri } });
         if let (Some(obj), Some(ex)) = (params.as_object_mut(), params_extra.as_object()) {
@@ -584,19 +620,33 @@ impl LspManager {
             }
         }
         let (_, rx) = client.send_request(method, params);
-        self.inflight.push(InFlight { entity, kind, rx });
+        Some(LspRequestOperation {
+            target: entity,
+            kind,
+            rx,
+        })
     }
 
-    pub fn format_document(&mut self, entity: Entity, path: &Path) {
+    pub(crate) fn format_document(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+    ) -> Option<LspRequestOperation> {
         self.send_format(
             entity,
             path,
             "textDocument/formatting",
             serde_json::json!({}),
-        );
+        )
     }
 
-    pub fn format_range(&mut self, entity: Entity, path: &Path, from_line: u32, to_line: u32) {
+    pub(crate) fn format_range(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        from_line: u32,
+        to_line: u32,
+    ) -> Option<LspRequestOperation> {
         let end_col = self.line_len_utf16(path, to_line);
         self.send_format(
             entity,
@@ -608,21 +658,22 @@ impl LspManager {
                     "end": { "line": to_line, "character": end_col },
                 }
             }),
-        );
+        )
     }
 
-    fn send_format(&mut self, entity: Entity, path: &Path, method: &str, extra: serde_json::Value) {
-        let Some(doc) = self.open_docs.get(path) else {
-            return;
-        };
-        let Some(uri) = uri_for(path) else {
-            return;
-        };
-        let Some(client) = self.servers.get(&doc.key) else {
-            return;
-        };
+    fn send_format(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        method: &str,
+        extra: serde_json::Value,
+    ) -> Option<LspRequestOperation> {
+        let doc = self.open_docs.get(path)?;
+        let uri = uri_for(path)?;
+        let client = self.servers.get(&doc.key)?;
+        let root = doc.key.0.clone();
         if !client.provides(method) {
-            return;
+            return None;
         }
         let mut params = serde_json::json!({
             "textDocument": { "uri": uri },
@@ -634,13 +685,14 @@ impl LspManager {
             }
         }
         let (_, rx) = client.send_request(method, params);
-        self.inflight.push(InFlight {
-            entity,
+        Some(LspRequestOperation {
+            target: entity,
             kind: ReqKind::Formatting {
                 path: path.to_path_buf(),
+                root,
             },
             rx,
-        });
+        })
     }
 
     fn line_len_utf16(&self, path: &Path, line: u32) -> u32 {
@@ -653,14 +705,15 @@ impl LspManager {
         l.chars().map(|c| c.len_utf16() as u32).sum()
     }
 
-    pub fn rename(
+    pub(crate) fn rename(
         &mut self,
         entity: Entity,
         path: &Path,
         line: u32,
         utf16_col: u32,
         new_name: &str,
-    ) {
+    ) -> Option<LspRequestOperation> {
+        let root = self.open_docs.get(path).map(|doc| doc.key.0.clone())?;
         self.send_doc_request(
             entity,
             path,
@@ -668,18 +721,18 @@ impl LspManager {
             line,
             utf16_col,
             serde_json::json!({ "newName": new_name }),
-            ReqKind::Rename,
-        );
+            ReqKind::Rename { root },
+        )
     }
 
-    pub fn completion(
+    pub(crate) fn completion(
         &mut self,
         entity: Entity,
         path: &Path,
         line: u32,
         utf16_col: u32,
         replace_from_col: u32,
-    ) {
+    ) -> Option<LspRequestOperation> {
         self.send_doc_request(
             entity,
             path,
@@ -691,79 +744,73 @@ impl LspManager {
                 line,
                 replace_from_col,
             },
-        );
+        )
     }
 
-    pub fn folding_range(&mut self, entity: Entity, path: &Path) {
-        let Some(doc) = self.open_docs.get(path) else {
-            return;
-        };
-        let Some(uri) = uri_for(path) else {
-            return;
-        };
-        let Some(client) = self.servers.get(&doc.key) else {
-            return;
-        };
+    pub(crate) fn folding_range(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+    ) -> Option<LspRequestOperation> {
+        let doc = self.open_docs.get(path)?;
+        let uri = uri_for(path)?;
+        let client = self.servers.get(&doc.key)?;
         if !client.provides("textDocument/foldingRange") {
-            return;
+            return None;
         }
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
         let (_, rx) = client.send_request("textDocument/foldingRange", params);
-        self.inflight.push(InFlight {
-            entity,
+        Some(LspRequestOperation {
+            target: entity,
             kind: ReqKind::Folding {
                 path: path.to_path_buf(),
             },
             rx,
-        });
+        })
     }
 
-    pub fn document_symbol(&mut self, entity: Entity, path: &Path) {
-        let Some(doc) = self.open_docs.get(path) else {
-            return;
-        };
-        let Some(uri) = uri_for(path) else {
-            return;
-        };
-        let Some(client) = self.servers.get(&doc.key) else {
-            return;
-        };
+    pub(crate) fn document_symbol(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+    ) -> Option<LspRequestOperation> {
+        let doc = self.open_docs.get(path)?;
+        let uri = uri_for(path)?;
+        let client = self.servers.get(&doc.key)?;
         if !client.provides("textDocument/documentSymbol") {
-            return;
+            return None;
         }
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
         let (_, rx) = client.send_request("textDocument/documentSymbol", params);
-        self.inflight.push(InFlight {
-            entity,
+        Some(LspRequestOperation {
+            target: entity,
             kind: ReqKind::DocumentSymbol,
             rx,
-        });
+        })
     }
 
-    pub fn semantic_tokens(&mut self, entity: Entity, path: &Path) {
-        let Some(doc) = self.open_docs.get(path) else {
-            return;
-        };
-        let Some(uri) = uri_for(path) else {
-            return;
-        };
+    pub(crate) fn semantic_tokens(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+    ) -> Option<LspRequestOperation> {
+        let doc = self.open_docs.get(path)?;
+        let uri = uri_for(path)?;
         let key = doc.key.clone();
-        let Some(client) = self.servers.get(&key) else {
-            return;
-        };
+        let client = self.servers.get(&key)?;
         if !client.provides("textDocument/semanticTokens/full") {
-            return;
+            return None;
         }
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
         let (_, rx) = client.send_request("textDocument/semanticTokens/full", params);
-        self.inflight.push(InFlight {
-            entity,
+        Some(LspRequestOperation {
+            target: entity,
             kind: ReqKind::SemanticTokens {
                 key,
                 path: path.to_path_buf(),
             },
             rx,
-        });
+        })
     }
 
     pub fn semantic_legend(
@@ -940,7 +987,8 @@ fn ref_display(path: &Path, line: u32) -> String {
 #[derive(Component)]
 pub struct LspOpened;
 
-use crate::host::plugin::{EditState, FileView, FileViewport};
+use crate::host::editor::{Editor, FileView};
+use crate::host::viewport::ViewportRenderRequest;
 
 fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
     settings
@@ -963,7 +1011,7 @@ fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
 }
 
 fn lsp_open_documents(
-    q: Query<(Entity, &FileView, &EditState), Without<LspOpened>>,
+    q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
     settings: Res<vmux_setting::AppSettings>,
     mut manager: ResMut<LspManager>,
     mut commands: Commands,
@@ -974,70 +1022,82 @@ fn lsp_open_documents(
         if !manager.open(&fv.path, &overrides) {
             continue;
         }
-        manager.folding_range(entity, &fv.path);
-        manager.semantic_tokens(entity, &fv.path);
-        if !crate::explorer_model::is_markdown(&fv.path) {
-            manager.document_symbol(entity, &fv.path);
+        if let Some(request) = manager.folding_range(entity, &fv.path) {
+            commands.spawn(request);
+        }
+        if let Some(request) = manager.semantic_tokens(entity, &fv.path) {
+            commands.spawn(request);
+        }
+        if !crate::explorer_model::is_markdown(&fv.path)
+            && let Some(request) = manager.document_symbol(entity, &fv.path)
+        {
+            commands.spawn(request);
         }
         commands.entity(entity).insert(LspOpened);
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct LspResponseWriters<'w> {
+    goto: MessageWriter<'w, LspGoto>,
+    folds: MessageWriter<'w, LspFolds>,
+    semantic: MessageWriter<'w, LspSemantic>,
+    edit: MessageWriter<'w, LspRequestedEdit>,
+}
+
 fn drain_lsp_requests(
-    mut manager: ResMut<LspManager>,
+    manager: Res<LspManager>,
+    requests: Query<(Entity, &LspRequestOperation)>,
     browsers: NonSend<Browsers>,
-    mut goto_w: MessageWriter<LspGoto>,
-    mut folds_w: MessageWriter<LspFolds>,
-    mut semantic_w: MessageWriter<LspSemantic>,
-    mut edit_w: MessageWriter<LspRequestedEdit>,
+    mut writers: LspResponseWriters,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{
-        EXPLORER_OUTLINE_EVENT, FILE_COMPLETION_EVENT, FILE_HOVER_EVENT, FILE_REFERENCES_EVENT,
-        FileCompletionEvent, FileHoverEvent, FileReferencesEvent, OutlineEvent, RefItem,
-    };
-    let drained = std::mem::take(&mut manager.inflight);
-    let mut still = Vec::new();
-    for f in drained {
-        let value = match f.rx.try_recv() {
+    use vmux_core::event::{FileHover, OutlineEvent, RefItem};
+    for (request_entity, request) in &requests {
+        let value = match request.rx.try_recv() {
             Ok(v) => v,
-            Err(crossbeam_channel::TryRecvError::Empty) => {
-                still.push(f);
+            Err(crossbeam_channel::TryRecvError::Empty) => continue,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                commands.entity(request_entity).despawn();
                 continue;
             }
-            Err(crossbeam_channel::TryRecvError::Disconnected) => continue,
         };
-        let ready = browsers.can_emit_to(&f.entity);
-        match f.kind {
+        commands.entity(request_entity).despawn();
+        let ready = browsers.can_emit_to(&request.target);
+        match &request.kind {
             ReqKind::Hover { line, col } => {
                 let blocks = parse_hover(&value);
                 if !blocks.is_empty() && ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
-                        f.entity,
-                        FILE_HOVER_EVENT,
-                        &FileHoverEvent { line, col, blocks },
+                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                        request.target,
+                        &FileHover {
+                            line: *line,
+                            col: *col,
+                            blocks,
+                        },
                     ));
                 }
             }
             ReqKind::Definition => {
                 if let Some((path, line, utf16_col)) = parse_definition(&value) {
-                    goto_w.write(LspGoto {
-                        entity: f.entity,
+                    writers.goto.write(LspGoto {
+                        entity: request.target,
                         path,
                         line,
                         utf16_col,
                     });
                 }
             }
-            ReqKind::Rename => {
+            ReqKind::Rename { root } => {
                 let result = if value.is_null() {
                     Err("the language server would not rename this".to_string())
                 } else {
                     serde_json::from_value::<lsp_types::WorkspaceEdit>(value)
                         .map_err(|e| format!("the rename could not be read: {e}"))
                 };
-                edit_w.write(LspRequestedEdit {
-                    entity: f.entity,
+                writers.edit.write(LspRequestedEdit {
+                    entity: request.target,
+                    root: root.clone(),
                     result,
                 });
             }
@@ -1051,35 +1111,36 @@ fn drain_lsp_requests(
                         lsp_types::CodeActionOrCommand::CodeAction(a) => a.title.clone(),
                     })
                     .collect();
-                manager.offered_actions.insert(f.entity, offered);
+                commands
+                    .entity(request.target)
+                    .insert(OfferedCodeActions(offered));
                 if !ready {
                     continue;
                 }
                 if titles.is_empty() {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
-                        f.entity,
-                        vmux_core::event::FILE_EDIT_FAILED_EVENT,
-                        &vmux_core::event::FileEditFailedEvent {
+                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                        request.target,
+                        &vmux_core::event::FileEditFailure {
                             reason: "no code actions here".to_string(),
                         },
                     ));
                     continue;
                 }
-                commands.trigger(BinHostEmitEvent::from_rkyv(
-                    f.entity,
-                    vmux_core::event::FILE_CODE_ACTIONS_EVENT,
-                    &vmux_core::event::FileCodeActionsEvent { titles },
+                commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                    request.target,
+                    &vmux_core::event::FileCodeActions { titles },
                 ));
             }
-            ReqKind::Formatting { path } => {
+            ReqKind::Formatting { path, root } => {
                 let result = match serde_json::from_value::<Vec<lsp_types::TextEdit>>(value) {
                     Ok(edits) if edits.is_empty() => continue,
-                    Ok(edits) => one_document_edit(&path, edits)
+                    Ok(edits) => one_document_edit(path, edits)
                         .ok_or_else(|| format!("{} has no URI to format", path.display())),
                     Err(_) => Err("the language server would not format this".to_string()),
                 };
-                edit_w.write(LspRequestedEdit {
-                    entity: f.entity,
+                writers.edit.write(LspRequestedEdit {
+                    entity: request.target,
+                    root: root.clone(),
                     result,
                 });
             }
@@ -1098,58 +1159,48 @@ fn drain_lsp_requests(
                         }
                     })
                     .collect();
-                if !items.is_empty() && ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
-                        f.entity,
-                        FILE_REFERENCES_EVENT,
-                        &FileReferencesEvent { items },
-                    ));
-                }
+                commands.trigger(crate::host::panel::ReferencesResult::new(
+                    request.target,
+                    items,
+                ));
             }
             ReqKind::Completion {
                 line,
                 replace_from_col,
             } => {
                 let items = parse_completion(&value);
-                if ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
-                        f.entity,
-                        FILE_COMPLETION_EVENT,
-                        &FileCompletionEvent {
-                            items,
-                            replace_from_col,
-                            line,
-                        },
-                    ));
-                }
+                commands.trigger(crate::host::panel::CompletionResult::new(
+                    request.target,
+                    items,
+                    *replace_from_col,
+                    *line,
+                ));
             }
             ReqKind::Folding { path } => {
-                folds_w.write(LspFolds {
-                    entity: f.entity,
-                    path,
+                writers.folds.write(LspFolds {
+                    entity: request.target,
+                    path: path.clone(),
                     regions: parse_folding_ranges(&value),
                 });
             }
             ReqKind::DocumentSymbol => {
                 let items = crate::explorer_model::flatten_symbols(&value);
                 if ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
-                        f.entity,
-                        EXPLORER_OUTLINE_EVENT,
+                    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+                        request.target,
                         &OutlineEvent { items },
                     ));
                 }
             }
             ReqKind::SemanticTokens { key, path } => {
-                semantic_w.write(LspSemantic {
-                    entity: f.entity,
-                    path,
-                    tokens: parse_semantic_tokens(&value, manager.semantic_legend(&key)),
+                writers.semantic.write(LspSemantic {
+                    entity: request.target,
+                    path: path.clone(),
+                    tokens: parse_semantic_tokens(&value, manager.semantic_legend(key)),
                 });
             }
         }
     }
-    manager.inflight = still;
 }
 
 fn parse_semantic_tokens(
@@ -1178,28 +1229,23 @@ pub struct LspSemantic {
 
 fn apply_semantic_tokens(
     mut reader: MessageReader<LspSemantic>,
-    mut views: Query<(&mut EditState, &FileView, &FileViewport)>,
-    browsers: NonSend<Browsers>,
+    mut views: Query<(&mut Editor, &FileView)>,
     mut commands: Commands,
 ) {
     for message in reader.read() {
-        let Ok((mut edit, view, vp)) = views.get_mut(message.entity) else {
+        let Ok((mut edit, view)) = views.get_mut(message.entity) else {
             continue;
         };
-        if crate::host::plugin::canon(&view.path) != crate::host::plugin::canon(&message.path) {
+        if crate::host::file_lifecycle::canon(&view.path)
+            != crate::host::file_lifecycle::canon(&message.path)
+        {
             continue;
         }
         edit.hl
-            .set_semantic(crate::lsp::semantic::SemanticHighlight::of(
+            .set_semantic(crate::lsp::semantic::SemanticHighlight::from(
                 message.tokens.clone(),
             ));
-        crate::host::plugin::repaint_window(
-            message.entity,
-            &mut edit,
-            vp,
-            &browsers,
-            &mut commands,
-        );
+        commands.trigger(ViewportRenderRequest::new(message.entity));
     }
 }
 
@@ -1207,7 +1253,6 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
     let events = app.world().resource::<ServerEvents>().sender();
     app.insert_resource(LspManager::new(outbox, events))
         .init_resource::<LintOutbox>()
-        .init_resource::<DiagState>()
         .add_message::<LspGoto>()
         .add_message::<LspFolds>()
         .add_message::<LspSemantic>()
@@ -1230,28 +1275,34 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
         );
 }
 
-use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
-use vmux_core::event::{FILE_DIAGNOSTICS_EVENT, FileDiagnosticsEvent};
+use bevy_cef::prelude::Browsers;
+use vmux_core::event::FileDiagnostics;
 
 use crate::lsp::LintOutbox;
 
 fn canon(p: &Path) -> PathBuf {
-    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+    vmux_path::PathIdentity::resolve(p).into_path_buf()
 }
 
-#[derive(Resource, Default)]
-struct DiagState {
-    lsp: HashMap<PathBuf, Vec<FileDiagnostic>>,
-    lint: HashMap<PathBuf, Vec<FileDiagnostic>>,
-    raw: HashMap<PathBuf, Vec<lsp_types::Diagnostic>>,
+#[derive(Component, Default)]
+struct LspDiagnostics {
+    mapped: Vec<FileDiagnostic>,
+    raw: Vec<lsp_types::Diagnostic>,
 }
+
+#[derive(Component, Default)]
+struct LintDiagnostics(Vec<FileDiagnostic>);
+
+#[derive(Component, Default)]
+pub(crate) struct OfferedCodeActions(pub(crate) Vec<lsp_types::CodeActionOrCommand>);
 
 #[derive(Component, Default)]
 pub struct DiagSent(Vec<FileDiagnostic>);
 
 fn emit_diagnostics_system(
     q: Query<(Entity, &FileView, Option<&DiagSent>), With<vmux_core::page::PageReady>>,
-    state: Res<DiagState>,
+    lsp_diagnostics: Query<&LspDiagnostics>,
+    lint_diagnostics: Query<&LintDiagnostics>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1259,23 +1310,21 @@ fn emit_diagnostics_system(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        let target = canon(&fv.path);
         let mut merged: Vec<FileDiagnostic> = Vec::new();
-        if let Some(d) = state.lsp.get(&target) {
-            merged.extend(d.iter().cloned());
+        if let Ok(diagnostics) = lsp_diagnostics.get(entity) {
+            merged.extend(diagnostics.mapped.iter().cloned());
         }
-        if let Some(d) = state.lint.get(&target) {
-            merged.extend(d.iter().cloned());
+        if let Ok(diagnostics) = lint_diagnostics.get(entity) {
+            merged.extend(diagnostics.0.iter().cloned());
         }
         match sent {
             Some(s) if s.0 == merged => continue,
             None if merged.is_empty() => continue,
             _ => {}
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
-            FILE_DIAGNOSTICS_EVENT,
-            &FileDiagnosticsEvent {
+            &FileDiagnostics {
                 path: fv.path.to_string_lossy().into_owned(),
                 diagnostics: merged.clone(),
             },
@@ -1286,8 +1335,8 @@ fn emit_diagnostics_system(
 
 fn drain_lsp_diagnostics(
     outbox: Res<LspOutbox>,
-    mut state: ResMut<DiagState>,
-    views: Query<(Entity, &FileView, &EditState)>,
+    views: Query<(Entity, &FileView, &Editor)>,
+    mut commands: Commands,
 ) {
     let drained: Vec<(PathBuf, Vec<lsp_types::Diagnostic>)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
@@ -1295,23 +1344,33 @@ fn drain_lsp_diagnostics(
     };
     for (path, diags) in drained {
         let target = canon(&path);
-        let mapped = views
-            .iter()
-            .find(|(_, fv, _)| canon(&fv.path) == target)
-            .map(|(_, _, edit)| map_diags(&diags, |l| rope_line_text(&edit.core.buffer.rope, l)))
-            .unwrap_or_default();
-        state.lsp.insert(target.clone(), mapped);
-        state.raw.insert(target, diags);
+        for (entity, view, edit) in &views {
+            if canon(&view.path) != target {
+                continue;
+            }
+            let mapped = map_diags(&diags, |line| rope_line_text(&edit.core.buffer.rope, line));
+            commands.entity(entity).insert(LspDiagnostics {
+                mapped,
+                raw: diags.clone(),
+            });
+        }
     }
 }
 
-fn drain_lint(outbox: Res<LintOutbox>, mut state: ResMut<DiagState>) {
+fn drain_lint(outbox: Res<LintOutbox>, views: Query<(Entity, &FileView)>, mut commands: Commands) {
     let drained: Vec<(PathBuf, Vec<FileDiagnostic>)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
         q.drain(..).collect()
     };
     for (path, diags) in drained {
-        state.lint.insert(canon(&path), diags);
+        let target = canon(&path);
+        for (entity, view) in &views {
+            if canon(&view.path) == target {
+                commands
+                    .entity(entity)
+                    .insert(LintDiagnostics(diags.clone()));
+            }
+        }
     }
 }
 
@@ -1325,22 +1384,25 @@ pub struct LspCodeActionRequest {
 
 fn request_code_actions(
     mut reader: MessageReader<LspCodeActionRequest>,
-    state: Res<DiagState>,
+    diagnostics: Query<&LspDiagnostics>,
     mut manager: ResMut<LspManager>,
+    mut commands: Commands,
 ) {
     for request in reader.read() {
-        let diagnostics = state
-            .raw
-            .get(&canon(&request.path))
-            .cloned()
+        let diagnostics = diagnostics
+            .get(request.entity)
+            .map(|diagnostics| diagnostics.raw.as_slice())
             .unwrap_or_default();
-        manager.code_actions(
+        let request = manager.code_actions(
             request.entity,
             &request.path,
             request.from_line,
             request.to_line,
-            &diagnostics,
+            diagnostics,
         );
+        if let Some(request) = request {
+            commands.spawn(request);
+        }
     }
 }
 
@@ -1348,7 +1410,7 @@ fn request_code_actions(
 pub struct LintRan;
 
 fn lint_on_open(
-    q: Query<(Entity, &FileView, &EditState), Without<LintRan>>,
+    q: Query<(Entity, &FileView, &Editor), Without<LintRan>>,
     outbox: Res<LintOutbox>,
     mut commands: Commands,
 ) {
@@ -1391,7 +1453,7 @@ fn lsp_status_system(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{FILE_LSP_STATUS_EVENT, FileLspStatusEvent, LspServerState};
+    use vmux_core::event::{FileLspStatus, LspServerState};
     let overrides = server_overrides(&settings);
     for (entity, fv, sent) in &q {
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
@@ -1411,10 +1473,9 @@ fn lsp_status_system(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
-            FILE_LSP_STATUS_EVENT,
-            &FileLspStatusEvent {
+            &FileLspStatus {
                 path: fv.path.to_string_lossy().into_owned(),
                 server: spec.command.clone(),
                 package: (!overrides.contains_key(ext))
@@ -1422,7 +1483,7 @@ fn lsp_status_system(
                     .flatten()
                     .map(str::to_string),
                 state: desired,
-                actions: manager.menu_actions(&fv.path),
+                capabilities: manager.menu_capabilities(&fv.path),
             },
         ));
         commands.entity(entity).insert(LspStatusSent {
@@ -1580,18 +1641,17 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_map_through_editstate() {
+    fn diagnostics_map_through_editor() {
         use crate::edit::highlight_cache::HighlightCache;
         use crate::edit::{EditCore, EditMode};
-        use crate::host::plugin::{EditState, FileView};
+        use crate::host::editor::{Editor, FileView};
         use crate::lsp::LspOutbox;
         use std::path::PathBuf;
 
-        let path = PathBuf::from("/tmp/vmux_lsp_editstate.rs");
+        let path = PathBuf::from("/tmp/vmux_lsp_editor.rs");
         let mut app = App::new();
         let outbox = LspOutbox::default();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<DiagState>()
             .insert_resource(outbox.clone())
             .add_systems(Update, drain_lsp_diagnostics);
 
@@ -1602,10 +1662,13 @@ mod tests {
             EditMode::Insert,
         );
         let hl = HighlightCache::new(&path);
-        app.world_mut().spawn((
-            FileView { path: path.clone() },
-            EditState::new(core, hl, crate::fold::FoldState::default()),
-        ));
+        let entity = app
+            .world_mut()
+            .spawn((
+                FileView { path: path.clone() },
+                Editor::new(core, hl, crate::fold::FoldState::default()),
+            ))
+            .id();
 
         let diag = lsp_types::Diagnostic {
             range: lsp_types::Range {
@@ -1624,11 +1687,11 @@ mod tests {
         outbox.0.lock().unwrap().push((path.clone(), vec![diag]));
         app.update();
 
-        let state = app.world().resource::<DiagState>();
-        let mapped = state
-            .lsp
-            .get(&canon(&path))
-            .expect("diagnostics mapped for EditState entity");
+        let mapped = &app
+            .world()
+            .get::<LspDiagnostics>(entity)
+            .expect("diagnostics mapped for Editor entity")
+            .mapped;
         assert_eq!(mapped.len(), 1);
         assert_eq!(mapped[0].line, 1);
         assert_eq!(mapped[0].start_col, 4);

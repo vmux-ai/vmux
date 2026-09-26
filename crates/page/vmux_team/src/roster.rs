@@ -1,7 +1,9 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_wire::page::PageEmit;
-use vmux_wire::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
+use vmux_api::page::PageEmit;
+use vmux_api::team::{TeamEvent, TeamMemberRow};
+
+use crate::projection::TeamStateProjection;
 
 pub struct TeamRosterPlugin;
 
@@ -13,10 +15,10 @@ impl Plugin for TeamRosterPlugin {
             .add_systems(
                 Update,
                 (
-                    Team::project
+                    project_team
                         .in_set(TeamProjection)
                         .run_if(resource_changed::<Members>),
-                    Team::emit
+                    emit_team
                         .after(TeamProjection)
                         .run_if(resource_changed::<Team>),
                 ),
@@ -33,20 +35,15 @@ pub struct Members(pub Vec<TeamMemberRow>);
 #[derive(Resource, Default)]
 pub struct Team(pub TeamEvent);
 
-impl Team {
-    fn project(members: Res<Members>, mut team: ResMut<Team>) {
-        team.0 = TeamEvent {
-            members: members.0.clone(),
-            profiles: Vec::new(),
-        };
-    }
+fn project_team(members: Res<Members>, mut team: ResMut<Team>) {
+    team.0 = TeamStateProjection::build(members.0.clone(), Vec::new());
+}
 
-    fn emit(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::of(TEAM_EVENT, &team.0) else {
-            return;
-        };
-        emits.write(emit);
-    }
+fn emit_team(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {
+    let Some(emit) = PageEmit::from_state(&team.0) else {
+        return;
+    };
+    emits.write(emit);
 }
 
 #[cfg(test)]
@@ -94,6 +91,13 @@ mod tests {
             .map(|m| m.name.as_str())
             .collect();
         assert_eq!(names, ["ada", "grace"], "in the order the Mac gave them");
+        let agents: Vec<&str> = started
+            .team()
+            .agents
+            .iter()
+            .map(|agent| agent.member.name.as_str())
+            .collect();
+        assert_eq!(agents, ["ada", "grace"]);
 
         started.reroster(Vec::new());
         assert!(

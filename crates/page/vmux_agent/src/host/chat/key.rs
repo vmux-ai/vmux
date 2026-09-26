@@ -1,45 +1,63 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::BinHostEmitEvent;
-use vmux_chat::event::{CHAT_KEY_EVENT, ChatKey};
-use vmux_command::{AppCommand, CommandIssued, ReadAppCommands};
+use vmux_chat::event::ChatKey;
+use vmux_command::{
+    CommandDispatch, CommandManifest, CommandRuntimePlugin, RegisterCommandDefinitions,
+};
 
 pub(crate) struct ChatKeyPlugin;
 
 impl Plugin for ChatKeyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, echo_key_command.in_set(ReadAppCommands));
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
+        app.add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
+            .add_observer(echo_key_command);
     }
 }
 
-fn echo_key_command(mut issued: MessageReader<CommandIssued>, mut commands: Commands) {
-    for issue in issued.read() {
-        let AppCommand::Chat(key) = issue.command else {
-            continue;
-        };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            issue.caller,
-            CHAT_KEY_EVENT,
-            &ChatKey::from(key),
-        ));
+#[derive(Component)]
+struct ChatKeyBinding(ChatKey);
+
+fn spawn_commands(mut commands: Commands) {
+    let manifest = CommandManifest::<ChatKey>::from_ron(include_str!("key.ron"));
+    for (definition, key) in manifest.into_commands() {
+        commands.spawn((definition, ChatKeyBinding(key)));
     }
+}
+
+fn echo_key_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<&ChatKeyBinding>,
+    mut commands: Commands,
+) {
+    let Ok(key) = keys.get(trigger.event().command()) else {
+        return;
+    };
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            trigger.event().invocation().caller,
+            &key.0,
+        ),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_command::ChatKeyCommand;
+    use vmux_chat::state::ChatUiState;
+    use vmux_command::CommandInvocation;
+    use vmux_core::host::UiStateWrite;
 
     #[derive(Resource, Default)]
-    struct Echoed(Vec<(Entity, String)>);
+    struct Echoed(Vec<(Entity, ChatKey)>);
 
     impl Echoed {
-        fn record(trigger: On<BinHostEmitEvent>, mut echoed: ResMut<Self>) {
-            let decoded = rkyv::from_bytes::<ChatKey, rkyv::rancor::Error>(&trigger.payload)
-                .map(|key| format!("{key:?}"))
-                .unwrap_or_else(|_| "undecodable".to_string());
-            echoed
-                .0
-                .push((trigger.webview, format!("{}:{decoded}", trigger.id)));
+        fn record(trigger: On<UiStateWrite<ChatUiState>>, mut echoed: ResMut<Self>) {
+            let Some(key) = trigger.event().patch().key else {
+                return;
+            };
+            echoed.0.push((trigger.event().webview(), key));
         }
     }
 
@@ -50,16 +68,15 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(ChatKeyPlugin)
-                .add_message::<CommandIssued>()
                 .init_resource::<Echoed>()
                 .add_observer(Echoed::record);
             app
         }
 
-        fn issue(app: &mut App, caller: Entity, command: AppCommand) {
+        fn issue(app: &mut App, caller: Entity, id: &str) {
             app.world_mut()
-                .resource_mut::<bevy::ecs::message::Messages<CommandIssued>>()
-                .write(CommandIssued { caller, command });
+                .resource_mut::<bevy::ecs::message::Messages<CommandInvocation>>()
+                .write(CommandInvocation::new(caller, id));
             app.update();
         }
     }
@@ -70,15 +87,11 @@ mod tests {
         let pressed = app.world_mut().spawn_empty().id();
         let other = app.world_mut().spawn_empty().id();
 
-        Echo::issue(
-            &mut app,
-            pressed,
-            AppCommand::Chat(ChatKeyCommand::ListChoose),
-        );
+        Echo::issue(&mut app, pressed, "chat_list_choose");
 
         assert_eq!(
             app.world().resource::<Echoed>().0,
-            vec![(pressed, format!("{CHAT_KEY_EVENT}:ListChoose"))]
+            vec![(pressed, ChatKey::ListChoose)]
         );
         assert!(
             !app.world()
@@ -87,19 +100,5 @@ mod tests {
                 .iter()
                 .any(|(entity, _)| *entity == other)
         );
-    }
-
-    #[test]
-    fn a_command_that_is_not_a_chat_key_is_left_alone() {
-        let mut app = Echo::app();
-        let caller = app.world_mut().spawn_empty().id();
-
-        Echo::issue(
-            &mut app,
-            caller,
-            AppCommand::Terminal(vmux_command::TerminalCommand::Clear),
-        );
-
-        assert!(app.world().resource::<Echoed>().0.is_empty());
     }
 }

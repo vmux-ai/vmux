@@ -1,15 +1,15 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
+use vmux_api::protocol::{ManagedMcpServer, ManagedMcpTransport};
 use vmux_core::profile::mcp_credentials::McpCredentialAccess;
 #[cfg(not(test))]
 use vmux_core::profile::mcp_credentials::McpCredentialStorage;
-use vmux_core::profile::tools::{McpServerManifest, McpTransport};
-use vmux_service::protocol::{ManagedMcpServer, ManagedMcpTransport};
+use vmux_tool::{McpServerManifest, McpTransport};
 
 #[cfg(not(test))]
 pub fn load() -> BTreeMap<String, McpServerManifest> {
-    match vmux_core::profile::tools::load_manifest() {
+    match vmux_tool::ToolStore::current().load() {
         Ok(manifest) => manifest.mcp.servers,
         Err(error) => {
             bevy::log::warn!("managed MCP servers unavailable: {error}");
@@ -33,7 +33,7 @@ pub(crate) fn acp_servers(agent_id: &str) -> Result<PreparedManagedMcpServers, S
         let revision = McpCredentialAccess::stable_revision()?;
         let mut servers = Vec::new();
         for (name, server) in load() {
-            if crate::acp_install::registry_id_alias(agent_id) == "codex-acp"
+            if crate::acp_tool::registry_id_alias(agent_id) == "codex-acp"
                 && server.transport == McpTransport::Sse
             {
                 bevy::log::warn!(
@@ -55,7 +55,7 @@ fn acp_server(mut name: String, server: McpServerManifest, agent_id: &str) -> Ma
     let headers = McpAuthorization::headers(&name, &server)
         .into_iter()
         .collect();
-    if crate::acp_install::registry_id_alias(agent_id) == "codex-acp" {
+    if crate::acp_tool::registry_id_alias(agent_id) == "codex-acp" {
         name = format!("vmux_{name}");
     }
     ManagedMcpServer {
@@ -230,7 +230,12 @@ impl McpAuthorization {
     }
 
     fn headers(name: &str, server: &McpServerManifest) -> BTreeMap<String, String> {
-        let mut headers = server.resolved_headers();
+        let mut headers = Self::vibe_headers(server);
+        if let Some(variable) = &server.bearer_token_env_var
+            && let Ok(value) = std::env::var(variable)
+        {
+            headers.insert("Authorization".to_string(), format!("Bearer {value}"));
+        }
         if Self::environment_variable(name, server).is_none() {
             return headers;
         }

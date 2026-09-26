@@ -72,14 +72,16 @@ struct BridgeInboundQueue {
     wake: Arc<Mutex<Option<BridgeWake>>>,
 }
 
-impl BridgeInboundQueue {
-    fn of(sender: crossbeam_channel::Sender<BridgeInbound>) -> Self {
+impl From<crossbeam_channel::Sender<BridgeInbound>> for BridgeInboundQueue {
+    fn from(sender: crossbeam_channel::Sender<BridgeInbound>) -> Self {
         Self {
             sender,
             wake: Arc::new(Mutex::new(None)),
         }
     }
+}
 
+impl BridgeInboundQueue {
     fn arm(&self, wake: BridgeWake) {
         *self.wake.lock().unwrap_or_else(|error| error.into_inner()) = Some(wake);
     }
@@ -192,7 +194,7 @@ impl ExtensionBridgeServer {
                 .map_err(|error| error.to_string())?;
         }
         let (inbound_tx, inbound_rx) = crossbeam_channel::bounded(MAX_INBOUND_MESSAGES);
-        let inbound_tx = BridgeInboundQueue::of(inbound_tx);
+        let inbound_tx = BridgeInboundQueue::from(inbound_tx);
         let inbound_queue = inbound_tx.clone();
         let sessions = Arc::new(Mutex::new(HashMap::new()));
         let shutdown = Arc::new(AtomicBool::new(false));

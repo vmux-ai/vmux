@@ -10,19 +10,23 @@ mod page_life;
 
 mod native_bridge;
 mod native_layout;
-pub mod native_page;
 mod navigation;
+mod platform;
 mod present;
 
 use crate::page_life::spawn_popup_stacks;
 use present::CommandBarWindowedFrame;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
-mod page_open;
-mod page_state;
+mod page;
 mod scroll;
 mod snapshot;
+mod state;
+mod tool;
 mod window_drag;
-pub use host_focus::HostFocusIntent;
+pub use command::{NavigationRequest, OpenRequest, ShowDevToolsRequest, ZoomRequest};
+pub use host_focus::{HostFocusIntent, KeyboardContext, KeyboardContextSet};
+pub use navigation::OpenHistoryRequest;
+pub use tool::BrowserToolPlugin;
 pub use window_drag::WindowDragRegion;
 
 pub use native_bridge::NativeBridge;
@@ -35,23 +39,24 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
-use vmux_command::ReadAppCommands;
+use vmux_command::ReadCommandRequests;
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_core::{
-    CefPageAttachRequest, HostSpawnRegistry, PageIdentity, PageMetadata, PageOpenRequest,
-    PageOpenSet,
+    PageIdentity, PageMetadata, PageOpenSet,
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::{
-    RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent, SideSheetResizeEvent,
-    WindowDragRegionEvent,
+    HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
+    RemoteCopyEvent, RemotePairingDismissRequest, RemotePairingShowRequest, RemoteRequest,
+    RemoteRevokeRequest, SideSheetProjectOpenRequest, SideSheetResizeEvent,
+    SideSheetSectionRequest, SideSheetStackActivateRequest, SideSheetStackCloseRequest,
+    SideSheetStackCreateRequest, WindowDragRegionEvent,
 };
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
-    event::HeaderCommandEvent,
     overlay::LayoutOverlayActive,
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
@@ -59,7 +64,6 @@ use vmux_layout::{
     tab::Tab,
 };
 
-use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
@@ -108,41 +112,13 @@ impl Plugin for BrowserPlugin {
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
             vmux_command::command_bar::CommandBarPlugin,
-            native_page::NativePagesPlugin,
+            BrowserToolPlugin,
+            platform::BrowserPlatformPlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
             extensions::broker::ExtensionBrokerPlugin,
             extensions::project::ExtensionProjectPlugin,
             extensions::windows::ExtensionWindowsPlugin,
-        ));
-        #[cfg(target_os = "macos")]
-        app.add_plugins((
-            native_page::NativePagePlugin::as_layout(&native_page::LAYOUT_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::START_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::HISTORY_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::TEAM_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::CHAT_PAGE)
-                .takes::<vmux_core::PageMetadata>(),
-            native_page::NativePagePlugin::in_pane(&native_page::LSP_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::FILES_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::PROJECTS_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::KNOWLEDGE_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::TERMINAL_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::SETTINGS_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::SERVICES_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::SPACES_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::TOOLS_PAGE)
-                .takes::<vmux_core::PageMetadata>(),
-        ))
-        .add_plugins((
-            native_page::NativePagePlugin::in_pane(&native_page::SHORTCUTS_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::VAULT_PAGE)
-                .takes::<vmux_core::PageMetadata>(),
-            native_page::NativePagePlugin::in_pane(&native_page::EXTENSIONS_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::ERROR_PAGE)
-                .takes::<vmux_wire::error::ErrorPageData>(),
-            native_page::NativePagePlugin::in_pane(&native_page::SIMULATOR_PAGE)
-                .takes::<vmux_core::PageMetadata>(),
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
@@ -159,20 +135,10 @@ impl Plugin for BrowserPlugin {
             .insert_resource(extension_bridge)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<WebviewLoadCompleted>()
-            .add_message::<PageOpenRequest>()
-            .add_message::<CefPageAttachRequest>()
             .add_plugins(vmux_layout::LayoutContractPlugin)
-            .configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
             .configure_sets(
                 Update,
-                (
-                    PageOpenSet::ResolveTarget,
-                    PageOpenSet::HandleKnownPages,
-                    PageOpenSet::Fallback,
-                    PageOpenSet::Respond,
-                )
-                    .chain()
-                    .after(ReadAppCommands),
+                CefSystems::CreateAndResize.after(ReadCommandRequests),
             )
             .add_plugins((
                 CefPlugin {
@@ -185,14 +151,26 @@ impl Plugin for BrowserPlugin {
                     os_crypt_key_provider: cef_os_crypt_key_provider(),
                     ..default()
                 },
-                BinEventEmitterPlugin::<(
-                    HeaderCommandEvent,
-                    SideSheetCommandEvent,
+                UiEventPlugin::<(
+                    HeaderBackRequest,
+                    HeaderForwardRequest,
+                    HeaderReloadRequest,
+                    HeaderAddressFocusRequest,
+                    SideSheetStackActivateRequest,
+                    SideSheetStackCloseRequest,
+                    SideSheetStackCreateRequest,
+                    SideSheetProjectOpenRequest,
+                )>::default(),
+                UiEventPlugin::<(
+                    SideSheetSectionRequest,
                     SideSheetResizeEvent,
                     WindowDragRegionEvent,
-                    RemoteCommandEvent,
+                    RemoteRequest,
+                    RemotePairingShowRequest,
+                    RemotePairingDismissRequest,
                     RemoteCopyEvent,
-                )>::for_hosts(&["layout"]),
+                    RemoteRevokeRequest,
+                )>::default(),
             ))
             .add_systems(Update, (vmux_layout::apply_cef_state_from_webview,))
             .add_systems(
@@ -200,7 +178,6 @@ impl Plugin for BrowserPlugin {
                 vmux_layout::mirror_metadata_to_url
                     .after(vmux_layout::apply_cef_state_from_webview),
             )
-            .init_resource::<HostSpawnRegistry>()
             .add_plugins((
                 host_focus::HostFocusPlugin,
                 appearance::AppearancePlugin,
@@ -210,8 +187,8 @@ impl Plugin for BrowserPlugin {
                 input::InputPlugin,
                 navigation::NavigationPlugin,
                 present::PresentPlugin,
-                page_open::PageOpenPlugin,
-                page_state::PageStatePlugin,
+                page::PagePlugin,
+                state::StatePlugin,
                 snapshot::SnapshotPlugin,
                 scroll::ScrollPlugin,
                 window_drag::WindowDragPlugin,
@@ -344,7 +321,7 @@ struct CefPointerHitRect {
 static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
 impl CefPointerHitRect {
-    fn of(row: CefPointerRegionRow<'_>) -> Self {
+    fn from_row(row: CefPointerRegionRow<'_>) -> Self {
         let (header, side_sheet, node, &rect, visibility, open) = row;
         let interactive = (header.is_some() || side_sheet.is_some())
             && open
@@ -364,7 +341,7 @@ fn cef_pointer_regions_contains(
     cef_regions: &CefPointerRegionQuery<'_, '_>,
 ) -> bool {
     for row in cef_regions.iter() {
-        if CefPointerHitRect::of(row).contains(cursor_pos) {
+        if CefPointerHitRect::from_row(row).contains(cursor_pos) {
             return true;
         }
     }
@@ -569,10 +546,11 @@ struct WindowedHoverRefreshState {
 
 const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
 
-#[derive(Default)]
+#[derive(Component, Default)]
 struct LayoutFrameRateState {
     native_sequence: u64,
     last_input: Option<std::time::Instant>,
+    last_emit: Option<std::time::Instant>,
     dragging_layout: bool,
 }
 
@@ -587,30 +565,12 @@ struct CommandBarRoute {
 static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
-static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
-static NATIVE_TEXT_ENTRY_OWNS_KEYS: AtomicBool = AtomicBool::new(false);
 
 #[cfg(any(target_os = "macos", test))]
 fn native_command_bar_route() -> CommandBarRoute {
     *NATIVE_COMMAND_BAR_ROUTE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-pub(crate) fn set_native_page_owns_escape(owns: bool) {
-    NATIVE_PAGE_OWNS_ESCAPE.store(owns, Ordering::Relaxed);
-}
-
-pub fn native_page_owns_escape() -> bool {
-    NATIVE_PAGE_OWNS_ESCAPE.load(Ordering::Relaxed)
-}
-
-pub(crate) fn set_native_text_entry_owns_keys(owns: bool) {
-    NATIVE_TEXT_ENTRY_OWNS_KEYS.store(owns, Ordering::Relaxed);
-}
-
-pub fn native_text_entry_owns_keys() -> bool {
-    NATIVE_TEXT_ENTRY_OWNS_KEYS.load(Ordering::Relaxed)
 }
 
 pub fn set_native_left_mouse_down(down: bool) {
@@ -671,7 +631,7 @@ struct LayoutFixedOffsets {
 }
 
 impl LayoutFixedOffsets {
-    fn of(rect: &ComputedNode, window_width_px: f32) -> Option<Self> {
+    fn from_node(rect: &ComputedNode, window_width_px: f32) -> Option<Self> {
         if rect.is_empty() || window_width_px <= 0.0 {
             return None;
         }
@@ -726,38 +686,6 @@ fn should_emit_update(
     last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
 }
 
-fn normalize_vmux_url(url: &str) -> String {
-    let url = url.trim();
-    if matches!(url, "vmux://tools" | "vmux://tools/") {
-        return "vmux://tools/acp".to_string();
-    }
-    if matches!(url, "vmux://agents" | "vmux://agents/") {
-        return "vmux://tools/acp".to_string();
-    }
-    if matches!(url, "vmux://lsp" | "vmux://lsp/") {
-        return "vmux://tools/lsp".to_string();
-    }
-    if matches!(url, "vmux://extensions" | "vmux://extensions/") {
-        return "vmux://tools/extensions".to_string();
-    }
-    if let Some(canonical) = vmux_shortcut::ShortcutUrl::canonical(url) {
-        return canonical.to_string();
-    }
-    if let Some(rest) = url.strip_prefix("vmux://agent")
-        && (rest.is_empty() || rest.starts_with('/'))
-    {
-        return normalize_vmux_url(&format!("vmux://sessions{rest}"));
-    }
-    if let Some(rest) = url.strip_prefix("vmux://")
-        && !rest.is_empty()
-        && !rest.contains('/')
-        && !rest.contains('?')
-    {
-        return format!("vmux://{rest}/");
-    }
-    url.to_string()
-}
-
 #[derive(Component, Clone, Debug)]
 struct PageOpenFallbackDeferred;
 
@@ -767,82 +695,88 @@ struct PageOpenAwaitSnapshot {
 }
 
 fn send_page_open_response(
-    service: &Option<Res<vmux_service::client::ServiceClient>>,
+    service_requests: &mut MessageWriter<vmux_service::client::ServiceRequest>,
     request_id: Option<[u8; 16]>,
     result: Result<(), String>,
 ) {
-    use vmux_service::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
-    let (Some(service), Some(request_id)) = (service.as_ref(), request_id) else {
+    use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
+    use vmux_service::client::ServiceRequest;
+    let Some(request_id) = request_id else {
         return;
     };
     let result = match result {
         Ok(()) => AgentCommandResult::Ok,
         Err(message) => AgentCommandResult::Error(message),
     };
-    service.0.send(ClientMessage::AgentCommandResponse {
+    service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
         request_id: AgentRequestId(request_id),
         result,
-    });
+    }));
 }
 
-fn attach_cef_page_to_stack(
-    stack: Entity,
-    url: &str,
-    title: &str,
-    bg_color: Option<String>,
-    children_q: &Query<&Children>,
-    commands: &mut Commands,
-) -> Entity {
-    clear_stack_children(stack, children_q, commands);
-    commands.entity(stack).insert(PageMetadata {
-        url: url.to_string(),
-        title: title.to_string(),
-        bg_color,
-        ..default()
-    });
-    let browser = commands
-        .spawn((Browser::new_with_title(url, title), ChildOf(stack)))
-        .id();
-    commands.entity(browser).insert(KeyboardOwner);
-    browser
-}
-
-fn attach_error_page_to_stack(
-    stack: Entity,
-    failure: vmux_wire::error::ErrorPageData,
-    children_q: &Query<&Children>,
-    commands: &mut Commands,
-) {
-    clear_stack_children(stack, children_q, commands);
-    commands.entity(stack).insert(PageMetadata {
-        url: failure.url.clone(),
-        title: failure.title.clone(),
-        ..default()
-    });
-    commands.spawn((
-        Browser::native_page(vmux_wire::error::ERROR_PAGE_URL, &failure.title),
-        failure,
-        ChildOf(stack),
-    ));
-}
-
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
-}
-
-pub struct NavPending {
+#[derive(Component, Clone)]
+struct PendingNavigationSnapshot {
+    webview: Entity,
     pub request_id: [u8; 16],
     pub started: std::time::Duration,
     pub saw_loading: bool,
     pub pane: Option<String>,
 }
 
-#[derive(Resource, Default)]
-pub struct PendingNavSnapshots(pub std::collections::HashMap<Entity, NavPending>);
+#[derive(Message)]
+struct PendingNavigationUpdate {
+    webview: Entity,
+    pending: Option<PendingNavigationSnapshot>,
+}
+
+impl PendingNavigationUpdate {
+    fn set(
+        webview: Entity,
+        request_id: [u8; 16],
+        started: std::time::Duration,
+        pane: Option<String>,
+    ) -> Self {
+        Self {
+            webview,
+            pending: Some(PendingNavigationSnapshot {
+                webview,
+                request_id,
+                started,
+                saw_loading: false,
+                pane,
+            }),
+        }
+    }
+
+    fn clear(webview: Entity) -> Self {
+        Self {
+            webview,
+            pending: None,
+        }
+    }
+}
+
+fn apply_pending_navigation_updates(
+    mut updates: MessageReader<PendingNavigationUpdate>,
+    existing: Query<(Entity, &PendingNavigationSnapshot)>,
+    mut commands: Commands,
+    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
+) {
+    let mut pending = existing
+        .iter()
+        .map(|(entity, operation)| (operation.webview, (entity, operation.clone())))
+        .collect::<bevy::ecs::entity::EntityHashMap<_>>();
+    for update in updates.read() {
+        if let Some((entity, displaced)) = pending.remove(&update.webview) {
+            commands.entity(entity).despawn();
+            send_page_open_response(&mut service_requests, Some(displaced.request_id), Ok(()));
+        }
+        if let Some(next) = update.pending.clone() {
+            let entity = commands.spawn(next.clone()).id();
+            pending.insert(update.webview, (entity, next));
+        }
+    }
+}
 
 fn cef_root_cache_path() -> Option<String> {
     vmux_core::profile::cef_cache_path()
@@ -855,57 +789,44 @@ mod tests {
     use vmux_core::overlay::WindowOverlay;
 
     #[test]
+    fn pending_navigation_updates_keep_only_the_latest_request() {
+        let mut app = App::new();
+        app.add_message::<vmux_service::client::ServiceRequest>()
+            .add_message::<PendingNavigationUpdate>()
+            .add_systems(Update, apply_pending_navigation_updates);
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Messages<PendingNavigationUpdate>>()
+            .write(PendingNavigationUpdate::set(
+                webview,
+                [1; 16],
+                std::time::Duration::ZERO,
+                None,
+            ));
+        app.world_mut()
+            .resource_mut::<Messages<PendingNavigationUpdate>>()
+            .write(PendingNavigationUpdate::set(
+                webview,
+                [2; 16],
+                std::time::Duration::ZERO,
+                None,
+            ));
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut pending = world.query::<&PendingNavigationSnapshot>();
+        let pending = pending.iter(world).collect::<Vec<_>>();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].request_id, [2; 16]);
+    }
+
+    #[test]
     fn cef_disables_bfcache_for_extension_ports() {
         assert!(
             cef_command_line_config()
                 .switch_values
                 .contains(&("disable-features", "BackForwardCache"))
-        );
-    }
-
-    #[test]
-    fn normalize_vmux_url_trims_and_adds_trailing_slash_to_bare_host() {
-        assert_eq!(normalize_vmux_url("vmux://tools"), "vmux://tools/acp");
-        assert_eq!(normalize_vmux_url("vmux://tools/"), "vmux://tools/acp");
-        assert_eq!(normalize_vmux_url("vmux://agents/"), "vmux://tools/acp");
-        assert_eq!(normalize_vmux_url("vmux://lsp"), "vmux://tools/lsp");
-        assert_eq!(normalize_vmux_url("vmux://terminal"), "vmux://terminal/");
-        assert_eq!(normalize_vmux_url("vmux://lsp/"), "vmux://tools/lsp");
-        assert_eq!(
-            normalize_vmux_url("vmux://extensions/"),
-            "vmux://tools/extensions"
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://shortcuts"),
-            vmux_shortcut::PAGE_URL
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://cheatsheet/"),
-            vmux_shortcut::PAGE_URL
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://cheetsheet"),
-            vmux_shortcut::PAGE_URL
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://sessions/vibe/"),
-            "vmux://sessions/vibe/"
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://error/?title=x"),
-            "vmux://error/?title=x"
-        );
-        assert_eq!(
-            normalize_vmux_url("file:///tmp/main.rs"),
-            "file:///tmp/main.rs"
-        );
-        assert_eq!(
-            normalize_vmux_url("  vmux://sessions/codex/session-id  "),
-            "vmux://sessions/codex/session-id"
-        );
-        assert_eq!(
-            normalize_vmux_url("vmux://agent/codex/session-id"),
-            "vmux://sessions/codex/session-id"
         );
     }
 
@@ -918,11 +839,11 @@ mod tests {
         };
         assert_eq!(meta.title_with(None), "host");
         assert_eq!(
-            meta.title_with(Some(&PageIdentity::of_title("reported"))),
+            meta.title_with(Some(&PageIdentity::from("reported"))),
             "reported"
         );
         assert_eq!(
-            meta.title_with(Some(&PageIdentity::of_title(""))),
+            meta.title_with(Some(&PageIdentity::from(""))),
             "host",
             "a page that blanks its own title has nothing to say, so the host name stands"
         );
@@ -1006,7 +927,7 @@ mod tests {
             inverse_scale_factor: 0.5,
             ..default()
         };
-        let offsets = LayoutFixedOffsets::of(&computed, 1_600.0).expect("offsets");
+        let offsets = LayoutFixedOffsets::from_node(&computed, 1_600.0).expect("offsets");
 
         assert_eq!(offsets.left, 8.0);
         assert_eq!(offsets.top, 0.0);
@@ -1119,22 +1040,24 @@ mod tests {
 
     mod browser_navigate_flow {
         use crate::input::RecentBrowserInteraction;
-        use crate::{Browser, PendingNavSnapshots};
+        use crate::{Browser, PendingNavigationSnapshot};
         use bevy::ecs::relationship::Relationship;
         use bevy::prelude::*;
         use vmux_agent::events::AgentCommandRequest;
         use vmux_agent::host::AgentSessionPlugin;
         use vmux_agent::strategy::AgentStrategies;
+        use vmux_api::protocol::{
+            AgentBrowserNavigate, AgentCommand as ServiceAgentCommand, AgentRequestId,
+        };
         use vmux_core::{
-            CefPageAttachRequest, LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError,
-            PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTask,
+            LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
+            PageOpenId, PageOpenSet, PageOpenTask,
         };
         use vmux_layout::pane::Pane;
         use vmux_layout::settings::{
             FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
         };
         use vmux_layout::stack::FocusedStack;
-        use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId};
         use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
         use vmux_terminal::Terminal;
 
@@ -1170,39 +1093,22 @@ mod tests {
             fn build(&self, app: &mut App) {
                 app.add_plugins((
                     vmux_layout::LayoutContractPlugin,
-                    vmux_terminal::TerminalContractPlugin,
+                    vmux_terminal::TerminalRequestPlugin,
+                    crate::page::PagePlugin,
                 ))
-                .add_message::<PageOpenRequest>()
-                .add_message::<CefPageAttachRequest>()
                 .add_message::<vmux_setting::SettingsWriteRequest>()
-                .add_message::<vmux_space::SpaceCommandRequest>()
+                .add_message::<vmux_space::SpaceAttachRequest>()
+                .add_message::<vmux_space::SpaceCreateRequest>()
+                .add_message::<vmux_space::SpaceDeleteRequest>()
+                .add_message::<vmux_space::SpaceOpenPageRequest>()
+                .add_message::<vmux_space::SpaceRenameRequest>()
                 .add_message::<vmux_history::query::HistoryOpenIntent>()
-                .init_resource::<crate::PendingNavSnapshots>()
-                .init_resource::<crate::input::RecentBrowserInteraction>()
-                .configure_sets(
-                    Update,
-                    (
-                        PageOpenSet::ResolveTarget,
-                        PageOpenSet::HandleKnownPages,
-                        PageOpenSet::Fallback,
-                        PageOpenSet::Respond,
-                    )
-                        .chain(),
-                )
                 .add_systems(
                     Update,
                     (
                         crate::navigation::handle_browser_navigate_requests
                             .before(PageOpenSet::ResolveTarget),
-                        crate::page_open::handle_page_open_requests
-                            .in_set(PageOpenSet::ResolveTarget),
                         handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
-                        crate::page_open::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
-                        crate::page_open::handle_unclaimed_page_open_tasks
-                            .in_set(PageOpenSet::Fallback),
-                        crate::page_open::respond_page_open_tasks.in_set(PageOpenSet::Respond),
-                        vmux_terminal::handle_terminal_send_requests,
-                        vmux_terminal::handle_run_shell_requests,
                     ),
                 );
             }
@@ -1217,11 +1123,19 @@ mod tests {
         ) {
             for (entity, task) in &tasks {
                 if task.url.starts_with("vmux://terminal/") {
-                    crate::clear_stack_children(task.stack, &children_q, &mut commands);
+                    vmux_layout::stack::clear_stack_children(
+                        task.stack,
+                        &children_q,
+                        &mut commands,
+                    );
                     commands.spawn((Browser, Terminal, ChildOf(task.stack)));
                     commands.entity(entity).insert(PageOpenHandled);
                 } else if task.url.starts_with("vmux://sessions/") {
-                    crate::clear_stack_children(task.stack, &children_q, &mut commands);
+                    vmux_layout::stack::clear_stack_children(
+                        task.stack,
+                        &children_q,
+                        &mut commands,
+                    );
                     commands.entity(entity).insert(PageOpenHandled);
                 }
             }
@@ -1268,11 +1182,11 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_service::agent_events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    origin: vmux_agent::events::CommandOrigin::User,
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "https://example.com".to_string(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1306,11 +1220,11 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_service::agent_events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    origin: vmux_agent::events::CommandOrigin::User,
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "https://example.com".to_string(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1386,17 +1300,10 @@ mod tests {
                 .expect("new browser stack");
             assert_ne!(second.0, first_stack);
             assert!(second.1 > 1);
-            assert_eq!(world.resource::<PendingNavSnapshots>().0.len(), 1);
-            assert_eq!(
-                world
-                    .resource::<PendingNavSnapshots>()
-                    .0
-                    .values()
-                    .next()
-                    .unwrap()
-                    .request_id,
-                request_id
-            );
+            let mut pending = world.query::<&PendingNavigationSnapshot>();
+            let pending = pending.iter(world).collect::<Vec<_>>();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].request_id, request_id);
         }
 
         #[test]
@@ -1416,10 +1323,9 @@ mod tests {
                 ))
                 .id();
             app.world_mut().spawn((Browser, ChildOf(first_stack)));
-            app.insert_resource(RecentBrowserInteraction {
-                stack: Some(first_stack),
-                at: Some(std::time::Instant::now()),
-            });
+            app.world_mut()
+                .entity_mut(first_stack)
+                .insert(RecentBrowserInteraction::now());
             app.world_mut()
                 .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
                 .write(vmux_layout::BrowserNavigateRequest {
@@ -1466,11 +1372,11 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_service::agent_events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    origin: vmux_agent::events::CommandOrigin::User,
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "https://example.com".to_string(),
                         pane: Some(pane_b.to_bits().to_string()),
-                    },
+                    }),
                 });
 
             app.update();
@@ -1511,11 +1417,11 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id,
-                    origin: vmux_service::agent_events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    origin: vmux_agent::events::CommandOrigin::User,
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://terminal/".to_string(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1527,11 +1433,10 @@ mod tests {
                 terminal_count >= 1,
                 "terminal should be spawned in focused pane"
             );
+            let mut pending = world.query::<&PendingNavigationSnapshot>();
             assert!(
-                world
-                    .resource::<PendingNavSnapshots>()
-                    .0
-                    .values()
+                pending
+                    .iter(world)
                     .any(|pending| pending.request_id == request_id.0),
                 "terminal navigation should wait for its snapshot"
             );
@@ -1713,11 +1618,11 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_service::agent_events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    origin: vmux_agent::events::CommandOrigin::User,
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://terminal/".to_string(),
                         pane: Some(pane_b.to_bits().to_string()),
-                    },
+                    }),
                 });
 
             app.update();
@@ -1763,11 +1668,11 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_service::agent_events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    origin: vmux_agent::events::CommandOrigin::User,
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://nonsense/".to_string(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1796,7 +1701,8 @@ mod tests {
         fn deferred_page_open_is_not_claimed_by_fallback() {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_systems(Update, crate::page_open::handle_unclaimed_page_open_tasks);
+                .add_plugins(crate::page::PagePlugin)
+                .insert_resource(FocusedStack::default());
             let stack = app.world_mut().spawn_empty().id();
             let task = app
                 .world_mut()
@@ -1890,11 +1796,11 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_service::agent_events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    origin: vmux_agent::events::CommandOrigin::User,
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://sessions/claude/cli/".into(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1936,11 +1842,11 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_service::agent_events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    origin: vmux_agent::events::CommandOrigin::User,
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://sessions/codex/cli/".into(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1959,11 +1865,10 @@ mod tests {
     }
 
     mod open_in_place_flow {
+        use crate::{OpenRequest, ZoomRequest};
         use bevy::ecs::message::Messages;
         use bevy::prelude::*;
         use bevy_cef::prelude::RequestNavigate;
-        use vmux_command::open::OpenCommand;
-        use vmux_command::{AppCommand, BrowserCommand, BrowserViewCommand};
         use vmux_core::{PageOpenRequest, PageOpenTarget};
         use vmux_history::LastActivatedAt;
         use vmux_layout::Browser;
@@ -1990,7 +1895,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_systems(
                 Update,
-                capture_page_open_requests.after(vmux_command::ReadAppCommands),
+                capture_page_open_requests.after(vmux_command::ReadCommandRequests),
             )
             .init_resource::<CapturedNavigateUrls>()
             .init_resource::<CapturedPageOpenRequests>()
@@ -1999,11 +1904,20 @@ mod tests {
                     captured.0.push(trigger.url.clone());
                 },
             );
-            for host in [
-                "terminal", "sessions", "services", "settings", "team", "spaces",
-            ] {
-                vmux_core::register_host_spawn(&mut app, host);
+            for host in ["terminal", "sessions"] {
+                app.world_mut().spawn(vmux_core::HostSpawnRoute::host(host));
             }
+            for (url, title) in [
+                ("vmux://services/", "Services"),
+                ("vmux://settings/", "Settings"),
+                ("vmux://team/", "Team"),
+                ("vmux://spaces/", "Spaces"),
+            ] {
+                app.world_mut()
+                    .spawn(vmux_core::host::page::NativelyHosted::subtree(url, title));
+            }
+            app.world_mut()
+                .spawn(vmux_core::HostSpawnRoute::scheme("file"));
             app
         }
 
@@ -2083,12 +1997,10 @@ mod tests {
             build_focused_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("https://example.com".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("https://example.com".into()),
+                });
 
             app.update();
 
@@ -2102,12 +2014,10 @@ mod tests {
             build_focused_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("vmux://sessions/vibe".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("vmux://sessions/vibe".into()),
+                });
 
             app.update();
 
@@ -2125,12 +2035,10 @@ mod tests {
             build_focused_native_stack(&mut app, "vmux://history/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("https://mistral.ai".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("https://mistral.ai".into()),
+                });
 
             app.update();
 
@@ -2146,12 +2054,10 @@ mod tests {
             build_focused_native_stack(&mut app, "https://example.com/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("vmux://history/".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("vmux://history/".into()),
+                });
 
             app.update();
 
@@ -2167,12 +2073,10 @@ mod tests {
             build_focused_native_stack(&mut app, "https://example.com/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("vmux://settings/".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("vmux://settings/".into()),
+                });
 
             app.update();
 
@@ -2190,12 +2094,10 @@ mod tests {
             build_focused_native_stack(&mut app, "vmux://settings/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("vmux://terminal/".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("vmux://terminal/".into()),
+                });
 
             app.update();
 
@@ -2213,12 +2115,10 @@ mod tests {
             build_focused_native_stack(&mut app, "https://example.com/");
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("file:///tmp/x".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("file:///tmp/x".into()),
+                });
 
             app.update();
 
@@ -2236,12 +2136,10 @@ mod tests {
             build_focused_terminal_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace {
-                        url: Some("https://google.com".into()),
-                    },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest {
+                    url: Some("https://google.com".into()),
+                });
 
             app.update();
 
@@ -2261,10 +2159,8 @@ mod tests {
             build_focused_terminal_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::View(
-                    BrowserViewCommand::ZoomIn,
-                )));
+                .resource_mut::<Messages<ZoomRequest>>()
+                .write(ZoomRequest::In);
 
             app.update();
 
@@ -2284,10 +2180,8 @@ mod tests {
             build_focused_terminal_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::View(
-                    BrowserViewCommand::ZoomReset,
-                )));
+                .resource_mut::<Messages<ZoomRequest>>()
+                .write(ZoomRequest::Reset);
 
             app.update();
 
@@ -2308,10 +2202,8 @@ mod tests {
             build_focused_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace { url: None },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest { url: None });
 
             app.update();
 
@@ -2325,10 +2217,8 @@ mod tests {
             build_focused_stack(&mut app);
 
             app.world_mut()
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InPlace { url: None },
-                )));
+                .resource_mut::<Messages<OpenRequest>>()
+                .write(OpenRequest { url: None });
 
             app.update();
 

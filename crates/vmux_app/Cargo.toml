@@ -1,0 +1,88 @@
+[package]
+name = "vmux_app"
+version.workspace = true
+edition.workspace = true
+description = "Composable cross-platform vmux application framework"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+desktop = [
+    "agent",
+    "browser",
+    "editor",
+    "git",
+    "history",
+    "knowledge",
+    "layout",
+    "tool",
+    "service",
+    "shortcut",
+    "simulator",
+    "space",
+    "start",
+    "team",
+    "terminal",
+    "vault",
+]
+mobile = ["dep:vmux_chat", "dep:vmux_start", "dep:vmux_team"]
+tool = ["dep:vmux_tool"]
+core = [
+    "dep:vmux_command",
+    "dep:vmux_core",
+    "dep:vmux_flex",
+    "dep:vmux_setting",
+]
+layout = ["core", "dep:vmux_layout"]
+browser = ["layout", "dep:vmux_browser"]
+terminal = ["layout", "service", "dep:vmux_terminal"]
+editor = ["layout", "dep:vmux_editor"]
+git = ["layout", "dep:vmux_git"]
+agent = [
+    "editor",
+    "history",
+    "knowledge",
+    "service",
+    "space",
+    "terminal",
+    "dep:vmux_agent",
+]
+knowledge = ["core", "dep:vmux_knowledge"]
+history = ["core", "dep:vmux_history"]
+simulator = ["layout", "dep:vmux_simulator"]
+shortcut = ["core", "dep:vmux_shortcut"]
+team = ["core", "dep:vmux_team"]
+space = ["layout", "dep:vmux_space"]
+service = ["core", "dep:vmux_service"]
+start = ["core", "dep:vmux_start"]
+vault = ["layout", "dep:vmux_vault"]
+
+[dependencies]
+bevy_app = { workspace = true }
+vmux_agent = { path = "../page/vmux_agent", optional = true }
+vmux_browser = { path = "../vmux_browser", optional = true }
+vmux_chat = { path = "../page/vmux_chat", optional = true }
+vmux_command = { path = "../page/vmux_command", optional = true }
+vmux_core = { path = "../vmux_core", optional = true }
+vmux_editor = { path = "../page/vmux_editor", optional = true }
+vmux_flex = { path = "../vmux_flex", optional = true }
+vmux_git = { path = "../vmux_git", optional = true }
+vmux_history = { path = "../page/vmux_history", optional = true }
+vmux_knowledge = { path = "../page/vmux_knowledge", optional = true }
+vmux_layout = { path = "../page/vmux_layout", optional = true }
+vmux_macro = { path = "../vmux_macro" }
+vmux_service = { path = "../host/vmux_service", optional = true }
+vmux_setting = { path = "../page/vmux_setting", optional = true }
+vmux_shortcut = { path = "../page/vmux_shortcut", optional = true }
+vmux_simulator = { path = "../page/vmux_simulator", optional = true }
+vmux_space = { path = "../page/vmux_space", optional = true }
+vmux_start = { path = "../page/vmux_start", optional = true }
+vmux_team = { path = "../page/vmux_team", optional = true }
+vmux_terminal = { path = "../page/vmux_terminal", optional = true }
+vmux_tool = { path = "../vmux_tool", optional = true }
+vmux_vault = { path = "../page/vmux_vault", optional = true }
+
+[lints]
+workspace = true

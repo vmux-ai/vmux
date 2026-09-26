@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use vmux_core::{LastActivatedAt, PageMetadata};
+use vmux_api::protocol::ProcessId;
+use vmux_core::PageMetadata;
 use vmux_layout::pane::{Pane, PaneSplit};
-use vmux_service::protocol::ProcessId;
 use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{AgentRunTerminal, ProcessExited, Terminal, TerminalStackSpawnRequest};
@@ -12,29 +12,28 @@ use crate::session::AgentSession;
 
 use super::valid_cwd;
 
-#[derive(Resource, Default)]
-pub struct AgentTerminalRegions {
-    pub run_terminals: std::collections::HashMap<ProcessId, ProcessId>,
-    pub run_panes: std::collections::HashMap<ProcessId, Entity>,
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AgentTerminalRegion {
+    pub(crate) run_terminal: Option<ProcessId>,
+    pub(crate) run_pane: Option<Entity>,
 }
 
-impl AgentTerminalRegions {
+impl AgentTerminalRegion {
     pub(crate) fn choose_reusable_terminal(
         &self,
-        anchor: ProcessId,
         agent_pane: Entity,
         candidates: &[RunTerminalCandidate],
     ) -> Option<RunTerminalCandidate> {
-        if let Some(pid) = self.run_terminals.get(&anchor)
-            && let Some(candidate) = candidates.iter().find(|c| c.pid == *pid)
+        if let Some(pid) = self.run_terminal
+            && let Some(candidate) = candidates.iter().find(|candidate| candidate.pid == pid)
         {
             return Some(*candidate);
         }
-        if let Some(pane) = self.run_panes.get(&anchor)
+        if let Some(pane) = self.run_pane
             && let Some(candidate) = candidates
                 .iter()
-                .filter(|c| c.pane == *pane)
-                .max_by_key(|c| c.pane_spawn_seq)
+                .filter(|candidate| candidate.pane == pane)
+                .max_by_key(|candidate| candidate.pane_spawn_seq)
         {
             return Some(*candidate);
         }
@@ -47,18 +46,12 @@ impl AgentTerminalRegions {
 
     pub(crate) fn choose_bucket_pane(
         &self,
-        anchor: ProcessId,
         agent_pane: Entity,
         candidates: &[RunTerminalCandidate],
     ) -> Option<Entity> {
-        self.choose_reusable_terminal(anchor, agent_pane, candidates)
+        self.choose_reusable_terminal(agent_pane, candidates)
             .map(|c| c.pane)
-            .or_else(|| {
-                self.run_panes
-                    .get(&anchor)
-                    .copied()
-                    .filter(|pane| *pane != agent_pane)
-            })
+            .or_else(|| self.run_pane.filter(|pane| *pane != agent_pane))
     }
 }
 
@@ -122,17 +115,16 @@ impl RunTerminalCandidate {
             .collect()
     }
 
-    pub(crate) fn focus(
+    pub(crate) fn activation_entities(
         &self,
-        commands: &mut Commands,
         child_of_q: &Query<&ChildOf>,
         tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
-    ) {
-        commands.entity(self.stack).insert(LastActivatedAt::now());
-        commands.entity(self.pane).insert(LastActivatedAt::now());
+    ) -> Vec<Entity> {
+        let mut entities = vec![self.stack, self.pane];
         if let Some(tab) = AgentPane::new(self.pane).tab(child_of_q, tab_q) {
-            commands.entity(tab).insert(LastActivatedAt::now());
+            entities.push(tab);
         }
+        entities
     }
 
     fn launch_matches_canonical_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
@@ -177,59 +169,65 @@ impl AgentPane {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn split_off(
+    pub(crate) fn split(
         &self,
-        commands: &mut Commands,
-        direction: &vmux_service::protocol::AgentPaneDirection,
+        direction: &vmux_api::protocol::AgentPaneDirection,
         focus: bool,
         pane_children: &Query<&Children, With<Pane>>,
         tab_filter: &Query<Entity, With<vmux_layout::stack::Stack>>,
         split_dir_q: &Query<&PaneSplit>,
         split_this_batch: &mut std::collections::HashSet<Entity>,
-    ) -> Entity {
+    ) -> AgentPaneSplit {
         let existing_tabs: Vec<Entity> = pane_children
             .get(self.0)
             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
             .unwrap_or_default();
         let split_dir = vmux_layout::pane::direction_to_split(&Self::direction(direction));
         let already_split = !split_this_batch.insert(self.0) || split_dir_q.contains(self.0);
-        vmux_layout::pane::split_or_extend(
-            commands,
-            self.0,
-            split_dir,
-            &existing_tabs,
+        AgentPaneSplit {
+            pane: self.0,
+            direction: split_dir,
+            existing_tabs,
             focus,
             already_split,
-        )
-    }
-
-    pub(crate) fn touch_spawn_seq(
-        &self,
-        commands: &mut Commands,
-        spawn_counter: &mut vmux_layout::pane::SpawnCounter,
-        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
-    ) {
-        let max_existing = seq_q.iter().map(|s| s.0).max().unwrap_or(0);
-        if spawn_counter.0 <= max_existing {
-            spawn_counter.0 = max_existing;
         }
-        spawn_counter.0 += 1;
-        commands
-            .entity(self.0)
-            .insert(vmux_layout::pane::SpawnSeq(spawn_counter.0));
     }
 
     pub(crate) fn direction(
-        d: &vmux_service::protocol::AgentPaneDirection,
-    ) -> vmux_command::open::PaneDirection {
-        use vmux_command::open::PaneDirection;
-        use vmux_service::protocol::AgentPaneDirection as D;
+        d: &vmux_api::protocol::AgentPaneDirection,
+    ) -> vmux_command::open_target::PaneDirection {
+        use vmux_api::protocol::AgentPaneDirection as D;
+        use vmux_command::open_target::PaneDirection;
         match d {
             D::Top => PaneDirection::Top,
             D::Right => PaneDirection::Right,
             D::Bottom => PaneDirection::Bottom,
             D::Left => PaneDirection::Left,
         }
+    }
+}
+
+pub(crate) struct AgentPaneSplit {
+    pub(crate) pane: Entity,
+    pub(crate) direction: vmux_layout::pane::PaneSplitDirection,
+    pub(crate) existing_tabs: Vec<Entity>,
+    pub(crate) focus: bool,
+    pub(crate) already_split: bool,
+}
+
+pub(crate) struct NextPaneSpawnSequence;
+
+impl NextPaneSpawnSequence {
+    pub(crate) fn take(
+        spawn_counter: &mut vmux_layout::pane::SpawnCounter,
+        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+    ) -> vmux_layout::pane::SpawnSeq {
+        let max_existing = seq_q.iter().map(|sequence| sequence.0).max().unwrap_or(0);
+        if spawn_counter.0 <= max_existing {
+            spawn_counter.0 = max_existing;
+        }
+        spawn_counter.0 += 1;
+        vmux_layout::pane::SpawnSeq(spawn_counter.0)
     }
 }
 
@@ -401,17 +399,16 @@ impl<'a> RunCommand<'a> {
         data
     }
 
-    pub(crate) fn queue(
+    pub(crate) fn reinput(
         &self,
-        writer: &mut MessageWriter<vmux_terminal::TerminalReinputRequest>,
         process_id: ProcessId,
         launch: &TerminalLaunch,
         pager: PagerEnv,
-    ) {
-        writer.write(vmux_terminal::TerminalReinputRequest {
+    ) -> vmux_terminal::TerminalReinputRequest {
+        vmux_terminal::TerminalReinputRequest {
             process_id,
             data: self.input(&launch.command, pager),
-        });
+        }
     }
 
     pub(crate) fn for_new_terminal(&self, settings: &AppSettings) -> (AgentTerminalShell, Vec<u8>) {
@@ -585,7 +582,7 @@ impl ProjectsDirectory {
 }
 
 impl<'a> AgentCwd<'a> {
-    pub(crate) fn of_tab(tab_cwd: Option<&'a str>) -> Self {
+    pub(crate) fn from_tab(tab_cwd: Option<&'a str>) -> Self {
         Self { tab_cwd }
     }
 
@@ -618,6 +615,7 @@ impl<'a> AgentCwd<'a> {
 mod tests {
     use super::*;
     use crate::host::test_support::{spawn_stack_in_pane, test_settings};
+    use vmux_core::LastActivatedAt;
     use vmux_terminal::Terminal;
 
     #[test]
@@ -628,7 +626,7 @@ mod tests {
         std::fs::create_dir_all(&agent_dir).unwrap();
         let canonical_tab_dir = tab_dir.canonicalize().unwrap();
         assert_eq!(
-            AgentCwd::of_tab(Some(tab_dir.to_string_lossy().as_ref()))
+            AgentCwd::from_tab(Some(tab_dir.to_string_lossy().as_ref()))
                 .or_agent_launch(Some(agent_dir.to_string_lossy().as_ref()))
                 .unwrap(),
             canonical_tab_dir
@@ -669,7 +667,7 @@ mod tests {
     pub(crate) fn run_terminal_cwd_inherits_agent_launch_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let got = AgentCwd::of_tab(None)
+        let got = AgentCwd::from_tab(None)
             .or_agent_launch(Some(&dir.to_string_lossy()))
             .unwrap();
         let _ = std::fs::remove_dir_all(&dir);
@@ -678,8 +676,8 @@ mod tests {
 
     #[test]
     pub(crate) fn run_terminal_cwd_requires_tab_or_agent_workspace() {
-        assert!(AgentCwd::of_tab(None).or_agent_launch(Some("")).is_err());
-        assert!(AgentCwd::of_tab(None).or_agent_launch(None).is_err());
+        assert!(AgentCwd::from_tab(None).or_agent_launch(Some("")).is_err());
+        assert!(AgentCwd::from_tab(None).or_agent_launch(None).is_err());
     }
 
     #[test]
@@ -687,7 +685,7 @@ mod tests {
         let agent_dir = std::env::temp_dir();
 
         assert!(
-            AgentCwd::of_tab(Some("/no/such/vmux-tab-workspace"))
+            AgentCwd::from_tab(Some("/no/such/vmux-tab-workspace"))
                 .or_agent_launch(agent_dir.to_str())
                 .is_err()
         );
@@ -695,7 +693,7 @@ mod tests {
 
     #[test]
     pub(crate) fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
-        assert!(AgentCwd::of_tab(Some(".")).or_agent_launch(None).is_err());
+        assert!(AgentCwd::from_tab(Some(".")).or_agent_launch(None).is_err());
     }
 
     #[test]
@@ -874,12 +872,11 @@ mod tests {
             input: Res<Input>,
             mut writer: MessageWriter<vmux_terminal::TerminalReinputRequest>,
         ) {
-            RunCommand::new("pwd", Some("tok4")).queue(
-                &mut writer,
+            writer.write(RunCommand::new("pwd", Some("tok4")).reinput(
                 input.process_id,
                 &input.launch,
                 PagerEnv::Inherited,
-            );
+            ));
         }
 
         fn capture(
@@ -1297,7 +1294,8 @@ mod tests {
         mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
     ) {
-        AgentPane::new(input.pane).touch_spawn_seq(&mut commands, &mut spawn_counter, &seq_q);
+        let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &seq_q);
+        commands.entity(input.pane).insert(sequence);
     }
 
     #[test]
@@ -1343,16 +1341,24 @@ mod tests {
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
     ) {
         let mut split_batch = std::collections::HashSet::new();
-        let target = AgentPane::new(input.pane).split_off(
-            &mut commands,
-            &vmux_service::protocol::AgentPaneDirection::Bottom,
+        let split = AgentPane::new(input.pane).split(
+            &vmux_api::protocol::AgentPaneDirection::Bottom,
             false,
             &pane_children,
             &tab_filter,
             &split_dir_q,
             &mut split_batch,
         );
-        AgentPane::new(target).touch_spawn_seq(&mut commands, &mut spawn_counter, &seq_q);
+        let target = vmux_layout::pane::split_or_extend(
+            &mut commands,
+            split.pane,
+            split.direction,
+            &split.existing_tabs,
+            split.focus,
+            split.already_split,
+        );
+        let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &seq_q);
+        commands.entity(target).insert(sequence);
         out.0 = Some(target);
     }
 
@@ -1396,11 +1402,10 @@ mod tests {
 
     #[test]
     pub(crate) fn run_reuses_existing_terminal_when_region_cache_is_empty() {
-        let anchor = ProcessId::new();
         let terminal = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let terminal_pane = Entity::from_bits(20);
-        let regions = AgentTerminalRegions::default();
+        let region = AgentTerminalRegion::default();
         let candidates = [RunTerminalCandidate {
             terminal: Entity::from_bits(19),
             pid: terminal,
@@ -1409,8 +1414,8 @@ mod tests {
             pane_spawn_seq: 7,
         }];
 
-        let picked = regions
-            .choose_reusable_terminal(anchor, agent_pane, &candidates)
+        let picked = region
+            .choose_reusable_terminal(agent_pane, &candidates)
             .unwrap();
 
         assert_eq!(picked.pid, terminal);
@@ -1441,15 +1446,15 @@ mod tests {
 
     #[test]
     pub(crate) fn run_reuses_cached_terminal_before_newer_terminal_candidates() {
-        let anchor = ProcessId::new();
         let cached = ProcessId::new();
         let newer = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let cached_pane = Entity::from_bits(20);
         let newer_pane = Entity::from_bits(30);
-        let mut regions = AgentTerminalRegions::default();
-        regions.run_terminals.insert(anchor, cached);
-        regions.run_panes.insert(anchor, cached_pane);
+        let region = AgentTerminalRegion {
+            run_terminal: Some(cached),
+            run_pane: Some(cached_pane),
+        };
         let candidates = [
             RunTerminalCandidate {
                 terminal: Entity::from_bits(19),
@@ -1467,8 +1472,8 @@ mod tests {
             },
         ];
 
-        let picked = regions
-            .choose_reusable_terminal(anchor, agent_pane, &candidates)
+        let picked = region
+            .choose_reusable_terminal(agent_pane, &candidates)
             .unwrap();
 
         assert_eq!(picked.pid, cached);
@@ -1486,7 +1491,9 @@ mod tests {
         child_of_q: Query<&ChildOf>,
         tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
     ) {
-        input.candidate.focus(&mut commands, &child_of_q, &tab_q);
+        for entity in input.candidate.activation_entities(&child_of_q, &tab_q) {
+            commands.entity(entity).insert(LastActivatedAt::now());
+        }
     }
 
     #[test]
@@ -1534,12 +1541,13 @@ mod tests {
 
     #[test]
     pub(crate) fn split_run_stacks_into_cached_terminal_bucket_pane() {
-        let anchor = ProcessId::new();
         let terminal = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let terminal_pane = Entity::from_bits(20);
-        let mut regions = AgentTerminalRegions::default();
-        regions.run_panes.insert(anchor, terminal_pane);
+        let region = AgentTerminalRegion {
+            run_pane: Some(terminal_pane),
+            ..default()
+        };
         let candidates = [RunTerminalCandidate {
             terminal: Entity::from_bits(19),
             pid: terminal,
@@ -1549,22 +1557,23 @@ mod tests {
         }];
 
         assert_eq!(
-            regions.choose_bucket_pane(anchor, agent_pane, &candidates),
+            region.choose_bucket_pane(agent_pane, &candidates),
             Some(terminal_pane)
         );
     }
 
     #[test]
     pub(crate) fn split_run_keeps_cached_terminal_bucket_after_process_exits() {
-        let anchor = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let terminal_pane = Entity::from_bits(20);
-        let mut regions = AgentTerminalRegions::default();
-        regions.run_panes.insert(anchor, terminal_pane);
+        let region = AgentTerminalRegion {
+            run_pane: Some(terminal_pane),
+            ..default()
+        };
         let candidates = [];
 
         assert_eq!(
-            regions.choose_bucket_pane(anchor, agent_pane, &candidates),
+            region.choose_bucket_pane(agent_pane, &candidates),
             Some(terminal_pane)
         );
     }

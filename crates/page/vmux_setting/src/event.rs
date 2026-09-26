@@ -1,35 +1,8 @@
 pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
-pub const SETTINGS_LIST_EVENT: &str = "settings_list";
-pub const SETTINGS_SCHEMA_EVENT: &str = "settings_schema";
-pub const UPDATE_CHECK_STATUS_EVENT: &str = "update_check_status";
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Copy, Default, Eq, url = "vmux://settings/")]
 pub struct CheckForUpdatesEvent;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub enum UpdateCheckStatus {
     #[default]
     Idle,
@@ -48,22 +21,6 @@ pub enum UpdateCheckStatus {
     Unavailable,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct UpdateCheckStatusEvent {
-    pub status: UpdateCheckStatus,
-}
-
 #[cfg(host)]
 #[derive(bevy::prelude::Message, Clone, Copy, Debug, Default)]
 pub struct CheckForUpdatesRequest;
@@ -72,53 +29,10 @@ pub struct CheckForUpdatesRequest;
 #[derive(bevy::prelude::Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct SettingsListEvent {
-    pub json: String,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct SettingsCommandEvent {
+#[vmux_api::ui_event(Default, Eq, version = 2, url = "vmux://settings/")]
+pub struct SettingsRequest {
     pub path: String,
-    pub value: String,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct SettingsSchemaEvent {
-    pub json: String,
+    pub value: vmux_api::json::JsonValue,
 }
 
 #[cfg(test)]
@@ -126,36 +40,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_list_event_rkyv_roundtrip() {
-        let original = SettingsListEvent {
-            json: r#"{"auto_update":true}"#.to_string(),
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        let decoded =
-            rkyv::from_bytes::<SettingsListEvent, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(decoded, original);
-    }
-
-    #[test]
-    fn settings_command_event_rkyv_roundtrip() {
-        let original = SettingsCommandEvent {
+    fn settings_request_rkyv_roundtrip() {
+        let original = SettingsRequest {
             path: "layout.pane.gap".to_string(),
-            value: "12.0".to_string(),
+            value: serde_json::json!(12.0).into(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        let decoded =
-            rkyv::from_bytes::<SettingsCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(decoded, original);
-    }
-
-    #[test]
-    fn settings_schema_event_rkyv_roundtrip() {
-        let original = SettingsSchemaEvent {
-            json: r#"{"sections":[]}"#.to_string(),
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        let decoded =
-            rkyv::from_bytes::<SettingsSchemaEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        let decoded = rkyv::from_bytes::<SettingsRequest, rkyv::rancor::Error>(&bytes).expect("de");
         assert_eq!(decoded, original);
     }
 
@@ -165,19 +56,6 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let decoded =
             rkyv::from_bytes::<CheckForUpdatesEvent, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(decoded, original);
-    }
-
-    #[test]
-    fn update_check_status_event_rkyv_roundtrip() {
-        let original = UpdateCheckStatusEvent {
-            status: UpdateCheckStatus::Downloading {
-                version: "1.2.3".to_string(),
-            },
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        let decoded =
-            rkyv::from_bytes::<UpdateCheckStatusEvent, rkyv::rancor::Error>(&bytes).expect("de");
         assert_eq!(decoded, original);
     }
 }

@@ -1,0 +1,98 @@
+[
+  (
+    kind: ListNext,
+    id: "chat_list_next",
+    label: "Next Option",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [
+      (shortcut: Direct("ArrowDown"), when: Some("chat.list")),
+      (shortcut: Direct("Ctrl+n"), when: Some("chat.list")),
+      (shortcut: Direct("Ctrl+j"), when: Some("chat.list")),
+    ],
+  ),
+  (
+    kind: ListPrevious,
+    id: "chat_list_previous",
+    label: "Previous Option",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [
+      (shortcut: Direct("ArrowUp"), when: Some("chat.list")),
+      (shortcut: Direct("Ctrl+p"), when: Some("chat.list")),
+      (shortcut: Direct("Ctrl+k"), when: Some("chat.list")),
+    ],
+  ),
+  (
+    kind: ListChoose,
+    id: "chat_list_choose",
+    label: "Choose Option",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [
+      (shortcut: Direct("Enter"), when: Some("chat.list")),
+    ],
+  ),
+  (
+    kind: HistoryOlder,
+    id: "chat_history_older",
+    label: "Previous Prompt",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [
+      (shortcut: Direct("ArrowUp"), when: Some("chat && !chat.list")),
+      (shortcut: Direct("Ctrl+p"), when: Some("chat && !chat.list")),
+    ],
+  ),
+  (
+    kind: HistoryNewer,
+    id: "chat_history_newer",
+    label: "Next Prompt",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [
+      (shortcut: Direct("ArrowDown"), when: Some("chat && !chat.list")),
+      (shortcut: Direct("Ctrl+n"), when: Some("chat && !chat.list")),
+    ],
+  ),
+  (
+    kind: Submit,
+    id: "chat_submit",
+    label: "Send Prompt",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [
+      (shortcut: Direct("Enter"), when: Some("chat && !chat.list")),
+    ],
+  ),
+  (
+    kind: DismissSelector,
+    id: "chat_dismiss_selector",
+    label: "Close Picker",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [
+      (shortcut: Direct("Escape"), when: Some("chat.selector")),
+    ],
+  ),
+  (
+    kind: Interrupt,
+    id: "chat_interrupt",
+    label: "Send Queued Now",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [
+      (shortcut: Direct("Escape"), when: Some("chat && !chat.selector")),
+    ],
+  ),
+  (
+    kind: Cancel,
+    id: "chat_cancel",
+    label: "Stop Turn",
+    group: "Chat",
+    hidden: true,
+    shortcuts: [
+      (shortcut: Direct("Ctrl+c"), when: Some("chat")),
+    ],
+  ),
+]

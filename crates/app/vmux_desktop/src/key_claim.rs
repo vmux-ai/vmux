@@ -1,15 +1,16 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, WebviewSource};
+use bevy_cef::prelude::{UiInput, WebviewSource};
 use vmux_command::shortcut::{KeyContext, Keymap};
 use vmux_core::host::page::HostsPage;
-use vmux_core::input::{KEY_CLAIMS_EVENT, KeyClaims, PageKeyContext};
+use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_core::input::{KeyClaims, PageKeyContext};
 
 pub struct KeyClaimPlugin;
 
 impl Plugin for KeyClaimPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(receive_page_context)
-            .add_observer(reclaim_on_page_ready)
+        app.add_plugins(UiStatePlugin::<KeyClaims>::default())
+            .add_observer(receive_page_context)
             .add_systems(Update, (start_page_context, push_key_claims).chain());
     }
 }
@@ -25,28 +26,20 @@ fn start_page_context(
     mut commands: Commands,
 ) {
     for entity in pages.iter() {
-        commands.entity(entity).insert(KeyContext::default());
+        commands
+            .entity(entity)
+            .insert((KeyContext::default(), UiState::<KeyClaims>::default()));
     }
 }
 
 fn receive_page_context(
-    trigger: On<BinReceive<PageKeyContext>>,
+    trigger: On<UiInput<PageKeyContext>>,
     mut contexts: Query<&mut KeyContext>,
 ) {
     let Ok(mut current) = contexts.get_mut(trigger.event_target()) else {
         return;
     };
     current.set_if_neq(trigger.payload.keys.iter().cloned().collect());
-}
-
-fn reclaim_on_page_ready(
-    trigger: On<BinReceive<vmux_core::host::page::PageReady>>,
-    mut contexts: Query<&mut KeyContext>,
-) {
-    let Ok(mut context) = contexts.get_mut(trigger.event_target()) else {
-        return;
-    };
-    context.set_changed();
 }
 
 fn push_key_claims(
@@ -62,11 +55,7 @@ fn push_key_claims(
             continue;
         }
         let claims: KeyClaims = keymap.in_context(&context).claims();
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            KEY_CLAIMS_EVENT,
-            &claims,
-        ));
+        commands.trigger(UiStateWrite::<KeyClaims>::from_event(entity, &claims));
     }
 }
 
@@ -74,6 +63,8 @@ fn push_key_claims(
 mod tests {
     use super::*;
     use bevy::input::keyboard::KeyCode;
+    use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
+    use vmux_api::BinEvent;
     use vmux_command::shortcut::{Binding, KeyCombo, Modifiers, Shortcut, Source, When};
 
     #[derive(Resource, Default)]
@@ -99,16 +90,16 @@ mod tests {
             mut pushed: ResMut<Self>,
             mut rejected: ResMut<Rejected>,
         ) {
-            if trigger.id != KEY_CLAIMS_EVENT {
-                rejected.0.push(trigger.id.clone());
+            if trigger.id() != KeyClaims::id() {
+                rejected.0.push(trigger.id().to_string());
                 return;
             }
-            let Ok(claims) = rkyv::from_bytes::<KeyClaims, rkyv::rancor::Error>(&trigger.payload)
+            let Ok(claims) = rkyv::from_bytes::<KeyClaims, rkyv::rancor::Error>(trigger.payload())
             else {
                 rejected.0.push("undecodable payload".to_string());
                 return;
             };
-            pushed.0.push((trigger.webview, claims));
+            pushed.0.push((trigger.webview(), claims));
         }
     }
 
@@ -127,6 +118,7 @@ mod tests {
     impl Seam {
         fn app() -> App {
             let mut keymap = Keymap::default();
+            keymap.register(["stack_close", "close_pane"]);
             keymap.extend(
                 Source::Settings,
                 [
@@ -156,6 +148,7 @@ mod tests {
                 .init_resource::<Pushed>()
                 .init_resource::<Rejected>()
                 .add_observer(Pushed::record);
+            app.insert_non_send(Browsers::default());
             app
         }
 
@@ -164,18 +157,24 @@ mod tests {
                 .world_mut()
                 .spawn(WebviewSource::new("about:blank"))
                 .id();
+            app.world_mut()
+                .non_send_mut::<Browsers>()
+                .set_externally_hosted(entity);
             app.update();
             entity
         }
 
         fn hosted_page(app: &mut App) -> Entity {
             let entity = app.world_mut().spawn(HostsPage).id();
+            app.world_mut()
+                .non_send_mut::<Browsers>()
+                .set_externally_hosted(entity);
             app.update();
             entity
         }
 
         fn publish(app: &mut App, page: Entity, keys: &[&str]) {
-            app.world_mut().trigger(BinReceive {
+            app.world_mut().trigger(UiInput {
                 webview: page,
                 payload: PageKeyContext {
                     keys: keys.iter().map(|key| (*key).to_string()).collect(),
@@ -226,7 +225,7 @@ mod tests {
         Seam::publish(&mut app, page, &["chat", "chat.selector"]);
         let before = Pushed::codes(app.world(), page).len();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview: page,
             payload: vmux_core::host::page::PageReady {},
         });

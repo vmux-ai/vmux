@@ -1,33 +1,28 @@
 use crate::ranking::score;
-use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 
 use crate::event::{
-    HISTORY_CHANGED_EVENT, HISTORY_QUERY_RESPONSE_EVENT, HISTORY_SUGGESTIONS_RESPONSE_EVENT,
-    HistoryChangedEvent, HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry,
-    HistoryOpenRequest, HistoryQueryRequest, HistoryQueryResponse, HistorySuggestionsRequest,
+    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryOpenRequest,
+    HistoryQueryRequest, HistoryQueryResponse, HistorySuggestionsRequest,
     HistorySuggestionsResponse,
 };
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_core::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
+
+use super::state::HistoryQueryState;
 
 pub struct HistoryQueryPlugin;
 
 impl Plugin for HistoryQueryPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            BinEventEmitterPlugin::<(
+            UiEventPlugin::<(
                 HistoryQueryRequest,
                 HistoryDeleteRequest,
                 HistoryClearAllRequest,
                 HistoryOpenRequest,
-                HistoryChangedEvent,
-            )>::for_hosts(&["history"]),
-            BinEventEmitterPlugin::<(HistorySuggestionsRequest,)>::for_hosts(&[
-                "command-bar",
-                "start",
-                "layout",
-            ]),
+            )>::default(),
+            UiEventPlugin::<(HistorySuggestionsRequest,)>::default(),
         ))
         .add_message::<HistoryOpenIntent>()
         .add_observer(on_history_query_request)
@@ -43,38 +38,56 @@ impl Plugin for HistoryQueryPlugin {
 }
 
 fn on_history_query_request(
-    trigger: On<BinReceive<HistoryQueryRequest>>,
+    trigger: On<UiInput<HistoryQueryRequest>>,
     urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     visits: Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
+    mut pages: Query<&mut HistoryQueryState>,
     mut commands: Commands,
 ) {
     let req = &trigger.event().payload;
-    let now = vmux_core::now_millis();
+    let Ok(mut state) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    *state = HistoryQueryState::from_request(req);
+    let response = history_query_response(req, &urls, &visits);
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
+            trigger.event().webview,
+            &response,
+        ),
+    );
+}
 
+fn history_query_response(
+    request: &HistoryQueryRequest,
+    urls: &Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
+    visits: &Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
+) -> HistoryQueryResponse {
     let url_rows: Vec<_> = urls
         .iter()
-        .map(|(e, m, c, l)| (e, m.clone(), *c, *l))
+        .map(|(entity, metadata, count, last)| (entity, metadata.clone(), *count, *last))
         .collect();
-    let visit_rows: Vec<_> = visits.iter().map(|(c, vu)| (*c, *vu)).collect();
-
-    let entries = build_entries(&req.query, &url_rows, &visit_rows, now);
+    let visit_rows: Vec<_> = visits
+        .iter()
+        .map(|(created, visited)| (*created, *visited))
+        .collect();
+    let entries = build_entries(
+        &request.query,
+        &url_rows,
+        &visit_rows,
+        vmux_core::now_millis(),
+    );
+    let offset = request.offset as usize;
+    let limit = request.limit as usize;
     let total = entries.len();
-    let offset = req.offset as usize;
-    let limit = req.limit as usize;
-    let page: Vec<_> = entries.into_iter().skip(offset).take(limit).collect();
-    let returned = page.len();
-    let has_more = offset + returned < total;
-
-    let payload = HistoryQueryResponse {
-        request_id: req.request_id,
-        entries: page,
+    let entries: Vec<_> = entries.into_iter().skip(offset).take(limit).collect();
+    let has_more = offset + entries.len() < total;
+    HistoryQueryResponse {
+        request_id: request.request_id,
+        offset: request.offset,
+        entries,
         has_more,
-    };
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        trigger.event().webview,
-        HISTORY_QUERY_RESPONSE_EVENT,
-        &payload,
-    ));
+    }
 }
 
 pub fn build_entries(
@@ -133,7 +146,7 @@ pub fn build_entries(
 }
 
 fn on_history_delete_request(
-    trigger: On<BinReceive<HistoryDeleteRequest>>,
+    trigger: On<UiInput<HistoryDeleteRequest>>,
     mut commands: Commands,
     visits: Query<(Entity, &VisitedUrl), With<Visit>>,
 ) {
@@ -149,7 +162,7 @@ fn on_history_delete_request(
 }
 
 fn on_history_clear_all_request(
-    _trigger: On<BinReceive<HistoryClearAllRequest>>,
+    _trigger: On<UiInput<HistoryClearAllRequest>>,
     mut commands: Commands,
     urls: Query<Entity, With<Url>>,
     visits: Query<Entity, With<Visit>>,
@@ -169,8 +182,8 @@ pub struct HistoryOpenIntent {
 }
 
 fn on_history_open_request(
-    trigger: On<BinReceive<HistoryOpenRequest>>,
-    mut messages: ResMut<Messages<HistoryOpenIntent>>,
+    trigger: On<UiInput<HistoryOpenRequest>>,
+    mut messages: MessageWriter<HistoryOpenIntent>,
 ) {
     let req = &trigger.event().payload;
     messages.write(HistoryOpenIntent {
@@ -181,30 +194,35 @@ fn on_history_open_request(
 
 fn broadcast_history_changed(
     changed: Query<(), (Changed<LastVisitedAt>, With<Url>)>,
-    pages: Query<(Entity, &vmux_core::PageMetadata)>,
-    browsers: NonSend<bevy_cef_core::prelude::Browsers>,
+    pages: Query<(Entity, &HistoryQueryState)>,
+    urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
+    visits: Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
     mut commands: Commands,
 ) {
     if changed.iter().next().is_none() {
         return;
     }
-    for (e, page) in &pages {
-        if !page.url.starts_with("vmux://history") {
+    for (entity, state) in &pages {
+        if state.request_id == 0 {
             continue;
         }
-        if !browsers.can_emit_to(&e) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            e,
-            HISTORY_CHANGED_EVENT,
-            &HistoryChangedEvent,
-        ));
+        let request = HistoryQueryRequest {
+            query: state.query.clone(),
+            offset: 0,
+            limit: state.limit,
+            request_id: state.request_id,
+        };
+        let response = history_query_response(&request, &urls, &visits);
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
+                entity, &response,
+            ),
+        );
     }
 }
 
 fn on_history_suggestions_request(
-    trigger: On<BinReceive<HistorySuggestionsRequest>>,
+    trigger: On<UiInput<HistorySuggestionsRequest>>,
     urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     mut commands: Commands,
 ) {
@@ -239,9 +257,10 @@ fn on_history_suggestions_request(
         .map(|(_, e)| e)
         .collect();
 
-    commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(
         trigger.event().webview,
-        HISTORY_SUGGESTIONS_RESPONSE_EVENT,
         &HistorySuggestionsResponse {
             request_id: req.request_id,
             entries,

@@ -1,11 +1,16 @@
 #[cfg(host)]
-fn main() {
-    use std::io::{self, BufReader, Write};
+use serde_json::{Value, json};
+#[cfg(host)]
+use std::io::{self, BufReader, Write};
+#[cfg(host)]
+use vmux_editor::lsp::framing::{read_message, write_message};
 
-    use serde_json::{Value, json};
-    use vmux_editor::lsp::framing::{read_message, write_message};
+#[cfg(host)]
+struct Diagnostic;
 
-    fn diagnostic(uri: &str, message: String) -> Value {
+#[cfg(host)]
+impl Diagnostic {
+    fn message(uri: &str, message: String) -> Value {
         json!({
             "jsonrpc": "2.0",
             "method": "textDocument/publishDiagnostics",
@@ -21,7 +26,10 @@ fn main() {
             }
         })
     }
+}
 
+#[cfg(host)]
+fn main() {
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
     let mut stdout = io::stdout();
@@ -53,7 +61,10 @@ fn main() {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let _ = write_message(&mut stdout, &diagnostic(&uri, "mock diagnostic".into()));
+                let _ = write_message(
+                    &mut stdout,
+                    &Diagnostic::message(&uri, "mock diagnostic".into()),
+                );
                 if uri.contains("probe-requests") {
                     probe_uri = uri;
                     let _ = write_message(
@@ -80,7 +91,7 @@ fn main() {
                     .unwrap_or_else(|| "ok".to_string());
                 let _ = write_message(
                     &mut stdout,
-                    &diagnostic(&probe_uri, format!("answered {code}")),
+                    &Diagnostic::message(&probe_uri, format!("answered {code}")),
                 );
             }
             _ => {}

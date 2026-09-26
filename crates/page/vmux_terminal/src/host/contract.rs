@@ -1,8 +1,7 @@
 use bevy::prelude::*;
 
-use crate::plugin::{
-    RunShellRequest, TerminalFontSizeCommand, TerminalReinputRequest, TerminalSendRequest,
-};
+use crate::theme::TerminalFontSizeCommand;
+use crate::{RunShellRequest, TerminalReinputRequest, TerminalSendRequest};
 
 pub struct TerminalContractPlugin;
 

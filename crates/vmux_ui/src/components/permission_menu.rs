@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_wire::protocol::AcpModeOption;
+use vmux_api::protocol::AcpModeOption;
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
 use crate::i18n::translate;

@@ -1,0 +1,74 @@
+#[vmux_api::ui_state(Default, url = "vmux://services/")]
+pub struct ProcessesUiState {
+    pub connected: bool,
+    pub processes: Vec<ProcessEntry>,
+}
+
+#[vmux_api::contract]
+pub struct ProcessEntry {
+    pub id: String,
+    pub managed: bool,
+    pub shell: String,
+    pub cwd: String,
+    pub cols: u16,
+    pub rows: u16,
+    pub pid: u32,
+    pub uptime_secs: u64,
+    pub cpu_percent: f32,
+    pub mem_bytes: u64,
+    pub attached: bool,
+    pub preview_lines: Vec<PreviewLine>,
+}
+
+#[vmux_api::contract]
+pub struct PreviewLine {
+    pub text: String,
+}
+
+pub fn format_mem(bytes: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if bytes == 0 {
+        "—".to_string()
+    } else if b < MB {
+        "<1 MB".to_string()
+    } else if b < GB {
+        format!("{:.0} MB", b / MB)
+    } else {
+        format!("{:.1} GB", b / GB)
+    }
+}
+
+#[vmux_api::ui_event(url = "vmux://services/")]
+pub struct ProcessNavigateEvent {
+    pub process_id: String,
+    pub navigate: bool,
+}
+
+#[vmux_api::ui_event(url = "vmux://services/")]
+pub struct ProcessKillEvent {
+    pub process_id: String,
+    pub kill: bool,
+}
+
+#[vmux_api::ui_event(url = "vmux://services/")]
+pub struct ProcessKillAllEvent {
+    pub kill_all: bool,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq, urls = ["vmux://debug/", "vmux://extensions/", "vmux://layout/"])]
+pub struct RelaunchRequest;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_mem_buckets() {
+        assert_eq!(format_mem(0), "—");
+        assert_eq!(format_mem(512 * 1024), "<1 MB");
+        assert_eq!(format_mem(332 * 1024 * 1024), "332 MB");
+        assert_eq!(format_mem(3 * 1024 * 1024 * 1024 / 2), "1.5 GB");
+    }
+}

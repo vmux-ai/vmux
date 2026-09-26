@@ -46,6 +46,31 @@ fn every_item_is_separated_from_the_body_above_it() {
     );
 }
 
+#[test]
+fn vmux_owned_crates_do_not_define_declarative_macros() {
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crates dir");
+
+    let mut violations = Vec::new();
+    walk(crates_dir, &mut |path, source| {
+        if path.ends_with("blank_line_between_items.rs") {
+            return;
+        }
+        for (index, line) in source.lines().enumerate() {
+            if line.trim_start().starts_with("macro_rules!") {
+                violations.push(format!("{}:{}", path.display(), index + 1));
+            }
+        }
+    });
+
+    assert!(
+        violations.is_empty(),
+        "vmux-owned crates must use functions, typed systems, derive macros, or attribute macros:\n{}",
+        violations.join("\n")
+    );
+}
+
 fn offending_lines(source: &str) -> Vec<usize> {
     let lines: Vec<&str> = source.lines().collect();
     let mut found = Vec::new();

@@ -1,8 +1,12 @@
-pub use vmux_wire::room::{
+pub use vmux_api::room::{
     ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent,
     RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };
 
+#[cfg(host)]
+pub mod authorization;
+#[cfg(host)]
+pub mod pairing;
 #[cfg(host)]
 pub mod quic;
 #[cfg(host)]

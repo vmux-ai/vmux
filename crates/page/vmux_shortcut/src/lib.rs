@@ -1,8 +1,4 @@
 pub const PAGE_URL: &str = "vmux://shortcuts/";
-pub const EVENT: &str = "shortcuts";
-pub const PRESSED_EVENT: &str = "shortcut-pressed";
-pub const CAPTURE_STATE_EVENT: &str = "shortcut-capture-state";
-
 pub struct ShortcutUrl;
 
 impl ShortcutUrl {
@@ -16,9 +12,6 @@ impl ShortcutUrl {
 }
 
 #[cfg(host)]
-static CAPTURE_TARGET: std::sync::Mutex<Option<ShortcutCaptureToken>> = std::sync::Mutex::new(None);
-
-#[cfg(host)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShortcutCaptureToken {
     pub target: bevy::prelude::Entity,
@@ -26,100 +19,46 @@ pub struct ShortcutCaptureToken {
 }
 
 #[cfg(host)]
-pub fn capture_target() -> Option<ShortcutCaptureToken> {
-    *CAPTURE_TARGET
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+#[derive(bevy::prelude::EntityEvent, Clone, Debug)]
+pub struct ShortcutProbePress {
+    #[event_target]
+    target: bevy::prelude::Entity,
+    stroke: ShortcutStroke,
+    pressed_at_ms: i64,
 }
 
 #[cfg(host)]
-pub fn release_capture(token: ShortcutCaptureToken) -> bool {
-    let mut current = CAPTURE_TARGET
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if *current != Some(token) {
-        return false;
+impl ShortcutProbePress {
+    pub fn new(target: bevy::prelude::Entity, stroke: ShortcutStroke, pressed_at_ms: i64) -> Self {
+        Self {
+            target,
+            stroke,
+            pressed_at_ms,
+        }
     }
-    *current = None;
-    true
+
+    pub fn stroke(&self) -> &ShortcutStroke {
+        &self.stroke
+    }
+
+    pub fn pressed_at_ms(&self) -> i64 {
+        self.pressed_at_ms
+    }
 }
 
-#[cfg(host)]
-fn set_capture_target(target: Option<ShortcutCaptureToken>) {
-    *CAPTURE_TARGET
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = target;
+#[vmux_api::ui_event(Eq, url = "vmux://shortcuts/")]
+pub enum ShortcutProbeRequest {
+    Press(ShortcutStroke),
+    Clear,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ShortcutCaptureEvent {
-    pub active: bool,
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ShortcutCaptureStateEvent {
-    pub active: bool,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ShortcutPressedEvent {
-    pub stroke: ShortcutStroke,
-    pub pressed_at_ms: i64,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ShortcutsEvent {
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutCatalog {
     pub groups: Vec<ShortcutGroup>,
     pub chord_timeout_ms: u64,
 }
 
-impl ShortcutsEvent {
+impl ShortcutCatalog {
     pub fn bindings(&self) -> impl Iterator<Item = (&ShortcutEntry, &ShortcutBinding)> {
         self.groups.iter().flat_map(|group| {
             group.entries.iter().flat_map(|entry| {
@@ -136,58 +75,53 @@ impl ShortcutsEvent {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
+pub struct ShortcutProbeView {
+    pub sequence: Vec<ShortcutStroke>,
+    pub status: ShortcutProbeStatus,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub enum ShortcutProbeStatus {
+    #[default]
+    Idle,
+    Pending,
+    Match(Vec<String>),
+    Contextual(Vec<String>),
+    Miss,
+}
+
+#[vmux_api::ui_state(Default, url = "vmux://shortcuts/")]
+pub struct ShortcutUiState {
+    pub groups: Vec<ShortcutGroup>,
+    pub probe: ShortcutProbeView,
+    pub shortcut_count: u32,
+}
+
+#[cfg(host)]
+pub type ShortcutUiStateUpdates = vmux_core::host::UiState<ShortcutUiState>;
+
+#[vmux_api::contract(Default, Eq)]
 pub struct ShortcutGroup {
     pub name: String,
     pub entries: Vec<ShortcutEntry>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ShortcutEntry {
     pub id: String,
     pub name: String,
     pub shortcuts: Vec<ShortcutBinding>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ShortcutBinding {
     pub label: String,
     pub strokes: Vec<ShortcutStroke>,
     pub resolves: bool,
     pub contexts: Vec<String>,
+    #[serde(default)]
+    pub emphasized: bool,
 }
 
 impl ShortcutBinding {
@@ -205,19 +139,7 @@ impl ShortcutBinding {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq, Hash)]
 pub struct ShortcutStroke {
     pub code: String,
     pub label: String,
@@ -266,7 +188,36 @@ impl ShortcutStroke {
 #[cfg(host)]
 mod host;
 #[cfg(host)]
-pub use host::{ShortcutCaptureTarget, ShortcutPlugin};
+pub use host::{ShortcutCaptureSet, ShortcutCaptureTarget, ShortcutPlugin};
 
 #[cfg(ui)]
-pub mod page;
+pub mod ui;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_state_round_trips_projected_shortcuts() {
+        let state = ShortcutUiState {
+            probe: ShortcutProbeView {
+                sequence: vec![ShortcutStroke {
+                    code: "KeyK".to_string(),
+                    label: "K".to_string(),
+                    ctrl: true,
+                    ..Default::default()
+                }],
+                status: ShortcutProbeStatus::Pending,
+            },
+            shortcut_count: 3,
+            ..Default::default()
+        };
+
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
+        let decoded = rkyv::from_bytes::<ShortcutUiState, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(decoded.shortcut_count, 3);
+        assert_eq!(decoded.probe.sequence[0].code, "KeyK");
+        assert_eq!(decoded.probe.status, ShortcutProbeStatus::Pending);
+    }
+}

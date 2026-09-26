@@ -1,16 +1,12 @@
-use crate::event::{
-    CommandBarOpenEvent, CommandBarPanelActiveEvent, CommandBarPanelCloseEvent,
-    LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT, PanelPlacement,
-    clamp_panel_placement,
-};
-use crate::page::CommandPalette;
+use crate::event::{CommandBarPanelRequest, PanelPlacement, clamp_panel_placement};
+use crate::ui::{CommandPalette, use_command_bar_ui};
 use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
-use vmux_ui::hooks::{send, use_listener};
+use vmux_ui::hooks::send;
 use vmux_ui::launcher::palette::PaletteSurface;
 
 fn set_command_bar_panel_active(active: bool) {
-    let _ = send(&CommandBarPanelActiveEvent { active });
+    let _ = send(&CommandBarPanelRequest { active });
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,7 +127,7 @@ fn panel_viewport() -> Option<(f64, f64)> {
 
 #[component]
 pub fn CommandBarPanel() -> Element {
-    let mut state = use_signal(CommandBarOpenEvent::default);
+    let state = use_command_bar_ui();
     let mut open = use_signal(|| false);
     let mut drag = use_panel_drag();
 
@@ -140,15 +136,9 @@ pub fn CommandBarPanel() -> Element {
         set_command_bar_panel_active(showing);
     };
 
-    let _open_listener =
-        use_listener::<CommandBarOpenEvent, _>(LAYOUT_COMMAND_BAR_OPEN_EVENT, move |data| {
-            state.set(data);
-            set_open(true);
-        });
-    let _close_listener =
-        use_listener::<CommandBarPanelCloseEvent, _>(LAYOUT_COMMAND_BAR_CLOSE_EVENT, move |_| {
-            set_open(false)
-        });
+    use_effect(move || {
+        set_open(state().open_id.is_open());
+    });
     use_drop(move || set_command_bar_panel_active(false));
 
     if !open() {
@@ -199,7 +189,6 @@ pub fn CommandBarPanel() -> Element {
                             state: ReadSignal::from(state),
                             surface: PaletteSurface::Modal,
                             on_close: move |_| set_open(false),
-                            on_dismiss: move |_| set_open(false),
                             on_activity: move |_| {},
                         }
                     }

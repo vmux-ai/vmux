@@ -9,7 +9,7 @@ enum ObjectScope {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum MarkAction {
+enum PendingMark {
     Set,
     GotoExact,
     GotoLine,
@@ -62,7 +62,7 @@ pub struct VimKeymap {
     macros: std::collections::HashMap<char, Vec<Recorded>>,
     last_macro: Option<char>,
     insert_after_next: bool,
-    mark_pending: Option<MarkAction>,
+    mark_pending: Option<PendingMark>,
     block_insert: Option<bool>,
     block_text: String,
     mappings: crate::keymap::mapping::Mappings,
@@ -403,17 +403,17 @@ impl VimKeymap {
             return self.resolve_find(forward, till, key);
         }
 
-        if let Some(action) = self.mark_pending.take() {
+        if let Some(pending) = self.mark_pending.take() {
             let Some(name) = single_char(key) else {
                 return vec![];
             };
-            return match action {
-                MarkAction::Set => vec![SetMark(name)],
-                MarkAction::GotoExact => vec![GotoMark {
+            return match pending {
+                PendingMark::Set => vec![SetMark(name)],
+                PendingMark::GotoExact => vec![GotoMark {
                     name,
                     linewise: false,
                 }],
-                MarkAction::GotoLine => vec![GotoMark {
+                PendingMark::GotoLine => vec![GotoMark {
                     name,
                     linewise: true,
                 }],
@@ -601,15 +601,15 @@ impl VimKeymap {
             "*" => vec![SearchWord { forward: true }],
             "#" => vec![SearchWord { forward: false }],
             "m" => {
-                self.mark_pending = Some(MarkAction::Set);
+                self.mark_pending = Some(PendingMark::Set);
                 vec![]
             }
             "`" => {
-                self.mark_pending = Some(MarkAction::GotoExact);
+                self.mark_pending = Some(PendingMark::GotoExact);
                 vec![]
             }
             "'" => {
-                self.mark_pending = Some(MarkAction::GotoLine);
+                self.mark_pending = Some(PendingMark::GotoLine);
                 vec![]
             }
             "q" => {

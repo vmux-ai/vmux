@@ -1,95 +1,35 @@
 use dioxus::prelude::*;
-use vmux_wire::mcp::{
-    MCP_SERVER_ACTION_RESULT_EVENT, MCP_SERVERS_EVENT, McpServerAction, McpServerActionRequest,
-    McpServerActionResult, McpServerEntry, McpServerStatus, McpServers, McpServersRequest,
-};
+use vmux_api::mcp::{McpServerEntry, McpServerRequest, McpServerStatus, McpServers};
 
 use crate::components::prompt_box::{PromptMenuRow, PromptPopup, PromptPopupPlacement};
-use crate::hooks::{send, use_listener};
+use crate::hooks::{send, use_ui_state};
 use crate::i18n::translate;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct McpConnections {
-    pub servers: Signal<Vec<McpServerEntry>>,
-    pub loaded: Signal<bool>,
-    pub loading: Signal<bool>,
-    pub pending: Signal<String>,
-    pub error: Signal<String>,
+    state: Signal<McpServers>,
 }
 
 pub fn use_mcp_connections() -> McpConnections {
-    let connections = McpConnections {
-        servers: use_signal(Vec::new),
-        loaded: use_signal(|| false),
-        loading: use_signal(|| false),
-        pending: use_signal(String::new),
-        error: use_signal(String::new),
-    };
-    let mut servers = connections.servers;
-    let mut loaded = connections.loaded;
-    let mut loading = connections.loading;
-    let _servers = use_listener::<McpServers, _>(MCP_SERVERS_EVENT, move |incoming| {
-        servers.set(incoming.servers);
-        loaded.set(true);
-        loading.set(false);
-    });
-    let mut pending = connections.pending;
-    let mut error = connections.error;
-    let _result =
-        use_listener::<McpServerActionResult, _>(MCP_SERVER_ACTION_RESULT_EVENT, move |result| {
-            if *pending.peek() == result.id {
-                pending.set(String::new());
-            }
-            if result.success {
-                error.set(String::new());
-            } else {
-                error.set(result.message);
-            }
-        });
-    connections
+    McpConnections {
+        state: use_ui_state::<McpServers>(),
+    }
 }
 
 impl McpConnections {
-    pub fn request(&self) {
-        if *self.loading.peek() {
-            return;
-        }
-        let mut loading = self.loading;
-        loading.set(true);
-        if send(&McpServersRequest).is_err() {
-            loading.set(false);
-        }
-    }
-
     pub fn activate(&self, server: &McpServerEntry) {
-        if !self.pending.peek().is_empty() {
+        if self.state.peek().pending.is_some() {
             return;
         }
-        let action = match server.status {
-            McpServerStatus::Available
-            | McpServerStatus::AuthenticationRequired
-            | McpServerStatus::Failed => McpServerAction::Connect,
-            McpServerStatus::Configured => return,
-            McpServerStatus::Connected => McpServerAction::Disconnect,
-        };
-        let mut pending = self.pending;
-        let mut error = self.error;
-        pending.set(server.id.clone());
-        error.set(String::new());
-        if send(&McpServerActionRequest {
+        let _ = send(&McpServerRequest {
             id: server.id.clone(),
-            action,
-        })
-        .is_err()
-        {
-            pending.set(String::new());
-        }
+        });
     }
 
     pub fn filtered(&self, query: &str) -> Vec<McpServerEntry> {
         let query = query.trim().to_ascii_lowercase();
         let mut matching = Vec::new();
-        for server in self.servers.read().iter() {
+        for server in self.state.read().servers.iter() {
             let description = McpServerText::description(server);
             if query.is_empty()
                 || server.id.to_ascii_lowercase().contains(&query)
@@ -103,21 +43,6 @@ impl McpConnections {
     }
 }
 
-pub struct McpQuery;
-
-impl McpQuery {
-    pub fn read(draft: &str) -> Option<&str> {
-        let rest = draft.strip_prefix("/mcp")?;
-        if rest.is_empty() {
-            return Some("");
-        }
-        rest.chars()
-            .next()?
-            .is_whitespace()
-            .then(|| rest.trim_start())
-    }
-}
-
 #[component]
 pub fn McpMenu(
     connections: McpConnections,
@@ -128,8 +53,18 @@ pub fn McpMenu(
     on_hover: EventHandler<usize>,
     on_dismiss: EventHandler<()>,
 ) -> Element {
-    let pending = (connections.pending)();
-    let error = (connections.error)();
+    let snapshot = (connections.state)();
+    let pending = snapshot
+        .pending
+        .as_ref()
+        .map(|pending| pending.id.clone())
+        .unwrap_or_default();
+    let error = snapshot
+        .result
+        .as_ref()
+        .filter(|result| !result.success)
+        .map(|result| result.message.clone())
+        .unwrap_or_default();
     rsx! {
         PromptPopup {
             placement,
@@ -140,7 +75,7 @@ pub fn McpMenu(
                     "{error}"
                 }
             }
-            if (connections.loading)() && !(connections.loaded)() {
+            if snapshot.loading && !snapshot.loaded {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("common-loading")} }
             } else if entries.is_empty() {
                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("tools-empty")} }
@@ -224,12 +159,12 @@ impl McpServerText {
 
 #[cfg(test)]
 mod tests {
-    use super::McpQuery;
+    use vmux_api::command_bar::CommandBarQuery;
 
     #[test]
     fn query_opens_on_the_complete_command() {
-        assert_eq!(McpQuery::read("/mcp"), Some(""));
-        assert_eq!(McpQuery::read("/mcp linear"), Some("linear"));
-        assert_eq!(McpQuery::read("/mcpx"), None);
+        assert_eq!(CommandBarQuery("/mcp").mcp_filter(), Some(""));
+        assert_eq!(CommandBarQuery("/mcp linear").mcp_filter(), Some("linear"));
+        assert_eq!(CommandBarQuery("/mcpx").mcp_filter(), None);
     }
 }

@@ -168,7 +168,7 @@ impl ExLine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_wire::command_bar::ExCommandName;
+    use vmux_api::command_bar::ExCommandName;
 
     #[test]
     fn bare_commands() {

@@ -1,5 +1,5 @@
 pub mod event;
-pub mod view;
+pub mod state;
 
 pub const FILES_HOST: &str = "files";
 pub const GIT_PAGE_URL: &str = "git://";
@@ -41,8 +41,6 @@ impl GitUrl {
     }
 }
 
-#[cfg(ui)]
-pub mod page;
 #[cfg(ui)]
 pub mod ui;
 

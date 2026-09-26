@@ -1,13 +1,14 @@
+use bevy_ecs::prelude::Component;
 use clap::{Args, Subcommand};
 
-#[derive(Debug, Args)]
+#[derive(Args, Clone, Component, Debug)]
 pub struct ServiceArgs {
     #[command(subcommand)]
-    pub action: ServiceAction,
+    pub command: ServiceCommand,
 }
 
-#[derive(Debug, Subcommand)]
-pub enum ServiceAction {
+#[derive(Clone, Debug, Subcommand)]
+pub enum ServiceCommand {
     Status,
     Start,
     Stop,
@@ -22,39 +23,44 @@ pub enum ServiceAction {
 
 impl ServiceArgs {
     #[cfg(target_os = "macos")]
-    fn run(self) -> std::io::Result<i32> {
-        use vmux_client::{DaemonBinary, cli};
+    pub(crate) fn execute(&self) -> std::io::Result<i32> {
+        use vmux_service::{DaemonBinary, cli};
 
-        match self.action {
-            ServiceAction::Status => cli::cmd_status(),
-            ServiceAction::Start => cli::cmd_start(DaemonBinary::current()?.path()),
-            ServiceAction::Stop => cli::cmd_stop(),
-            ServiceAction::Restart => cli::cmd_restart(DaemonBinary::current()?.path()),
-            ServiceAction::Logs { follow } => cli::cmd_logs(follow),
-            ServiceAction::Install => cli::cmd_install(DaemonBinary::current()?.path()),
-            ServiceAction::Uninstall => cli::cmd_uninstall(),
+        match &self.command {
+            ServiceCommand::Status => cli::cmd_status(),
+            ServiceCommand::Start => match DaemonBinary::current() {
+                Ok(binary) => cli::cmd_start(binary.path()),
+                Err(error) => Err(error),
+            },
+            ServiceCommand::Stop => cli::cmd_stop(),
+            ServiceCommand::Restart => match DaemonBinary::current() {
+                Ok(binary) => cli::cmd_restart(binary.path()),
+                Err(error) => Err(error),
+            },
+            ServiceCommand::Logs { follow } => cli::cmd_logs(*follow),
+            ServiceCommand::Install => match DaemonBinary::current() {
+                Ok(binary) => cli::cmd_install(binary.path()),
+                Err(error) => Err(error),
+            },
+            ServiceCommand::Uninstall => cli::cmd_uninstall(),
         }
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn run(self) -> std::io::Result<i32> {
-        use vmux_client::cli;
+    pub(crate) fn execute(&self) -> std::io::Result<i32> {
+        use vmux_service::cli;
 
-        match self.action {
-            ServiceAction::Status => cli::cmd_status(),
-            ServiceAction::Logs { follow } => cli::cmd_logs(follow),
-            ServiceAction::Start
-            | ServiceAction::Stop
-            | ServiceAction::Restart
-            | ServiceAction::Install
-            | ServiceAction::Uninstall => {
+        match &self.command {
+            ServiceCommand::Status => cli::cmd_status(),
+            ServiceCommand::Logs { follow } => cli::cmd_logs(*follow),
+            ServiceCommand::Start
+            | ServiceCommand::Stop
+            | ServiceCommand::Restart
+            | ServiceCommand::Install
+            | ServiceCommand::Uninstall => {
                 eprintln!("vmux service: launchd commands are macOS-only");
                 Ok(2)
             }
         }
     }
-}
-
-pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
-    args.run()
 }

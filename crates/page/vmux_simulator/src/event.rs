@@ -1,16 +1,4 @@
-pub const SIMULATOR_READY_EVENT: &str = "simulator_ready";
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_state(Default, url = "vmux://simulator/")]
 pub struct SimulatorReady {
     pub port: u16,
     pub capability: String,
@@ -21,36 +9,14 @@ pub struct SimulatorReady {
     pub frame_stride: u32,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default, url = "vmux://simulator/")]
 pub struct SimulatorTouch {
     pub phase: SimulatorTouchPhase,
     pub x: f32,
     pub y: f32,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub enum SimulatorTouchPhase {
     #[default]
     Down,
@@ -60,39 +26,24 @@ pub enum SimulatorTouchPhase {
     Tap,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum SimulatorKey {
-    Text(String),
-    Code(u16),
-    Modified {
+#[vmux_api::ui_event_variants(Eq, url = "vmux://simulator/")]
+pub enum SimulatorInputOperation {
+    Text {
+        text: String,
+    },
+    Key {
+        code: u16,
+    },
+    ModifiedKey {
         code: u16,
         modifiers: SimulatorKeyModifiers,
     },
-    Button(HardwareButton),
+    HardwareButton {
+        button: HardwareButton,
+    },
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq)]
 pub struct SimulatorKeyModifiers {
     pub control: bool,
     pub shift: bool,
@@ -100,71 +51,22 @@ pub struct SimulatorKeyModifiers {
     pub meta: bool,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
 pub enum HardwareButton {
     Home,
     Lock,
     Siri,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum SimulatorClipboardAction {
+#[vmux_api::ui_event_variants(Copy, Eq, url = "vmux://simulator/")]
+pub enum SimulatorClipboardOperation {
     Copy,
     Cut,
     Paste,
     SelectAll,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct SimulatorClipboard {
-    pub action: SimulatorClipboardAction,
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://simulator/")]
 pub struct SimulatorSoftwareKeyboard;
 
 impl HardwareButton {
@@ -177,8 +79,8 @@ impl HardwareButton {
     }
 }
 
-impl SimulatorKey {
-    pub fn of_browser_key(key: &str) -> Option<Self> {
+impl SimulatorInputOperation {
+    fn parse_browser_key(key: &str) -> Option<Self> {
         let code = match key {
             "Enter" => 40,
             "Escape" => 41,
@@ -193,10 +95,12 @@ impl SimulatorKey {
                 let (Some(c), None) = (chars.next(), chars.next()) else {
                     return None;
                 };
-                return Some(Self::Text(c.to_string()));
+                return Some(Self::Text {
+                    text: c.to_string(),
+                });
             }
         };
-        Some(Self::Code(code))
+        Some(Self::Key { code })
     }
 
     pub fn modified_browser_code(
@@ -283,7 +187,26 @@ impl SimulatorKey {
             "ArrowUp" => 82,
             _ => return None,
         };
-        Some(Self::Modified { code, modifiers })
+        Some(Self::ModifiedKey { code, modifiers })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidSimulatorKey;
+
+impl std::fmt::Display for InvalidSimulatorKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("invalid simulator browser key")
+    }
+}
+
+impl std::error::Error for InvalidSimulatorKey {}
+
+impl TryFrom<&str> for SimulatorInputOperation {
+    type Error = InvalidSimulatorKey;
+
+    fn try_from(key: &str) -> Result<Self, Self::Error> {
+        Self::parse_browser_key(key).ok_or(InvalidSimulatorKey)
     }
 }
 
@@ -317,35 +240,35 @@ mod tests {
     #[test]
     fn a_printable_key_is_typed_rather_than_coded() {
         assert_eq!(
-            SimulatorKey::of_browser_key("a"),
-            Some(SimulatorKey::Text("a".into()))
+            SimulatorInputOperation::try_from("a"),
+            Ok(SimulatorInputOperation::Text { text: "a".into() })
         );
         assert_eq!(
-            SimulatorKey::of_browser_key("あ"),
-            Some(SimulatorKey::Text("あ".into()))
+            SimulatorInputOperation::try_from("あ"),
+            Ok(SimulatorInputOperation::Text { text: "あ".into() })
         );
     }
 
     #[test]
     fn keys_with_no_text_become_hid_codes() {
         assert_eq!(
-            SimulatorKey::of_browser_key("Enter"),
-            Some(SimulatorKey::Code(40))
+            SimulatorInputOperation::try_from("Enter"),
+            Ok(SimulatorInputOperation::Key { code: 40 })
         );
         assert_eq!(
-            SimulatorKey::of_browser_key("Backspace"),
-            Some(SimulatorKey::Code(42))
+            SimulatorInputOperation::try_from("Backspace"),
+            Ok(SimulatorInputOperation::Key { code: 42 })
         );
         assert_eq!(
-            SimulatorKey::of_browser_key("ArrowUp"),
-            Some(SimulatorKey::Code(82))
+            SimulatorInputOperation::try_from("ArrowUp"),
+            Ok(SimulatorInputOperation::Key { code: 82 })
         );
     }
 
     #[test]
     fn a_modifier_or_unknown_named_key_is_dropped() {
         for key in ["Shift", "Meta", "F13", "Unidentified"] {
-            assert_eq!(SimulatorKey::of_browser_key(key), None, "{key}");
+            assert!(SimulatorInputOperation::try_from(key).is_err(), "{key}");
         }
     }
 
@@ -358,15 +281,15 @@ mod tests {
         };
 
         assert_eq!(
-            SimulatorKey::modified_browser_code("ArrowLeft", modifiers),
-            Some(SimulatorKey::Modified {
+            SimulatorInputOperation::modified_browser_code("ArrowLeft", modifiers),
+            Some(SimulatorInputOperation::ModifiedKey {
                 code: 80,
                 modifiers,
             })
         );
         assert_eq!(
-            SimulatorKey::modified_browser_code("KeyA", modifiers),
-            Some(SimulatorKey::Modified { code: 4, modifiers })
+            SimulatorInputOperation::modified_browser_code("KeyA", modifiers),
+            Some(SimulatorInputOperation::ModifiedKey { code: 4, modifiers })
         );
         assert_eq!(modifiers.hid_codes(), vec![225, 227]);
     }

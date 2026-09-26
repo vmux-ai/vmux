@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -16,7 +16,6 @@ use vmux_git::worktree::{self, CheckoutInfo};
 impl Plugin for WorktreePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ManagedWorktreeRoot>()
-            .init_resource::<WorktreeReconcileQueue>()
             .add_message::<TabDirectoryObserved>()
             .add_systems(
                 Update,
@@ -68,8 +67,8 @@ pub struct TabWorktreeReady {
     execution_fingerprint: PathFingerprint,
 }
 
-#[derive(Resource, Default)]
-struct WorktreeReconcileQueue(VecDeque<Entity>);
+#[derive(Component)]
+struct WorktreeReconcilePending;
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TabDirectoryRebindSet;
@@ -395,14 +394,14 @@ pub fn create_worktree_for_existing_branch_blocking(
         let info = worktree::WorktreeInfo {
             path: registration.path,
             branch: branch.to_string(),
-            base_ref: worktree::BaseRef::of(&checkout.root)
+            base_ref: worktree::BaseRef::resolve(&checkout.root)
                 .map(|base| base.branch().to_string())
                 .unwrap_or_default(),
             repo_root: checkout.root.clone(),
         };
         return activate_added_worktree(&base_dir, &checkout, relative_dir, &info);
     }
-    let base_ref = worktree::BaseRef::of(&checkout.root)
+    let base_ref = worktree::BaseRef::resolve(&checkout.root)
         .map(|base| base.branch().to_string())
         .unwrap_or_default();
     let checkout_dir = plan_existing_worktree_path(&checkout, managed_root, branch);
@@ -507,22 +506,23 @@ fn ensure_tab_workspaces(
 
 fn queue_added_tab_worktrees(
     worktrees: Query<(Entity, Option<&TabWorktreeReady>), Added<TabWorktree>>,
-    mut queue: ResMut<WorktreeReconcileQueue>,
+    mut commands: Commands,
 ) {
     for (entity, ready) in &worktrees {
-        if ready.is_none() && !queue.0.contains(&entity) {
-            queue.0.push_back(entity);
+        if ready.is_none() {
+            commands.entity(entity).insert(WorktreeReconcilePending);
         }
     }
 }
 
 fn reconcile_next_tab_worktree(
-    mut queue: ResMut<WorktreeReconcileQueue>,
+    pending: Query<Entity, With<WorktreeReconcilePending>>,
     mut q: Query<(&mut Tab, &TabWorkspace, &TabWorktree), Without<TabWorktreeReady>>,
     managed_root: Res<ManagedWorktreeRoot>,
     mut commands: Commands,
 ) {
-    while let Some(entity) = queue.0.pop_front() {
+    for entity in &pending {
+        commands.entity(entity).remove::<WorktreeReconcilePending>();
         let Ok((mut tab, workspace, metadata)) = q.get_mut(entity) else {
             continue;
         };

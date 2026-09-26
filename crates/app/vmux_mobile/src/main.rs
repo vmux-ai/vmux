@@ -5,7 +5,6 @@ mod lifecycle;
 mod logs;
 mod page_host;
 mod pairing;
-mod plugins;
 mod qr_scanner;
 mod quic;
 mod remote;
@@ -14,11 +13,10 @@ mod session;
 mod transition;
 
 use crate::logs::Logs;
-use crate::pairing::{Credentials, PairCard};
-use crate::plugins::PagePlugins;
+use crate::pairing::{AuthState, Credentials, PairCard};
 use crate::remote::{Api, ApiError};
-use crate::runtime::World;
-use crate::session::{AuthState, use_session};
+use crate::runtime::RuntimeHandle;
+use crate::session::{LeaveSession, SessionPlugin, use_session};
 use vmux_chat::room::Agents;
 use vmux_start::roster::Roster;
 
@@ -26,10 +24,10 @@ use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use dioxus::prelude::*;
+use vmux_api::room::{RemoteAgent, RemoteSession};
 use vmux_ui::back::PageBack;
 use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
 use vmux_ui::i18n::translate;
-use vmux_wire::room::{RemoteAgent, RemoteSession};
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
@@ -37,6 +35,7 @@ static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(V
 static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
+#[cfg(target_os = "ios")]
 const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
 
 #[cfg(target_os = "ios")]
@@ -59,15 +58,19 @@ fn webview_background() -> (u8, u8, u8, u8) {
 fn main() {
     Logs::start();
 
-    World::new(|app| {
-        app.add_plugins(PagePlugins);
-    })
-    .install();
-    lifecycle::install();
+    let runtime = runtime::create(|app| {
+        app.add_plugins((
+            vmux_app::VmuxPlugin::builder().mobile().build(),
+            SessionPlugin,
+        ));
+    });
+    runtime::install_ui(runtime.clone());
+    lifecycle::install(runtime.clone());
 
+    let event_runtime = runtime.clone();
     let config = dioxus::mobile::Config::new()
         .with_background_color(webview_background())
-        .with_custom_event_handler(|event, _| {
+        .with_custom_event_handler(move |event, _| {
             use dioxus::mobile::tao::event::Event;
             match event {
                 Event::Opened { urls } => {
@@ -82,7 +85,7 @@ fn main() {
                 }
                 Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
                 Event::MainEventsCleared => {
-                    World::with(World::tick);
+                    runtime::update(&event_runtime);
                 }
                 _ => {}
             }
@@ -96,6 +99,7 @@ pub(crate) fn take_resumed() -> bool {
 
 #[component]
 fn App() -> Element {
+    use_context_provider(runtime::ui);
     rsx! {
         AppHead {}
         AppBody {}
@@ -104,6 +108,7 @@ fn App() -> Element {
 
 #[component]
 fn AppBody() -> Element {
+    let runtime = use_context::<RuntimeHandle>();
     transition::install(&dioxus::mobile::window());
     qr_scanner::install(&dioxus::mobile::window());
     let mut auth = use_signal(|| AuthState::Loading);
@@ -113,6 +118,14 @@ fn AppBody() -> Element {
     let mut sessions = use_signal(Vec::<RemoteSession>::new);
     let mut agents = use_signal(Vec::<RemoteAgent>::new);
     let session = use_session();
+    let session_runtime = runtime.clone();
+    use_hook(move || {
+        session_runtime
+            .borrow_mut()
+            .app
+            .world_mut()
+            .insert_non_send(session);
+    });
     let composer = page_host::use_composer_exchange();
     let mut reachable = use_signal(|| false);
     let mut pending_pair_url = use_signal(|| None::<String>);
@@ -120,35 +133,52 @@ fn AppBody() -> Element {
     let mut pairing = use_signal(|| false);
     let mut team_open = use_signal(|| false);
 
+    let page_back_runtime = runtime.clone();
     use_context_provider(|| {
         PageBack::new(EventHandler::new(move |()| {
             team_open.set(false);
-            session.leave();
+            page_back_runtime
+                .borrow_mut()
+                .app
+                .world_mut()
+                .write_message(LeaveSession);
         }))
     });
 
+    let host_runtime = runtime.clone();
     use_effect(move || {
         if let Some(client) = api() {
-            page_host::install(client, sessions, session, composer);
+            page_host::install(host_runtime.clone(), client, sessions, session, composer);
         }
     });
 
+    let roster_runtime = runtime.clone();
     use_effect(move || {
         let roster = Roster {
             sessions: sessions(),
             agents: agents(),
         };
-        World::with(|world| world.insert(roster));
+        let mut runtime = roster_runtime.borrow_mut();
+        if runtime.app.world().get_resource::<Roster>() != Some(&roster) {
+            runtime.app.insert_resource(roster);
+        }
     });
 
+    let agents_runtime = runtime.clone();
     use_effect(move || {
-        World::with(|world| world.insert(Agents(agents())));
+        let next = Agents(agents());
+        let mut runtime = agents_runtime.borrow_mut();
+        if runtime.app.world().get_resource::<Agents>() != Some(&next) {
+            runtime.app.insert_resource(next);
+        }
     });
 
+    let stream_runtime = runtime.clone();
     let _room = use_resource(move || {
         let client = api();
         let sid = session.sid();
         let generation = (session.generation)();
+        let stream_runtime = stream_runtime.clone();
         async move {
             let Some(client) = client else {
                 return;
@@ -156,7 +186,7 @@ fn AppBody() -> Element {
             if sid.is_empty() {
                 return;
             }
-            session.stream(client, sid, generation).await;
+            session::stream(session, stream_runtime, client, sid, generation).await;
         }
     });
 
@@ -265,10 +295,13 @@ fn AppBody() -> Element {
                     continue;
                 }
             };
-            match client.sessions().await {
+            let result = client.sessions().await;
+            if let Some(credentials) = client.paired_credentials().await {
+                credentials::StoredCredentials::save(&credentials);
+                pair_url.set(String::new());
+            }
+            match result {
                 Ok(next) => {
-                    credentials::StoredCredentials::save(&credentials);
-                    pair_url.set(credentials.pairing_url());
                     let displaced = api.peek().clone();
                     api.set(Some(client.clone()));
                     if let Some(displaced) = displaced {
@@ -361,28 +394,32 @@ fn AppBody() -> Element {
                         {translate("mobile-chat-back")}
                     }
                 }
-                div { class: "min-h-0 flex-1", vmux_team::page::Page {} }
+                div { class: "min-h-0 flex-1", vmux_team::ui::Page {} }
             }
         };
     }
 
     if session.is_open() {
         return rsx! {
-            vmux_chat::page::Page {}
+            vmux_chat::ui::Page {}
         };
     }
 
     rsx! {
         div { class: "relative h-dvh bg-background",
             div { class: "flex h-full flex-col py-[calc(3rem+env(safe-area-inset-top))]",
-                vmux_start::page::Page {}
+                vmux_start::ui::Page {}
             }
             LinkStatus {
                 reachable: reachable(),
                 on_team: move |_| team_open.set(true),
                 on_disconnect: move |_| {
                     credentials::StoredCredentials::clear();
-                    session.leave();
+                    runtime
+                        .borrow_mut()
+                        .app
+                        .world_mut()
+                        .write_message(LeaveSession);
                     let displaced = api.peek().clone();
                     api.set(None);
                     if let Some(displaced) = displaced {

@@ -1,0 +1,11 @@
+[
+    (
+        name: "rename_profile",
+        description: "Rename the active profile display name without changing its storage.",
+        input_schema: (
+            type: Object,
+            required: ["name"],
+            properties: {"name": (type: String)},
+        ),
+    ),
+]

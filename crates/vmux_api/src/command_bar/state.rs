@@ -1,0 +1,96 @@
+use super::{CommandBarOpenEvent, PathCompleteResponse, StartProjectBranches};
+use crate::chat::{PromptHistory, ResumableSessionEntry, ResumableSessions};
+use crate::history::{HistoryEntry, HistorySuggestionsResponse};
+use crate::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry};
+use crate::space::ProjectBranch;
+
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct CommandBarFocusInput;
+
+#[vmux_api::ui_state_patch(Default)]
+pub struct CommandBarUiStatePatch {
+    pub snapshot: Option<Box<CommandBarOpenEvent>>,
+    pub path_completion: Option<PathCompleteResponse>,
+    pub history_suggestions: Option<HistorySuggestionsResponse>,
+    pub prompt_history: Option<Box<PromptHistory>>,
+    pub project_branches: Option<Box<StartProjectBranches>>,
+    pub resumable_sessions: Option<Box<ResumableSessions>>,
+    pub attachments: Option<Box<ChatAttachments>>,
+    pub media_entries: Option<Box<ChatMediaEntries>>,
+    pub focus_input: Option<CommandBarFocusInput>,
+}
+
+#[vmux_api::ui_state(Default, urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/"])]
+pub struct CommandBarUiState {
+    pub sequence: u64,
+    pub patches: Vec<CommandBarUiStatePatch>,
+}
+
+#[vmux_api::ui_state(Default, urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/"])]
+pub struct CommandPaletteState {
+    pub open_id: super::OpenId,
+    pub projection: super::CommandPaletteProjection,
+    pub completions: Vec<super::PathEntry>,
+    pub completions_partial: bool,
+    pub completions_total: u32,
+    pub history: Vec<HistoryEntry>,
+    pub prompt_history: Vec<String>,
+    pub branch_project: String,
+    pub branches: Vec<ProjectBranch>,
+    pub sessions: Vec<ResumableSessionEntry>,
+    pub sessions_total: u32,
+    pub sessions_loading: bool,
+    pub media_query: Option<String>,
+    pub media_entries: Vec<ChatMediaEntry>,
+    pub media_loading: bool,
+    pub attachments: Vec<ChatAttachment>,
+    pub attachment_sequence: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command_bar::{CommandBarResultItem, CommandPaletteProjection, OpenId, PaletteMode};
+
+    #[test]
+    fn batches_preserve_patch_order() {
+        let state = CommandBarUiState {
+            sequence: 4,
+            patches: vec![
+                CommandBarOpenEvent::default().into(),
+                PathCompleteResponse::default().into(),
+            ],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
+        let decoded = rkyv::from_bytes::<CommandBarUiState, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(decoded.sequence, 4);
+        assert!(decoded.patches[0].snapshot.is_some());
+        assert!(decoded.patches[1].path_completion.is_some());
+    }
+
+    #[test]
+    fn palette_projection_round_trips() {
+        let state = CommandPaletteState {
+            open_id: OpenId(8),
+            projection: CommandPaletteProjection {
+                rows: vec![CommandBarResultItem::Navigate {
+                    url: "vmux://settings".to_string(),
+                }],
+                ghost: "/settings".to_string(),
+                mode: PaletteMode::Url,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&state).unwrap();
+        let decoded = rkyv::from_bytes::<CommandPaletteState, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(decoded.open_id, OpenId(8));
+        assert_eq!(decoded.projection.mode, PaletteMode::Url);
+        assert!(matches!(
+            decoded.projection.rows.as_slice(),
+            [CommandBarResultItem::Navigate { url }] if url == "vmux://settings"
+        ));
+    }
+}

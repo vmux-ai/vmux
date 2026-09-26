@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use vmux_editor::lsp::package_path::Sha256Digest;
 
 pub const REGISTRY_URL: &str =
     "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
@@ -41,10 +42,22 @@ pub struct Distribution {
 pub struct BinaryTarget {
     pub archive: String,
     pub cmd: String,
+    #[serde(default, deserialize_with = "deserialize_sha256")]
+    pub sha256: Option<Sha256Digest>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+}
+
+fn deserialize_sha256<'de, D>(deserializer: D) -> Result<Option<Sha256Digest>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    value
+        .map(|value| Sha256Digest::parse(&value).map_err(serde::de::Error::custom))
+        .transpose()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -117,7 +130,7 @@ pub fn fetch_blocking() -> Result<Registry, String> {
     let registry = parse(&text)?;
     let dir = agents_dir();
     if std::fs::create_dir_all(&dir).is_ok() {
-        let _ = std::fs::write(cache_path(), &text);
+        let _ = vmux_path::AtomicFile::write(cache_path(), text.as_bytes());
     }
     Ok(registry)
 }
@@ -187,6 +200,19 @@ mod tests {
         assert_eq!(
             fast.distribution.uvx.as_ref().unwrap().package,
             "fast-agent-acp"
+        );
+
+        let checksummed = parse(
+            r#"{"version":"1","agents":[{"id":"agent","name":"Agent","distribution":{"binary":{"darwin-aarch64":{"archive":"https://example.com/agent","cmd":"agent","sha256":"ed16a0c68a7df1e55597fcb7c884140ce292def6116cbaab1fc05045433494b9"}}}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            checksummed.agents[0].distribution.binary.as_ref().unwrap()["darwin-aarch64"]
+                .sha256
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "ed16a0c68a7df1e55597fcb7c884140ce292def6116cbaab1fc05045433494b9"
         );
     }
 

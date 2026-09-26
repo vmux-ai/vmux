@@ -3,9 +3,9 @@ use crate::host::run_state::AgentRunState;
 use bevy::prelude::*;
 use vmux_chat::activity::ActivityIcon;
 use vmux_chat::tab::Accent;
+use vmux_core::chat::group_turns_tail;
 use vmux_core::team::Profile;
 use vmux_core::{PageIcon, PageIdentity};
-use vmux_service::chat::group_turns_tail;
 use vmux_session::{AgentConversationTitle, AgentMessages, AgentSession};
 
 pub struct ChatTabPlugin;
@@ -61,23 +61,25 @@ fn activity_icon(
 ) -> Option<PageIcon> {
     let running = matches!(state, AgentRunState::Streaming);
     let page = group_turns_tail(&[], &messages.0, &[], &[], running, TAIL_ITEMS);
-    let activity = ActivityIcon::current(&page.items, state.status())?;
+    let activity = vmux_core::chat_projection::current_activity(&page.items, state.status())?;
     let provider = session
         .map(|session| session.provider.as_str())
         .unwrap_or_default();
-    let accent = Accent::of_agent(
+    let accent = Accent::for_agent(
         profile
             .map(|profile| profile.avatar.color.as_str())
             .unwrap_or_default(),
         provider,
     );
-    Some(PageIcon::favicon(activity.favicon(&accent.css)))
+    Some(PageIcon::favicon(
+        ActivityIcon::from(activity).favicon(&accent.css),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_wire::chat::{ChatBlock, ChatTurn};
+    use vmux_api::chat::{ChatBlock, ChatTurn};
 
     struct Conversation {
         view: Entity,
@@ -191,25 +193,31 @@ mod tests {
 
     #[test]
     fn a_streaming_agent_is_read_from_the_last_block_of_the_running_turn() {
-        let thinking = ActivityIcon::current(
-            &[vmux_wire::chat::ChatItem::Turn(ChatTurn {
-                running: true,
-                blocks: vec![ChatBlock::Thinking(String::new())],
-                ..Default::default()
-            })],
+        let mut thinking_turn = ChatTurn {
+            running: true,
+            blocks: vec![ChatBlock::Thinking(String::new())],
+            ..Default::default()
+        };
+        vmux_core::chat_projection::project_turn(&mut thinking_turn);
+        let thinking = vmux_core::chat_projection::current_activity(
+            &[vmux_api::chat::ChatItem::Turn(thinking_turn)],
             "streaming",
-        );
-        let writing = ActivityIcon::current(
-            &[vmux_wire::chat::ChatItem::Turn(ChatTurn {
-                running: true,
-                blocks: vec![
-                    ChatBlock::Thinking(String::new()),
-                    ChatBlock::Text(String::new()),
-                ],
-                ..Default::default()
-            })],
+        )
+        .map(ActivityIcon::from);
+        let mut writing_turn = ChatTurn {
+            running: true,
+            blocks: vec![
+                ChatBlock::Thinking(String::new()),
+                ChatBlock::Text(String::new()),
+            ],
+            ..Default::default()
+        };
+        vmux_core::chat_projection::project_turn(&mut writing_turn);
+        let writing = vmux_core::chat_projection::current_activity(
+            &[vmux_api::chat::ChatItem::Turn(writing_turn)],
             "streaming",
-        );
+        )
+        .map(ActivityIcon::from);
 
         assert_eq!(thinking, Some(ActivityIcon::Thinking));
         assert_eq!(

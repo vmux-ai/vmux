@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::marker::PhantomData;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::CefSystems;
@@ -34,38 +33,6 @@ impl Plugin for PrewarmPagesPlugin {
             .add_systems(
                 Update,
                 maintain_registered_page_pools.in_set(WarmPageSet::Fill),
-            );
-    }
-}
-
-pub trait WarmPage: Component {
-    const HOST: &'static str;
-    const URL: &'static str;
-    const TITLE: &'static str;
-    const POOL_SIZE: usize = 1;
-
-    fn spawn(commands: &mut Commands) -> Entity;
-}
-
-pub struct WarmPagePlugin<M: WarmPage>(PhantomData<fn() -> M>);
-
-impl<M: WarmPage> Default for WarmPagePlugin<M> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<M: WarmPage> Plugin for WarmPagePlugin<M> {
-    fn build(&self, app: &mut App) {
-        vmux_core::register_host_spawn(app, M::HOST);
-        app.init_resource::<WarmPageSpawnBudget>()
-            .add_systems(
-                Update,
-                handle_warm_page_open::<M>.in_set(PageOpenSet::HandleKnownPages),
-            )
-            .add_systems(
-                Update,
-                maintain_warm_page_pool::<M>.in_set(WarmPageSet::Fill),
             );
     }
 }
@@ -130,7 +97,7 @@ fn handle_registered_page_open(
             continue;
         };
         if handled_stacks.insert((task.stack, page.url)) {
-            clear_stack_children(task.stack, &children_q, &mut commands);
+            crate::stack::clear_stack_children(task.stack, &children_q, &mut commands);
             commands.entity(task.stack).insert(PageMetadata {
                 url: page.url.to_string(),
                 title: page.title.to_string(),
@@ -198,81 +165,6 @@ fn maintain_registered_page_pools(
     }
 }
 
-fn handle_warm_page_open<M: WarmPage>(
-    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    spares: Query<(Entity, &WarmPageSpare), With<PageReady>>,
-    children_q: Query<&Children>,
-    mut commands: Commands,
-) {
-    let mut available: Vec<Entity> = spares
-        .iter()
-        .filter_map(|(entity, spare)| (spare.url == M::URL).then_some(entity))
-        .collect();
-    let mut handled_stacks = HashSet::new();
-
-    for (entity, task) in &tasks {
-        if task.url != M::URL {
-            continue;
-        }
-        if handled_stacks.insert(task.stack) {
-            clear_stack_children(task.stack, &children_q, &mut commands);
-            commands.entity(task.stack).insert(PageMetadata {
-                url: M::URL.to_string(),
-                title: M::TITLE.to_string(),
-                ..default()
-            });
-            if let Some(spare) = available.pop() {
-                commands
-                    .entity(spare)
-                    .insert((ChildOf(task.stack), KeyboardOwner))
-                    .remove::<WarmPageSpare>();
-            } else {
-                let page = M::spawn(&mut commands);
-                commands
-                    .entity(page)
-                    .insert((ChildOf(task.stack), KeyboardOwner));
-            }
-        }
-        commands.entity(entity).insert(PageOpenHandled);
-    }
-}
-
-fn maintain_warm_page_pool<M: WarmPage>(
-    pool_nodes: Query<(Entity, &WarmPagePoolNode)>,
-    vmux_windows: Query<(Entity, &HostWindow), With<VmuxWindow>>,
-    focused_window: Res<crate::window::FocusedWindow>,
-    layout_ready: Query<(), (With<LayoutCef>, With<PageReady>)>,
-    spares: Query<&WarmPageSpare>,
-    mut commands: Commands,
-    mut budget: ResMut<WarmPageSpawnBudget>,
-) {
-    if layout_ready.is_empty() || M::POOL_SIZE == 0 {
-        return;
-    }
-    let Some(window) = focused_window
-        .0
-        .and_then(|focused| {
-            vmux_windows
-                .iter()
-                .find_map(|(root, host)| (host.0 == focused).then_some(root))
-        })
-        .or_else(|| vmux_windows.iter().next().map(|(root, _)| root))
-    else {
-        return;
-    };
-    let node = pool_node_for(M::URL, window, &pool_nodes, &mut commands);
-    let count = spares.iter().filter(|spare| spare.url == M::URL).count();
-    for _ in count..M::POOL_SIZE {
-        if !budget.take() {
-            return;
-        }
-        let page = M::spawn(&mut commands);
-        commands
-            .entity(page)
-            .insert((WarmPageSpare { url: M::URL }, ChildOf(node)));
-    }
-}
-
 fn pool_node_for(
     url: &'static str,
     window: Entity,
@@ -299,130 +191,12 @@ fn pool_node_for(
         })
 }
 
-pub(crate) fn clear_stack_children(
-    stack: Entity,
-    children_q: &Query<&Children>,
-    commands: &mut Commands,
-) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use vmux_core::{PageOpenId, PageOpenTask};
 
     use crate::cef::Browser;
-
-    #[derive(Component)]
-    struct TestPage;
-
-    impl WarmPage for TestPage {
-        const HOST: &'static str = "test";
-        const URL: &'static str = "vmux://test/";
-        const TITLE: &'static str = "Test";
-        const POOL_SIZE: usize = 1;
-
-        fn spawn(commands: &mut Commands) -> Entity {
-            commands
-                .spawn((TestPage, Browser::new_with_title(Self::URL, Self::TITLE)))
-                .id()
-        }
-    }
-
-    fn app() -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, handle_warm_page_open::<TestPage>);
-        app
-    }
-
-    fn task(stack: Entity) -> PageOpenTask {
-        PageOpenTask {
-            id: PageOpenId::new(),
-            stack,
-            url: TestPage::URL.to_string(),
-            request_id: None,
-        }
-    }
-
-    #[test]
-    fn ready_spare_is_reparented() {
-        let mut app = app();
-        let stack = app.world_mut().spawn_empty().id();
-        let spare = app
-            .world_mut()
-            .spawn((TestPage, WarmPageSpare { url: TestPage::URL }, PageReady {}))
-            .id();
-        let task = app.world_mut().spawn(task(stack)).id();
-
-        app.update();
-
-        assert_eq!(
-            app.world()
-                .get::<ChildOf>(spare)
-                .map(|child| child.parent()),
-            Some(stack)
-        );
-        assert!(app.world().get::<WarmPageSpare>(spare).is_none());
-        assert!(app.world().get::<KeyboardOwner>(spare).is_some());
-        assert!(app.world().get::<PageOpenHandled>(task).is_some());
-    }
-
-    #[test]
-    fn unready_spare_falls_back_to_cold_page() {
-        let mut app = app();
-        let stack = app.world_mut().spawn_empty().id();
-        let spare = app
-            .world_mut()
-            .spawn((TestPage, WarmPageSpare { url: TestPage::URL }))
-            .id();
-        app.world_mut().spawn(task(stack));
-
-        app.update();
-
-        assert!(app.world().get::<WarmPageSpare>(spare).is_some());
-        let pages = app
-            .world_mut()
-            .query_filtered::<Entity, (With<TestPage>, With<ChildOf>)>()
-            .iter(app.world())
-            .count();
-        assert_eq!(pages, 1);
-    }
-
-    #[test]
-    fn pool_waits_for_layout_then_fills() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<WarmPageSpawnBudget>()
-            .init_resource::<crate::window::FocusedWindow>()
-            .add_systems(Update, maintain_warm_page_pool::<TestPage>);
-        let window = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn((VmuxWindow, HostWindow(window)));
-
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query_filtered::<(), With<WarmPageSpare>>()
-                .iter(app.world())
-                .count(),
-            0
-        );
-
-        app.world_mut().spawn((LayoutCef, PageReady {}));
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query_filtered::<(), With<WarmPageSpare>>()
-                .iter(app.world())
-                .count(),
-            TestPage::POOL_SIZE
-        );
-    }
 
     #[test]
     fn registered_page_claims_ready_spare() {

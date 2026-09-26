@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use bevy::prelude::*;
 
 use crate::terminal::TerminalKind;
-pub use vmux_wire::agent::AgentKind;
+pub use vmux_api::agent::AgentKind;
 
 pub fn effort_levels(agent_key: &str) -> &'static [&'static str] {
     match agent_key {
@@ -63,7 +63,7 @@ pub struct SpawnAgentInStackRequest {
     pub session_id: Option<String>,
     pub stack: Entity,
     pub initial_prompt: Option<String>,
-    pub initial_attachments: Vec<vmux_wire::protocol::AgentAttachment>,
+    pub initial_attachments: Vec<vmux_api::protocol::AgentAttachment>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,7 +71,7 @@ pub struct StackSessionHandoff {
     pub source_agent: String,
     pub source_kind: AgentKind,
     pub source_sid: String,
-    pub messages_json: String,
+    pub messages: Vec<vmux_api::room::Message>,
     pub context: String,
     pub truncated: bool,
 }
@@ -116,10 +116,11 @@ pub struct RestartAgentPty {
 }
 
 pub fn parse_page_agent_url(url: &str) -> Option<(String, String, Option<String>)> {
-    let body = url
-        .strip_prefix("vmux://sessions/")
-        .or_else(|| url.strip_prefix("vmux://agent/"))?;
-    let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
+    let route = vmux_api::VmuxRoute::parse(url)?;
+    if !route.is_agent() {
+        return None;
+    }
+    let segs: Vec<&str> = route.path_segments().collect();
     match segs.as_slice() {
         [provider, model] => Some(((*provider).to_string(), (*model).to_string(), None)),
         [provider, model, sid] => Some((
@@ -132,10 +133,11 @@ pub fn parse_page_agent_url(url: &str) -> Option<(String, String, Option<String>
 }
 
 pub fn parse_acp_agent_url(url: &str) -> Option<String> {
-    let body = url
-        .strip_prefix("vmux://sessions/")
-        .or_else(|| url.strip_prefix("vmux://agent/"))?;
-    let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
+    let route = vmux_api::VmuxRoute::parse(url)?;
+    if !route.is_agent() {
+        return None;
+    }
+    let segs: Vec<&str> = route.path_segments().collect();
     match segs.as_slice() {
         [id] => Some((*id).to_string()),
         _ => None,

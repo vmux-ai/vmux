@@ -1,24 +1,10 @@
 use crate::{
     display::DisplayPlugin, os_menu::OsMenuPlugin, permission::PermissionsPlugin,
-    persistence::PersistencePlugin, remote::RemotePlugin, runtime::RuntimePlugin,
-    shortcut::ShortcutPlugin, tools::ToolsPlugin, window_state::WindowStatePlugin,
+    remote::RemotePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin,
+    window_state::WindowStatePlugin,
 };
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
-
-pub struct VmuxCorePlugins;
-
-impl PluginGroup for VmuxCorePlugins {
-    fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::start::<Self>()
-            .add(vmux_flex::FlexPlugin)
-            .add(vmux_core::CorePlugin)
-            .add(vmux_core::page::PagePlugin)
-            .add(vmux_command::CommandPlugin)
-            .add(vmux_setting::SettingsPlugin)
-            .add(PersistencePlugin)
-    }
-}
 
 pub struct DesktopPlugins;
 
@@ -95,27 +81,5 @@ impl Plugin for UpdaterPlugin {
 
         #[cfg(not(feature = "updater"))]
         app.add_plugins(crate::disabled_features::UpdaterDisabledPlugin);
-    }
-}
-
-pub struct FeaturePlugins;
-
-impl PluginGroup for FeaturePlugins {
-    fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::start::<Self>()
-            .add(vmux_core::input::KeyStrokePlugin)
-            .add(vmux_terminal::TerminalPlugin)
-            .add(vmux_editor::EditorPlugin)
-            .add(vmux_git::GitPlugin)
-            .add(vmux_agent::AgentPlugin)
-            .add(vmux_knowledge::KnowledgePlugin)
-            .add(vmux_history::HistoryPlugin)
-            .add(vmux_simulator::SimulatorPlugin)
-            .add(vmux_shortcut::ShortcutPlugin)
-            .add(vmux_team::TeamPlugin)
-            .add(vmux_space::SpacePlugin)
-            .add(vmux_service::plugin::ServicePlugin)
-            .add(vmux_start::StartPlugin)
-            .add(ToolsPlugin)
     }
 }

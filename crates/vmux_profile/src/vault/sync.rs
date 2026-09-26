@@ -12,7 +12,7 @@ use super::repository::{
 use super::snapshot::{
     EntryKind, LocalEntry, LocalFingerprint, LocalState, LocalStateEntry, entry_digest,
     load_encrypted_snapshot, modified_time, random_hex, state_path, validate_relative_path,
-    write_atomic, write_encrypted_snapshot,
+    write_encrypted_snapshot,
 };
 use super::{repository_dir, root_dir};
 
@@ -831,7 +831,8 @@ pub(super) fn apply_local_entry(
             remove_existing_path(&path)?;
             match entry.kind {
                 EntryKind::File => {
-                    write_atomic(&path, &entry.data)?;
+                    vmux_path::AtomicFile::write(&path, &entry.data)
+                        .map_err(|error| error.to_string())?;
                     FileAttributes::set_mode(&path, entry.mode)?;
                 }
                 EntryKind::Symlink => FileAttributes::create_symlink(&path, &entry.data)?,
@@ -887,7 +888,8 @@ pub(super) fn write_local_state(root: &Path, repository: &Path) -> Result<(), St
             .collect(),
     };
     let source = ron::ser::to_string(&state).map_err(|error| error.to_string())?;
-    write_atomic(&state_path(repository), source.as_bytes())
+    vmux_path::AtomicFile::write(state_path(repository), source.as_bytes())
+        .map_err(|error| error.to_string())
 }
 
 pub(super) fn local_change_count(root: &Path, repository: &Path) -> Result<u32, String> {

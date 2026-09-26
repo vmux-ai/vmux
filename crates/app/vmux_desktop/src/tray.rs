@@ -1,12 +1,11 @@
 use bevy::prelude::*;
-use parking_lot::Mutex;
-use std::sync::LazyLock;
 use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
+use crate::os_menu::{OsMenuEntry, OsMenuSelect};
 #[cfg(feature = "recording")]
 use crate::recording::{RecordingControl, RecordingStatus};
-use crate::runtime::LifecycleEvent;
+use crate::runtime::{HideAllWindowsRequest, QuitRequest, ShowAllWindowsRequest};
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 
@@ -14,43 +13,57 @@ pub(crate) struct TrayPlugin;
 
 impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
-            .add_systems(
-                Update,
-                (drain_tray_events, sync_tray_menu_state, sync_tray_recording),
-            );
+        app.insert_non_send(TrayRuntime(None))
+            .add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
+            .add_observer(toggle_tray_visibility)
+            .add_observer(quit_from_tray)
+            .add_observer(control_recording_from_tray)
+            .add_systems(Update, (sync_tray_menu_state, sync_tray_recording));
     }
 }
 
-pub(crate) static PENDING_TRAY_EVENTS: LazyLock<Mutex<Vec<String>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
+#[derive(Component)]
+struct ToggleTrayVisibility;
+
+#[derive(Component)]
+struct QuitFromTray;
+
+#[cfg(feature = "recording")]
+#[derive(Component)]
+struct PauseRecordingFromTray;
+
+#[cfg(feature = "recording")]
+#[derive(Component)]
+struct ResumeRecordingFromTray;
+
+#[cfg(feature = "recording")]
+#[derive(Component)]
+struct FinishRecordingFromTray;
 
 struct TrayHandle {
     _tray: TrayIcon,
     toggle: MenuItem,
     quit: MenuItem,
-    toggle_id: String,
-    quit_id: String,
     #[cfg(feature = "recording")]
     pause: MenuItem,
     #[cfg(feature = "recording")]
-    pause_id: String,
-    #[cfg(feature = "recording")]
     resume: MenuItem,
     #[cfg(feature = "recording")]
-    resume_id: String,
-    #[cfg(feature = "recording")]
     done: MenuItem,
-    #[cfg(feature = "recording")]
-    done_id: String,
     last_any_visible: Option<bool>,
     last_locale: Locale,
     #[cfg(feature = "recording")]
     last_status: Option<RecordingStatus>,
 }
 
-fn setup_tray(world: &mut World) {
-    let locale = tray_locale(world.resource::<AppSettings>());
+struct TrayRuntime(Option<TrayHandle>);
+
+fn setup_tray(
+    settings: Res<AppSettings>,
+    mut runtime: NonSendMut<TrayRuntime>,
+    mut commands: Commands,
+) {
+    let locale = tray_locale(&settings);
     let menu = Menu::new();
     let toggle = MenuItem::new(toggle_label(true, &locale), true, None);
     #[cfg(feature = "recording")]
@@ -101,68 +114,108 @@ fn setup_tray(world: &mut World) {
         }
     };
 
-    world.insert_non_send(TrayHandle {
+    runtime.0 = Some(TrayHandle {
         _tray: tray,
         toggle,
         quit,
-        toggle_id,
-        quit_id,
         #[cfg(feature = "recording")]
         pause,
         #[cfg(feature = "recording")]
-        pause_id,
-        #[cfg(feature = "recording")]
         resume,
         #[cfg(feature = "recording")]
-        resume_id,
-        #[cfg(feature = "recording")]
         done,
-        #[cfg(feature = "recording")]
-        done_id,
         last_any_visible: None,
         last_locale: locale,
         #[cfg(feature = "recording")]
         last_status: None,
     });
+    commands.spawn((
+        Name::new("Toggle tray visibility"),
+        OsMenuEntry::identified(toggle_id),
+        ToggleTrayVisibility,
+    ));
+    commands.spawn((
+        Name::new("Quit from tray"),
+        OsMenuEntry::identified(quit_id),
+        QuitFromTray,
+    ));
+    #[cfg(feature = "recording")]
+    commands.spawn((
+        Name::new("Pause recording from tray"),
+        OsMenuEntry::identified(pause_id),
+        PauseRecordingFromTray,
+    ));
+    #[cfg(feature = "recording")]
+    commands.spawn((
+        Name::new("Resume recording from tray"),
+        OsMenuEntry::identified(resume_id),
+        ResumeRecordingFromTray,
+    ));
+    #[cfg(feature = "recording")]
+    commands.spawn((
+        Name::new("Finish recording from tray"),
+        OsMenuEntry::identified(done_id),
+        FinishRecordingFromTray,
+    ));
 }
 
-fn drain_tray_events(
-    handle: Option<NonSend<TrayHandle>>,
+fn toggle_tray_visibility(
+    trigger: On<OsMenuSelect>,
+    menu_items: Query<(), With<ToggleTrayVisibility>>,
     windows: Query<&Window>,
-    mut events: MessageWriter<LifecycleEvent>,
-    #[cfg(feature = "recording")] mut controls: MessageWriter<RecordingControl>,
+    mut hide_windows: MessageWriter<HideAllWindowsRequest>,
+    mut show_windows: MessageWriter<ShowAllWindowsRequest>,
 ) {
-    let Some(handle) = handle else { return };
-    let drained = std::mem::take(&mut *PENDING_TRAY_EVENTS.lock());
+    if !menu_items.contains(trigger.event_target()) {
+        return;
+    }
     let any_visible = windows.iter().any(|w| w.visible);
-    for event_id in drained {
-        if event_id == handle.toggle_id {
-            events.write(toggle_lifecycle_event(any_visible));
-        } else if event_id == handle.quit_id {
-            events.write(LifecycleEvent::QuitVmux);
-        } else {
-            #[cfg(feature = "recording")]
-            if event_id == handle.pause_id {
-                controls.write(RecordingControl::Pause);
-                continue;
-            } else if event_id == handle.resume_id {
-                controls.write(RecordingControl::Resume);
-                continue;
-            } else if event_id == handle.done_id {
-                controls.write(RecordingControl::Done);
-                continue;
-            }
-            tracing::debug!(id = %event_id, "unhandled tray menu event id");
-        }
+    if any_visible {
+        hide_windows.write(HideAllWindowsRequest);
+    } else {
+        show_windows.write(ShowAllWindowsRequest);
     }
 }
 
+fn quit_from_tray(
+    trigger: On<OsMenuSelect>,
+    menu_items: Query<(), With<QuitFromTray>>,
+    mut quit: MessageWriter<QuitRequest>,
+) {
+    if menu_items.contains(trigger.event_target()) {
+        quit.write(QuitRequest);
+    }
+}
+
+#[cfg(feature = "recording")]
+fn control_recording_from_tray(
+    trigger: On<OsMenuSelect>,
+    pause: Query<(), With<PauseRecordingFromTray>>,
+    resume: Query<(), With<ResumeRecordingFromTray>>,
+    finish: Query<(), With<FinishRecordingFromTray>>,
+    mut controls: MessageWriter<RecordingControl>,
+) {
+    let target = trigger.event_target();
+    if pause.contains(target) {
+        controls.write(RecordingControl::Pause);
+    } else if resume.contains(target) {
+        controls.write(RecordingControl::Resume);
+    } else if finish.contains(target) {
+        controls.write(RecordingControl::Done);
+    }
+}
+
+#[cfg(not(feature = "recording"))]
+fn control_recording_from_tray(_trigger: On<OsMenuSelect>) {}
+
 fn sync_tray_menu_state(
-    handle: Option<NonSendMut<TrayHandle>>,
+    mut runtime: NonSendMut<TrayRuntime>,
     windows: Query<&Window>,
     settings: Res<AppSettings>,
 ) {
-    let Some(mut handle) = handle else { return };
+    let Some(handle) = runtime.0.as_mut() else {
+        return;
+    };
     let any_visible = windows.iter().any(|w| w.visible);
     if handle.last_any_visible == Some(any_visible) && !settings.is_changed() {
         return;
@@ -190,8 +243,10 @@ fn sync_tray_menu_state(
 }
 
 #[cfg(feature = "recording")]
-fn sync_tray_recording(status: Res<RecordingStatus>, handle: Option<NonSendMut<TrayHandle>>) {
-    let Some(mut handle) = handle else { return };
+fn sync_tray_recording(status: Res<RecordingStatus>, mut runtime: NonSendMut<TrayRuntime>) {
+    let Some(handle) = runtime.0.as_mut() else {
+        return;
+    };
     if handle.last_status == Some(*status) {
         return;
     }
@@ -238,14 +293,6 @@ fn tray_locale(settings: &AppSettings) -> Locale {
         let _ = locale.register_catalog(&source);
     }
     locale
-}
-
-fn toggle_lifecycle_event(any_visible: bool) -> LifecycleEvent {
-    if any_visible {
-        LifecycleEvent::HideAllWindows
-    } else {
-        LifecycleEvent::ShowAllWindows
-    }
 }
 
 fn load_tray_icon() -> tray_icon::Icon {
@@ -297,17 +344,6 @@ fn tray_icon_rgba() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn tray_module_not_a_placeholder() {
-        let source = include_str!("tray.rs");
-        let tray_builder = ["Tray", "Icon", "Builder"].concat();
-        let tray_type = ["tray_icon", "::", "Tray", "Icon"].concat();
-        assert!(
-            source.contains(&tray_builder) || source.contains(&tray_type),
-            "tray.rs must wire tray-icon, not be a stub"
-        );
-    }
-
-    #[test]
     fn toggle_label_reflects_visibility() {
         use vmux_ui::i18n::Locale;
 
@@ -326,31 +362,6 @@ mod tests {
     }
 
     #[test]
-    fn toggle_event_routes_by_visibility() {
-        use super::LifecycleEvent;
-        assert!(matches!(
-            super::toggle_lifecycle_event(true),
-            LifecycleEvent::HideAllWindows
-        ));
-        assert!(matches!(
-            super::toggle_lifecycle_event(false),
-            LifecycleEvent::ShowAllWindows
-        ));
-    }
-
-    #[test]
-    fn tray_syncs_toggle_label_with_window_visibility() {
-        let source = include_str!("tray.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
-
-        assert!(source.contains("sync_tray_menu_state"));
-        assert!(source.contains("set_text"));
-        assert!(source.contains("toggle_label"));
-    }
-
-    #[test]
     fn tray_icon_has_visible_pixels() {
         let rgba = super::tray_icon_rgba();
 
@@ -359,12 +370,5 @@ mod tests {
             rgba.chunks_exact(4).any(|pixel| pixel[3] != 0),
             "tray icon must not be fully transparent"
         );
-    }
-
-    #[test]
-    fn tray_icon_uses_macos_template_mode() {
-        let source = include_str!("tray.rs");
-
-        assert!(source.contains("with_icon_as_template(true)"));
     }
 }

@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 pub mod mcp_credentials;
 pub mod safe_storage;
-pub mod tools;
 pub mod vault;
 
 pub const fn build_profile() -> &'static str {

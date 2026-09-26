@@ -1,11 +1,13 @@
 use bevy::prelude::*;
 
 pub mod active;
-pub mod active_panes;
+pub mod active_pane;
 pub mod apply;
 pub mod archive;
 pub mod bookmark;
+pub mod bookmark_tool;
 pub mod cef;
+mod command;
 pub mod contract;
 pub mod native_open;
 pub mod native_pointer;
@@ -17,6 +19,7 @@ pub mod pending_stack;
 pub mod placement;
 pub mod plugin;
 pub mod profile;
+pub mod projection;
 pub mod settings;
 pub mod side_sheet;
 pub mod snapshot;
@@ -25,6 +28,7 @@ pub mod stack;
 pub mod tab;
 pub mod target;
 pub mod toggle;
+pub mod tool;
 pub mod unit;
 pub mod warm_page;
 pub mod window;
@@ -35,20 +39,23 @@ pub mod worktree;
 mod header;
 mod swap;
 mod webview_reveal;
+mod zoom;
 
 pub use cef::{
-    Browser, LayoutCef, Loading, NavigationState, apply_cef_state_from_webview,
+    Browser, LayoutCef, Loading, NavigationState, ReloadRevision, apply_cef_state_from_webview,
     mirror_metadata_to_url,
 };
 pub use contract::LayoutContractPlugin;
 pub use header::Header;
-pub use pane::{OpenBesideRequest, handle_open_beside_requests};
+pub use pane::OpenBesideRequest;
 pub use plugin::LayoutPlugin;
 pub use stack::{CloseStackReason, CloseStackRequest};
 pub use vmux_core::ContributedCommandChosen;
 pub use vmux_core::launcher::PendingLaunch;
 pub use webview_reveal::PendingWebviewReveal;
 pub use window::fit_window_to_screen;
+
+pub type LayoutUiStateUpdates = vmux_core::host::UiState<crate::state::LayoutUiState>;
 
 pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "layout",
@@ -106,8 +113,8 @@ pub enum UpdateState {
 }
 
 #[derive(Message, Clone, Debug)]
-pub enum LayoutSpawnRequest {
-    Terminal { stack: Entity },
+pub struct TerminalLayoutSpawnRequest {
+    pub stack: Entity,
 }
 
 #[derive(Clone, Debug)]

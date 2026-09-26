@@ -8,8 +8,11 @@ publish = false
 proc-macro = true
 
 [dependencies]
+heck = "0.5"
 proc-macro2 = "1"
 quote = "1"
+ron = { workspace = true }
+serde = { workspace = true }
 syn = { version = "2", features = ["full"] }
 
 [dev-dependencies]

@@ -18,7 +18,9 @@ serde = { workspace = true }
 rkyv = { workspace = true }
 unicode-width = "0.2"
 vmux_core = { path = "../../vmux_core" }
+vmux_native = { path = "../../vmux_native" }
 vmux_git = { path = "../../vmux_git" }
+vmux_api = { path = "../../vmux_api" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 arboard = "3"
@@ -36,13 +38,14 @@ lsp-types = "0.97"
 notify = { workspace = true }
 percent-encoding = "2"
 pulldown-cmark = { version = "0.12", default-features = false }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 ron = { workspace = true }
 ropey = "1"
 serde_json = { workspace = true }
 sha2 = "0.10"
 syntect = { workspace = true }
 tar = "0.4"
+tempfile = "3"
 tracing = "0.1"
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 unicode-segmentation = "1"
@@ -50,13 +53,15 @@ url = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_flex = { path = "../../vmux_flex" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_mcp = { path = "../../host/vmux_mcp" }
+vmux_tool = { path = "../../vmux_tool" }
+vmux_path = { path = "../../vmux_path" }
+vmux_service = { path = "../../host/vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
-vmux_wire = { path = "../../vmux_wire" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]
-tempfile = "3"
 url = { workspace = true }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]

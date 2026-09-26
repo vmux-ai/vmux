@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use vmux_command::event::CommandBarPage;
 use vmux_command::snapshot::{
-    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, ContributedCommand, ContributedPage,
-    WriteCommandBarSnapshots,
+    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, CommandBarProjection,
+    ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
@@ -17,7 +17,7 @@ impl Plugin for CommandBarPlugin {
             Update,
             publish_contributions
                 .in_set(WriteCommandBarSnapshots)
-                .after(crate::snapshot_updater::update_agent_sessions_snapshot),
+                .after(crate::snapshot_updater::SnapshotSet::AgentSessions),
         );
     }
 }
@@ -91,17 +91,20 @@ impl AgentContribution {
 }
 
 fn publish_contributions(
-    agents: Res<CommandBarAgentsSnapshot>,
+    state: Res<CommandBarProjection>,
+    mut previous: Local<Option<CommandBarAgentsSnapshot>>,
     mine: Query<Entity, With<AgentContribution>>,
     mut commands: Commands,
 ) {
-    if !agents.is_changed() {
+    if previous.as_ref() == Some(&state.agents) {
         return;
     }
+    let agents = &state.agents;
+    *previous = Some(agents.clone());
     for entity in mine.iter() {
         commands.entity(entity).despawn();
     }
-    for page in AgentContribution::launcher_pages(&agents) {
+    for page in AgentContribution::launcher_pages(agents) {
         commands.spawn((AgentContribution, page));
     }
     for strategy in &agents.strategies {
@@ -192,7 +195,7 @@ impl std::fmt::Display for AppAgentId {
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_command::snapshot::{AgentProviderSummary, Contributions};
+    use vmux_command::snapshot::AgentProviderSummary;
     use vmux_core::agent::AgentKind;
 
     #[test]
@@ -265,16 +268,16 @@ mod tests {
         }
 
         let claimed = world
-            .run_system_once(|contributions: Contributions| {
+            .run_system_once(|claimed: Query<&ClaimedUrl>| {
                 [
-                    contributions.claims_url("vmux://sessions/"),
-                    contributions.claims_url("vmux://sessions"),
-                    contributions.claims_url("vmux://agent/"),
-                    contributions.claims_url("vmux://agent"),
-                    contributions.claims_url("vmux://sessions/codex"),
-                    contributions.claims_url("vmux://sessions/codex/cli"),
-                    contributions.claims_url("vmux://agent/codex"),
-                    contributions.claims_url("vmux://agent/codex/cli"),
+                    ClaimedUrl::contains(&claimed, "vmux://sessions/"),
+                    ClaimedUrl::contains(&claimed, "vmux://sessions"),
+                    ClaimedUrl::contains(&claimed, "vmux://agent/"),
+                    ClaimedUrl::contains(&claimed, "vmux://agent"),
+                    ClaimedUrl::contains(&claimed, "vmux://sessions/codex"),
+                    ClaimedUrl::contains(&claimed, "vmux://sessions/codex/cli"),
+                    ClaimedUrl::contains(&claimed, "vmux://agent/codex"),
+                    ClaimedUrl::contains(&claimed, "vmux://agent/codex/cli"),
                 ]
             })
             .expect("claims_url system runs");

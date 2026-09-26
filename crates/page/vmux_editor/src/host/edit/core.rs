@@ -370,7 +370,7 @@ impl EditCore {
             .slice(line_start..line_start + col)
             .chars()
             .collect();
-        DisplayCells::of_str(&s)
+        DisplayCells::from(s.as_str()).width()
     }
 
     pub fn char_at_cell(&self, line: usize, cell: u32) -> usize {
@@ -382,7 +382,7 @@ impl EditCore {
             .chars()
             .filter(|ch| *ch != '\n' && *ch != '\r')
             .collect();
-        DisplayCells::char_at(&text, cell)
+        DisplayCells::from(text.as_str()).char_at(cell)
     }
 
     pub fn cursor_pos(&self) -> CursorPos {
@@ -1304,7 +1304,7 @@ impl EditCore {
 
     fn reshape(&mut self, to: crate::shape::BufferShape) -> bool {
         let source: String = self.buffer.rope.chars().collect();
-        let from = crate::shape::BufferShape::of(&self.buffer.rope).indent;
+        let from = crate::shape::BufferShape::detect(&self.buffer.rope).indent;
         let out = crate::shape::Reindent { from, to }.applied(&source);
         if out == source {
             return false;

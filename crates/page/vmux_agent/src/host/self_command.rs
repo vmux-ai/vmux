@@ -1,29 +1,29 @@
 use std::path::Path;
 
 use bevy::prelude::*;
-use vmux_command::WriteAppCommands;
+use vmux_api::protocol::{AgentCommand as ServiceAgentCommand, ClientMessage, ProcessId};
+use vmux_command::WriteCommandRequests;
 use vmux_layout::event::TERMINAL_PAGE_URL;
-use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, ClientMessage, ProcessId};
+use vmux_service::client::ServiceRequest;
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{
     AgentRunTerminal, ProcessExited, ServiceMessageSet, Terminal, TerminalStackSpawnRequest,
+    TerminalStackSpawnSet,
 };
 
 use crate::events::AgentCommandRequest;
 use crate::session::AgentSession;
 
-use super::command::requested_focus_for_origin;
 use super::follow::file_touch_url;
 use super::run_terminal::{
-    AgentCwd, AgentPane, AgentTerminalRegions, PagerEnv, PendingRunTerminalSpawn,
-    PendingRunTerminalSpawns, ProjectsDirectory, RunCommand, RunPlacementPolicy, RunTerminal,
-    RunTerminalBucketPanes, RunTerminalCandidate,
+    AgentCwd, AgentPane, AgentTerminalRegion, NextPaneSpawnSequence, PagerEnv,
+    PendingRunTerminalSpawn, PendingRunTerminalSpawns, ProjectsDirectory, RunCommand,
+    RunPlacementPolicy, RunTerminal, RunTerminalBucketPanes, RunTerminalCandidate,
 };
 use super::workspace::{
-    AgentTabWorktreeContext, PendingAgentChoice, PendingAgentChoiceAction, PendingWorkspacePicker,
+    AgentTabWorktreeContext, PendingAgentChoice, PendingWorkspacePicker, ResumeAgentChoice,
     USER_CHOICE_REQUESTED, WORKSPACE_SELECTION_PENDING, WORKSPACE_SELECTION_REQUESTED,
     WorkspacePickerContext, activate_agent_directory, activate_agent_worktree,
     ambiguous_worktree_message, existing_worktree_candidates, resolve_requested_worktree,
@@ -32,29 +32,33 @@ use super::workspace::{
 
 pub(super) struct SelfCommandPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct SelfCommandSet;
+
 impl Plugin for SelfCommandPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
             handle_agent_self_commands
-                .in_set(WriteAppCommands)
+                .in_set(SelfCommandSet)
+                .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
                 .after(vmux_layout::worktree::TabDirectoryRebindSet)
-                .before(vmux_terminal::plugin::respond_terminal_stack_spawn),
+                .before(TerminalStackSpawnSet),
         );
     }
 }
 
 fn resolve_self_pane(
     anchor: ProcessId,
-    agent_terms: &Query<(Entity, &ProcessId, &ChildOf)>,
+    agent_terms: &Query<(Entity, &ProcessId, &ChildOf, Option<&AgentTerminalRegion>)>,
     child_of_q: &Query<&ChildOf>,
-) -> Option<(Entity, Entity)> {
+) -> Option<(Entity, Entity, AgentTerminalRegion)> {
     use bevy::ecs::relationship::Relationship;
-    let (term, _, term_co) = agent_terms.iter().find(|(_, pid, _)| **pid == anchor)?;
+    let (term, _, term_co, region) = agent_terms.iter().find(|(_, pid, _, _)| **pid == anchor)?;
     let stack = term_co.get();
     let pane = child_of_q.get(stack).ok()?.get();
-    Some((term, pane))
+    Some((term, pane, region.copied().unwrap_or_default()))
 }
 
 fn ancestor_self_tab(
@@ -126,19 +130,19 @@ pub(crate) fn rebind_acp_workspace(
 
 fn self_command_anchor(command: &ServiceAgentCommand) -> Option<ProcessId> {
     match command {
-        ServiceAgentCommand::OpenBeside { anchor, .. }
-        | ServiceAgentCommand::Run { anchor, .. }
-        | ServiceAgentCommand::RunWithPlacementOverride { anchor, .. }
-        | ServiceAgentCommand::CreateWorktree { anchor }
-        | ServiceAgentCommand::ChooseWorkspace { anchor }
-        | ServiceAgentCommand::ChooseWorkspaceAtPath { anchor, .. }
-        | ServiceAgentCommand::PrepareWorktree { anchor, .. }
-        | ServiceAgentCommand::RequestUserChoice { anchor, .. }
-        | ServiceAgentCommand::SetConversationTitle { anchor, .. }
-        | ServiceAgentCommand::SearchKnowledge { anchor, .. }
-        | ServiceAgentCommand::ReadKnowledge { anchor, .. }
-        | ServiceAgentCommand::WriteKnowledge { anchor, .. }
-        | ServiceAgentCommand::CreateWorktreeOnBranch { anchor, .. } => Some(*anchor),
+        ServiceAgentCommand::OpenBeside(command) => Some(command.anchor),
+        ServiceAgentCommand::Run(command)
+        | ServiceAgentCommand::RunWithPlacementOverride(command) => Some(command.anchor),
+        ServiceAgentCommand::CreateWorktree(command) => Some(command.anchor),
+        ServiceAgentCommand::ChooseWorkspace(command) => Some(command.anchor),
+        ServiceAgentCommand::ChooseWorkspaceAtPath(command) => Some(command.anchor),
+        ServiceAgentCommand::PrepareWorktree(command) => Some(command.anchor),
+        ServiceAgentCommand::RequestUserChoice(command) => Some(command.anchor),
+        ServiceAgentCommand::SetConversationTitle(command) => Some(command.anchor),
+        ServiceAgentCommand::SearchKnowledge(command) => Some(command.anchor),
+        ServiceAgentCommand::ReadKnowledge(command) => Some(command.anchor),
+        ServiceAgentCommand::WriteKnowledge(command) => Some(command.anchor),
+        ServiceAgentCommand::CreateWorktreeOnBranch(command) => Some(command.anchor),
         _ => None,
     }
 }
@@ -146,16 +150,16 @@ fn self_command_anchor(command: &ServiceAgentCommand) -> Option<ProcessId> {
 fn self_command_priority(command: &ServiceAgentCommand) -> u8 {
     if matches!(
         command,
-        ServiceAgentCommand::CreateWorktree { .. }
-            | ServiceAgentCommand::ChooseWorkspace { .. }
-            | ServiceAgentCommand::ChooseWorkspaceAtPath { .. }
-            | ServiceAgentCommand::PrepareWorktree { .. }
-            | ServiceAgentCommand::RequestUserChoice { .. }
-            | ServiceAgentCommand::SetConversationTitle { .. }
-            | ServiceAgentCommand::SearchKnowledge { .. }
-            | ServiceAgentCommand::ReadKnowledge { .. }
-            | ServiceAgentCommand::WriteKnowledge { .. }
-            | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
+        ServiceAgentCommand::CreateWorktree(_)
+            | ServiceAgentCommand::ChooseWorkspace(_)
+            | ServiceAgentCommand::ChooseWorkspaceAtPath(_)
+            | ServiceAgentCommand::PrepareWorktree(_)
+            | ServiceAgentCommand::RequestUserChoice(_)
+            | ServiceAgentCommand::SetConversationTitle(_)
+            | ServiceAgentCommand::SearchKnowledge(_)
+            | ServiceAgentCommand::ReadKnowledge(_)
+            | ServiceAgentCommand::WriteKnowledge(_)
+            | ServiceAgentCommand::CreateWorktreeOnBranch(_)
     ) {
         0
     } else {
@@ -169,16 +173,16 @@ fn self_command_blocked_by_worktree_failure(
 ) -> bool {
     !matches!(
         command,
-        ServiceAgentCommand::CreateWorktree { .. }
-            | ServiceAgentCommand::ChooseWorkspace { .. }
-            | ServiceAgentCommand::ChooseWorkspaceAtPath { .. }
-            | ServiceAgentCommand::PrepareWorktree { .. }
-            | ServiceAgentCommand::RequestUserChoice { .. }
-            | ServiceAgentCommand::SetConversationTitle { .. }
-            | ServiceAgentCommand::SearchKnowledge { .. }
-            | ServiceAgentCommand::ReadKnowledge { .. }
-            | ServiceAgentCommand::WriteKnowledge { .. }
-            | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
+        ServiceAgentCommand::CreateWorktree(_)
+            | ServiceAgentCommand::ChooseWorkspace(_)
+            | ServiceAgentCommand::ChooseWorkspaceAtPath(_)
+            | ServiceAgentCommand::PrepareWorktree(_)
+            | ServiceAgentCommand::RequestUserChoice(_)
+            | ServiceAgentCommand::SetConversationTitle(_)
+            | ServiceAgentCommand::SearchKnowledge(_)
+            | ServiceAgentCommand::ReadKnowledge(_)
+            | ServiceAgentCommand::WriteKnowledge(_)
+            | ServiceAgentCommand::CreateWorktreeOnBranch(_)
     ) && self_command_anchor(command).is_some_and(|anchor| failed.contains(&anchor))
 }
 
@@ -190,9 +194,9 @@ pub(crate) struct AgentSelfCommandWriters<'w> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn handle_agent_self_commands(
+fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
+    agent_terms: Query<(Entity, &ProcessId, &ChildOf, Option<&AgentTerminalRegion>)>,
     term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
     run_terms: Query<
         (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
@@ -207,19 +211,14 @@ pub(super) fn handle_agent_self_commands(
     ctx: vmux_layout::pane::PlacementCtx,
     mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
     active_space: Option<Res<ActiveSpace>>,
     settings: Res<AppSettings>,
-    mut regions: ResMut<AgentTerminalRegions>,
     mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
     mut tab_worktree: AgentTabWorktreeContext,
     mut workspace_picker: WorkspacePickerContext,
 ) {
-    use vmux_service::protocol::{AgentCommandResult, ClientMessage};
-    let Some(service) = service else {
-        for _ in reader.read() {}
-        return;
-    };
+    use vmux_api::protocol::{AgentCommandResult, ClientMessage};
     let managed_root = tab_worktree
         .managed_root
         .as_deref()
@@ -232,6 +231,7 @@ pub(super) fn handle_agent_self_commands(
     let mut terminal_spawns: Vec<TerminalStackSpawnRequest> = Vec::new();
     let mut pending_run_spawns = PendingRunTerminalSpawns::default();
     let mut failed_worktree_anchors = std::collections::HashSet::new();
+    let mut terminal_regions = std::collections::HashMap::new();
     let mut workspace_picker_tabs: std::collections::HashSet<Entity> = workspace_picker
         .pickers
         .iter()
@@ -242,81 +242,71 @@ pub(super) fn handle_agent_self_commands(
     for request in requests {
         let request_anchor = self_command_anchor(&request.command);
         if self_command_blocked_by_worktree_failure(&request.command, &failed_worktree_anchors) {
-            service.0.send(ClientMessage::AgentCommandResponse {
+            service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
                 request_id: request.request_id,
                 result: AgentCommandResult::Error(
                     "Skipped because worktree activation did not complete.".to_string(),
                 ),
-            });
+            }));
             continue;
         }
         let result = match &request.command {
-            ServiceAgentCommand::OpenBeside {
-                anchor,
-                direction,
-                url,
-                focus,
-            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("self process not found".to_string()),
-                Some((_, pane)) => {
-                    let focus = requested_focus_for_origin(&request.origin, *focus);
-                    writers.open_beside.write(vmux_layout::OpenBesideRequest {
-                        pane,
-                        direction: direction.as_ref().map(AgentPane::direction),
-                        url: url.clone(),
-                        request_id: request.request_id.0,
-                        focus,
-                    });
-                    AgentCommandResult::Ok
+            ServiceAgentCommand::OpenBeside(command) => {
+                let anchor = &command.anchor;
+                let direction = &command.direction;
+                let url = &command.url;
+                let focus = &command.focus;
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("self process not found".to_string()),
+                    Some((_, pane, _)) => {
+                        let focus = request.origin.allows_focus(*focus);
+                        writers.open_beside.write(vmux_layout::OpenBesideRequest {
+                            pane,
+                            direction: direction.as_ref().map(AgentPane::direction),
+                            url: url.clone(),
+                            request_id: request.request_id.0,
+                            focus,
+                        });
+                        AgentCommandResult::Ok
+                    }
                 }
-            },
-            ServiceAgentCommand::Run {
-                anchor,
-                command,
-                direction,
-                focus,
-                beside,
-                mode,
-                terminal,
-                done_marker,
             }
-            | ServiceAgentCommand::RunWithPlacementOverride {
-                anchor,
-                command,
-                direction,
-                focus,
-                beside,
-                mode,
-                terminal,
-                done_marker,
-            } => 'run: {
+            ServiceAgentCommand::Run(run)
+            | ServiceAgentCommand::RunWithPlacementOverride(run) => 'run: {
+                let anchor = &run.anchor;
+                let command = &run.command;
+                let direction = &run.direction;
+                let focus = &run.focus;
+                let beside = &run.beside;
+                let mode = &run.mode;
+                let terminal = &run.terminal;
+                let done_marker = &run.done_marker;
                 let placement_override = matches!(
                     &request.command,
-                    ServiceAgentCommand::RunWithPlacementOverride { .. }
+                    ServiceAgentCommand::RunWithPlacementOverride(_)
                 ) || beside.is_some()
-                    || *mode != vmux_service::protocol::PlacementMode::Auto
-                    || *direction != vmux_service::protocol::AgentPaneDirection::Right;
+                    || *mode != vmux_api::protocol::PlacementMode::Auto
+                    || *direction != vmux_api::protocol::AgentPaneDirection::Right;
                 if let Err(error) = RunPlacementPolicy::new(placement_override).validate(&settings)
                 {
                     break 'run AgentCommandResult::Error(error.to_string());
                 }
-                let focus = requested_focus_for_origin(&request.origin, *focus);
+                let focus = request.origin.allows_focus(*focus);
                 let run = RunCommand::new(command, done_marker.as_deref());
                 match terminal {
                     Some(pid) => match RunTerminal::new(*pid).launch(&term_pids, &launch_q) {
                         Ok(launch) => {
-                            run.queue(
-                                &mut writers.terminal_reinput,
+                            writers.terminal_reinput.write(run.reinput(
                                 *pid,
                                 &launch,
                                 PagerEnv::Inherited,
-                            );
+                            ));
                             AgentCommandResult::Text(pid.to_string())
                         }
                         Err(error) => AgentCommandResult::Error(error),
                     },
                     None => 'spawn: {
-                        let Some((agent_term, self_pane)) =
+                        let Some((agent_term, self_pane, stored_region)) =
                             resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q)
                         else {
                             break 'spawn AgentCommandResult::Error(
@@ -347,7 +337,7 @@ pub(super) fn handle_agent_self_commands(
                                     .ok()
                                     .map(|session| session.cwd.to_string_lossy().into_owned())
                             });
-                        let cwd = match AgentCwd::of_tab(tab_cwd.as_deref())
+                        let cwd = match AgentCwd::from_tab(tab_cwd.as_deref())
                             .or_agent_launch(agent_cwd.as_deref())
                         {
                             Ok(cwd) => cwd,
@@ -372,7 +362,7 @@ pub(super) fn handle_agent_self_commands(
                             &ctx.seq_q,
                         );
                         if beside.is_none()
-                            && *mode == vmux_service::protocol::PlacementMode::Auto
+                            && *mode == vmux_api::protocol::PlacementMode::Auto
                             && let Some(pid) = pending_run_spawns.append_input(
                                 *anchor,
                                 &mut terminal_spawns,
@@ -382,10 +372,13 @@ pub(super) fn handle_agent_self_commands(
                         {
                             break 'spawn AgentCommandResult::Text(pid.to_string());
                         }
+                        let region = terminal_regions
+                            .entry(*anchor)
+                            .or_insert((agent_term, stored_region));
                         if beside.is_none()
-                            && *mode == vmux_service::protocol::PlacementMode::Auto
+                            && *mode == vmux_api::protocol::PlacementMode::Auto
                             && let Some(candidate) =
-                                regions.choose_reusable_terminal(*anchor, self_pane, &candidates)
+                                region.1.choose_reusable_terminal(self_pane, &candidates)
                         {
                             let Ok(launch) = launch_q.get(candidate.terminal) else {
                                 break 'spawn AgentCommandResult::Error(format!(
@@ -393,21 +386,24 @@ pub(super) fn handle_agent_self_commands(
                                     candidate.pid
                                 ));
                             };
-                            run.queue(
-                                &mut writers.terminal_reinput,
+                            writers.terminal_reinput.write(run.reinput(
                                 candidate.pid,
                                 launch,
                                 PagerEnv::Set,
-                            );
-                            regions.run_terminals.insert(*anchor, candidate.pid);
-                            regions.run_panes.insert(*anchor, candidate.pane);
-                            AgentPane::new(candidate.pane).touch_spawn_seq(
-                                &mut commands,
-                                &mut spawn_counter,
-                                &ctx.seq_q,
-                            );
+                            ));
+                            region.1.run_terminal = Some(candidate.pid);
+                            region.1.run_pane = Some(candidate.pane);
+                            let sequence =
+                                NextPaneSpawnSequence::take(&mut spawn_counter, &ctx.seq_q);
+                            commands.entity(candidate.pane).insert(sequence);
                             if focus {
-                                candidate.focus(&mut commands, &ctx.child_of_q, &ctx.tab_q);
+                                for entity in
+                                    candidate.activation_entities(&ctx.child_of_q, &ctx.tab_q)
+                                {
+                                    commands
+                                        .entity(entity)
+                                        .insert(vmux_core::LastActivatedAt::now());
+                                }
                             }
                             break 'spawn AgentCommandResult::Text(candidate.pid.to_string());
                         }
@@ -430,12 +426,13 @@ pub(super) fn handle_agent_self_commands(
                         }
                         let shell = shell.into_string();
 
-                        use vmux_service::protocol::PlacementMode;
+                        use vmux_api::protocol::PlacementMode;
                         let target_pane = match (beside_pane, *mode) {
                             (anchor_pane, PlacementMode::Split) => {
                                 let bucket_pane = if anchor_pane.is_none() {
-                                    regions
-                                        .choose_bucket_pane(*anchor, self_pane, &candidates)
+                                    region
+                                        .1
+                                        .choose_bucket_pane(self_pane, &candidates)
                                         .filter(|pane| terminal_bucket_panes.contains(*pane))
                                         .or_else(|| terminal_bucket_panes.newest(self_pane))
                                 } else {
@@ -449,14 +446,21 @@ pub(super) fn handle_agent_self_commands(
                                             self_pane, &ctx,
                                         )
                                     });
-                                    AgentPane::new(anchor_pane).split_off(
-                                        &mut commands,
+                                    let split = AgentPane::new(anchor_pane).split(
                                         direction,
                                         focus,
                                         &ctx.pane_children,
                                         &ctx.tab_filter,
                                         &ctx.split_dir_q,
                                         &mut split_this_batch,
+                                    );
+                                    vmux_layout::pane::split_or_extend(
+                                        &mut commands,
+                                        split.pane,
+                                        split.direction,
+                                        &split.existing_tabs,
+                                        split.focus,
+                                        split.already_split,
                                     )
                                 }
                             }
@@ -470,11 +474,8 @@ pub(super) fn handle_agent_self_commands(
                                 &ctx,
                             ),
                         };
-                        AgentPane::new(target_pane).touch_spawn_seq(
-                            &mut commands,
-                            &mut spawn_counter,
-                            &ctx.seq_q,
-                        );
+                        let sequence = NextPaneSpawnSequence::take(&mut spawn_counter, &ctx.seq_q);
+                        commands.entity(target_pane).insert(sequence);
                         let new_pid = ProcessId::new();
                         let request_index = terminal_spawns.len();
                         terminal_spawns.push(TerminalStackSpawnRequest {
@@ -486,10 +487,9 @@ pub(super) fn handle_agent_self_commands(
                             process_id: Some(new_pid),
                             activate: focus,
                         });
-                        regions.run_panes.insert(*anchor, target_pane);
-                        if beside.is_none() && *mode != vmux_service::protocol::PlacementMode::Split
-                        {
-                            regions.run_terminals.insert(*anchor, new_pid);
+                        region.1.run_pane = Some(target_pane);
+                        if beside.is_none() && *mode != vmux_api::protocol::PlacementMode::Split {
+                            region.1.run_terminal = Some(new_pid);
                             pending_run_spawns.insert(
                                 *anchor,
                                 PendingRunTerminalSpawn {
@@ -503,53 +503,13 @@ pub(super) fn handle_agent_self_commands(
                     }
                 }
             }
-            ServiceAgentCommand::RequestUserChoice {
-                anchor,
-                question,
-                options,
-            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, _)) => {
-                    let Some(session_entity) = ancestor_agent_session(
-                        agent_entity,
-                        &acp_sessions,
-                        &workspace_picker.page_sessions,
-                        &workspace_picker.cli_sessions,
-                        &ctx.child_of_q,
-                    ) else {
-                        service.0.send(ClientMessage::AgentCommandResponse {
-                            request_id: request.request_id,
-                            result: AgentCommandResult::Error(
-                                "agent session not found".to_string(),
-                            ),
-                        });
-                        continue;
-                    };
-                    if workspace_picker.choices.get(agent_entity).is_ok() {
-                        AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
-                    } else if workspace_picker.chat_views.contains(agent_entity) {
-                        commands
-                            .entity(agent_entity)
-                            .insert(PendingAgentChoice {
-                                session_entity,
-                                action: PendingAgentChoiceAction::Resume,
-                                question: question.clone(),
-                                options: options.clone(),
-                            })
-                            .remove::<crate::host::chat::ChatSynced>();
-                        AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
-                    } else {
-                        AgentCommandResult::Error(
-                            "Native choice prompts require the chat agent view; ask the user with the same numbered options in the current terminal session."
-                                .to_string(),
-                        )
-                    }
-                }
-            },
-            ServiceAgentCommand::SetConversationTitle { anchor, title } => {
+            ServiceAgentCommand::RequestUserChoice(command) => {
+                let anchor = &command.anchor;
+                let question = &command.question;
+                let options = &command.options;
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                     None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some((agent_entity, _)) => {
+                    Some((agent_entity, _, _)) => {
                         let Some(session_entity) = ancestor_agent_session(
                             agent_entity,
                             &acp_sessions,
@@ -557,12 +517,61 @@ pub(super) fn handle_agent_self_commands(
                             &workspace_picker.cli_sessions,
                             &ctx.child_of_q,
                         ) else {
-                            service.0.send(ClientMessage::AgentCommandResponse {
-                                request_id: request.request_id,
-                                result: AgentCommandResult::Error(
-                                    "agent session not found".to_string(),
-                                ),
-                            });
+                            service_requests.write(ServiceRequest(
+                                ClientMessage::AgentCommandResponse {
+                                    request_id: request.request_id,
+                                    result: AgentCommandResult::Error(
+                                        "agent session not found".to_string(),
+                                    ),
+                                },
+                            ));
+                            continue;
+                        };
+                        if workspace_picker.choices.get(agent_entity).is_ok() {
+                            AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
+                        } else if workspace_picker.chat_views.contains(agent_entity) {
+                            commands
+                                .entity(agent_entity)
+                                .insert((
+                                    PendingAgentChoice {
+                                        session_entity,
+                                        question: question.clone(),
+                                        options: options.clone(),
+                                    },
+                                    ResumeAgentChoice,
+                                ))
+                                .remove::<crate::host::chat::ChatSynced>();
+                            AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
+                        } else {
+                            AgentCommandResult::Error(
+                            "Native choice prompts require the chat agent view; ask the user with the same numbered options in the current terminal session."
+                                .to_string(),
+                        )
+                        }
+                    }
+                }
+            }
+            ServiceAgentCommand::SetConversationTitle(command) => {
+                let anchor = &command.anchor;
+                let title = &command.title;
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some((agent_entity, _, _)) => {
+                        let Some(session_entity) = ancestor_agent_session(
+                            agent_entity,
+                            &acp_sessions,
+                            &workspace_picker.page_sessions,
+                            &workspace_picker.cli_sessions,
+                            &ctx.child_of_q,
+                        ) else {
+                            service_requests.write(ServiceRequest(
+                                ClientMessage::AgentCommandResponse {
+                                    request_id: request.request_id,
+                                    result: AgentCommandResult::Error(
+                                        "agent session not found".to_string(),
+                                    ),
+                                },
+                            ));
                             continue;
                         };
                         let title = title.trim().to_string();
@@ -582,144 +591,156 @@ pub(super) fn handle_agent_self_commands(
                     }
                 }
             }
-            ServiceAgentCommand::SearchKnowledge {
-                anchor,
-                query,
-                limit,
-            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some(_) => match tab_worktree.knowledge_index.as_deref() {
-                    Some(index) if index.loaded() => {
-                        let matches = index.search(query, usize::from(*limit));
-                        if matches.is_empty() {
-                            AgentCommandResult::Text(format!(
-                                "No Knowledge matches for: {}",
-                                query.trim()
-                            ))
-                        } else {
-                            let root = index.root();
-                            let text = matches
-                                .into_iter()
-                                .map(|item| {
-                                    let path = item
-                                        .path
-                                        .strip_prefix(root)
-                                        .unwrap_or(&item.path)
-                                        .to_string_lossy()
-                                        .replace('\\', "/");
-                                    format!(
-                                        "{}:{}: {} — {}",
-                                        path,
-                                        item.line + 1,
-                                        item.title,
-                                        item.preview
-                                    )
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            AgentCommandResult::Text(text)
-                        }
-                    }
-                    Some(_) => AgentCommandResult::Error(
-                        "Knowledge index is still loading; retry shortly.".to_string(),
-                    ),
-                    None => AgentCommandResult::Error(
-                        "Knowledge is unavailable in this vmux session.".to_string(),
-                    ),
-                },
-            },
-            ServiceAgentCommand::ReadKnowledge {
-                anchor,
-                path,
-                line,
-                limit,
-            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some(_) => match tab_worktree.knowledge_index.as_deref() {
-                    Some(index) if index.loaded() => match index.note_by_query(path) {
-                        Some((note_path, title, text)) => {
-                            let lines = text.lines().collect::<Vec<_>>();
-                            let start = line.saturating_sub(1) as usize;
-                            if start >= lines.len() && !lines.is_empty() {
-                                AgentCommandResult::Error(format!(
-                                    "Knowledge line {} exceeds note length {}",
-                                    line,
-                                    lines.len()
+            ServiceAgentCommand::SearchKnowledge(command) => {
+                let anchor = &command.anchor;
+                let query = &command.query;
+                let limit = &command.limit;
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some(_) => match tab_worktree.knowledge_index.as_deref() {
+                        Some(index) if index.loaded() => {
+                            let matches = index.search(query, usize::from(*limit));
+                            if matches.is_empty() {
+                                AgentCommandResult::Text(format!(
+                                    "No Knowledge matches for: {}",
+                                    query.trim()
                                 ))
                             } else {
-                                let end = start.saturating_add(*limit as usize).min(lines.len());
-                                let source = note_path
-                                    .strip_prefix(index.root())
-                                    .unwrap_or(&note_path)
-                                    .to_string_lossy()
-                                    .replace('\\', "/");
-                                let body = lines[start..end]
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(offset, value)| {
-                                        format!("{} | {}", start + offset + 1, value)
+                                let root = index.root();
+                                let text = matches
+                                    .into_iter()
+                                    .map(|item| {
+                                        let path = item
+                                            .path
+                                            .strip_prefix(root)
+                                            .unwrap_or(&item.path)
+                                            .to_string_lossy()
+                                            .replace('\\', "/");
+                                        format!(
+                                            "{}:{}: {} — {}",
+                                            path,
+                                            item.line + 1,
+                                            item.title,
+                                            item.preview
+                                        )
                                     })
                                     .collect::<Vec<_>>()
                                     .join("\n");
-                                AgentCommandResult::Text(format!(
-                                    "Source: {source}\nTitle: {title}\nLines {}-{}\n\n{body}",
-                                    start + 1,
-                                    end
-                                ))
+                                AgentCommandResult::Text(text)
                             }
                         }
-                        None => AgentCommandResult::Error(format!(
-                            "Knowledge note not found: {}",
-                            path.trim()
-                        )),
+                        Some(_) => AgentCommandResult::Error(
+                            "Knowledge index is still loading; retry shortly.".to_string(),
+                        ),
+                        None => AgentCommandResult::Error(
+                            "Knowledge is unavailable in this vmux session.".to_string(),
+                        ),
                     },
-                    Some(_) => AgentCommandResult::Error(
-                        "Knowledge index is still loading; retry shortly.".to_string(),
-                    ),
-                    None => AgentCommandResult::Error(
-                        "Knowledge is unavailable in this vmux session.".to_string(),
-                    ),
-                },
-            },
-            ServiceAgentCommand::WriteKnowledge {
-                anchor,
-                path,
-                title,
-                content,
-            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((_, pane)) => {
-                    match vmux_core::knowledge::KnowledgeVault::user().write_note(
-                        path.as_deref(),
-                        title,
-                        content,
-                    ) {
-                        Ok(path) => {
-                            writers.open_beside.write(vmux_layout::OpenBesideRequest {
-                                pane,
-                                direction: None,
-                                url: file_touch_url(&path.to_string_lossy(), None, None, None),
-                                request_id: request.request_id.0,
-                                focus: false,
-                            });
-                            AgentCommandResult::Text(format!("Knowledge saved: {}", path.display()))
-                        }
-                        Err(error) => AgentCommandResult::Error(error),
-                    }
                 }
-            },
-            ServiceAgentCommand::ChooseWorkspace { anchor }
-            | ServiceAgentCommand::ChooseWorkspaceAtPath { anchor, .. } => {
+            }
+            ServiceAgentCommand::ReadKnowledge(command) => {
+                let anchor = &command.anchor;
+                let path = &command.path;
+                let line = &command.line;
+                let limit = &command.limit;
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                     None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some((agent_entity, pane)) => {
+                    Some(_) => match tab_worktree.knowledge_index.as_deref() {
+                        Some(index) if index.loaded() => match index.note_by_query(path) {
+                            Some((note_path, title, text)) => {
+                                let lines = text.lines().collect::<Vec<_>>();
+                                let start = line.saturating_sub(1) as usize;
+                                if start >= lines.len() && !lines.is_empty() {
+                                    AgentCommandResult::Error(format!(
+                                        "Knowledge line {} exceeds note length {}",
+                                        line,
+                                        lines.len()
+                                    ))
+                                } else {
+                                    let end =
+                                        start.saturating_add(*limit as usize).min(lines.len());
+                                    let source = note_path
+                                        .strip_prefix(index.root())
+                                        .unwrap_or(&note_path)
+                                        .to_string_lossy()
+                                        .replace('\\', "/");
+                                    let body = lines[start..end]
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(offset, value)| {
+                                            format!("{} | {}", start + offset + 1, value)
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    AgentCommandResult::Text(format!(
+                                        "Source: {source}\nTitle: {title}\nLines {}-{}\n\n{body}",
+                                        start + 1,
+                                        end
+                                    ))
+                                }
+                            }
+                            None => AgentCommandResult::Error(format!(
+                                "Knowledge note not found: {}",
+                                path.trim()
+                            )),
+                        },
+                        Some(_) => AgentCommandResult::Error(
+                            "Knowledge index is still loading; retry shortly.".to_string(),
+                        ),
+                        None => AgentCommandResult::Error(
+                            "Knowledge is unavailable in this vmux session.".to_string(),
+                        ),
+                    },
+                }
+            }
+            ServiceAgentCommand::WriteKnowledge(command) => {
+                let anchor = &command.anchor;
+                let path = &command.path;
+                let title = &command.title;
+                let content = &command.content;
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some((_, pane, _)) => {
+                        match vmux_core::knowledge::KnowledgeVault::user().write_note(
+                            path.as_deref(),
+                            title,
+                            content,
+                        ) {
+                            Ok(path) => {
+                                writers.open_beside.write(vmux_layout::OpenBesideRequest {
+                                    pane,
+                                    direction: None,
+                                    url: file_touch_url(&path.to_string_lossy(), None, None, None),
+                                    request_id: request.request_id.0,
+                                    focus: false,
+                                });
+                                AgentCommandResult::Text(format!(
+                                    "Knowledge saved: {}",
+                                    path.display()
+                                ))
+                            }
+                            Err(error) => AgentCommandResult::Error(error),
+                        }
+                    }
+                }
+            }
+            ServiceAgentCommand::ChooseWorkspace(_)
+            | ServiceAgentCommand::ChooseWorkspaceAtPath(_) => {
+                let anchor = self_command_anchor(&request.command).expect("workspace anchor");
+                match resolve_self_pane(anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some((agent_entity, pane, _)) => {
                         let Some(tab_entity) =
                             ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
                         else {
-                            service.0.send(ClientMessage::AgentCommandResponse {
-                                request_id: request.request_id,
-                                result: AgentCommandResult::Error("no tab for agent".to_string()),
-                            });
+                            service_requests.write(ServiceRequest(
+                                ClientMessage::AgentCommandResponse {
+                                    request_id: request.request_id,
+                                    result: AgentCommandResult::Error(
+                                        "no tab for agent".to_string(),
+                                    ),
+                                },
+                            ));
                             continue;
                         };
                         let Some(session_entity) = ancestor_agent_session(
@@ -729,21 +750,23 @@ pub(super) fn handle_agent_self_commands(
                             &workspace_picker.cli_sessions,
                             &ctx.child_of_q,
                         ) else {
-                            service.0.send(ClientMessage::AgentCommandResponse {
-                                request_id: request.request_id,
-                                result: AgentCommandResult::Error(
-                                    "agent session not found".to_string(),
-                                ),
-                            });
+                            service_requests.write(ServiceRequest(
+                                ClientMessage::AgentCommandResponse {
+                                    request_id: request.request_id,
+                                    result: AgentCommandResult::Error(
+                                        "agent session not found".to_string(),
+                                    ),
+                                },
+                            ));
                             continue;
                         };
                         if workspace_picker.choices.get(agent_entity).is_ok() {
                             AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
                         } else if !workspace_picker_tabs.insert(tab_entity) {
                             AgentCommandResult::Text(WORKSPACE_SELECTION_PENDING.to_string())
-                        } else if let ServiceAgentCommand::ChooseWorkspaceAtPath { path, .. } =
+                        } else if let ServiceAgentCommand::ChooseWorkspaceAtPath(command) =
                             &request.command
-                            && let Ok(selected) = Path::new(path).canonicalize()
+                            && let Ok(selected) = Path::new(&command.path).canonicalize()
                             && selected.is_dir()
                         {
                             let trusted = ProjectsDirectory::ensure()
@@ -778,168 +801,179 @@ pub(super) fn handle_agent_self_commands(
                     }
                 }
             }
-            ServiceAgentCommand::PrepareWorktree {
-                anchor,
-                path,
-                task,
-                create,
-            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, pane)) => {
-                    let Some(tab_entity) =
-                        ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
-                    else {
-                        service.0.send(ClientMessage::AgentCommandResponse {
-                            request_id: request.request_id,
-                            result: AgentCommandResult::Error("no tab for agent".to_string()),
+            ServiceAgentCommand::PrepareWorktree(command) => {
+                let anchor = &command.anchor;
+                let path = &command.path;
+                let task = &command.task;
+                let create = &command.create;
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some((agent_entity, pane, _)) => {
+                        let Some(tab_entity) =
+                            ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
+                        else {
+                            service_requests.write(ServiceRequest(
+                                ClientMessage::AgentCommandResponse {
+                                    request_id: request.request_id,
+                                    result: AgentCommandResult::Error(
+                                        "no tab for agent".to_string(),
+                                    ),
+                                },
+                            ));
+                            continue;
+                        };
+                        let current_dir = tab_worktree.tabs.get(tab_entity).ok().and_then(|tab| {
+                            AgentCwd::from_tab(tab.startup_dir.as_deref())
+                                .stored()
+                                .ok()
+                                .flatten()
                         });
-                        continue;
-                    };
-                    let current_dir = tab_worktree.tabs.get(tab_entity).ok().and_then(|tab| {
-                        AgentCwd::of_tab(tab.startup_dir.as_deref())
-                            .stored()
-                            .ok()
-                            .flatten()
-                    });
-                    if let Some(current_dir) = current_dir.as_deref()
-                        && vmux_git::worktree::is_linked_worktree(current_dir)
-                    {
-                        AgentCommandResult::Text(current_dir.to_string_lossy().into_owned())
-                    } else {
-                        let project_dir = tab_worktree
-                            .workspaces
-                            .get(tab_entity)
-                            .ok()
-                            .and_then(|workspace| {
-                                AgentCwd::of_tab(Some(&workspace.project_dir))
-                                    .stored()
-                                    .ok()
-                                    .flatten()
-                            })
-                            .or_else(|| {
-                                tab_worktree
-                                    .pending_projects
-                                    .get(tab_entity)
-                                    .ok()
-                                    .map(|project| project.0.clone())
-                            })
-                            .or(current_dir);
-                        let Some(project_dir) = project_dir else {
-                            service.0.send(ClientMessage::AgentCommandResponse {
+                        if let Some(current_dir) = current_dir.as_deref()
+                            && vmux_git::worktree::is_linked_worktree(current_dir)
+                        {
+                            AgentCommandResult::Text(current_dir.to_string_lossy().into_owned())
+                        } else {
+                            let project_dir = tab_worktree
+                                .workspaces
+                                .get(tab_entity)
+                                .ok()
+                                .and_then(|workspace| {
+                                    AgentCwd::from_tab(Some(&workspace.project_dir))
+                                        .stored()
+                                        .ok()
+                                        .flatten()
+                                })
+                                .or_else(|| {
+                                    tab_worktree
+                                        .pending_projects
+                                        .get(tab_entity)
+                                        .ok()
+                                        .map(|project| project.0.clone())
+                                })
+                                .or(current_dir);
+                            let Some(project_dir) = project_dir else {
+                                service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
                                 request_id: request.request_id,
                                 result: AgentCommandResult::Error(
                                     "No Git project selected. Complete select_project and initialize Git first."
                                         .to_string(),
                                 ),
-                            });
-                            continue;
-                        };
-                        if vmux_git::worktree::checkout_info(&project_dir).is_err() {
-                            AgentCommandResult::Text(project_dir.to_string_lossy().into_owned())
-                        } else {
-                            let candidate = if *create {
-                                Ok(None)
-                            } else {
-                                match path.as_deref() {
-                                    Some(path) => {
-                                        resolve_requested_worktree(&project_dir, Path::new(path))
-                                            .map(Some)
-                                    }
-                                    None => match existing_worktree_candidates(&project_dir) {
-                                        Ok(candidates) if candidates.is_empty() => Ok(None),
-                                        Ok(candidates) if candidates.len() == 1 => {
-                                            Ok(candidates.into_iter().next())
-                                        }
-                                        Ok(candidates) => {
-                                            Err(ambiguous_worktree_message(&candidates))
-                                        }
-                                        Err(error) => Err(error),
-                                    },
-                                }
+                            }));
+                                continue;
                             };
-                            match candidate {
-                                Err(error) => AgentCommandResult::Error(error),
-                                Ok(Some(candidate)) => match activate_agent_directory(
-                                    tab_entity,
-                                    agent_entity,
-                                    &project_dir,
-                                    &candidate.execution_dir,
-                                    &mut tab_worktree.tabs,
-                                    &mut acp_sessions,
-                                    &ctx.child_of_q,
-                                    &mut commands,
-                                ) {
-                                    Ok(rebind) => {
-                                        if let Some(message) = rebind {
-                                            service.0.send(message);
-                                        }
-                                        AgentCommandResult::Text(format!(
-                                            "Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.",
-                                            candidate.execution_dir.display()
-                                        ))
-                                    }
-                                    Err(error) => AgentCommandResult::Error(error),
-                                },
-                                Ok(None) => {
-                                    let name = task
-                                        .as_deref()
-                                        .filter(|task| !task.trim().is_empty())
-                                        .map(str::to_string)
-                                        .or_else(|| {
-                                            tab_worktree
-                                                .tabs
-                                                .get(tab_entity)
-                                                .ok()
-                                                .map(|tab| tab.name.clone())
-                                        })
-                                        .unwrap_or_else(|| "task".to_string());
-                                    let slug_hint = vmux_layout::worktree::tab_worktree_slug_hint(
-                                        &name,
-                                        &project_dir,
-                                    );
-                                    match vmux_layout::worktree::create_worktree_blocking(
-                                        &project_dir,
-                                        &slug_hint,
-                                        &managed_root,
-                                    ) {
-                                        Ok(activation) => match activate_agent_worktree(
-                                            tab_entity,
-                                            agent_entity,
+                            if vmux_git::worktree::checkout_info(&project_dir).is_err() {
+                                AgentCommandResult::Text(project_dir.to_string_lossy().into_owned())
+                            } else {
+                                let candidate = if *create {
+                                    Ok(None)
+                                } else {
+                                    match path.as_deref() {
+                                        Some(path) => resolve_requested_worktree(
                                             &project_dir,
-                                            activation,
-                                            &mut tab_worktree.tabs,
-                                            &mut acp_sessions,
-                                            &ctx.child_of_q,
-                                            &mut commands,
-                                        ) {
-                                            Ok((execution_dir, rebind)) => {
-                                                if let Some(message) = rebind {
-                                                    service.0.send(message);
-                                                }
-                                                worktree_created_this_batch.insert(
-                                                    tab_entity,
-                                                    vmux_git::worktree::head_ref(&execution_dir)
-                                                        .unwrap_or_default(),
-                                                );
-                                                AgentCommandResult::Text(format!(
-                                                    "Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.",
-                                                    execution_dir.display()
-                                                ))
+                                            Path::new(path),
+                                        )
+                                        .map(Some),
+                                        None => match existing_worktree_candidates(&project_dir) {
+                                            Ok(candidates) if candidates.is_empty() => Ok(None),
+                                            Ok(candidates) if candidates.len() == 1 => {
+                                                Ok(candidates.into_iter().next())
                                             }
-                                            Err(error) => AgentCommandResult::Error(error),
+                                            Ok(candidates) => {
+                                                Err(ambiguous_worktree_message(&candidates))
+                                            }
+                                            Err(error) => Err(error),
                                         },
+                                    }
+                                };
+                                match candidate {
+                                    Err(error) => AgentCommandResult::Error(error),
+                                    Ok(Some(candidate)) => match activate_agent_directory(
+                                        tab_entity,
+                                        agent_entity,
+                                        &project_dir,
+                                        &candidate.execution_dir,
+                                        &mut tab_worktree.tabs,
+                                        &mut acp_sessions,
+                                        &ctx.child_of_q,
+                                        &mut commands,
+                                    ) {
+                                        Ok(rebind) => {
+                                            if let Some(message) = rebind {
+                                                service_requests.write(ServiceRequest(message));
+                                            }
+                                            AgentCommandResult::Text(format!(
+                                                "Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.",
+                                                candidate.execution_dir.display()
+                                            ))
+                                        }
                                         Err(error) => AgentCommandResult::Error(error),
+                                    },
+                                    Ok(None) => {
+                                        let name = task
+                                            .as_deref()
+                                            .filter(|task| !task.trim().is_empty())
+                                            .map(str::to_string)
+                                            .or_else(|| {
+                                                tab_worktree
+                                                    .tabs
+                                                    .get(tab_entity)
+                                                    .ok()
+                                                    .map(|tab| tab.name.clone())
+                                            })
+                                            .unwrap_or_else(|| "task".to_string());
+                                        let slug_hint =
+                                            vmux_layout::worktree::tab_worktree_slug_hint(
+                                                &name,
+                                                &project_dir,
+                                            );
+                                        match vmux_layout::worktree::create_worktree_blocking(
+                                            &project_dir,
+                                            &slug_hint,
+                                            &managed_root,
+                                        ) {
+                                            Ok(activation) => match activate_agent_worktree(
+                                                tab_entity,
+                                                agent_entity,
+                                                &project_dir,
+                                                activation,
+                                                &mut tab_worktree.tabs,
+                                                &mut acp_sessions,
+                                                &ctx.child_of_q,
+                                                &mut commands,
+                                            ) {
+                                                Ok((execution_dir, rebind)) => {
+                                                    if let Some(message) = rebind {
+                                                        service_requests
+                                                            .write(ServiceRequest(message));
+                                                    }
+                                                    worktree_created_this_batch.insert(
+                                                        tab_entity,
+                                                        vmux_git::worktree::head_ref(
+                                                            &execution_dir,
+                                                        )
+                                                        .unwrap_or_default(),
+                                                    );
+                                                    AgentCommandResult::Text(format!(
+                                                        "Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.",
+                                                        execution_dir.display()
+                                                    ))
+                                                }
+                                                Err(error) => AgentCommandResult::Error(error),
+                                            },
+                                            Err(error) => AgentCommandResult::Error(error),
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            },
-            ServiceAgentCommand::CreateWorktree { anchor } => {
+            }
+            ServiceAgentCommand::CreateWorktree(command) => {
+                let anchor = &command.anchor;
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                     None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some((_, pane)) => {
+                    Some((_, pane, _)) => {
                         let mut cur = pane;
                         let tab_e = loop {
                             if tab_worktree.tabs.get(cur).is_ok() {
@@ -961,7 +995,7 @@ pub(super) fn handle_agent_self_commands(
                                     .get(tab_e)
                                     .ok()
                                     .and_then(|t| t.startup_dir.clone());
-                                match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
+                                match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
                                     Ok(Some(path)) => AgentCommandResult::Text(
                                         path.to_string_lossy().into_owned(),
                                     ),
@@ -982,7 +1016,7 @@ pub(super) fn handle_agent_self_commands(
                                     .get(tab_e)
                                     .map(|t| t.name.clone())
                                     .unwrap_or_default();
-                                match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
+                                match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
                                     Err(message) => AgentCommandResult::Error(message),
                                     Ok(stored) => 'create_worktree: {
                                         let configured_dir =
@@ -992,7 +1026,7 @@ pub(super) fn handle_agent_self_commands(
                                         let workspace_dir =
                                             tab_worktree.workspaces.get(tab_e).ok().and_then(
                                                 |workspace| {
-                                                    AgentCwd::of_tab(Some(&workspace.project_dir))
+                                                    AgentCwd::from_tab(Some(&workspace.project_dir))
                                                         .stored()
                                                         .ok()
                                                         .flatten()
@@ -1065,53 +1099,56 @@ pub(super) fn handle_agent_self_commands(
                     }
                 }
             }
-            ServiceAgentCommand::CreateWorktreeOnBranch {
-                anchor,
-                branch,
-                project,
-            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, pane)) => {
-                    let Some(tab_entity) =
-                        ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
-                    else {
-                        failed_worktree_anchors.insert(*anchor);
-                        service.0.send(ClientMessage::AgentCommandResponse {
-                            request_id: request.request_id,
-                            result: AgentCommandResult::Error("no tab for agent".to_string()),
-                        });
-                        continue;
-                    };
-                    let existing_branch = tab_worktree
-                        .worktrees
-                        .get(tab_entity)
-                        .ok()
-                        .map(|worktree| worktree.branch.clone())
-                        .or_else(|| worktree_created_this_batch.get(&tab_entity).cloned());
-                    if let Some(existing_branch) = existing_branch {
-                        if existing_branch != *branch {
-                            AgentCommandResult::Error(format!(
-                                "Tab already has a worktree on branch {existing_branch}; requested {branch}"
-                            ))
-                        } else {
-                            let path = tab_worktree
-                                .tabs
-                                .get(tab_entity)
-                                .ok()
-                                .and_then(|tab| tab.startup_dir.clone());
-                            match path {
-                                Some(path) => AgentCommandResult::Text(path),
-                                None => AgentCommandResult::Error(
-                                    "tab worktree directory is missing".to_string(),
-                                ),
+            ServiceAgentCommand::CreateWorktreeOnBranch(command) => {
+                let anchor = &command.anchor;
+                let branch = &command.branch;
+                let project = &command.project;
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some((agent_entity, pane, _)) => {
+                        let Some(tab_entity) =
+                            ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
+                        else {
+                            failed_worktree_anchors.insert(*anchor);
+                            service_requests.write(ServiceRequest(
+                                ClientMessage::AgentCommandResponse {
+                                    request_id: request.request_id,
+                                    result: AgentCommandResult::Error(
+                                        "no tab for agent".to_string(),
+                                    ),
+                                },
+                            ));
+                            continue;
+                        };
+                        let existing_branch = tab_worktree
+                            .worktrees
+                            .get(tab_entity)
+                            .ok()
+                            .map(|worktree| worktree.branch.clone())
+                            .or_else(|| worktree_created_this_batch.get(&tab_entity).cloned());
+                        if let Some(existing_branch) = existing_branch {
+                            if existing_branch != *branch {
+                                AgentCommandResult::Error(format!(
+                                    "Tab already has a worktree on branch {existing_branch}; requested {branch}"
+                                ))
+                            } else {
+                                let path = tab_worktree
+                                    .tabs
+                                    .get(tab_entity)
+                                    .ok()
+                                    .and_then(|tab| tab.startup_dir.clone());
+                                match path {
+                                    Some(path) => AgentCommandResult::Text(path),
+                                    None => AgentCommandResult::Error(
+                                        "tab worktree directory is missing".to_string(),
+                                    ),
+                                }
                             }
-                        }
-                    } else {
-                        let base_dir =
-                            project
+                        } else {
+                            let base_dir = project
                                 .as_ref()
                                 .and_then(|picked| {
-                                    AgentCwd::of_tab(Some(picked)).stored().ok().flatten()
+                                    AgentCwd::from_tab(Some(picked)).stored().ok().flatten()
                                 })
                                 .or_else(|| {
                                     tab_worktree
@@ -1123,83 +1160,92 @@ pub(super) fn handle_agent_self_commands(
                                 .or_else(|| {
                                     tab_worktree.workspaces.get(tab_entity).ok().and_then(
                                         |workspace| {
-                                            AgentCwd::of_tab(Some(&workspace.project_dir))
+                                            AgentCwd::from_tab(Some(&workspace.project_dir))
                                                 .stored()
                                                 .ok()
                                                 .flatten()
                                         },
                                     )
                                 });
-                        let Some(base_dir) = base_dir else {
-                            failed_worktree_anchors.insert(*anchor);
-                            service.0.send(ClientMessage::AgentCommandResponse {
-                                request_id: request.request_id,
-                                result: AgentCommandResult::Error(
-                                    "No project selected. Call select_project first.".to_string(),
-                                ),
-                            });
-                            continue;
-                        };
-                        match vmux_layout::worktree::create_worktree_for_branch_blocking(
-                            &base_dir,
-                            branch,
-                            &managed_root,
-                        ) {
-                            Ok(activation) => match activate_agent_worktree(
-                                tab_entity,
-                                agent_entity,
+                            let Some(base_dir) = base_dir else {
+                                failed_worktree_anchors.insert(*anchor);
+                                service_requests.write(ServiceRequest(
+                                    ClientMessage::AgentCommandResponse {
+                                        request_id: request.request_id,
+                                        result: AgentCommandResult::Error(
+                                            "No project selected. Call select_project first."
+                                                .to_string(),
+                                        ),
+                                    },
+                                ));
+                                continue;
+                            };
+                            match vmux_layout::worktree::create_worktree_for_branch_blocking(
                                 &base_dir,
-                                activation,
-                                &mut tab_worktree.tabs,
-                                &mut acp_sessions,
-                                &ctx.child_of_q,
-                                &mut commands,
+                                branch,
+                                &managed_root,
                             ) {
-                                Ok((execution_dir, rebind)) => {
-                                    if let Some(message) = rebind {
-                                        service.0.send(message);
+                                Ok(activation) => match activate_agent_worktree(
+                                    tab_entity,
+                                    agent_entity,
+                                    &base_dir,
+                                    activation,
+                                    &mut tab_worktree.tabs,
+                                    &mut acp_sessions,
+                                    &ctx.child_of_q,
+                                    &mut commands,
+                                ) {
+                                    Ok((execution_dir, rebind)) => {
+                                        if let Some(message) = rebind {
+                                            service_requests.write(ServiceRequest(message));
+                                        }
+                                        worktree_created_this_batch
+                                            .insert(tab_entity, branch.clone());
+                                        let path = execution_dir.to_string_lossy().into_owned();
+                                        AgentCommandResult::Text(format!(
+                                            "Worktree ready: {path}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools."
+                                        ))
                                     }
-                                    worktree_created_this_batch.insert(tab_entity, branch.clone());
-                                    let path = execution_dir.to_string_lossy().into_owned();
-                                    AgentCommandResult::Text(format!(
-                                        "Worktree ready: {path}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools."
-                                    ))
-                                }
+                                    Err(error) => AgentCommandResult::Error(error),
+                                },
                                 Err(error) => AgentCommandResult::Error(error),
-                            },
-                            Err(error) => AgentCommandResult::Error(error),
+                            }
                         }
                     }
                 }
-            },
+            }
             _ => continue,
         };
         if matches!(
             (&request.command, &result),
             (
-                ServiceAgentCommand::CreateWorktree { .. }
-                    | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
-                    | ServiceAgentCommand::PrepareWorktree { .. },
+                ServiceAgentCommand::CreateWorktree(_)
+                    | ServiceAgentCommand::CreateWorktreeOnBranch(_)
+                    | ServiceAgentCommand::PrepareWorktree(_),
                 AgentCommandResult::Error(_)
             )
         ) && let Some(anchor) = request_anchor
         {
             failed_worktree_anchors.insert(anchor);
         }
-        service.0.send(ClientMessage::AgentCommandResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
             request_id: request.request_id,
             result,
-        });
+        }));
     }
     for spawn in terminal_spawns {
         writers.terminal_stack_spawn.write(spawn);
+    }
+    for (_, (entity, region)) in terminal_regions {
+        commands.entity(entity).insert(region);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::schedule::{IntoSystemSet, NodeId, Schedules, SystemSet};
+    use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
+    use vmux_api::protocol::{AgentCreateWorktreeOnBranch, AgentOpenBeside};
 
     #[test]
     fn agent_run_spawns_terminal_before_next_agent_command_frame() {
@@ -1212,19 +1258,15 @@ mod tests {
         let graph = update.graph();
 
         let self_commands = graph
-            .systems_in_set(handle_agent_self_commands.into_system_set().intern())
+            .systems_in_set(SelfCommandSet.intern())
             .expect("handle_agent_self_commands is registered")
             .first()
             .copied()
             .expect("handle_agent_self_commands is registered");
         let terminal_spawn = graph
             .system_sets
-            .get_key(
-                vmux_terminal::plugin::respond_terminal_stack_spawn
-                    .into_system_set()
-                    .intern(),
-            )
-            .expect("the ordering names respond_terminal_stack_spawn");
+            .get_key(TerminalStackSpawnSet.intern())
+            .expect("the terminal spawn ordering set is registered");
 
         assert!(
             graph
@@ -1238,17 +1280,17 @@ mod tests {
     #[test]
     pub(crate) fn create_worktree_precedes_and_gates_sibling_self_commands() {
         let anchor = ProcessId::new();
-        let create = ServiceAgentCommand::CreateWorktreeOnBranch {
+        let create = ServiceAgentCommand::CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch {
             anchor,
             branch: "feature/test".into(),
             project: None,
-        };
-        let sibling = ServiceAgentCommand::OpenBeside {
+        });
+        let sibling = ServiceAgentCommand::OpenBeside(AgentOpenBeside {
             anchor,
             direction: None,
             url: "https://example.com".into(),
             focus: false,
-        };
+        });
         assert!(self_command_priority(&create) < self_command_priority(&sibling));
         let failed = std::collections::HashSet::from([anchor]);
         assert!(!self_command_blocked_by_worktree_failure(&create, &failed));

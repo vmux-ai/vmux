@@ -1,15 +1,14 @@
-use vmux_wire::agent::supports_inline_agent_transition;
-use vmux_wire::chat::SlashCommandEntry;
-use vmux_wire::command_bar::{
-    AgentModels, AgentModes, CommandBarActionEvent, CommandBarOpenEvent, CommandBarPick,
-    CommandBarPicker, CommandBarPromptContext, CommandBarQuery, ExCommandName, HistoryEntry,
-    PathEntry, is_data_uri,
+use vmux_api::command_bar::{
+    AgentModels, AgentModes, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
+    CommandBarPromptContext, CommandBarQuery, CommandPaletteProjection, ExCommandName, ExRequest,
+    HistoryEntry, InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest,
+    SwitchSpaceRequest, SwitchTabRequest, TerminalRequest, is_data_uri,
 };
-use vmux_wire::open_target::OpenTarget;
-use vmux_wire::prompt_media::ChatAttachment;
-use vmux_wire::protocol::AcpModeOption;
-use vmux_wire::room::ModelOptionEntry;
-use vmux_wire::space::ProjectRow;
+use vmux_api::open_target::OpenTarget;
+use vmux_api::prompt_media::ChatAttachment;
+use vmux_api::protocol::AcpModeOption;
+use vmux_api::room::ModelOptionEntry;
+use vmux_api::space::ProjectRow;
 
 use crate::components::agent_menu::ComposerAgentOption;
 use crate::i18n::translate;
@@ -20,6 +19,8 @@ use crate::launcher::results::{
     terminal_matches_query,
 };
 use crate::list_nav::MenuDirection;
+
+pub use vmux_api::command_bar::PaletteMode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaletteSurface {
@@ -33,116 +34,6 @@ impl PaletteSurface {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PaletteMode {
-    #[default]
-    Search,
-    Command,
-    Ex,
-    Path,
-    Url,
-    Slash,
-    Picking(CommandBarPicker),
-}
-
-impl PaletteMode {
-    pub fn of(query: &str, asserted: Option<CommandBarPicker>) -> Self {
-        Self::read(query, asserted, &[])
-    }
-
-    pub fn read(
-        query: &str,
-        asserted: Option<CommandBarPicker>,
-        slash_commands: &[SlashCommandEntry],
-    ) -> Self {
-        if let Some(picker) = asserted {
-            return Self::Picking(picker);
-        }
-        if ExLine::claims(query) {
-            return Self::Ex;
-        }
-        let trimmed = query.trim();
-        if trimmed.starts_with('>') {
-            return Self::Command;
-        }
-        if Self::names_a_command(query, slash_commands) {
-            return Self::Slash;
-        }
-        if trimmed.starts_with('/') || trimmed.starts_with('~') {
-            return Self::Path;
-        }
-        if trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')) {
-            return Self::Url;
-        }
-        Self::Search
-    }
-
-    fn names_a_command(query: &str, slash_commands: &[SlashCommandEntry]) -> bool {
-        if query.trim() == "/" {
-            return !slash_commands.is_empty();
-        }
-        let held = CommandBarQuery(query);
-        let Some((name, _)) = held.slash_token() else {
-            return false;
-        };
-        let lowered = name.to_lowercase();
-        slash_commands
-            .iter()
-            .any(|command| command.name.starts_with(&lowered))
-    }
-
-    pub fn opened(state: &CommandBarOpenEvent) -> Self {
-        Self::of(&state.url, state.picker)
-    }
-
-    pub const fn is_ex(self) -> bool {
-        matches!(self, Self::Ex)
-    }
-
-    pub const fn is_space(self) -> bool {
-        matches!(self, Self::Picking(CommandBarPicker::Space))
-    }
-
-    pub const fn picking(self) -> Option<CommandBarPicker> {
-        match self {
-            Self::Picking(picker) => Some(picker),
-            _ => None,
-        }
-    }
-
-    pub const fn prefix(self) -> &'static str {
-        match self {
-            Self::Ex => ":",
-            Self::Command => ">",
-            Self::Path | Self::Slash => "/",
-            Self::Search | Self::Url | Self::Picking(_) => "",
-        }
-    }
-
-    pub fn opens_at_end(self, query: &str) -> bool {
-        let prefix = self.prefix();
-        !prefix.is_empty() && query == prefix
-    }
-
-    pub fn label(self) -> String {
-        match self {
-            Self::Ex => translate("palette-mode-ex"),
-            Self::Command => translate("palette-mode-command"),
-            Self::Path => translate("palette-mode-path"),
-            Self::Slash => translate("palette-mode-slash"),
-            Self::Picking(picker) => {
-                let id = picker.label();
-                if id.is_empty() {
-                    String::new()
-                } else {
-                    translate(id)
-                }
-            }
-            Self::Search | Self::Url => String::new(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct PaletteDraft {
     pub query: String,
@@ -153,7 +44,7 @@ pub struct PaletteDraft {
     pub completions_partial: bool,
     pub completions_total: usize,
     pub history: Vec<HistoryEntry>,
-    pub sessions: Vec<vmux_wire::chat::ResumableSessionEntry>,
+    pub sessions: Vec<vmux_api::chat::ResumableSessionEntry>,
     pub sessions_pending: bool,
 }
 
@@ -210,7 +101,34 @@ pub struct PaletteRows {
 }
 
 impl PaletteRows {
-    pub fn of(state: &CommandBarOpenEvent, draft: &PaletteDraft, surface: PaletteSurface) -> Self {
+    pub fn from_projection(projection: &CommandPaletteProjection) -> Self {
+        Self {
+            items: projection.rows.clone(),
+            prompt_targets: projection.prompt_targets.clone(),
+            default_target: projection.default_target.clone(),
+            ghost: projection.ghost.clone(),
+            start_prompt_mode: projection.start_prompt_mode,
+            mode: projection.mode,
+        }
+    }
+
+    pub fn projection(&self) -> CommandPaletteProjection {
+        CommandPaletteProjection {
+            rows: self.items.clone(),
+            prompt_targets: self.prompt_targets.clone(),
+            default_target: self.default_target.clone(),
+            ghost: self.ghost.clone(),
+            start_prompt_mode: self.start_prompt_mode,
+            mode: self.mode,
+            ..Default::default()
+        }
+    }
+
+    pub fn build(
+        state: &CommandBarOpenEvent,
+        draft: &PaletteDraft,
+        surface: PaletteSurface,
+    ) -> Self {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
         let slash_commands = state.prompt_context.slash_commands.as_slice();
@@ -250,7 +168,7 @@ impl PaletteRows {
         draft: &PaletteDraft,
         matched: Vec<CommandBarResultItem>,
     ) -> Vec<CommandBarResultItem> {
-        FileRows::merge(query, Completions::of(draft, query), matched)
+        FileRows::merge(query, Completions::for_query(draft, query), matched)
     }
 
     fn listed(
@@ -266,7 +184,7 @@ impl PaletteRows {
             if picker.is_space() {
                 return space_switch_results(&state.spaces, &state.pages, query);
             }
-            return PickerRows::of(picker, &state.picks, query);
+            return PickerRows::filtered(picker, &state.picks, query);
         }
         if mode.is_ex() {
             if is_start {
@@ -275,7 +193,7 @@ impl PaletteRows {
             return ExLine::suggestions(query);
         }
         if mode == PaletteMode::Slash {
-            return SlashRows::of(
+            return SlashRows::for_query(
                 query,
                 state.prompt_context.slash_commands.as_slice(),
                 &draft.sessions,
@@ -328,7 +246,7 @@ impl PaletteRows {
     }
 
     fn ghost_of(query: &str, completions: &[PathEntry]) -> String {
-        if CompletionQuery::of(query).is_none() {
+        if CompletionQuery::parse(query).is_none() {
             return String::new();
         }
         let Some(first) = completions.first() else {
@@ -369,7 +287,7 @@ pub enum PaletteGlyph {
 }
 
 impl PaletteGlyph {
-    fn of(navigating: Option<&CommandBarResultItem>, mode: PaletteMode) -> Option<Self> {
+    fn resolve(navigating: Option<&CommandBarResultItem>, mode: PaletteMode) -> Option<Self> {
         if let PaletteMode::Picking(picker) = mode
             && !picker.is_space()
         {
@@ -425,7 +343,7 @@ impl ExLine {
         query.starts_with(':')
     }
 
-    pub fn of(query: &str) -> Option<String> {
+    pub fn parse(query: &str) -> Option<String> {
         let body = query.strip_prefix(':')?.trim();
         (!body.is_empty()).then(|| body.to_string())
     }
@@ -471,7 +389,7 @@ pub struct ComposerState {
 }
 
 impl ComposerState {
-    fn of(
+    fn build(
         state: &CommandBarOpenEvent,
         prompt_targets: &[CommandBarResultItem],
         effective_target: Option<&CommandBarResultItem>,
@@ -495,8 +413,8 @@ impl ComposerState {
                 title: title.clone(),
             });
         }
-        let models = SelectedAgentModels::of(&state.agent_models, &agent_url);
-        let modes = SelectedAgentModes::of(&state.agent_modes, &agent_url);
+        let models = SelectedAgentModels::find(&state.agent_models, &agent_url);
+        let modes = SelectedAgentModes::find(&state.agent_modes, &agent_url);
         let active_project = context.projects.iter().find(|project| project.is_active);
         let workspace_label = if let Some(project) = active_project {
             project.label.clone()
@@ -551,7 +469,7 @@ impl ComposerState {
             branch_label,
             branch_title,
             worktree_title,
-            project: ActiveProject::of(context),
+            project: ActiveProject::resolve(context),
             projects: context.projects.clone(),
             cwd: context.cwd.clone(),
             is_git_repo: context.is_git_repo,
@@ -563,38 +481,85 @@ impl ComposerState {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Submission {
-    pub close: bool,
-    pub action: Option<CommandBarActionEvent>,
-    pub inline_target: Option<String>,
-    pub retype: Option<String>,
+pub enum PaletteDecision {
+    #[default]
+    None,
+    Close,
+    Retype(String),
+    Prompt {
+        close: bool,
+        request: PromptRequest,
+    },
+    Open {
+        close: bool,
+        request: OpenRequest,
+    },
+    Terminal(TerminalRequest),
+    Invoke(InvokeRequest),
+    SwitchSpace(SwitchSpaceRequest),
+    SwitchTab(SwitchTabRequest),
+    Ex(ExRequest),
+    Pick(PickRequest),
 }
 
-impl Submission {
-    fn closing(action: CommandBarActionEvent) -> Self {
-        Self {
-            close: true,
-            action: Some(action),
-            inline_target: None,
-            retype: None,
+impl PaletteDecision {
+    fn closing() -> Self {
+        Self::Close
+    }
+
+    fn prompt(close: bool, text: &str, target_url: &str, attachments: &[ChatAttachment]) -> Self {
+        Self::Prompt {
+            close,
+            request: PromptRequest::new(text, target_url, attachments),
         }
     }
 
-    fn silent(action: CommandBarActionEvent) -> Self {
-        Self {
-            close: false,
-            action: Some(action),
-            inline_target: None,
-            retype: None,
+    fn open(close: bool, value: &str, open: Option<OpenTarget>) -> Self {
+        Self::Open {
+            close,
+            request: OpenRequest::new(value, open),
         }
+    }
+
+    fn terminal(value: String) -> Self {
+        Self::Terminal(TerminalRequest { value })
+    }
+
+    fn invoke(id: String, open: Option<OpenTarget>) -> Self {
+        Self::Invoke(InvokeRequest { id, open })
+    }
+
+    fn switch_space(id: String) -> Self {
+        Self::SwitchSpace(SwitchSpaceRequest { id })
+    }
+
+    fn switch_tab(pane: u64, index: usize) -> Self {
+        Self::SwitchTab(SwitchTabRequest { pane, index })
+    }
+
+    fn ex(line: String) -> Self {
+        Self::Ex(ExRequest { line })
+    }
+
+    fn pick(pick: CommandBarPick) -> Self {
+        Self::Pick(PickRequest { pick })
     }
 
     fn retyping(query: impl Into<String>) -> Self {
-        Self {
-            close: false,
-            action: None,
-            inline_target: None,
-            retype: Some(query.into()),
+        Self::Retype(query.into())
+    }
+
+    pub const fn closes(&self) -> bool {
+        match self {
+            Self::Prompt { close, .. } | Self::Open { close, .. } => *close,
+            Self::Close
+            | Self::Terminal(_)
+            | Self::Invoke(_)
+            | Self::SwitchSpace(_)
+            | Self::SwitchTab(_)
+            | Self::Ex(_)
+            | Self::Pick(_) => true,
+            Self::None | Self::Retype(_) => false,
         }
     }
 }
@@ -628,15 +593,15 @@ impl PaletteState {
         draft: &PaletteDraft,
         surface: PaletteSurface,
     ) -> Self {
-        Self::of(
-            &PaletteRows::of(state, draft, surface),
+        Self::from_rows(
+            &PaletteRows::build(state, draft, surface),
             state,
             draft,
             surface,
         )
     }
 
-    pub fn of(
+    pub fn from_rows(
         rows: &PaletteRows,
         state: &CommandBarOpenEvent,
         draft: &PaletteDraft,
@@ -649,12 +614,12 @@ impl PaletteState {
             .filter(|item| prompt_target_url(item).is_some())
             .or(rows.default_target.as_ref())
             .cloned();
-        let accent_agent = AgentSegment::of(if draft.nav_mode {
+        let accent_agent = AgentSegment::from_item(if draft.nav_mode {
             active
         } else {
             rows.default_target.as_ref()
         })
-        .or_else(|| AgentSegment::of(rows.default_target.as_ref()));
+        .or_else(|| AgentSegment::from_item(rows.default_target.as_ref()));
         let row_text = if rows.start_prompt_mode {
             None
         } else {
@@ -668,8 +633,8 @@ impl PaletteState {
             selected,
             ghost: rows.ghost.clone(),
             row_text,
-            placeholder: Placeholder::of(rows.mode, state, surface),
-            glyph: PaletteGlyph::of(navigating, rows.mode),
+            placeholder: Placeholder::resolve(rows.mode, state, surface),
+            glyph: PaletteGlyph::resolve(navigating, rows.mode),
             mode: rows.mode,
             start_prompt_mode: rows.start_prompt_mode,
             space_switch: rows.mode.is_space(),
@@ -678,7 +643,7 @@ impl PaletteState {
             space_name: state.space_name.clone(),
             prompt_targets: rows.prompt_targets.clone(),
             default_target: rows.default_target.clone(),
-            composer: ComposerState::of(state, &rows.prompt_targets, effective_target.as_ref()),
+            composer: ComposerState::build(state, &rows.prompt_targets, effective_target.as_ref()),
             effective_target,
             accent_agent,
         }
@@ -715,92 +680,66 @@ impl PaletteState {
         &self,
         item: &CommandBarResultItem,
         attachments: &[ChatAttachment],
-    ) -> Submission {
-        let inline_target = self.inline_target(item);
+    ) -> PaletteDecision {
         if self.surface.is_start()
             && (CommandBarQuery(&self.query).is_start_prompt() || !attachments.is_empty())
             && let Some(target_url) = prompt_target_url(item)
         {
-            let action = if prompt_target_matches_query(item, &self.query) && attachments.is_empty()
-            {
-                CommandBarActionEvent::open(target_url, self.open_target)
+            return if prompt_target_matches_query(item, &self.query) && attachments.is_empty() {
+                PaletteDecision::open(true, target_url, self.open_target)
             } else {
-                CommandBarActionEvent::prompt(self.query.trim(), target_url, attachments)
-            };
-            return Submission {
-                close: true,
-                action: Some(action),
-                inline_target,
-                retype: None,
+                PaletteDecision::prompt(true, self.query.trim(), target_url, attachments)
             };
         }
 
         if let CommandBarResultItem::Slash { name, .. } = item {
-            return Submission::retyping(format!("/{name} "));
+            return PaletteDecision::retyping(format!("/{name} "));
         }
-        Submission {
-            close: true,
-            action: self.acted(item),
-            inline_target,
-            retype: None,
-        }
+        self.acted(item).unwrap_or_else(PaletteDecision::closing)
     }
 
-    fn inline_target(&self, item: &CommandBarResultItem) -> Option<String> {
-        if !self.surface.is_start() {
-            return None;
-        }
-        let url = prompt_target_url(item)?;
-        supports_inline_agent_transition(url).then(|| url.to_string())
-    }
-
-    fn acted(&self, item: &CommandBarResultItem) -> Option<CommandBarActionEvent> {
+    fn acted(&self, item: &CommandBarResultItem) -> Option<PaletteDecision> {
         match item {
             CommandBarResultItem::Slash { .. } => None,
             CommandBarResultItem::Resume { entry, .. } => {
-                Some(CommandBarActionEvent::open(&entry.url, self.open_target))
+                Some(PaletteDecision::open(true, &entry.url, self.open_target))
             }
-            CommandBarResultItem::Terminal { path } => Some(CommandBarActionEvent::Terminal {
-                value: path.clone(),
-            }),
+            CommandBarResultItem::Terminal { path } => {
+                Some(PaletteDecision::terminal(path.clone()))
+            }
             CommandBarResultItem::Editor { path } | CommandBarResultItem::File { path, .. } => {
-                Some(CommandBarActionEvent::open(
+                Some(PaletteDecision::open(
+                    true,
                     &format!("file://{path}"),
                     self.open_target,
                 ))
             }
-            CommandBarResultItem::WorkDir { path, .. } => Some(CommandBarActionEvent::open(
+            CommandBarResultItem::WorkDir { path, .. } => Some(PaletteDecision::open(
+                true,
                 &format!("file://{path}"),
                 self.open_target,
             )),
             CommandBarResultItem::Stack {
                 pane_id, tab_index, ..
-            } => Some(CommandBarActionEvent::SwitchTab {
-                pane: *pane_id,
-                index: *tab_index,
-            }),
-            CommandBarResultItem::Command { id, .. } => Some(CommandBarActionEvent::Command {
-                id: id.clone(),
-                open: self.open_target,
-            }),
-            CommandBarResultItem::Ex { name, .. } => {
-                Some(CommandBarActionEvent::Ex { line: name.clone() })
+            } => Some(PaletteDecision::switch_tab(*pane_id, *tab_index)),
+            CommandBarResultItem::Command { id, .. } => {
+                Some(PaletteDecision::invoke(id.clone(), self.open_target))
             }
-            CommandBarResultItem::Pick { pick, .. } => {
-                Some(CommandBarActionEvent::Pick { pick: pick.clone() })
-            }
+            CommandBarResultItem::Ex { name, .. } => Some(PaletteDecision::ex(name.clone())),
+            CommandBarResultItem::Pick { pick, .. } => Some(PaletteDecision::pick(pick.clone())),
             CommandBarResultItem::Space { id, .. } => {
-                Some(CommandBarActionEvent::Space { id: id.clone() })
+                Some(PaletteDecision::switch_space(id.clone()))
             }
             CommandBarResultItem::Page { url, .. }
             | CommandBarResultItem::Navigate { url }
             | CommandBarResultItem::History { url, .. } => {
-                (!url.is_empty()).then(|| CommandBarActionEvent::open(url, self.open_target))
+                (!url.is_empty()).then(|| PaletteDecision::open(true, url, self.open_target))
             }
             CommandBarResultItem::RecentFile { url, .. } => {
-                Some(CommandBarActionEvent::open(url, self.open_target))
+                Some(PaletteDecision::open(true, url, self.open_target))
             }
-            CommandBarResultItem::Search { engine, query } => Some(CommandBarActionEvent::open(
+            CommandBarResultItem::Search { engine, query } => Some(PaletteDecision::open(
+                true,
                 &engine.search_url(query),
                 self.open_target,
             )),
@@ -810,7 +749,7 @@ impl PaletteState {
         }
     }
 
-    pub fn submit_modal(&self, attachments: &[ChatAttachment]) -> Submission {
+    pub fn submit_modal(&self, attachments: &[ChatAttachment]) -> PaletteDecision {
         if let Some(picker) = self.mode.picking() {
             return self.submit_picked(picker, attachments);
         }
@@ -820,10 +759,10 @@ impl PaletteState {
             {
                 return self.activate(item, attachments);
             }
-            let Some(line) = ExLine::of(&self.query) else {
-                return Submission::default();
+            let Some(line) = ExLine::parse(&self.query) else {
+                return PaletteDecision::default();
             };
-            return Submission::closing(CommandBarActionEvent::Ex { line });
+            return PaletteDecision::ex(line);
         }
         self.submit_typed(attachments)
     }
@@ -832,32 +771,32 @@ impl PaletteState {
         &self,
         picker: CommandBarPicker,
         attachments: &[ChatAttachment],
-    ) -> Submission {
+    ) -> PaletteDecision {
         if picker.takes_typed_value() {
             let Some(pick) = CommandBarPick::goto_line(&self.query) else {
-                return Submission::default();
+                return PaletteDecision::default();
             };
-            return Submission::closing(CommandBarActionEvent::Pick { pick });
+            return PaletteDecision::pick(pick);
         }
         let Some(item) = self.row(self.selected) else {
-            return Submission::default();
+            return PaletteDecision::default();
         };
         self.activate(item, attachments)
     }
 
-    pub fn submit_start(&self, attachments: &[ChatAttachment]) -> Submission {
+    pub fn submit_start(&self, attachments: &[ChatAttachment]) -> PaletteDecision {
         if self.mode == PaletteMode::Slash && self.rows.is_empty() {
-            return Submission::default();
+            return PaletteDecision::default();
         }
         if self.query.trim().is_empty() && !attachments.is_empty() {
             if let Some(item) = self.default_target.as_ref() {
                 return self.activate(item, attachments);
             }
-            return Submission::silent(CommandBarActionEvent::prompt("", "", attachments));
+            return PaletteDecision::prompt(false, "", "", attachments);
         }
         if self.space_switch {
             let Some(item) = self.row(self.selected) else {
-                return Submission::default();
+                return PaletteDecision::default();
             };
             return self.activate(item, attachments);
         }
@@ -873,50 +812,23 @@ impl PaletteState {
         if let Some(item) = self.default_target.as_ref() {
             return self.activate(item, attachments);
         }
-        Submission::closing(CommandBarActionEvent::prompt(
-            self.query.trim(),
-            "",
-            attachments,
-        ))
+        PaletteDecision::prompt(true, self.query.trim(), "", attachments)
     }
 
-    pub fn submit_action(&self, attachments: &[ChatAttachment]) -> Submission {
-        if self.mode == PaletteMode::Slash && self.rows.is_empty() {
-            return Submission::default();
-        }
-        if let Some(item) = self
-            .row(self.selected)
-            .filter(|item| !self.start_prompt_mode || self.accepts_typed(item))
-        {
-            return self.activate(item, attachments);
-        }
-        if self.query.trim().is_empty() && attachments.is_empty() {
-            return Submission::default();
-        }
-        if let Some(item) = self.effective_target.as_ref() {
-            return self.activate(item, attachments);
-        }
-        Submission::closing(CommandBarActionEvent::prompt(
-            self.query.trim(),
-            "",
-            attachments,
-        ))
-    }
-
-    fn submit_typed(&self, attachments: &[ChatAttachment]) -> Submission {
+    fn submit_typed(&self, attachments: &[ChatAttachment]) -> PaletteDecision {
         if !TypedRow::beats_a_guessed_url(self.row(self.selected), &self.query)
             && CommandBarQuery(&self.query)
                 .opens_typed_url_on_enter(self.open_target, self.nav_mode)
         {
-            return Submission::closing(CommandBarActionEvent::open(&self.query, self.open_target));
+            return PaletteDecision::open(true, &self.query, self.open_target);
         }
         if let Some(item) = self.row(self.selected) {
             return self.activate(item, attachments);
         }
         if !self.query.is_empty() {
-            return Submission::silent(CommandBarActionEvent::open(&self.query, self.open_target));
+            return PaletteDecision::open(false, &self.query, self.open_target);
         }
-        Submission::default()
+        PaletteDecision::default()
     }
 
     pub fn opening_selection(state: &CommandBarOpenEvent) -> usize {
@@ -961,7 +873,7 @@ impl TypedRow {
 struct Placeholder;
 
 impl Placeholder {
-    fn of(mode: PaletteMode, state: &CommandBarOpenEvent, surface: PaletteSurface) -> String {
+    fn resolve(mode: PaletteMode, state: &CommandBarOpenEvent, surface: PaletteSurface) -> String {
         if let Some(picker) = mode.picking() {
             return translate(picker.placeholder());
         }
@@ -989,7 +901,7 @@ impl RowText {
         if Self::names_itself_in_the_row(item) {
             return None;
         }
-        let text = Self::of(item, query);
+        let text = Self::resolve(item, query);
         if text == query {
             return None;
         }
@@ -1006,7 +918,7 @@ impl RowText {
         )
     }
 
-    fn of(item: &CommandBarResultItem, query: &str) -> String {
+    fn resolve(item: &CommandBarResultItem, query: &str) -> String {
         match item {
             CommandBarResultItem::Command { name, .. } => format!("> {name}"),
             CommandBarResultItem::Ex { name, .. } => format!(":{name}"),
@@ -1045,7 +957,7 @@ impl RowText {
 pub struct AgentSegment;
 
 impl AgentSegment {
-    fn of(item: Option<&CommandBarResultItem>) -> Option<String> {
+    fn from_item(item: Option<&CommandBarResultItem>) -> Option<String> {
         Self::in_url(prompt_target_url(item?)?)
     }
 
@@ -1061,7 +973,7 @@ impl AgentSegment {
 pub struct ActiveProject;
 
 impl ActiveProject {
-    pub fn of(context: &CommandBarPromptContext) -> String {
+    pub fn resolve(context: &CommandBarPromptContext) -> String {
         for project in &context.projects {
             if project.is_active {
                 return project.path.clone();
@@ -1082,7 +994,7 @@ impl AgentCatalogUrl {
 }
 
 impl SelectedAgentModels {
-    pub fn of<'a>(rows: &'a [AgentModels], target_url: &str) -> Option<&'a AgentModels> {
+    pub fn find<'a>(rows: &'a [AgentModels], target_url: &str) -> Option<&'a AgentModels> {
         if target_url.is_empty() {
             return None;
         }
@@ -1106,7 +1018,7 @@ impl SelectedAgentModels {
 pub struct SelectedAgentModes;
 
 impl SelectedAgentModes {
-    pub fn of<'a>(rows: &'a [AgentModes], target_url: &str) -> Option<&'a AgentModes> {
+    pub fn find<'a>(rows: &'a [AgentModes], target_url: &str) -> Option<&'a AgentModes> {
         if target_url.is_empty() {
             return None;
         }
@@ -1118,7 +1030,7 @@ impl SelectedAgentModes {
 pub struct CompletionQuery;
 
 impl CompletionQuery {
-    pub fn of(input: &str) -> Option<String> {
+    pub fn parse(input: &str) -> Option<String> {
         let trimmed = input.trim();
         if let Some(rest) = trimmed.strip_prefix("file://") {
             return Some(rest.to_string());
@@ -1170,8 +1082,8 @@ pub struct Completions<'a> {
 }
 
 impl<'a> Completions<'a> {
-    pub fn of(draft: &'a PaletteDraft, query: &str) -> Self {
-        if CompletionQuery::of(query).is_none() {
+    pub fn for_query(draft: &'a PaletteDraft, query: &str) -> Self {
+        if CompletionQuery::parse(query).is_none() {
             return Self::default();
         }
         Self {
@@ -1272,7 +1184,7 @@ impl FileRows {
                 out.push(item);
                 continue;
             };
-            let Some((project, relative)) = ProjectPath::of(path, projects) else {
+            let Some((project, relative)) = ProjectPath::split(path, projects) else {
                 out.push(item);
                 continue;
             };
@@ -1290,7 +1202,7 @@ impl FileRows {
 struct ProjectPath;
 
 impl ProjectPath {
-    fn of(path: &str, projects: &[String]) -> Option<(String, String)> {
+    fn split(path: &str, projects: &[String]) -> Option<(String, String)> {
         let mut owner = "";
         for project in projects {
             let root = project.trim().trim_end_matches('/');
@@ -1316,7 +1228,7 @@ impl ProjectPath {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_wire::command_bar::{
+    use vmux_api::command_bar::{
         CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, SearchEngine,
     };
 
@@ -1372,7 +1284,7 @@ mod tests {
                         url: "vmux://settings/".into(),
                         title: "Settings".into(),
                         keywords: vec!["preferences".into()],
-                        icon: vmux_wire::PageIcon::None,
+                        icon: vmux_api::PageIcon::None,
                         shortcut: String::new(),
                         prompt_target: false,
                     },
@@ -1381,7 +1293,7 @@ mod tests {
                         url: "vmux://sessions/vibe/".into(),
                         title: "Vibe".into(),
                         keywords: vec!["vibe".into()],
-                        icon: vmux_wire::PageIcon::None,
+                        icon: vmux_api::PageIcon::None,
                         shortcut: String::new(),
                         prompt_target: true,
                     },
@@ -1390,7 +1302,7 @@ mod tests {
                         url: "vmux://sessions/codex/cli".into(),
                         title: "Codex".into(),
                         keywords: vec!["codex".into()],
-                        icon: vmux_wire::PageIcon::None,
+                        icon: vmux_api::PageIcon::None,
                         shortcut: String::new(),
                         prompt_target: true,
                     },
@@ -1476,7 +1388,7 @@ mod tests {
     struct ExNames;
 
     impl ExNames {
-        fn of(palette: &PaletteState) -> Vec<String> {
+        fn list(palette: &PaletteState) -> Vec<String> {
             let mut names = Vec::new();
             for row in &palette.rows {
                 let CommandBarResultItem::Ex { name, .. } = row else {
@@ -1607,7 +1519,7 @@ mod tests {
             .expect("the notice is listed");
 
         let submission = palette.activate(&palette.rows[at], &[]);
-        assert_eq!(submission.action, None);
+        assert_eq!(submission, PaletteDecision::Close);
         assert_eq!(
             RowText::over(Some(&CommandBarResultItem::PartialIndex), "settings"),
             None
@@ -1632,19 +1544,25 @@ mod tests {
 
     #[test]
     fn a_bare_word_reaches_the_host_but_prose_and_urls_do_not() {
-        assert_eq!(CompletionQuery::of("handler").as_deref(), Some("handler"));
-        assert_eq!(CompletionQuery::of("https://example.com").as_deref(), None);
-        assert_eq!(CompletionQuery::of("file://~/x").as_deref(), Some("~/x"));
+        assert_eq!(
+            CompletionQuery::parse("handler").as_deref(),
+            Some("handler")
+        );
+        assert_eq!(
+            CompletionQuery::parse("https://example.com").as_deref(),
+            None
+        );
+        assert_eq!(CompletionQuery::parse("file://~/x").as_deref(), Some("~/x"));
     }
 
     #[test]
     fn several_words_reach_the_host_so_a_path_can_be_narrowed_word_by_word() {
         assert_eq!(
-            CompletionQuery::of("mobile main").as_deref(),
+            CompletionQuery::parse("mobile main").as_deref(),
             Some("mobile main")
         );
         assert_eq!(
-            CompletionQuery::of("desktop src/lib").as_deref(),
+            CompletionQuery::parse("desktop src/lib").as_deref(),
             Some("desktop src/lib")
         );
     }
@@ -1653,11 +1571,11 @@ mod tests {
     fn a_file_under_a_project_is_shown_against_that_project() {
         let projects = vec!["/code/dashboard".to_string(), "/code".to_string()];
         assert_eq!(
-            ProjectPath::of("/code/dashboard/src/main.rs", &projects),
+            ProjectPath::split("/code/dashboard/src/main.rs", &projects),
             Some(("dashboard".to_string(), "src/main.rs".to_string())),
             "the longest matching root wins, or a worktree is shown against its parent repo"
         );
-        assert_eq!(ProjectPath::of("/elsewhere/main.rs", &projects), None);
+        assert_eq!(ProjectPath::split("/elsewhere/main.rs", &projects), None);
     }
 
     #[test]
@@ -1737,7 +1655,7 @@ mod tests {
         let submitted = bar.submit_start(&[]);
 
         assert!(
-            submitted.action.is_none(),
+            matches!(submitted, PaletteDecision::None),
             "the list is still loading, so Enter must wait rather than search the web for the command"
         );
     }
@@ -1800,7 +1718,7 @@ mod tests {
             PaletteState::modal(&state, PaletteDraft::typed("close").at(0).navigating());
         assert_eq!(
             navigated.glyph,
-            PaletteGlyph::of(navigated.row(0), navigated.mode),
+            PaletteGlyph::resolve(navigated.row(0), navigated.mode),
             "navigating reads the row, not the text"
         );
     }
@@ -1808,11 +1726,11 @@ mod tests {
     #[test]
     fn a_picker_shows_no_input_glyph_because_its_chip_already_names_it() {
         assert_eq!(
-            PaletteGlyph::of(None, PaletteMode::Picking(CommandBarPicker::Encoding)),
+            PaletteGlyph::resolve(None, PaletteMode::Picking(CommandBarPicker::Encoding)),
             None
         );
         assert_eq!(
-            PaletteGlyph::of(None, PaletteMode::Picking(CommandBarPicker::Space)),
+            PaletteGlyph::resolve(None, PaletteMode::Picking(CommandBarPicker::Space)),
             Some(PaletteGlyph::Search),
             "the space switcher is a picker but reads as a search"
         );
@@ -1870,11 +1788,11 @@ mod tests {
         let state = Launcher::state();
 
         let offered = PaletteState::modal(&state, PaletteDraft::typed(":"));
-        let names = ExNames::of(&offered);
+        let names = ExNames::list(&offered);
         assert_eq!(names.len(), ExCommandName::ALL.len(), "{names:?}");
 
         let narrowed = PaletteState::modal(&state, PaletteDraft::typed(":w"));
-        assert_eq!(ExNames::of(&narrowed), vec!["w", "wq"]);
+        assert_eq!(ExNames::list(&narrowed), vec!["w", "wq"]);
 
         let typed_out = PaletteState::modal(&state, PaletteDraft::typed(":%s/a/b/g"));
         assert!(
@@ -1909,7 +1827,7 @@ mod tests {
         ));
         assert_eq!(
             mcp.submit_start(&[]),
-            Submission::retyping("/mcp ".to_string())
+            PaletteDecision::Retype("/mcp ".to_string())
         );
     }
 
@@ -1919,17 +1837,17 @@ mod tests {
 
         let typed = PaletteState::modal(&state, PaletteDraft::typed(":noh"));
         assert_eq!(
-            typed.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Ex {
-                line: "noh".to_string()
+            typed.submit_modal(&[]),
+            PaletteDecision::Ex(ExRequest {
+                line: "noh".to_string(),
             })
         );
 
         let picked = PaletteState::modal(&state, PaletteDraft::typed(":").at(1).navigating());
         assert_eq!(
-            picked.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Ex {
-                line: ExCommandName::ALL[1].name.to_string()
+            picked.submit_modal(&[]),
+            PaletteDecision::Ex(ExRequest {
+                line: ExCommandName::ALL[1].name.to_string(),
             }),
             "an empty line still runs the row the user walked to: {:?}",
             picked.rows
@@ -1941,17 +1859,17 @@ mod tests {
         let asserted = CommandBarPicker::EncodingReopen;
         for typed in [">", ":", "~/etc", "example.com", "how do i", ""] {
             assert_eq!(
-                PaletteMode::of(typed, Some(asserted)),
+                PaletteMode::infer(typed, Some(asserted)),
                 PaletteMode::Picking(asserted),
                 "`{typed}` must not steal the picker the caller asked for"
             );
         }
 
-        assert_eq!(PaletteMode::of("> close", None), PaletteMode::Command);
-        assert_eq!(PaletteMode::of(":w", None), PaletteMode::Ex);
-        assert_eq!(PaletteMode::of("~/src", None), PaletteMode::Path);
-        assert_eq!(PaletteMode::of("example.com", None), PaletteMode::Url);
-        assert_eq!(PaletteMode::of("how do i", None), PaletteMode::Search);
+        assert_eq!(PaletteMode::infer("> close", None), PaletteMode::Command);
+        assert_eq!(PaletteMode::infer(":w", None), PaletteMode::Ex);
+        assert_eq!(PaletteMode::infer("~/src", None), PaletteMode::Path);
+        assert_eq!(PaletteMode::infer("example.com", None), PaletteMode::Url);
+        assert_eq!(PaletteMode::infer("how do i", None), PaletteMode::Search);
     }
 
     #[test]
@@ -1964,8 +1882,8 @@ mod tests {
         let narrowed = PaletteState::modal(&state, PaletteDraft::typed("shift"));
         assert_eq!(narrowed.rows.len(), 1, "{:?}", narrowed.rows);
         assert_eq!(
-            narrowed.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Pick {
+            narrowed.submit_modal(&[]),
+            PaletteDecision::Pick(PickRequest {
                 pick: CommandBarPick::Encoding {
                     label: "Shift_JIS".to_string(),
                     save: false,
@@ -1980,8 +1898,8 @@ mod tests {
         let palette = PaletteState::modal(&state, PaletteDraft::default());
 
         assert_eq!(
-            palette.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Pick {
+            palette.submit_modal(&[]),
+            PaletteDecision::Pick(PickRequest {
                 pick: CommandBarPick::Picker(CommandBarPicker::EncodingReopen),
             })
         );
@@ -1994,27 +1912,27 @@ mod tests {
         let typed = PaletteState::modal(&state, PaletteDraft::typed("42"));
         assert!(typed.rows.is_empty(), "{:?}", typed.rows);
         assert_eq!(
-            typed.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Pick {
+            typed.submit_modal(&[]),
+            PaletteDecision::Pick(PickRequest {
                 pick: CommandBarPick::GotoLine { line: 41 },
             })
         );
 
         let refused = PaletteState::modal(&state, PaletteDraft::typed("abc"));
-        assert_eq!(refused.submit_modal(&[]), Submission::default());
+        assert_eq!(refused.submit_modal(&[]), PaletteDecision::default());
     }
 
     #[test]
     fn a_seeded_prefix_is_typed_past_but_a_seeded_url_is_replaced() {
         for seed in [":", ">", "/"] {
             assert!(
-                PaletteMode::of(seed, None).opens_at_end(seed),
+                PaletteMode::infer(seed, None).opens_at_end(seed),
                 "`{seed}` opens a mode, so the next keystroke must append to it"
             );
         }
         for seed in ["https://example.com", "", ":w"] {
             assert!(
-                !PaletteMode::of(seed, None).opens_at_end(seed),
+                !PaletteMode::infer(seed, None).opens_at_end(seed),
                 "`{seed}` is a value, so the next keystroke must replace it"
             );
         }
@@ -2058,7 +1976,7 @@ mod tests {
     #[test]
     fn arrow_keys_stop_at_both_ends_of_the_list() {
         let state = Launcher::state();
-        let rows = PaletteRows::of(
+        let rows = PaletteRows::build(
             &state,
             &PaletteDraft::typed("fix the failing test"),
             PaletteSurface::Start,
@@ -2095,29 +2013,23 @@ mod tests {
     }
 
     #[test]
-    fn prose_on_start_prompts_the_agent_and_offers_an_inline_handoff() {
+    fn prose_on_start_prompts_the_agent() {
         let state = Launcher::state();
         let palette = PaletteState::start(&state, PaletteDraft::typed("fix the failing test"));
 
         let submitted = palette.submit_start(&[]);
 
-        assert!(submitted.close);
         assert_eq!(
-            submitted.action,
-            Some(CommandBarActionEvent::prompt(
-                "fix the failing test",
-                "vmux://sessions/vibe/",
-                &[]
-            ))
-        );
-        assert_eq!(
-            submitted.inline_target.as_deref(),
-            Some("vmux://sessions/vibe/")
+            submitted,
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest::new("fix the failing test", "vmux://sessions/vibe/", &[]),
+            }
         );
     }
 
     #[test]
-    fn a_cli_agent_is_prompted_without_an_inline_handoff() {
+    fn a_cli_agent_is_prompted() {
         let state = Launcher::state();
         let palette = PaletteState::start(
             &state,
@@ -2127,14 +2039,16 @@ mod tests {
         let submitted = palette.submit_start(&[]);
 
         assert_eq!(
-            submitted.action,
-            Some(CommandBarActionEvent::prompt(
-                "fix the failing test",
-                "vmux://sessions/codex/cli",
-                &[]
-            ))
+            submitted,
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest::new(
+                    "fix the failing test",
+                    "vmux://sessions/codex/cli",
+                    &[]
+                ),
+            }
         );
-        assert_eq!(submitted.inline_target, None);
     }
 
     #[test]
@@ -2145,11 +2059,11 @@ mod tests {
         let submitted = palette.submit_start(&[]);
 
         assert_eq!(
-            submitted.action,
-            Some(CommandBarActionEvent::open(
-                "vmux://sessions/vibe/",
-                palette.open_target
-            ))
+            submitted,
+            PaletteDecision::Open {
+                close: true,
+                request: OpenRequest::new("vmux://sessions/vibe/", palette.open_target),
+            }
         );
     }
 
@@ -2168,12 +2082,11 @@ mod tests {
         let submitted = palette.submit_start(&attached);
 
         assert_eq!(
-            submitted.action,
-            Some(CommandBarActionEvent::prompt(
-                "",
-                "vmux://sessions/vibe/",
-                &attached
-            ))
+            submitted,
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest::new("", "vmux://sessions/vibe/", &attached),
+            }
         );
     }
 
@@ -2191,10 +2104,13 @@ mod tests {
 
         let submitted = palette.submit_start(&attached);
 
-        assert!(!submitted.close, "the composer keeps its draft on screen");
         assert_eq!(
-            submitted.action,
-            Some(CommandBarActionEvent::prompt("", "", &attached))
+            submitted,
+            PaletteDecision::Prompt {
+                close: false,
+                request: PromptRequest::new("", "", &attached),
+            },
+            "the composer keeps its draft on screen"
         );
     }
 
@@ -2205,21 +2121,21 @@ mod tests {
 
         let typed = PaletteState::modal(&state, PaletteDraft::typed("https://example.com"));
         assert_eq!(
-            typed.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::open(
-                "https://example.com",
-                Some(OpenTarget::InPlace)
-            ))
+            typed.submit_modal(&[]),
+            PaletteDecision::Open {
+                close: true,
+                request: OpenRequest::new("https://example.com", Some(OpenTarget::InPlace)),
+            }
         );
 
         let page = PaletteState::modal(&state, PaletteDraft::typed("vmux://settings"));
         let opened = page.submit_modal(&[]);
         assert_eq!(
-            opened.action,
-            Some(CommandBarActionEvent::open(
-                "vmux://settings/",
-                Some(OpenTarget::InPlace)
-            )),
+            opened,
+            PaletteDecision::Open {
+                close: true,
+                request: OpenRequest::new("vmux://settings/", Some(OpenTarget::InPlace)),
+            },
             "the page row wins over the raw text: {:?}",
             page.rows
         );
@@ -2231,9 +2147,9 @@ mod tests {
         let palette = PaletteState::modal(&state, PaletteDraft::default().at(1));
 
         assert_eq!(
-            palette.submit_modal(&[]).action,
-            Some(CommandBarActionEvent::Space {
-                id: "work".to_string()
+            palette.submit_modal(&[]),
+            PaletteDecision::SwitchSpace(SwitchSpaceRequest {
+                id: "work".to_string(),
             })
         );
     }
@@ -2244,8 +2160,8 @@ mod tests {
         let palette = PaletteState::start(&state, PaletteDraft::default());
 
         assert_eq!(
-            palette.submit_start(&[]).action,
-            Some(CommandBarActionEvent::SwitchTab { pane: 8, index: 1 })
+            palette.submit_start(&[]),
+            PaletteDecision::SwitchTab(SwitchTabRequest { pane: 8, index: 1 })
         );
     }
 
@@ -2264,13 +2180,12 @@ mod tests {
             &[],
         );
 
-        assert!(opened.close);
         assert_eq!(
-            opened.action,
-            Some(CommandBarActionEvent::open(
-                "file:///work/main.rs",
-                palette.open_target
-            ))
+            opened,
+            PaletteDecision::Open {
+                close: true,
+                request: OpenRequest::new("file:///work/main.rs", palette.open_target),
+            }
         );
     }
 
@@ -2282,8 +2197,7 @@ mod tests {
         let submitted =
             palette.activate(&CommandBarResultItem::Navigate { url: String::new() }, &[]);
 
-        assert!(submitted.close);
-        assert_eq!(submitted.action, None);
+        assert_eq!(submitted, PaletteDecision::Close);
     }
 
     #[test]
@@ -2295,12 +2209,15 @@ mod tests {
         );
 
         assert_eq!(
-            palette.submit_action(&[]).action,
-            Some(CommandBarActionEvent::prompt(
-                "fix the failing test",
-                "vmux://sessions/codex/cli",
-                &[]
-            ))
+            palette.submit_start(&[]),
+            PaletteDecision::Prompt {
+                close: true,
+                request: PromptRequest::new(
+                    "fix the failing test",
+                    "vmux://sessions/codex/cli",
+                    &[]
+                ),
+            }
         );
     }
 
@@ -2313,7 +2230,7 @@ mod tests {
             ..palette
         };
 
-        assert_eq!(empty.submit_action(&[]), Submission::default());
+        assert_eq!(empty.submit_start(&[]), PaletteDecision::default());
     }
 
     #[test]
@@ -2405,7 +2322,7 @@ mod tests {
             cwd: "/tmp/scratch".into(),
             ..CommandBarPromptContext::default()
         };
-        assert_eq!(ActiveProject::of(&unrooted), "/tmp/scratch");
+        assert_eq!(ActiveProject::resolve(&unrooted), "/tmp/scratch");
     }
 
     #[test]

@@ -21,9 +21,14 @@ pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
 }
 
 #[derive(Component, Default)]
+#[require(super::SpacesUiStateUpdates, SpaceSelection, SpacesPageSnapshot)]
 pub struct Spaces;
 
-impl Spaces {}
+#[derive(Component, Default)]
+pub(crate) struct SpaceSelection(pub(crate) usize);
+
+#[derive(Component, Default)]
+pub(crate) struct SpacesPageSnapshot(pub(crate) vmux_api::space::SpacesListEvent);
 
 impl HostedPage for Spaces {
     const HOST: &'static str = "spaces";

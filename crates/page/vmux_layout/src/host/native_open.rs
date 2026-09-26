@@ -5,7 +5,6 @@ use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageO
 use vmux_core::host::page::NativelyHosted;
 
 use crate::cef::Browser;
-use crate::warm_page::clear_stack_children;
 
 pub trait HostedPage: Component + Default {
     const HOST: &'static str;
@@ -23,7 +22,6 @@ impl<M: HostedPage> Default for HostedPagePlugin<M> {
 
 impl<M: HostedPage> Plugin for HostedPagePlugin<M> {
     fn build(&self, app: &mut App) {
-        vmux_core::register_host_spawn(app, M::HOST);
         app.world_mut()
             .spawn(NativelyHosted::page(M::URL, M::TITLE));
         app.add_systems(
@@ -71,7 +69,7 @@ fn handle_native_page_open(
             continue;
         };
         if opened.insert(task.stack) {
-            clear_stack_children(task.stack, &children_q, &mut commands);
+            crate::stack::clear_stack_children(task.stack, &children_q, &mut commands);
             let metadata = manifest.map_or_else(
                 || PageMetadata {
                     url: task.url.clone(),

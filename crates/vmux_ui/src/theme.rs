@@ -1,16 +1,4 @@
-pub const THEME_EVENT: &str = "theme";
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_state(Default, target = any)]
 pub struct ThemeEvent {
     pub radius: f32,
     pub locale: String,

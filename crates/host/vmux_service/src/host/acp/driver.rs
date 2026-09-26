@@ -29,12 +29,12 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_core::ProcessId;
 
 use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
-use crate::process::{ProcessManager, PtyInputWriter};
-use crate::protocol::{
+use crate::process::ProcessManager;
+use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
+use vmux_api::protocol::{
     AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
     ServiceMessage, SharedEvent, compose_agent_prompt,
 };
-use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
@@ -157,7 +157,6 @@ pub struct AcpShared {
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     pub terminals: Mutex<HashMap<String, AcpTerminal>>,
     pub manager: Arc<tokio::sync::Mutex<ProcessManager>>,
-    pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
     model_info: Mutex<Option<AcpModelInfoState>>,
     mode_info: Mutex<Option<AcpModeInfoState>>,
@@ -177,7 +176,6 @@ impl AcpShared {
         anchor: ProcessId,
         stream_tx: broadcast::Sender<ServiceMessage>,
         manager: Arc<tokio::sync::Mutex<ProcessManager>>,
-        input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     ) -> Self {
         Self {
             sid,
@@ -189,7 +187,6 @@ impl AcpShared {
             pending_perms: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
             manager,
-            input_writers,
             agent_name: Mutex::new(None),
             model_info: Mutex::new(None),
             mode_info: Mutex::new(None),
@@ -214,11 +211,9 @@ impl AcpShared {
 
     pub fn snapshot_message(&self) -> ServiceMessage {
         let projector = self.projector.lock().unwrap();
-        let messages_json =
-            serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
         ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
             sid: self.sid.clone(),
-            messages_json,
+            messages: projector.messages().to_vec(),
         })
     }
 
@@ -301,8 +296,8 @@ impl AcpShared {
             .filter(|model| !model.is_empty());
         RemoteSession {
             sid: self.sid.clone(),
-            room_id: vmux_wire::room::RoomId::for_session(&self.sid),
-            title: vmux_wire::room::Message::conversation_title(&self.remote_messages(), &name),
+            room_id: vmux_api::room::RoomId::for_session(&self.sid),
+            title: vmux_api::room::Message::conversation_title(&self.remote_messages(), &name),
             name,
             runtime: "acp".to_string(),
             model,
@@ -467,13 +462,11 @@ impl AcpShared {
         if !loaded {
             *projector = AcpProjector::new();
         }
-        let messages_json =
-            serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
         self.history_replay_updates.store(0, Ordering::SeqCst);
         self.history_replay.store(false, Ordering::SeqCst);
         self.emit(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
             sid: self.sid.clone(),
-            messages_json,
+            messages: projector.messages().to_vec(),
         }));
     }
 
@@ -548,11 +541,9 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
         }
         let update_count = shared.history_replay_updates.fetch_add(1, Ordering::SeqCst) + 1;
         if update_count == 1 || update_count.is_multiple_of(HISTORY_REPLAY_SNAPSHOT_INTERVAL) {
-            let messages_json =
-                serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
             shared.emit(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
                 sid: shared.sid.clone(),
-                messages_json,
+                messages: projector.messages().to_vec(),
             }));
         }
         return;
@@ -581,14 +572,14 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
                 shared.emit(ServiceMessage::AgentCommand {
                     request_id: AgentRequestId::new(),
                     anchor: Some(shared.anchor),
-                    command: AgentCommand::FileTouched {
+                    command: AgentCommand::FileTouched(vmux_api::protocol::AgentFileTouched {
                         anchor: shared.anchor,
                         path,
                         line,
                         col: None,
                         end_col: None,
                         kind,
-                    },
+                    }),
                 });
             }
             Intent::WorkspaceChanged {
@@ -605,14 +596,14 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
 struct AcpModelInfoState {
     config_id: String,
     current_model_id: String,
-    models: Vec<crate::protocol::AcpModelOption>,
+    models: Vec<vmux_api::protocol::AcpModelOption>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AcpModeInfoState {
     config_id: String,
     current_mode_id: String,
-    modes: Vec<crate::protocol::AcpModeOption>,
+    modes: Vec<vmux_api::protocol::AcpModeOption>,
 }
 
 impl AcpModeInfoState {
@@ -661,7 +652,7 @@ fn model_info(config_options: &[SessionConfigOption]) -> Option<AcpModelInfoStat
         current_model_id: select.current_value.to_string(),
         models: options
             .into_iter()
-            .map(|option| crate::protocol::AcpModelOption {
+            .map(|option| vmux_api::protocol::AcpModelOption {
                 id: option.value.to_string(),
                 name: option.name.clone(),
                 description: option.description.clone(),
@@ -721,7 +712,7 @@ fn mode_info(
             current_mode_id: select.current_value.to_string(),
             modes: options
                 .into_iter()
-                .map(|option| crate::protocol::AcpModeOption {
+                .map(|option| vmux_api::protocol::AcpModeOption {
                     id: option.value.to_string(),
                     name: option.name.clone(),
                     description: option.description.clone(),
@@ -736,7 +727,7 @@ fn mode_info(
         modes: legacy
             .available_modes
             .iter()
-            .map(|mode| crate::protocol::AcpModeOption {
+            .map(|mode| vmux_api::protocol::AcpModeOption {
                 id: mode.id.to_string(),
                 name: mode.name.clone(),
                 description: mode.description.clone(),
@@ -1009,13 +1000,13 @@ pub async fn run(
                 *perm_shared.approval.lock().unwrap() = Some(RemoteApproval {
                     call_id: call_id.clone(),
                     name: name.clone(),
-                    args_json: args_json.clone(),
+                    args: vmux_api::json::JsonValue::parse_or_string(&args_json),
                 });
                 perm_shared.emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
                     sid: perm_shared.sid.clone(),
                     call_id: call_id.clone(),
                     name,
-                    args_json,
+                    args: vmux_api::json::JsonValue::parse_or_string(&args_json),
                 }));
                 let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
                 *perm_shared.approval.lock().unwrap() = None;
@@ -1714,7 +1705,7 @@ fn session_meta_for_agent(
     }
     session_meta_for_agent_with_knowledge(
         agent_id,
-        &vmux_core::knowledge::AgentPrompt::of("").into_string(),
+        &vmux_core::knowledge::AgentPrompt::from("").into_string(),
         effort,
     )
 }
@@ -1840,7 +1831,7 @@ async fn create_terminal(
     let cwd = cwd.to_string_lossy().into_owned();
     let id = ProcessId::new();
 
-    let (exit_stream, writer) = {
+    let exit_stream = {
         let mut mgr = shared.manager.lock().await;
         mgr.create_process_keep_alive(
             id,
@@ -1851,13 +1842,8 @@ async fn create_terminal(
             ACP_TERMINAL_COLS,
             ACP_TERMINAL_ROWS,
         )?;
-        let exit_stream = mgr.processes.get(&id).map(|process| process.subscribe());
-        (exit_stream, mgr.input_writer(&id))
+        mgr.processes.get(&id).map(|process| process.subscribe())
     };
-
-    if let Some(writer) = writer {
-        shared.input_writers.lock().await.insert(id, writer);
-    }
 
     let (exit_tx, exit_rx) = watch::channel(AcpTerminalExit::Pending);
     if let Some(mut exit_stream) = exit_stream {
@@ -2033,7 +2019,7 @@ async fn release_terminal(
         .manager
         .lock()
         .await
-        .kill_process(&terminal.process_id);
+        .remove_process(&terminal.process_id);
     Ok(ReleaseTerminalResponse::new())
 }
 
@@ -2087,46 +2073,28 @@ fn is_permissionless_host_tool(name: &str) -> bool {
             if request == "request" && user == "user" && choice == "choice"
     ) || matches!(
         parts.as_slice(),
-        [mcp, vmux, action, knowledge]
+        [mcp, vmux, operation, knowledge]
             if mcp == "mcp"
                 && vmux == "vmux"
-                && matches!(action.as_str(), "search" | "read")
+                && matches!(operation.as_str(), "search" | "read")
                 && knowledge == "knowledge"
     ) || matches!(
         parts.as_slice(),
-        [vmux, action, knowledge]
+        [vmux, operation, knowledge]
             if vmux == "vmux"
-                && matches!(action.as_str(), "search" | "read")
+                && matches!(operation.as_str(), "search" | "read")
                 && knowledge == "knowledge"
     ) || matches!(
         parts.as_slice(),
-        [action, knowledge]
-            if matches!(action.as_str(), "search" | "read") && knowledge == "knowledge"
+        [operation, knowledge]
+            if matches!(operation.as_str(), "search" | "read") && knowledge == "knowledge"
     )
 }
 
 fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathBuf> {
-    if path
-        .components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        return None;
-    }
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    if !abs.starts_with(cwd) {
-        return None;
-    }
-    if let Ok(real_cwd) = cwd.canonicalize()
-        && let Some(anchor) = abs.ancestors().find_map(|a| a.canonicalize().ok())
-        && !anchor.starts_with(&real_cwd)
-    {
-        return None;
-    }
-    Some(abs)
+    vmux_path::ScopedPath::resolve(cwd, path)
+        .ok()
+        .map(vmux_path::ScopedPath::into_path_buf)
 }
 
 fn resolve_acp_fs_path(scope: &AcpFsScope, path: &std::path::Path) -> Option<PathBuf> {
@@ -2415,7 +2383,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
 
         shared.publish_agent_info("Antigravity".into());
@@ -2538,7 +2505,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         publish_mode_selection_result(&shared, 9, "auto", true);
 
@@ -2567,7 +2533,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         let config = SessionConfigOption::select(
             "approval",
@@ -2607,7 +2572,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         let config = SessionConfigOption::select(
             "model",
@@ -2643,7 +2607,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         publish_model_selection_result(&shared, 7, "fable", false);
 
@@ -2672,7 +2635,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         let stale = SessionConfigOption::select(
             "model",
@@ -2706,7 +2668,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         let config = SessionConfigOption::select(
             "model",
@@ -2765,7 +2726,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         shared.begin_history_replay();
 
@@ -2775,12 +2735,11 @@ mod tests {
                 TextContent::new("hello"),
             ))),
         );
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
             stream_rx.try_recv().expect("first progressive snapshot")
         else {
             panic!("expected snapshot");
         };
-        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
         assert_eq!(messages.len(), 1);
         for _ in 0..300 {
             project_session_update(
@@ -2797,12 +2756,11 @@ mod tests {
         assert!(snapshots.len() < 64);
         shared.finish_history_replay(true);
 
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
             stream_rx.try_recv().expect("final snapshot")
         else {
             panic!("expected snapshot");
         };
-        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
         assert_eq!(messages.len(), 2);
         assert!(matches!(
             &messages[1],
@@ -2824,7 +2782,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         shared.begin_history_replay();
         project_session_update(
@@ -2834,23 +2791,21 @@ mod tests {
             ))),
         );
 
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
             stream_rx.try_recv().expect("progressive snapshot")
         else {
             panic!("expected snapshot");
         };
-        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
         assert_eq!(messages.len(), 1);
 
         shared.finish_history_replay(false);
 
         assert!(shared.projector.lock().unwrap().messages().is_empty());
-        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages, .. }) =
             stream_rx.try_recv().expect("clearing snapshot")
         else {
             panic!("expected snapshot");
         };
-        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
         assert!(messages.is_empty());
         assert!(matches!(
             stream_rx.try_recv(),
@@ -2955,7 +2910,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         let request = RequestPermissionRequest::new(
             "session-1",
@@ -2999,7 +2953,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         project_session_update(
             &shared,
@@ -3135,7 +3088,7 @@ mod tests {
     fn private_context_wraps_wire_prompt_without_changing_display_text() {
         let wire = compose_agent_prompt("continue here", Some("prior conversation"));
 
-        assert!(wire.starts_with(crate::protocol::PRIVATE_CONTEXT_PREFIX));
+        assert!(wire.starts_with(vmux_api::protocol::PRIVATE_CONTEXT_PREFIX));
         assert!(wire.contains("prior conversation"));
         assert!(wire.ends_with("continue here"));
         assert_eq!(compose_agent_prompt("plain", None), "plain");
@@ -3316,7 +3269,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             manager,
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         (shared, stream_rx)
     }
@@ -3344,7 +3296,7 @@ mod tests {
         *shared.approval.lock().unwrap() = Some(RemoteApproval {
             call_id: "call-1".into(),
             name: "run".into(),
-            args_json: "{}".into(),
+            args: vmux_api::json::JsonValue::Object(Vec::new()),
         });
 
         assert!(shared.resolve_approval("call-1"));
@@ -3400,7 +3352,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
 
         shared.publish_workspace_change(
@@ -3616,7 +3567,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn release_terminal_kills_running_command() {
+    async fn release_terminal_removes_running_command() {
         let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
         let (shared, _rx) = test_shared(manager.clone());
         let created = create_terminal(
@@ -3636,27 +3587,7 @@ mod tests {
         .await
         .expect("release");
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
-        let exited = loop {
-            let exited = {
-                let mut manager = manager.lock().await;
-                manager.poll_all();
-                manager
-                    .processes
-                    .get(&process_id)
-                    .and_then(|process| process.process_exit())
-                    .is_some()
-            };
-            if exited || std::time::Instant::now() >= deadline {
-                break exited;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        };
-        if !exited {
-            manager.lock().await.remove_process(&process_id);
-        }
-
-        assert!(exited, "release must kill a running terminal command");
+        assert!(!manager.lock().await.processes.contains_key(&process_id));
     }
 
     #[tokio::test]

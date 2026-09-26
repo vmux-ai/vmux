@@ -1,9 +1,8 @@
-use crate::event::{ChatBlock, ChatItem};
 use dioxus::prelude::*;
+use vmux_api::chat::{ChatActivityKind, ChatToolKind};
 use vmux_ui::file_icon::{FileIcon, FilePath, TypeIcon};
 use vmux_ui::i18n::translate;
 use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_wire::chat::ToolName;
 
 #[component]
 pub fn ActivityIconView(kind: ActivityIcon) -> Element {
@@ -103,181 +102,52 @@ pub fn FileActivityIcon(path: String, write: bool) -> Element {
 }
 
 #[component]
-pub fn ToolActivityIcon(name: String, args: String, fallback: ActivityIcon) -> Element {
-    let activity = ToolActivity::of(&name);
+pub fn ToolActivityIcon(
+    name: String,
+    file_path: Option<String>,
+    activity: ChatActivityKind,
+) -> Element {
     if matches!(
         activity,
-        ToolActivity::ReadFile | ToolActivity::WriteFile | ToolActivity::Other
-    ) && let Some(path) = tool_file_path(&args)
+        ChatActivityKind::ReadFile | ChatActivityKind::WriteFile | ChatActivityKind::Tool
+    ) && let Some(path) = file_path
     {
-        let write = activity == ToolActivity::WriteFile;
+        let write = activity == ChatActivityKind::WriteFile;
         return rsx! { FileActivityIcon { path, write } };
     }
     if matches!(FilePath(&name).icon(false), FileIcon::Logo(_)) {
         return rsx! { FileActivityIcon { path: name, write: false } };
     }
-    rsx! { ActivityIconView { kind: fallback } }
+    rsx! { ActivityIconView { kind: ActivityIcon::from(activity) } }
 }
 
 pub struct ToolPresentation {
-    pub icon: ActivityIcon,
     pub label: String,
 }
 
 impl ToolPresentation {
-    pub fn of(name: &str, args: &str) -> Self {
-        let icon = ActivityIcon::for_tool(name, args);
-        let label = match ToolActivity::of(name) {
-            ToolActivity::Guardian => translate("agent-tool-guardian-review"),
-            ToolActivity::ReadFile if tool_args_read_skill(args) => "Read skill".into(),
-            ToolActivity::ReadFile => translate("agent-tool-read-files"),
-            ToolActivity::WriteFile => translate("agent-edited"),
-            ToolActivity::Layout => translate("schema-layout"),
-            ToolActivity::Worktree if name.ends_with("select_project") => "Select project".into(),
-            ToolActivity::Worktree => translate("layout-worktree"),
-            ToolActivity::Image | ToolActivity::Screenshot => translate("agent-tool-viewed-image"),
-            ToolActivity::OpenPage | ToolActivity::Browser => translate("agent-tool-used-browser"),
-            ToolActivity::Search => translate("agent-tool-searched-files"),
-            ToolActivity::Command => translate("agent-tool-ran-commands"),
-            ToolActivity::Other => name
-                .rsplit(['.', ':'])
-                .next()
-                .unwrap_or(name)
-                .replace('_', " "),
+    pub fn for_call(kind: ChatToolKind, fallback: &str) -> Self {
+        let label = match kind {
+            ChatToolKind::Guardian => translate("agent-tool-guardian-review"),
+            ChatToolKind::ReadSkill => "Read skill".into(),
+            ChatToolKind::ReadFile => translate("agent-tool-read-files"),
+            ChatToolKind::WriteFile => translate("agent-edited"),
+            ChatToolKind::Layout => translate("schema-layout"),
+            ChatToolKind::Worktree if fallback == "select project" => "Select project".into(),
+            ChatToolKind::Worktree => translate("layout-worktree"),
+            ChatToolKind::Image | ChatToolKind::Screenshot => translate("agent-tool-viewed-image"),
+            ChatToolKind::OpenPage | ChatToolKind::Browser => translate("agent-tool-used-browser"),
+            ChatToolKind::Search => translate("agent-tool-searched-files"),
+            ChatToolKind::Command => translate("agent-tool-ran-commands"),
+            ChatToolKind::Other => fallback.to_string(),
         };
         if label.trim().is_empty() {
             return Self {
-                icon,
                 label: translate("agent-tool-calling"),
             };
         }
-        Self { icon, label }
+        Self { label }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolActivity {
-    Guardian,
-    ReadFile,
-    WriteFile,
-    Layout,
-    Worktree,
-    Image,
-    Screenshot,
-    OpenPage,
-    Browser,
-    Search,
-    Command,
-    Other,
-}
-
-impl ToolActivity {
-    pub fn of(name: &str) -> Self {
-        let lower = name.to_ascii_lowercase();
-        if ToolName(name).is_guardian() {
-            ToolActivity::Guardian
-        } else if lower.contains("read_file")
-            || lower.contains("read file")
-            || lower.contains("open_file")
-            || lower.contains("open file")
-        {
-            ToolActivity::ReadFile
-        } else if matches!(lower.as_str(), "edit" | "write")
-            || lower.contains("editing file")
-            || lower.contains("edited file")
-            || lower.contains("write file")
-            || lower.contains("apply_patch")
-            || lower.contains("edit_file")
-            || lower.contains("write_file")
-            || lower.contains("multi_edit")
-        {
-            ToolActivity::WriteFile
-        } else if lower.contains("worktree")
-            || lower.contains("workspace")
-            || lower == "select_project"
-            || lower.contains("repository")
-        {
-            ToolActivity::Worktree
-        } else if lower.contains("layout")
-            || lower.contains("list_spaces")
-            || lower.contains("create_space")
-            || lower.contains("rename_space")
-            || lower.contains("delete_space")
-        {
-            ToolActivity::Layout
-        } else if lower.contains("screenshot") {
-            ToolActivity::Screenshot
-        } else if lower.contains("open_page") || lower.contains("open page") {
-            ToolActivity::OpenPage
-        } else if lower.contains("view_image") || lower.contains("view image") {
-            ToolActivity::Image
-        } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_")
-        {
-            ToolActivity::Browser
-        } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") {
-            ToolActivity::Search
-        } else if lower.contains("run")
-            || lower.contains("exec")
-            || lower.contains("command")
-            || lower.contains("shell")
-            || lower.contains("terminal")
-        {
-            ToolActivity::Command
-        } else {
-            ToolActivity::Other
-        }
-    }
-
-    pub fn icon(self) -> ActivityIcon {
-        match self {
-            Self::Guardian => ActivityIcon::Guardian,
-            Self::ReadFile => ActivityIcon::ReadFile,
-            Self::WriteFile => ActivityIcon::WriteFile,
-            Self::Layout => ActivityIcon::Layout,
-            Self::Worktree => ActivityIcon::Worktree,
-            Self::Image => ActivityIcon::Image,
-            Self::Screenshot => ActivityIcon::Screenshot,
-            Self::OpenPage => ActivityIcon::OpenPage,
-            Self::Browser => ActivityIcon::Browser,
-            Self::Search => ActivityIcon::Search,
-            Self::Command => ActivityIcon::Command,
-            Self::Other => ActivityIcon::Tool,
-        }
-    }
-}
-
-fn tool_args_read_skill(args: &str) -> bool {
-    fn skill_path(value: &serde_json::Value) -> bool {
-        match value {
-            serde_json::Value::Object(map) => map.iter().any(|(key, value)| {
-                matches!(key.as_str(), "path" | "file" | "file_path" | "filename")
-                    && value.as_str().is_some_and(|path| {
-                        std::path::Path::new(path)
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
-                    })
-                    || skill_path(value)
-            }),
-            serde_json::Value::Array(values) => values.iter().any(skill_path),
-            _ => false,
-        }
-    }
-
-    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(args) else {
-        return false;
-    };
-    while let serde_json::Value::Object(map) = &value {
-        let Some(arguments) = map.get("arguments") else {
-            break;
-        };
-        if map.contains_key("server") || map.contains_key("tool") || map.contains_key("name") {
-            value = arguments.clone();
-        } else {
-            break;
-        }
-    }
-    skill_path(&value)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -308,21 +178,6 @@ pub enum ActivityIcon {
 }
 
 impl ActivityIcon {
-    pub fn for_tool(name: &str, args: &str) -> Self {
-        if let Some(icon) = Self::for_language(args) {
-            return icon;
-        }
-        if let Some(icon) = Self::for_language(name) {
-            return icon;
-        }
-        ToolActivity::of(name).icon()
-    }
-
-    pub fn for_language(value: &str) -> Option<Self> {
-        let lower = value.to_ascii_lowercase();
-        (lower.contains(".py") || lower == "py" || lower.contains("python")).then_some(Self::Python)
-    }
-
     pub fn line_icon(self) -> Option<LineIcon> {
         let icon = match self {
             Self::Python => return None,
@@ -349,34 +204,6 @@ impl ActivityIcon {
             Self::Reconnect => LineIcon::Wifi,
         };
         Some(icon)
-    }
-
-    pub fn current(items: &[ChatItem], status: &str) -> Option<Self> {
-        match status {
-            "installing" => Some(Self::Installing),
-            "awaiting" => Some(Self::Awaiting),
-            "errored" => Some(Self::Error),
-            "streaming" => {
-                let block = items.iter().rev().find_map(|item| match item {
-                    ChatItem::Turn(turn) if turn.running => turn.blocks.last(),
-                    _ => None,
-                });
-                Some(match block {
-                    Some(ChatBlock::Text(_)) => Self::Writing,
-                    Some(ChatBlock::Thinking(_)) | None => Self::Thinking,
-                    Some(ChatBlock::ToolUse { name, args, .. }) => Self::for_tool(name, args),
-                    Some(ChatBlock::Subagent(_)) => Self::Subagent,
-                    Some(ChatBlock::Diff { path, .. }) => {
-                        Self::for_language(path).unwrap_or(Self::Diff)
-                    }
-                    Some(ChatBlock::Plan { .. }) => Self::Plan,
-                    Some(ChatBlock::ToolResult { is_error: true, .. }) => Self::Error,
-                    Some(ChatBlock::ToolResult { .. }) => Self::Output,
-                    Some(ChatBlock::Reconnect { .. }) => Self::Reconnect,
-                })
-            }
-            _ => None,
-        }
     }
 
     pub fn favicon(self, accent: &str) -> String {
@@ -420,50 +247,34 @@ impl ActivityIcon {
     }
 }
 
-fn tool_file_path(args: &str) -> Option<String> {
-    if let Ok(value) = serde_json::from_str(args)
-        && let Some(path) = file_path_from_value(&value)
-    {
-        return Some(path);
-    }
-    file_path_from_text(args)
-}
-
-fn file_path_from_value(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::Object(map) => {
-            for key in ["path", "file_path", "filename", "file"] {
-                if let Some(path) = map.get(key).and_then(serde_json::Value::as_str)
-                    && !path.trim().is_empty()
-                {
-                    return Some(path.to_string());
-                }
-            }
-            map.values().find_map(file_path_from_value)
-        }
-        serde_json::Value::Array(values) => values.iter().find_map(file_path_from_value),
-        serde_json::Value::String(text) => file_path_from_text(text),
-        _ => None,
-    }
-}
-
-fn file_path_from_text(text: &str) -> Option<String> {
-    for marker in ["*** Update File: ", "*** Add File: ", "*** Delete File: "] {
-        if let Some(path) = text.lines().find_map(|line| line.strip_prefix(marker)) {
-            return Some(path.trim().to_string());
+impl From<ChatActivityKind> for ActivityIcon {
+    fn from(kind: ChatActivityKind) -> Self {
+        match kind {
+            ChatActivityKind::None | ChatActivityKind::Thinking => Self::Thinking,
+            ChatActivityKind::Writing => Self::Writing,
+            ChatActivityKind::Installing => Self::Installing,
+            ChatActivityKind::Awaiting => Self::Awaiting,
+            ChatActivityKind::Python => Self::Python,
+            ChatActivityKind::ReadFile => Self::ReadFile,
+            ChatActivityKind::WriteFile => Self::WriteFile,
+            ChatActivityKind::Layout => Self::Layout,
+            ChatActivityKind::Worktree => Self::Worktree,
+            ChatActivityKind::Search => Self::Search,
+            ChatActivityKind::Image => Self::Image,
+            ChatActivityKind::Screenshot => Self::Screenshot,
+            ChatActivityKind::OpenPage => Self::OpenPage,
+            ChatActivityKind::Command => Self::Command,
+            ChatActivityKind::Browser => Self::Browser,
+            ChatActivityKind::Guardian => Self::Guardian,
+            ChatActivityKind::Subagent => Self::Subagent,
+            ChatActivityKind::Tool => Self::Tool,
+            ChatActivityKind::Output => Self::Output,
+            ChatActivityKind::Error => Self::Error,
+            ChatActivityKind::Plan => Self::Plan,
+            ChatActivityKind::Diff => Self::Diff,
+            ChatActivityKind::Reconnect => Self::Reconnect,
         }
     }
-    text.split_whitespace()
-        .map(|token| token.trim_matches(['"', '\'', ',', ':', ';', '(', ')']))
-        .find(|token| {
-            if token.contains("://") {
-                return false;
-            }
-            let name = token.rsplit('/').next().unwrap_or(token);
-            name.rsplit_once('.')
-                .is_some_and(|(_, ext)| !ext.is_empty() && ext.len() <= 12)
-        })
-        .map(ToOwned::to_owned)
 }
 
 #[cfg(test)]
@@ -471,45 +282,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_activity_classifies_timeline_icons() {
-        assert_eq!(ToolActivity::of("guardian_review"), ToolActivity::Guardian);
-        assert_eq!(ToolActivity::of("read_file"), ToolActivity::ReadFile);
-        assert_eq!(ToolActivity::of("apply_patch"), ToolActivity::WriteFile);
-        assert_eq!(ToolActivity::of("read_layout"), ToolActivity::Layout);
-        assert_eq!(ToolActivity::of("create_worktree"), ToolActivity::Worktree);
-        assert_eq!(ToolActivity::of("select_project"), ToolActivity::Worktree);
-        assert_eq!(ToolActivity::of("view_image"), ToolActivity::Image);
+    fn activity_icons_follow_host_projection() {
         assert_eq!(
-            ToolActivity::of("vmux_screenshot"),
-            ToolActivity::Screenshot
+            ActivityIcon::from(ChatActivityKind::Guardian),
+            ActivityIcon::Guardian
         );
-        assert_eq!(ToolActivity::of("vmux_open_page"), ToolActivity::OpenPage);
-        assert_eq!(ToolActivity::of("vmux_open_file"), ToolActivity::ReadFile);
-        assert_eq!(ToolActivity::of("browser_navigate"), ToolActivity::Browser);
-        assert_eq!(ToolActivity::of("search_files"), ToolActivity::Search);
-        assert_eq!(ToolActivity::of("exec_command"), ToolActivity::Command);
-        assert_eq!(ToolActivity::of("custom_tool"), ToolActivity::Other);
-    }
-
-    #[test]
-    fn a_tool_icon_prefers_the_language_in_its_arguments() {
         assert_eq!(
-            ActivityIcon::for_tool("run", r#"{"cmd":"python main.py"}"#),
+            ActivityIcon::from(ChatActivityKind::Python),
             ActivityIcon::Python
         );
         assert_eq!(
-            ActivityIcon::for_tool("run", r#"{"cmd":"ls"}"#),
-            ActivityIcon::Command
+            ActivityIcon::from(ChatActivityKind::Reconnect),
+            ActivityIcon::Reconnect
         );
     }
 
     #[test]
-    fn skill_reads_are_identified_from_nested_tool_arguments() {
-        assert!(tool_args_read_skill(
-            r#"{"arguments":{"path":"/tmp/skills/caveman/SKILL.md"},"server":"vmux","tool":"read_file"}"#
-        ));
-        assert!(!tool_args_read_skill(
-            r#"{"arguments":{"path":"/tmp/src/lib.rs"},"server":"vmux","tool":"read_file"}"#
-        ));
+    fn tool_labels_translate_typed_kinds_and_keep_fallbacks() {
+        assert_eq!(
+            ToolPresentation::for_call(ChatToolKind::ReadSkill, "read file").label,
+            "Read skill"
+        );
+        assert_eq!(
+            ToolPresentation::for_call(ChatToolKind::Other, "custom tool").label,
+            "custom tool"
+        );
     }
 }

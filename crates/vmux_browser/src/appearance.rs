@@ -1,19 +1,20 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
 
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
-use vmux_ui::theme::THEME_EVENT;
 
 use crate::{browser_accept_language_list, theme_event};
 pub(crate) struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_webview_ready_send_theme)
+        app.add_plugins(UiStatePlugin::<vmux_ui::theme::ThemeEvent>::default())
+            .add_observer(on_webview_ready_send_theme)
             .add_systems(
                 Update,
                 sync_appearance_to_cef
@@ -40,7 +41,7 @@ fn reassert_color_scheme_on_navigation(
 }
 
 fn on_webview_ready_send_theme(
-    trigger: On<BinReceive<PageReady>>,
+    trigger: On<UiInput<PageReady>>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     cef_q: Query<(), With<LayoutCef>>,
@@ -49,10 +50,10 @@ fn on_webview_ready_send_theme(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    if browsers.can_emit_to(&entity) {
-        let payload = theme_event(&settings);
-        commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
-    }
+    commands.trigger(UiStateWrite::<vmux_ui::theme::ThemeEvent>::from_event(
+        entity,
+        &theme_event(&settings),
+    ));
     if cef_q.get(entity).is_ok() || modal_q.get(entity).is_ok() {
         if let Ok(mut zoom) = zoom_q.get_mut(entity) {
             zoom.0 = 0.0;
@@ -94,13 +95,11 @@ pub(crate) fn sync_appearance_to_cef(
             browsers.set_accept_language_list(&next_accept_language_list);
         }
     }
-    let browsers = browsers.as_deref();
-    let Some(browsers) = browsers else { return };
     let payload = theme_event(&settings);
     for entity in &ready {
-        if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
-        }
+        commands.trigger(UiStateWrite::<vmux_ui::theme::ThemeEvent>::from_event(
+            entity, &payload,
+        ));
     }
 }
 

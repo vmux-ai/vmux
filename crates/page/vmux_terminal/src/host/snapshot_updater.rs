@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
-use vmux_command::snapshot::CommandBarTerminalsSnapshot;
+use vmux_command::snapshot::CommandBarProjection;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 
 use crate::pid::{Pid, PidToEntity};
 
-pub struct TerminalSnapshotPlugin;
+pub struct SnapshotPlugin;
 
-impl Plugin for TerminalSnapshotPlugin {
+impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
@@ -18,23 +18,23 @@ impl Plugin for TerminalSnapshotPlugin {
 
 fn update_terminals_snapshot(
     pid_map: Option<Res<PidToEntity>>,
-    mut snapshot: ResMut<CommandBarTerminalsSnapshot>,
+    mut state: ResMut<CommandBarProjection>,
 ) {
     let changed = pid_map
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
-    if !changed && !snapshot.terminal_page_url.is_empty() {
+    if !changed && !state.terminals.terminal_page_url.is_empty() {
         return;
     }
     let mut running = HashMap::new();
     if let Some(pid_map) = pid_map.as_deref() {
-        for (pid, entity) in &pid_map.0 {
-            running.insert(Pid(*pid).page_url(), *entity);
+        for (pid, entity) in pid_map.iter() {
+            running.insert(Pid(pid).page_url(), entity);
         }
     }
-    snapshot.running = running;
-    snapshot.terminal_page_url = TERMINAL_PAGE_URL.to_string();
+    state.terminals.running = running;
+    state.terminals.terminal_page_url = TERMINAL_PAGE_URL.to_string();
 }
 
 #[cfg(test)]
@@ -44,10 +44,10 @@ mod tests {
     #[test]
     fn writes_url_and_no_running_terminals() {
         let mut app = App::new();
-        app.init_resource::<CommandBarTerminalsSnapshot>()
+        app.init_resource::<CommandBarProjection>()
             .add_systems(Update, update_terminals_snapshot);
         app.update();
-        let snap = app.world().resource::<CommandBarTerminalsSnapshot>();
+        let snap = &app.world().resource::<CommandBarProjection>().terminals;
         assert_eq!(snap.terminal_page_url, TERMINAL_PAGE_URL);
         assert!(snap.running.is_empty());
     }
@@ -55,15 +55,15 @@ mod tests {
     #[test]
     fn running_terminals_are_keyed_by_the_url_the_row_carries() {
         let mut app = App::new();
-        app.init_resource::<CommandBarTerminalsSnapshot>()
+        app.init_resource::<CommandBarProjection>()
             .add_systems(Update, update_terminals_snapshot);
         let pane = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .insert_resource(PidToEntity(HashMap::from([(4321, pane)])));
+            .insert_resource([(4321, pane)].into_iter().collect::<PidToEntity>());
 
         app.update();
 
-        let snap = app.world().resource::<CommandBarTerminalsSnapshot>();
+        let snap = &app.world().resource::<CommandBarProjection>().terminals;
         assert_eq!(snap.running.get("vmux://terminal/4321"), Some(&pane));
     }
 }

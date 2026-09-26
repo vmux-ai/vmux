@@ -119,7 +119,8 @@ pub(super) fn write_encrypted_snapshot(
             && object_path.is_file();
         if !unchanged {
             let encrypted = encrypt_bytes(key, &object_aad(path), &entry.data)?;
-            write_atomic(&object_path, &encrypted)?;
+            vmux_path::AtomicFile::write(&object_path, &encrypted)
+                .map_err(|error| error.to_string())?;
         }
         index_files.push(EncryptedIndexEntry {
             path: path.clone(),
@@ -146,7 +147,8 @@ pub(super) fn write_encrypted_snapshot(
         .map_err(|error| error.to_string())?
         .into_bytes();
     let encrypted_index = encrypt_bytes(key, INDEX_AAD, &index_source)?;
-    write_atomic(&repository.join(INDEX_FILE), &encrypted_index)?;
+    vmux_path::AtomicFile::write(repository.join(INDEX_FILE), &encrypted_index)
+        .map_err(|error| error.to_string())?;
     let manifest = RemoteManifest {
         version: MANIFEST_VERSION,
         cipher: "AES-256-GCM".to_string(),
@@ -311,19 +313,6 @@ pub(super) fn validate_relative_path(path: &str) -> Result<(), String> {
 
 pub(super) fn state_path(repository: &Path) -> PathBuf {
     repository.join(".git").join("vmux-state.ron")
-}
-
-pub(super) fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("vault");
-    let temporary = path.with_file_name(format!(".{file_name}.{}.tmp", random_hex(8)?));
-    std::fs::write(&temporary, data).map_err(|error| error.to_string())?;
-    std::fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
 pub(super) fn random_hex(bytes: usize) -> Result<String, String> {

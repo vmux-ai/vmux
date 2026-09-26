@@ -382,25 +382,19 @@ fn active_tab_is_visible(
 
 fn windowed_ring_for(
     stack: Entity,
-    pane: Entity,
     focus: &vmux_layout::stack::FocusedStack,
     visible_pane_count: usize,
-    active_panes: &vmux_layout::active_panes::ActivePanes,
+    agent: Option<(&str, vmux_layout::active_pane::ActiveStack)>,
     settings: &AppSettings,
     scale: f32,
 ) -> (f32, [f32; 3], Option<vmux_core::agent::AgentKind>) {
-    use vmux_layout::active_panes::ProfileId;
     let width = settings.layout.focus_ring.width * scale;
     let user = &settings.layout.focus_ring.color;
     if focus.stack == Some(stack) && visible_pane_count > 1 {
         return (width, [user.r, user.g, user.b], None);
     }
-    for (profile, active) in active_panes.0.iter() {
-        if let ProfileId::Agent(key) = profile
-            && active.pane == Some(pane)
-        {
-            return (width, agent_ring_rgb(key), active.kind);
-        }
+    if let Some((profile, active)) = agent {
+        return (width, agent_ring_rgb(profile), active.kind);
     }
     (0.0, [user.r, user.g, user.b], None)
 }
@@ -435,9 +429,11 @@ fn agent_brand_rgb(kind: vmux_core::agent::AgentKind) -> [f32; 3] {
 pub(crate) fn sync_windowed_frames(
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
-    layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
+    hidden_windows: Query<(), With<vmux_layout::toggle::LayoutHidden>>,
+    added_hidden_windows: Query<(), Added<vmux_layout::toggle::LayoutHidden>>,
+    mut removed_hidden_windows: RemovedComponents<vmux_layout::toggle::LayoutHidden>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    active_panes: Res<vmux_layout::active_panes::ActivePanes>,
+    active_panes: vmux_layout::active_pane::ActivePaneQuery,
     clear_color: Res<vmux_layout::window::WindowBackground>,
     browser_q: Query<
         (
@@ -464,7 +460,8 @@ pub(crate) fn sync_windowed_frames(
     pane_frames.frames.clear();
     pane_frames.rings.clear();
     pane_frames.all_corners.clear();
-    let force_raise = layout_hidden.is_changed();
+    let force_raise =
+        !added_hidden_windows.is_empty() || removed_hidden_windows.read().next().is_some();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
     memory.visible_frames.clear();
@@ -521,11 +518,11 @@ pub(crate) fn sync_windowed_frames(
         }
         visible.push(entity);
         let host_window = queries.hierarchy.host_of(entity);
-        let layout_is_hidden = host_window.is_some_and(|window| layout_hidden.is_hidden(window));
+        let layout_is_hidden = host_window.is_some_and(|window| hidden_windows.contains(window));
         let header_frame = host_window.and_then(|host_window| {
             queries.header_rect.iter().find_map(|(header, rect)| {
                 if queries.hierarchy.host_of(header) == Some(host_window) {
-                    WindowedFrameRect::of(rect)
+                    WindowedFrameRect::from_node(rect)
                 } else {
                     None
                 }
@@ -533,7 +530,7 @@ pub(crate) fn sync_windowed_frames(
         });
         let visible_pane_count =
             visible_pane_count_for_windowed_sync(tab, &queries.all_children, &queries.leaf_panes);
-        let Some(pane_frame) = WindowedFrameRect::of(computed) else {
+        let Some(pane_frame) = WindowedFrameRect::from_node(computed) else {
             continue;
         };
         let scale = computed.scale();
@@ -543,7 +540,7 @@ pub(crate) fn sync_windowed_frames(
             layout_is_hidden,
             visible_pane_count,
         );
-        if let Some(logical) = PaneFrame::of(frame, scale) {
+        if let Some(logical) = PaneFrame::from_windowed(frame, scale) {
             pane_frames.frames.insert(entity, logical);
         }
         let became_visible = !memory.visible_pages.contains(&entity);
@@ -572,10 +569,9 @@ pub(crate) fn sync_windowed_frames(
         );
         let (focus_ring_width, focus_ring_rgb, focus_ring_kind) = windowed_ring_for(
             parent,
-            pane_entity,
             &focus,
             visible_pane_count,
-            &active_panes,
+            active_panes.agent_in_pane(pane_entity),
             &settings,
             scale,
         );
@@ -683,7 +679,7 @@ pub(crate) struct PaneFrames {
 
 impl PaneFrames {
     #[cfg(target_os = "macos")]
-    pub(crate) fn of(&self, page: Entity) -> Option<PaneFrame> {
+    pub(crate) fn frame(&self, page: Entity) -> Option<PaneFrame> {
         self.frames.get(&page).copied()
     }
 
@@ -713,7 +709,7 @@ pub(crate) struct PaneFrame {
 }
 
 impl PaneFrame {
-    fn of(frame: WindowedFrameRect, scale: f32) -> Option<Self> {
+    fn from_windowed(frame: WindowedFrameRect, scale: f32) -> Option<Self> {
         if !scale.is_finite() || scale <= 0.0 {
             return None;
         }
@@ -728,7 +724,7 @@ impl PaneFrame {
 }
 
 impl WindowedFrameRect {
-    fn of(rect: &ComputedNode) -> Option<Self> {
+    fn from_node(rect: &ComputedNode) -> Option<Self> {
         if rect.is_empty() {
             return None;
         }
@@ -977,7 +973,7 @@ pub(crate) fn sync_windowed_command_bar(
         *was_open = false;
         return;
     };
-    let state = OverlayState::of(node.display, *visibility, has_keyboard_target, shown_inline);
+    let state = OverlayState::resolve(node.display, *visibility, has_keyboard_target, shown_inline);
     let open = state.is_shown();
     let owns_input = state.owns_input();
     let render_hidden = command_bar_windowed_view_should_render_hidden(node.display, *visibility);
@@ -1511,21 +1507,19 @@ mod tests {
 
     #[test]
     fn the_user_ring_outranks_an_agent_ring_on_the_same_pane() {
-        use vmux_layout::active_panes::{ActivePanes, ActiveStack, ProfileId};
+        use vmux_layout::active_pane::ActiveStack;
         use vmux_layout::stack::FocusedStack;
 
         let mut world = World::new();
-        let pane = world.spawn_empty().id();
         let stack = world.spawn_empty().id();
         let settings = test_app_settings_with_radius(0.0);
         let user = &settings.layout.focus_ring.color;
 
-        let mut agent_only = ActivePanes::default();
-        agent_only.0.insert(
-            ProfileId::Agent("claude".to_string()),
+        let agent = (
+            "claude",
             ActiveStack {
                 tab: None,
-                pane: Some(pane),
+                pane: None,
                 stack: Some(stack),
                 kind: Some(vmux_core::agent::AgentKind::Claude),
             },
@@ -1533,7 +1527,7 @@ mod tests {
         let unfocused = FocusedStack::default();
 
         let (width, rgb, kind) =
-            windowed_ring_for(stack, pane, &unfocused, 2, &agent_only, &settings, 1.0);
+            windowed_ring_for(stack, &unfocused, 2, Some(agent), &settings, 1.0);
         assert!(width > 0.0, "an agent's active pane draws a ring");
         assert_eq!(kind, Some(vmux_core::agent::AgentKind::Claude));
         assert_ne!(
@@ -1546,21 +1540,12 @@ mod tests {
             stack: Some(stack),
             ..Default::default()
         };
-        let (width, rgb, kind) =
-            windowed_ring_for(stack, pane, &focused, 2, &agent_only, &settings, 1.0);
+        let (width, rgb, kind) = windowed_ring_for(stack, &focused, 2, Some(agent), &settings, 1.0);
         assert!(width > 0.0);
         assert_eq!(rgb, [user.r, user.g, user.b]);
         assert_eq!(kind, None, "no agent badge on the user's own ring");
 
-        let (width, _, _) = windowed_ring_for(
-            stack,
-            pane,
-            &focused,
-            1,
-            &ActivePanes::default(),
-            &settings,
-            1.0,
-        );
+        let (width, _, _) = windowed_ring_for(stack, &focused, 1, None, &settings, 1.0);
         assert_eq!(width, 0.0);
     }
 
@@ -2016,7 +2001,7 @@ mod tests {
 
     #[test]
     fn revealing_command_bar_owns_input_while_its_view_stays_parked() {
-        let revealing = OverlayState::of(Display::Flex, Visibility::Hidden, true, false);
+        let revealing = OverlayState::resolve(Display::Flex, Visibility::Hidden, true, false);
 
         assert!(revealing.owns_input());
         assert!(!revealing.is_shown());

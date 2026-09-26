@@ -13,7 +13,6 @@ use vmux_core::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, Order, PageMetadata,
 };
 use vmux_flex::prelude::*;
-use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::{
@@ -32,7 +31,7 @@ pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::bookmark_persistence::BookmarkPersistencePlugin)
+        app.add_plugins(crate::bookmark::BookmarkPersistencePlugin)
             .insert_resource(AutoSave {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
@@ -511,25 +510,6 @@ fn sort_tabs_by_order(mut tabs: Vec<(Entity, Option<u32>, Option<i64>)>) -> Vec<
     tabs.into_iter().map(|(entity, _, _)| entity).collect()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct PageUrl<'a>(&'a str);
-
-impl<'a> PageUrl<'a> {
-    fn of(url: &'a str) -> Self {
-        let path = url.split(['?', '#']).next().unwrap_or(url);
-        Self(path.trim_end_matches('/'))
-    }
-
-    fn hosted_by(self, pages: &Query<&NativelyHosted>) -> Option<NativelyHosted> {
-        for page in pages {
-            if page.answers_for(self.0) {
-                return Some(*page);
-            }
-        }
-        None
-    }
-}
-
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
     tabs_need_view: Query<(Entity, Option<&Order>, Option<&CreatedAt>), (With<Tab>, Without<Node>)>,
@@ -657,14 +637,12 @@ pub(crate) fn rebuild_space_views(
             .unwrap_or(false);
 
         if !has_browser {
-            if let Some(page) = PageUrl::of(&meta.url).hosted_by(&native_pages) {
+            if let Some(page) = native_pages.iter().find(|page| page.answers_for(&meta.url)) {
                 commands.spawn((
                     vmux_layout::cef::Browser::native_page(&meta.url, page.title),
                     ChildOf(entity),
                 ));
-            } else if meta
-                .url
-                .starts_with(TERMINAL_PAGE_URL.trim_end_matches('/'))
+            } else if vmux_api::VmuxRoute::parse(&meta.url).is_some_and(|route| route.is_terminal())
             {
                 let cwd = saved_launch.map(|l| std::path::PathBuf::from(&l.cwd));
                 let term = commands
@@ -782,6 +760,7 @@ mod tests {
     use super::*;
     use bevy::ecs::entity::EntityHashMap;
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_layout::event::TERMINAL_PAGE_URL;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -791,43 +770,39 @@ mod tests {
     fn saved_components_keep_the_type_paths_stores_name_them_by() {
         use bevy::reflect::TypePath;
 
-        macro_rules! paths {
-            ($($ty:ty),+ $(,)?) => { vec![$(<$ty as TypePath>::type_path()),+] };
-        }
-
-        let actual = paths![
-            ChildOf,
-            Children,
-            Name,
-            Stack,
-            Tab,
-            TabWorkspace,
-            TabWorktree,
-            TabDirDecided,
-            Pane,
-            PaneSplit,
-            PaneSize,
-            Space,
-            SpaceId,
-            WindowGeometry,
-            Profile,
-            Open,
-            PageMetadata,
-            ArchivedPage,
-            ArchivedPagePosition,
-            ArchivedTabPage,
-            PaneId,
-            vmux_history::CreatedAt,
-            vmux_history::LastActivatedAt,
-            vmux_history::Visit,
-            vmux_core::Url,
-            vmux_core::VisitCount,
-            vmux_core::LastVisitedAt,
-            vmux_core::VisitedUrl,
-            vmux_core::TransitionType,
-            vmux_core::Order,
-            vmux_editor::StackExplorerVisibility,
-            vmux_terminal::launch::TerminalLaunch,
+        let actual = vec![
+            <ChildOf as TypePath>::type_path(),
+            <Children as TypePath>::type_path(),
+            <Name as TypePath>::type_path(),
+            <Stack as TypePath>::type_path(),
+            <Tab as TypePath>::type_path(),
+            <TabWorkspace as TypePath>::type_path(),
+            <TabWorktree as TypePath>::type_path(),
+            <TabDirDecided as TypePath>::type_path(),
+            <Pane as TypePath>::type_path(),
+            <PaneSplit as TypePath>::type_path(),
+            <PaneSize as TypePath>::type_path(),
+            <Space as TypePath>::type_path(),
+            <SpaceId as TypePath>::type_path(),
+            <WindowGeometry as TypePath>::type_path(),
+            <Profile as TypePath>::type_path(),
+            <Open as TypePath>::type_path(),
+            <PageMetadata as TypePath>::type_path(),
+            <ArchivedPage as TypePath>::type_path(),
+            <ArchivedPagePosition as TypePath>::type_path(),
+            <ArchivedTabPage as TypePath>::type_path(),
+            <PaneId as TypePath>::type_path(),
+            <vmux_history::CreatedAt as TypePath>::type_path(),
+            <vmux_history::LastActivatedAt as TypePath>::type_path(),
+            <vmux_history::Visit as TypePath>::type_path(),
+            <vmux_core::Url as TypePath>::type_path(),
+            <vmux_core::VisitCount as TypePath>::type_path(),
+            <vmux_core::LastVisitedAt as TypePath>::type_path(),
+            <vmux_core::VisitedUrl as TypePath>::type_path(),
+            <vmux_core::TransitionType as TypePath>::type_path(),
+            <vmux_core::Order as TypePath>::type_path(),
+            <vmux_editor::StackExplorerVisibility as TypePath>::type_path(),
+            <vmux_terminal::launch::TerminalLaunch as TypePath>::type_path(),
         ];
 
         assert_eq!(
@@ -1242,16 +1217,11 @@ mod tests {
 
     #[test]
     fn a_neighbouring_url_does_not_claim_a_hosted_page() {
-        assert_eq!(PageUrl::of("vmux://vault/"), PageUrl::of("vmux://vault"));
-        assert_eq!(
-            PageUrl::of("vmux://vault/?provider=github"),
-            PageUrl::of("vmux://vault/")
-        );
-        assert_ne!(PageUrl::of("vmux://vaults/"), PageUrl::of("vmux://vault/"));
-        assert_ne!(
-            PageUrl::of("vmux://vault/deep"),
-            PageUrl::of("vmux://vault/")
-        );
+        let page = NativelyHosted::page("vmux://vault/", "Vault");
+        assert!(page.answers_for("vmux://vault"));
+        assert!(page.answers_for("vmux://vault/?provider=github"));
+        assert!(!page.answers_for("vmux://vaults/"));
+        assert!(!page.answers_for("vmux://vault/deep"));
     }
 
     #[test]

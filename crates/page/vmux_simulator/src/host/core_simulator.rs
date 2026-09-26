@@ -8,7 +8,7 @@ use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{AnyClass, AnyObject};
 use objc2::{msg_send, sel};
 use objc2_foundation::{NSArray, NSError, NSString, NSUUID};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
 use std::io::Write;
 use std::process::Command;
@@ -18,107 +18,113 @@ pub(super) struct CoreSimulatorPlugin;
 
 impl Plugin for CoreSimulatorPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HardwareKeyboardState>()
-            .add_message::<HardwareKeyboardSetRequest>()
-            .add_systems(Update, update_hardware_keyboard.in_set(SimulatorInputSet));
+        app.add_systems(
+            Update,
+            (
+                initialize_hardware_keyboard,
+                ApplyDeferred,
+                update_hardware_keyboard,
+            )
+                .chain()
+                .in_set(SimulatorInputSet),
+        );
     }
 }
 
-#[derive(Message)]
-pub(super) struct HardwareKeyboardSetRequest {
-    pub udid: String,
-    pub enabled: bool,
-}
-
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct HardwareKeyboardState {
-    enabled: HashMap<String, bool>,
-    requested: VecDeque<(String, bool)>,
+    enabled: bool,
+    requested: VecDeque<bool>,
     pending: Option<HardwareKeyboardTask>,
 }
 
 struct HardwareKeyboardTask {
-    udid: String,
     enabled: bool,
     task: Task<Result<(), String>>,
 }
 
-fn update_hardware_keyboard(
-    mut sets: MessageReader<HardwareKeyboardSetRequest>,
-    mut toggles: MessageReader<SimulatorSoftwareKeyboardRequest>,
-    active: Res<ActiveSimulatorView>,
-    devices: Query<(Entity, &SimulatorDevice)>,
-    wake: Option<Res<EventLoopProxyWrapper>>,
-    mut state: ResMut<HardwareKeyboardState>,
+fn initialize_hardware_keyboard(
+    devices: Query<Entity, (Added<SimulatorDevice>, Without<HardwareKeyboardState>)>,
+    mut commands: Commands,
 ) {
-    let completed = state
-        .pending
-        .as_mut()
-        .and_then(|pending| future::block_on(future::poll_once(&mut pending.task)));
-    if let Some(result) = completed {
-        let pending = state.pending.take().unwrap();
-        match result {
-            Ok(()) => {
-                state.enabled.insert(pending.udid, pending.enabled);
+    for entity in &devices {
+        commands
+            .entity(entity)
+            .insert(HardwareKeyboardState::disabling());
+    }
+}
+
+fn update_hardware_keyboard(
+    mut toggles: MessageReader<SimulatorSoftwareKeyboardRequest>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
+    mut devices: Query<(Entity, &SimulatorDevice, &mut HardwareKeyboardState)>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+) {
+    for (_, _, mut state) in &mut devices {
+        let completed = state
+            .pending
+            .as_mut()
+            .and_then(|pending| future::block_on(future::poll_once(&mut pending.task)));
+        if let Some(result) = completed {
+            let pending = state.pending.take().unwrap();
+            match result {
+                Ok(()) => state.enabled = pending.enabled,
+                Err(error) => error!("could not change simulator keyboard mode: {error}"),
             }
-            Err(error) => error!("could not change simulator keyboard mode: {error}"),
         }
     }
 
-    for request in sets.read() {
-        state
-            .requested
-            .push_back((request.udid.clone(), request.enabled));
-    }
+    let active = active.iter().next();
     for request in toggles.read() {
         let target = request
             .view
             .filter(|entity| devices.contains(*entity))
-            .or_else(|| active.select(devices.iter().map(|(entity, _)| entity)));
+            .or_else(|| {
+                ActiveSimulatorView::select(active, devices.iter().map(|(entity, _, _)| entity))
+            });
         let Some(target) = target else {
             continue;
         };
-        let Ok((_, device)) = devices.get(target) else {
+        let Ok((_, _, mut state)) = devices.get_mut(target) else {
             continue;
         };
         let enabled = state
             .requested
-            .iter()
-            .rev()
-            .find(|(udid, _)| udid == &device.udid)
-            .map(|(_, enabled)| *enabled)
-            .or_else(|| {
-                state
-                    .pending
-                    .as_ref()
-                    .filter(|pending| pending.udid == device.udid)
-                    .map(|pending| pending.enabled)
-            })
-            .or_else(|| state.enabled.get(&device.udid).copied())
-            .unwrap_or(true);
-        state.requested.push_back((device.udid.clone(), !enabled));
+            .back()
+            .copied()
+            .or_else(|| state.pending.as_ref().map(|pending| pending.enabled))
+            .unwrap_or(state.enabled);
+        state.requested.push_back(!enabled);
     }
 
-    if state.pending.is_some() {
-        return;
-    }
-    let Some((udid, enabled)) = state.requested.pop_front() else {
-        return;
-    };
-    let wake = wake.map(|wrapper| (**wrapper).clone());
-    let requested_udid = udid.clone();
-    let task = IoTaskPool::get().spawn(async move {
-        let result = request_hardware_keyboard(&requested_udid, enabled);
-        if let Some(wake) = wake {
-            let _ = wake.send_event(WinitUserEvent::WakeUp);
+    for (_, device, mut state) in &mut devices {
+        if state.pending.is_some() {
+            continue;
         }
-        result
-    });
-    state.pending = Some(HardwareKeyboardTask {
-        udid,
-        enabled,
-        task,
-    });
+        let Some(enabled) = state.requested.pop_front() else {
+            continue;
+        };
+        let wake = wake.as_ref().map(|wrapper| (***wrapper).clone());
+        let udid = device.udid.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            let result = request_hardware_keyboard(&udid, enabled);
+            if let Some(wake) = wake {
+                let _ = wake.send_event(WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        state.pending = Some(HardwareKeyboardTask { enabled, task });
+    }
+}
+
+impl HardwareKeyboardState {
+    fn disabling() -> Self {
+        Self {
+            enabled: true,
+            requested: VecDeque::from([false]),
+            pending: None,
+        }
+    }
 }
 
 pub(super) fn exit_if_requested() {

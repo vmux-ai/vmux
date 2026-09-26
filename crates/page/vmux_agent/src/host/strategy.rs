@@ -5,8 +5,8 @@ use bevy::prelude::Resource;
 
 use crate::AgentKind;
 use crate::AgentVariant;
-use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
 use crate::message::Message;
+use crate::runtime::cli::strategy::{CliAgentStrategy, ResumableSession};
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;
@@ -73,7 +73,7 @@ pub fn kind_supports_cross_runtime(kind: AgentKind) -> bool {
 pub(crate) fn acp_agent_kind(agent_id: &str) -> Option<AgentKind> {
     AgentKind::all().into_iter().find(|kind| {
         let segment = kind.as_url_segment();
-        agent_id == segment || agent_id == crate::acp_install::registry_id_alias(segment)
+        agent_id == segment || agent_id == crate::acp_tool::registry_id_alias(segment)
     })
 }
 

@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 #[cfg(host)]
 pub struct KeyStrokePlugin;
 
@@ -21,43 +19,39 @@ impl KeyStrokePlugin {
 #[cfg(host)]
 impl bevy::prelude::Plugin for KeyStrokePlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_plugins(bevy_cef::prelude::BinEventEmitterPlugin::<(
+        app.add_plugins(bevy_cef::prelude::UiEventPlugin::<(
             KeyStroke,
             PageKeyContext,
-        )>::for_hosts(Self::SENDERS));
+        )>::default());
     }
 }
 
-pub const KEY_CLAIMS_EVENT: &str = "key-claims";
-
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default, Eq, urls = [
+        "vmux://terminal/",
+        "file://",
+        "projects",
+        "knowledge",
+        "vmux://command-bar/",
+        "vmux://layout/",
+        "vmux://agent/",
+        "vmux://start/",
+        "vmux://spaces/",
+    ])]
 pub struct PageKeyContext {
     pub keys: Vec<String>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_state(Default, Eq, urls = [
+    "vmux://terminal/",
+    "file://",
+    "projects",
+    "knowledge",
+    "vmux://command-bar/",
+    "vmux://layout/",
+    "vmux://agent/",
+    "vmux://start/",
+    "vmux://spaces/",
+])]
 pub struct KeyClaims {
     pub keys: Vec<ClaimedKey>,
 }
@@ -77,7 +71,7 @@ pub enum KeyVerdict {
 }
 
 impl KeyVerdict {
-    pub fn of(
+    pub fn decide(
         claims: &KeyClaims,
         unclaimed: Unclaimed,
         stroke: &KeyStroke,
@@ -102,37 +96,13 @@ pub enum Unclaimed {
     Forwards,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ClaimedKey {
     pub code: String,
     pub mods: KeyModifiers,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Default, Eq, Hash)]
 pub struct KeyModifiers {
     pub ctrl: bool,
     pub shift: bool,
@@ -146,18 +116,17 @@ impl KeyModifiers {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default, Eq, urls = [
+        "vmux://terminal/",
+        "file://",
+        "projects",
+        "knowledge",
+        "vmux://command-bar/",
+        "vmux://layout/",
+        "vmux://agent/",
+        "vmux://start/",
+        "vmux://spaces/",
+    ])]
 pub struct KeyStroke {
     pub key: String,
     #[serde(default)]
@@ -235,11 +204,11 @@ mod tests {
         let claims = claims(&[("KeyX", CTRL)]);
 
         assert_eq!(
-            KeyVerdict::of(&claims, Unclaimed::Types, &stroke("KeyX", CTRL), false),
+            KeyVerdict::decide(&claims, Unclaimed::Types, &stroke("KeyX", CTRL), false),
             KeyVerdict::Send
         );
         assert_eq!(
-            KeyVerdict::of(
+            KeyVerdict::decide(
                 &claims,
                 Unclaimed::Types,
                 &stroke("KeyX", KeyModifiers::default()),
@@ -252,7 +221,7 @@ mod tests {
     #[test]
     fn a_forwarding_surface_sends_what_nobody_claimed() {
         assert_eq!(
-            KeyVerdict::of(
+            KeyVerdict::decide(
                 &claims(&[]),
                 Unclaimed::Forwards,
                 &stroke("KeyX", KeyModifiers::default()),
@@ -268,7 +237,7 @@ mod tests {
 
         for unclaimed in [Unclaimed::Types, Unclaimed::Forwards] {
             assert_eq!(
-                KeyVerdict::of(&claims, unclaimed, &stroke("KeyX", CTRL), true),
+                KeyVerdict::decide(&claims, unclaimed, &stroke("KeyX", CTRL), true),
                 KeyVerdict::Browser
             );
         }

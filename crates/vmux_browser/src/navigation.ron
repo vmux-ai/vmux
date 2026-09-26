@@ -1,0 +1,40 @@
+[
+    (
+        id: "browser_prev_page",
+        label: "Back",
+        group: "Browser > Navigation",
+        accelerator: Some("super+["),
+        mcp: Some((description: "Back", allow_agent: true)),
+    ),
+    (
+        id: "browser_next_page",
+        label: "Forward",
+        group: "Browser > Navigation",
+        accelerator: Some("super+]"),
+        mcp: Some((description: "Forward", allow_agent: true)),
+    ),
+    (
+        id: "browser_reload",
+        label: "Reload",
+        group: "Browser > Navigation",
+        accelerator: Some("super+r"),
+        shortcuts: [(shortcut: Direct("Super+r"), when: None)],
+        mcp: Some((description: "Reload", allow_agent: true)),
+    ),
+    (
+        id: "browser_hard_reload",
+        label: "Hard Reload",
+        group: "Browser > Navigation",
+        accelerator: Some("super+shift+r"),
+        shortcuts: [(shortcut: Direct("Super+Shift+R"), when: None)],
+        mcp: Some((description: "Hard Reload", allow_agent: true)),
+    ),
+    (
+        id: "browser_stop",
+        label: "Stop Loading",
+        group: "Browser > Navigation",
+        accelerator: Some("super+."),
+        hidden: true,
+        mcp: Some((description: "Stop Loading", allow_agent: true)),
+    ),
+]

@@ -28,10 +28,11 @@ pub enum AgentUrl {
 
 impl AgentUrl {
     pub fn parse(url: &str) -> Option<Self> {
-        let body = url
-            .strip_prefix("vmux://sessions/")
-            .or_else(|| url.strip_prefix("vmux://agent/"))?;
-        let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
+        let route = vmux_api::VmuxRoute::parse(url)?;
+        if !route.is_agent() {
+            return None;
+        }
+        let segs: Vec<&str> = route.path_segments().collect();
         match segs.as_slice() {
             [] => Some(AgentUrl::PageDefault),
             [id] => Some(AgentUrl::Acp {

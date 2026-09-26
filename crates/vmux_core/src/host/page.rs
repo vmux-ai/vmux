@@ -1,26 +1,25 @@
 use bevy::{
     asset::io::embedded::EmbeddedAssetRegistry,
-    ecs::system::SystemParam,
     prelude::{
         App, Commands, Component, Entity, IntoScheduleConfigs, Message, MessageReader,
-        MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update, With,
+        MessageWriter, On, Plugin, Query, ResMut, Startup, SystemSet, Update,
     },
 };
-use bevy_cef::prelude::BinReceive;
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_cef_core::prelude::CefEmbeddedHost;
-use serde::Deserialize;
 use std::path::{Path, PathBuf};
+pub use vmux_api::PageReady;
 
 pub struct PagePlugin;
 
 impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(Startup, PageEmbedSet)
+        app.add_plugins(UiEventPlugin::<(PageReady,)>::default())
+            .add_observer(mark_webview_page_ready)
+            .configure_sets(Startup, PageEmbedSet)
             .add_systems(Startup, embed_page_static_assets.in_set(PageEmbedSet));
     }
 }
-
-pub const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageManifest {
@@ -76,6 +75,15 @@ impl NativelyHosted {
             return url
                 .split_once(':')
                 .is_some_and(|(candidate, _)| candidate.eq_ignore_ascii_case(scheme));
+        }
+        if let (Some(base), Some(candidate)) = (
+            vmux_api::VmuxRoute::parse(self.url),
+            vmux_api::VmuxRoute::parse(url),
+        ) {
+            return match self.owns_subtree {
+                true => candidate.in_subtree(&base),
+                false => candidate.same_page(&base),
+            };
         }
         let (Ok(base), Ok(candidate)) = (url::Url::parse(self.url), url::Url::parse(url)) else {
             return false;
@@ -207,22 +215,6 @@ pub struct HostHistoryTraversed {
     pub entry: HostHistoryEntry,
 }
 
-#[derive(SystemParam)]
-pub struct HostHistoryNavigation<'w, 's> {
-    hosted: Query<'w, 's, (), With<HostHistory>>,
-    steps: MessageWriter<'w, HostHistoryStep>,
-}
-
-impl HostHistoryNavigation<'_, '_> {
-    pub fn stepped(&mut self, webview: Entity, delta: HostHistoryDelta) -> bool {
-        if !self.hosted.contains(webview) {
-            return false;
-        }
-        self.steps.write(HostHistoryStep { webview, delta });
-        true
-    }
-}
-
 fn step_host_history(
     mut steps: MessageReader<HostHistoryStep>,
     mut histories: Query<&mut HostHistory>,
@@ -244,10 +236,10 @@ fn step_host_history(
 
 impl PageManifest {
     pub fn answers_for(&self, url: &str) -> bool {
-        let Ok(url) = url::Url::parse(url) else {
+        let Some(route) = vmux_api::VmuxRoute::parse(url) else {
             return false;
         };
-        url.scheme() == "vmux" && url.host_str() == Some(self.host.trim().trim_matches('/'))
+        route.is_host(self.host.trim().trim_matches('/'))
     }
 
     pub fn metadata_for(&self, url: impl Into<String>) -> crate::PageMetadata {
@@ -280,20 +272,7 @@ impl PageManifest {
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PageEmbedSet;
 
-#[derive(
-    Clone,
-    Copy,
-    Component,
-    Debug,
-    Default,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct PageReady {}
-
-pub fn mark_webview_page_ready(trigger: On<BinReceive<PageReady>>, mut commands: Commands) {
+fn mark_webview_page_ready(trigger: On<UiInput<PageReady>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
         .insert(trigger.event().payload);
@@ -531,18 +510,6 @@ mod host_history_tests {
 #[cfg(test)]
 mod page_ready_tests {
     use super::*;
-
-    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    struct PageReadyPayloadProbe {}
-
-    #[test]
-    fn page_ready_cross_type_rkyv_compat() {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&PageReadyPayloadProbe {}).expect("ser");
-        println!("PageReady archive byte length: {}", bytes.len());
-        println!("PageReady archive bytes: {:?}", &bytes[..]);
-        let _decoded =
-            rkyv::from_bytes::<PageReady, rkyv::rancor::Error>(&bytes).expect("cross-type decode");
-    }
 
     #[test]
     fn page_ready_self_rkyv_roundtrip() {

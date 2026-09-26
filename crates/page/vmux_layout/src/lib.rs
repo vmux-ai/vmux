@@ -7,21 +7,19 @@
 pub mod event;
 pub mod protocol;
 pub mod reconcile;
+pub mod state;
 
 #[cfg(ui)]
-pub mod tools_page;
+pub mod ui;
 
 #[cfg(ui)]
-pub mod page;
+mod extension;
+
+#[cfg(ui)]
+mod remote;
 
 #[cfg(ui)]
 pub mod error_page;
-#[cfg(ui)]
-pub mod extensions_page;
-
-#[cfg(ui)]
-pub mod vault_page;
-
 #[cfg(host)]
 pub mod host;
 #[cfg(host)]

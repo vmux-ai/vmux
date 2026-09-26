@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use std::sync::atomic::{AtomicU64, Ordering};
-use vmux_command::WriteAppCommands;
+use vmux_api::protocol::{ClientMessage, ProcessId};
+use vmux_command::WriteCommandRequests;
 use vmux_core::KeyboardOwner;
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
@@ -10,8 +11,8 @@ use vmux_core::agent::{
 use vmux_core::{LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled};
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::ForcePaneClose;
-use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{ClientMessage, ProcessId};
+use vmux_service::client::ServiceRequest;
+use vmux_service::plugin::ServiceConnected;
 use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{
@@ -24,35 +25,51 @@ use crate::strategy::AgentStrategies;
 use super::attach::attach_page_agent_to_stack;
 use super::command::ProcessStackSpawnRequest;
 use super::page_open::{
-    attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, clear_stack_children,
-    cli_initial_prompt,
+    attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, cli_initial_prompt,
 };
 use super::provider::{AgentExecutableOverride, resolve_agent_executable};
 
 pub(super) struct SpawnPlugin;
 
+pub(super) struct SpawnRequestsPlugin;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct SpawnRequestSet;
+
 impl Plugin for SpawnPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_message::<ServiceRequest>()
+            .add_plugins(SpawnRequestsPlugin)
+            .add_systems(
+                Update,
+                detect_agent_session_process_exit
+                    .in_set(WriteCommandRequests)
+                    .after(ServiceMessageSet)
+                    .after(super::query::AgentQuerySet),
+            )
+            .add_systems(
+                Update,
+                (
+                    respond_process_stack_spawn.after(super::command::CommandSet::Commands),
+                    (handle_restart_agent_pty, drain_agent_restarts)
+                        .chain()
+                        .before(ServiceMessageSet),
+                    respond_page_agent_attach,
+                    respond_page_agent_spawn_stack,
+                    respond_page_agent_spawn_default,
+                    respond_page_agent_attach_default,
+                ),
+            );
+    }
+}
+
+impl Plugin for SpawnRequestsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<SpawnAgentInStackRequest>().add_systems(
             Update,
-            detect_agent_session_process_exit
-                .in_set(WriteAppCommands)
-                .after(ServiceMessageSet)
-                .after(super::query::handle_agent_queries),
-        )
-        .add_systems(
-            Update,
-            (
-                (handle_spawn_agent_requests, drain_agent_launches).chain(),
-                respond_process_stack_spawn.after(super::command::handle_agent_commands),
-                (handle_restart_agent_pty, drain_agent_restarts)
-                    .chain()
-                    .before(ServiceMessageSet),
-                respond_page_agent_attach,
-                respond_page_agent_spawn_stack,
-                respond_page_agent_spawn_default,
-                respond_page_agent_attach_default,
-            ),
+            (handle_spawn_agent_requests, drain_agent_launches)
+                .chain()
+                .in_set(SpawnRequestSet),
         );
     }
 }
@@ -205,7 +222,7 @@ type RestartedAgentLaunch = (
     u64,
 );
 
-pub(super) fn handle_spawn_agent_requests(
+fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
     strategies: Option<Res<AgentStrategies>>,
@@ -325,7 +342,7 @@ fn drain_agent_launches(
         let validation = vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
             prepared.mcp_revision,
             || {
-                clear_stack_children(request.stack, &children_q, &mut commands);
+                vmux_layout::stack::clear_stack_children(request.stack, &children_q, &mut commands);
                 let terminal = commands
                     .spawn((
                         new_terminal_bundle_with_cwd(&settings, Some(&request.cwd)),
@@ -395,8 +412,8 @@ fn drain_agent_launches(
 fn respond_page_agent_attach(
     mut reader: MessageReader<PageAgentAttachRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -418,8 +435,8 @@ fn respond_page_agent_attach(
 fn respond_page_agent_spawn_stack(
     mut reader: MessageReader<PageAgentSpawnStackRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -448,8 +465,8 @@ fn respond_page_agent_spawn_stack(
 fn respond_page_agent_spawn_default(
     mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -493,8 +510,8 @@ fn respond_page_agent_spawn_default(
 fn respond_page_agent_attach_default(
     mut reader: MessageReader<PageAgentAttachDefaultRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
-    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
+    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
 ) {
     for req in reader.read() {
         let Some(idx) = idx.as_deref() else {
@@ -530,7 +547,7 @@ fn respond_page_agent_attach_default(
 
 fn rebuilt_args_env_for_restart(
     launch: &TerminalLaunch,
-    strategy: &dyn crate::client::cli::strategy::CliAgentStrategy,
+    strategy: &dyn crate::runtime::cli::strategy::CliAgentStrategy,
     session_id: Option<&str>,
     new_id: ProcessId,
 ) -> Result<(Vec<String>, Vec<(String, String)>, u64), String> {
@@ -567,15 +584,15 @@ fn handle_restart_agent_pty(
         (Option<&TerminalLaunch>, &AgentSession, Option<&SessionId>),
         Without<PendingAgentRestart>,
     >,
-    service: Option<Res<ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     strategies: Option<Res<AgentStrategies>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let Some(_service) = service else {
+    if connected.is_none() {
         for _ in reader.read() {}
         return;
-    };
+    }
     for msg in reader.read() {
         let Ok((launch, session, session_id)) = q.get(msg.entity) else {
             continue;
@@ -624,11 +641,14 @@ fn drain_agent_restarts(
         Option<&TerminalGridSize>,
         &mut PendingAgentRestart,
     )>,
-    service: Option<Res<ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     mut restart_requests: MessageWriter<RestartAgentPty>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
+    if connected.is_none() {
+        return;
+    }
     for (entity, mut pid, mut launch, grid, mut pending) in &mut q {
         let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
@@ -644,11 +664,14 @@ fn drain_agent_restarts(
         let (cols, rows) = grid.map(|grid| (grid.cols, grid.rows)).unwrap_or((80, 24));
         let validation = vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
             mcp_revision,
-            || {
-                service
-                    .0
-                    .send(ClientMessage::KillProcess { process_id: *pid });
-                service.0.send(ClientMessage::CreateProcess {
+            || (),
+        );
+        match validation {
+            Ok(Some(())) => {
+                service_requests.write(ServiceRequest(ClientMessage::KillProcess {
+                    process_id: *pid,
+                }));
+                service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
                     process_id: new_id,
                     command,
                     args: args.clone(),
@@ -656,11 +679,8 @@ fn drain_agent_restarts(
                     env: env.clone(),
                     cols,
                     rows,
-                });
-            },
-        );
-        match validation {
-            Ok(Some(())) => {}
+                }));
+            }
             Ok(None) => {
                 commands.entity(entity).remove::<PendingAgentRestart>();
                 restart_requests.write(RestartAgentPty { entity });
@@ -747,7 +767,7 @@ mod tests {
         let new_id = ProcessId::new();
         let (args, _env, _) = rebuilt_args_env_for_restart(
             &launch,
-            &crate::client::cli::claude::ClaudeStrategy,
+            &crate::runtime::cli::claude::ClaudeStrategy,
             None,
             new_id,
         )
@@ -779,7 +799,7 @@ mod tests {
 
         let (_, env, _) = rebuilt_args_env_for_restart(
             &launch,
-            &crate::client::cli::codex::CodexStrategy,
+            &crate::runtime::cli::codex::CodexStrategy,
             None,
             ProcessId::new(),
         )
@@ -805,7 +825,7 @@ mod tests {
         assert!(
             rebuilt_args_env_for_restart(
                 &launch,
-                &crate::client::cli::codex::CodexStrategy,
+                &crate::runtime::cli::codex::CodexStrategy,
                 None,
                 ProcessId::new(),
             )

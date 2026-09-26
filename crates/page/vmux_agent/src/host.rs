@@ -1,13 +1,17 @@
 mod tree;
 pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
 
-pub mod acp_install;
+#[derive(bevy::prelude::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct AgentContinuationSet;
+
 pub mod acp_registry;
+pub mod acp_tool;
+pub(crate) mod approval;
 pub mod attach;
 pub mod attention;
 pub mod browser_pane;
+mod capture_tool;
 pub mod chat;
-pub mod client;
 pub mod command;
 pub mod command_bar;
 pub mod echo;
@@ -16,6 +20,7 @@ pub mod events;
 pub mod exec;
 pub mod follow;
 pub mod handoff;
+mod ingress;
 pub mod launch;
 pub mod managed_mcp;
 pub mod mcp;
@@ -26,20 +31,16 @@ pub mod query;
 pub mod run_state;
 pub mod run_state_kind;
 pub mod run_terminal;
+pub mod runtime;
 pub mod self_command;
 pub mod session;
 pub mod snapshot_updater;
 pub mod spawn;
 pub mod strategy;
 pub mod toast;
-pub mod tools;
+mod tool;
 pub mod url;
 pub mod workspace;
-
-pub mod systems {
-    pub mod approval;
-    pub mod surface_errors;
-}
 
 #[cfg(test)]
 pub mod test_support;
@@ -49,12 +50,10 @@ pub(crate) mod tidy;
 pub use self::attach::{
     attach_acp_agent_to_stack, attach_page_agent_to_stack, page_agent_placeholder_url,
 };
-pub use self::command::AgentLookups;
 pub use self::provider::AgentExecutableOverride;
-pub use self::run_terminal::AgentTerminalRegions;
+pub use capture_tool::CaptureToolPlugin;
 pub use vmux_space::cwd::valid_cwd;
 
-pub(crate) use self::follow::on_tidy_action;
 pub(crate) use self::run_terminal::agent_terminal_shell;
 pub(crate) use self::workspace::{
     PendingAgentChoice, PendingAgentProject, RepositoryNeedsWorktree,
@@ -62,7 +61,6 @@ pub(crate) use self::workspace::{
 
 pub use vmux_service::{http, message, stream};
 
-pub use client::cli::strategy::CliAgentStrategy;
 pub use events::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
@@ -72,15 +70,16 @@ pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 pub use run_state::AgentRunState;
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
+pub use runtime::cli::strategy::CliAgentStrategy;
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
-pub use tools::mcp_tool_defs;
+pub use tool::WorkspaceToolPlugin;
 pub use url::{AgentKind, AgentUrl};
 pub use vmux_session::room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
-    MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomEventIndex,
-    RoomIndex, RoomIntent, RoomMember, RoomMessageContent, RoomMetadata, RoomOpCommitted,
-    RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
+    MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomMember,
+    RoomMessageContent, RoomMetadata, RoomOpCommitted, RoomOpReceived, RoomPlugin, RoomProjection,
+    StreamingMessage,
 };
 pub use vmux_session::{
     AcpSession, AgentApprovalPolicy, AgentMessages, AgentSession, AgentVariant, PromptQueue,

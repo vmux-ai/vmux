@@ -14,7 +14,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 url = { workspace = true }
-vmux_wire = { path = "../vmux_wire" }
+vmux_api = { path = "../vmux_api" }
+vmux_path = { path = "../vmux_path" }
 zeroize = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]

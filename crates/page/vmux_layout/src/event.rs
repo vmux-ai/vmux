@@ -1,48 +1,15 @@
 use std::path::Path;
 
-use vmux_core::{PageIcon, PageMetadata};
+use vmux_core::PageIcon;
 
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
-pub const SERVICES_PAGE_URL: &str = "vmux://services/";
-pub const LAYOUT_STATE_EVENT: &str = "layout-state";
-pub const STACKS_EVENT: &str = "stacks";
-pub const RELOAD_EVENT: &str = "reload";
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ReloadEvent;
-pub const TABS_EVENT: &str = "tabs";
-pub const BOOKMARKS_EVENT: &str = "bookmarks";
-pub const BOOKMARK_MENU_ACTION_EVENT: &str = "bookmark-menu-action";
-pub const PANE_TREE_EVENT: &str = "pane-tree";
-pub const SIDE_SHEET_COMMAND_EVENT: &str = "side-sheet-command";
-pub const SIDE_SHEET_DRAG_EVENT: &str = "side-sheet-drag";
-pub const TAB_BOUNDARY_EVENT: &str = "tab-boundary";
-pub const REMOTE_STATE_EVENT: &str = "remote-state";
-pub const REMOTE_COMMAND_EVENT: &str = "remote-command";
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct LayoutStateEvent {
+#[vmux_api::contract(Default, Eq)]
+pub struct ReloadEffect {
+    pub revision: u64,
+}
+#[vmux_api::contract(Copy, Default)]
+pub struct LayoutGeometry {
     #[serde(default)]
     pub header_open: bool,
     #[serde(default)]
@@ -71,7 +38,7 @@ pub struct LayoutStateEvent {
     pub window_pad_left: f32,
 }
 
-impl LayoutStateEvent {
+impl LayoutGeometry {
     pub fn main_cef_left(&self) -> f32 {
         if self.side_sheet_open {
             self.window_pad_left + self.side_sheet_width + self.pane_gap
@@ -142,16 +109,7 @@ pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
 pub const SIDE_SHEET_MIN_WIDTH_PX: f32 = 160.0;
 pub const SIDE_SHEET_MAX_WIDTH_PX: f32 = 640.0;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Copy, url = "vmux://layout/")]
 pub struct SideSheetResizeEvent {
     pub width: f32,
     pub settled: bool,
@@ -181,17 +139,7 @@ impl SideSheetResizeEvent {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default, url = "vmux://layout/")]
 pub struct WindowDragRegionEvent {
     pub id: String,
     #[serde(default)]
@@ -288,13 +236,13 @@ mod tests {
 
     #[test]
     fn main_cef_left_includes_side_sheet_gap_when_open() {
-        let open = LayoutStateEvent {
+        let open = LayoutGeometry {
             side_sheet_open: true,
             side_sheet_width: 280.0,
             pane_gap: 8.0,
             ..Default::default()
         };
-        let closed = LayoutStateEvent {
+        let closed = LayoutGeometry {
             side_sheet_open: false,
             side_sheet_width: 280.0,
             pane_gap: 8.0,
@@ -307,12 +255,12 @@ mod tests {
 
     #[test]
     fn main_cef_left_includes_effective_window_left_padding() {
-        let closed = LayoutStateEvent {
+        let closed = LayoutGeometry {
             side_sheet_open: false,
             window_pad_left: 16.0,
             ..Default::default()
         };
-        let open = LayoutStateEvent {
+        let open = LayoutGeometry {
             side_sheet_open: true,
             side_sheet_width: 280.0,
             pane_gap: 8.0,
@@ -326,7 +274,7 @@ mod tests {
 
     #[test]
     fn header_offsets_can_override_derived_window_padding() {
-        let state = LayoutStateEvent {
+        let state = LayoutGeometry {
             side_sheet_open: true,
             side_sheet_width: 220.0,
             pane_gap: 4.0,
@@ -347,11 +295,11 @@ mod tests {
 
     #[test]
     fn tab_row_pad_left_clears_traffic_lights_when_side_sheet_closed() {
-        let closed = LayoutStateEvent {
+        let closed = LayoutGeometry {
             side_sheet_open: false,
             ..Default::default()
         };
-        let open = LayoutStateEvent {
+        let open = LayoutGeometry {
             side_sheet_open: true,
             ..Default::default()
         };
@@ -362,12 +310,12 @@ mod tests {
 
     #[test]
     fn header_visibility_tracks_header_open() {
-        let open = LayoutStateEvent {
+        let open = LayoutGeometry {
             header_open: true,
             side_sheet_open: false,
             ..Default::default()
         };
-        let closed = LayoutStateEvent {
+        let closed = LayoutGeometry {
             header_open: false,
             side_sheet_open: true,
             ..Default::default()
@@ -378,34 +326,6 @@ mod tests {
     }
 
     #[test]
-    fn header_command_event_rkyv_roundtrip() {
-        let original = HeaderCommandEvent {
-            header_command: "back".into(),
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        let recovered =
-            rkyv::from_bytes::<HeaderCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(recovered.header_command, "back");
-    }
-
-    #[test]
-    fn tabs_command_event_rkyv_roundtrip() {
-        let original = TabsCommandEvent {
-            command: "switch-tab".into(),
-            tab_id: Some("work".into()),
-            target_tab_id: Some("home".into()),
-            drop_placement: Some(TabDropPlacement::Before),
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        let recovered =
-            rkyv::from_bytes::<TabsCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(recovered.command, "switch-tab");
-        assert_eq!(recovered.tab_id.as_deref(), Some("work"));
-        assert_eq!(recovered.target_tab_id.as_deref(), Some("home"));
-        assert_eq!(recovered.drop_placement, Some(TabDropPlacement::Before));
-    }
-
-    #[test]
     fn tab_drop_placement_stays_relative_when_the_source_is_removed() {
         assert_eq!(TabDropPlacement::Before.destination(0, 2, 3), 1);
         assert_eq!(TabDropPlacement::After.destination(2, 0, 3), 1);
@@ -413,32 +333,20 @@ mod tests {
         assert_eq!(TabDropPlacement::After.destination(0, 2, 3), 2);
     }
 }
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct HeaderCommandEvent {
-    pub header_command: String,
-}
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
+pub struct HeaderBackRequest;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct StacksHostEvent {
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
+pub struct HeaderForwardRequest;
+
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
+pub struct HeaderReloadRequest;
+
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
+pub struct HeaderAddressFocusRequest;
+
+#[vmux_api::contract(Default, Eq)]
+pub struct StackNavigationState {
     pub stacks: Vec<StackRow>,
     #[serde(default)]
     pub can_go_back: bool,
@@ -448,17 +356,7 @@ pub struct StacksHostEvent {
     pub is_zoomed: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct StackRow {
     pub title: String,
     pub url: String,
@@ -471,18 +369,7 @@ pub struct StackRow {
     pub address: AddressParts,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct AddressParts {
     pub origin: String,
     pub rest: String,
@@ -531,33 +418,12 @@ impl AddressParts {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct TabsHostEvent {
+#[vmux_api::contract(Default, Eq)]
+pub struct TabListState {
     pub tabs: Vec<TabRow>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
 pub struct TabRow {
     pub id: String,
     pub name: String,
@@ -574,37 +440,27 @@ pub struct TabRow {
     pub is_done_unseen: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct TabsCommandEvent {
-    pub command: String,
-    #[serde(default)]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
+pub struct TabCreateRequest;
+
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
+pub struct TabCloseRequest {
     pub tab_id: Option<String>,
-    #[serde(default)]
-    pub target_tab_id: Option<String>,
-    #[serde(default)]
-    pub drop_placement: Option<TabDropPlacement>,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
+pub struct TabActivateRequest {
+    pub tab_id: String,
+}
+
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
+pub struct TabReorderRequest {
+    pub tab_id: String,
+    pub target_tab_id: String,
+    pub drop_placement: TabDropPlacement,
+}
+
+#[vmux_api::contract(Copy, Eq)]
 pub enum TabDropPlacement {
     Before,
     After,
@@ -622,30 +478,26 @@ impl TabDropPlacement {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct PaneTreeEvent {
+#[vmux_api::contract(Default)]
+pub struct PaneTreeState {
     pub panes: Vec<PaneNode>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Copy, Eq)]
+pub struct StackRevealTarget {
+    pub pane_id: u64,
+    pub stack_id: u64,
+}
+
+#[vmux_api::contract(Default)]
+pub struct SideSheetState {
+    pub active_space: Option<vmux_core::event::space::SpaceRow>,
+    pub active_pane: Option<PaneNode>,
+    pub active_page: Option<StackNode>,
+    pub reveal: Option<StackRevealTarget>,
+}
+
+#[vmux_api::contract]
 pub struct PaneNode {
     pub id: u64,
     pub is_active: bool,
@@ -656,18 +508,11 @@ pub struct PaneNode {
     pub stacks: Vec<StackNode>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract]
 pub struct StackNode {
     pub id: u64,
+    #[serde(default)]
+    pub agent_id: Option<String>,
     pub title: String,
     pub url: String,
     #[serde(default)]
@@ -682,40 +527,47 @@ pub struct StackNode {
     pub bg_color: Option<String>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct SideSheetCommandEvent {
-    pub command: String,
-    #[serde(default)]
-    pub pane_id: String,
-    #[serde(default)]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
+pub struct SideSheetStackActivateRequest {
+    pub pane_id: u64,
     pub stack_id: u64,
-    #[serde(default)]
-    pub line: u32,
-    #[serde(default)]
+}
+
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
+pub struct SideSheetStackCloseRequest {
+    pub pane_id: u64,
+    pub stack_id: u64,
+}
+
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
+pub struct SideSheetStackCreateRequest {
+    pub pane_id: u64,
+}
+
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
+pub struct SideSheetProjectOpenRequest {
+    pub pane_id: u64,
     pub path: String,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
+pub struct SideSheetSectionRequest {
+    pub pane_id: u64,
+    pub path: String,
+    pub expanded: bool,
+}
+
+impl SideSheetSectionRequest {
+    pub fn new(pane_id: u64, path: impl Into<String>, expanded: bool) -> Self {
+        Self {
+            pane_id,
+            path: path.into(),
+            expanded,
+        }
+    }
+}
+
+#[vmux_api::contract(Copy, Default, Eq)]
 pub enum RemotePhase {
     #[default]
     Disabled,
@@ -724,87 +576,50 @@ pub enum RemotePhase {
     Error,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct RemoteStateEvent {
+#[vmux_api::contract(Default, Eq)]
+pub struct RemoteUiState {
     pub enabled: bool,
     pub phase: RemotePhase,
     pub pairing_url: String,
     pub pairing_deep_link: String,
     pub paired: bool,
+    #[serde(default)]
+    pub pairing_visible: bool,
+    pub devices: Vec<RemoteDevice>,
     pub error: String,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct RemoteCommandEvent {
+#[vmux_api::contract(Default, Eq)]
+pub struct RemoteDevice {
+    pub id: String,
+}
+
+#[vmux_api::ui_event(Copy, Default, Eq, url = "vmux://layout/")]
+pub struct RemoteRequest {
     pub enabled: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
+pub struct RemotePairingShowRequest;
+
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
+pub struct RemotePairingDismissRequest;
+
+#[vmux_api::ui_event(Default, Eq, url = "vmux://layout/")]
 pub struct LayoutOverlayEvent {
     pub id: String,
     pub active: bool,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Copy, Default, Eq, url = "vmux://layout/")]
 pub struct RemoteCopyEvent;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default, Eq, url = "vmux://layout/")]
+pub struct RemoteRevokeRequest {
+    pub client_id: String,
+}
+
+#[vmux_api::contract(Default)]
 pub struct TabBoundary {
     pub effective_dir: String,
     pub source: String,
@@ -821,33 +636,44 @@ pub struct TabBoundary {
     pub pane_count: u32,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct TabBoundaryEvent {
+#[vmux_api::contract(Default)]
+pub struct TabBoundaryState {
     pub boundary: Option<TabBoundary>,
     pub projects: Vec<vmux_core::event::ProjectRow>,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
+pub struct ActiveSessionState {
+    pub session: Option<ActiveSession>,
+}
+
+#[vmux_api::contract]
+pub struct ActiveSession {
+    pub page: StackNode,
+    pub agent: Option<vmux_core::event::team::TeamMemberRow>,
+    pub project: Option<ActiveWorkspaceProject>,
+    pub boundary: Option<TabBoundary>,
+    pub pane_id: u64,
+}
+
+#[vmux_api::contract]
+pub struct ActiveWorkspaceProject {
+    pub root: vmux_core::event::ProjectRow,
+    pub children: Vec<vmux_core::event::ProjectRow>,
+    pub choices: Vec<vmux_core::event::ProjectRow>,
+}
+
+#[vmux_api::contract(Default)]
+pub struct HeaderState {
+    pub active: Option<StackRow>,
+    pub metadata: Option<vmux_core::PageMetadata>,
+    pub bookmarked: bool,
+    pub pinned_uuid: Option<String>,
+    pub user: Option<vmux_core::event::team::TeamMemberRow>,
+    pub agents: Vec<vmux_core::event::team::TeamMemberRow>,
+}
+
+#[vmux_api::contract(Copy, Eq)]
 pub enum SplitDirection {
     Row,
     Column,
@@ -868,188 +694,21 @@ pub enum LayoutNode {
     },
 }
 
-pub const UPDATE_READY_EVENT: &str = "update-ready";
-pub const UPDATE_CLEARED_EVENT: &str = "update-cleared";
-pub const UPDATE_PROGRESS_EVENT: &str = "update-progress";
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct UpdateReadyEvent {
+#[vmux_api::contract(Default)]
+pub struct UpdateReady {
     pub version: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct UpdateProgressEvent {
+#[vmux_api::contract(Default)]
+pub struct UpdateProgress {
     pub version: String,
     pub downloaded: u64,
     pub total: u64,
     pub installing: bool,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct UpdateClearedEvent;
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct RestartRequestEvent;
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct BookmarkRow {
-    pub uuid: String,
-    pub metadata: PageMetadata,
-    pub bookmarked: bool,
-    pub pinned: bool,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct FolderRow {
-    pub uuid: String,
-    pub name: String,
-    pub collapsed: bool,
-    pub parent: Option<String>,
-    pub children: Vec<BookmarkRow>,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum BookmarkNode {
-    Entry(BookmarkRow),
-    Folder(FolderRow),
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct BookmarksHostEvent {
-    pub pins: Vec<BookmarkRow>,
-    pub roots: Vec<BookmarkNode>,
-}
-
-pub use vmux_command::event::BookmarksCommandEvent;
-
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct BookmarkTextInputEvent {
-    pub active: bool,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct BookmarkContextMenuEvent {
-    pub active: bool,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct BookmarkMenuActionEvent {
-    pub sequence: u64,
-    pub action: String,
-    pub uuid: Option<String>,
-}
+#[vmux_api::contract(Copy, Default, Eq)]
+pub struct UpdateCleared;
 
 #[cfg(test)]
 mod update_event_tests {
@@ -1057,34 +716,27 @@ mod update_event_tests {
 
     #[test]
     fn update_ready_event_rkyv_round_trips() {
-        let evt = UpdateReadyEvent {
+        let evt = UpdateReady {
             version: "v9.9.9".to_string(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&evt).unwrap();
-        let back = rkyv::from_bytes::<UpdateReadyEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        let back = rkyv::from_bytes::<UpdateReady, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.version, "v9.9.9");
     }
 
     #[test]
     fn update_progress_event_rkyv_round_trips() {
-        let evt = UpdateProgressEvent {
+        let evt = UpdateProgress {
             version: "0.0.20".to_string(),
             downloaded: 42,
             total: 100,
             installing: false,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&evt).unwrap();
-        let back = rkyv::from_bytes::<UpdateProgressEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        let back = rkyv::from_bytes::<UpdateProgress, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.version, "0.0.20");
         assert_eq!(back.downloaded, 42);
         assert_eq!(back.total, 100);
         assert!(!back.installing);
-    }
-
-    #[test]
-    fn event_ids_are_stable() {
-        assert_eq!(UPDATE_READY_EVENT, "update-ready");
-        assert_eq!(UPDATE_CLEARED_EVENT, "update-cleared");
-        assert_eq!(UPDATE_PROGRESS_EVENT, "update-progress");
     }
 }

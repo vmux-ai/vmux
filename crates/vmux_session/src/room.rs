@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use vmux_wire::room::{
+use vmux_api::room::{
     ClientOpId, EventId, MemberId, MemberKind, Message, RoomEvent, RoomId, RoomRole,
 };
 
@@ -13,10 +13,9 @@ pub struct RoomPlugin;
 
 impl Plugin for RoomPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RoomIndex>()
-            .init_resource::<RoomEventIndex>()
-            .add_message::<RoomIntent>()
-            .add_message::<RoomOpReceived>()
+        app.world_mut()
+            .spawn((Name::new("Chat room registry"), RoomRegistry::default()));
+        app.add_message::<RoomOpReceived>()
             .add_message::<RoomOpCommitted>()
             .add_message::<CrdtChangeReceived>()
             .add_systems(
@@ -113,27 +112,17 @@ pub enum DocumentKind {
     Plan,
 }
 
-#[derive(Resource, Default)]
-pub struct RoomIndex(pub HashMap<RoomId, Entity>);
-
-#[derive(Resource, Default)]
-pub struct RoomEventIndex(pub HashMap<EventId, Entity>);
-
-#[derive(Message, Clone, Debug, PartialEq)]
-pub enum RoomIntent {
-    Append {
-        room_id: RoomId,
-        actor_id: MemberId,
-        client_op_id: ClientOpId,
-        message: Message,
-    },
+#[derive(Component, Default)]
+struct RoomRegistry {
+    rooms: HashMap<RoomId, Entity>,
+    events: HashMap<EventId, Entity>,
 }
 
 #[derive(Message, Clone, Debug, PartialEq)]
-pub struct RoomOpReceived(pub vmux_wire::room::RoomEvent);
+pub struct RoomOpReceived(pub vmux_api::room::RoomEvent);
 
 #[derive(Message, Clone, Debug, PartialEq)]
-pub struct RoomOpCommitted(pub vmux_wire::room::RoomEvent);
+pub struct RoomOpCommitted(pub vmux_api::room::RoomEvent);
 
 #[derive(Message, Clone, Debug, Eq, PartialEq)]
 pub struct CrdtChangeReceived {
@@ -166,8 +155,7 @@ fn ensure_implicit_rooms(
             Without<RoomAgentBinding>,
         ),
     >,
-    mut rooms: ResMut<RoomIndex>,
-    mut event_index: ResMut<RoomEventIndex>,
+    mut registry: Single<&mut RoomRegistry>,
 ) {
     for (session_entity, messages, title, page, acp) in &sessions {
         let Some((sid, agent_name)) = session_identity(page, acp) else {
@@ -175,7 +163,7 @@ fn ensure_implicit_rooms(
         };
         let room_id = RoomId::for_session(sid);
         let agent_id = MemberId::agent(&room_id);
-        let room_entity = rooms.0.get(&room_id).copied().unwrap_or_else(|| {
+        let room_entity = registry.rooms.get(&room_id).copied().unwrap_or_else(|| {
             let title = title
                 .map(|title| title.0.clone())
                 .filter(|title| !title.is_empty())
@@ -234,9 +222,9 @@ fn ensure_implicit_rooms(
                 room_entity,
                 sid,
                 &messages.0,
-                &mut event_index,
+                &mut registry.events,
             );
-            rooms.0.insert(room_id.clone(), room_entity);
+            registry.rooms.insert(room_id.clone(), room_entity);
             room_entity
         });
         commands.entity(session_entity).insert(RoomAgentBinding {
@@ -255,7 +243,7 @@ fn materialize_events(
     room_entity: Entity,
     sid: &str,
     messages: &[Message],
-    event_index: &mut RoomEventIndex,
+    event_index: &mut HashMap<EventId, Entity>,
 ) {
     for event in RoomEvent::from_messages(sid, 0, messages) {
         let event_entity = commands
@@ -274,7 +262,7 @@ fn materialize_events(
                 ChildOf(room_entity),
             ))
             .id();
-        event_index.0.insert(event.event_id, event_entity);
+        event_index.insert(event.event_id, event_entity);
     }
 }
 
@@ -289,16 +277,15 @@ fn sync_room_messages(
         ),
         Changed<AgentMessages>,
     >,
-    rooms: Res<RoomIndex>,
+    mut registry: Single<&mut RoomRegistry>,
     existing: Query<(Entity, &RoomEventIdentity, &ChildOf), With<MaterializedRoomEvent>>,
     mut projections: Query<&mut RoomProjection>,
-    mut event_index: ResMut<RoomEventIndex>,
 ) {
     for (messages, binding, page, acp) in &sessions {
         let Some((sid, _)) = session_identity(page, acp) else {
             continue;
         };
-        let Some(&room_entity) = rooms.0.get(&binding.room_id) else {
+        let Some(&room_entity) = registry.rooms.get(&binding.room_id) else {
             continue;
         };
         let events = RoomEvent::from_messages(sid, 0, &messages.0);
@@ -339,12 +326,12 @@ fn sync_room_messages(
                         ChildOf(room_entity),
                     ))
                     .id();
-                event_index.0.insert(event_id, entity);
+                registry.events.insert(event_id, entity);
             }
         }
         for (event_id, entity) in stale {
             commands.entity(entity).despawn();
-            event_index.0.remove(&event_id);
+            registry.events.remove(&event_id);
         }
         if let Ok(mut projection) = projections.get_mut(room_entity) {
             projection.through_seq = messages.0.len() as u64;
@@ -354,11 +341,11 @@ fn sync_room_messages(
 
 fn sync_room_titles(
     sessions: Query<(&AgentConversationTitle, &RoomAgentBinding), Changed<AgentConversationTitle>>,
-    rooms: Res<RoomIndex>,
+    registry: Single<&RoomRegistry>,
     mut metadata: Query<&mut RoomMetadata>,
 ) {
     for (title, binding) in &sessions {
-        let Some(&room_entity) = rooms.0.get(&binding.room_id) else {
+        let Some(&room_entity) = registry.rooms.get(&binding.room_id) else {
             continue;
         };
         if let Ok(mut metadata) = metadata.get_mut(room_entity)
@@ -377,8 +364,7 @@ fn cleanup_orphaned_rooms(
     >,
     room_entities: Query<(Entity, &ChatRoom, &RoomProjection)>,
     room_events: Query<(&RoomEventIdentity, &ChildOf), With<MaterializedRoomEvent>>,
-    mut rooms: ResMut<RoomIndex>,
-    mut event_index: ResMut<RoomEventIndex>,
+    mut registry: Single<&mut RoomRegistry>,
 ) {
     let live_sids = sessions
         .iter()
@@ -390,10 +376,10 @@ fn cleanup_orphaned_rooms(
         }
         for (event, child_of) in &room_events {
             if child_of.parent() == entity {
-                event_index.0.remove(&event.event_id);
+                registry.events.remove(&event.event_id);
             }
         }
-        rooms.0.remove(&room.room_id);
+        registry.rooms.remove(&room.room_id);
         commands.entity(entity).despawn();
     }
 }
@@ -402,7 +388,7 @@ fn cleanup_orphaned_rooms(
 mod tests {
     use super::*;
     use crate::variant::AgentVariant;
-    use vmux_wire::agent::AgentKind;
+    use vmux_api::agent::AgentKind;
 
     #[test]
     fn projects_agent_session_into_stable_room_entities() {
@@ -425,11 +411,20 @@ mod tests {
 
         app.update();
 
-        let binding = app.world().get::<RoomAgentBinding>(session).unwrap();
-        assert_eq!(binding.room_id, RoomId::for_session("session-1"));
-        let room_entity = app.world().resource::<RoomIndex>().0[&binding.room_id];
+        let room_id = app
+            .world()
+            .get::<RoomAgentBinding>(session)
+            .unwrap()
+            .room_id
+            .clone();
+        assert_eq!(room_id, RoomId::for_session("session-1"));
         let first_event_id = EventId::new("session:session-1:event:1");
-        let first_event_entity = app.world().resource::<RoomEventIndex>().0[&first_event_id];
+        let (room_entity, first_event_entity) = {
+            let world = app.world_mut();
+            let mut registry = world.query::<&RoomRegistry>();
+            let registry = registry.single(world).unwrap();
+            (registry.rooms[&room_id], registry.events[&first_event_id])
+        };
         assert_eq!(
             app.world().get::<RoomMetadata>(room_entity),
             Some(&RoomMetadata {
@@ -448,7 +443,7 @@ mod tests {
             .unwrap()
             .0
             .push(Message::Assistant {
-                blocks: vec![vmux_wire::room::AssistantBlock::Text("hi".to_string())],
+                blocks: vec![vmux_api::room::AssistantBlock::Text("hi".to_string())],
             });
         app.world_mut()
             .get_mut::<AgentConversationTitle>(session)
@@ -456,10 +451,12 @@ mod tests {
             .0 = "Updated room".to_string();
         app.update();
 
-        assert_eq!(
-            app.world().resource::<RoomEventIndex>().0[&first_event_id],
-            first_event_entity
-        );
+        let current_first_event = {
+            let world = app.world_mut();
+            let mut registry = world.query::<&RoomRegistry>();
+            registry.single(world).unwrap().events[&first_event_id]
+        };
+        assert_eq!(current_first_event, first_event_entity);
         assert_eq!(
             app.world().get::<RoomProjection>(room_entity),
             Some(&RoomProjection {
@@ -477,7 +474,10 @@ mod tests {
         app.world_mut().entity_mut(session).despawn();
         app.update();
 
-        assert!(app.world().resource::<RoomIndex>().0.is_empty());
-        assert!(app.world().resource::<RoomEventIndex>().0.is_empty());
+        let world = app.world_mut();
+        let mut registry = world.query::<&RoomRegistry>();
+        let registry = registry.single(world).unwrap();
+        assert!(registry.rooms.is_empty());
+        assert!(registry.events.is_empty());
     }
 }

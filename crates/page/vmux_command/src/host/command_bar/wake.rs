@@ -3,13 +3,13 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
 use crate::command_bar::handler::PendingCommandBarReveal;
 
-pub(crate) struct CommandBarWakePlugin;
+pub(crate) struct WakePlugin;
 
-impl Plugin for CommandBarWakePlugin {
+impl Plugin for WakePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            keep_awake_while_command_bar_opening.after(crate::ReadAppCommands),
+            keep_awake_while_command_bar_opening.after(crate::ReadCommandRequests),
         );
     }
 }

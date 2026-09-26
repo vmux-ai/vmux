@@ -1,17 +1,13 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinReceive, Receive};
-use vmux_layout::event::RestartRequestEvent;
+use bevy_cef::prelude::{Receive, UiInput};
+use vmux_api::service::RelaunchRequest;
 
 pub(crate) struct RelaunchPlugin;
 
 impl Plugin for RelaunchPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            bevy_cef::prelude::BinEventEmitterPlugin::<(RestartRequestEvent,)>::for_hosts(&[
-                "debug",
-                "extensions",
-                "layout",
-            ]),
+            bevy_cef::prelude::UiEventPlugin::<(RelaunchRequest,)>::default(),
             bevy_cef::prelude::JsEmitEventPlugin::<PageRelaunchRequest>::default(),
         ))
         .add_observer(on_restart_request)
@@ -156,10 +152,7 @@ fn launch_profile(profile: &str) {
     bevy::log::info!(profile, "launched profile window");
 }
 
-fn on_restart_request(
-    _trigger: On<BinReceive<RestartRequestEvent>>,
-    mut exit: MessageWriter<AppExit>,
-) {
+fn on_restart_request(_trigger: On<UiInput<RelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
     relaunch_now(&mut exit, None);
 }
 

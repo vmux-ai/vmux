@@ -1,56 +1,42 @@
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy_cef::prelude::BinReceive;
+use bevy_cef::prelude::UiInput;
 use vmux_core::input::KeyStroke;
 
-use crate::command::AppCommand;
-use crate::issued::CommandIssuer;
+use crate::definition::CommandInvocation;
 use crate::shortcut::{KeyCombo, KeyContext, Keymap};
 
-pub struct PageKeyPlugin;
+pub struct KeyPlugin;
 
-impl Plugin for PageKeyPlugin {
+impl Plugin for KeyPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(resolve_page_key);
     }
 }
 
 fn resolve_page_key(
-    trigger: On<BinReceive<KeyStroke>>,
-    keys: ScopedKeys,
-    mut issuer: CommandIssuer,
+    trigger: On<UiInput<KeyStroke>>,
+    keymap: Option<Res<Keymap>>,
+    contexts: Query<&KeyContext>,
+    mut invocations: MessageWriter<CommandInvocation>,
 ) {
     let page = trigger.event_target();
-    let Some(command) = keys.command(page, &trigger.payload) else {
+    let (Some(keymap), Ok(context), Some(pressed)) = (
+        keymap.as_deref(),
+        contexts.get(page),
+        KeyCombo::from_stroke(&trigger.payload),
+    ) else {
         return;
     };
-    issuer.issue(page, command);
-}
-
-#[derive(SystemParam)]
-pub struct ScopedKeys<'w, 's> {
-    keymap: Option<Res<'w, Keymap>>,
-    contexts: Query<'w, 's, &'static KeyContext>,
-}
-
-impl ScopedKeys<'_, '_> {
-    pub fn command(&self, page: Entity, stroke: &KeyStroke) -> Option<AppCommand> {
-        let keymap = self.keymap.as_ref()?;
-        let context = self.contexts.get(page).ok()?;
-        let pressed = KeyCombo::of(stroke)?;
-        keymap.in_context(context).scoped(&pressed)
-    }
-
-    pub fn answered(&self, page: Entity, stroke: &KeyStroke) -> bool {
-        self.command(page, stroke).is_some()
-    }
+    let Some(command) = keymap.in_context(context).scoped(&pressed) else {
+        return;
+    };
+    invocations.write(CommandInvocation::new(page, command));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::AppCommand;
-    use crate::issued::CommandIssued;
+    use crate::definition::CommandInvocation;
     use crate::shortcut::{Binding, Modifiers, Shortcut, Source, When};
     use bevy::ecs::message::Messages;
     use bevy::input::keyboard::KeyCode;
@@ -89,12 +75,12 @@ mod tests {
                     },
                 ],
             );
+            keymap.register(["command_bar_next", "stack_close"]);
 
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .add_plugins(PageKeyPlugin)
-                .add_message::<AppCommand>()
-                .add_message::<CommandIssued>()
+                .add_plugins(KeyPlugin)
+                .add_message::<CommandInvocation>()
                 .insert_resource(keymap);
             app
         }
@@ -104,8 +90,8 @@ mod tests {
             app.world_mut().spawn(context).id()
         }
 
-        fn press(app: &mut App, page: Entity, code: &str) -> Vec<(Entity, AppCommand)> {
-            app.world_mut().trigger(BinReceive {
+        fn press(app: &mut App, page: Entity, code: &str) -> Vec<(Entity, String)> {
+            app.world_mut().trigger(UiInput {
                 webview: page,
                 payload: KeyStroke {
                     key: code.to_string(),
@@ -117,9 +103,9 @@ mod tests {
             });
             app.update();
             app.world_mut()
-                .resource_mut::<Messages<CommandIssued>>()
+                .resource_mut::<Messages<CommandInvocation>>()
                 .drain()
-                .map(|issued| (issued.caller, issued.command))
+                .map(|invocation| (invocation.caller, invocation.id))
                 .collect()
         }
     }
@@ -132,10 +118,7 @@ mod tests {
 
         assert_eq!(
             Seam::press(&mut app, bar, "KeyN"),
-            vec![(
-                bar,
-                AppCommand::from_shortcut_id("command_bar_next").expect("command exists")
-            )]
+            vec![(bar, "command_bar_next".to_string())]
         );
         assert_eq!(Seam::press(&mut app, plain, "KeyN"), vec![]);
     }
@@ -153,13 +136,20 @@ mod tests {
 
     impl Answered {
         fn record(
-            trigger: On<BinReceive<KeyStroke>>,
-            keys: ScopedKeys,
+            trigger: On<UiInput<KeyStroke>>,
+            keymap: Res<Keymap>,
+            contexts: Query<&KeyContext>,
             mut answered: ResMut<Self>,
         ) {
-            answered
-                .0
-                .push(keys.answered(trigger.event_target(), &trigger.payload));
+            let is_answered = contexts
+                .get(trigger.event_target())
+                .ok()
+                .and_then(|context| {
+                    KeyCombo::from_stroke(&trigger.payload).map(|key| (context, key))
+                })
+                .and_then(|(context, key)| keymap.in_context(context).scoped(&key))
+                .is_some();
+            answered.0.push(is_answered);
         }
     }
 

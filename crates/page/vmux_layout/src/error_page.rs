@@ -1,9 +1,17 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use vmux_api::error::ErrorPageData;
 use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
-use vmux_wire::error::ErrorPageData;
+
+#[vmux_native::page(
+    url = vmux_api::error::ERROR_PAGE_URL,
+    title = "Error",
+    component = Page,
+    takes = vmux_api::error::ErrorPageData
+)]
+pub struct ErrorPage;
 
 #[component]
 pub fn Page() -> Element {

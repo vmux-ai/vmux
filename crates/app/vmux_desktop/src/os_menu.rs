@@ -1,6 +1,7 @@
-use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::WindowCloseRequested;
+#[cfg(target_os = "macos")]
+use muda::ContextMenu;
 use muda::{Menu, MenuEvent, MenuItem, MenuItemKind};
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
@@ -11,71 +12,154 @@ use objc2_app_kit::{NSApplication, NSMenuItem};
 #[cfg(target_os = "macos")]
 use objc2_foundation::MainThreadMarker;
 use parking_lot::Mutex;
-use std::sync::LazyLock;
+use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use vmux_browser::HostFocusIntent;
 #[cfg(target_os = "macos")]
-use vmux_command::ReadAppCommands;
-use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, StackCommand, WriteAppCommands,
-    build_native_root_menu, open::OpenCommand,
-};
+use vmux_command::ReadCommandRequests;
+use vmux_command::{CommandDefinition, CommandInvocation, WriteCommandRequests};
+use vmux_layout::stack::CloseRequest;
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
 pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::bookmark_menu::BookmarkMenuPlugin)
+        app.world_mut()
+            .spawn((Name::new("OS menu runtime"), OsMenuState::default()));
+        app.add_plugins(crate::bookmark::BookmarkMenuPlugin)
             .add_message::<crate::window_manager::CloseVmuxWindow>()
-            .init_resource::<LastMenuCommandAt>()
-            .init_resource::<LastStackCloseAt>()
-            .init_resource::<LastNativePageOpenAt>()
-            .init_resource::<CloseMenuItemEnabled>()
-            .add_systems(Startup, setup.after(vmux_setting::SettingsLoadSet))
+            .add_message::<CloseRequest>()
+            .add_message::<vmux_browser::OpenRequest>()
+            .add_observer(dispatch_command_menu_selection)
+            .add_observer(hide_windows_from_menu)
+            .add_observer(remember_tab_close)
+            .add_systems(
+                Startup,
+                setup
+                    .after(vmux_setting::SettingsLoadSet)
+                    .after(vmux_command::RegisterCommandDefinitions),
+            )
             .add_systems(
                 Update,
                 (
-                    forward_menu_events.in_set(WriteAppCommands),
+                    forward_menu_events.in_set(WriteCommandRequests),
                     sync_menu_locale,
-                    remember_stack_close_commands.after(WriteAppCommands),
-                    remember_native_page_open_commands.after(WriteAppCommands),
+                    remember_stack_close_commands.after(vmux_command::DispatchCommandInvocations),
+                    remember_native_page_open_requests
+                        .after(vmux_command::DispatchCommandInvocations),
                     hide_window_on_close_request
                         .after(remember_stack_close_commands)
-                        .after(remember_native_page_open_commands),
+                        .after(remember_native_page_open_requests),
                     sync_close_menu_item.after(hide_window_on_close_request),
                 ),
             );
         #[cfg(target_os = "macos")]
-        app.add_systems(Update, sync_edit_menu_items.after(ReadAppCommands));
+        app.add_systems(Update, sync_edit_menu_items.after(ReadCommandRequests))
+            .add_systems(PostUpdate, present_context_menus);
     }
 }
 
-#[derive(Resource, Default)]
-pub(crate) struct LastMenuCommandAt(pub Option<std::time::Instant>);
+#[derive(Component)]
+struct OsMenuState {
+    last_menu_command_at: Option<std::time::Instant>,
+    last_stack_close_at: Option<std::time::Instant>,
+    last_tab_close_at: Option<std::time::Instant>,
+    last_native_page_open_at: Option<std::time::Instant>,
+    close_item_enabled: bool,
+}
 
-#[derive(Resource, Default)]
-pub(crate) struct LastStackCloseAt(pub Option<std::time::Instant>);
-
-#[derive(Resource, Default)]
-pub(crate) struct LastNativePageOpenAt(pub Option<std::time::Instant>);
-
-#[derive(Resource)]
-pub(crate) struct CloseMenuItemEnabled(pub bool);
-
-impl Default for CloseMenuItemEnabled {
+impl Default for OsMenuState {
     fn default() -> Self {
-        Self(true)
+        Self {
+            last_menu_command_at: None,
+            last_stack_close_at: None,
+            last_tab_close_at: None,
+            last_native_page_open_at: None,
+            close_item_enabled: true,
+        }
     }
 }
 
-static PENDING_MENU_EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+#[derive(Component)]
+pub(crate) struct OsMenuEntry {
+    id: Option<String>,
+    #[cfg(target_os = "macos")]
+    label: String,
+    #[cfg(target_os = "macos")]
+    enabled: bool,
+}
+
+impl OsMenuEntry {
+    #[cfg(target_os = "macos")]
+    pub(crate) fn new(label: String, enabled: bool) -> Self {
+        Self {
+            id: None,
+            label,
+            enabled,
+        }
+    }
+
+    pub(crate) fn identified(id: String) -> Self {
+        Self {
+            id: Some(id),
+            #[cfg(target_os = "macos")]
+            label: String::new(),
+            #[cfg(target_os = "macos")]
+            enabled: true,
+        }
+    }
+
+    fn matches(&self, event_id: &str) -> bool {
+        self.id.as_deref() == Some(event_id)
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Component)]
+pub(crate) struct OsContextMenu {
+    view: usize,
+}
+
+#[cfg(target_os = "macos")]
+impl OsContextMenu {
+    pub(crate) fn new(view: *mut std::ffi::c_void) -> Self {
+        Self {
+            view: view as usize,
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Component)]
+pub(crate) struct OsMenuSeparator;
+
+#[derive(Component)]
+struct TransientOsMenuEntry;
+
+#[derive(Component)]
+struct HideWindowsMenuEntry;
+
+#[derive(EntityEvent)]
+pub(crate) struct OsMenuSelect(#[event_target] Entity);
+
+impl OsMenuSelect {
+    pub(crate) fn new(entity: Entity) -> Self {
+        Self(entity)
+    }
+}
+
+#[derive(Component, Clone)]
+struct OsMenuInbox(Arc<Mutex<Vec<String>>>);
+
 const WINDOW_CLOSE_SUPPRESSION_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
     std::time::Duration::from_millis(1500);
 
 struct OsMenuResource {
     menu: Menu,
+    #[cfg(target_os = "macos")]
+    context_menu: Option<Menu>,
     locale: Locale,
     close_window: Option<MenuItem>,
     #[cfg(target_os = "macos")]
@@ -83,14 +167,19 @@ struct OsMenuResource {
 }
 
 fn setup(world: &mut World) {
+    let definitions = {
+        let mut query = world.query::<&CommandDefinition>();
+        query.iter(world).cloned().collect::<Vec<_>>()
+    };
     let mut menu = Menu::new();
-    build_native_root_menu(&mut menu).unwrap();
+    append_application_menu(&menu).unwrap();
+    CommandDefinition::append_native_menus(&definitions, &mut menu).unwrap();
     append_standard_edit_menu(&menu);
     let locale = world
         .get_resource::<vmux_setting::AppSettings>()
         .map(|settings| Locale::requested(Some(&settings.appearance.locale)))
         .unwrap_or_else(Locale::preferred);
-    localize_root_menu(&menu, &Locale::from(DEFAULT_LOCALE), &locale);
+    localize_root_menu(&menu, &Locale::from(DEFAULT_LOCALE), &locale, &definitions);
     let close_window = find_menu_item(menu.items(), "app_quit");
 
     #[cfg(target_os = "macos")]
@@ -102,15 +191,37 @@ fn setup(world: &mut World) {
         .get_resource::<bevy::winit::EventLoopProxyWrapper>()
         .map(|w| (**w).clone());
 
+    let inbox = OsMenuInbox(Arc::new(Mutex::new(Vec::new())));
+    let callback_inbox = inbox.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        PENDING_MENU_EVENTS.lock().push(event.id.0.clone());
+        callback_inbox.0.lock().push(event.id.0.clone());
         if let Some(proxy) = &proxy {
             let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
         }
     }));
 
+    let mut runtime = world.query_filtered::<Entity, With<OsMenuState>>();
+    let runtime = runtime.single(world).unwrap();
+    world.entity_mut(runtime).insert(inbox);
+    world.spawn((
+        Name::new("Close Vmux menu item"),
+        OsMenuEntry::identified("app_quit".to_string()),
+        HideWindowsMenuEntry,
+    ));
+    let command_entries = {
+        let mut query = world.query::<(Entity, &CommandDefinition)>();
+        query
+            .iter(world)
+            .map(|(entity, definition)| (entity, definition.id.clone()))
+            .collect::<Vec<_>>()
+    };
+    for (entity, id) in command_entries {
+        world.entity_mut(entity).insert(OsMenuEntry::identified(id));
+    }
     world.insert_non_send(OsMenuResource {
         menu,
+        #[cfg(target_os = "macos")]
+        context_menu: None,
         locale,
         close_window,
         #[cfg(target_os = "macos")]
@@ -118,9 +229,47 @@ fn setup(world: &mut World) {
     });
 }
 
+#[cfg(target_os = "macos")]
+fn present_context_menus(
+    _non_send: bevy::ecs::system::NonSendMarker,
+    mut commands: Commands,
+    menu: Option<NonSendMut<OsMenuResource>>,
+    context_menus: Query<(&OsContextMenu, &Children), Added<OsContextMenu>>,
+    mut entries: Query<&mut OsMenuEntry>,
+    separators: Query<(), (With<OsMenuSeparator>, Without<OsMenuEntry>)>,
+) {
+    let Some(mut menu_resource) = menu else {
+        return;
+    };
+    for (context, children) in &context_menus {
+        let menu = Menu::new();
+        for child in children.iter() {
+            if let Ok(mut entry) = entries.get_mut(child) {
+                let id = format!("os_context_menu_{}", child.to_bits());
+                let item = MenuItem::with_id(id.clone(), &entry.label, entry.enabled, None);
+                let _ = menu.append(&item);
+                entry.id = Some(id);
+                commands.entity(child).insert(TransientOsMenuEntry);
+                continue;
+            }
+            if separators.contains(child) {
+                let _ = menu.append(&muda::PredefinedMenuItem::separator());
+            }
+        }
+        menu_resource.context_menu = Some(menu);
+        let Some(menu) = menu_resource.context_menu.as_ref() else {
+            continue;
+        };
+        unsafe {
+            menu.show_context_menu_for_nsview(context.view as _, None);
+        }
+    }
+}
+
 fn sync_menu_locale(
     settings: Option<Res<vmux_setting::AppSettings>>,
     menu: Option<NonSendMut<OsMenuResource>>,
+    definitions: Query<&CommandDefinition>,
 ) {
     let (Some(settings), Some(mut menu)) = (settings, menu) else {
         return;
@@ -129,27 +278,40 @@ fn sync_menu_locale(
     if menu.locale == locale {
         return;
     }
-    localize_root_menu(&menu.menu, &menu.locale, &locale);
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
+    localize_root_menu(&menu.menu, &menu.locale, &locale, &definitions);
     menu.locale = locale;
 }
 
-fn localize_root_menu(menu: &Menu, previous_locale: &Locale, locale: &Locale) {
-    localize_menu_items(menu.items(), previous_locale, locale);
+fn localize_root_menu(
+    menu: &Menu,
+    previous_locale: &Locale,
+    locale: &Locale,
+    definitions: &[CommandDefinition],
+) {
+    localize_menu_items(menu.items(), previous_locale, locale, definitions);
 }
 
-fn localize_menu_items(items: Vec<MenuItemKind>, previous_locale: &Locale, locale: &Locale) {
+fn localize_menu_items(
+    items: Vec<MenuItemKind>,
+    previous_locale: &Locale,
+    locale: &Locale,
+    definitions: &[CommandDefinition],
+) {
     for item in items {
         let id = item.id().0.clone();
         if let Some(menu_item) = item.as_menuitem() {
             if id == "app_quit" {
                 menu_item.set_text(locale.translate("menu-close-vmux"));
-            } else if AppCommand::from_menu_id(&id).is_some() {
+            } else if let Some(definition) =
+                definitions.iter().find(|definition| definition.id == id)
+            {
                 let current = menu_item.text();
                 let suffix = current
                     .split_once('\t')
                     .map(|(_, suffix)| format!("\t{suffix}"))
                     .unwrap_or_default();
-                let localized = vmux_command::localized_command_name(locale.as_str(), &id, current);
+                let localized = definition.localized_name(locale.as_str());
                 let leaf = localized.rsplit(" > ").next().unwrap_or(&localized);
                 menu_item.set_text(format!("{leaf}{suffix}"));
             }
@@ -158,7 +320,7 @@ fn localize_menu_items(items: Vec<MenuItemKind>, previous_locale: &Locale, local
             if let Some(title) = localized_submenu_title(&submenu.text(), previous_locale, locale) {
                 submenu.set_text(title);
             }
-            localize_menu_items(submenu.items(), previous_locale, locale);
+            localize_menu_items(submenu.items(), previous_locale, locale, definitions);
         }
     }
 }
@@ -218,6 +380,41 @@ fn append_standard_edit_menu(menu: &Menu) {
     let _ = menu.append(&edit);
 }
 
+fn append_application_menu(menu: &Menu) -> Result<(), muda::Error> {
+    use muda::{AboutMetadata, PredefinedMenuItem, Submenu};
+
+    let app_name = match env!("VMUX_BUILD_PROFILE") {
+        "release" => "Vmux".to_string(),
+        "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
+        "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
+        other => format!("Vmux ({other})"),
+    };
+    let version = match env!("VMUX_BUILD_PROFILE") {
+        "local" | "dev" => format!("v{} ({})", env!("CARGO_PKG_VERSION"), env!("VMUX_GIT_HASH")),
+        _ => format!("v{}", env!("CARGO_PKG_VERSION")),
+    };
+    let submenu = Submenu::new(app_name, true);
+    let quit = MenuItem::with_id(
+        "app_quit",
+        "Close Vmux",
+        true,
+        Some("super+q".parse().unwrap()),
+    );
+    submenu.append_items(&[
+        &PredefinedMenuItem::about(
+            None,
+            Some(AboutMetadata {
+                version: Some(version),
+                copyright: Some(String::new()),
+                ..default()
+            }),
+        ),
+        &PredefinedMenuItem::separator(),
+        &quit,
+    ])?;
+    menu.append(&submenu)
+}
+
 #[cfg(target_os = "macos")]
 fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
     let Some(mtm) = MainThreadMarker::new() else {
@@ -226,7 +423,7 @@ fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
     let Some(main_menu) = NSApplication::sharedApplication(mtm).mainMenu() else {
         return Vec::new();
     };
-    let actions: [Sel; 6] = [
+    let selectors: [Sel; 6] = [
         sel!(undo:),
         sel!(redo:),
         sel!(cut:),
@@ -246,7 +443,7 @@ fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
             };
             if item
                 .action()
-                .is_some_and(|action| actions.contains(&action))
+                .is_some_and(|selector| selectors.contains(&selector))
             {
                 items.push(item);
                 found = true;
@@ -312,13 +509,13 @@ fn find_menu_item(items: Vec<MenuItemKind>, id: &str) -> Option<MenuItem> {
 fn sync_close_menu_item(
     menu: Option<NonSend<OsMenuResource>>,
     windows: Query<&Window>,
-    mut enabled: ResMut<CloseMenuItemEnabled>,
+    mut state: Single<&mut OsMenuState>,
 ) {
     let any_visible = windows.iter().any(|w| w.visible);
-    if enabled.0 == any_visible {
+    if state.close_item_enabled == any_visible {
         return;
     }
-    enabled.0 = any_visible;
+    state.close_item_enabled = any_visible;
     if let Some(menu) = menu
         && let Some(item) = &menu.close_window
     {
@@ -326,9 +523,17 @@ fn sync_close_menu_item(
     }
 }
 
-fn forward_menu_events(world: &mut World) {
+fn forward_menu_events(
+    mut commands: Commands,
+    inbox: Option<Single<&OsMenuInbox>>,
+    menu_entries: Query<(Entity, &OsMenuEntry, Has<TransientOsMenuEntry>)>,
+    mut state: Single<&mut OsMenuState>,
+) {
     let drained = {
-        let mut events = PENDING_MENU_EVENTS.lock();
+        let Some(inbox) = inbox else {
+            return;
+        };
+        let mut events = inbox.0.lock();
         if events.is_empty() {
             return;
         }
@@ -336,65 +541,71 @@ fn forward_menu_events(world: &mut World) {
     };
 
     if !drained.is_empty() {
-        world.resource_mut::<LastMenuCommandAt>().0 = Some(std::time::Instant::now());
+        state.last_menu_command_at = Some(std::time::Instant::now());
     }
     for event_id in drained {
-        if crate::bookmark_menu::forward_menu_event(world, &event_id) {
-            continue;
-        }
-        if event_id == "app_quit" {
-            handle_quit_request(world);
-        } else if let Some(cmd) = AppCommand::from_menu_id(event_id.as_str()) {
-            let caller = {
-                let mut q = world.query_filtered::<Entity, With<vmux_core::team::User>>();
-                q.iter(world).next().unwrap_or(Entity::PLACEHOLDER)
-            };
-            world
-                .resource_mut::<Messages<vmux_command::CommandIssued>>()
-                .write(vmux_command::CommandIssued {
-                    caller,
-                    command: cmd.clone(),
-                });
-            world.resource_mut::<Messages<AppCommand>>().write(cmd);
-        } else {
-            #[cfg(feature = "tray")]
-            crate::tray::PENDING_TRAY_EVENTS.lock().push(event_id);
+        let selected = menu_entries.iter().find_map(|(entity, entry, transient)| {
+            entry.matches(&event_id).then_some((entity, transient))
+        });
+        if let Some((entity, transient)) = selected {
+            commands.trigger(OsMenuSelect::new(entity));
+            if transient {
+                commands.entity(entity).despawn();
+            }
         }
     }
 }
 
-fn handle_quit_request(world: &mut World) {
-    world
-        .resource_mut::<Messages<crate::runtime::LifecycleEvent>>()
-        .write(crate::runtime::LifecycleEvent::HideAllWindows);
+fn dispatch_command_menu_selection(
+    trigger: On<OsMenuSelect>,
+    definitions: Query<&CommandDefinition>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut invocations: MessageWriter<CommandInvocation>,
+) {
+    let Ok(definition) = definitions.get(trigger.event_target()) else {
+        return;
+    };
+    let caller = users.iter().next().unwrap_or(Entity::PLACEHOLDER);
+    invocations.write(CommandInvocation::new(caller, definition.id.clone()));
+}
+
+fn hide_windows_from_menu(
+    trigger: On<OsMenuSelect>,
+    menu_items: Query<(), With<HideWindowsMenuEntry>>,
+    mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
+) {
+    if menu_items.contains(trigger.event_target()) {
+        hide_windows.write(crate::runtime::HideAllWindowsRequest);
+    }
 }
 
 fn remember_stack_close_commands(
-    mut reader: MessageReader<AppCommand>,
-    mut last_stack_close: ResMut<LastStackCloseAt>,
+    mut reader: MessageReader<CloseRequest>,
+    mut state: Single<&mut OsMenuState>,
 ) {
-    for cmd in reader.read() {
-        if matches!(
-            cmd,
-            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close))
-        ) {
-            last_stack_close.0 = Some(std::time::Instant::now());
-        }
+    for _ in reader.read() {
+        state.last_stack_close_at = Some(std::time::Instant::now());
     }
 }
 
-fn remember_native_page_open_commands(
-    mut reader: MessageReader<AppCommand>,
-    mut last_native_page_open: ResMut<LastNativePageOpenAt>,
+fn remember_tab_close(
+    _trigger: On<vmux_layout::tab::TabClosed>,
+    mut state: Single<&mut OsMenuState>,
 ) {
-    for cmd in reader.read() {
-        if matches!(
-            cmd,
-            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InPlace {
-                url: Some(url)
-            })) if url.starts_with("vmux://")
-        ) {
-            last_native_page_open.0 = Some(std::time::Instant::now());
+    state.last_tab_close_at = Some(std::time::Instant::now());
+}
+
+fn remember_native_page_open_requests(
+    mut reader: MessageReader<vmux_browser::OpenRequest>,
+    mut state: Single<&mut OsMenuState>,
+) {
+    for request in reader.read() {
+        if request
+            .url
+            .as_deref()
+            .is_some_and(|url| url.starts_with("vmux://"))
+        {
+            state.last_native_page_open_at = Some(std::time::Instant::now());
         }
     }
 }
@@ -403,23 +614,19 @@ fn hide_window_on_close_request(
     mut closed: MessageReader<WindowCloseRequested>,
     mut windows: Query<&mut Window>,
     mut close_windows: MessageWriter<crate::window_manager::CloseVmuxWindow>,
-    last_menu_command: Res<LastMenuCommandAt>,
-    last_stack_close: Res<LastStackCloseAt>,
-    last_native_page_open: Res<LastNativePageOpenAt>,
-    last_tab_close: Option<Res<vmux_layout::tab::LastTabCloseAt>>,
+    state: Single<&OsMenuState>,
 ) {
-    let from_menu_key_equivalent = last_menu_command
-        .0
+    let from_menu_key_equivalent = state
+        .last_menu_command_at
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
-    let from_tab_close = last_tab_close
-        .as_deref()
-        .and_then(|last| last.0)
+    let from_tab_close = state
+        .last_tab_close_at
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
-    let from_stack_close = last_stack_close
-        .0
+    let from_stack_close = state
+        .last_stack_close_at
         .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
-    let from_native_page_open = last_native_page_open
-        .0
+    let from_native_page_open = state
+        .last_native_page_open_at
         .is_some_and(|t| t.elapsed() < NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW);
     let window_count = windows.iter().count();
     for event in closed.read() {
@@ -448,6 +655,7 @@ fn hide_window_on_close_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::message::Messages;
     use bevy::window::Window;
     use vmux_command::CommandPlugin;
     use vmux_layout::settings::{
@@ -526,57 +734,55 @@ mod tests {
     }
 
     #[test]
-    fn quit_menu_event_hides_windows_not_exit() {
-        let source = include_str!("os_menu.rs");
-        let needle = ["AppExit", "::", "Success"].concat();
-        assert!(
-            !source.contains(&needle),
-            "Cmd+Q must hide windows, not exit the app — terminal state must survive"
-        );
-        assert!(
-            source.contains("HideAllWindows") || source.contains("window.visible = false"),
-            "handle_quit_request must dispatch a hide action"
-        );
-    }
+    fn command_menu_selection_emits_command_invocation() {
+        let mut app = App::new();
+        app.add_message::<CommandInvocation>()
+            .add_observer(dispatch_command_menu_selection);
+        let command = app
+            .world_mut()
+            .spawn(CommandDefinition::new(
+                "terminal_next",
+                "Next Terminal",
+                "Terminal",
+            ))
+            .id();
 
-    #[test]
-    fn window_close_request_hides_window_instead_of_despawning() {
-        let source = include_str!("os_menu.rs");
-        let despawn_marker = ["Closing", "Window"].concat();
-        let inserts = source.matches(&format!("insert({despawn_marker})")).count()
-            + source
-                .matches(&format!("try_insert({despawn_marker})"))
-                .count();
+        app.world_mut().trigger(OsMenuSelect::new(command));
+
+        let invocations = app
+            .world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .drain()
+            .collect::<Vec<_>>();
         assert_eq!(
-            inserts, 0,
-            "WindowCloseRequested must hide the window, not insert ClosingWindow which leads to despawn"
-        );
-        assert!(
-            source.contains("window.visible = false") || source.contains(".visible = false"),
-            "expected the close handler to set window.visible = false"
+            invocations,
+            vec![CommandInvocation::new(Entity::PLACEHOLDER, "terminal_next")]
         );
     }
 
     #[test]
-    fn window_close_hides_without_quit_confirmation() {
-        let source = include_str!("os_menu.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
+    fn close_menu_selection_emits_hide_windows_request() {
+        let mut app = App::new();
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
+            .add_observer(hide_windows_from_menu);
+        let close = app.world_mut().spawn(HideWindowsMenuEntry).id();
 
-        assert!(
-            !source.contains("PendingWindowClose"),
-            "window close must not route through a confirmation dialog"
-        );
-        assert!(!source.contains("process_pending_window_close"));
-        assert!(!source.contains("should_confirm"));
-        assert!(!source.contains("confirm_quit_dialog"));
+        app.world_mut().trigger(OsMenuSelect::new(close));
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<crate::runtime::HideAllWindowsRequest>>()
+            .drain()
+            .count();
+        assert_eq!(requests, 1);
     }
 
     #[test]
     fn unsuppressed_window_close_hides_window() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<CloseRequest>()
+            .add_message::<vmux_browser::OpenRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
@@ -591,32 +797,36 @@ mod tests {
     }
 
     #[test]
-    fn window_close_request_after_tab_close_is_suppressed() {
-        let source = include_str!("os_menu.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
-
-        assert!(source.contains("LastTabCloseAt"));
-        assert!(source.contains("from_tab_close"));
-        assert!(source.contains(
-        "from_menu_key_equivalent || from_stack_close || from_tab_close || from_native_page_open"
-    ));
-    }
-
-    #[test]
     fn window_close_request_after_stack_close_command_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            .resource_mut::<Messages<CloseRequest>>()
+            .write(CloseRequest);
+        app.world_mut()
+            .resource_mut::<Messages<WindowCloseRequested>>()
+            .write(WindowCloseRequested { window });
+
+        app.world_mut().run_schedule(Update);
+
+        assert!(app.world().get::<Window>(window).unwrap().visible);
+    }
+
+    #[test]
+    fn window_close_request_after_tab_close_is_suppressed() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<CloseRequest>()
+            .add_message::<WindowCloseRequested>()
+            .insert_resource(test_settings());
+
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut().trigger(vmux_layout::tab::TabClosed);
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });
@@ -630,17 +840,16 @@ mod tests {
     fn window_close_request_after_native_page_open_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(vmux_command::BrowserCommand::Open(
-                vmux_command::open::OpenCommand::InPlace {
-                    url: Some("vmux://terminal".to_string()),
-                },
-            )));
+            .resource_mut::<Messages<vmux_browser::OpenRequest>>()
+            .write(vmux_browser::OpenRequest {
+                url: Some("vmux://terminal".to_string()),
+            });
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });
@@ -654,12 +863,17 @@ mod tests {
     fn delayed_window_close_request_after_native_page_open_is_suppressed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
         let window = app.world_mut().spawn(Window::default()).id();
-        app.world_mut().resource_mut::<LastNativePageOpenAt>().0 =
-            Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));
+        {
+            let world = app.world_mut();
+            let mut state = world.query::<&mut OsMenuState>();
+            state.single_mut(world).unwrap().last_native_page_open_at =
+                Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));
+        }
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });
@@ -673,28 +887,35 @@ mod tests {
     fn close_menu_item_disabled_when_all_windows_hidden() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<CloseRequest>()
             .add_message::<WindowCloseRequested>()
             .insert_resource(test_settings());
 
         let window = app.world_mut().spawn(Window::default()).id();
         app.world_mut().run_schedule(Update);
-        assert!(
-            app.world().resource::<CloseMenuItemEnabled>().0,
-            "a visible window means Close is enabled"
-        );
+        let enabled = {
+            let world = app.world_mut();
+            let mut state = world.query::<&OsMenuState>();
+            state.single(world).unwrap().close_item_enabled
+        };
+        assert!(enabled, "a visible window means Close is enabled");
 
         app.world_mut().get_mut::<Window>(window).unwrap().visible = false;
         app.world_mut().run_schedule(Update);
-        assert!(
-            !app.world().resource::<CloseMenuItemEnabled>().0,
-            "all windows hidden means Close is disabled"
-        );
+        let enabled = {
+            let world = app.world_mut();
+            let mut state = world.query::<&OsMenuState>();
+            state.single(world).unwrap().close_item_enabled
+        };
+        assert!(!enabled, "all windows hidden means Close is disabled");
 
         app.world_mut().get_mut::<Window>(window).unwrap().visible = true;
         app.world_mut().run_schedule(Update);
-        assert!(
-            app.world().resource::<CloseMenuItemEnabled>().0,
-            "showing a window re-enables Close"
-        );
+        let enabled = {
+            let world = app.world_mut();
+            let mut state = world.query::<&OsMenuState>();
+            state.single(world).unwrap().close_item_enabled
+        };
+        assert!(enabled, "showing a window re-enables Close");
     }
 }

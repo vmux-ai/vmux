@@ -1,0 +1,23 @@
+[
+    (
+        name: "open_command_bar",
+        description: "Open the Vmux command bar.",
+        input_schema: (
+            type: Object,
+            properties: {
+                "mode": (type: String, values: ["default", "commands", "path"]),
+            },
+        ),
+    ),
+    (
+        name: "notify",
+        description: "Notify the user that the agent needs attention. Optional title and body customize the message.",
+        input_schema: (
+            type: Object,
+            properties: {
+                "title": (type: String),
+                "body": (type: String),
+            },
+        ),
+    ),
+]

@@ -1,9 +1,9 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use super::event::{
-    AGENT_SETUP_PREREQ_EVENT, AGENT_SETUP_RESULT_EVENT, AgentInstallRunRequest,
-    AgentSetupPrereqRequest, AgentSetupPrereqStatus, AgentSetupResult,
+    AgentInstallRunRequest, AgentSetupPrereqRequest, AgentSetupPrereqStatus, AgentSetupResult,
+    AgentSetupUiState,
 };
 use vmux_core::agent::AgentKind;
 
@@ -11,14 +11,17 @@ pub struct AgentSetupPlugin;
 
 impl Plugin for AgentSetupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
-            AgentInstallRunRequest,
-            AgentSetupPrereqRequest,
-        )>::for_hosts(&["agent", "agents"]))
-            .add_observer(on_agent_install_run)
-            .add_observer(on_agent_setup_prereq_request)
-            .add_systems(Update, auto_redirect_agent_setup_when_installed)
-            .add_systems(Update, detect_agent_install_outcome);
+        app.add_plugins((
+            UiEventPlugin::<(AgentInstallRunRequest, AgentSetupPrereqRequest)>::default(),
+            vmux_core::host::UiStatePlugin::<AgentSetupUiState>::default(),
+        ))
+        .add_observer(on_agent_install_run)
+        .add_observer(on_agent_setup_prereq_request)
+        .add_systems(Update, auto_redirect_agent_setup_when_installed)
+        .add_systems(
+            Update,
+            (detect_agent_install_outcome, publish_agent_install_outcome).chain(),
+        );
     }
 }
 
@@ -27,12 +30,24 @@ struct AgentInstallPane {
     setup_stack: Entity,
     setup_webview: Entity,
     agent: AgentKind,
-    process_id: vmux_service::protocol::ProcessId,
+    process_id: vmux_api::protocol::ProcessId,
     armed: bool,
 }
 
 #[derive(Component)]
+struct AgentInstallCompleted {
+    result: AgentSetupResult,
+    close_pane: bool,
+}
+
+#[derive(Component)]
 pub(crate) struct AgentSetupNavigated;
+
+#[derive(Component)]
+#[require(AgentSetupUiStateUpdates)]
+pub(crate) struct AgentSetupView;
+
+type AgentSetupUiStateUpdates = vmux_core::host::UiState<AgentSetupUiState>;
 
 fn run_install_in_new_tab(run: &mut MessageWriter<vmux_terminal::RunShellRequest>, command: &str) {
     run.write(vmux_terminal::RunShellRequest {
@@ -47,21 +62,19 @@ fn prereq_needs_homebrew(segment: &str, brew_present: bool) -> bool {
 }
 
 fn on_agent_setup_prereq_request(
-    trigger: On<BinReceive<AgentSetupPrereqRequest>>,
-    browsers: NonSend<Browsers>,
+    trigger: On<UiInput<AgentSetupPrereqRequest>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let segment = &trigger.event().payload.agent;
     let brew_present = crate::exec::find_executable("brew").is_some();
     let needs_homebrew = prereq_needs_homebrew(segment, brew_present);
-    if browsers.can_emit_to(&webview) {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<AgentSetupUiState>::from_event(
             webview,
-            AGENT_SETUP_PREREQ_EVENT,
             &AgentSetupPrereqStatus { needs_homebrew },
-        ));
-    }
+        ),
+    );
 }
 
 fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
@@ -72,17 +85,22 @@ fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
 }
 
 fn close_install_pane_after_success(url: &str) -> bool {
-    url.trim_end_matches('/') == "vmux://tools/acp"
+    let Some(route) = vmux_api::VmuxRoute::parse(url) else {
+        return false;
+    };
+    let Some(install) = vmux_api::VmuxRoute::parse("vmux://tools/acp") else {
+        return false;
+    };
+    route.same_page(&install)
 }
 
 fn detect_agent_install_outcome(
     mut events: MessageReader<vmux_terminal::CommandLifecycleEvent>,
     mut install_panes: Query<(Entity, &mut AgentInstallPane)>,
     setup_stacks: Query<&vmux_core::PageMetadata, With<vmux_layout::stack::Stack>>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    use vmux_service::protocol::CommandLifecycleKind;
+    use vmux_api::protocol::CommandLifecycleKind;
     for ev in events.read() {
         for (install_pane, mut pane) in &mut install_panes {
             if pane.process_id != ev.process_id {
@@ -93,25 +111,17 @@ fn detect_agent_install_outcome(
                 CommandLifecycleKind::Ended { .. } => {
                     let installed = crate::exec::find_executable(pane.agent.executable()).is_some();
                     if let Some(ok) = install_outcome(pane.armed, installed) {
-                        if browsers.can_emit_to(&pane.setup_webview) {
-                            commands.trigger(BinHostEmitEvent::from_rkyv(
-                                pane.setup_webview,
-                                AGENT_SETUP_RESULT_EVENT,
-                                &AgentSetupResult {
-                                    agent: pane.agent.as_url_segment().to_string(),
-                                    ok,
-                                },
-                            ));
-                        }
-                        if ok
+                        let close_pane = ok
                             && setup_stacks
                                 .get(pane.setup_stack)
-                                .is_ok_and(|meta| close_install_pane_after_success(&meta.url))
-                        {
-                            commands
-                                .entity(install_pane)
-                                .insert(vmux_layout::pane::ForcePaneClose);
-                        }
+                                .is_ok_and(|meta| close_install_pane_after_success(&meta.url));
+                        commands.entity(install_pane).insert(AgentInstallCompleted {
+                            result: AgentSetupResult {
+                                agent: pane.agent.as_url_segment().to_string(),
+                                ok,
+                            },
+                            close_pane,
+                        });
                         pane.armed = false;
                     }
                 }
@@ -120,11 +130,33 @@ fn detect_agent_install_outcome(
     }
 }
 
+fn publish_agent_install_outcome(
+    completed: Query<
+        (Entity, &AgentInstallPane, &AgentInstallCompleted),
+        Added<AgentInstallCompleted>,
+    >,
+    mut commands: Commands,
+) {
+    for (entity, pane, completed) in &completed {
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<AgentSetupUiState>::from_event(
+                pane.setup_webview,
+                &completed.result,
+            ),
+        );
+        if completed.close_pane {
+            commands
+                .entity(entity)
+                .insert(vmux_layout::pane::ForcePaneClose);
+        }
+    }
+}
+
 fn on_agent_install_run(
-    trigger: On<BinReceive<AgentInstallRunRequest>>,
+    trigger: On<UiInput<AgentInstallRunRequest>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     ctx: vmux_layout::pane::PlacementCtx,
-    mut install_panes: Query<&mut AgentInstallPane>,
+    mut install_panes: Query<(Entity, &mut AgentInstallPane)>,
     mut commands: Commands,
     mut spawn: MessageWriter<vmux_terminal::TerminalStackSpawnRequest>,
     mut run: MessageWriter<vmux_terminal::RunShellRequest>,
@@ -144,13 +176,14 @@ fn on_agent_install_run(
     };
     let input = vmux_terminal::shell_input::shell_command_input(&command);
 
-    for mut pane in &mut install_panes {
+    for (entity, mut pane) in &mut install_panes {
         if pane.setup_webview == webview && pane.agent == kind {
             reinput.write(vmux_terminal::TerminalReinputRequest {
                 process_id: pane.process_id,
                 data: input.clone(),
             });
             pane.armed = false;
+            commands.entity(entity).remove::<AgentInstallCompleted>();
             return;
         }
     }
@@ -177,7 +210,7 @@ fn on_agent_install_run(
         true,
         already_split,
     );
-    let process_id = vmux_service::protocol::ProcessId::new();
+    let process_id = vmux_api::protocol::ProcessId::new();
     commands.entity(install_pane).insert(AgentInstallPane {
         setup_stack,
         setup_webview: webview,
@@ -245,6 +278,22 @@ fn auto_redirect_agent_setup_when_installed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_core::host::UiStateWrite;
+
+    #[derive(Resource, Default)]
+    struct Published(Vec<(Entity, AgentSetupResult)>);
+
+    fn record_published(
+        trigger: On<UiStateWrite<AgentSetupUiState>>,
+        mut published: ResMut<Published>,
+    ) {
+        let Some(result) = &trigger.event().patch().result else {
+            return;
+        };
+        published
+            .0
+            .push((trigger.event().webview(), result.clone()));
+    }
 
     #[test]
     fn prereq_needs_homebrew_logic() {
@@ -274,5 +323,38 @@ mod tests {
         assert!(!close_install_pane_after_success(
             "vmux://sessions/codex/setup"
         ));
+    }
+
+    #[test]
+    fn completed_install_entity_projects_result_to_its_setup_page() {
+        let mut app = App::new();
+        app.init_resource::<Published>()
+            .add_observer(record_published)
+            .add_systems(Update, publish_agent_install_outcome);
+        let setup_webview = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((
+            AgentInstallPane {
+                setup_stack: Entity::PLACEHOLDER,
+                setup_webview,
+                agent: AgentKind::Codex,
+                process_id: vmux_api::protocol::ProcessId::new(),
+                armed: false,
+            },
+            AgentInstallCompleted {
+                result: AgentSetupResult {
+                    agent: "codex".into(),
+                    ok: true,
+                },
+                close_pane: false,
+            },
+        ));
+
+        app.update();
+
+        let published = app.world().resource::<Published>();
+        assert_eq!(published.0.len(), 1);
+        assert_eq!(published.0[0].0, setup_webview);
+        assert_eq!(published.0[0].1.agent, "codex");
+        assert!(published.0[0].1.ok);
     }
 }

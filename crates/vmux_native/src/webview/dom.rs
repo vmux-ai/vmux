@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use tracing::{error, warn};
 use vmux_ui::hooks::EventListenerError;
-use vmux_ui::transport::{BytesListener, HostScope, PageHost, TextOffsetAnswer};
+use vmux_ui::transport::{BinEventTarget, BytesListener, HostScope, PageHost, TextOffsetAnswer};
 
 use crate::webview::dom_request::{DomRequest, RequestQueue};
 use crate::webview::element::Element;
@@ -161,7 +161,7 @@ impl Dom {
             .get(EventRequest::HEADER)
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default();
-        let outcome = self.handle_event(payload, EventSelection::of(headers));
+        let outcome = self.handle_event(payload, EventSelection::from(headers));
         self.flush_to_page();
         let body = outcome.response_bytes();
         let response = wry::http::Response::builder()
@@ -258,11 +258,21 @@ impl SurfaceHost {
 }
 
 impl PageHost for SurfaceHost {
-    fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+    fn send(
+        &self,
+        _target: BinEventTarget,
+        id: &str,
+        bytes: &[u8],
+    ) -> Result<(), EventListenerError> {
         self.outbox.send(id, bytes)
     }
 
-    fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
+    fn listen(
+        &self,
+        _target: BinEventTarget,
+        id: &str,
+        on_bytes: BytesListener,
+    ) -> Result<(), EventListenerError> {
         let mut listeners = self
             .listeners
             .try_borrow_mut()

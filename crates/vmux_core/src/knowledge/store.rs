@@ -139,7 +139,7 @@ impl NotePath {
     fn parse(requested: Option<&str>, title: &str) -> Result<Self, String> {
         let relative = match requested.map(str::trim).filter(|path| !path.is_empty()) {
             Some(path) => PathBuf::from(path),
-            None => PathBuf::from("projects").join(format!("{}.md", NoteSlug::of(title))),
+            None => PathBuf::from("projects").join(format!("{}.md", NoteSlug::from(title))),
         };
         if relative.is_absolute() {
             return Err("knowledge path must be relative".to_string());
@@ -184,8 +184,8 @@ impl NotePath {
 
 struct NoteSlug(String);
 
-impl NoteSlug {
-    fn of(title: &str) -> Self {
+impl From<&str> for NoteSlug {
+    fn from(title: &str) -> Self {
         let mut slug = String::new();
         let mut separator = false;
         for character in title.chars().flat_map(char::to_lowercase) {
@@ -576,11 +576,13 @@ impl MemoryTree {
 
 pub struct AgentPrompt(String);
 
-impl AgentPrompt {
-    pub fn of(base: &str) -> Self {
+impl From<&str> for AgentPrompt {
+    fn from(base: &str) -> Self {
         Self(base.to_string()).with_skills().with_memories()
     }
+}
 
+impl AgentPrompt {
     pub fn into_string(self) -> String {
         self.0
     }
@@ -615,11 +617,13 @@ impl AgentPrompt {
 #[derive(Clone, Copy)]
 pub struct Frontmatter<'a>(&'a str);
 
-impl<'a> Frontmatter<'a> {
-    pub fn of(source: &'a str) -> Self {
+impl<'a> From<&'a str> for Frontmatter<'a> {
+    fn from(source: &'a str) -> Self {
         Self(source)
     }
+}
 
+impl Frontmatter<'_> {
     pub fn apply(&self, edit: &crate::event::FilePropertyEdit) -> Result<String, String> {
         let text = self.0;
         let original = edit.original_key.trim();
@@ -812,7 +816,7 @@ mod tests {
     #[test]
     fn edits_frontmatter_properties_without_touching_body() {
         let text = "---\ntitle: Old\ntags:\n  - alpha\nstatus: draft\n---\n\nBody\n";
-        let edited = Frontmatter::of(text)
+        let edited = Frontmatter::from(text)
             .apply(&crate::event::FilePropertyEdit {
                 original_key: "tags".into(),
                 key: "tags".into(),
@@ -821,7 +825,7 @@ mod tests {
                 remove: false,
             })
             .unwrap();
-        let renamed = Frontmatter::of(&edited)
+        let renamed = Frontmatter::from(edited.as_str())
             .apply(&crate::event::FilePropertyEdit {
                 original_key: "status".into(),
                 key: "stage".into(),
@@ -835,7 +839,7 @@ mod tests {
         assert!(!renamed.contains("status:"));
         assert!(renamed.ends_with("\nBody\n"));
         assert!(
-            Frontmatter::of(&renamed)
+            Frontmatter::from(renamed.as_str())
                 .apply(&crate::event::FilePropertyEdit {
                     original_key: "stage".into(),
                     key: "title".into(),
@@ -846,7 +850,7 @@ mod tests {
                 .is_err()
         );
 
-        let with_link = Frontmatter::of(&renamed)
+        let with_link = Frontmatter::from(renamed.as_str())
             .apply(&crate::event::FilePropertyEdit {
                 original_key: String::new(),
                 key: "related".into(),
@@ -855,7 +859,7 @@ mod tests {
                 remove: false,
             })
             .unwrap();
-        let with_date = Frontmatter::of(&with_link)
+        let with_date = Frontmatter::from(with_link.as_str())
             .apply(&crate::event::FilePropertyEdit {
                 original_key: String::new(),
                 key: "due".into(),

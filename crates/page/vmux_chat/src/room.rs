@@ -1,40 +1,48 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_service::chat::group_turns_tail;
-use vmux_wire::chat::ChatItem;
-use vmux_wire::page::PageEmit;
-use vmux_wire::room::{
+use vmux_api::chat::ChatItem;
+use vmux_api::room::{
     AssistantBlock, Message as RoomMessage, RemoteAgent, RemoteApproval, RemoteEvent,
     RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };
+use vmux_core::chat::group_turns_tail;
 
-use crate::event::{CHAT_SNAPSHOT_EVENT, ChatSnapshot};
+use crate::event::{ChatSnapshot, ChatTranscriptState, PendingApproval};
+use crate::prompt::AttachmentPreviews;
+use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
 
 pub struct ChatRoomPlugin;
 
 impl Plugin for ChatRoomPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ChatUiStatePlugin>() {
+            app.add_plugins(ChatUiStatePlugin);
+        }
+        #[cfg(all(ui, host))]
+        app.add_plugins(crate::ui::ChatPage::plugin());
         app.add_message::<Reported>()
             .add_message::<Submitted>()
-            .add_message::<PageEmit>()
             .init_resource::<Conversation>()
             .init_resource::<Log>()
             .init_resource::<LiveTurn>()
             .init_resource::<Agents>()
+            .init_resource::<AttachmentPreviews>()
             .init_resource::<Snapshot>()
+            .init_resource::<RoomTranscript>()
             .add_systems(
                 Update,
                 (
-                    Conversation::fold.before(RoomProjection),
-                    Snapshot::project.in_set(RoomProjection).run_if(
+                    fold_conversation.before(RoomProjection),
+                    project_snapshot.in_set(RoomProjection).run_if(
                         resource_changed::<Conversation>
                             .or_else(resource_changed::<Log>)
                             .or_else(resource_changed::<LiveTurn>)
-                            .or_else(resource_changed::<Agents>),
+                            .or_else(resource_changed::<Agents>)
+                            .or_else(resource_changed::<AttachmentPreviews>),
                     ),
-                    Snapshot::emit
-                        .after(RoomProjection)
-                        .run_if(resource_changed::<Snapshot>),
+                    emit_snapshot.after(RoomProjection).run_if(
+                        resource_changed::<Snapshot>.or_else(resource_changed::<RoomTranscript>),
+                    ),
                 ),
             );
     }
@@ -66,73 +74,71 @@ impl Default for Conversation {
     }
 }
 
-impl Conversation {
-    fn fold(
-        mut submitted: MessageReader<Submitted>,
-        mut reported: MessageReader<Reported>,
-        mut conversation: ResMut<Conversation>,
-        mut log: ResMut<Log>,
-        mut live: ResMut<LiveTurn>,
-    ) {
-        for Submitted in submitted.read() {
-            if conversation.session.is_some() {
-                conversation.status = RemoteStatus::Streaming;
-            }
+fn fold_conversation(
+    mut submitted: MessageReader<Submitted>,
+    mut reported: MessageReader<Reported>,
+    mut conversation: ResMut<Conversation>,
+    mut log: ResMut<Log>,
+    mut live: ResMut<LiveTurn>,
+) {
+    for Submitted in submitted.read() {
+        if conversation.session.is_some() {
+            conversation.status = RemoteStatus::Streaming;
         }
-        for Reported(event) in reported.read() {
-            match event {
-                RemoteEvent::Session { session } => {
-                    if log
-                        .room_id
-                        .as_ref()
-                        .is_some_and(|room_id| room_id != &session.room_id)
-                    {
-                        *log = Log::default();
-                    }
-                    conversation.status = session.status.clone();
-                    conversation.approval = session.approval.clone();
-                    conversation.session = Some(session.clone());
+    }
+    for Reported(event) in reported.read() {
+        match event {
+            RemoteEvent::Session { session } => {
+                if log
+                    .room_id
+                    .as_ref()
+                    .is_some_and(|room_id| room_id != &session.room_id)
+                {
+                    *log = Log::default();
                 }
-                RemoteEvent::Snapshot {
-                    room_id,
-                    through_seq,
-                    events,
-                } => {
-                    let matches_session = conversation
-                        .session
-                        .as_ref()
-                        .is_none_or(|session| &session.room_id == room_id);
-                    let has_newer_projection =
-                        log.room_id.as_ref() == Some(room_id) && log.through_seq > *through_seq;
-                    if matches_session && !has_newer_projection {
-                        *log = Log {
-                            room_id: Some(room_id.clone()),
-                            through_seq: *through_seq,
-                            events: events.clone(),
-                        };
-                        live.0.clear();
-                    }
-                }
-                RemoteEvent::Delta { room_id, text } => {
-                    let accepts_delta = log
-                        .room_id
-                        .as_ref()
-                        .is_none_or(|current| current == room_id);
-                    if accepts_delta {
-                        if log.room_id.is_none() {
-                            log.room_id = Some(room_id.clone());
-                        }
-                        live.0.push_str(text);
-                    }
-                }
-                RemoteEvent::Status { status } => {
-                    if !matches!(status, RemoteStatus::Streaming) {
-                        conversation.approval = None;
-                    }
-                    conversation.status = status.clone();
-                }
-                RemoteEvent::Approval { approval } => conversation.approval = approval.clone(),
+                conversation.status = session.status.clone();
+                conversation.approval = session.approval.clone();
+                conversation.session = Some(session.clone());
             }
+            RemoteEvent::Snapshot {
+                room_id,
+                through_seq,
+                events,
+            } => {
+                let matches_session = conversation
+                    .session
+                    .as_ref()
+                    .is_none_or(|session| &session.room_id == room_id);
+                let has_newer_projection =
+                    log.room_id.as_ref() == Some(room_id) && log.through_seq > *through_seq;
+                if matches_session && !has_newer_projection {
+                    *log = Log {
+                        room_id: Some(room_id.clone()),
+                        through_seq: *through_seq,
+                        events: events.clone(),
+                    };
+                    live.0.clear();
+                }
+            }
+            RemoteEvent::Delta { room_id, text } => {
+                let accepts_delta = log
+                    .room_id
+                    .as_ref()
+                    .is_none_or(|current| current == room_id);
+                if accepts_delta {
+                    if log.room_id.is_none() {
+                        log.room_id = Some(room_id.clone());
+                    }
+                    live.0.push_str(text);
+                }
+            }
+            RemoteEvent::Status { status } => {
+                if !matches!(status, RemoteStatus::Streaming) {
+                    conversation.approval = None;
+                }
+                conversation.status = status.clone();
+            }
+            RemoteEvent::Approval { approval } => conversation.approval = approval.clone(),
         }
     }
 }
@@ -153,63 +159,83 @@ pub struct Agents(pub Vec<RemoteAgent>);
 #[derive(Resource, Default)]
 pub struct Snapshot(pub ChatSnapshot);
 
-impl Snapshot {
-    fn emit(snapshot: Res<Snapshot>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::of(CHAT_SNAPSHOT_EVENT, &snapshot.0) else {
-            return;
-        };
-        emits.write(emit);
-    }
+#[derive(Resource, Default)]
+struct RoomTranscript {
+    room_id: Option<RoomId>,
+    state: ChatTranscriptState,
+}
 
-    fn project(
-        conversation: Res<Conversation>,
-        log: Res<Log>,
-        live: Res<LiveTurn>,
-        agents: Res<Agents>,
-        mut snapshot: ResMut<Snapshot>,
-    ) {
-        let Some(session) = conversation.session.as_ref() else {
-            snapshot.0 = ChatSnapshot::default();
-            return;
+fn emit_snapshot(
+    snapshot: Res<Snapshot>,
+    transcript: Res<RoomTranscript>,
+    mut projection: ResMut<ChatUiStateProjection>,
+) {
+    projection.write(&snapshot.0);
+    projection.write(&transcript.state);
+}
+
+fn project_snapshot(
+    conversation: Res<Conversation>,
+    log: Res<Log>,
+    live: Res<LiveTurn>,
+    agents: Res<Agents>,
+    previews: Res<AttachmentPreviews>,
+    mut snapshot: ResMut<Snapshot>,
+    mut transcript: ResMut<RoomTranscript>,
+) {
+    let Some(session) = conversation.session.as_ref() else {
+        snapshot.0 = ChatSnapshot::default();
+        transcript.room_id = None;
+        transcript.state = ChatTranscriptState::default();
+        return;
+    };
+    let running = matches!(session.status, RemoteStatus::Streaming);
+    let mut items = log.chat_items(&live.0, running);
+    for item in &mut items {
+        let ChatItem::User { attachments, .. } = item else {
+            continue;
         };
-        let running = matches!(session.status, RemoteStatus::Streaming);
-        let items = log.chat_items(&live.0, running);
-        let total = items.len() as u32;
-        let messages_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
-        let speaker = agents.named(&session.name);
-        let (approval_call_id, approval_name, approval_args_json) =
-            match conversation.approval.as_ref() {
-                Some(pending) => (
-                    pending.call_id.clone(),
-                    pending.name.clone(),
-                    pending.args_json.clone(),
-                ),
-                None => (String::new(), String::new(), String::new()),
-            };
-        let error = match &conversation.status {
-            RemoteStatus::Errored(message) => message.clone(),
-            _ => String::new(),
-        };
-        let (agent_icon, agent_segment) = match speaker {
-            Some(agent) => (agent.icon.clone(), agent.id.as_str()),
-            None => (String::new(), ""),
-        };
-        snapshot.0 = ChatSnapshot {
-            messages_json,
-            messages_start: 0,
-            messages_total: total,
-            status: conversation.status.page_status().to_string(),
-            error,
-            approval_call_id,
-            approval_name,
-            approval_args_json,
-            agent_name: session.name.clone(),
-            conversation_title: session.name.clone(),
-            agent_icon,
-            accent_color: vmux_wire::avatar::agent_color(agent_segment),
-            ..ChatSnapshot::default()
-        };
+        previews.hydrate(attachments);
     }
+    let total = items.len() as u32;
+    let speaker = agents.named(&session.name);
+    let approval = conversation.approval.as_ref().map(|pending| {
+        PendingApproval::new(pending.call_id.clone(), pending.name.clone(), &pending.args)
+    });
+    let error = match &conversation.status {
+        RemoteStatus::Errored(message) => message.clone(),
+        _ => String::new(),
+    };
+    let (agent_icon, agent_segment) = match speaker {
+        Some(agent) => (agent.icon.clone(), agent.id.as_str()),
+        None => (String::new(), ""),
+    };
+    let generation = if transcript.room_id.as_ref() == Some(&session.room_id) {
+        transcript.state.generation.max(1)
+    } else {
+        transcript.state.generation.wrapping_add(1).max(1)
+    };
+    transcript.room_id = Some(session.room_id.clone());
+    let (active_subagents, active_tasks) = vmux_core::chat_projection::activity_counts(&items);
+    transcript.state = ChatTranscriptState {
+        generation,
+        items,
+        loaded_start: 0,
+        total,
+        active_subagents,
+        active_tasks,
+        ..ChatTranscriptState::default()
+    };
+    snapshot.0 = ChatSnapshot {
+        status: conversation.status.page_status().to_string(),
+        error,
+        approval,
+        agent_name: session.name.clone(),
+        conversation_title: session.name.clone(),
+        agent_icon,
+        accent_color: vmux_api::avatar::agent_color(agent_segment),
+        ..ChatSnapshot::default()
+    };
 }
 
 impl Agents {
@@ -254,7 +280,7 @@ impl PageStatus for RemoteStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_wire::chat::ChatBlock;
+    use vmux_api::chat::ChatBlock;
 
     struct Started(App);
 
@@ -272,8 +298,12 @@ mod tests {
             &self.0.world().resource::<Snapshot>().0
         }
 
+        fn transcript(&self) -> &ChatTranscriptState {
+            &self.0.world().resource::<RoomTranscript>().state
+        }
+
         fn items(&self) -> Vec<ChatItem> {
-            serde_json::from_str(&self.snapshot().messages_json).expect("a decodable transcript")
+            self.transcript().items.clone()
         }
 
         fn insert(&mut self, resource: impl Resource) {
@@ -328,10 +358,10 @@ mod tests {
         }
     }
 
-    impl Agents {
-        fn of(named: &[(&str, &str)]) -> Self {
+    impl<const N: usize> From<[(&str, &str); N]> for Agents {
+        fn from(named: [(&str, &str); N]) -> Self {
             let mut agents = Vec::with_capacity(named.len());
-            for (name, icon) in named {
+            for (name, icon) in &named {
                 agents.push(RemoteAgent {
                     id: name.to_string(),
                     name: name.to_string(),
@@ -446,8 +476,8 @@ mod tests {
 
         started.insert(Conversation::default());
         assert!(started.snapshot().agent_name.is_empty());
-        assert_eq!(started.snapshot().messages_total, 0);
-        assert!(started.snapshot().messages_json.is_empty());
+        assert_eq!(started.transcript().total, 0);
+        assert!(started.transcript().items.is_empty());
     }
 
     #[test]
@@ -515,7 +545,7 @@ mod tests {
         let mut started = Started::open();
         assert!(started.snapshot().agent_icon.is_empty());
 
-        started.insert(Agents::of(&[("grace", "G"), ("ada", "A")]));
+        started.insert(Agents::from([("grace", "G"), ("ada", "A")]));
         assert_eq!(
             started.snapshot().agent_icon,
             "A",
@@ -523,7 +553,7 @@ mod tests {
         );
         assert_eq!(
             started.snapshot().accent_color,
-            vmux_wire::avatar::agent_color("ada")
+            vmux_api::avatar::agent_color("ada")
         );
     }
 }

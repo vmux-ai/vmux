@@ -8,7 +8,7 @@ use cef::{Browser, Frame, ImplBinaryValue, ImplFrame, ImplListValue, ListValue};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BinIpcEventRaw {
     pub webview: Entity,
-    pub host: String,
+    pub page_url: String,
     pub id: String,
     pub payload: Vec<u8>,
 }
@@ -81,8 +81,7 @@ impl ProcessMessageHandler for BinEmitEventHandler {
         let Some(args) = args else {
             return;
         };
-        let host =
-            crate::util::embedded_page_host_of(&frame.url().into_string()).unwrap_or_default();
+        let page_url = frame.url().into_string();
         let id = args.string(0).into_string();
         let payload_index = if id.is_empty() { 0 } else { 1 };
         let payload = match args.binary(payload_index) {
@@ -101,7 +100,7 @@ impl ProcessMessageHandler for BinEmitEventHandler {
         };
         let _ = self.sender.send_blocking(BinIpcEventRaw {
             webview: self.webview,
-            host,
+            page_url,
             id,
             payload,
         });
@@ -119,12 +118,12 @@ mod tests {
         let payload = vec![1, 2, 3, 4];
         let raw = BinIpcEventRaw {
             webview,
-            host: "history".to_string(),
+            page_url: "vmux://history/".to_string(),
             id: "test-id".to_string(),
             payload: payload.clone(),
         };
         assert_eq!(raw.webview, webview);
-        assert_eq!(raw.host, "history");
+        assert_eq!(raw.page_url, "vmux://history/");
         assert_eq!(raw.id, "test-id");
         assert_eq!(raw.payload, payload);
     }

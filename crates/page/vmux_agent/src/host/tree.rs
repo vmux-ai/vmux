@@ -4,27 +4,23 @@ use vmux_core::agent::{
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
 };
 use vmux_core::browser::{
-    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
+    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
+    BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
 use vmux_terminal::TerminalStackSpawnRequest;
 
-use crate::client::cli::claude::ClaudeStrategy;
-use crate::client::cli::codex::CodexStrategy;
-use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, RecordStartRequest,
     RecordStartResponse, RecordStopRequest, RecordStopResponse, ScreenshotRequest,
     ScreenshotResponse,
 };
-use crate::session::{
-    self, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
-    agent_session_dirty_run_condition,
-};
+use crate::runtime::cli::claude::ClaudeStrategy;
+use crate::runtime::cli::codex::CodexStrategy;
+use crate::runtime::cli::vibe::VibeStrategy;
+use crate::session;
 use crate::strategy::AgentStrategies;
 
 use super::command::{FocusPaneRequest, ProcessStackSpawnRequest, RenameProfileRequest};
-use super::run_terminal::AgentTerminalRegions;
-
 pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
@@ -32,7 +28,9 @@ impl Plugin for AgentPlugin {
         app.add_plugins((
             AgentSessionPlugin,
             AgentPagesPlugin,
-            crate::client::AgentClientPlugin,
+            crate::WorkspaceToolPlugin,
+            crate::CaptureToolPlugin,
+            crate::runtime::AgentRuntimePlugin,
         ));
     }
 }
@@ -52,17 +50,18 @@ pub struct AgentSessionPlugin;
 
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
-        vmux_core::register_host_spawn(app, "sessions");
-        vmux_core::register_host_spawn(app, "agent");
+        app.world_mut()
+            .spawn(vmux_core::HostSpawnRoute::host("sessions"));
+        app.world_mut()
+            .spawn(vmux_core::HostSpawnRoute::host("agent"));
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
         strategies.register_cli(Box::new(ClaudeStrategy));
         strategies.register_cli(Box::new(CodexStrategy));
-
         app.insert_resource(strategies)
             .add_plugins((
                 vmux_layout::LayoutContractPlugin,
-                vmux_editor::EditorContractPlugin,
+                vmux_editor::ContractPlugin,
                 vmux_terminal::TerminalContractPlugin,
             ))
             .add_plugins((
@@ -72,17 +71,16 @@ impl Plugin for AgentSessionPlugin {
                 super::attention::AttentionPlugin,
                 super::command::CommandPlugin,
                 super::follow::FollowPlugin,
+                super::ingress::AgentIngressPlugin,
                 super::page_open::PageOpenPlugin,
                 super::provider::ProviderPlugin,
-                super::query::QueryPlugin,
+                super::query::AgentQueryPlugin,
                 super::self_command::SelfCommandPlugin,
+                session::AgentSessionLifecyclePlugin,
+                super::snapshot_updater::SnapshotPlugin,
                 super::spawn::SpawnPlugin,
                 super::workspace::WorkspacePlugin,
             ))
-            .init_resource::<AgentSessionToEntity>()
-            .init_resource::<AgentTerminalRegions>()
-            .init_resource::<AgentSessionDirty>()
-            .init_resource::<NavAwaitingSnapshot>()
             .add_message::<AgentCommandRequest>()
             .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
@@ -91,17 +89,22 @@ impl Plugin for AgentSessionPlugin {
             .add_message::<ScreenshotResponse>()
             .add_message::<BrowserSnapshotRequest>()
             .add_message::<BrowserSnapshotResponse>()
+            .add_message::<BrowserNavigationSnapshotResponse>()
             .add_message::<BrowserScrollRequest>()
+            .add_message::<BrowserScrollResponse>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStartResponse>()
             .add_message::<RecordStopRequest>()
             .add_message::<RecordStopResponse>()
-            .add_message::<vmux_simulator::SimulatorControlRequest>()
+            .add_message::<vmux_simulator::SimulatorTapRequest>()
+            .add_message::<vmux_simulator::SimulatorSwipeRequest>()
+            .add_message::<vmux_simulator::SimulatorTypeTextRequest>()
+            .add_message::<vmux_simulator::SimulatorKeyPressRequest>()
+            .add_message::<vmux_simulator::SimulatorButtonPressRequest>()
             .add_message::<vmux_simulator::SimulatorControlResponse>()
             .add_message::<vmux_simulator::SimulatorScreenshotRequest>()
             .add_message::<vmux_simulator::SimulatorScreenshotResponse>()
             .add_message::<AgentToolCallRequest>()
-            .add_message::<AgentSessionExited>()
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<PageAgentAttachRequest>()
             .add_message::<PageAgentSpawnStackRequest>()
@@ -115,49 +118,7 @@ impl Plugin for AgentSessionPlugin {
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
             .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
-            .add_systems(Startup, session::start_agent_session_watchers)
-            .add_systems(Update, super::run_terminal::remember_configured_shell)
-            .add_systems(
-                Update,
-                (
-                    session::track_session_id_inserts,
-                    session::track_session_id_removals,
-                )
-                    .chain(),
-            )
-            .add_systems(
-                Update,
-                (
-                    session::mark_dirty_on_fs_change,
-                    session::mark_dirty_on_pending_added,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
-                    session::discover_pending_agent_sessions,
-                    session::detect_file_end_time_exit,
-                    session::clear_agent_session_dirty,
-                )
-                    .chain()
-                    .after(session::mark_dirty_on_fs_change)
-                    .after(session::mark_dirty_on_pending_added)
-                    .run_if(agent_session_dirty_run_condition),
-            )
-            .add_systems(
-                Update,
-                session::format_agent_url.after(session::track_session_id_inserts),
-            )
-            .add_systems(
-                Update,
-                (
-                    crate::snapshot_updater::update_agents_snapshot,
-                    crate::snapshot_updater::update_recent_agents,
-                    crate::snapshot_updater::update_agent_sessions_snapshot,
-                )
-                    .chain()
-                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-            );
+            .add_systems(Update, super::run_terminal::remember_configured_shell);
     }
 }
 

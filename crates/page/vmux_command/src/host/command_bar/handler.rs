@@ -2,38 +2,35 @@ use crate::CommandBar;
 use crate::build_command_bar_open_payload;
 use crate::host::payload::CommandBarPicks;
 use std::time::{Duration, Instant};
+use vmux_api::command_bar::{
+    CommandBarOpenEvent, CommandBarPick, CommandBarPicker, DismissRequest, ExRequest,
+    InvokeRequest, OpenRequest as CommandBarPageOpenRequest, PickRequest, PromptRequest,
+    SwitchSpaceRequest, SwitchTabRequest, TerminalRequest,
+};
 pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
     HostsLauncher, InlineTransitionRequested, RendersLauncherPanel, RestoreKeyboardToStack,
     StackInPaneChosen,
 };
-use vmux_wire::command_bar::{CommandBarPick, CommandBarPicker};
 
+use crate::command_bar::CloseCommandBar;
 use crate::command_bar::panel::CommandBarPanelActive;
-use crate::command_bar::project_files::{ProjectCompletions, RankBias};
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::event::{
-    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
-    CommandBarSizeEvent, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathEntry,
-    SearchEngine, SearchEngineSetting,
+    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent, OpenId, SearchEngine,
+    SearchEngineSetting,
 };
-use crate::event::{
-    CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
-};
-use crate::open::OpenCommand;
-use crate::open_target::OpenTarget;
+use crate::open_target::{OpenTarget, PaneDirection};
 use crate::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
-    CommandBarWorkSnapshot, CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
+    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage, WriteCommandBarSnapshots,
 };
 use crate::{
-    AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
-    SpaceCommand, StackCommand,
+    CommandDefinition, CommandInvocation, CommandRequest, CommandTypePlugin, ReadCommandRequests,
 };
-use bevy::{ecs::message::MessageReader, ecs::system::SystemParam, prelude::*};
+use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_core::event::space::SpaceCommandEvent;
+use vmux_core::event::space::SpaceAttachRequest;
 use vmux_core::host::page::HostsPage;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
@@ -49,77 +46,151 @@ use vmux_flex::prelude::*;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
-pub(crate) struct CommandBarInputPlugin;
+pub(crate) struct InputPlugin;
 
-impl Plugin for CommandBarInputPlugin {
+impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingLaunch>()
-            .add_message::<vmux_core::ContributedCommandChosen>()
-            .add_message::<InlineTransitionRequested>()
-            .add_message::<StackInPaneChosen>()
-            .add_message::<RestoreKeyboardToStack>()
-            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_message::<SettingsPageSpawnRequest>()
-            .add_message::<SpacesPageSpawnRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(
-                CommandBarActionEvent,
-                PathCompleteRequest,
-                CommandBarReadyEvent,
-                CommandBarRenderedEvent,
-                CommandBarSizeEvent,
-            )>::for_hosts(&[
-                "command-bar",
-                "start",
-                "layout",
-            ]))
-            .add_observer(on_command_bar_action)
-            .add_observer(on_path_complete_request)
-            .add_observer(on_command_bar_ready)
-            .add_observer(on_command_bar_rendered)
-            .add_observer(on_command_bar_size)
-            .init_resource::<crate::command_bar::project_files::ProjectIndex>()
-            .add_systems(
-                Update,
-                (
-                    warm_project_index.after(WriteCommandBarSnapshots),
-                    answer_settled_project_index.after(warm_project_index),
-                ),
+        app.add_plugins((
+            CommandTypePlugin::<CommandBarOpenRequest>::default(),
+            CommandTypePlugin::<SpaceOpenRequest>::default(),
+        ))
+        .init_resource::<PendingLaunch>()
+        .add_message::<vmux_core::ContributedCommandChosen>()
+        .add_message::<InlineTransitionRequested>()
+        .add_message::<StackInPaneChosen>()
+        .add_message::<RestoreKeyboardToStack>()
+        .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+        .add_message::<SettingsPageSpawnRequest>()
+        .add_message::<SpacesPageSpawnRequest>()
+        .add_plugins(UiEventPlugin::<(
+            PromptRequest,
+            CommandBarPageOpenRequest,
+            TerminalRequest,
+            InvokeRequest,
+            SwitchSpaceRequest,
+            SwitchTabRequest,
+            ExRequest,
+            PickRequest,
+            DismissRequest,
+            CommandBarReadyEvent,
+            CommandBarRenderedEvent,
+            CommandBarSizeEvent,
+        )>::default())
+        .add_observer(on_prompt_request)
+        .add_observer(on_page_open_request)
+        .add_observer(on_terminal_request)
+        .add_observer(on_invoke_request)
+        .add_observer(on_switch_space_request)
+        .add_observer(on_switch_tab_request)
+        .add_observer(on_ex_request)
+        .add_observer(on_pick_request)
+        .add_observer(on_dismiss_request)
+        .add_observer(close_command_bar)
+        .add_observer(on_command_bar_ready)
+        .add_observer(on_command_bar_rendered)
+        .add_observer(on_command_bar_size)
+        .add_systems(
+            Update,
+            prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
+        )
+        .add_systems(
+            Update,
+            handle_open_command_bar
+                .in_set(ReadCommandRequests)
+                .after(prewarm_command_bar_modal)
+                .after(vmux_core::workspace::TabCommandSet)
+                .after(vmux_core::workspace::StackCommandSet),
+        )
+        .add_systems(
+            Update,
+            retry_pending_command_bar_open.after(handle_open_command_bar),
+        )
+        .add_systems(
+            Update,
+            (
+                update_work_dirs_snapshot,
+                update_recent_files_snapshot,
+                mirror_project_roots,
             )
-            .add_systems(
-                Update,
-                prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
-            )
-            .add_systems(
-                Update,
-                handle_open_command_bar
-                    .in_set(ReadAppCommands)
-                    .after(prewarm_command_bar_modal)
-                    .after(vmux_core::workspace::TabCommandSet)
-                    .after(vmux_core::workspace::StackCommandSet),
-            )
-            .add_systems(
-                Update,
-                retry_pending_command_bar_open.after(handle_open_command_bar),
-            )
-            .add_systems(
-                Update,
-                (
-                    update_work_dirs_snapshot,
-                    update_recent_files_snapshot,
-                    mirror_project_roots,
-                )
-                    .in_set(WriteCommandBarSnapshots),
-            )
-            .add_systems(
-                Update,
-                deferred_dismiss_modal
-                    .after(ReadAppCommands)
-                    .before(vmux_core::workspace::ComputeFocusSet),
-            )
-            .add_systems(
-                PostUpdate,
-                reveal_command_bar.chain().after(LayoutSystems::Layout),
-            );
+                .in_set(WriteCommandBarSnapshots),
+        )
+        .add_systems(
+            Update,
+            deferred_dismiss_modal
+                .after(ReadCommandRequests)
+                .before(vmux_core::workspace::ComputeFocusSet),
+        )
+        .add_systems(
+            PostUpdate,
+            reveal_command_bar.chain().after(LayoutSystems::Layout),
+        );
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+struct SpaceOpenRequest;
+
+impl CommandRequest for SpaceOpenRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        crate::CommandDefinitions::from_ron(include_str!("handler.ron")).select(&["space_open"])
+    }
+}
+
+impl TryFrom<&CommandInvocation> for SpaceOpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "space_open").then_some(Self).ok_or(())
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandBarOpenRequest {
+    Toggle,
+    EditPage,
+    Path,
+    Commands,
+    Ex,
+    Picker(CommandBarPicker),
+}
+
+impl CommandRequest for CommandBarOpenRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        crate::CommandDefinitions::from_ron(include_str!("handler.ron")).select(&[
+            "browser_open_command_bar",
+            "browser_open_page_in_command_bar",
+            "browser_open_path_bar",
+            "browser_open_commands",
+            "browser_open_ex_bar",
+            "browser_open_goto_line",
+            "browser_open_indentation",
+            "browser_open_line_ending",
+            "browser_open_encoding",
+            "browser_open_reopen_with_encoding",
+            "browser_open_save_with_encoding",
+        ])
+    }
+}
+
+impl TryFrom<&CommandInvocation> for CommandBarOpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        let request = match invocation.id.as_str() {
+            "browser_open_command_bar" => Self::Toggle,
+            "browser_open_page_in_command_bar" => Self::EditPage,
+            "browser_open_path_bar" => Self::Path,
+            "browser_open_commands" => Self::Commands,
+            "browser_open_ex_bar" => Self::Ex,
+            "browser_open_goto_line" => Self::Picker(CommandBarPicker::GotoLine),
+            "browser_open_indentation" => Self::Picker(CommandBarPicker::Indent),
+            "browser_open_line_ending" => Self::Picker(CommandBarPicker::LineEnding),
+            "browser_open_encoding" => Self::Picker(CommandBarPicker::Encoding),
+            "browser_open_reopen_with_encoding" => Self::Picker(CommandBarPicker::EncodingReopen),
+            "browser_open_save_with_encoding" => Self::Picker(CommandBarPicker::EncodingSave),
+            _ => return Err(()),
+        };
+        Ok(request)
     }
 }
 
@@ -149,7 +220,7 @@ pub struct CommandBarNativeSize {
 pub struct PendingCommandBarReveal {
     frames: u8,
     open_id: OpenId,
-    payload: Option<Vec<u8>>,
+    payload: Option<CommandBarOpenEvent>,
     started_at: Option<Instant>,
 }
 
@@ -163,10 +234,6 @@ const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
 const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
 const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
 const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
-
-pub fn match_command(id: &str) -> Option<AppCommand> {
-    AppCommand::from_menu_id(id)
-}
 
 pub fn is_command_bar_open(modal_q: &CommandBarStateQuery) -> bool {
     command_bar_state(modal_q).owns_input()
@@ -293,14 +360,14 @@ fn native_command_bar_reveal_timed_out(
 
 fn should_retry_command_bar_open_payload(
     open_id: OpenId,
-    payload: Option<&[u8]>,
+    payload: Option<&CommandBarOpenEvent>,
     rendered_open_id: Option<OpenId>,
 ) -> bool {
     open_id.is_open() && payload.is_some() && rendered_open_id != Some(open_id)
 }
 
 fn on_command_bar_ready(
-    trigger: On<BinReceive<CommandBarReadyEvent>>,
+    trigger: On<UiInput<CommandBarReadyEvent>>,
     mut pending_q: Query<&mut PendingCommandBarReveal>,
     mut commands: Commands,
 ) {
@@ -318,7 +385,7 @@ fn on_command_bar_ready(
 }
 
 fn on_command_bar_rendered(
-    trigger: On<BinReceive<CommandBarRenderedEvent>>,
+    trigger: On<UiInput<CommandBarRenderedEvent>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -335,7 +402,7 @@ fn on_command_bar_rendered(
 }
 
 fn on_command_bar_size(
-    trigger: On<BinReceive<CommandBarSizeEvent>>,
+    trigger: On<UiInput<CommandBarSizeEvent>>,
     browsers: NonSend<Browsers>,
     state: Query<(
         &Visibility,
@@ -397,7 +464,7 @@ fn command_bar_size_should_apply(
 }
 
 #[derive(Default)]
-struct CommandBarOpenRequest {
+struct CommandBarOpenState {
     should_toggle: bool,
     should_dismiss: bool,
     should_dismiss_nav: bool,
@@ -406,60 +473,66 @@ struct CommandBarOpenRequest {
     picker: Option<CommandBarPicker>,
 }
 
-fn command_bar_open_request(
-    commands: impl IntoIterator<Item = AppCommand>,
-) -> CommandBarOpenRequest {
-    let mut request = CommandBarOpenRequest::default();
-    for cmd in commands {
-        match cmd {
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)) => {
+impl CommandBarOpenState {
+    fn picker_id(picker: CommandBarPicker) -> Option<&'static str> {
+        match picker {
+            CommandBarPicker::GotoLine => Some("browser_open_goto_line"),
+            CommandBarPicker::Indent => Some("browser_open_indentation"),
+            CommandBarPicker::LineEnding => Some("browser_open_line_ending"),
+            CommandBarPicker::Encoding => Some("browser_open_encoding"),
+            CommandBarPicker::EncodingReopen => Some("browser_open_reopen_with_encoding"),
+            CommandBarPicker::EncodingSave => Some("browser_open_save_with_encoding"),
+            CommandBarPicker::Space => None,
+        }
+    }
+}
+
+fn command_bar_open_state<'a>(
+    requests: impl IntoIterator<Item = &'a CommandBarOpenRequest>,
+    ids: impl IntoIterator<Item = &'a str>,
+) -> CommandBarOpenState {
+    let mut request = CommandBarOpenState::default();
+    for open in requests {
+        match open {
+            CommandBarOpenRequest::Toggle => {
                 request.should_toggle = true;
                 request.url_override = Some(String::new());
             }
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPageInCommandBar)) => {
+            CommandBarOpenRequest::EditPage => {
                 request.should_toggle = true;
                 request.replace_active_stack = true;
             }
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPathBar)) => {
+            CommandBarOpenRequest::Path => {
                 request.should_toggle = true;
                 request.url_override = Some("/".to_string());
             }
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommands)) => {
+            CommandBarOpenRequest::Commands => {
                 request.should_toggle = true;
                 request.url_override = Some(">".to_string());
             }
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenExBar)) => {
+            CommandBarOpenRequest::Ex => {
                 request.should_toggle = true;
                 request.url_override = Some(":".to_string());
             }
-            AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)) => {
+            CommandBarOpenRequest::Picker(picker) => {
                 request.should_toggle = true;
-                request.picker = Some(CommandBarPicker::Space);
+                request.picker = Some(*picker);
                 request.url_override = Some(String::new());
             }
-            AppCommand::Browser(BrowserCommand::Bar(bar)) => {
-                let Some(picker) = bar.picker() else {
-                    continue;
-                };
-                request.should_toggle = true;
-                request.picker = Some(picker);
-                request.url_override = Some(String::new());
-            }
-            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)) => {
+        }
+    }
+    for id in ids {
+        match id {
+            "stack_close" => {
                 request.should_dismiss = true;
             }
-            AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Next | StackCommand::Previous,
-            ))
-            | AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft
-                | PaneCommand::SelectRight
-                | PaneCommand::SelectUp
-                | PaneCommand::SelectDown,
-            )) => {
+            "stack_next" | "stack_previous" | "select_pane_left" | "select_pane_right"
+            | "select_pane_up" | "select_pane_down" => {
                 request.should_dismiss_nav = true;
             }
-            _ => {}
+            _ => {
+                continue;
+            }
         }
     }
     request
@@ -470,7 +543,9 @@ fn command_bar_toggle_should_open(is_open: bool, picker: Option<CommandBarPicker
 }
 
 fn handle_open_command_bar(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<CommandInvocation>,
+    mut open_requests: MessageReader<CommandBarOpenRequest>,
+    mut open_space_picker: MessageReader<SpaceOpenRequest>,
     layout_q: Query<
         (Entity, Has<CommandBarPanelActive>, Option<&HostWindow>),
         With<RendersLauncherPanel>,
@@ -478,17 +553,27 @@ fn handle_open_command_bar(
     windows: Query<&Window>,
     all_children: Query<&Children>,
     browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
-    focus: Res<CommandBarWorkspaceSnapshot>,
+    state: Res<CommandBarProjection>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
-    contributions: Contributions,
-    mut snapshot_params: ParamSet<(
-        Res<CommandBarSpacesSnapshot>,
-        Res<CommandBarPagesSnapshot>,
-        Res<crate::snapshot::CommandBarWorkSnapshot>,
-        Option<Res<ResolvedLocale>>,
-    )>,
+    contributed_pages: Query<&ContributedPage>,
+    contributed_commands: Query<&ContributedCommand>,
+    definitions: Query<&crate::CommandDefinition>,
+    locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
+    let mut request = command_bar_open_state(
+        open_requests.read(),
+        reader.read().map(|invocation| invocation.id.as_str()),
+    );
+    if open_space_picker.read().next().is_some() {
+        request.should_toggle = true;
+        request.picker = Some(CommandBarPicker::Space);
+        request.url_override = Some(String::new());
+    }
+    if !request.should_toggle && !request.should_dismiss && !request.should_dismiss_nav {
+        return;
+    }
+
     let Some((layout_e, is_open, _)) = layout_q
         .iter()
         .find(|(_, _, host)| {
@@ -498,18 +583,16 @@ fn handle_open_command_bar(
     else {
         return;
     };
+    let focus = &state.workspace;
     let active_stack_count = focus.stack_count;
-    let spaces_snapshot = snapshot_params.p0().clone();
+    let spaces_snapshot = &state.spaces;
     let space_name = spaces_snapshot.active_space_name.clone();
-    let pages_snap = snapshot_params.p1().clone();
-    let work_snap = snapshot_params.p2().clone();
-    let locale = snapshot_params
-        .p3()
+    let locale = locale
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
 
-    let request = command_bar_open_request(reader.read().cloned());
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
     let should_dismiss_nav = request.should_dismiss_nav;
@@ -559,75 +642,53 @@ fn handle_open_command_bar(
         false,
         space_name,
         current_url,
-        &spaces_snapshot,
-        &contributions,
-        &pages_snap,
-        &work_snap,
+        spaces_snapshot,
+        &contributed_pages,
+        &contributed_commands,
+        &state.pages,
+        &state.work,
         &locale,
         active_stack_count,
         bar_tabs,
         target,
+        &definitions,
     );
     payload.picker = picker;
     if let Some(picker) = picker {
-        payload.picks = CommandBarPicks::of(picker, &locale);
+        payload.picks = CommandBarPicks::for_picker(picker, &locale);
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        layout_e,
-        LAYOUT_COMMAND_BAR_OPEN_EVENT,
-        &payload,
-    ));
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(layout_e, &payload));
 }
 
 fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        layout,
-        LAYOUT_COMMAND_BAR_CLOSE_EVENT,
-        &CommandBarPanelCloseEvent,
-    ));
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(layout, &CommandBarOpenEvent::default()));
 }
 
-#[derive(SystemParam)]
-struct CommandBarActionQueries<'w, 's> {
-    child_of_q: Query<'w, 's, &'static ChildOf>,
-    launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
-    focus: Res<'w, CommandBarWorkspaceSnapshot>,
-}
-
-impl CommandBarActionQueries<'_, '_> {
-    fn focused_stack(&self) -> Option<Entity> {
-        self.focus.stack
-    }
-
-    fn focused_pane(&self) -> Option<Entity> {
-        self.focus.pane
-    }
-
-    fn inline_transition_stack(&self, webview: Entity) -> Option<Entity> {
-        if !self.launcher_hosts.contains(webview) {
-            return None;
-        }
-        self.child_of_q.get(webview).ok().map(|parent| parent.0)
-    }
-}
-
-fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
-    match target {
-        Some(OpenTarget::InPlace) | None => OpenCommand::InPlace { url: Some(url) },
-        Some(OpenTarget::InNewStack) => OpenCommand::InNewStack { url: Some(url) },
+fn open_invocation(caller: Entity, target: Option<OpenTarget>, url: String) -> CommandInvocation {
+    let (id, arguments) = match target {
+        Some(OpenTarget::InPlace) | None => ("open_in_place", serde_json::json!({ "url": url })),
+        Some(OpenTarget::InNewStack) => ("open_in_new_stack", serde_json::json!({ "url": url })),
         Some(OpenTarget::InPane {
             direction,
             target,
             mode,
-        }) => OpenCommand::InPane {
-            direction,
-            target,
-            mode,
-            url: Some(url),
-        },
-        Some(OpenTarget::InNewTab) => OpenCommand::InNewTab { url: Some(url) },
-        Some(OpenTarget::InNewSpace) => OpenCommand::InNewSpace { url: Some(url) },
-    }
+        }) => (
+            match direction {
+                PaneDirection::Top => "open_in_pane_top",
+                PaneDirection::Right => "open_in_pane_right",
+                PaneDirection::Bottom => "open_in_pane_bottom",
+                PaneDirection::Left => "open_in_pane_left",
+            },
+            serde_json::json!({ "url": url, "target": target, "mode": mode }),
+        ),
+        Some(OpenTarget::InNewTab) => ("open_in_new_tab", serde_json::json!({ "url": url })),
+        Some(OpenTarget::InNewSpace) => ("open_in_new_space", serde_json::json!({ "url": url })),
+    };
+    CommandInvocation::new(caller, id).with_arguments(arguments)
 }
 
 struct Home;
@@ -674,9 +735,326 @@ fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     }
 }
 
-fn on_command_bar_action(
-    trigger: On<BinReceive<CommandBarActionEvent>>,
+fn on_prompt_request(
+    trigger: On<UiInput<PromptRequest>>,
+    launcher_hosts: Query<(), With<HostsLauncher>>,
+    child_of: Query<&ChildOf>,
+    contributed_pages: Query<&ContributedPage>,
+    command_bar: Res<CommandBarProjection>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut inline_transition: MessageWriter<InlineTransitionRequested>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let prompt = request.text.trim();
+    let attachments = request
+        .attachments
+        .iter()
+        .filter(|attachment| !attachment.path.is_empty())
+        .map(|attachment| vmux_api::protocol::AgentAttachment {
+            path: attachment.path.clone(),
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
+            size: attachment.size,
+        })
+        .collect::<Vec<_>>();
+    let inline_stack = launcher_hosts
+        .contains(webview)
+        .then(|| child_of.get(webview).ok().map(|parent| parent.0))
+        .flatten();
+    let mut custom_keyboard_restore = false;
+    if (!prompt.is_empty() || !attachments.is_empty())
+        && let Some(stack) = command_bar.workspace.stack
+        && let Some(url) =
+            ContributedPage::prompt_url(&contributed_pages, request.target_url.as_deref())
+    {
+        if inline_stack == Some(stack) && vmux_api::agent::supports_inline_agent_transition(&url) {
+            inline_transition.write(InlineTransitionRequested { stack, webview });
+            if let Some(proxy) = proxy.as_deref() {
+                let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+        }
+        commands
+            .entity(stack)
+            .insert(PendingPrompt(prompt.to_string()));
+        if attachments.is_empty() {
+            commands.entity(stack).remove::<PendingPromptAttachments>();
+        } else {
+            commands
+                .entity(stack)
+                .insert(PendingPromptAttachments(attachments));
+        }
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id: None,
+        });
+        custom_keyboard_restore = true;
+    }
+    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
+}
+
+fn on_page_open_request(
+    trigger: On<UiInput<CommandBarPageOpenRequest>>,
     search_engine: Option<Res<SearchEngineSetting>>,
+    child_of: Query<&ChildOf>,
+    launcher_hosts: Query<(), With<HostsLauncher>>,
+    claimed_urls: Query<&ClaimedUrl>,
+    command_bar: Res<CommandBarProjection>,
+    locale: Option<Res<ResolvedLocale>>,
+    mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
+    mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
+    mut inline_transition: MessageWriter<InlineTransitionRequested>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let focus = &command_bar.workspace;
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+    let mut custom_keyboard_restore = false;
+    let inline_stack = launcher_hosts
+        .contains(webview)
+        .then(|| child_of.get(webview).ok().map(|parent| parent.0))
+        .flatten();
+    let locale = locale
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(Locale::preferred);
+    let value = Home::expanded_file_url(&request.value);
+    let expanded = Home::resolve(&value);
+    if expanded.exists() {
+        let directory = if expanded.is_dir() {
+            &expanded
+        } else {
+            expanded.parent().unwrap_or(&expanded)
+        };
+        if let Some(pane) = focus.pane {
+            terminal_spawn_requests.write(TerminalSpawnRequest {
+                cwd: Some(directory.to_path_buf()),
+                target: TerminalSpawnTarget::NewStackInPane(pane),
+                metadata: Some(PageMetadata {
+                    url: command_bar.terminals.terminal_page_url.clone(),
+                    title: locale.translate_with(
+                        "command-terminal-path",
+                        &[(
+                            "path",
+                            TranslationValue::String(&directory.display().to_string()),
+                        )],
+                    ),
+                    ..default()
+                }),
+            });
+            custom_keyboard_restore = true;
+        }
+    } else {
+        let url = normalize_url(
+            &value,
+            search_engine.map(|setting| setting.0).unwrap_or_default(),
+        );
+        let inline_transitioned = if matches!(request.open, None | Some(OpenTarget::InPlace))
+            && vmux_api::agent::supports_inline_agent_transition(&url)
+            && let Some(stack) = inline_stack
+        {
+            inline_transition.write(InlineTransitionRequested { stack, webview });
+            if let Some(proxy) = proxy.as_deref() {
+                let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            true
+        } else {
+            false
+        };
+        if !inline_transitioned && ClaimedUrl::contains(&claimed_urls, &url) {
+            if let Some(pane) = focus.pane {
+                chosen_writer.write(vmux_core::ContributedCommandChosen {
+                    id: url,
+                    stack: None,
+                    pane: Some(pane),
+                });
+                custom_keyboard_restore = true;
+            }
+        } else {
+            command_invocations.write(open_invocation(caller, request.open, url));
+        }
+    }
+    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
+}
+
+fn on_terminal_request(
+    trigger: On<UiInput<TerminalRequest>>,
+    child_of: Query<&ChildOf>,
+    command_bar: Res<CommandBarProjection>,
+    locale: Option<Res<ResolvedLocale>>,
+    mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
+    mut command_invocations: MessageWriter<CommandInvocation>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let value = &trigger.event().payload.value;
+    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+    let focus = &command_bar.workspace;
+    let locale = locale
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(Locale::preferred);
+    let mut custom_keyboard_restore = false;
+    if let Some(entity) = command_bar.terminals.running.get(value).copied() {
+        focus_pane_entity(entity, &mut commands, &child_of);
+        custom_keyboard_restore = true;
+    } else {
+        if value.starts_with(&command_bar.terminals.terminal_page_url) {
+            bevy::log::warn!("no terminal pane for {}; spawning new", value);
+        }
+        let cwd = if value.is_empty() || value.contains("://") {
+            None
+        } else {
+            let expanded = if value.starts_with("~/") {
+                std::env::var("HOME")
+                    .map(|home| std::path::PathBuf::from(home).join(&value[2..]))
+                    .unwrap_or_else(|_| std::path::PathBuf::from(value))
+            } else if value.starts_with('/') {
+                std::path::PathBuf::from(value)
+            } else {
+                std::env::var("HOME")
+                    .map(|home| std::path::PathBuf::from(home).join(value))
+                    .unwrap_or_else(|_| std::path::PathBuf::from(value))
+            };
+            Some(expanded)
+        };
+        if let Some(pane) = focus.pane {
+            terminal_spawn_requests.write(TerminalSpawnRequest {
+                cwd,
+                target: TerminalSpawnTarget::NewStackInPane(pane),
+                metadata: Some(PageMetadata {
+                    url: command_bar.terminals.terminal_page_url.clone(),
+                    title: locale.translate("command-terminal"),
+                    ..default()
+                }),
+            });
+        } else {
+            command_invocations.write(open_invocation(
+                caller,
+                Some(OpenTarget::InNewStack),
+                "vmux://terminal/".into(),
+            ));
+        }
+    }
+    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
+}
+
+fn on_invoke_request(
+    trigger: On<UiInput<InvokeRequest>>,
+    contributed_pages: Query<&ContributedPage>,
+    contributed_commands: Query<&ContributedCommand>,
+    command_bar: Res<CommandBarProjection>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut chosen: MessageWriter<vmux_core::ContributedCommandChosen>,
+    mut invocations: MessageWriter<CommandInvocation>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+    let mut custom_keyboard_restore = false;
+    if contributed_commands
+        .iter()
+        .any(|command| command.id == request.id)
+    {
+        if let Some(pane) = command_bar.workspace.pane {
+            chosen.write(vmux_core::ContributedCommandChosen {
+                id: request.id.clone(),
+                stack: None,
+                pane: Some(pane),
+            });
+            custom_keyboard_restore = true;
+        }
+    } else if let Some(url) = ContributedPage::page_url(&contributed_pages, &request.id) {
+        invocations.write(open_invocation(caller, request.open, url));
+        custom_keyboard_restore = true;
+    } else {
+        invocations.write(CommandInvocation::new(caller, &request.id));
+    }
+    commands.trigger(CloseCommandBar::after(webview, custom_keyboard_restore));
+}
+
+fn on_switch_space_request(trigger: On<UiInput<SwitchSpaceRequest>>, mut commands: Commands) {
+    let webview = trigger.event().webview;
+    let id = &trigger.event().payload.id;
+    if !id.is_empty() {
+        commands.trigger(UiInput {
+            webview,
+            payload: SpaceAttachRequest {
+                space_id: id.clone(),
+            },
+        });
+    }
+    commands.trigger(CloseCommandBar::after(webview, true));
+}
+
+fn on_switch_tab_request(
+    trigger: On<UiInput<SwitchTabRequest>>,
+    mut chosen: MessageWriter<StackInPaneChosen>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let request = &trigger.event().payload;
+    chosen.write(StackInPaneChosen {
+        pane_bits: request.pane,
+        index: request.index,
+    });
+    commands.trigger(CloseCommandBar::after(webview, false));
+}
+
+fn on_ex_request(
+    trigger: On<UiInput<ExRequest>>,
+    command_bar: Res<CommandBarProjection>,
+    mut lines: MessageWriter<crate::host::ExLineSubmitted>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    lines.write(crate::host::ExLineSubmitted {
+        stack: command_bar.workspace.stack,
+        line: trigger.event().payload.line.clone(),
+    });
+    commands.trigger(CloseCommandBar::after(webview, false));
+}
+
+fn on_pick_request(
+    trigger: On<UiInput<PickRequest>>,
+    command_bar: Res<CommandBarProjection>,
+    users: Query<Entity, With<vmux_core::team::User>>,
+    mut picked: MessageWriter<crate::host::FileStatusPicked>,
+    mut invocations: MessageWriter<CommandInvocation>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let pick = &trigger.event().payload.pick;
+    if let CommandBarPick::Picker(next) = pick {
+        if let Some(id) = CommandBarOpenState::picker_id(*next) {
+            let caller = users.single().unwrap_or(Entity::PLACEHOLDER);
+            invocations.write(CommandInvocation::new(caller, id));
+        }
+    } else {
+        picked.write(crate::host::FileStatusPicked {
+            stack: command_bar.workspace.stack,
+            pick: pick.clone(),
+        });
+    }
+    commands.trigger(CloseCommandBar::after(webview, false));
+}
+
+fn on_dismiss_request(trigger: On<UiInput<DismissRequest>>, mut commands: Commands) {
+    commands.trigger(CloseCommandBar::after(trigger.event().webview, false));
+}
+
+fn close_command_bar(
+    trigger: On<CloseCommandBar>,
+    command_bar: Res<CommandBarProjection>,
     mut modal_q: Query<
         (
             Entity,
@@ -686,283 +1064,9 @@ fn on_command_bar_action(
         ),
         With<CommandBar>,
     >,
-    queries: CommandBarActionQueries,
-    mut resource_params: ParamSet<(
-        Res<CommandBarSpacesSnapshot>,
-        Res<CommandBarTerminalsSnapshot>,
-        Contributions,
-        Option<Res<ResolvedLocale>>,
-    )>,
-    mut writer_params: ParamSet<(
-        MessageWriter<AppCommand>,
-        MessageWriter<PageOpenRequest>,
-        MessageWriter<TerminalSpawnRequest>,
-    )>,
-    mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
-    mut inline_transition: MessageWriter<InlineTransitionRequested>,
-    mut stack_chosen: MessageWriter<StackInPaneChosen>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
-    mut ex_lines: MessageWriter<crate::host::ExLineSubmitted>,
-    mut picked: MessageWriter<crate::host::FileStatusPicked>,
-    mut issued: MessageWriter<crate::CommandIssued>,
-    user_q: Query<Entity, With<vmux_core::team::User>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let webview = trigger.event().webview;
-    let evt = &trigger.event().payload;
-    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-    let terminals_snapshot = resource_params.p1().clone();
-    let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
-    let running_terminals = terminals_snapshot.running.clone();
-    let mut custom_keyboard_restore = false;
-    let inline_transition_stack = queries.inline_transition_stack(webview);
-    let locale = resource_params
-        .p3()
-        .as_deref()
-        .map(|locale| locale.0.clone())
-        .unwrap_or_else(Locale::preferred);
-    match evt {
-        CommandBarActionEvent::Prompt {
-            text,
-            target_url,
-            attachments: submitted,
-        } => {
-            let prompt = text.trim();
-            let attachments = submitted
-                .iter()
-                .filter(|attachment| !attachment.path.is_empty())
-                .map(|attachment| vmux_wire::protocol::AgentAttachment {
-                    path: attachment.path.clone(),
-                    name: attachment.name.clone(),
-                    mime_type: attachment.mime_type.clone(),
-                    size: attachment.size,
-                })
-                .collect::<Vec<_>>();
-            if !prompt.is_empty() || !attachments.is_empty() {
-                let focused = queries.focused_stack();
-                if let Some(stack) = focused
-                    && let Some(url) = resource_params.p2().prompt_url(target_url.as_deref())
-                {
-                    if inline_transition_stack == Some(stack)
-                        && vmux_wire::agent::supports_inline_agent_transition(&url)
-                    {
-                        inline_transition.write(InlineTransitionRequested { stack, webview });
-                        if let Some(proxy) = proxy.as_deref() {
-                            let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
-                        }
-                    }
-                    commands
-                        .entity(stack)
-                        .insert(PendingPrompt(prompt.to_string()));
-                    if !attachments.is_empty() {
-                        commands
-                            .entity(stack)
-                            .insert(PendingPromptAttachments(attachments));
-                    } else {
-                        commands.entity(stack).remove::<PendingPromptAttachments>();
-                    }
-                    writer_params.p1().write(PageOpenRequest {
-                        target: PageOpenTarget::Stack(stack),
-                        url,
-                        request_id: None,
-                    });
-                    custom_keyboard_restore = true;
-                }
-            }
-        }
-        CommandBarActionEvent::Open { value, open } => {
-            let value = &Home::expanded_file_url(value);
-            let expanded = Home::resolve(value);
-            let is_path = expanded.exists();
-
-            if is_path {
-                let dir = if expanded.is_dir() {
-                    &expanded
-                } else {
-                    expanded.parent().unwrap_or(&expanded)
-                };
-                if let Some(pane_e) = queries.focused_pane() {
-                    writer_params.p2().write(TerminalSpawnRequest {
-                        cwd: Some(dir.to_path_buf()),
-                        target: TerminalSpawnTarget::NewStackInPane(pane_e),
-                        metadata: Some(PageMetadata {
-                            url: terminal_page_url.clone(),
-                            title: locale.translate_with(
-                                "command-terminal-path",
-                                &[("path", TranslationValue::String(&dir.display().to_string()))],
-                            ),
-                            ..default()
-                        }),
-                    });
-                    custom_keyboard_restore = true;
-                }
-            } else {
-                let url = normalize_url(
-                    value,
-                    search_engine.map(|setting| setting.0).unwrap_or_default(),
-                );
-                let inline_transition = if matches!(open, None | Some(OpenTarget::InPlace))
-                    && vmux_wire::agent::supports_inline_agent_transition(&url)
-                    && let Some(stack) = inline_transition_stack
-                {
-                    inline_transition.write(InlineTransitionRequested { stack, webview });
-                    if let Some(proxy) = proxy.as_deref() {
-                        let _ = (**proxy).send_event(bevy::winit::WinitUserEvent::WakeUp);
-                    }
-                    true
-                } else {
-                    false
-                };
-                if !inline_transition && resource_params.p2().claims_url(&url) {
-                    if let Some(pane_e) = queries.focused_pane() {
-                        chosen_writer.write(vmux_core::ContributedCommandChosen {
-                            id: url.clone(),
-                            stack: None,
-                            pane: Some(pane_e),
-                        });
-                        custom_keyboard_restore = true;
-                    }
-                } else {
-                    let target = *open;
-                    let cmd =
-                        AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
-                    issued.write(crate::CommandIssued {
-                        caller,
-                        command: cmd.clone(),
-                    });
-                    writer_params.p0().write(cmd);
-                }
-            }
-        }
-        CommandBarActionEvent::Terminal { value } => {
-            let known_terminal = running_terminals.get(value).copied();
-            if let Some(entity) = known_terminal {
-                focus_pane_entity(entity, &mut commands, &queries.child_of_q);
-                custom_keyboard_restore = true;
-            } else {
-                if value.starts_with(&terminal_page_url) {
-                    bevy::log::warn!("no terminal pane for {}; spawning new", value);
-                }
-                let cwd = if value.is_empty() || value.contains("://") {
-                    None
-                } else {
-                    let expanded = if value.starts_with("~/") {
-                        std::env::var("HOME")
-                            .map(|h| std::path::PathBuf::from(h).join(&value[2..]))
-                            .unwrap_or_else(|_| std::path::PathBuf::from(&value))
-                    } else if value.starts_with('/') {
-                        std::path::PathBuf::from(&value)
-                    } else {
-                        std::env::var("HOME")
-                            .map(|h| std::path::PathBuf::from(h).join(value))
-                            .unwrap_or_else(|_| std::path::PathBuf::from(&value))
-                    };
-                    Some(expanded)
-                };
-                {
-                    let active_pane_opt = queries.focused_pane();
-                    if let Some(pane_e) = active_pane_opt {
-                        writer_params.p2().write(TerminalSpawnRequest {
-                            cwd: cwd.clone(),
-                            target: TerminalSpawnTarget::NewStackInPane(pane_e),
-                            metadata: Some(PageMetadata {
-                                url: terminal_page_url.clone(),
-                                title: locale.translate("command-terminal"),
-                                ..default()
-                            }),
-                        });
-                    } else {
-                        let cmd =
-                            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-                                url: Some("vmux://terminal/".into()),
-                            }));
-                        issued.write(crate::CommandIssued {
-                            caller,
-                            command: cmd.clone(),
-                        });
-                        writer_params.p0().write(cmd);
-                    }
-                }
-            }
-        }
-        CommandBarActionEvent::Command { id, open } => {
-            let is_contributed = resource_params
-                .p2()
-                .commands()
-                .any(|command| &command.id == id);
-            if is_contributed {
-                if let Some(pane) = queries.focused_pane() {
-                    chosen_writer.write(vmux_core::ContributedCommandChosen {
-                        id: id.clone(),
-                        stack: None,
-                        pane: Some(pane),
-                    });
-                    custom_keyboard_restore = true;
-                }
-            } else if let Some(url) = resource_params.p2().page_url(id) {
-                let target = *open;
-                let cmd =
-                    AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
-                issued.write(crate::CommandIssued {
-                    caller,
-                    command: cmd.clone(),
-                });
-                writer_params.p0().write(cmd);
-                custom_keyboard_restore = true;
-            } else if let Some(cmd) = match_command(id) {
-                issued.write(crate::CommandIssued {
-                    caller,
-                    command: cmd.clone(),
-                });
-                writer_params.p0().write(cmd);
-            }
-        }
-        CommandBarActionEvent::Space { id } => {
-            custom_keyboard_restore = true;
-            if !id.is_empty() {
-                commands.trigger(BinReceive {
-                    webview,
-                    payload: SpaceCommandEvent {
-                        command: "attach".to_string(),
-                        space_id: Some(id.clone()),
-                        name: None,
-                    },
-                });
-            }
-        }
-        CommandBarActionEvent::SwitchTab { pane, index } => {
-            stack_chosen.write(StackInPaneChosen {
-                pane_bits: *pane,
-                index: *index,
-            });
-        }
-        CommandBarActionEvent::Ex { line } => {
-            ex_lines.write(crate::host::ExLineSubmitted {
-                stack: queries.focused_stack(),
-                line: line.clone(),
-            });
-        }
-        CommandBarActionEvent::Pick { pick } => {
-            if let CommandBarPick::Picker(next) = pick {
-                if let Some(bar) = BrowserBarCommand::opening(*next) {
-                    let cmd = AppCommand::Browser(BrowserCommand::Bar(bar));
-                    issued.write(crate::CommandIssued {
-                        caller,
-                        command: cmd.clone(),
-                    });
-                    writer_params.p0().write(cmd);
-                }
-            } else {
-                picked.write(crate::host::FileStatusPicked {
-                    stack: queries.focused_stack(),
-                    pick: pick.clone(),
-                });
-            }
-        }
-        CommandBarActionEvent::Dismiss => {}
-    }
-
     if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut() {
         close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
         commands
@@ -972,7 +1076,9 @@ fn on_command_bar_action(
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
     }
-    if !custom_keyboard_restore && let Some(stack) = queries.focused_stack() {
+    if trigger.event().restore_keyboard
+        && let Some(stack) = command_bar.workspace.stack
+    {
         restore_keyboard.write(RestoreKeyboardToStack { stack });
     }
 }
@@ -1043,9 +1149,9 @@ fn reveal_command_bar(
             native_size.is_some(),
         ) {
             commands.entity(entity).remove::<PendingCommandBarReveal>();
-            commands.trigger(BinReceive::<CommandBarActionEvent> {
+            commands.trigger(UiInput::<DismissRequest> {
                 webview: entity,
-                payload: CommandBarActionEvent::Dismiss,
+                payload: DismissRequest,
             });
             continue;
         }
@@ -1086,7 +1192,7 @@ fn retry_pending_command_bar_open(
             continue;
         }
         let rendered_open_id = rendered.map(|rendered| rendered.0);
-        let Some(payload) = pending.payload.as_deref() else {
+        let Some(payload) = pending.payload.as_ref() else {
             continue;
         };
         if !should_retry_command_bar_open_payload(pending.open_id, Some(payload), rendered_open_id)
@@ -1103,268 +1209,102 @@ fn retry_pending_command_bar_open(
         {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_bytes(
-            entity,
-            COMMAND_BAR_OPEN_EVENT,
-            payload.to_vec(),
-        ));
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(entity, payload));
         pending.started_at.get_or_insert(now);
         last_emit.insert(entity, now);
     }
 }
 
-fn on_path_complete_request(
-    trigger: On<BinReceive<PathCompleteRequest>>,
-    workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
-    projects: Res<crate::snapshot::CommandBarProjectRoots>,
-    work: Res<CommandBarWorkSnapshot>,
-    browsers: NonSend<Browsers>,
-    mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
-    mut commands: Commands,
-) {
-    let asking = trigger.event().webview;
-    if !browsers.can_emit_to(&asking) {
+fn mirror_project_roots(mut state: ResMut<CommandBarProjection>) {
+    if !state.is_changed() || state.work.projects == state.projects.roots {
         return;
     }
-    let query = &trigger.event().payload.query;
-
-    let mut completions = None;
-    let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
-    if roots.is_empty() {
-        index.forget(asking);
-    } else {
-        let bias = RankBias::of(
-            ProjectQuery::favoured(
-                projects.active.as_deref(),
-                workspace.project_root.as_deref(),
-            ),
-            &work.recent_files,
-        );
-        completions = index.matches(&roots, &bias, query, asking);
-    }
-    let completions = completions.unwrap_or_else(|| complete_path(query));
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        asking,
-        PATH_COMPLETE_RESPONSE,
-        &completions.response(),
-    ));
-}
-
-fn mirror_project_roots(
-    projects: Res<crate::snapshot::CommandBarProjectRoots>,
-    mut work: ResMut<crate::snapshot::CommandBarWorkSnapshot>,
-) {
-    if !projects.is_changed() || work.projects == projects.roots {
-        return;
-    }
-    work.projects = projects.roots.clone();
-}
-
-fn warm_project_index(
-    workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
-    projects: Res<crate::snapshot::CommandBarProjectRoots>,
-    mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
-) {
-    if !workspace.is_changed() && !projects.is_changed() {
-        return;
-    }
-    let roots = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
-    if roots.is_empty() {
-        return;
-    }
-    index.warm(&roots);
-}
-
-fn answer_settled_project_index(
-    workspace: Res<crate::snapshot::CommandBarWorkspaceSnapshot>,
-    projects: Res<crate::snapshot::CommandBarProjectRoots>,
-    work: Res<CommandBarWorkSnapshot>,
-    browsers: NonSend<Browsers>,
-    mut index: ResMut<crate::command_bar::project_files::ProjectIndex>,
-    mut commands: Commands,
-) {
-    let pending = index.pending();
-    if pending.is_empty() {
-        return;
-    }
-    let bias = RankBias::of(
-        ProjectQuery::favoured(
-            projects.active.as_deref(),
-            workspace.project_root.as_deref(),
-        ),
-        &work.recent_files,
-    );
-    for asked in pending {
-        if !browsers.can_emit_to(&asked.webview) {
-            continue;
-        }
-        let roots = ProjectQuery::roots_for(
-            &asked.query,
-            workspace.project_root.as_deref(),
-            &projects.roots,
-        );
-        if roots.is_empty() {
-            continue;
-        }
-        let Some(completions) = index.settled_for(asked.webview, &roots, &bias) else {
-            continue;
-        };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            asked.webview,
-            PATH_COMPLETE_RESPONSE,
-            &completions.response(),
-        ));
-    }
-}
-
-struct ProjectQuery;
-
-impl ProjectQuery {
-    fn roots_for(
-        query: &str,
-        project_root: Option<&str>,
-        registered: &[String],
-    ) -> Vec<std::path::PathBuf> {
-        let query = query.trim();
-        if query.is_empty() || Self::names_a_location(query) {
-            return Vec::new();
-        }
-        Self::all(project_root, registered)
-    }
-
-    fn favoured<'a>(active: Option<&'a str>, project_root: Option<&'a str>) -> Option<&'a str> {
-        for candidate in [active, project_root] {
-            let Some(candidate) = candidate else {
-                continue;
-            };
-            let candidate = candidate.trim();
-            if !candidate.is_empty() {
-                return Some(candidate);
-            }
-        }
-        None
-    }
-
-    fn all(project_root: Option<&str>, registered: &[String]) -> Vec<std::path::PathBuf> {
-        let mut roots = Vec::new();
-        for candidate in project_root
-            .into_iter()
-            .chain(registered.iter().map(String::as_str))
-        {
-            let root = std::path::PathBuf::from(candidate.trim());
-            if roots.contains(&root) || !root.is_dir() {
-                continue;
-            }
-            roots.push(root);
-        }
-        roots
-    }
-
-    fn names_a_location(query: &str) -> bool {
-        query.starts_with('/') || query.starts_with('~') || query.starts_with('.')
-    }
-}
-
-fn complete_path(query: &str) -> ProjectCompletions {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-
-    let (parent_str, prefix) = if let Some(pos) = query.rfind('/') {
-        (&query[..=pos], &query[pos + 1..])
-    } else {
-        ("", query)
-    };
-
-    let resolved_parent = if parent_str.starts_with("~/") || parent_str == "~/" {
-        std::path::PathBuf::from(&home).join(&parent_str[2..])
-    } else if parent_str.starts_with('/') {
-        std::path::PathBuf::from(parent_str)
-    } else if parent_str.is_empty() {
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(&home))
-    } else {
-        std::path::PathBuf::from(&home).join(parent_str)
-    };
-
-    let Ok(entries) = std::fs::read_dir(&resolved_parent) else {
-        return ProjectCompletions::listed(Vec::new(), 0);
-    };
-
-    let prefix_lower = prefix.to_lowercase();
-    let mut results: Vec<PathEntry> = Vec::new();
-
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-
-        if !prefix.is_empty() && !name.to_lowercase().starts_with(&prefix_lower) {
-            continue;
-        }
-
-        let display_name = if is_dir {
-            format!("{}/", name)
-        } else {
-            name.clone()
-        };
-
-        let child = resolved_parent.join(&name);
-        let full_path = if is_dir {
-            format!("{}/", child.display())
-        } else {
-            child.display().to_string()
-        };
-
-        results.push(PathEntry {
-            name: display_name,
-            is_dir,
-            full_path,
-            project: String::new(),
-        });
-    }
-
-    results.sort_by(|a, b| {
-        let a_hidden = a.name.starts_with('.');
-        let b_hidden = b.name.starts_with('.');
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then(a_hidden.cmp(&b_hidden))
-            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-
-    let total = results.len();
-    results.truncate(crate::command_bar::project_files::MAX_RESULTS);
-    ProjectCompletions::listed(results, total)
+    state.work.projects = state.projects.roots.clone();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command_bar_open_payload;
     use crate::event::CommandBarOpenEvent;
     use crate::event::CommandBarSpace;
-    use crate::{CommandPlugin, ReadAppCommands};
-    use crate::{command_bar_open_payload, localized_command_name};
+    use crate::{CommandPlugin, ReadCommandRequests};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
+    use vmux_core::host::UiStateWrite;
     use vmux_core::overlay::OverlayState;
+
+    #[test]
+    fn command_bar_mcp_definitions_are_the_dispatchable_command_set() {
+        let definitions = CommandBarOpenRequest::definitions();
+        let tools = definitions
+            .iter()
+            .filter_map(CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "browser_open_command_bar",
+                "browser_open_page_in_command_bar",
+                "browser_open_path_bar",
+                "browser_open_commands",
+                "browser_open_ex_bar",
+                "browser_open_goto_line",
+                "browser_open_indentation",
+                "browser_open_line_ending",
+                "browser_open_encoding",
+                "browser_open_reopen_with_encoding",
+                "browser_open_save_with_encoding",
+            ],
+        );
+        for tool in tools {
+            let invocation = CommandInvocation::new(Entity::PLACEHOLDER, tool.name);
+            assert!(CommandBarOpenRequest::try_from(&invocation).is_ok());
+        }
+    }
 
     #[test]
     fn build_payload_includes_commands_and_target() {
         let mut world = World::new();
         let payload = world
-            .run_system_once(|contributions: Contributions| {
-                build_command_bar_open_payload(
-                    OpenId(7),
-                    false,
-                    String::new(),
-                    String::new(),
-                    &CommandBarSpacesSnapshot::default(),
-                    &contributions,
-                    &CommandBarPagesSnapshot::default(),
-                    &crate::snapshot::CommandBarWorkSnapshot::default(),
-                    &Locale::from("en-US"),
-                    0,
-                    Vec::new(),
-                    Some(OpenTarget::InPlace),
-                )
-            })
+            .run_system_once(
+                |pages: Query<&ContributedPage>, commands: Query<&ContributedCommand>| {
+                    let definitions = [crate::CommandDefinition {
+                        id: "test_command".to_string(),
+                        aliases: Vec::new(),
+                        label: "Test Command".to_string(),
+                        group: "Test".to_string(),
+                        accelerator: None,
+                        hidden: false,
+                        native_menu: false,
+                        shortcut_label: None,
+                        shortcuts: Vec::new(),
+                        mcp: None,
+                    }];
+                    build_command_bar_open_payload(
+                        OpenId(7),
+                        false,
+                        String::new(),
+                        String::new(),
+                        &Default::default(),
+                        &pages,
+                        &commands,
+                        &Default::default(),
+                        &crate::snapshot::CommandBarWorkSnapshot::default(),
+                        &Locale::from("en-US"),
+                        0,
+                        Vec::new(),
+                        Some(OpenTarget::InPlace),
+                        &definitions,
+                    )
+                },
+            )
             .expect("payload system runs");
         assert_eq!(payload.open_id, OpenId(7));
         assert_eq!(payload.target, Some(OpenTarget::InPlace));
@@ -1373,36 +1313,42 @@ mod tests {
 
     #[test]
     fn command_names_localize_every_hierarchy_segment() {
+        let browser = CommandDefinition::new("browser_prev_page", "Back", "Browser > Navigation");
+        let pane = CommandDefinition::new("close_pane", "Close Pane", "Layout > Pane");
         assert_eq!(
-            localized_command_name("ja", "browser_prev_page", "fallback".to_string()),
+            browser.localized_name("ja"),
             "ブラウザ > ナビゲーション > 戻る"
         );
         assert_eq!(
-            localized_command_name("ja", "close_pane", "fallback".to_string()),
+            pane.localized_name("ja"),
             "レイアウト > ペイン > ペインを閉じる"
         );
     }
 
     #[test]
     fn command_bar_open_payload_retries_until_rendered_ack() {
+        let payload = CommandBarOpenEvent {
+            open_id: OpenId(7),
+            ..Default::default()
+        };
         assert!(should_retry_command_bar_open_payload(
             OpenId(7),
-            Some(b"payload"),
+            Some(&payload),
             None
         ));
         assert!(should_retry_command_bar_open_payload(
             OpenId(7),
-            Some(b"payload"),
+            Some(&payload),
             Some(OpenId(6))
         ));
         assert!(!should_retry_command_bar_open_payload(
             OpenId(7),
-            Some(b"payload"),
+            Some(&payload),
             Some(OpenId(7))
         ));
         assert!(!should_retry_command_bar_open_payload(
             OpenId::NONE,
-            Some(b"payload"),
+            Some(&payload),
             None
         ));
         assert!(!should_retry_command_bar_open_payload(
@@ -1410,19 +1356,6 @@ mod tests {
             None,
             None
         ));
-    }
-
-    #[test]
-    fn command_bar_open_retry_uses_binary_host_emit() {
-        let source = include_str!("handler.rs");
-        let retry_fn = source
-            .split("fn retry_pending_command_bar_open")
-            .nth(1)
-            .and_then(|tail| tail.split("fn reveal_command_bar").next())
-            .unwrap_or_default();
-
-        assert!(retry_fn.contains("BinHostEmitEvent::from_bytes"));
-        assert!(!retry_fn.contains("HostEmitEvent::new"));
     }
 
     #[derive(Resource, Default)]
@@ -1464,7 +1397,7 @@ mod tests {
 
         assert_eq!(node.display, Display::Flex);
         assert_eq!(visibility, Visibility::Visible);
-        assert!(!OverlayState::of(node.display, visibility, false, false).owns_input());
+        assert!(!OverlayState::resolve(node.display, visibility, false, false).owns_input());
     }
 
     #[test]
@@ -1671,7 +1604,10 @@ mod tests {
                 PendingCommandBarReveal {
                     frames: u8::MAX,
                     open_id: OpenId(7),
-                    payload: Some(b"payload".to_vec()),
+                    payload: Some(CommandBarOpenEvent {
+                        open_id: OpenId(7),
+                        ..Default::default()
+                    }),
                     started_at: Some(Instant::now() - COMMAND_BAR_NATIVE_REVEAL_TIMEOUT),
                 },
             ))
@@ -1700,7 +1636,10 @@ mod tests {
                 PendingCommandBarReveal {
                     frames: 0,
                     open_id: OpenId(7),
-                    payload: Some(b"payload".to_vec()),
+                    payload: Some(CommandBarOpenEvent {
+                        open_id: OpenId(7),
+                        ..Default::default()
+                    }),
                     started_at: Some(Instant::now()),
                 },
             ))
@@ -1728,7 +1667,10 @@ mod tests {
         let pending = PendingCommandBarReveal {
             frames: 0,
             open_id: OpenId(7),
-            payload: Some(Vec::new()),
+            payload: Some(CommandBarOpenEvent {
+                open_id: OpenId(7),
+                ..Default::default()
+            }),
             started_at: Some(Instant::now()),
         };
 
@@ -1796,9 +1738,12 @@ mod tests {
 
     #[test]
     fn space_open_command_opens_space_switch_mode() {
-        let request = command_bar_open_request([AppCommand::Layout(LayoutCommand::Space(
-            SpaceCommand::Open,
-        ))]);
+        let request = CommandBarOpenState {
+            should_toggle: true,
+            picker: Some(CommandBarPicker::Space),
+            url_override: Some(String::new()),
+            ..Default::default()
+        };
 
         assert!(request.should_toggle);
         assert_eq!(request.picker, Some(CommandBarPicker::Space));
@@ -1807,47 +1752,50 @@ mod tests {
 
     #[test]
     fn every_status_bar_command_asserts_its_own_picker() {
-        for (bar, expected) in [
-            (BrowserBarCommand::OpenGotoLine, CommandBarPicker::GotoLine),
-            (BrowserBarCommand::OpenIndentation, CommandBarPicker::Indent),
+        for (id, expected) in [
+            ("browser_open_goto_line", CommandBarPicker::GotoLine),
+            ("browser_open_indentation", CommandBarPicker::Indent),
+            ("browser_open_line_ending", CommandBarPicker::LineEnding),
+            ("browser_open_encoding", CommandBarPicker::Encoding),
             (
-                BrowserBarCommand::OpenLineEnding,
-                CommandBarPicker::LineEnding,
-            ),
-            (BrowserBarCommand::OpenEncoding, CommandBarPicker::Encoding),
-            (
-                BrowserBarCommand::OpenReopenWithEncoding,
+                "browser_open_reopen_with_encoding",
                 CommandBarPicker::EncodingReopen,
             ),
             (
-                BrowserBarCommand::OpenSaveWithEncoding,
+                "browser_open_save_with_encoding",
                 CommandBarPicker::EncodingSave,
             ),
         ] {
-            let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(bar))]);
+            let open =
+                CommandBarOpenRequest::try_from(&CommandInvocation::new(Entity::PLACEHOLDER, id))
+                    .unwrap();
+            let request = command_bar_open_state([&open], std::iter::empty());
 
-            assert!(request.should_toggle, "{bar:?}");
-            assert_eq!(request.picker, Some(expected), "{bar:?}");
+            assert!(request.should_toggle, "{id}");
+            assert_eq!(request.picker, Some(expected), "{id}");
             assert_eq!(
-                BrowserBarCommand::opening(expected),
-                Some(bar),
-                "the round trip is what lets a sub-list re-open the bar"
+                CommandBarOpenState::picker_id(expected),
+                Some(id),
+                "the picker returns to its command"
             );
         }
     }
 
     #[test]
     fn the_generic_bar_commands_assert_no_picker() {
-        for bar in [
-            BrowserBarCommand::OpenCommandBar,
-            BrowserBarCommand::OpenPathBar,
-            BrowserBarCommand::OpenCommands,
-            BrowserBarCommand::OpenExBar,
+        for id in [
+            "browser_open_command_bar",
+            "browser_open_path_bar",
+            "browser_open_commands",
+            "browser_open_ex_bar",
         ] {
-            let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(bar))]);
+            let open =
+                CommandBarOpenRequest::try_from(&CommandInvocation::new(Entity::PLACEHOLDER, id))
+                    .unwrap();
+            let request = command_bar_open_state([&open], std::iter::empty());
 
-            assert_eq!(request.picker, None, "{bar:?}");
-            assert!(request.should_toggle, "{bar:?}");
+            assert_eq!(request.picker, None, "{id}");
+            assert!(request.should_toggle, "{id}");
         }
     }
 
@@ -1867,18 +1815,15 @@ mod tests {
 
     #[test]
     fn open_in_new_stack_does_not_dismiss_command_bar() {
-        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Open(
-            OpenCommand::InNewStack { url: None },
-        ))]);
+        let request = command_bar_open_state(std::iter::empty(), ["open_in_new_stack"]);
 
         assert!(!request.should_dismiss);
     }
 
     #[test]
     fn open_command_bar_forces_empty_url_override() {
-        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(
-            BrowserBarCommand::OpenCommandBar,
-        ))]);
+        let open = CommandBarOpenRequest::Toggle;
+        let request = command_bar_open_state([&open], std::iter::empty());
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, Some(String::new()));
@@ -1886,34 +1831,35 @@ mod tests {
 
     #[test]
     fn open_page_in_command_bar_leaves_url_override_unset_so_current_url_is_prefilled() {
-        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(
-            BrowserBarCommand::OpenPageInCommandBar,
-        ))]);
+        let open = CommandBarOpenRequest::EditPage;
+        let request = command_bar_open_state([&open], std::iter::empty());
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, None);
     }
 
     #[derive(Resource, Default)]
-    struct EmittedToPage(Vec<(Entity, String, Vec<u8>)>);
+    struct EmittedToPage(Vec<(Entity, CommandBarUiStatePatch)>);
 
-    fn capture_page_emit(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<EmittedToPage>) {
+    fn capture_page_emit(
+        trigger: On<UiStateWrite<CommandBarUiState>>,
+        mut emitted: ResMut<EmittedToPage>,
+    ) {
         emitted
             .0
-            .push((trigger.webview, trigger.id.clone(), trigger.payload.clone()));
+            .push((trigger.event().webview(), trigger.event().patch().clone()));
     }
 
     fn panel_app() -> App {
         let mut app = App::new();
-        app.add_message::<AppCommand>()
+        app.add_message::<CommandInvocation>()
+            .add_message::<CommandBarOpenRequest>()
+            .add_message::<SpaceOpenRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
-            .init_resource::<CommandBarWorkspaceSnapshot>()
-            .init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<CommandBarPagesSnapshot>()
-            .init_resource::<crate::snapshot::CommandBarWorkSnapshot>()
+            .init_resource::<CommandBarProjection>()
             .init_resource::<PendingLaunch>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
@@ -1921,29 +1867,38 @@ mod tests {
         app
     }
 
-    fn emitted_to_page(app: &App) -> Vec<(Entity, String)> {
+    fn emitted_to_page(app: &App) -> Vec<Entity> {
         app.world()
             .resource::<EmittedToPage>()
             .0
             .iter()
-            .map(|(webview, id, _)| (*webview, id.clone()))
+            .map(|(webview, _)| *webview)
             .collect()
     }
 
     fn open_payload(app: &App) -> CommandBarOpenEvent {
-        let (_, _, bytes) = app
+        let (_, patch) = app
             .world()
             .resource::<EmittedToPage>()
             .0
             .iter()
-            .find(|(_, id, _)| id == LAYOUT_COMMAND_BAR_OPEN_EVENT)
+            .find(|(_, patch)| patch.snapshot.is_some())
             .expect("no open payload emitted");
-        rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(bytes)
-            .expect("open payload should round-trip")
+        let snapshot = patch.snapshot.as_ref().unwrap();
+        *snapshot.clone()
     }
 
-    fn send(app: &mut App, command: AppCommand) {
-        app.world_mut().write_message(command);
+    fn send(app: &mut App, id: &str) {
+        if id == "space_open" {
+            app.world_mut().write_message(SpaceOpenRequest);
+        } else if let Ok(request) =
+            CommandBarOpenRequest::try_from(&CommandInvocation::new(Entity::PLACEHOLDER, id))
+        {
+            app.world_mut().write_message(request);
+        } else {
+            app.world_mut()
+                .write_message(CommandInvocation::new(Entity::PLACEHOLDER, id));
+        }
         app.update();
     }
 
@@ -1952,15 +1907,9 @@ mod tests {
         let mut app = panel_app();
         let layout = app.world_mut().spawn(RendersLauncherPanel).id();
 
-        send(
-            &mut app,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
-        );
+        send(&mut app, "browser_open_command_bar");
 
-        assert_eq!(
-            emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
-        );
+        assert_eq!(emitted_to_page(&app), vec![layout]);
     }
 
     #[test]
@@ -1978,18 +1927,13 @@ mod tests {
             ChildOf(stack),
         ));
         app.world_mut()
-            .resource_mut::<CommandBarWorkspaceSnapshot>()
+            .resource_mut::<CommandBarProjection>()
+            .workspace
             .stack = Some(stack);
 
-        send(
-            &mut app,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
-        );
+        send(&mut app, "browser_open_command_bar");
 
-        assert_eq!(
-            emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
-        );
+        assert_eq!(emitted_to_page(&app), vec![layout]);
         assert_eq!(open_payload(&app).url, "");
     }
 
@@ -2001,15 +1945,10 @@ mod tests {
             .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
-        send(
-            &mut app,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
-        );
+        send(&mut app, "browser_open_command_bar");
 
-        assert_eq!(
-            emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
-        );
+        assert_eq!(emitted_to_page(&app), vec![layout]);
+        assert!(!open_payload(&app).open_id.is_open());
     }
 
     #[test]
@@ -2028,10 +1967,11 @@ mod tests {
 
         assert_eq!(
             emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())],
+            vec![layout],
             "the launcher is drawn by the layout page here, so closing only the overlay window \
              leaves it on screen"
         );
+        assert!(!open_payload(&app).open_id.is_open());
     }
 
     #[test]
@@ -2042,15 +1982,9 @@ mod tests {
             .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
-        send(
-            &mut app,
-            AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)),
-        );
+        send(&mut app, "space_open");
 
-        assert_eq!(
-            emitted_to_page(&app),
-            vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
-        );
+        assert_eq!(emitted_to_page(&app), vec![layout]);
         assert_eq!(open_payload(&app).picker, Some(CommandBarPicker::Space));
     }
 
@@ -2059,10 +1993,7 @@ mod tests {
         let mut app = panel_app();
         app.world_mut().spawn(RendersLauncherPanel);
 
-        send(
-            &mut app,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPageInCommandBar)),
-        );
+        send(&mut app, "browser_open_page_in_command_bar");
 
         assert_eq!(open_payload(&app).target, Some(OpenTarget::InPlace));
     }
@@ -2073,12 +2004,11 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(CommandBarInputPlugin)
+            .add_plugins(InputPlugin)
             .add_message::<TerminalSpawnRequest>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
-            .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
 
@@ -2096,11 +2026,10 @@ mod tests {
             ))
             .id();
 
-        app.world_mut()
-            .trigger(BinReceive::<CommandBarActionEvent> {
-                webview: modal,
-                payload: CommandBarActionEvent::Dismiss,
-            });
+        app.world_mut().trigger(UiInput::<DismissRequest> {
+            webview: modal,
+            payload: DismissRequest,
+        });
         app.world_mut().flush();
 
         let vis_after_close = *app.world().get::<Visibility>(modal).unwrap();
@@ -2154,7 +2083,7 @@ mod tests {
             "KeyboardOwner must not return after prewarm"
         );
         assert!(
-            !OverlayState::of(
+            !OverlayState::resolve(
                 display_after_prewarm,
                 Visibility::Hidden,
                 has_kb_after_prewarm,
@@ -2176,7 +2105,7 @@ mod tests {
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(CommandBarInputPlugin);
+            .add_plugins(InputPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let mut update = schedules.remove(Update).unwrap();
@@ -2186,7 +2115,7 @@ mod tests {
             .system_sets
             .get_key(vmux_core::workspace::StackCommandSet.intern())
             .unwrap();
-        let read_command_systems = graph.systems_in_set(ReadAppCommands.intern()).unwrap();
+        let read_command_systems = graph.systems_in_set(ReadCommandRequests.intern()).unwrap();
         let tab_command_systems = graph
             .systems_in_set(vmux_core::workspace::StackCommandSet.intern())
             .unwrap();
@@ -2203,73 +2132,60 @@ mod tests {
     }
 
     #[test]
-    fn build_open_command_none_target_yields_in_place() {
-        let cmd = build_open_command(None, "https://example.com".to_string());
+    fn open_invocation_none_target_yields_in_place() {
+        let invocation = open_invocation(Entity::PLACEHOLDER, None, "https://example.com".into());
+        assert_eq!(invocation.id, "open_in_place");
         assert_eq!(
-            cmd,
-            OpenCommand::InPlace {
-                url: Some("https://example.com".to_string())
-            }
+            invocation.argument::<String>("url").as_deref(),
+            Some("https://example.com")
         );
     }
 
     #[test]
-    fn build_open_command_in_place_target_yields_in_place() {
-        let cmd = build_open_command(Some(OpenTarget::InPlace), "https://example.com".to_string());
-        assert_eq!(
-            cmd,
-            OpenCommand::InPlace {
-                url: Some("https://example.com".to_string())
-            }
+    fn open_invocation_in_place_target_yields_in_place() {
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
+            Some(OpenTarget::InPlace),
+            "https://example.com".into(),
         );
+        assert_eq!(invocation.id, "open_in_place");
     }
 
     #[test]
-    fn build_open_command_in_new_stack_target() {
-        let cmd = build_open_command(
+    fn open_invocation_in_new_stack_target() {
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
             Some(OpenTarget::InNewStack),
             "https://example.com".to_string(),
         );
-        assert_eq!(
-            cmd,
-            OpenCommand::InNewStack {
-                url: Some("https://example.com".to_string())
-            }
-        );
+        assert_eq!(invocation.id, "open_in_new_stack");
     }
 
     #[test]
-    fn build_open_command_in_new_tab_target() {
-        let cmd = build_open_command(
+    fn open_invocation_in_new_tab_target() {
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
             Some(OpenTarget::InNewTab),
             "https://example.com".to_string(),
         );
-        assert_eq!(
-            cmd,
-            OpenCommand::InNewTab {
-                url: Some("https://example.com".to_string())
-            }
-        );
+        assert_eq!(invocation.id, "open_in_new_tab");
     }
 
     #[test]
-    fn build_open_command_in_new_space_target() {
-        let cmd = build_open_command(
+    fn open_invocation_in_new_space_target() {
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
             Some(OpenTarget::InNewSpace),
             "https://example.com".to_string(),
         );
-        assert_eq!(
-            cmd,
-            OpenCommand::InNewSpace {
-                url: Some("https://example.com".to_string())
-            }
-        );
+        assert_eq!(invocation.id, "open_in_new_space");
     }
 
     #[test]
-    fn build_open_command_in_pane_target() {
+    fn open_invocation_in_pane_target() {
         use crate::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-        let cmd = build_open_command(
+        let invocation = open_invocation(
+            Entity::PLACEHOLDER,
             Some(OpenTarget::InPane {
                 direction: PaneDirection::Right,
                 target: PaneTarget::NewSplit,
@@ -2277,15 +2193,9 @@ mod tests {
             }),
             "https://example.com".to_string(),
         );
-        assert_eq!(
-            cmd,
-            OpenCommand::InPane {
-                direction: PaneDirection::Right,
-                target: PaneTarget::NewSplit,
-                mode: PaneOpenMode::NewStack,
-                url: Some("https://example.com".to_string()),
-            }
-        );
+        assert_eq!(invocation.id, "open_in_pane_right");
+        assert_eq!(invocation.argument("target"), Some(PaneTarget::NewSplit));
+        assert_eq!(invocation.argument("mode"), Some(PaneOpenMode::NewStack));
     }
 
     #[test]

@@ -1,42 +1,35 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use crate::client::acp::{AcpModeState, AcpModelState};
 use crate::events::AgentCommandRequest;
+use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
+use vmux_api::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
+use vmux_api::room::RemoteModelState;
 use vmux_chat::event::{
-    MODE_STATE_EVENT, MODEL_STATE_EVENT, ModeState, ModelOptionEntry, ModelState,
-    SLASH_COMMANDS_EVENT, SelectMode, SelectModel, SetAgentEffort, SlashCommands,
+    ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommands,
 };
 use vmux_command::event::{StartSelectMode, StartSelectModel};
-use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
+use vmux_service::client::ServiceRequest;
 use vmux_session::AcpSession;
-use vmux_wire::room::RemoteModelState;
 
 pub(super) struct ChatModelPlugin;
 
 impl Plugin for ChatModelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AcpModelRequestCounter>()
+        app.add_message::<ServiceRequest>()
+            .init_resource::<AcpModelRequestCounter>()
             .init_resource::<AcpModeRequestCounter>()
             .init_resource::<AgentModelSelections>()
             .init_resource::<AgentModeSelections>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
+            .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_message::<AcpSetModelRequest>()
             .add_message::<AcpSetModeRequest>()
             .add_message::<ModeSelectRequest>()
             .add_message::<ModelSelectRequest>()
             .add_message::<EffortSetRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(
-                SelectModel,
-                SetAgentEffort,
-                SelectMode,
-            )>::for_hosts(super::CHAT_EVENT_HOSTS))
-            .add_plugins(
-                BinEventEmitterPlugin::<(StartSelectModel, StartSelectMode)>::for_hosts(&["start"]),
-            )
+            .add_plugins(UiEventPlugin::<(SelectModel, SetAgentEffort, SelectMode)>::default())
+            .add_plugins(UiEventPlugin::<(StartSelectModel, StartSelectMode)>::default())
             .add_systems(
                 Startup,
                 (
@@ -62,7 +55,7 @@ impl Plugin for ChatModelPlugin {
                     push_removed_acp_model_state_to_page,
                     push_acp_mode_state_to_page,
                     push_removed_acp_mode_state_to_page,
-                    apply_last_used_acp_model.after(crate::client::acp::apply_acp_model_info),
+                    apply_last_used_acp_model.after(crate::runtime::acp::AcpModelInfoSet),
                     send_acp_model_requests,
                     send_acp_mode_requests,
                     remember_acp_model_lists,
@@ -92,11 +85,11 @@ pub(super) struct EffortSetRequest {
 
 fn answer_remote_model_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    service: Option<Res<ServiceClient>>,
     sessions: Query<(&AcpSession, &AcpModelState)>,
     settings: Res<vmux_setting::AppSettings>,
     mut selects: MessageWriter<ModelSelectRequest>,
     mut efforts: MessageWriter<EffortSetRequest>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let AgentCommand::Shared(command) = &request.command else {
@@ -137,12 +130,10 @@ fn answer_remote_model_commands(
             }
             _ => continue,
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(ClientMessage::AgentCommandResponse {
-                request_id: request.request_id,
-                result,
-            });
-        }
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
+            request_id: request.request_id,
+            result,
+        }));
     }
 }
 
@@ -205,7 +196,7 @@ fn apply_model_selection(
             config_id: model_state.config_id.clone(),
             model_id: model_id.clone(),
         });
-        model_state.pending = Some(crate::client::acp::PendingAcpModelSelection {
+        model_state.pending = Some(crate::runtime::acp::PendingAcpModelSelection {
             request_id,
             model_id,
         });
@@ -261,22 +252,22 @@ struct AgentModeMemory {
     url: String,
     selected: String,
     #[serde(default)]
-    modes: Vec<vmux_wire::protocol::AcpModeOption>,
+    modes: Vec<vmux_api::protocol::AcpModeOption>,
 }
 
 struct AgentSelectionKey;
 
 impl AgentSelectionKey {
-    fn of(agent_id: &str) -> &str {
+    fn normalize(agent_id: &str) -> &str {
         if agent_id.starts_with("cli:") {
             return agent_id;
         }
-        crate::acp_install::agent_url_id(agent_id)
+        crate::acp_tool::agent_url_id(agent_id)
     }
 
     fn acp_url(agent_id: &str) -> String {
         vmux_command::snapshot::AgentPromptTarget::Acp {
-            id: Self::of(agent_id).to_string(),
+            id: Self::normalize(agent_id).to_string(),
         }
         .url()
     }
@@ -320,7 +311,7 @@ fn load_agent_model_selections(mut models: ResMut<AgentModelSelections>) {
         return;
     };
     for (agent, entry) in saved {
-        let key = AgentSelectionKey::of(&agent).to_string();
+        let key = AgentSelectionKey::normalize(&agent).to_string();
         let mut memory = entry.memory();
         if !key.starts_with("cli:") && !memory.url.is_empty() {
             memory.url = AgentSelectionKey::acp_url(&agent);
@@ -340,7 +331,7 @@ fn load_agent_mode_selections(mut modes: ResMut<AgentModeSelections>) {
         return;
     };
     for (agent, mut memory) in saved {
-        let key = AgentSelectionKey::of(&agent).to_string();
+        let key = AgentSelectionKey::normalize(&agent).to_string();
         memory.url = AgentSelectionKey::acp_url(&agent);
         modes.by_agent.insert(key, memory);
     }
@@ -352,17 +343,10 @@ fn save_agent_model_selections(mut models: ResMut<AgentModelSelections>) {
         return;
     }
     let path = agent_model_selections_path();
-    let Some(parent) = path.parent() else {
-        return;
-    };
     let Ok(bytes) = serde_json::to_vec_pretty(&models.by_agent) else {
         return;
     };
-    let temp = path.with_extension("json.tmp");
-    if std::fs::create_dir_all(parent).is_ok()
-        && std::fs::write(&temp, bytes).is_ok()
-        && std::fs::rename(&temp, &path).is_ok()
-    {
+    if vmux_path::AtomicFile::write(&path, &bytes).is_ok() {
         models.dirty = false;
     }
 }
@@ -372,17 +356,10 @@ fn save_agent_mode_selections(mut modes: ResMut<AgentModeSelections>) {
         return;
     }
     let path = agent_mode_selections_path();
-    let Some(parent) = path.parent() else {
-        return;
-    };
     let Ok(bytes) = serde_json::to_vec_pretty(&modes.by_agent) else {
         return;
     };
-    let temp = path.with_extension("json.tmp");
-    if std::fs::create_dir_all(parent).is_ok()
-        && std::fs::write(&temp, bytes).is_ok()
-        && std::fs::rename(&temp, &path).is_ok()
-    {
+    if vmux_path::AtomicFile::write(&path, &bytes).is_ok() {
         modes.dirty = false;
     }
 }
@@ -393,15 +370,46 @@ struct AcpModelRequestCounter(u64);
 #[derive(Resource, Default)]
 struct AcpModeRequestCounter(u64);
 
-fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
-    let Some(state) = state else {
-        return ModelState::default();
-    };
-    ModelState {
-        current_model_id: state.display_model_id().to_string(),
-        current_model_name: state.current_name().to_string(),
-        default_model_id: state.default_model_id.clone(),
-        models: state
+pub(super) struct ModelProjection {
+    pub(super) state: ModelState,
+    pub(super) slash_commands: SlashCommands,
+}
+
+impl ModelProjection {
+    pub(super) fn new(
+        model: Option<&AcpModelState>,
+        cross_runtime: bool,
+        agent_key: &str,
+        settings: Option<&vmux_setting::AppSettings>,
+    ) -> Self {
+        let mut state = match model {
+            Some(model) => ModelState {
+                current_model_id: model.display_model_id().to_string(),
+                current_model_name: model.current_name().to_string(),
+                default_model_id: model.default_model_id.clone(),
+                models: Self::options(model),
+                ..Default::default()
+            },
+            None => ModelState::default(),
+        };
+        state.agent_key = agent_key.to_string();
+        state.effort_current = settings
+            .and_then(|settings| settings.agent.effort_for(agent_key))
+            .unwrap_or("")
+            .to_string();
+        state.effort_default = vmux_core::agent::default_effort(agent_key).to_string();
+        state.effort_levels = vmux_core::agent::effort_levels(agent_key)
+            .iter()
+            .map(|level| level.to_string())
+            .collect();
+        Self {
+            state,
+            slash_commands: SlashCommands::for_agent(cross_runtime, model.is_some()),
+        }
+    }
+
+    fn options(model: &AcpModelState) -> Vec<ModelOptionEntry> {
+        model
             .models
             .iter()
             .map(|model| ModelOptionEntry {
@@ -409,69 +417,26 @@ fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
                 name: model.name.clone(),
                 description: model.description.clone().unwrap_or_default(),
             })
-            .collect(),
-        ..Default::default()
+            .collect()
     }
 }
 
-pub(super) fn emit_model_state(
-    webview: Entity,
-    model_state: Option<&AcpModelState>,
-    cross_runtime: bool,
-    agent_key: &str,
-    effort_current: &str,
-    commands: &mut Commands,
-) {
-    let mut state = model_state_of(model_state);
-    state.agent_key = agent_key.to_string();
-    state.effort_current = effort_current.to_string();
-    state.effort_default = vmux_core::agent::default_effort(agent_key).to_string();
-    state.effort_levels = vmux_core::agent::effort_levels(agent_key)
-        .iter()
-        .map(|level| level.to_string())
-        .collect();
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        MODEL_STATE_EVENT,
-        &state,
-    ));
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        SLASH_COMMANDS_EVENT,
-        &SlashCommands::for_agent(cross_runtime, model_state.is_some()),
-    ));
-}
+pub(super) struct ModeProjection(pub(super) ModeState);
 
-pub(super) fn emit_mode_state(
-    webview: Entity,
-    mode_state: Option<&AcpModeState>,
-    commands: &mut Commands,
-) {
-    let state = match mode_state {
-        Some(state) => ModeState {
-            current_mode_id: state.display_mode_id().to_string(),
-            modes: state.modes.clone(),
-        },
-        None => ModeState::default(),
-    };
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        MODE_STATE_EVENT,
-        &state,
-    ));
-}
-
-pub(super) fn effort_current_for<'a>(
-    settings: Option<&'a Res<vmux_setting::AppSettings>>,
-    agent_key: &str,
-) -> &'a str {
-    settings
-        .and_then(|settings| settings.agent.effort_for(agent_key))
-        .unwrap_or("")
+impl From<Option<&AcpModeState>> for ModeProjection {
+    fn from(mode: Option<&AcpModeState>) -> Self {
+        Self(match mode {
+            Some(mode) => ModeState {
+                current_mode_id: mode.display_mode_id().to_string(),
+                modes: mode.modes.clone(),
+            },
+            None => ModeState::default(),
+        })
+    }
 }
 
 fn on_start_select_model(
-    trigger: On<BinReceive<StartSelectModel>>,
+    trigger: On<UiInput<StartSelectModel>>,
     mut last_used: ResMut<AgentModelSelections>,
 ) {
     let request = &trigger.event().payload;
@@ -482,7 +447,7 @@ fn on_start_select_model(
 }
 
 fn on_start_select_mode(
-    trigger: On<BinReceive<StartSelectMode>>,
+    trigger: On<UiInput<StartSelectMode>>,
     mut last_used: ResMut<AgentModeSelections>,
 ) {
     let request = &trigger.event().payload;
@@ -513,7 +478,7 @@ fn remember_acp_model_lists(
     mut last_used: ResMut<AgentModelSelections>,
 ) {
     for (session, state) in &sessions {
-        let listed = model_state_of(Some(state)).models;
+        let listed = ModelProjection::options(state);
         let current = state.display_model_id().to_string();
         let url = AgentSelectionKey::acp_url(&session.agent_id);
         last_used.remember_catalog(&session.agent_id, &url, &current, &listed);
@@ -537,7 +502,7 @@ fn remember_acp_mode_lists(
 
 fn publish_agent_models(
     last_used: Res<AgentModelSelections>,
-    mut published: ResMut<vmux_command::snapshot::CommandBarAgentModels>,
+    mut state: ResMut<vmux_command::snapshot::CommandBarProjection>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -547,21 +512,21 @@ fn publish_agent_models(
         if memory.url.is_empty() || memory.models.is_empty() {
             continue;
         }
-        next.push(vmux_wire::command_bar::AgentModels {
+        next.push(vmux_api::command_bar::AgentModels {
             agent_key: agent_key.clone(),
             url: memory.url.clone(),
             selected: memory.selected.clone(),
             models: memory.models.clone(),
         });
     }
-    if published.agents != next {
-        published.agents = next;
+    if state.agent_models.agents != next {
+        state.agent_models.agents = next;
     }
 }
 
 fn publish_agent_modes(
     last_used: Res<AgentModeSelections>,
-    mut published: ResMut<vmux_command::snapshot::CommandBarAgentModes>,
+    mut state: ResMut<vmux_command::snapshot::CommandBarProjection>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -571,15 +536,15 @@ fn publish_agent_modes(
         if memory.url.is_empty() || memory.modes.is_empty() {
             continue;
         }
-        next.push(vmux_wire::command_bar::AgentModes {
+        next.push(vmux_api::command_bar::AgentModes {
             agent_key: agent_key.clone(),
             url: memory.url.clone(),
             selected: memory.selected.clone(),
             modes: memory.modes.clone(),
         });
     }
-    if published.agents != next {
-        published.agents = next;
+    if state.agent_modes.agents != next {
+        state.agent_modes.agents = next;
     }
 }
 
@@ -604,14 +569,13 @@ fn push_acp_model_state_to_page(
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
-        emit_model_state(
-            webview,
+        let projection = ModelProjection::new(
             Some(model_state),
             cross,
             &session.agent_id,
-            effort_current_for(settings.as_ref(), &session.agent_id),
-            &mut commands,
+            settings.as_deref(),
         );
+        write_model_projection(webview, projection, &mut commands);
     }
 }
 
@@ -640,14 +604,8 @@ fn push_removed_acp_model_state_to_page(
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
-        emit_model_state(
-            webview,
-            None,
-            cross,
-            &session.agent_id,
-            effort_current_for(settings.as_ref(), &session.agent_id),
-            &mut commands,
-        );
+        let projection = ModelProjection::new(None, cross, &session.agent_id, settings.as_deref());
+        write_model_projection(webview, projection, &mut commands);
     }
 }
 
@@ -666,7 +624,11 @@ fn push_acp_mode_state_to_page(
             continue;
         };
         if browsers.can_emit_to(&webview) {
-            emit_mode_state(webview, Some(mode_state), &mut commands);
+            write_mode_projection(
+                webview,
+                ModeProjection::from(Some(mode_state)),
+                &mut commands,
+            );
         }
     }
 }
@@ -686,13 +648,37 @@ fn push_removed_acp_mode_state_to_page(
             continue;
         };
         if browsers.can_emit_to(&webview) {
-            emit_mode_state(webview, None, &mut commands);
+            write_mode_projection(webview, ModeProjection::from(None), &mut commands);
         }
     }
 }
 
+fn write_model_projection(webview: Entity, projection: ModelProjection, commands: &mut Commands) {
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.state,
+        ),
+    );
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.slash_commands,
+        ),
+    );
+}
+
+fn write_mode_projection(webview: Entity, projection: ModeProjection, commands: &mut Commands) {
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ),
+    );
+}
+
 fn on_select_model(
-    trigger: On<BinReceive<SelectModel>>,
+    trigger: On<UiInput<SelectModel>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
     mut selects: MessageWriter<ModelSelectRequest>,
@@ -710,7 +696,7 @@ fn on_select_model(
 }
 
 fn on_select_mode(
-    trigger: On<BinReceive<SelectMode>>,
+    trigger: On<UiInput<SelectMode>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
     mut selects: MessageWriter<ModeSelectRequest>,
@@ -754,7 +740,7 @@ fn apply_mode_selection(
             config_id: state.config_id.clone(),
             mode_id: selection.mode_id.clone(),
         });
-        state.pending = Some(crate::client::acp::PendingAcpModeSelection {
+        state.pending = Some(crate::runtime::acp::PendingAcpModeSelection {
             request_id,
             mode_id: selection.mode_id.clone(),
         });
@@ -762,7 +748,7 @@ fn apply_mode_selection(
 }
 
 fn on_set_agent_effort(
-    trigger: On<BinReceive<SetAgentEffort>>,
+    trigger: On<UiInput<SetAgentEffort>>,
     mut efforts: MessageWriter<EffortSetRequest>,
 ) {
     let payload = &trigger.event().payload;
@@ -820,7 +806,7 @@ fn apply_last_used_acp_model(
     for (session, mut state) in &mut sessions {
         let Some(remembered) = last_used
             .by_agent
-            .get(AgentSelectionKey::of(&session.agent_id))
+            .get(AgentSelectionKey::normalize(&session.agent_id))
         else {
             continue;
         };
@@ -840,7 +826,7 @@ fn apply_last_used_acp_model(
             config_id: state.config_id.clone(),
             model_id: model_id.clone(),
         });
-        state.pending = Some(crate::client::acp::PendingAcpModelSelection {
+        state.pending = Some(crate::runtime::acp::PendingAcpModelSelection {
             request_id,
             model_id: model_id.clone(),
         });
@@ -849,41 +835,35 @@ fn apply_last_used_acp_model(
 
 fn send_acp_model_requests(
     mut requests: MessageReader<AcpSetModelRequest>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     for request in requests.read() {
-        service.0.send(ClientMessage::AcpSetModel {
+        service_requests.write(ServiceRequest(ClientMessage::AcpSetModel {
             sid: request.sid.clone(),
             request_id: request.request_id,
             config_id: request.config_id.clone(),
             model_id: request.model_id.clone(),
-        });
+        }));
     }
 }
 
 fn send_acp_mode_requests(
     mut requests: MessageReader<AcpSetModeRequest>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     for request in requests.read() {
-        service.0.send(ClientMessage::AcpSetMode {
+        service_requests.write(ServiceRequest(ClientMessage::AcpSetMode {
             sid: request.sid.clone(),
             request_id: request.request_id,
             config_id: request.config_id.clone(),
             mode_id: request.mode_id.clone(),
-        });
+        }));
     }
 }
 
 impl AgentModelSelections {
     fn select(&mut self, agent_id: &str, model_id: &str) {
-        let key = AgentSelectionKey::of(agent_id).to_string();
+        let key = AgentSelectionKey::normalize(agent_id).to_string();
         let entry = self.by_agent.entry(key).or_default();
         if !entry.models.is_empty() && !entry.models.iter().any(|model| model.id == model_id) {
             return;
@@ -896,7 +876,7 @@ impl AgentModelSelections {
     }
 
     pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(AgentSelectionKey::of(agent_id)) {
+        match self.by_agent.get(AgentSelectionKey::normalize(agent_id)) {
             Some(memory) => &memory.selected,
             None => "",
         }
@@ -912,7 +892,7 @@ impl AgentModelSelections {
         if models.is_empty() {
             return;
         }
-        let key = AgentSelectionKey::of(agent_id).to_string();
+        let key = AgentSelectionKey::normalize(agent_id).to_string();
         let entry = self.by_agent.entry(key).or_default();
         let mut changed = false;
         if entry.url != url {
@@ -942,7 +922,7 @@ impl AgentModelSelections {
 
 impl AgentModeSelections {
     fn select(&mut self, agent_id: &str, mode_id: &str) {
-        let key = AgentSelectionKey::of(agent_id).to_string();
+        let key = AgentSelectionKey::normalize(agent_id).to_string();
         let entry = self.by_agent.entry(key).or_default();
         if !entry.modes.is_empty() && !entry.modes.iter().any(|mode| mode.id == mode_id) {
             return;
@@ -955,7 +935,7 @@ impl AgentModeSelections {
     }
 
     pub(crate) fn selected_for(&self, agent_id: &str) -> &str {
-        match self.by_agent.get(AgentSelectionKey::of(agent_id)) {
+        match self.by_agent.get(AgentSelectionKey::normalize(agent_id)) {
             Some(memory) => &memory.selected,
             None => "",
         }
@@ -966,12 +946,12 @@ impl AgentModeSelections {
         agent_id: &str,
         url: &str,
         selected: &str,
-        modes: &[vmux_wire::protocol::AcpModeOption],
+        modes: &[vmux_api::protocol::AcpModeOption],
     ) {
         if modes.is_empty() {
             return;
         }
-        let key = AgentSelectionKey::of(agent_id).to_string();
+        let key = AgentSelectionKey::normalize(agent_id).to_string();
         let entry = self.by_agent.entry(key).or_default();
         let mut changed = false;
         if entry.url != url {
@@ -1023,7 +1003,7 @@ mod tests {
             SlashCommands::for_agent(cross, models)
                 .commands
                 .iter()
-                .map(|command| command.name.clone())
+                .map(|command| command.name())
                 .collect::<Vec<_>>()
         };
         assert_eq!(names(false, false), ["upload", "resume", "mcp"]);
@@ -1060,12 +1040,12 @@ mod tests {
                     default_model_id: "default".into(),
                     pending: None,
                     models: vec![
-                        vmux_service::protocol::AcpModelOption {
+                        vmux_api::protocol::AcpModelOption {
                             id: "default".into(),
                             name: "Default".into(),
                             description: None,
                         },
-                        vmux_service::protocol::AcpModelOption {
+                        vmux_api::protocol::AcpModelOption {
                             id: "fable".into(),
                             name: "Fable".into(),
                             description: None,
@@ -1076,7 +1056,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SelectModel {
                 model_id: "fable".into(),
@@ -1115,13 +1095,13 @@ mod tests {
             "fable"
         );
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SelectModel {
                 model_id: "fable".into(),
             },
         });
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SelectModel {
                 model_id: "missing".into(),
@@ -1161,12 +1141,12 @@ mod tests {
                     current_mode_id: "ask".into(),
                     pending: None,
                     modes: vec![
-                        vmux_service::protocol::AcpModeOption {
+                        vmux_api::protocol::AcpModeOption {
                             id: "ask".into(),
                             name: "Ask".into(),
                             description: None,
                         },
-                        vmux_service::protocol::AcpModeOption {
+                        vmux_api::protocol::AcpModeOption {
                             id: "auto".into(),
                             name: "Auto Allow".into(),
                             description: None,
@@ -1177,7 +1157,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: SelectMode {
                 mode_id: "auto".into(),
@@ -1229,14 +1209,15 @@ mod tests {
         );
         let mut app = App::new();
         app.insert_resource(selections)
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
+            .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_systems(Update, publish_agent_models);
 
         app.update();
 
         let published = app
             .world()
-            .resource::<vmux_command::snapshot::CommandBarAgentModels>();
+            .resource::<vmux_command::snapshot::CommandBarProjection>();
+        let published = &published.agent_models;
         assert_eq!(published.agents.len(), 1);
         assert_eq!(published.agents[0].agent_key, "cli:codex");
         assert_eq!(published.agents[0].url, "vmux://sessions/codex/cli");
@@ -1247,7 +1228,7 @@ mod tests {
     fn acp_mode_catalog_uses_the_canonical_launcher_identity() {
         let mut app = App::new();
         app.init_resource::<AgentModeSelections>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
+            .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_systems(
                 Update,
                 (
@@ -1267,7 +1248,7 @@ mod tests {
                 config_id: "mode".into(),
                 current_mode_id: "agent".into(),
                 pending: None,
-                modes: vec![vmux_service::protocol::AcpModeOption {
+                modes: vec![vmux_api::protocol::AcpModeOption {
                     id: "agent".into(),
                     name: "Agent".into(),
                     description: None,
@@ -1279,7 +1260,8 @@ mod tests {
 
         let published = app
             .world()
-            .resource::<vmux_command::snapshot::CommandBarAgentModes>();
+            .resource::<vmux_command::snapshot::CommandBarProjection>();
+        let published = &published.agent_modes;
         assert_eq!(published.agents.len(), 1);
         assert_eq!(published.agents[0].agent_key, "codex");
         assert_eq!(published.agents[0].url, "vmux://sessions/codex");
@@ -1305,8 +1287,8 @@ mod tests {
             "custom",
             "custom-acp",
         ] {
-            let once = AgentSelectionKey::of(agent_id);
-            let twice = AgentSelectionKey::of(once);
+            let once = AgentSelectionKey::normalize(agent_id);
+            let twice = AgentSelectionKey::normalize(once);
             assert_eq!(once, twice, "{agent_id}");
         }
     }
@@ -1346,12 +1328,12 @@ mod tests {
                     default_model_id: "default".into(),
                     pending: None,
                     models: vec![
-                        vmux_service::protocol::AcpModelOption {
+                        vmux_api::protocol::AcpModelOption {
                             id: "default".into(),
                             name: "Default".into(),
                             description: None,
                         },
-                        vmux_service::protocol::AcpModelOption {
+                        vmux_api::protocol::AcpModelOption {
                             id: "fable".into(),
                             name: "Fable".into(),
                             description: None,

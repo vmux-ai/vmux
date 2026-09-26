@@ -8,30 +8,39 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
+use vmux_api::protocol::{ClientMessage, ProcessId, ServiceMessage};
+use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
-use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, StackCommand, WriteAppCommands,
-};
 use vmux_core::input::KeyStroke;
-use vmux_core::page::PageReady;
-use vmux_core::terminal::{
-    ProcessesMonitorSpawnRequest, TerminalSpawnRequest, TerminalSpawnTarget,
-};
+use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
-    PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet,
-    PageOpenTarget, PageOpenTask,
+    PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
+use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest};
+use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_service::{
-    client::{ServiceHandle, ServiceWake},
-    protocol::{ClientMessage, ProcessId, ServiceMessage, SharedEvent},
+    client::{ServiceInbound, ServiceRequest},
+    plugin::{ServiceConnected, ServiceUnavailable},
 };
-use vmux_setting::{AppSettings, SettingsSaveRequest};
+use vmux_setting::AppSettings;
 
+#[cfg(test)]
+use super::input_queue::InputQueuePlugin;
+#[cfg(test)]
+use super::input_queue::pending_terminal_input;
+use super::input_queue::{NextTerminalInputSequence, enqueue_terminal_input};
+use super::loading::AgentLoading;
+use super::mouse::TerminalMouseState;
+use super::process_control::{PendingTerminalSnapshot, ProcessControlPlugin, TerminalGridSize};
+use super::prompt::PromptCapture;
+use super::state::{
+    CopyModeInputState, CopyModePendingKey, TerminalCopyMode, TerminalMode, TerminalShortcutState,
+};
 use crate::event::*;
 use crate::pid::{self, Pid};
+use crate::process_index::TerminalProcessIndex;
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
@@ -40,85 +49,92 @@ pub struct TerminalPlugin;
 
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::ui::TerminalPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        vmux_core::register_host_spawn(app, "terminal");
-        app.add_plugins(crate::contract::TerminalContractPlugin)
+        app.world_mut()
+            .spawn(vmux_core::HostSpawnRoute::host("terminal"));
+        app.add_message::<ServiceRequest>()
+            .add_plugins((
+                vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
+                crate::TerminalToolPlugin,
+                vmux_command::CommandTypePlugin::<super::command::TerminalCloseRequest>::default(),
+                vmux_command::CommandTypePlugin::<super::command::TerminalNextRequest>::default(),
+                vmux_command::CommandTypePlugin::<super::command::TerminalPrevRequest>::default(),
+                vmux_command::CommandTypePlugin::<super::command::TerminalClearRequest>::default(),
+                vmux_command::CommandTypePlugin::<super::command::CopyModeRequest>::default(),
+            ))
+            .add_plugins(crate::contract::TerminalContractPlugin)
             .register_type::<crate::launch::TerminalLaunch>()
             .register_type::<crate::launch::TerminalKind>()
             .add_message::<TerminalStackSpawnRequest>()
             .add_message::<TerminalSpawnRequest>()
-            .add_message::<ProcessesMonitorSpawnRequest>()
-            .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
-            .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
-            .add_plugins(crate::pid::PidPlugin);
-        let service_wake = service_wake_callback(app);
-        ensure_service_started();
-        app.insert_resource(ServiceConnectRetry::new());
-        app.insert_resource(ServiceWakeCallback(service_wake))
-            .init_resource::<MouseSelectionState>()
-            .init_resource::<TerminalModeMap>()
-            .init_resource::<LocalCopyModeState>()
-            .init_resource::<TerminalWebShortcutState>()
-            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
-            .add_plugins(BinEventEmitterPlugin::<(
-                TermResizeEvent,
-                TermMouseEvent,
-                TermScrollEvent,
-                TermLinkOpenRequest,
-            )>::for_hosts(&["terminal"]));
+            .add_plugins((
+                crate::pid::PidPlugin,
+                crate::host::request::TerminalRequestPlugin,
+                TerminalServicePlugin,
+                TerminalInputPlugin,
+                crate::processes_monitor::ProcessesMonitorPlugin,
+                super::loading::LoadingPlugin,
+                super::prompt::PromptPlugin,
+                crate::snapshot_updater::SnapshotPlugin,
+                crate::theme::TerminalThemePlugin,
+            ));
+    }
+}
+
+struct TerminalServicePlugin;
+
+impl Plugin for TerminalServicePlugin {
+    fn build(&self, app: &mut App) {
         app.add_plugins(TerminalUpdatePlugin)
             .add_systems(
                 Update,
-                (
-                    handle_terminal_send_requests,
-                    handle_run_shell_requests,
-                    respond_terminal_stack_spawn,
-                )
+                respond_terminal_stack_spawn
+                    .in_set(TerminalStackSpawnSet)
                     .after(ServiceMessageSet),
             )
             .add_systems(
                 Update,
-                (respond_terminal_spawn, respond_processes_monitor_spawn)
-                    .in_set(vmux_command::ReadAppCommands),
-            )
-            .add_systems(
-                Update,
-                handle_terminal_font_size.after(vmux_command::ReadAppCommands),
-            )
-            .add_observer(on_term_ready)
-            .add_observer(on_term_resize)
-            .add_observer(on_term_mouse)
-            .add_observer(on_term_scroll)
-            .add_observer(on_term_key)
-            .add_observer(on_term_link_open)
-            .add_observer(on_restart_pty)
-            .add_observer(on_terminal_removed)
-            .add_plugins((
-                crate::processes_monitor::ProcessesMonitorPlugin,
-                crate::snapshot_updater::TerminalSnapshotPlugin,
-            ))
-            .add_systems(
-                Update,
-                (
-                    arm_agent_loading,
-                    arm_agent_loading_on_restart,
-                    announce_slow_shell_boot.after(poll_service_messages),
-                    clear_agent_loading.after(poll_service_messages),
-                    resend_the_screen_a_page_missed.after(poll_service_messages),
-                    flush_buffered_agent_prompt.after(poll_service_messages),
-                    reset_terminal_title_on_agent_removed,
-                    set_terminal_shell_icon,
-                ),
+                respond_terminal_spawn.in_set(vmux_command::ReadCommandRequests),
             )
             .add_systems(
                 Update,
                 prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
-            );
+            )
+            .add_observer(on_restart_pty)
+            .add_observer(on_terminal_removed);
+    }
+}
+
+struct TerminalInputPlugin;
+
+impl Plugin for TerminalInputPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(PreUpdate, initialize_terminal_state)
+            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
+            .add_plugins((
+                super::mouse::MousePlugin,
+                super::link::LinkPlugin,
+                ProcessControlPlugin,
+            ))
+            .add_observer(on_term_key);
     }
 }
 
 fn prewarm_login_shell_env(settings: Res<AppSettings>) {
     crate::shell_env::prewarm_login_shell_env(terminal_shell(&settings));
+}
+
+fn initialize_terminal_state(terminals: Query<Entity, Added<Terminal>>, mut commands: Commands) {
+    for entity in &terminals {
+        commands.entity(entity).insert((
+            TerminalMode::default(),
+            TerminalCopyMode::default(),
+            TerminalShortcutState::default(),
+            TerminalMouseState::default(),
+        ));
+    }
 }
 
 struct TerminalUpdatePlugin;
@@ -130,12 +146,6 @@ impl Plugin for TerminalUpdatePlugin {
             .add_message::<CommandLifecycleEvent>()
             .add_message::<OscTitleChanged>()
             .add_message::<vmux_core::notify::BellReceived>()
-            .add_systems(
-                Update,
-                handle_terminal_reinput_requests
-                    .after(poll_service_messages)
-                    .before(flush_pending_terminal_input),
-            )
             .add_systems(Update, apply_osc_title.after(poll_service_messages))
             .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
             .add_systems(Update, sync_agent_focus.after(poll_service_messages))
@@ -150,22 +160,20 @@ impl Plugin for TerminalUpdatePlugin {
             .add_systems(
                 Update,
                 (
-                    try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
+                    publish_service_status,
                     resolve_pending_terminal_cwd,
                     poll_service_messages
-                        .in_set(WriteAppCommands)
+                        .in_set(WriteCommandRequests)
                         .in_set(ServiceMessageSet),
-                    flush_pending_terminal_input,
-                    handle_terminal_copy_mode_command.in_set(vmux_command::ReadAppCommands),
+                    handle_terminal_navigation_commands.in_set(vmux_command::ReadCommandRequests),
+                    handle_terminal_clear_command.in_set(vmux_command::ReadCommandRequests),
+                    handle_terminal_copy_mode_command.in_set(vmux_command::ReadCommandRequests),
                 )
                     .chain(),
-            )
-            .add_systems(Update, sync_terminal_theme.after(handle_terminal_font_size));
+            );
     }
 }
 
-const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
-const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
 const CTRL_V: u8 = 0x16;
 
 pub fn should_confirm_close(settings: &AppSettings) -> bool {
@@ -182,58 +190,6 @@ pub fn has_live_terminal(
     } else {
         false
     }
-}
-
-pub fn confirm_quit_dialog(count: usize) -> bool {
-    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-    let msg = if count == 1 {
-        "A terminal is still running. Quit anyway?".to_string()
-    } else {
-        format!("{count} terminals are still running. Quit anyway?")
-    };
-    let result = MessageDialog::new()
-        .set_level(MessageLevel::Warning)
-        .set_title("Quit Vmux?")
-        .set_description(&msg)
-        .set_buttons(MessageButtons::OkCancel)
-        .show();
-    matches!(result, MessageDialogResult::Ok)
-}
-
-pub use vmux_service::client::ServiceClient;
-
-#[derive(Resource, Clone)]
-struct ServiceWakeCallback(Option<ServiceWake>);
-
-#[derive(Resource, Default)]
-pub struct TerminalModeMap {
-    pub modes: std::collections::HashMap<ProcessId, TerminalModeFlags>,
-}
-
-#[derive(Resource, Default)]
-struct LocalCopyModeState {
-    active: std::collections::HashSet<ProcessId>,
-    input_states: std::collections::HashMap<ProcessId, CopyModeInputState>,
-}
-
-#[derive(Resource, Default)]
-struct TerminalWebShortcutState {
-    pending_prefix: Option<(KeyCombo, Instant)>,
-}
-
-#[derive(Default)]
-struct CopyModeInputState {
-    pending_key: Option<CopyModePendingKey>,
-    count: Option<u16>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CopyModePendingKey {
-    G,
-    FindForward,
-    FindBackward,
-    TillForward,
-    TillBackward,
 }
 
 #[derive(Clone, Copy)]
@@ -263,161 +219,12 @@ impl<'a> CopyModeKeyInput<'a> {
     }
 }
 
-#[derive(Default, Clone, Copy, Debug)]
-pub struct TerminalModeFlags {
-    pub mouse_capture: bool,
-    pub copy_mode: bool,
-    pub alt_screen: bool,
-    pub focus_reporting: bool,
-}
-
 #[derive(Component)]
 pub struct AgentFocusBlurred;
-
-const AGENT_LOADING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-
-const SHELL_BOOT_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
-
-#[derive(Component, Debug, Clone, Copy)]
-pub struct AgentLoading {
-    pub since: Instant,
-    pub announced: bool,
-}
-
-impl AgentLoading {
-    fn armed(announced: bool) -> Self {
-        Self {
-            since: Instant::now(),
-            announced,
-        }
-    }
-}
-
-#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
-pub struct BufferedAgentPrompt {
-    pub text: String,
-    pub submit: bool,
-}
-
-#[derive(Component, Debug, Clone, Default)]
-pub struct PromptCapture {
-    pub draft: String,
-    pub skipped: bool,
-}
-
-impl PromptCapture {
-    fn wants_paste(event: &KeyStroke) -> bool {
-        event.mods.super_key && event.code == "KeyV"
-    }
-
-    fn apply(&mut self, event: &KeyStroke, pasted: Option<String>) -> bool {
-        if event.mods.ctrl && event.code == "KeyC" {
-            self.draft.clear();
-            self.skipped = false;
-            return true;
-        }
-        if Self::wants_paste(event) {
-            let Some(pasted) = pasted else { return false };
-            if !self.draft.is_empty() && !self.draft.ends_with(char::is_whitespace) {
-                self.draft.push(' ');
-            }
-            self.draft.push_str(&pasted);
-            self.skipped = false;
-            return true;
-        }
-        match event.key.as_str() {
-            "Escape" => {
-                self.draft.clear();
-                self.skipped = true;
-                true
-            }
-            "Backspace" => self.draft.pop().is_some(),
-            _ if event.is_text_input() => {
-                self.draft.push_str(event.typed_text());
-                self.skipped = false;
-                true
-            }
-            _ => false,
-        }
-    }
-}
-
-fn agent_prompt_flush_bytes(alt_screen: bool, buf: &BufferedAgentPrompt) -> Option<Vec<u8>> {
-    if !alt_screen {
-        return None;
-    }
-    let bytes = crate::shell_input::bracketed_paste_input(&buf.text, buf.submit);
-    (!bytes.is_empty()).then_some(bytes)
-}
-
-fn flush_buffered_agent_prompt(
-    q: Query<(Entity, &ProcessId, &BufferedAgentPrompt), With<vmux_core::agent::AgentSession>>,
-    service: Option<Res<ServiceClient>>,
-    mut commands: Commands,
-) {
-    let Some(service) = service else { return };
-    for (entity, pid, buf) in &q {
-        if let Some(data) = agent_prompt_flush_bytes(true, buf) {
-            service.0.send(ClientMessage::ProcessInput {
-                process_id: *pid,
-                data,
-            });
-        }
-        commands.entity(entity).remove::<BufferedAgentPrompt>();
-    }
-}
-
-#[derive(Component, Debug, Clone, Copy)]
-pub struct TerminalGridSize {
-    pub cols: u16,
-    pub rows: u16,
-}
-
-impl Default for TerminalGridSize {
-    fn default() -> Self {
-        Self { cols: 80, rows: 24 }
-    }
-}
 
 #[derive(Event)]
 pub struct RestartPty {
     pub entity: Entity,
-}
-
-#[derive(Resource)]
-struct ServiceConnectRetry {
-    timer: Timer,
-    next_delay_ms: u64,
-    remaining_attempts: u32,
-}
-
-impl ServiceConnectRetry {
-    fn new() -> Self {
-        Self {
-            timer: Timer::from_seconds(0.05, TimerMode::Once),
-            next_delay_ms: 50,
-            remaining_attempts: 6,
-        }
-    }
-}
-
-#[derive(Message, Clone)]
-pub struct TerminalSendRequest {
-    pub text: String,
-    pub terminal: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShellMode {
-    NewTab,
-    Active,
-}
-
-#[derive(Message, Clone)]
-pub struct RunShellRequest {
-    pub command: String,
-    pub cwd: String,
-    pub mode: ShellMode,
 }
 
 #[derive(Message, Clone)]
@@ -433,6 +240,9 @@ pub struct TerminalStackSpawnRequest {
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ServiceMessageSet;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TerminalStackSpawnSet;
 
 pub fn format_terminal_url(
     mut q: Query<
@@ -455,39 +265,22 @@ pub fn format_terminal_url(
     }
 }
 
-fn set_terminal_shell_icon(
-    mut q: Query<(&crate::launch::TerminalLaunch, &mut vmux_core::PageMetadata), With<Terminal>>,
-) {
-    for (launch, mut meta) in &mut q {
-        if !matches!(launch.kind, crate::launch::TerminalKind::Plain) {
-            continue;
-        }
-        if !meta.icon.is_none() {
-            continue;
-        }
-        if let Some(icon) = vmux_core::BuiltinIcon::for_shell(&launch.command) {
-            meta.icon = vmux_core::PageIcon::Builtin(icon);
-        }
-    }
-}
-
 fn on_terminal_removed(
     trigger: On<Remove, ProcessId>,
-    service: Option<Res<ServiceClient>>,
     pids: Query<&ProcessId>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     let entity = trigger.event_target();
     let Ok(process_id) = pids.get(entity) else {
         return;
     };
-    service.0.send(ClientMessage::KillProcess {
+    service_requests.write(ServiceRequest(ClientMessage::KillProcess {
         process_id: *process_id,
-    });
+    }));
 }
 
 fn spawn_layout_requested_content(
-    mut reader: MessageReader<LayoutSpawnRequest>,
+    mut reader: MessageReader<TerminalLayoutSpawnRequest>,
     settings: Res<AppSettings>,
     active_space: Res<vmux_space::spaces::ActiveSpace>,
     child_of: Query<&ChildOf>,
@@ -495,22 +288,17 @@ fn spawn_layout_requested_content(
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        match request {
-            LayoutSpawnRequest::Terminal { stack } => {
-                let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(*stack, &child_of, &tabs);
-                let Ok(cwd) = settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())
-                else {
-                    continue;
-                };
-                let terminal = commands
-                    .spawn((
-                        new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
-                        ChildOf(*stack),
-                    ))
-                    .id();
-                commands.entity(terminal).insert(KeyboardOwner);
-            }
-        }
+        let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(request.stack, &child_of, &tabs);
+        let Ok(cwd) = settings.workspace_dir(&active_space.record.id, tab_dir.as_deref()) else {
+            continue;
+        };
+        let terminal = commands
+            .spawn((
+                new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
+                ChildOf(request.stack),
+            ))
+            .id();
+        commands.entity(terminal).insert(KeyboardOwner);
     }
 }
 
@@ -568,7 +356,7 @@ fn open_terminal_page(
         match path.parse::<u32>() {
             Ok(pid) => {
                 if let Some(map) = pid_to_entity
-                    && let Some(&entity) = map.0.get(&pid)
+                    && let Some(entity) = map.get(pid)
                 {
                     pid::focus_pane_entity(entity, commands, child_of_q);
                     return Ok(());
@@ -588,7 +376,7 @@ fn open_terminal_page(
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, child_of_q, tabs);
         settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())?
     };
-    clear_stack_children(task.stack, children_q, commands);
+    vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
     let title = cwd
         .as_ref()
         .map(|cwd| format!("Terminal ({})", cwd.display()))
@@ -607,14 +395,6 @@ fn open_terminal_page(
         .id();
     commands.entity(terminal).insert(KeyboardOwner);
     Ok(())
-}
-
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
 }
 
 fn respond_terminal_spawn(
@@ -658,30 +438,6 @@ fn respond_terminal_spawn(
             }
         }
     }
-}
-
-fn respond_processes_monitor_spawn(
-    mut reader: MessageReader<ProcessesMonitorSpawnRequest>,
-    mut page_open: MessageWriter<PageOpenRequest>,
-) {
-    for req in reader.read() {
-        page_open.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(req.target_stack),
-            url: vmux_layout::event::SERVICES_PAGE_URL.to_string(),
-            request_id: None,
-        });
-    }
-}
-
-fn service_wake_callback(app: &App) -> Option<ServiceWake> {
-    app.world()
-        .get_resource::<bevy::winit::EventLoopProxyWrapper>()
-        .map(|wrapper| {
-            let proxy = (**wrapper).clone();
-            std::sync::Arc::new(move || {
-                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }) as ServiceWake
-        })
 }
 
 pub fn new_terminal_bundle(settings: &AppSettings) -> impl Bundle {
@@ -758,9 +514,10 @@ fn new_terminal_bundle_with_cwd_and_shell(
     )
 }
 
-pub fn respond_terminal_stack_spawn(
+fn respond_terminal_stack_spawn(
     mut reader: MessageReader<TerminalStackSpawnRequest>,
     settings: Res<AppSettings>,
+    mut sequence: ResMut<NextTerminalInputSequence>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -805,9 +562,7 @@ pub fn respond_terminal_stack_spawn(
             commands.entity(terminal).insert(pid);
         }
         if let Some(data) = request.pending_input.clone() {
-            commands
-                .entity(terminal)
-                .insert(PendingTerminalInput { data });
+            enqueue_terminal_input(&mut commands, &mut sequence, terminal, data);
         }
     }
 }
@@ -854,15 +609,7 @@ pub struct PendingServiceCreate;
 struct PendingServiceAttach;
 
 #[derive(Component)]
-pub struct PendingTerminalInput {
-    pub data: Vec<u8>,
-}
-
-#[derive(Component)]
-struct ShellOutputSeen;
-
-#[derive(Component)]
-struct OwedSnapshot;
+pub(crate) struct ShellOutputSeen;
 
 fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
     has_content && cursor_col > 0
@@ -872,10 +619,13 @@ fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
 pub struct AwaitingProcessCreated;
 
 pub fn mark_terminal_restarting(commands: &mut Commands, entity: Entity) {
-    commands
-        .entity(entity)
-        .remove::<ShellOutputSeen>()
-        .insert(AwaitingProcessCreated);
+    commands.entity(entity).remove::<ShellOutputSeen>().insert((
+        AwaitingProcessCreated,
+        TerminalMode::default(),
+        TerminalCopyMode::default(),
+        TerminalShortcutState::default(),
+        TerminalMouseState::default(),
+    ));
 }
 
 pub fn apply_process_created(
@@ -907,6 +657,32 @@ struct MissingTerminalRestart {
     agent_kind: Option<vmux_core::agent::AgentKind>,
 }
 
+impl MissingTerminalRestart {
+    fn new(
+        entity: Entity,
+        launch: crate::launch::TerminalLaunch,
+        agent_kind: Option<vmux_core::agent::AgentKind>,
+    ) -> Self {
+        let new_id = ProcessId::new();
+        let cwd = launch.cwd.clone();
+        Self {
+            entity,
+            new_id,
+            command: ClientMessage::CreateProcess {
+                process_id: new_id,
+                command: launch.command,
+                args: launch.args,
+                cwd: launch.cwd,
+                env: launch.env,
+                cols: 80,
+                rows: 24,
+            },
+            cwd,
+            agent_kind,
+        }
+    }
+}
+
 fn terminal_shell(settings: &AppSettings) -> String {
     settings
         .terminal
@@ -921,223 +697,45 @@ fn process_create_budget(in_flight: usize, max_concurrent: usize) -> usize {
     max_concurrent.saturating_sub(in_flight)
 }
 
-fn missing_terminal_restart(
-    process_id: ProcessId,
-    terminals: impl IntoIterator<
-        Item = (
-            Entity,
-            ProcessId,
-            crate::launch::TerminalLaunch,
-            Option<vmux_core::agent::AgentKind>,
-        ),
-    >,
-) -> Option<MissingTerminalRestart> {
-    terminals
-        .into_iter()
-        .find(|(_, terminal_pid, _, _)| *terminal_pid == process_id)
-        .map(|(entity, _, launch, agent_kind)| {
-            let new_id = ProcessId::new();
-            let cwd = launch.cwd.clone();
-            MissingTerminalRestart {
-                entity,
-                new_id,
-                command: ClientMessage::CreateProcess {
-                    process_id: new_id,
-                    command: launch.command,
-                    args: launch.args,
-                    cwd: launch.cwd,
-                    env: launch.env,
-                    cols: 80,
-                    rows: 24,
-                },
-                cwd,
-                agent_kind,
-            }
-        })
-}
-
 fn missing_process_id(message: &str) -> Option<ProcessId> {
     message
         .strip_prefix("process not found: ")
         .and_then(|id| id.parse().ok())
 }
 
-fn ensure_service_started() {
-    if ServiceHandle::service_running() {
-        tracing::info!("service already running");
-        return;
-    }
-    let binary = match vmux_service::DaemonBinary::current() {
-        Ok(b) => b.into_path(),
-        Err(e) => {
-            tracing::error!(error = %e, "could not locate vmux_service binary");
-            return;
-        }
-    };
-    match vmux_service::registry::start_mode_for(&binary) {
-        vmux_service::registry::StartMode::Register => {
-            let profile = vmux_service::ServicePaths::build_profile();
-            if let Err(e) = vmux_service::registry::ensure_running(profile, &binary) {
-                tracing::error!(error = ?e, "service registration failed");
-            }
-        }
-        vmux_service::registry::StartMode::SpawnDetached => {
-            vmux_service::registry::prepare_spawn_detached(&binary);
-            spawn_detached_service(&binary);
-        }
-    }
-}
-
-#[cfg(unix)]
-fn spawn_detached_service(binary: &std::path::Path) {
-    use std::os::unix::process::CommandExt;
-    let log_dir = vmux_service::ServicePaths::log_dir();
-    let _ = std::fs::create_dir_all(&log_dir);
-    let stderr_cfg = match std::fs::File::create(vmux_service::ServicePaths::current().log()) {
-        Ok(f) => std::process::Stdio::from(f),
-        Err(e) => {
-            tracing::warn!(error = %e, "could not create service log; stderr will be discarded");
-            std::process::Stdio::null()
-        }
-    };
-    let spawn_result = unsafe {
-        std::process::Command::new(binary)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(stderr_cfg)
-            .pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            })
-            .spawn()
-    };
-    if let Err(e) = spawn_result {
-        tracing::error!(error = %e, "failed to spawn vmux_service");
-    }
-}
-
 fn broadcast_service_unavailable(
     terminals: &Query<Entity, With<Terminal>>,
-    browsers: &NonSend<Browsers>,
     commands: &mut Commands,
     message: String,
 ) {
     let evt = ServiceUnavailableEvent { message };
     for entity in terminals.iter() {
-        if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                SERVICE_UNAVAILABLE_EVENT,
-                &evt,
-            ));
-        }
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_core::event::TerminalUiState,
+        >::from_event(entity, &evt));
     }
 }
 
-fn try_connect_service(
-    mut retry: ResMut<ServiceConnectRetry>,
-    time: Res<Time>,
-    mut commands: Commands,
-    wake: Res<ServiceWakeCallback>,
+fn publish_service_status(
+    connected: Query<(), Added<ServiceConnected>>,
+    unavailable: Query<&ServiceUnavailable, Changed<ServiceUnavailable>>,
     terminal_webviews: Query<Entity, With<Terminal>>,
-    browsers: NonSend<Browsers>,
+    mut commands: Commands,
 ) {
-    retry.timer.tick(time.delta());
-    if !retry.timer.just_finished() {
-        return;
+    if !connected.is_empty() {
+        broadcast_service_unavailable(&terminal_webviews, &mut commands, String::new());
     }
-
-    retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
-
-    let sock = vmux_service::ServicePaths::current().socket();
-    if !sock.exists() {
-        if retry.remaining_attempts == 0 {
-            tracing::warn!("service socket never appeared — giving up");
-            commands.remove_resource::<ServiceConnectRetry>();
-            broadcast_service_unavailable(
-                &terminal_webviews,
-                &browsers,
-                &mut commands,
-                "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
-            );
-        } else {
-            retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
-            retry.timer = Timer::new(
-                std::time::Duration::from_millis(retry.next_delay_ms),
-                TimerMode::Once,
-            );
-        }
-        return;
-    }
-
-    match ServiceHandle::connect_with_wake(wake.0.clone()) {
-        Some(handle) => {
-            tracing::info!("connected to service after retry");
-            handle.send(ClientMessage::SubscribeAgentCommands);
-            commands.insert_resource(ServiceClient(handle));
-            commands.remove_resource::<ServiceConnectRetry>();
-            broadcast_service_unavailable(
-                &terminal_webviews,
-                &browsers,
-                &mut commands,
-                String::new(),
-            );
-        }
-        None => {
-            if retry.remaining_attempts == 0 {
-                tracing::error!("failed to connect to service after all retries");
-                let log_path = vmux_service::ServicePaths::current().log();
-                if let Ok(log) = std::fs::read_to_string(&log_path)
-                    && !log.is_empty()
-                {
-                    tracing::error!(service_log = %log, "service log contents");
-                }
-                commands.remove_resource::<ServiceConnectRetry>();
-                broadcast_service_unavailable(
-                    &terminal_webviews,
-                    &browsers,
-                    &mut commands,
-                    "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
-                );
-            } else {
-                retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
-                retry.timer = Timer::new(
-                    std::time::Duration::from_millis(retry.next_delay_ms),
-                    TimerMode::Once,
-                );
-            }
-        }
+    for unavailable in &unavailable {
+        broadcast_service_unavailable(&terminal_webviews, &mut commands, unavailable.0.clone());
     }
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PollServiceWriters<'w> {
-    app_commands: MessageWriter<'w, AppCommand>,
-    agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
-    agent_queries: MessageWriter<'w, vmux_service::agent_events::AgentQueryRequest>,
-    agent_tool_calls: MessageWriter<'w, vmux_service::agent_events::AgentToolCallRequest>,
-    page_agent_delta: MessageWriter<'w, vmux_service::agent_events::PageAgentDelta>,
-    page_agent_run_status: MessageWriter<'w, vmux_service::agent_events::PageAgentRunStatus>,
-    page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
-    page_agent_approval_resolved:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentApprovalResolved>,
-    page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
-    page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
-    page_agent_workspace_changed:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentWorkspaceChanged>,
-    page_agent_model_info: MessageWriter<'w, vmux_service::agent_events::PageAgentModelInfo>,
-    page_agent_model_selection_result:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentModelSelectionResult>,
-    page_agent_mode_info: MessageWriter<'w, vmux_service::agent_events::PageAgentModeInfo>,
-    page_agent_mode_selection_result:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentModeSelectionResult>,
-    page_agent_session_created:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentSessionCreated>,
-    page_agent_acp_terminal_created:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentAcpTerminalCreated>,
-    agent_command_results: MessageWriter<'w, vmux_service::agent_events::AgentCommandResultEvent>,
-    agent_query_results: MessageWriter<'w, vmux_service::agent_events::AgentQueryResultEvent>,
+    service_requests: MessageWriter<'w, ServiceRequest>,
+    stack_close_requests: MessageWriter<'w, StackCloseRequest>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
+    process_snapshot: MessageWriter<'w, crate::processes_monitor::ServiceProcessSnapshot>,
     command_lifecycle: MessageWriter<'w, CommandLifecycleEvent>,
     osc_title: MessageWriter<'w, OscTitleChanged>,
     bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
@@ -1172,37 +770,31 @@ fn agent_focus_transition(
 #[allow(clippy::type_complexity)]
 fn sync_agent_focus(
     agents: Query<
-        (Entity, &ProcessId, Has<AgentFocusBlurred>),
+        (Entity, &ProcessId, &TerminalMode, Has<AgentFocusBlurred>),
         With<vmux_core::agent::AgentSession>,
     >,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    mode_map: Res<TerminalModeMap>,
-    service: Option<Res<ServiceClient>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     let active_pid = crate::target::active_terminal_for_tab(focus.stack, &terminals)
-        .and_then(|entity| agents.get(entity).ok().map(|(_, pid, _)| *pid));
-    for (entity, process_id, blurred) in &agents {
-        let focus_reporting = mode_map
-            .modes
-            .get(process_id)
-            .is_some_and(|m| m.focus_reporting);
+        .and_then(|entity| agents.get(entity).ok().map(|(_, pid, _, _)| *pid));
+    for (entity, process_id, mode, blurred) in &agents {
         let active = Some(*process_id) == active_pid;
-        match agent_focus_transition(focus_reporting, active, blurred) {
+        match agent_focus_transition(mode.focus_reporting, active, blurred) {
             Some(AgentFocusTransition::FocusIn) => {
-                service.0.send(ClientMessage::ProcessInput {
+                service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
                     process_id: *process_id,
                     data: b"\x1b[I".to_vec(),
-                });
+                }));
                 commands.entity(entity).remove::<AgentFocusBlurred>();
             }
             Some(AgentFocusTransition::FocusOut) => {
-                service.0.send(ClientMessage::ProcessInput {
+                service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
                     process_id: *process_id,
                     data: b"\x1b[O".to_vec(),
-                });
+                }));
                 commands.entity(entity).insert(AgentFocusBlurred);
             }
             None => {}
@@ -1255,20 +847,29 @@ fn poll_service_messages(
         (Entity, &ProcessId, &ChildOf, Has<RetainOnProcessExit>),
         ServiceTerminalFilter,
     >,
-    service: Option<Res<ServiceClient>>,
+    mut terminal_states: Query<
+        (
+            &mut TerminalMode,
+            &mut TerminalCopyMode,
+            &mut TerminalShortcutState,
+            &mut TerminalMouseState,
+        ),
+        With<Terminal>,
+    >,
+    connected: Option<Single<(), With<ServiceConnected>>>,
+    mut inbound: MessageReader<ServiceInbound>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writers: PollServiceWriters,
-    mut mode_map: ResMut<TerminalModeMap>,
-    mut local_copy_mode: ResMut<LocalCopyModeState>,
-    mut mouse_state: ResMut<MouseSelectionState>,
+    process_index: Res<TerminalProcessIndex>,
     settings: Res<AppSettings>,
     launches: Query<&crate::launch::TerminalLaunch>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
     output_seen: Query<(), With<ShellOutputSeen>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
-    let Some(service) = service else { return };
+    if connected.is_none() {
+        return;
+    }
 
     let create_budget = process_create_budget(
         awaiting_create.iter().count(),
@@ -1279,15 +880,17 @@ fn poll_service_messages(
         if should_merge_login_shell_env(agent_sessions.contains(entity), agent_run) {
             crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
         }
-        service.0.send(ClientMessage::CreateProcess {
-            process_id: *process_id,
-            command: launch.command.clone(),
-            args: launch.args.clone(),
-            cwd: launch.cwd.clone(),
-            env,
-            cols: 80,
-            rows: 24,
-        });
+        writers
+            .service_requests
+            .write(ServiceRequest(ClientMessage::CreateProcess {
+                process_id: *process_id,
+                command: launch.command.clone(),
+                args: launch.args.clone(),
+                cwd: launch.cwd.clone(),
+                env,
+                cols: 80,
+                rows: 24,
+            }));
         commands
             .entity(entity)
             .remove::<PendingServiceCreate>()
@@ -1295,29 +898,31 @@ fn poll_service_messages(
     }
 
     for (entity, pid) in &pending_attach {
-        service
-            .0
-            .send(ClientMessage::AttachProcess { process_id: *pid });
-        service
-            .0
-            .send(ClientMessage::RequestSnapshot { process_id: *pid });
+        writers
+            .service_requests
+            .write(ServiceRequest(ClientMessage::AttachProcess {
+                process_id: *pid,
+            }));
+        writers
+            .service_requests
+            .write(ServiceRequest(ClientMessage::RequestSnapshot {
+                process_id: *pid,
+            }));
         commands.entity(entity).remove::<PendingServiceAttach>();
     }
 
     let mut restarted_missing_processes = Vec::new();
-    let (messages, capped) = service.0.drain_with_status();
-    if capped && let Some(proxy) = proxy.as_deref() {
-        let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-    }
-    for msg in messages {
+    for inbound in inbound.read() {
+        let msg = inbound.0.clone();
         match msg {
             ServiceMessage::ProcessCreated { process_id, pid } => {
-                let entity = (&awaiting_create)
-                    .into_iter()
-                    .find(|(_, pid_c, _)| **pid_c == process_id)
-                    .map(|(e, _, _)| e);
+                let entity = process_index
+                    .get(&process_id)
+                    .filter(|entity| awaiting_create.contains(*entity));
                 if let Some(entity) = entity {
-                    service.0.send(ClientMessage::AttachProcess { process_id });
+                    writers
+                        .service_requests
+                        .write(ServiceRequest(ClientMessage::AttachProcess { process_id }));
                     apply_process_created(&mut commands, entity, process_id, pid);
                 } else {
                     bevy::log::warn!(
@@ -1327,10 +932,9 @@ fn poll_service_messages(
             }
             ServiceMessage::ProcessCreateFailed { process_id, reason } => {
                 bevy::log::warn!("service failed to create process: {reason}");
-                if let Some(entity) = (&awaiting_create)
-                    .into_iter()
-                    .find(|(_, pid_c, _)| **pid_c == process_id)
-                    .map(|(e, _, _)| e)
+                if let Some(entity) = process_index
+                    .get(&process_id)
+                    .filter(|entity| awaiting_create.contains(*entity))
                 {
                     apply_process_create_failed(&mut commands, entity);
                 }
@@ -1350,45 +954,43 @@ fn poll_service_messages(
                 mouse,
                 evicted_total,
             } => {
-                for (entity, pid, _, _) in &terminals {
-                    if *pid == process_id {
-                        if !output_seen.contains(entity) {
-                            let has_content =
-                                changed_lines.iter().any(|(_, l)| line_has_content(l));
-                            if shell_prompt_ready(has_content, cursor.col) {
-                                commands.entity(entity).insert(ShellOutputSeen);
-                            }
-                        }
-                        if !browsers.can_emit_to(&entity) {
-                            commands.entity(entity).insert(OwedSnapshot);
-                            continue;
-                        }
-                        let mut changed_lines = changed_lines;
-                        for (_, line) in changed_lines.iter_mut() {
-                            crate::link::annotate_links(line, None);
-                        }
-                        let patch = TermViewportPatch {
-                            changed_lines,
-                            cursor,
-                            cols,
-                            rows,
-                            selection,
-                            copy_mode,
-                            full,
-                            first_row,
-                            total_rows,
-                            alt,
-                            mouse,
-                            evicted_total,
-                        };
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
-                            entity,
-                            TERM_VIEWPORT_EVENT,
-                            &patch,
-                        ));
-                        break;
+                let Some(entity) = process_index.get(&process_id) else {
+                    continue;
+                };
+                if !terminals.contains(entity) {
+                    continue;
+                }
+                if !output_seen.contains(entity) {
+                    let has_content = changed_lines.iter().any(|(_, l)| line_has_content(l));
+                    if shell_prompt_ready(has_content, cursor.col) {
+                        commands.entity(entity).insert(ShellOutputSeen);
                     }
                 }
+                if !browsers.can_emit_to(&entity) {
+                    commands.entity(entity).insert(PendingTerminalSnapshot);
+                    continue;
+                }
+                let mut changed_lines = changed_lines;
+                for (_, line) in changed_lines.iter_mut() {
+                    crate::link::annotate_links(line, None);
+                }
+                let patch = TermViewportPatch {
+                    changed_lines,
+                    cursor,
+                    cols,
+                    rows,
+                    selection,
+                    copy_mode,
+                    full,
+                    first_row,
+                    total_rows,
+                    alt,
+                    mouse,
+                    evicted_total,
+                };
+                commands.trigger(vmux_core::host::UiStateWrite::<
+                    vmux_core::event::TerminalUiState,
+                >::from_event(entity, &patch));
             }
             ServiceMessage::Bell { process_id } => {
                 writers
@@ -1400,20 +1002,16 @@ fn poll_service_messages(
                     process_id,
                     title: title.clone(),
                 });
-                for (entity, pid, _, _) in &terminals {
-                    if *pid == process_id {
-                        if !browsers.can_emit_to(&entity) {
-                            continue;
-                        }
-                        let evt = TermTitleEvent { title };
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
-                            entity,
-                            TERM_TITLE_EVENT,
-                            &evt,
-                        ));
-                        break;
-                    }
+                let Some(entity) = process_index.get(&process_id) else {
+                    continue;
+                };
+                if !terminals.contains(entity) || !browsers.can_emit_to(&entity) {
+                    continue;
                 }
+                let evt = TermTitleEvent { title };
+                commands.trigger(vmux_core::host::UiStateWrite::<
+                    vmux_core::event::TerminalUiState,
+                >::from_event(entity, &evt));
             }
             ServiceMessage::Snapshot {
                 process_id,
@@ -1422,128 +1020,131 @@ fn poll_service_messages(
                 cols,
                 rows,
             } => {
-                for (entity, pid, _, _) in &terminals {
-                    if *pid == process_id {
-                        if !output_seen.contains(entity) {
-                            let has_content = lines.iter().any(line_has_content);
-                            if shell_prompt_ready(has_content, cursor.col) {
-                                commands.entity(entity).insert(ShellOutputSeen);
-                            }
-                        }
-                        if !browsers.can_emit_to(&entity) {
-                            continue;
-                        }
-                        let mut changed_lines: Vec<(u32, TermLine)> = lines
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, l)| (i as u32, l))
-                            .collect();
-                        for (_, line) in changed_lines.iter_mut() {
-                            crate::link::annotate_links(line, None);
-                        }
-                        let patch = TermViewportPatch {
-                            changed_lines,
-                            cursor,
-                            cols,
-                            rows,
-                            selection: None,
-                            copy_mode: false,
-                            full: true,
-                            first_row: 0,
-                            total_rows: rows as u32,
-                            alt: false,
-                            mouse: false,
-                            evicted_total: 0,
-                        };
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
-                            entity,
-                            TERM_VIEWPORT_EVENT,
-                            &patch,
-                        ));
-                        break;
+                let Some(entity) = process_index.get(&process_id) else {
+                    continue;
+                };
+                if !terminals.contains(entity) {
+                    continue;
+                }
+                if !output_seen.contains(entity) {
+                    let has_content = lines.iter().any(line_has_content);
+                    if shell_prompt_ready(has_content, cursor.col) {
+                        commands.entity(entity).insert(ShellOutputSeen);
                     }
                 }
+                if !browsers.can_emit_to(&entity) {
+                    continue;
+                }
+                let mut changed_lines: Vec<(u32, TermLine)> = lines
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, l)| (i as u32, l))
+                    .collect();
+                for (_, line) in changed_lines.iter_mut() {
+                    crate::link::annotate_links(line, None);
+                }
+                let patch = TermViewportPatch {
+                    changed_lines,
+                    cursor,
+                    cols,
+                    rows,
+                    selection: None,
+                    copy_mode: false,
+                    full: true,
+                    first_row: 0,
+                    total_rows: rows as u32,
+                    alt: false,
+                    mouse: false,
+                    evicted_total: 0,
+                };
+                commands.trigger(vmux_core::host::UiStateWrite::<
+                    vmux_core::event::TerminalUiState,
+                >::from_event(entity, &patch));
             }
             ServiceMessage::ProcessExited { process_id, .. } => {
                 writers
                     .process_exited
                     .write(ProcessExitedEvent { process_id });
-                mode_map.modes.remove(&process_id);
-                set_local_copy_mode(&mut local_copy_mode, process_id, false);
-                mouse_state.per_process.remove(&process_id);
-                for (entity, pid, child_of, retain_on_exit) in &terminals {
-                    if *pid == process_id {
-                        commands
-                            .entity(entity)
-                            .insert(ProcessExited)
-                            .remove::<CloseRequiresConfirmation>()
-                            .remove::<AgentLoading>();
-                        let is_agent = if let Ok(session) = agent_sessions.get(entity) {
-                            commands.trigger(BinHostEmitEvent::from_rkyv(
-                                entity,
-                                TERM_LOADING_EVENT,
-                                &crate::event::TermLoadingEvent {
-                                    loading: false,
-                                    label: session.kind.display_name().to_string(),
-                                    segment: session.kind.as_url_segment().to_string(),
-                                },
-                            ));
-                            true
-                        } else {
-                            false
-                        };
-                        if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
-                            let tab = child_of.get();
-                            commands.entity(tab).insert(LastActivatedAt::now());
-                            writers
-                                .app_commands
-                                .write(AppCommand::Layout(LayoutCommand::Stack(
-                                    StackCommand::Close,
-                                )));
-                        }
-                        break;
-                    }
+                let Some(entity) = process_index.get(&process_id) else {
+                    continue;
+                };
+                if let Ok((mut mode, mut copy_mode, mut shortcut, mut mouse)) =
+                    terminal_states.get_mut(entity)
+                {
+                    *mode = TerminalMode::default();
+                    *copy_mode = TerminalCopyMode::default();
+                    *shortcut = TerminalShortcutState::default();
+                    *mouse = TerminalMouseState::default();
+                }
+                let Ok((_, _, child_of, retain_on_exit)) = terminals.get(entity) else {
+                    continue;
+                };
+                commands
+                    .entity(entity)
+                    .insert(ProcessExited)
+                    .remove::<CloseRequiresConfirmation>()
+                    .remove::<AgentLoading>();
+                let is_agent = if let Ok(session) = agent_sessions.get(entity) {
+                    commands.trigger(vmux_core::host::UiStateWrite::<
+                        vmux_core::event::TerminalUiState,
+                    >::from_event(
+                        entity,
+                        &crate::event::TermLoadingEvent {
+                            loading: false,
+                            label: session.kind.display_name().to_string(),
+                            segment: session.kind.as_url_segment().to_string(),
+                        },
+                    ));
+                    true
+                } else {
+                    false
+                };
+                if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
+                    let tab = child_of.get();
+                    commands.entity(tab).insert(LastActivatedAt::now());
+                    writers.stack_close_requests.write(StackCloseRequest);
                 }
             }
             ServiceMessage::ProcessList { processes } => {
-                commands
-                    .insert_resource(crate::processes_monitor::ServiceProcessList { processes });
+                writers
+                    .process_snapshot
+                    .write(crate::processes_monitor::ServiceProcessSnapshot(processes));
             }
             ServiceMessage::Error { message } => {
                 if let Some(stale_pid) = missing_process_id(&message)
                     && !restarted_missing_processes.contains(&stale_pid)
+                    && let Some(entity) = process_index.get(&stale_pid)
+                    && terminals.contains(entity)
                 {
-                    let candidates = terminals.iter().map(|(entity, terminal_pid, _, _)| {
-                        let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
-                            crate::launch::TerminalLaunch {
-                                command: terminal_shell(&settings),
-                                args: vec![],
-                                cwd: String::new(),
-                                env: vec![],
-                                kind: crate::launch::TerminalKind::Plain,
-                            }
-                        });
-                        let agent_kind = agent_sessions.get(entity).ok().map(|s| s.kind);
-                        (entity, *terminal_pid, launch, agent_kind)
-                    });
-                    if let Some(restart) = missing_terminal_restart(stale_pid, candidates) {
-                        restarted_missing_processes.push(stale_pid);
-                        let cwd = restart.cwd.clone();
-                        let agent_kind = restart.agent_kind;
-                        let new_id = restart.new_id;
-                        let entity = restart.entity;
-                        service.0.send(restart.command);
-                        commands.entity(entity).insert(new_id);
-                        mark_terminal_restarting(&mut commands, entity);
-                        if let Some(kind) = agent_kind {
-                            commands
-                                .entity(entity)
-                                .insert(vmux_core::agent::PendingAgentSession {
-                                    kind,
-                                    spawn_time: std::time::SystemTime::now(),
-                                    cwd: std::path::PathBuf::from(&cwd),
-                                });
+                    let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
+                        crate::launch::TerminalLaunch {
+                            command: terminal_shell(&settings),
+                            args: vec![],
+                            cwd: String::new(),
+                            env: vec![],
+                            kind: crate::launch::TerminalKind::Plain,
                         }
+                    });
+                    let agent_kind = agent_sessions.get(entity).ok().map(|s| s.kind);
+                    let restart = MissingTerminalRestart::new(entity, launch, agent_kind);
+                    restarted_missing_processes.push(stale_pid);
+                    let cwd = restart.cwd.clone();
+                    let agent_kind = restart.agent_kind;
+                    let new_id = restart.new_id;
+                    let entity = restart.entity;
+                    writers
+                        .service_requests
+                        .write(ServiceRequest(restart.command));
+                    commands.entity(entity).insert(new_id);
+                    mark_terminal_restarting(&mut commands, entity);
+                    if let Some(kind) = agent_kind {
+                        commands
+                            .entity(entity)
+                            .insert(vmux_core::agent::PendingAgentSession {
+                                kind,
+                                spawn_time: std::time::SystemTime::now(),
+                                cwd: std::path::PathBuf::from(&cwd),
+                            });
                     }
                 }
                 warn!("Service error: {message}");
@@ -1555,16 +1156,18 @@ fn poll_service_messages(
                 alt_screen,
                 focus_reporting,
             } => {
-                mode_map.modes.insert(
-                    process_id,
-                    TerminalModeFlags {
+                let Some(entity) = process_index.get(&process_id) else {
+                    continue;
+                };
+                if let Ok((mut mode, mut local_copy_mode, _, _)) = terminal_states.get_mut(entity) {
+                    *mode = TerminalMode {
                         mouse_capture,
                         copy_mode,
                         alt_screen,
                         focus_reporting,
-                    },
-                );
-                set_local_copy_mode(&mut local_copy_mode, process_id, copy_mode);
+                    };
+                    local_copy_mode.set(copy_mode);
+                }
             }
             ServiceMessage::SelectionText {
                 process_id: _,
@@ -1572,204 +1175,10 @@ fn poll_service_messages(
             } if !text.is_empty() => {
                 vmux_clipboard::write(text);
             }
-            ServiceMessage::AgentCommand {
-                request_id,
-                anchor,
-                command,
-            } => {
-                writers
-                    .agent_commands
-                    .write(vmux_service::agent_events::AgentCommandRequest {
-                        request_id,
-                        origin: vmux_service::agent_events::CommandOrigin::Agent {
-                            sid: None,
-                            anchor,
-                        },
-                        command,
-                    });
-            }
-            ServiceMessage::AgentQuery { request_id, query } => {
-                writers
-                    .agent_queries
-                    .write(vmux_service::agent_events::AgentQueryRequest { request_id, query });
-            }
-            ServiceMessage::AgentToolCall {
-                request_id,
-                sid,
-                name,
-                args_json,
-            } => {
-                writers
-                    .agent_tool_calls
-                    .write(vmux_service::agent_events::AgentToolCallRequest {
-                        request_id,
-                        sid,
-                        name,
-                        args_json,
-                    });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentDelta { sid, text }) => {
-                writers
-                    .page_agent_delta
-                    .write(vmux_service::agent_events::PageAgentDelta { sid, text });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { sid, status }) => {
-                tracing::info!(%sid, ?status, "run status from the daemon");
-                writers
-                    .page_agent_run_status
-                    .write(vmux_service::agent_events::PageAgentRunStatus { sid, status });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
-                sid,
-                call_id,
-                name,
-                args_json,
-            }) => {
-                writers.page_agent_awaiting.write(
-                    vmux_service::agent_events::PageAgentAwaitingApproval {
-                        sid,
-                        call_id,
-                        name,
-                        args_json,
-                    },
-                );
-            }
-            ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }) => {
-                writers
-                    .page_agent_approval_resolved
-                    .write(vmux_service::agent_events::PageAgentApprovalResolved { sid, call_id });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { sid, messages_json }) => {
-                writers
-                    .page_agent_snapshot
-                    .write(vmux_service::agent_events::PageAgentSnapshot { sid, messages_json });
-            }
-            ServiceMessage::Shared(SharedEvent::AcpAgentInfo { sid, name }) => {
-                writers
-                    .page_agent_info
-                    .write(vmux_service::agent_events::PageAgentInfo { sid, name });
-            }
-            ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged {
-                sid,
-                name,
-                branch,
-                cwd,
-                workspace_cwd,
-            }) => {
-                writers.page_agent_workspace_changed.write(
-                    vmux_service::agent_events::PageAgentWorkspaceChanged {
-                        sid,
-                        name,
-                        branch,
-                        cwd,
-                        workspace_cwd,
-                    },
-                );
-            }
-            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
-                sid,
-                config_id,
-                current_model_id,
-                models,
-            }) => {
-                writers.page_agent_model_info.write(
-                    vmux_service::agent_events::PageAgentModelInfo {
-                        sid,
-                        config_id,
-                        current_model_id,
-                        models,
-                    },
-                );
-            }
-            ServiceMessage::AcpModelSelectionResult {
-                sid,
-                request_id,
-                model_id,
-                succeeded,
-            } => {
-                writers.page_agent_model_selection_result.write(
-                    vmux_service::agent_events::PageAgentModelSelectionResult {
-                        sid,
-                        request_id,
-                        model_id,
-                        succeeded,
-                    },
-                );
-            }
-            ServiceMessage::AcpModeInfo {
-                sid,
-                config_id,
-                current_mode_id,
-                modes,
-            } => {
-                writers
-                    .page_agent_mode_info
-                    .write(vmux_service::agent_events::PageAgentModeInfo {
-                        sid,
-                        config_id,
-                        current_mode_id,
-                        modes,
-                    });
-            }
-            ServiceMessage::AcpModeSelectionResult {
-                sid,
-                request_id,
-                mode_id,
-                succeeded,
-            } => {
-                writers.page_agent_mode_selection_result.write(
-                    vmux_service::agent_events::PageAgentModeSelectionResult {
-                        sid,
-                        request_id,
-                        mode_id,
-                        succeeded,
-                    },
-                );
-            }
-            ServiceMessage::AgentCommandResult { request_id, result } => {
-                writers.agent_command_results.write(
-                    vmux_service::agent_events::AgentCommandResultEvent { request_id, result },
-                );
-            }
-            ServiceMessage::AgentQueryResult { request_id, result } => {
-                writers.agent_query_results.write(
-                    vmux_service::agent_events::AgentQueryResultEvent { request_id, result },
-                );
-            }
             ServiceMessage::CommandLifecycle { process_id, kind } => {
                 writers
                     .command_lifecycle
                     .write(CommandLifecycleEvent { process_id, kind });
-            }
-            ServiceMessage::AcpSessionCreated {
-                sid,
-                acp_session_id,
-            } => {
-                writers.page_agent_session_created.write(
-                    vmux_service::agent_events::PageAgentSessionCreated {
-                        sid,
-                        acp_session_id,
-                    },
-                );
-            }
-            ServiceMessage::AcpTerminalCreated {
-                sid,
-                terminal_id,
-                process_id,
-                command,
-                args,
-                cwd,
-            } => {
-                writers.page_agent_acp_terminal_created.write(
-                    vmux_service::agent_events::PageAgentAcpTerminalCreated {
-                        sid,
-                        terminal_id,
-                        process_id,
-                        command,
-                        args,
-                        cwd,
-                    },
-                );
             }
             _ => {}
         }
@@ -1790,60 +1199,8 @@ fn should_close_terminal_stack_on_exit(is_agent: bool, retain_on_exit: bool) -> 
     !is_agent && !retain_on_exit
 }
 
-fn flush_pending_terminal_input(
-    pending: Query<
-        (Entity, &ProcessId, &PendingTerminalInput),
-        (
-            With<Terminal>,
-            With<ShellOutputSeen>,
-            Without<PendingServiceCreate>,
-            Without<AwaitingProcessCreated>,
-            Without<ProcessExited>,
-        ),
-    >,
-    service: Option<Res<ServiceClient>>,
-    mut commands: Commands,
-) {
-    let Some(service) = service else { return };
-    for (entity, pid, input) in &pending {
-        service.0.send(ClientMessage::ProcessInput {
-            process_id: *pid,
-            data: input.data.clone(),
-        });
-        commands.entity(entity).remove::<PendingTerminalInput>();
-    }
-}
-
-fn handle_terminal_reinput_requests(
-    mut requests: MessageReader<TerminalReinputRequest>,
-    terminals: Query<(Entity, &ProcessId), With<Terminal>>,
-    mut pending_inputs: Query<&mut PendingTerminalInput>,
-    mut commands: Commands,
-) {
-    let mut queued = std::collections::HashMap::<Entity, Vec<u8>>::new();
-    for req in requests.read() {
-        for (entity, pid) in &terminals {
-            if *pid == req.process_id {
-                queued
-                    .entry(entity)
-                    .or_default()
-                    .extend_from_slice(&req.data);
-            }
-        }
-    }
-    for (entity, data) in queued {
-        if let Ok(mut pending) = pending_inputs.get_mut(entity) {
-            pending.data.extend(data);
-        } else {
-            commands
-                .entity(entity)
-                .insert(PendingTerminalInput { data });
-        }
-    }
-}
-
 #[cfg(test)]
-fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_service::protocol::CopyModeKey> {
+fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_api::protocol::CopyModeKey> {
     map_copy_mode_key_from_input(CopyModeKeyInput {
         key,
         key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
@@ -1854,8 +1211,8 @@ fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_service::protocol::Co
 
 fn map_copy_mode_key_from_input(
     input: CopyModeKeyInput<'_>,
-) -> Option<vmux_service::protocol::CopyModeKey> {
-    use vmux_service::protocol::CopyModeKey as K;
+) -> Option<vmux_api::protocol::CopyModeKey> {
+    use vmux_api::protocol::CopyModeKey as K;
     match (input.key, input.ctrl) {
         (Key::ArrowLeft, _) => Some(K::Left),
         (Key::ArrowRight, _) => Some(K::Right),
@@ -1906,14 +1263,12 @@ fn map_copy_mode_key_from_input(
 
 #[cfg(test)]
 fn map_copy_mode_key_with_state(
-    local_copy_mode: &mut LocalCopyModeState,
-    process_id: ProcessId,
+    copy_mode: &mut TerminalCopyMode,
     key: &Key,
     ctrl: bool,
-) -> Option<vmux_service::protocol::CopyModeKey> {
+) -> Option<vmux_api::protocol::CopyModeKey> {
     map_copy_mode_keys_with_state(
-        local_copy_mode,
-        process_id,
+        copy_mode,
         CopyModeKeyInput {
             key,
             key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
@@ -1926,13 +1281,12 @@ fn map_copy_mode_key_with_state(
 }
 
 fn map_copy_mode_keys_with_state(
-    local_copy_mode: &mut LocalCopyModeState,
-    process_id: ProcessId,
+    copy_mode: &mut TerminalCopyMode,
     input: CopyModeKeyInput<'_>,
-) -> Vec<vmux_service::protocol::CopyModeKey> {
-    use vmux_service::protocol::CopyModeKey as K;
+) -> Vec<vmux_api::protocol::CopyModeKey> {
+    use vmux_api::protocol::CopyModeKey as K;
 
-    let state = local_copy_mode.input_states.entry(process_id).or_default();
+    let state = &mut copy_mode.input;
     if let Some(pending) = state.pending_key.take() {
         let key = match pending {
             CopyModePendingKey::G if !input.ctrl && key_char_eq(input, '_') => {
@@ -1997,8 +1351,8 @@ fn map_copy_mode_keys_with_state(
 
 fn repeat_copy_mode_key(
     state: &mut CopyModeInputState,
-    key: vmux_service::protocol::CopyModeKey,
-) -> Vec<vmux_service::protocol::CopyModeKey> {
+    key: vmux_api::protocol::CopyModeKey,
+) -> Vec<vmux_api::protocol::CopyModeKey> {
     let repeat = if copy_mode_key_uses_count(key) {
         state.count.take().unwrap_or(1)
     } else {
@@ -2008,8 +1362,8 @@ fn repeat_copy_mode_key(
     vec![key; repeat as usize]
 }
 
-fn copy_mode_key_uses_count(key: vmux_service::protocol::CopyModeKey) -> bool {
-    use vmux_service::protocol::CopyModeKey as K;
+fn copy_mode_key_uses_count(key: vmux_api::protocol::CopyModeKey) -> bool {
+    use vmux_api::protocol::CopyModeKey as K;
     !matches!(
         key,
         K::StartSelection | K::StartLineSelection | K::Copy | K::Exit
@@ -2237,23 +1591,19 @@ fn term_key_event_to_bytes(event: &KeyStroke) -> Vec<u8> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum TerminalWebShortcutAction {
-    Command(AppCommand),
+enum TerminalWebShortcutResolution {
+    Command(String),
     Consume,
     PassThrough,
 }
 
 fn resolve_terminal_web_shortcut(
     event: &KeyStroke,
-    settings: Option<&AppSettings>,
-    state: &mut TerminalWebShortcutState,
-) -> TerminalWebShortcutAction {
+    map: &Keymap,
+    state: &mut TerminalShortcutState,
+) -> TerminalWebShortcutResolution {
     let Some(combo) = term_key_event_to_shortcut_combo(event) else {
-        return TerminalWebShortcutAction::PassThrough;
-    };
-    let map = match settings {
-        Some(settings) => settings.shortcuts.keymap(),
-        None => Keymap::defaults(),
+        return TerminalWebShortcutResolution::PassThrough;
     };
     let now = Instant::now();
     if let Some((_, started)) = state.pending_prefix.as_ref()
@@ -2265,7 +1615,7 @@ fn resolve_terminal_web_shortcut(
     if let Some((prefix, _)) = state.pending_prefix.clone() {
         if let Some(cmd) = map.chord(&prefix, &combo) {
             state.pending_prefix = None;
-            return TerminalWebShortcutAction::Command(cmd);
+            return TerminalWebShortcutResolution::Command(cmd);
         }
         state.pending_prefix = None;
     }
@@ -2273,15 +1623,15 @@ fn resolve_terminal_web_shortcut(
     if let Some(cmd) = map.direct(&combo)
         && (combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key)
     {
-        return TerminalWebShortcutAction::Command(cmd);
+        return TerminalWebShortcutResolution::Command(cmd);
     }
 
     if map.has_chord_prefix(&combo) {
         state.pending_prefix = Some((combo, now));
-        return TerminalWebShortcutAction::Consume;
+        return TerminalWebShortcutResolution::Consume;
     }
 
-    TerminalWebShortcutAction::PassThrough
+    TerminalWebShortcutResolution::PassThrough
 }
 
 fn term_key_event_to_shortcut_combo(event: &KeyStroke) -> Option<KeyCombo> {
@@ -2392,326 +1742,47 @@ fn key_code_from_web_code(code: &str) -> KeyCode {
     }
 }
 
-fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool) -> Vec<u8> {
-    let mut cb = button as u32;
-    if modifiers & MOD_SHIFT != 0 {
-        cb += 4;
-    }
-    if modifiers & MOD_ALT != 0 {
-        cb += 8;
-    }
-    if modifiers & MOD_CTRL != 0 {
-        cb += 16;
-    }
-    let suffix = if pressed { 'M' } else { 'm' };
-    format!("\x1b[<{};{};{}{}", cb, col + 1, row + 1, suffix).into_bytes()
-}
-
-#[derive(Resource, Default)]
-struct MouseSelectionState {
-    per_process: std::collections::HashMap<ProcessId, MouseSessionState>,
-}
-
-#[derive(Default, Clone, Debug)]
-struct MouseSessionState {
-    last_click: Option<MouseClickRecord>,
-    drag_active: bool,
-    drag_visual_active: bool,
-    last_extend_cell: Option<(u16, u16)>,
-    pending_anchor: Option<(u16, u16)>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct MouseClickRecord {
-    when: std::time::Instant,
-    col: u16,
-    row: u16,
-    count: u8,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum MouseTerminalAction {
-    ForwardInput(Vec<u8>),
-    EnterCopyMode,
-    ExitCopyMode,
-    SetSelection(Option<TermSelectionRange>),
-    ExtendSelectionTo { col: u16, row: u16 },
-    SelectWordAt { col: u16, row: u16 },
-    SelectLineAt { row: u16 },
-}
-
-fn mouse_terminal_actions(
-    entry: &mut MouseSessionState,
-    event: &TermMouseEvent,
-    mouse_capture: bool,
-    now: std::time::Instant,
-) -> Vec<MouseTerminalAction> {
-    let shift = event.modifiers & MOD_SHIFT != 0;
-    let is_left = event.button == 0;
-    let select_mode = is_left && (!mouse_capture || shift);
-
-    if !select_mode {
-        if !mouse_capture {
-            return Vec::new();
-        }
-        let button = if event.moving {
-            event.button + 32
-        } else {
-            event.button
-        };
-        return vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
-            button,
-            event.col,
-            event.row,
-            event.modifiers,
-            event.pressed,
-        ))];
-    }
-
-    if event.pressed && !event.moving {
-        let count = match entry.last_click {
-            Some(prev)
-                if now.duration_since(prev.when) <= MULTI_CLICK_WINDOW
-                    && (prev.col as i32 - event.col as i32).abs() <= MULTI_CLICK_CELL_TOLERANCE
-                    && (prev.row as i32 - event.row as i32).abs() <= MULTI_CLICK_CELL_TOLERANCE =>
-            {
-                if prev.count >= 3 {
-                    1
-                } else {
-                    prev.count + 1
-                }
-            }
-            _ => 1,
-        };
-        entry.last_click = Some(MouseClickRecord {
-            when: now,
-            col: event.col,
-            row: event.row,
-            count,
-        });
-        entry.drag_active = count == 1;
-        entry.drag_visual_active = false;
-        entry.last_extend_cell = Some((event.col, event.row));
-
-        match count {
-            1 if shift => {
-                entry.pending_anchor = None;
-                vec![MouseTerminalAction::ExtendSelectionTo {
-                    col: event.col,
-                    row: event.row,
-                }]
-            }
-            1 => {
-                entry.pending_anchor = Some((event.col, event.row));
-                vec![MouseTerminalAction::SetSelection(None)]
-            }
-            2 => {
-                entry.pending_anchor = None;
-                vec![MouseTerminalAction::SelectWordAt {
-                    col: event.col,
-                    row: event.row,
-                }]
-            }
-            _ => {
-                entry.pending_anchor = None;
-                vec![MouseTerminalAction::SelectLineAt { row: event.row }]
-            }
-        }
-    } else if event.moving && entry.drag_active {
-        if entry.last_extend_cell == Some((event.col, event.row)) {
-            return Vec::new();
-        }
-        entry.last_extend_cell = Some((event.col, event.row));
-        if let Some((ac, ar)) = entry.pending_anchor.take() {
-            entry.drag_visual_active = true;
-            vec![
-                MouseTerminalAction::EnterCopyMode,
-                MouseTerminalAction::SetSelection(Some(TermSelectionRange {
-                    start_col: ac,
-                    start_row: ar,
-                    end_col: event.col,
-                    end_row: event.row,
-                    is_block: false,
-                })),
-            ]
-        } else {
-            vec![MouseTerminalAction::ExtendSelectionTo {
-                col: event.col,
-                row: event.row,
-            }]
-        }
-    } else if !event.pressed {
-        let actions = if entry.drag_visual_active {
-            vec![MouseTerminalAction::ExitCopyMode]
-        } else {
-            Vec::new()
-        };
-        entry.drag_active = false;
-        entry.drag_visual_active = false;
-        entry.last_extend_cell = None;
-        entry.pending_anchor = None;
-        actions
-    } else {
-        Vec::new()
-    }
-}
-
-fn send_mouse_action(service: &ServiceHandle, process_id: ProcessId, action: MouseTerminalAction) {
-    match action {
-        MouseTerminalAction::ForwardInput(data) => {
-            service.send(ClientMessage::ProcessInput { process_id, data });
-        }
-        MouseTerminalAction::EnterCopyMode => {
-            service.send(ClientMessage::EnterCopyMode { process_id });
-        }
-        MouseTerminalAction::ExitCopyMode => {
-            service.send(ClientMessage::ExitCopyMode { process_id });
-        }
-        MouseTerminalAction::SetSelection(range) => {
-            service.send(ClientMessage::SetSelection { process_id, range });
-        }
-        MouseTerminalAction::ExtendSelectionTo { col, row } => {
-            service.send(ClientMessage::ExtendSelectionTo {
-                process_id,
-                col,
-                row,
-            });
-        }
-        MouseTerminalAction::SelectWordAt { col, row } => {
-            service.send(ClientMessage::SelectWordAt {
-                process_id,
-                col,
-                row,
-            });
-        }
-        MouseTerminalAction::SelectLineAt { row } => {
-            service.send(ClientMessage::SelectLineAt { process_id, row });
-        }
-    }
-}
-
-fn on_term_mouse(
-    trigger: On<BinReceive<TermMouseEvent>>,
-    q: Query<&ProcessId, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
-    mode_map: Res<TerminalModeMap>,
-    mut state: ResMut<MouseSelectionState>,
-    mut local_copy_mode: ResMut<LocalCopyModeState>,
-) {
-    let entity = trigger.event_target();
-    let event = &trigger.payload;
-    let Some(service) = service else { return };
-    let Ok(pid) = q.get(entity) else { return };
-    let process_id = *pid;
-
-    if event.button == 64 || event.button == 65 {
-        service.0.send(ClientMessage::MouseWheel {
-            process_id,
-            up: event.button == 64,
-            col: event.col,
-            row: event.row,
-            modifiers: event.modifiers,
-        });
-        return;
-    }
-
-    let mouse_capture = mode_map
-        .modes
-        .get(&process_id)
-        .map(|m| m.mouse_capture)
-        .unwrap_or(false);
-    let entry = state.per_process.entry(process_id).or_default();
-    for action in mouse_terminal_actions(entry, event, mouse_capture, std::time::Instant::now()) {
-        update_local_copy_mode_for_mouse_action(&mut local_copy_mode, process_id, &action);
-        send_mouse_action(&service.0, process_id, action);
-    }
-}
-
-fn on_term_scroll(
-    trigger: On<BinReceive<TermScrollEvent>>,
-    q: Query<&ProcessId, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
-) {
-    let entity = trigger.event_target();
-    let event = &trigger.payload;
-    let Some(service) = service else { return };
-    let Ok(pid) = q.get(entity) else { return };
-    service.0.send(ClientMessage::ScrollWindow {
-        process_id: *pid,
-        top_row: event.top_row,
-        follow: event.follow,
-    });
-}
-
-fn on_term_link_open(
-    trigger: On<BinReceive<TermLinkOpenRequest>>,
-    mut app_commands: MessageWriter<AppCommand>,
-    mut issued: MessageWriter<vmux_command::CommandIssued>,
-    user_q: Query<Entity, With<vmux_core::team::User>>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-) {
-    let url = trigger.payload.url.clone();
-    if url.is_empty() {
-        return;
-    }
-    let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-        url: Some(url),
-    }));
-    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-    issued.write(vmux_command::CommandIssued {
-        caller,
-        command: cmd.clone(),
-    });
-    app_commands.write(cmd);
-    if let Some(proxy) = proxy.as_ref() {
-        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
-    }
-}
-
 fn on_term_key(
-    trigger: On<BinReceive<KeyStroke>>,
-    terminals: Query<(), With<Terminal>>,
-    q: Query<&ProcessId, With<Terminal>>,
+    trigger: On<UiInput<KeyStroke>>,
+    mut terminals: Query<
+        (
+            &ProcessId,
+            &TerminalMode,
+            &mut TerminalCopyMode,
+            &mut TerminalShortcutState,
+        ),
+        With<Terminal>,
+    >,
     agents: Query<&vmux_core::agent::AgentSession>,
     launches: Query<&crate::launch::TerminalLaunch>,
-    service: Option<Res<ServiceClient>>,
-    mode_map: Res<TerminalModeMap>,
-    mut local_copy_mode: ResMut<LocalCopyModeState>,
-    settings: Option<Res<AppSettings>>,
-    mut web_shortcuts: ResMut<TerminalWebShortcutState>,
-    mut app_commands: MessageWriter<AppCommand>,
-    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    keymap: Res<Keymap>,
+    mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut capture_q: Query<&mut PromptCapture, With<Terminal>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
-    if terminals.get(entity).is_err() {
+    let Ok((pid, mode, mut copy_mode, mut shortcuts)) = terminals.get_mut(entity) else {
         return;
-    }
-    match resolve_terminal_web_shortcut(event, settings.as_deref(), &mut web_shortcuts) {
-        TerminalWebShortcutAction::Command(cmd) => {
+    };
+    match resolve_terminal_web_shortcut(event, &keymap, &mut shortcuts) {
+        TerminalWebShortcutResolution::Command(id) => {
             let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
-            issued.write(vmux_command::CommandIssued {
-                caller,
-                command: cmd.clone(),
-            });
-            app_commands.write(cmd);
+            command_invocations.write(vmux_command::CommandInvocation::new(caller, id));
             if let Some(proxy) = proxy.as_ref() {
                 let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
             }
             return;
         }
-        TerminalWebShortcutAction::Consume => return,
-        TerminalWebShortcutAction::PassThrough => {}
+        TerminalWebShortcutResolution::Consume => return,
+        TerminalWebShortcutResolution::PassThrough => {}
     }
     if event.is_modifier_key() {
         return;
     }
-    let Some(service) = service else { return };
-    let Ok(pid) = q.get(entity) else { return };
     let process_id = *pid;
     let is_vibe = agents.get(entity).ok().map(|session| session.kind)
         == Some(vmux_core::agent::AgentKind::Vibe)
@@ -2723,10 +1794,10 @@ fn on_term_key(
             .flatten();
         if capture.apply(event, pasted) {
             let (draft, skipped) = (capture.draft.clone(), capture.skipped);
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                AGENT_PROMPT_DRAFT_EVENT,
-                &AgentPromptDraftEvent { draft, skipped },
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_core::event::TerminalUiState,
+            >::from_event(
+                entity, &AgentPromptDraftEvent { draft, skipped }
             ));
         }
         return;
@@ -2740,27 +1811,27 @@ fn on_term_key(
                 let is_vibe = agent_kind == Some(vmux_core::agent::AgentKind::Vibe)
                     || launch_kind == Some(crate::launch::TerminalKind::Vibe);
                 if let Some(data) = resolve_paste(is_vibe, process_id) {
-                    service
-                        .0
-                        .send(ClientMessage::ProcessInput { process_id, data });
+                    service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
+                        process_id,
+                        data,
+                    }));
                 }
                 return;
             }
             "KeyC" => {
-                service
-                    .0
-                    .send(ClientMessage::GetSelectionText { process_id });
+                service_requests.write(ServiceRequest(ClientMessage::GetSelectionText {
+                    process_id,
+                }));
                 return;
             }
             _ => return,
         }
     }
 
-    if is_copy_mode_active(&mode_map, &local_copy_mode, process_id) {
+    if is_copy_mode_active(mode, &copy_mode) {
         let key = term_key_event_to_key(event);
         let mapped = map_copy_mode_keys_with_state(
-            &mut local_copy_mode,
-            process_id,
+            &mut copy_mode,
             CopyModeKeyInput {
                 key: &key,
                 key_code: key_code_from_web_code(&event.code),
@@ -2770,439 +1841,22 @@ fn on_term_key(
         );
         for k in mapped {
             if copy_mode_key_exits(k) {
-                set_local_copy_mode(&mut local_copy_mode, process_id, false);
+                copy_mode.set(false);
             }
-            service
-                .0
-                .send(ClientMessage::CopyModeKey { process_id, key: k });
+            service_requests.write(ServiceRequest(ClientMessage::CopyModeKey {
+                process_id,
+                key: k,
+            }));
         }
         return;
     }
 
     let data = term_key_event_to_bytes(event);
     if !data.is_empty() {
-        service
-            .0
-            .send(ClientMessage::ProcessInput { process_id, data });
-    }
-}
-
-fn terminal_loading_labels(session: Option<&vmux_core::agent::AgentSession>) -> (String, String) {
-    match session {
-        Some(s) => (
-            s.kind.display_name().to_string(),
-            s.kind.as_url_segment().to_string(),
-        ),
-        None => ("Terminal".to_string(), "terminal".to_string()),
-    }
-}
-
-fn arm_agent_loading(
-    newly_ready: Query<
-        (
-            Entity,
-            Option<&vmux_core::agent::AgentSession>,
-            Option<&PromptCapture>,
-            Has<ShellOutputSeen>,
-        ),
-        (With<Terminal>, Added<PageReady>, Without<AgentLoading>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, session, capture, output_seen) in &newly_ready {
-        if session.is_none() && output_seen {
-            continue;
-        }
-        let announced = session.is_some();
-        commands
-            .entity(entity)
-            .insert(AgentLoading::armed(announced));
-        if session.is_some() && capture.is_none() {
-            commands.entity(entity).insert(PromptCapture::default());
-        }
-        if let Some(capture) = capture {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                AGENT_PROMPT_DRAFT_EVENT,
-                &AgentPromptDraftEvent {
-                    draft: capture.draft.clone(),
-                    skipped: capture.skipped,
-                },
-            ));
-        }
-        if !announced {
-            continue;
-        }
-        let (label, segment) = terminal_loading_labels(session);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            TERM_LOADING_EVENT,
-            &crate::event::TermLoadingEvent {
-                loading: true,
-                label,
-                segment,
-            },
-        ));
-    }
-}
-
-fn announce_slow_shell_boot(
-    mut waiting: Query<
-        (Entity, &mut AgentLoading),
-        (
-            With<Terminal>,
-            Without<vmux_core::agent::AgentSession>,
-            Without<ShellOutputSeen>,
-        ),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, mut loading) in &mut waiting {
-        if loading.announced || loading.since.elapsed() < SHELL_BOOT_GRACE {
-            continue;
-        }
-        loading.announced = true;
-        let (label, segment) = terminal_loading_labels(None);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            TERM_LOADING_EVENT,
-            &crate::event::TermLoadingEvent {
-                loading: true,
-                label,
-                segment,
-            },
-        ));
-    }
-}
-
-fn arm_agent_loading_on_restart(
-    restarted: Query<
-        (
-            Entity,
-            Option<&vmux_core::agent::AgentSession>,
-            Option<&PromptCapture>,
-        ),
-        (
-            With<Terminal>,
-            With<PageReady>,
-            Without<AgentLoading>,
-            Changed<ProcessId>,
-        ),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, session, capture) in &restarted {
-        let announced = session.is_some();
-        commands
-            .entity(entity)
-            .insert(AgentLoading::armed(announced));
-        if session.is_some() && capture.is_none() {
-            commands.entity(entity).insert(PromptCapture::default());
-        }
-        if let Some(capture) = capture {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                AGENT_PROMPT_DRAFT_EVENT,
-                &AgentPromptDraftEvent {
-                    draft: capture.draft.clone(),
-                    skipped: capture.skipped,
-                },
-            ));
-        }
-        if !announced {
-            continue;
-        }
-        let (label, segment) = terminal_loading_labels(session);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            TERM_LOADING_EVENT,
-            &crate::event::TermLoadingEvent {
-                loading: true,
-                label,
-                segment,
-            },
-        ));
-    }
-}
-
-fn clear_agent_loading(
-    loading_q: Query<
-        (
-            Entity,
-            &ProcessId,
-            Option<&vmux_core::agent::AgentSession>,
-            &AgentLoading,
-            Option<&PromptCapture>,
-            Has<ShellOutputSeen>,
-        ),
-        With<Terminal>,
-    >,
-    mode_map: Res<TerminalModeMap>,
-    mut commands: Commands,
-) {
-    for (entity, pid, session, loading, capture, output_seen) in &loading_q {
-        let ready = match session {
-            Some(_) => mode_map
-                .modes
-                .get(pid)
-                .map(|m| m.alt_screen || m.mouse_capture || m.focus_reporting)
-                .unwrap_or(false),
-            None => output_seen,
-        };
-        if !ready && loading.since.elapsed() < AGENT_LOADING_TIMEOUT {
-            continue;
-        }
-        if let Some(capture) = capture {
-            if !capture.skipped && !capture.draft.trim().is_empty() {
-                commands.entity(entity).insert(BufferedAgentPrompt {
-                    text: capture.draft.clone(),
-                    submit: true,
-                });
-            }
-            commands.entity(entity).remove::<PromptCapture>();
-        }
-        commands.entity(entity).remove::<AgentLoading>();
-        if !loading.announced {
-            continue;
-        }
-        let (label, segment) = terminal_loading_labels(session);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            entity,
-            TERM_LOADING_EVENT,
-            &crate::event::TermLoadingEvent {
-                loading: false,
-                label,
-                segment,
-            },
-        ));
-    }
-}
-
-fn reset_terminal_title_on_agent_removed(
-    mut removed: RemovedComponents<vmux_core::agent::AgentSession>,
-    mut q: Query<(&ProcessId, &mut PageMetadata), With<Terminal>>,
-) {
-    for entity in removed.read() {
-        if let Ok((pid, mut meta)) = q.get_mut(entity) {
-            let title = format!("Terminal ({})", &pid.to_string()[..8]);
-            if meta.title != title {
-                meta.title = title;
-            }
-        }
-    }
-}
-
-fn on_term_ready(
-    trigger: On<BinReceive<PageReady>>,
-    q: Query<&ProcessId, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().webview;
-    let Ok(pid) = q.get(entity) else { return };
-    let Some(service) = service else {
-        commands.entity(entity).insert(OwedSnapshot);
-        return;
-    };
-    service
-        .0
-        .send(ClientMessage::RequestSnapshot { process_id: *pid });
-}
-
-fn resend_the_screen_a_page_missed(
-    owed: Query<(Entity, &ProcessId), (With<Terminal>, With<OwedSnapshot>)>,
-    browsers: NonSend<Browsers>,
-    service: Option<Res<ServiceClient>>,
-    mut commands: Commands,
-) {
-    let Some(service) = service else { return };
-    for (entity, pid) in &owed {
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        service
-            .0
-            .send(ClientMessage::RequestSnapshot { process_id: *pid });
-        commands.entity(entity).remove::<OwedSnapshot>();
-    }
-}
-
-fn on_term_resize(
-    trigger: On<BinReceive<TermResizeEvent>>,
-    webview_q: Query<&WebviewSize, With<Terminal>>,
-    pid_q: Query<&ProcessId, With<Terminal>>,
-    mut grid_q: Query<&mut TerminalGridSize, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
-) {
-    let entity = trigger.event_target();
-    let event = &trigger.payload;
-
-    let Ok(webview_size) = webview_q.get(entity) else {
-        return;
-    };
-
-    if event.char_width <= 0.0 || event.char_height <= 0.0 {
-        return;
-    }
-
-    let vw = if event.viewport_width > 0.0 {
-        event.viewport_width
-    } else {
-        webview_size.0.x
-    };
-    let vh = if event.viewport_height > 0.0 {
-        event.viewport_height
-    } else {
-        webview_size.0.y
-    };
-
-    let cols = (vw / event.char_width).floor().max(1.0) as u16;
-    let rows = (vh / event.char_height).floor().max(1.0) as u16;
-
-    if let Ok(mut grid) = grid_q.get_mut(entity) {
-        grid.cols = cols;
-        grid.rows = rows;
-    }
-
-    let Some(service) = service else { return };
-    let Ok(pid) = pid_q.get(entity) else {
-        return;
-    };
-
-    service.0.send(ClientMessage::ResizeProcess {
-        process_id: *pid,
-        cols,
-        rows,
-    });
-}
-
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TerminalFontSizeCommand {
-    Increase,
-    Decrease,
-    Reset,
-}
-
-pub fn handle_terminal_font_size(
-    mut reader: MessageReader<TerminalFontSizeCommand>,
-    mut settings: ResMut<AppSettings>,
-    mut saves: MessageWriter<SettingsSaveRequest>,
-) {
-    for cmd in reader.read() {
-        let Some(terminal) = settings.terminal.as_ref() else {
-            continue;
-        };
-        let name = terminal.default_theme.clone();
-        let idx = match terminal.themes.iter().position(|t| t.name == name) {
-            Some(idx) => idx,
-            None => {
-                let resolved = terminal.resolve_theme(&name);
-                let terminal = settings.terminal.as_mut().unwrap();
-                terminal.themes.push(resolved);
-                terminal.themes.len() - 1
-            }
-        };
-        let terminal = settings.terminal.as_mut().unwrap();
-        let cur = terminal.themes[idx].font_size;
-        let new = match cmd {
-            TerminalFontSizeCommand::Increase => (cur + 1.0).min(40.0),
-            TerminalFontSizeCommand::Decrease => (cur - 1.0).max(6.0),
-            TerminalFontSizeCommand::Reset => 14.0,
-        };
-        if new == cur {
-            continue;
-        }
-        terminal.themes[idx].font_size = new;
-        saves.write(SettingsSaveRequest);
-    }
-}
-
-fn theme_signature(
-    theme: &vmux_setting::TerminalTheme,
-    colors: &vmux_setting::themes::TerminalColorScheme,
-) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    colors.foreground.hash(&mut hasher);
-    colors.background.hash(&mut hasher);
-    colors.cursor.hash(&mut hasher);
-    colors.ansi.hash(&mut hasher);
-    theme.font_size.to_bits().hash(&mut hasher);
-    theme.line_height.to_bits().hash(&mut hasher);
-    theme.padding.to_bits().hash(&mut hasher);
-    theme.font_family.hash(&mut hasher);
-    theme.cursor_style.hash(&mut hasher);
-    theme.cursor_blink.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn scheme_for_appearance(name: &str, dark: bool) -> &str {
-    match (name, dark) {
-        ("catppuccin-mocha" | "catppuccin-frappe" | "catppuccin-macchiato", false) => {
-            "catppuccin-latte"
-        }
-        ("catppuccin-latte", true) => "catppuccin-mocha",
-        ("solarized-dark", false) => "solarized-light",
-        ("solarized-light", true) => "solarized-dark",
-        (other, _) => other,
-    }
-}
-
-fn sync_terminal_theme(
-    q: Query<Entity, With<Terminal>>,
-    new_terminals: Query<Entity, Added<Terminal>>,
-    newly_ready: Query<Entity, (With<Terminal>, Changed<PageReady>)>,
-    browsers: NonSend<Browsers>,
-    settings: Res<AppSettings>,
-    scheme: Option<Res<vmux_setting::ResolvedColorScheme>>,
-    mut commands: Commands,
-    mut last_theme_hash: Local<u64>,
-) {
-    let Some(terminal_settings) = &settings.terminal else {
-        return;
-    };
-
-    let theme = terminal_settings.resolve_theme(&terminal_settings.default_theme);
-    let dark = scheme
-        .map(|s| matches!(s.0, vmux_setting::ResolvedScheme::Dark))
-        .unwrap_or(true);
-    let scheme_name = scheme_for_appearance(&theme.color_scheme, dark);
-    let colors = vmux_setting::themes::resolve_theme(scheme_name, &terminal_settings.custom_themes);
-
-    let hash = theme_signature(&theme, &colors);
-
-    let theme_changed = hash != *last_theme_hash;
-    if !theme_changed && new_terminals.is_empty() && newly_ready.is_empty() {
-        return;
-    }
-    *last_theme_hash = hash;
-
-    let base_event = crate::event::TermThemeEvent {
-        foreground: colors.foreground,
-        background: colors.background,
-        cursor: colors.cursor,
-        ansi: colors.ansi,
-        font_family: theme.font_family.clone(),
-        font_size: theme.font_size,
-        line_height: theme.line_height,
-        padding: theme.padding,
-        cursor_style: theme.cursor_style.clone(),
-        cursor_blink: theme.cursor_blink,
-    };
-    let targets: Vec<Entity> = if theme_changed {
-        q.iter().collect()
-    } else {
-        new_terminals.iter().chain(newly_ready.iter()).collect()
-    };
-
-    for entity in targets {
-        if browsers.can_emit_to(&entity) {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                TERM_THEME_EVENT,
-                &base_event,
-            ));
-        }
+        service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
+            process_id,
+            data,
+        }));
     }
 }
 
@@ -3216,13 +1870,12 @@ fn on_restart_pty(
         Option<&TerminalGridSize>,
         Has<crate::AgentRunTerminal>,
     )>,
-    service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
     mut restart_agent: MessageWriter<vmux_core::agent::RestartAgentPty>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event().entity;
-    let Some(service) = service else { return };
     let Ok((mut pid, mut meta, mut launch, agent_session, grid, agent_run)) = q.get_mut(entity)
     else {
         return;
@@ -3233,9 +1886,9 @@ fn on_restart_pty(
         return;
     }
 
-    service
-        .0
-        .send(ClientMessage::KillProcess { process_id: *pid });
+    service_requests.write(ServiceRequest(ClientMessage::KillProcess {
+        process_id: *pid,
+    }));
 
     let (command, args, cwd, mut env) = match launch.as_deref() {
         Some(l) => (
@@ -3259,7 +1912,7 @@ fn on_restart_pty(
 
     let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));
     let new_id = ProcessId::new();
-    service.0.send(ClientMessage::CreateProcess {
+    service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
         process_id: new_id,
         command: command.clone(),
         args: args.clone(),
@@ -3267,7 +1920,7 @@ fn on_restart_pty(
         env: env.clone(),
         cols,
         rows,
-    });
+    }));
 
     *pid = new_id;
     mark_terminal_restarting(&mut commands, entity);
@@ -3280,7 +1933,7 @@ fn on_restart_pty(
 }
 
 fn handle_terminal_copy_mode_command(
-    mut er: MessageReader<AppCommand>,
+    mut requests: MessageReader<super::command::CopyModeRequest>,
     targeted_terminals: Query<
         (&ProcessId, &ChildOf),
         (With<Terminal>, With<KeyboardOwner>, Without<ProcessExited>),
@@ -3288,13 +1941,10 @@ fn handle_terminal_copy_mode_command(
     keyboard_targets: Query<(), With<KeyboardOwner>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    service: Option<Res<ServiceClient>>,
-    mut local_copy_mode: ResMut<LocalCopyModeState>,
+    process_index: Res<TerminalProcessIndex>,
+    mut copy_modes: Query<&mut TerminalCopyMode, With<Terminal>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        for _ in er.read() {}
-        return;
-    };
     let target_processes = resolve_terminal_input_targets(
         targeted_terminals
             .iter()
@@ -3306,46 +1956,71 @@ fn handle_terminal_copy_mode_command(
             .map(|(pid, child_of)| (child_of.get(), *pid)),
     );
     let active_process_id = target_processes.first().copied();
-    for cmd in er.read() {
-        if matches!(
-            cmd,
-            AppCommand::Terminal(vmux_command::TerminalCommand::CopyMode)
-        ) && let Some(process_id) = active_process_id
-        {
-            set_local_copy_mode(&mut local_copy_mode, process_id, true);
-            service.0.send(ClientMessage::EnterCopyMode { process_id });
+    for _ in requests.read() {
+        if let Some(process_id) = active_process_id {
+            if let Some(entity) = process_index.get(&process_id)
+                && let Ok(mut copy_mode) = copy_modes.get_mut(entity)
+            {
+                copy_mode.set(true);
+            }
+            service_requests.write(ServiceRequest(ClientMessage::EnterCopyMode { process_id }));
         }
     }
 }
 
-fn is_copy_mode_active(
-    mode_map: &TerminalModeMap,
-    local_copy_mode: &LocalCopyModeState,
-    process_id: ProcessId,
-) -> bool {
-    mode_map
-        .modes
-        .get(&process_id)
-        .map(|m| m.copy_mode)
-        .unwrap_or(false)
-        || local_copy_mode.active.contains(&process_id)
-}
-
-fn set_local_copy_mode(
-    local_copy_mode: &mut LocalCopyModeState,
-    process_id: ProcessId,
-    active: bool,
+fn handle_terminal_navigation_commands(
+    mut close_requests: MessageReader<super::command::TerminalCloseRequest>,
+    mut next_requests: MessageReader<super::command::TerminalNextRequest>,
+    mut previous_requests: MessageReader<super::command::TerminalPrevRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    terminals: Query<&ChildOf, With<Terminal>>,
+    mut stack_close_requests: MessageWriter<StackCloseRequest>,
+    mut stack_focus_requests: MessageWriter<FocusRequest>,
 ) {
-    if active {
-        local_copy_mode.active.insert(process_id);
-    } else {
-        local_copy_mode.active.remove(&process_id);
-        local_copy_mode.input_states.remove(&process_id);
+    let terminal_is_focused = focus
+        .stack
+        .is_some_and(|stack| terminals.iter().any(|child_of| child_of.get() == stack));
+    if !terminal_is_focused {
+        close_requests.clear();
+        next_requests.clear();
+        previous_requests.clear();
+        return;
+    }
+    for _ in close_requests.read() {
+        stack_close_requests.write(StackCloseRequest);
+    }
+    for _ in next_requests.read() {
+        stack_focus_requests.write(FocusRequest(vmux_layout::target::SiblingDirection::Next));
+    }
+    for _ in previous_requests.read() {
+        stack_focus_requests.write(FocusRequest(
+            vmux_layout::target::SiblingDirection::Previous,
+        ));
     }
 }
 
-fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
-    use vmux_service::protocol::CopyModeKey as K;
+fn handle_terminal_clear_command(
+    mut requests: MessageReader<super::command::TerminalClearRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    mut sequence: ResMut<NextTerminalInputSequence>,
+    mut commands: Commands,
+) {
+    let terminal = crate::target::active_terminal_for_tab(focus.stack, &terminals);
+    for _ in requests.read() {
+        let Some(terminal) = terminal else {
+            continue;
+        };
+        enqueue_terminal_input(&mut commands, &mut sequence, terminal, vec![0x0c]);
+    }
+}
+
+fn is_copy_mode_active(mode: &TerminalMode, copy_mode: &TerminalCopyMode) -> bool {
+    mode.copy_mode || copy_mode.active
+}
+
+fn copy_mode_key_exits(key: vmux_api::protocol::CopyModeKey) -> bool {
+    use vmux_api::protocol::CopyModeKey as K;
     matches!(key, K::Copy | K::Exit)
 }
 
@@ -3357,7 +2032,7 @@ pub struct ProcessExitedEvent {
 #[derive(Message, Debug, Clone)]
 pub struct CommandLifecycleEvent {
     pub process_id: ProcessId,
-    pub kind: vmux_service::protocol::CommandLifecycleKind,
+    pub kind: vmux_api::protocol::CommandLifecycleKind,
 }
 
 #[derive(Message, Debug, Clone)]
@@ -3372,15 +2047,17 @@ pub struct OscTitleChanged {
     pub title: String,
 }
 
-pub fn apply_osc_title(
+fn apply_osc_title(
     mut reader: MessageReader<OscTitleChanged>,
     mut commands: Commands,
-    terminals: Query<(Entity, &ProcessId, Option<&PageIdentity>), With<Terminal>>,
+    process_index: Res<TerminalProcessIndex>,
+    terminals: Query<Option<&PageIdentity>, With<Terminal>>,
 ) {
     for ev in reader.read() {
-        let Some((entity, _, current)) =
-            terminals.iter().find(|(_, pid, _)| **pid == ev.process_id)
-        else {
+        let Some(entity) = process_index.get(&ev.process_id) else {
+            continue;
+        };
+        let Ok(current) = terminals.get(entity) else {
             continue;
         };
         if ev.title.is_empty() {
@@ -3391,227 +2068,36 @@ pub fn apply_osc_title(
         {
             commands
                 .entity(entity)
-                .insert(PageIdentity::of_title(ev.title.clone()));
+                .insert(PageIdentity::from(ev.title.clone()));
         }
     }
 }
 
-pub fn clear_osc_title_on_exit(
+fn clear_osc_title_on_exit(
     mut reader: MessageReader<ProcessExitedEvent>,
     mut commands: Commands,
-    terminals: Query<(Entity, &ProcessId), (With<Terminal>, With<PageIdentity>)>,
+    process_index: Res<TerminalProcessIndex>,
+    terminals: Query<(), (With<Terminal>, With<PageIdentity>)>,
 ) {
     for ev in reader.read() {
-        if let Some((entity, _)) = terminals.iter().find(|(_, pid)| **pid == ev.process_id) {
+        if let Some(entity) = process_index.get(&ev.process_id)
+            && terminals.contains(entity)
+        {
             commands.entity(entity).remove::<PageIdentity>();
         }
-    }
-}
-
-fn update_local_copy_mode_for_mouse_action(
-    local_copy_mode: &mut LocalCopyModeState,
-    process_id: ProcessId,
-    action: &MouseTerminalAction,
-) {
-    match action {
-        MouseTerminalAction::EnterCopyMode => {
-            set_local_copy_mode(local_copy_mode, process_id, true)
-        }
-        MouseTerminalAction::ExitCopyMode => {
-            set_local_copy_mode(local_copy_mode, process_id, false)
-        }
-        _ => {}
-    }
-}
-
-pub fn handle_terminal_send_requests(
-    mut reader: MessageReader<crate::TerminalSendRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
-    terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    mut commands: Commands,
-) {
-    for request in reader.read() {
-        let crate::TerminalSendRequest { text, terminal } = request.clone();
-
-        let target = if let Some(s) = terminal.as_deref() {
-            match crate::target::parse_terminal_target(s, &terminals) {
-                Some(t) => Ok(Some(t)),
-                None => Err(format!("terminal_send: invalid terminal id '{s}'")),
-            }
-        } else {
-            Ok(crate::target::active_terminal_for_tab(
-                focus.stack,
-                &terminals,
-            ))
-        };
-
-        match target {
-            Err(_) => {}
-            Ok(Some(terminal_entity)) => {
-                commands
-                    .entity(terminal_entity)
-                    .insert(PendingTerminalInput {
-                        data: text.as_bytes().to_vec(),
-                    });
-            }
-            Ok(None) => {}
-        }
-    }
-}
-
-pub fn handle_run_shell_requests(
-    mut reader: MessageReader<crate::RunShellRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
-    panes: Query<
-        Entity,
-        (
-            With<vmux_layout::pane::Pane>,
-            Without<vmux_layout::pane::PaneSplit>,
-        ),
-    >,
-    terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    mut commands: Commands,
-    mut terminal_stack_spawns: Option<MessageWriter<TerminalStackSpawnRequest>>,
-) {
-    for request in reader.read() {
-        let crate::RunShellRequest { command, cwd, mode } = request.clone();
-        let input = crate::shell_input::shell_command_input(&command);
-        if matches!(mode, crate::ShellMode::Active)
-            && let Some(terminal) = crate::target::active_terminal_for_tab(focus.stack, &terminals)
-        {
-            commands
-                .entity(terminal)
-                .insert(PendingTerminalInput { data: input });
-        } else if let Some(terminal_stack_spawns) = terminal_stack_spawns.as_mut()
-            && let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane))
-            && let Ok(cwd_path) = vmux_space::cwd::valid_cwd(&cwd)
-        {
-            terminal_stack_spawns.write(TerminalStackSpawnRequest {
-                pane,
-                cwd: cwd_path,
-                shell: None,
-                agent_run: false,
-                pending_input: Some(input),
-                process_id: None,
-                activate: true,
-            });
-        }
-    }
-}
-
-#[cfg(test)]
-mod prompt_capture_tests {
-    use super::PromptCapture;
-    use vmux_core::input::{KeyModifiers, KeyStroke};
-
-    const CTRL: KeyModifiers = KeyModifiers {
-        ctrl: true,
-        shift: false,
-        alt: false,
-        super_key: false,
-    };
-    const SUPER: KeyModifiers = KeyModifiers {
-        ctrl: false,
-        shift: false,
-        alt: false,
-        super_key: true,
-    };
-
-    fn press(key: &str, code: &str, mods: KeyModifiers) -> KeyStroke {
-        KeyStroke {
-            key: key.to_string(),
-            code: code.to_string(),
-            mods,
-            text: None,
-            repeat: false,
-        }
-    }
-
-    fn typed(key: &str, code: &str) -> KeyStroke {
-        press(key, code, KeyModifiers::default())
-    }
-
-    #[test]
-    fn the_draft_takes_text_and_refuses_everything_else() {
-        let mut capture = PromptCapture::default();
-
-        assert!(capture.apply(&typed("h", "KeyH"), None));
-        assert!(capture.apply(&typed("i", "KeyI"), None));
-        assert_eq!(capture.draft, "hi");
-
-        assert!(!capture.apply(&press("i", "KeyI", CTRL), None));
-        assert!(!capture.apply(&typed("Enter", "Enter"), None));
-        assert!(!capture.apply(&typed("F5", "F5"), None));
-        assert_eq!(capture.draft, "hi", "a chord or a bare action is not text");
-
-        assert!(capture.apply(&typed("Backspace", "Backspace"), None));
-        assert_eq!(capture.draft, "h");
-    }
-
-    #[test]
-    fn escape_declines_the_prompt_and_ctrl_c_only_clears_it() {
-        let mut capture = PromptCapture::default();
-        capture.apply(&typed("h", "KeyH"), None);
-
-        assert!(capture.apply(&typed("Escape", "Escape"), None));
-        assert_eq!((capture.draft.as_str(), capture.skipped), ("", true));
-
-        capture.apply(&typed("h", "KeyH"), None);
-        assert_eq!((capture.draft.as_str(), capture.skipped), ("h", false));
-
-        assert!(capture.apply(&press("c", "KeyC", CTRL), None));
-        assert_eq!((capture.draft.as_str(), capture.skipped), ("", false));
-    }
-
-    #[test]
-    fn a_press_that_changes_nothing_reports_no_change() {
-        let mut capture = PromptCapture::default();
-
-        assert!(!capture.apply(&typed("Backspace", "Backspace"), None));
-        assert!(!capture.apply(&typed("Shift", "ShiftLeft"), None));
-        assert!(capture.draft.is_empty());
-    }
-
-    #[test]
-    fn paste_is_separated_from_the_draft_it_joins() {
-        let paste = press("v", "KeyV", SUPER);
-        let mut capture = PromptCapture::default();
-        capture.apply(&typed("g", "KeyG"), None);
-
-        assert!(capture.apply(&paste, Some("o run".to_string())));
-        assert_eq!(capture.draft, "g o run");
-
-        assert!(!capture.apply(&paste, None));
-        assert_eq!(capture.draft, "g o run");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process_index::TerminalProcessIndexPlugin;
     use bevy::ecs::schedule::Schedules;
-    use std::time::{Duration, Instant};
-    use vmux_core::agent::{AgentKind, AgentSession};
     use vmux_core::input::KeyModifiers;
-    use vmux_core::page::PageReady;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
-
-    #[test]
-    fn service_bridge_routes_acp_agent_info() {
-        let source = include_str!("plugin.rs");
-        let handler = source
-            .split("fn poll_service_messages")
-            .nth(1)
-            .expect("service handler")
-            .split("fn flush_pending_terminal_input")
-            .next()
-            .expect("service handler body");
-        assert!(handler.contains("ServiceMessage::Shared(SharedEvent::AcpAgentInfo"));
-        assert!(handler.contains(".page_agent_info"));
-    }
 
     #[test]
     fn bracketed_paste_wraps_payload() {
@@ -3641,22 +2127,21 @@ mod tests {
     }
 
     #[test]
-    fn terminal_reinput_appends_to_existing_pending_input() {
+    fn terminal_reinput_preserves_existing_queued_input() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<TerminalReinputRequest>()
-            .add_systems(Update, handle_terminal_reinput_requests);
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin, InputQueuePlugin));
         let pid = process_id(7);
-        let terminal = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                pid,
-                PendingTerminalInput {
-                    data: b"initial\r".to_vec(),
+        let terminal = app.world_mut().spawn((Terminal, pid)).id();
+        app.world_mut()
+            .run_system_cached_with(
+                |In((terminal, data)): In<(Entity, Vec<u8>)>,
+                 mut sequence: ResMut<NextTerminalInputSequence>,
+                 mut commands: Commands| {
+                    enqueue_terminal_input(&mut commands, &mut sequence, terminal, data);
                 },
-            ))
-            .id();
+                (terminal, b"initial\r".to_vec()),
+            )
+            .unwrap();
 
         app.world_mut()
             .resource_mut::<Messages<TerminalReinputRequest>>()
@@ -3667,20 +2152,15 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<PendingTerminalInput>(terminal)
-                .unwrap()
-                .data,
-            b"initial\rnext\r"
+            pending_terminal_input(app.world_mut(), terminal),
+            [b"initial\r".to_vec(), b"next\r".to_vec()]
         );
     }
 
     #[test]
     fn terminal_reinput_preserves_multiple_messages_in_order() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<TerminalReinputRequest>()
-            .add_systems(Update, handle_terminal_reinput_requests);
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin, InputQueuePlugin));
         let pid = process_id(8);
         let terminal = app.world_mut().spawn((Terminal, pid)).id();
 
@@ -3699,51 +2179,8 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world()
-                .get::<PendingTerminalInput>(terminal)
-                .unwrap()
-                .data,
-            b"one\rtwo\r"
-        );
-    }
-
-    #[test]
-    fn term_link_open_emits_browser_open_command() {
-        #[derive(Resource, Default)]
-        struct Captured(Vec<AppCommand>);
-        fn capture(mut r: MessageReader<AppCommand>, mut c: ResMut<Captured>) {
-            for m in r.read() {
-                c.0.push(m.clone());
-            }
-        }
-
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<AppCommand>()
-            .add_message::<vmux_command::CommandIssued>()
-            .init_resource::<Captured>()
-            .add_observer(on_term_link_open)
-            .add_systems(Update, capture);
-        let webview = app.world_mut().spawn(vmux_core::team::User).id();
-
-        app.world_mut().trigger(BinReceive::<TermLinkOpenRequest> {
-            webview,
-            payload: TermLinkOpenRequest {
-                url: "https://vmux.ai".into(),
-            },
-        });
-        app.update();
-
-        let captured = app.world().resource::<Captured>();
-        assert!(
-            captured.0.iter().any(|c| matches!(
-                c,
-                AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-                    url: Some(u),
-                })) if u == "https://vmux.ai"
-            )),
-            "expected InNewStack open command, got {:?}",
-            captured.0
+            pending_terminal_input(app.world_mut(), terminal),
+            [b"one\r".to_vec(), b"two\r".to_vec()]
         );
     }
 
@@ -3776,10 +2213,8 @@ mod tests {
     #[test]
     fn terminal_send_resolves_target_by_process_id_uuid() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<crate::TerminalSendRequest>()
-            .insert_resource(vmux_layout::stack::FocusedStack::default())
-            .add_systems(Update, handle_terminal_send_requests);
+        app.add_plugins((MinimalPlugins, crate::host::request::TerminalRequestPlugin))
+            .insert_resource(vmux_layout::stack::FocusedStack::default());
 
         let parent = app.world_mut().spawn_empty().id();
         let pid = process_id(7);
@@ -3797,17 +2232,17 @@ mod tests {
             });
         app.update();
 
-        let pending = app
-            .world()
-            .get::<PendingTerminalInput>(terminal)
-            .expect("input routed to terminal by process id uuid");
-        assert_eq!(pending.data, b"hi".to_vec());
+        assert_eq!(
+            pending_terminal_input(app.world_mut(), terminal),
+            [b"hi".to_vec()]
+        );
     }
 
     #[test]
     fn terminal_stack_spawn_uses_requested_shell() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .add_plugins(InputQueuePlugin)
             .add_message::<TerminalStackSpawnRequest>()
             .insert_resource(test_settings())
             .add_systems(Update, respond_terminal_stack_spawn);
@@ -4062,7 +2497,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<LayoutSpawnRequest>()
+            .add_message::<TerminalLayoutSpawnRequest>()
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
             .add_systems(Update, spawn_layout_requested_content);
@@ -4079,8 +2514,8 @@ mod tests {
             .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
             .id();
         app.world_mut()
-            .resource_mut::<Messages<LayoutSpawnRequest>>()
-            .write(LayoutSpawnRequest::Terminal { stack });
+            .resource_mut::<Messages<TerminalLayoutSpawnRequest>>()
+            .write(TerminalLayoutSpawnRequest { stack });
 
         app.update();
 
@@ -4094,24 +2529,16 @@ mod tests {
     }
 
     #[test]
-    fn missing_service_process_restarts_matching_terminal() {
-        let missing = process_id(7);
+    fn missing_service_process_restart_preserves_launch() {
         let target = Entity::from_bits(1);
-        let plain_launch = || crate::launch::TerminalLaunch {
+        let launch = crate::launch::TerminalLaunch {
             command: default_shell(),
             args: vec![],
             cwd: String::new(),
             env: vec![],
             kind: crate::launch::TerminalKind::Plain,
         };
-        let restart = missing_terminal_restart(
-            missing,
-            [
-                (Entity::from_bits(2), process_id(8), plain_launch(), None),
-                (target, missing, plain_launch(), None),
-            ],
-        )
-        .unwrap();
+        let restart = MissingTerminalRestart::new(target, launch, None);
 
         assert_eq!(restart.entity, target);
         assert!(restart.agent_kind.is_none());
@@ -4164,7 +2591,7 @@ mod tests {
             vmux_command::CommandPlugin,
             vmux_layout::stack::StackPlugin,
         ))
-        .add_message::<LayoutSpawnRequest>()
+        .add_message::<TerminalLayoutSpawnRequest>()
         .add_plugins(TerminalUpdatePlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
@@ -4297,7 +2724,7 @@ mod tests {
     }
 
     #[test]
-    fn web_terminal_shortcuts_emit_app_command_before_pty_input() {
+    fn web_terminal_shortcuts_emit_command_before_pty_input() {
         let event = KeyStroke {
             key: "l".to_string(),
             code: "KeyL".to_string(),
@@ -4308,20 +2735,23 @@ mod tests {
             text: Some("l".to_string()),
             ..Default::default()
         };
-        let mut state = TerminalWebShortcutState::default();
+        let mut state = TerminalShortcutState::default();
+        let definitions = [vmux_command::CommandDefinition::new(
+            "browser_open_page_in_command_bar",
+            "Edit Page",
+            "Browser > Bar",
+        )
+        .direct("Super+l")];
+        let keymap = Keymap::defaults_with(&definitions);
 
         assert_eq!(
-            resolve_terminal_web_shortcut(&event, None, &mut state),
-            TerminalWebShortcutAction::Command(AppCommand::Browser(
-                vmux_command::BrowserCommand::Bar(
-                    vmux_command::BrowserBarCommand::OpenPageInCommandBar
-                )
-            ))
+            resolve_terminal_web_shortcut(&event, &keymap, &mut state),
+            TerminalWebShortcutResolution::Command("browser_open_page_in_command_bar".to_string())
         );
     }
 
     #[test]
-    fn web_terminal_menu_accel_shortcuts_emit_app_command_before_pty_input() {
+    fn web_terminal_menu_accel_shortcuts_emit_command_before_pty_input() {
         let event = KeyStroke {
             key: "S".to_string(),
             code: "KeyS".to_string(),
@@ -4333,143 +2763,18 @@ mod tests {
             text: Some("S".to_string()),
             ..Default::default()
         };
-        let mut state = TerminalWebShortcutState::default();
+        let mut state = TerminalShortcutState::default();
+        let definitions = [vmux_command::CommandDefinition::new(
+            "toggle_layout",
+            "Toggle Layout",
+            "Layout > Layout",
+        )
+        .direct("Super+Shift+S")];
+        let keymap = Keymap::defaults_with(&definitions);
 
         assert_eq!(
-            resolve_terminal_web_shortcut(&event, None, &mut state),
-            TerminalWebShortcutAction::Command(AppCommand::Layout(
-                vmux_command::LayoutCommand::ToggleLayout(
-                    vmux_command::ToggleLayoutCommand::Toggle
-                )
-            ))
-        );
-    }
-
-    #[test]
-    fn terminal_web_shortcut_wakes_next_command_frame() {
-        let source = include_str!("plugin.rs");
-        let on_term_key = source
-            .split("fn on_term_key")
-            .nth(1)
-            .and_then(|tail| tail.split("fn on_term_ready").next())
-            .unwrap_or_default();
-
-        assert!(on_term_key.contains("EventLoopProxyWrapper"));
-        assert!(on_term_key.contains("WinitUserEvent::WakeUp"));
-    }
-
-    fn mouse_event(button: u8, col: u16, row: u16, pressed: bool, moving: bool) -> TermMouseEvent {
-        TermMouseEvent {
-            button,
-            col,
-            row,
-            modifiers: 0,
-            pressed,
-            moving,
-        }
-    }
-
-    #[test]
-    fn drag_enters_visual_mode_on_first_motion_and_exits_on_release() {
-        let mut state = MouseSessionState::default();
-        let now = std::time::Instant::now();
-
-        let down = mouse_event(0, 2, 3, true, false);
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &down, false, now),
-            vec![MouseTerminalAction::SetSelection(None)]
-        );
-
-        let drag = mouse_event(0, 5, 3, true, true);
-        assert_eq!(
-            mouse_terminal_actions(
-                &mut state,
-                &drag,
-                false,
-                now + std::time::Duration::from_millis(10),
-            ),
-            vec![
-                MouseTerminalAction::EnterCopyMode,
-                MouseTerminalAction::SetSelection(Some(TermSelectionRange {
-                    start_col: 2,
-                    start_row: 3,
-                    end_col: 5,
-                    end_row: 3,
-                    is_block: false,
-                })),
-            ]
-        );
-
-        let release = mouse_event(0, 5, 3, false, false);
-        assert_eq!(
-            mouse_terminal_actions(
-                &mut state,
-                &release,
-                false,
-                now + std::time::Duration::from_millis(20),
-            ),
-            vec![MouseTerminalAction::ExitCopyMode]
-        );
-    }
-
-    #[test]
-    fn single_click_never_enters_visual_mode() {
-        let mut state = MouseSessionState::default();
-        let now = std::time::Instant::now();
-
-        let down = mouse_event(0, 2, 3, true, false);
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &down, false, now),
-            vec![MouseTerminalAction::SetSelection(None)]
-        );
-
-        let release = mouse_event(0, 2, 3, false, false);
-        assert_eq!(
-            mouse_terminal_actions(
-                &mut state,
-                &release,
-                false,
-                now + std::time::Duration::from_millis(20),
-            ),
-            Vec::<MouseTerminalAction>::new()
-        );
-    }
-
-    #[test]
-    fn captured_mouse_without_shift_still_forwards_drag_motion() {
-        let mut state = MouseSessionState::default();
-        let event = mouse_event(0, 4, 5, true, true);
-
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &event, true, std::time::Instant::now()),
-            vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
-                32, 4, 5, 0, true,
-            ))]
-        );
-    }
-
-    #[test]
-    fn hover_motion_without_app_capture_is_not_forwarded() {
-        let mut state = MouseSessionState::default();
-        let hover = mouse_event(3, 9, 4, true, true);
-
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &hover, false, std::time::Instant::now()),
-            Vec::<MouseTerminalAction>::new(),
-            "bare hover with no app mouse capture must not be echoed into the PTY"
-        );
-    }
-
-    #[test]
-    fn hover_motion_with_app_capture_is_forwarded() {
-        let mut state = MouseSessionState::default();
-        let hover = mouse_event(3, 9, 4, true, true);
-
-        assert_eq!(
-            mouse_terminal_actions(&mut state, &hover, true, std::time::Instant::now()),
-            vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
-                35, 9, 4, 0, true,
-            ))]
+            resolve_terminal_web_shortcut(&event, &keymap, &mut state),
+            TerminalWebShortcutResolution::Command("toggle_layout".to_string())
         );
     }
 
@@ -4492,7 +2797,7 @@ mod tests {
 
     #[test]
     fn vim_visual_keys_map_to_copy_mode_actions() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
         assert_eq!(
             map_copy_mode_key(&Key::Character("v".into()), false),
@@ -4522,66 +2827,50 @@ mod tests {
 
     #[test]
     fn vim_g_ends_visual_selection_at_last_non_blank() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
-        let process_id = ProcessId::new();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
-            map_copy_mode_key_with_state(
-                &mut local_copy_mode,
-                process_id,
-                &Key::Character("g".into()),
-                false
-            ),
+            map_copy_mode_key_with_state(&mut copy_mode, &Key::Character("g".into()), false),
             None
         );
         assert_eq!(
-            map_copy_mode_key_with_state(
-                &mut local_copy_mode,
-                process_id,
-                &Key::Character("_".into()),
-                false
-            ),
+            map_copy_mode_key_with_state(&mut copy_mode, &Key::Character("_".into()), false),
             Some(K::LastNonBlank)
         );
     }
 
     #[test]
     fn vim_visual_motion_keys_map_to_copy_mode_actions() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
-        let process_id = ProcessId::new();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("w".into()), KeyCode::KeyW)
             ),
             vec![K::WordForward]
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::shift(&Key::Character("W".into()), KeyCode::KeyW)
             ),
             vec![K::BigWordForward]
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("b".into()), KeyCode::KeyB)
             ),
             vec![K::WordBackward]
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("e".into()), KeyCode::KeyE)
             ),
             vec![K::WordEndForward]
@@ -4589,16 +2878,14 @@ mod tests {
 
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("g".into()), KeyCode::KeyG)
             ),
             Vec::<K>::new()
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("e".into()), KeyCode::KeyE)
             ),
             vec![K::WordEndBackward]
@@ -4606,16 +2893,14 @@ mod tests {
 
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("3".into()), KeyCode::Digit3)
             ),
             Vec::<K>::new()
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("w".into()), KeyCode::KeyW)
             ),
             vec![K::WordForward, K::WordForward, K::WordForward]
@@ -4624,23 +2909,20 @@ mod tests {
 
     #[test]
     fn shifted_minus_resolves_g_() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
-        let process_id = ProcessId::new();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::new(&Key::Character("g".into()), KeyCode::KeyG)
             ),
             Vec::<K>::new()
         );
         assert_eq!(
             map_copy_mode_keys_with_state(
-                &mut local_copy_mode,
-                process_id,
+                &mut copy_mode,
                 CopyModeKeyInput::shift(&Key::Character("-".into()), KeyCode::Minus)
             ),
             vec![K::LastNonBlank]
@@ -4649,75 +2931,56 @@ mod tests {
 
     #[test]
     fn local_copy_mode_is_active_before_service_broadcast() {
-        let process_id = ProcessId::new();
-        let mode_map = TerminalModeMap::default();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mode = TerminalMode::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
-        assert!(!is_copy_mode_active(
-            &mode_map,
-            &local_copy_mode,
-            process_id
-        ));
+        assert!(!is_copy_mode_active(&mode, &copy_mode));
 
-        set_local_copy_mode(&mut local_copy_mode, process_id, true);
+        copy_mode.set(true);
 
-        assert!(is_copy_mode_active(&mode_map, &local_copy_mode, process_id));
+        assert!(is_copy_mode_active(&mode, &copy_mode));
     }
 
     #[test]
     fn service_copy_mode_broadcast_reconciles_local_latch() {
-        let process_id = ProcessId::new();
-        let mut mode_map = TerminalModeMap::default();
-        let mut local_copy_mode = LocalCopyModeState::default();
+        let mode = TerminalMode::default();
+        let mut copy_mode = TerminalCopyMode::default();
 
-        set_local_copy_mode(&mut local_copy_mode, process_id, true);
-        mode_map.modes.insert(
-            process_id,
-            TerminalModeFlags {
-                mouse_capture: false,
-                copy_mode: false,
-                alt_screen: false,
-                focus_reporting: false,
-            },
-        );
-        set_local_copy_mode(&mut local_copy_mode, process_id, false);
+        copy_mode.set(true);
+        copy_mode.set(false);
 
-        assert!(!is_copy_mode_active(
-            &mode_map,
-            &local_copy_mode,
-            process_id
-        ));
+        assert!(!is_copy_mode_active(&mode, &copy_mode));
     }
 
     #[test]
     fn exiting_copy_mode_clears_local_latch() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
-        let process_id = ProcessId::new();
-        let mut local_copy_mode = LocalCopyModeState::default();
-        set_local_copy_mode(&mut local_copy_mode, process_id, true);
+        let mut copy_mode = TerminalCopyMode::default();
+        copy_mode.set(true);
 
         if copy_mode_key_exits(K::Exit) {
-            set_local_copy_mode(&mut local_copy_mode, process_id, false);
+            copy_mode.set(false);
         }
 
-        assert!(!local_copy_mode.active.contains(&process_id));
+        assert!(!copy_mode.active);
     }
 
     #[test]
     fn restart_state_clears_shell_output_seen_and_preserves_pending_input() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        let entity = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                ShellOutputSeen,
-                PendingTerminalInput {
-                    data: b"queued\r".to_vec(),
+        app.add_plugins((MinimalPlugins, InputQueuePlugin));
+        let entity = app.world_mut().spawn((Terminal, ShellOutputSeen)).id();
+        app.world_mut()
+            .run_system_cached_with(
+                |In((terminal, data)): In<(Entity, Vec<u8>)>,
+                 mut sequence: ResMut<NextTerminalInputSequence>,
+                 mut commands: Commands| {
+                    enqueue_terminal_input(&mut commands, &mut sequence, terminal, data);
                 },
-            ))
-            .id();
+                (entity, b"queued\r".to_vec()),
+            )
+            .unwrap();
 
         app.world_mut()
             .run_system_cached_with(
@@ -4731,11 +2994,8 @@ mod tests {
         assert!(app.world().get::<ShellOutputSeen>(entity).is_none());
         assert!(app.world().get::<AwaitingProcessCreated>(entity).is_some());
         assert_eq!(
-            app.world()
-                .get::<PendingTerminalInput>(entity)
-                .unwrap()
-                .data,
-            b"queued\r"
+            pending_terminal_input(app.world_mut(), entity),
+            [b"queued\r".to_vec()]
         );
     }
 
@@ -4868,388 +3128,10 @@ mod tests {
     }
 
     #[test]
-    fn agent_terminal_armed_loading_on_page_ready() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                PageReady {},
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn a_shell_already_at_its_prompt_is_shown_without_arming_loading() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((Terminal, ShellOutputSeen, PageReady {}))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-    }
-
-    #[test]
-    fn a_page_ready_before_the_service_is_owed_its_screen() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_observer(on_term_ready);
-        let webview = app.world_mut().spawn((Terminal, ProcessId::new())).id();
-
-        app.world_mut().trigger(BinReceive::<PageReady> {
-            webview,
-            payload: PageReady {},
-        });
-        app.update();
-
-        assert!(
-            app.world().get::<OwedSnapshot>(webview).is_some(),
-            "the snapshot request had nowhere to go, so the debt has to outlive the connection"
-        );
-    }
-
-    #[test]
-    fn a_plain_terminal_holds_its_boot_screen_back_until_the_shell_is_late() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_systems(
-            Update,
-            (arm_agent_loading, announce_slow_shell_boot).chain(),
-        );
-        let e = app.world_mut().spawn((Terminal, PageReady {})).id();
-
-        app.update();
-        assert!(
-            !app.world().get::<AgentLoading>(e).unwrap().announced,
-            "a shell that may still beat the grace period must not have been announced"
-        );
-
-        let mut loading = app.world_mut().get_mut::<AgentLoading>(e).unwrap();
-        loading.since = Instant::now() - SHELL_BOOT_GRACE - Duration::from_millis(1);
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).unwrap().announced);
-    }
-
-    #[test]
-    fn an_agent_announces_its_boot_screen_at_once() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                PageReady {},
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).unwrap().announced);
-    }
-
-    #[test]
-    fn agent_loading_preserves_initial_prompt_capture() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                PromptCapture {
-                    draft: "@asdfas".to_string(),
-                    skipped: false,
-                },
-                PageReady {},
-            ))
-            .id();
-
-        app.update();
-
-        let capture = app.world().get::<PromptCapture>(e).unwrap();
-        assert_eq!(capture.draft, "@asdfas");
-        assert!(!capture.skipped);
-    }
-
-    #[test]
-    fn agent_loading_armed_on_pty_restart() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading_on_restart);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                ProcessId::new(),
-            ))
-            .id();
-
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-
-        app.world_mut().entity_mut(e).insert(PageReady {});
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-
-        *app.world_mut().get_mut::<ProcessId>(e).unwrap() = ProcessId::new();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn agent_loading_cleared_when_alt_screen_active() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                pid,
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-            ))
-            .id();
-        app.world_mut()
-            .resource_mut::<TerminalModeMap>()
-            .modes
-            .insert(
-                pid,
-                TerminalModeFlags {
-                    mouse_capture: false,
-                    copy_mode: false,
-                    alt_screen: true,
-                    focus_reporting: false,
-                },
-            );
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-    }
-
-    fn clear_with_capture(capture: PromptCapture) -> (App, Entity) {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Claude,
-                },
-                pid,
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-                capture,
-            ))
-            .id();
-        app.world_mut()
-            .resource_mut::<TerminalModeMap>()
-            .modes
-            .insert(
-                pid,
-                TerminalModeFlags {
-                    mouse_capture: false,
-                    copy_mode: false,
-                    alt_screen: true,
-                    focus_reporting: false,
-                },
-            );
-        app.update();
-        (app, e)
-    }
-
-    #[test]
-    fn ready_flips_capture_into_buffered_prompt() {
-        let (app, e) = clear_with_capture(PromptCapture {
-            draft: "find me a hotel".to_string(),
-            skipped: false,
-        });
-        assert!(app.world().get::<PromptCapture>(e).is_none());
-        let buffered = app.world().get::<BufferedAgentPrompt>(e).unwrap();
-        assert_eq!(buffered.text, "find me a hotel");
-        assert!(buffered.submit);
-    }
-
-    #[test]
-    fn ready_with_skipped_capture_delivers_nothing() {
-        let (app, e) = clear_with_capture(PromptCapture {
-            draft: "ignored".to_string(),
-            skipped: true,
-        });
-        assert!(app.world().get::<PromptCapture>(e).is_none());
-        assert!(app.world().get::<BufferedAgentPrompt>(e).is_none());
-    }
-
-    #[test]
-    fn agent_loading_cleared_after_timeout() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                pid,
-                AgentLoading {
-                    since: Instant::now() - AGENT_LOADING_TIMEOUT - Duration::from_secs(1),
-                    announced: true,
-                },
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-    }
-
-    #[test]
-    fn agent_loading_retained_while_starting() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                pid,
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn arm_loading_arms_plain_terminal() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, arm_agent_loading);
-        let e = app.world_mut().spawn((Terminal, PageReady {})).id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn plain_terminal_loading_retained_before_min_display() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                ProcessId::new(),
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-    }
-
-    #[test]
-    fn plain_terminal_loading_cleared_once_the_shell_prompt_lands() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<TerminalModeMap>()
-            .add_systems(Update, clear_agent_loading);
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                ProcessId::new(),
-                AgentLoading {
-                    since: Instant::now(),
-                    announced: true,
-                },
-            ))
-            .id();
-
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_some());
-
-        app.world_mut().entity_mut(e).insert(ShellOutputSeen);
-        app.update();
-        assert!(app.world().get::<AgentLoading>(e).is_none());
-    }
-
-    #[test]
-    fn terminal_title_resets_to_plain_when_agent_session_removed() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, reset_terminal_title_on_agent_removed);
-        let pid = ProcessId::new();
-        let e = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                pid,
-                PageMetadata {
-                    title: "Vibe (abc12345)".to_string(),
-                    url: "vmux://sessions/vibe/abc12345".to_string(),
-                    icon: vmux_core::PageIcon::None,
-                    bg_color: None,
-                },
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-            ))
-            .id();
-        app.update();
-        app.world_mut().entity_mut(e).remove::<AgentSession>();
-        app.update();
-        let expected = format!("Terminal ({})", &pid.to_string()[..8]);
-        let title = app.world().get::<PageMetadata>(e).unwrap().title.clone();
-        assert_eq!(title, expected);
-    }
-
-    #[test]
     fn apply_osc_title_sets_and_clears() {
         use bevy::ecs::message::Messages;
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
             .add_message::<OscTitleChanged>()
             .add_systems(Update, apply_osc_title);
         let pid = ProcessId::new();
@@ -5283,13 +3165,13 @@ mod tests {
     fn clear_osc_title_on_exit_removes_override() {
         use bevy::ecs::message::Messages;
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
             .add_message::<ProcessExitedEvent>()
             .add_systems(Update, clear_osc_title_on_exit);
         let pid = ProcessId::new();
         let e = app
             .world_mut()
-            .spawn((Terminal, pid, vmux_core::PageIdentity::of_title("working")))
+            .spawn((Terminal, pid, vmux_core::PageIdentity::from("working")))
             .id();
 
         app.world_mut()
@@ -5320,141 +3202,5 @@ mod tests {
         assert!(should_merge_login_shell_env(false, true));
         assert!(should_merge_login_shell_env(true, false));
         assert!(!should_merge_login_shell_env(false, false));
-    }
-
-    fn term_theme(font_size: f32) -> vmux_setting::TerminalTheme {
-        vmux_setting::TerminalTheme {
-            name: "default".to_string(),
-            color_scheme: "catppuccin-mocha".to_string(),
-            font_family: "JetBrainsMono Nerd Font".to_string(),
-            font_size,
-            line_height: 1.2,
-            padding: 4.0,
-            cursor_style: "block".to_string(),
-            cursor_blink: true,
-            shell: "/bin/sh".to_string(),
-        }
-    }
-
-    fn settings_with_font(font_size: f32) -> AppSettings {
-        let mut s = test_settings();
-        s.terminal = Some(vmux_setting::TerminalSettings {
-            default_theme: "default".to_string(),
-            themes: vec![term_theme(font_size)],
-            ..Default::default()
-        });
-        s
-    }
-
-    fn run_font_size_command(start: f32, cmd: TerminalFontSizeCommand) -> (f32, usize) {
-        use bevy::ecs::message::Messages;
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(settings_with_font(start))
-            .add_message::<TerminalFontSizeCommand>()
-            .add_message::<SettingsSaveRequest>()
-            .add_systems(Update, handle_terminal_font_size);
-        app.world_mut()
-            .resource_mut::<Messages<TerminalFontSizeCommand>>()
-            .write(cmd);
-        app.update();
-        let size = app
-            .world()
-            .resource::<AppSettings>()
-            .terminal
-            .as_ref()
-            .unwrap()
-            .themes[0]
-            .font_size;
-        let saves = app
-            .world_mut()
-            .resource_mut::<Messages<SettingsSaveRequest>>()
-            .drain()
-            .count();
-        (size, saves)
-    }
-
-    #[test]
-    fn font_size_materializes_missing_default_theme() {
-        use bevy::ecs::message::Messages;
-        let mut settings = test_settings();
-        settings.terminal = Some(vmux_setting::TerminalSettings {
-            default_theme: "default".to_string(),
-            themes: Vec::new(),
-            ..Default::default()
-        });
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(settings)
-            .add_message::<TerminalFontSizeCommand>()
-            .add_message::<SettingsSaveRequest>()
-            .add_systems(Update, handle_terminal_font_size);
-        app.world_mut()
-            .resource_mut::<Messages<TerminalFontSizeCommand>>()
-            .write(TerminalFontSizeCommand::Increase);
-        app.update();
-
-        let terminal = app
-            .world()
-            .resource::<AppSettings>()
-            .terminal
-            .clone()
-            .unwrap();
-        let theme = terminal
-            .themes
-            .iter()
-            .find(|t| t.name == "default")
-            .expect("missing default theme must be materialized so zoom persists");
-        assert_eq!(theme.font_size, 15.0);
-        let saves = app
-            .world_mut()
-            .resource_mut::<Messages<SettingsSaveRequest>>()
-            .drain()
-            .count();
-        assert_eq!(saves, 1);
-    }
-
-    #[test]
-    fn font_size_increase_steps_up_and_persists() {
-        let (size, writes) = run_font_size_command(14.0, TerminalFontSizeCommand::Increase);
-        assert_eq!(size, 15.0);
-        assert_eq!(writes, 1);
-    }
-
-    #[test]
-    fn font_size_decrease_steps_down_and_persists() {
-        let (size, writes) = run_font_size_command(14.0, TerminalFontSizeCommand::Decrease);
-        assert_eq!(size, 13.0);
-        assert_eq!(writes, 1);
-    }
-
-    #[test]
-    fn font_size_increase_clamps_at_40() {
-        let (size, _) = run_font_size_command(40.0, TerminalFontSizeCommand::Increase);
-        assert_eq!(size, 40.0);
-    }
-
-    #[test]
-    fn font_size_decrease_clamps_at_6() {
-        let (size, _) = run_font_size_command(6.0, TerminalFontSizeCommand::Decrease);
-        assert_eq!(size, 6.0);
-    }
-
-    #[test]
-    fn font_size_reset_returns_to_14() {
-        let (size, writes) = run_font_size_command(20.0, TerminalFontSizeCommand::Reset);
-        assert_eq!(size, 14.0);
-        assert_eq!(writes, 1);
-    }
-
-    #[test]
-    fn theme_signature_changes_with_font_size() {
-        let colors = vmux_setting::themes::resolve_theme("catppuccin-mocha", &[]);
-        let small = term_theme(14.0);
-        let large = term_theme(15.0);
-        assert_ne!(
-            theme_signature(&small, &colors),
-            theme_signature(&large, &colors)
-        );
     }
 }

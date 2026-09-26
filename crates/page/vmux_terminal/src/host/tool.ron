@@ -1,0 +1,15 @@
+[
+    (
+        name: "terminal_send",
+        description: "Send text to a terminal. Target by terminal process ID or omit it to use the active terminal. Set enter to true to append a carriage return.",
+        input_schema: (
+            type: Object,
+            required: ["text"],
+            properties: {
+                "text": (type: String),
+                "terminal": (type: String),
+                "enter": (type: Boolean),
+            },
+        ),
+    ),
+]

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -64,6 +65,7 @@ impl ServerEvents {
 pub enum ServerEvent {
     ApplyEdit {
         reply: ReplyHandle,
+        root: PathBuf,
         params: lsp_types::ApplyWorkspaceEditParams,
     },
     Log {
@@ -118,7 +120,10 @@ impl ServerRequestPending {
 }
 
 #[derive(Component)]
-pub struct AwaitingApplyEdit(pub lsp_types::ApplyWorkspaceEditParams);
+pub struct AwaitingApplyEdit {
+    pub root: PathBuf,
+    pub params: lsp_types::ApplyWorkspaceEditParams,
+}
 
 #[derive(Message)]
 pub struct ServerReply {
@@ -129,8 +134,15 @@ pub struct ServerReply {
 fn spawn_server_requests(events: Res<ServerEvents>, mut commands: Commands) {
     for event in events.rx.try_iter() {
         match event {
-            ServerEvent::ApplyEdit { reply, params } => {
-                commands.spawn((ServerRequestPending::new(reply), AwaitingApplyEdit(params)));
+            ServerEvent::ApplyEdit {
+                reply,
+                root,
+                params,
+            } => {
+                commands.spawn((
+                    ServerRequestPending::new(reply),
+                    AwaitingApplyEdit { root, params },
+                ));
             }
             ServerEvent::Log { level, text } => match level {
                 lsp_types::MessageType::ERROR => tracing::error!("lsp: {text}"),
@@ -184,6 +196,7 @@ mod tests {
             events
                 .send(ServerEvent::ApplyEdit {
                     reply,
+                    root: std::path::PathBuf::from("/tmp/project"),
                     params: lsp_types::ApplyWorkspaceEditParams {
                         label: None,
                         edit: lsp_types::WorkspaceEdit::default(),

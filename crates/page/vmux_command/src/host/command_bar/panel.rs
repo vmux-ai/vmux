@@ -1,19 +1,17 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::CommandBar;
-use crate::event::CommandBarPanelActiveEvent;
+use crate::event::CommandBarPanelRequest;
 use vmux_core::overlay::OverlayShownInline;
 
-pub struct CommandBarPanelPlugin;
+pub struct PanelPlugin;
 
-impl Plugin for CommandBarPanelPlugin {
+impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(
-            BinEventEmitterPlugin::<(CommandBarPanelActiveEvent,)>::for_hosts(&["layout"]),
-        )
-        .add_observer(on_command_bar_panel_active)
-        .add_systems(Update, mark_command_bar_shown_inline);
+        app.add_plugins(UiEventPlugin::<(CommandBarPanelRequest,)>::default())
+            .add_observer(on_command_bar_panel_active)
+            .add_systems(Update, mark_command_bar_shown_inline);
     }
 }
 
@@ -39,7 +37,7 @@ fn mark_command_bar_shown_inline(
 }
 
 fn on_command_bar_panel_active(
-    trigger: On<BinReceive<CommandBarPanelActiveEvent>>,
+    trigger: On<UiInput<CommandBarPanelRequest>>,
     mut commands: Commands,
 ) {
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
@@ -69,16 +67,16 @@ mod tests {
         let mut app = app();
         let webview = app.world_mut().spawn_empty().id();
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
-            payload: CommandBarPanelActiveEvent { active: true },
+            payload: CommandBarPanelRequest { active: true },
         });
         app.update();
         assert!(app.world().get::<CommandBarPanelActive>(webview).is_some());
 
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
-            payload: CommandBarPanelActiveEvent { active: false },
+            payload: CommandBarPanelRequest { active: false },
         });
         app.update();
         assert!(app.world().get::<CommandBarPanelActive>(webview).is_none());

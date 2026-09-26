@@ -1,13 +1,18 @@
-use super::use_listener;
+use super::use_ui_state;
 use crate::i18n::Locale;
-use crate::theme::{THEME_EVENT, ThemeEvent};
+use crate::theme::ThemeEvent;
 use crate::transport::Host;
 use dioxus::prelude::*;
 
 pub fn use_theme() -> Signal<String> {
+    let state = use_ui_state::<ThemeEvent>();
     let mut locale = use_signal(|| Locale::preferred().into_string());
     apply_locale(&Locale::from(locale().as_str()));
-    let _listener = use_listener::<ThemeEvent, _>(THEME_EVENT, move |data| {
+    use_effect(move || {
+        let data = state();
+        if data.locale.is_empty() {
+            return;
+        }
         Host::set_root_radius(data.radius);
         let resolved = Locale::from(data.locale.as_str());
         if let Some(catalog) = data.catalog.as_deref() {

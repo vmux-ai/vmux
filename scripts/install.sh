@@ -37,7 +37,8 @@ main() {
   esac
 
   LATEST_URL="https://api.github.com/repos/${REPO}/releases/latest"
-  VERSION="$(curl -fsSL "$LATEST_URL" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')"
+  RELEASE_JSON="$(curl -fsSL "$LATEST_URL")"
+  VERSION="$(printf '%s\n' "$RELEASE_JSON" | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p' | head -n 1)"
 
   if [ -z "$VERSION" ]; then
     echo "Error: Could not determine latest version." >&2
@@ -46,8 +47,12 @@ main() {
 
   echo "Latest version: v${VERSION}"
 
-  DMG_NAME="${APP_NAME}_${VERSION}_${ARCH_LABEL}.dmg"
-  DMG_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${DMG_NAME}"
+  DMG_URL="$(printf '%s\n' "$RELEASE_JSON" | sed -n "s|.*\"browser_download_url\": \"\([^\"]*/${APP_NAME}_[^\"]*_${ARCH_LABEL}\\.dmg\)\".*|\1|p" | head -n 1)"
+  if [ -z "$DMG_URL" ]; then
+    echo "Error: Release v${VERSION} has no macOS ${ARCH_LABEL} disk image." >&2
+    exit 1
+  fi
+  DMG_NAME="${DMG_URL##*/}"
   DMG_PATH="/tmp/${DMG_NAME}"
 
   echo "Downloading ${DMG_NAME}..."

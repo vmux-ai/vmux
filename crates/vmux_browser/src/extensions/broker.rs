@@ -1,23 +1,21 @@
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::RequestNavigate;
 use crossbeam_channel::RecvTimeoutError;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
-use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::extension::protocol::{
     ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ChromeError,
     ExtensionCallerContext,
 };
 
-use super::ExtensionPopup;
 use super::bridge::{BridgeAuthorization, BridgeInbound, ExtensionBridgeServer};
 use super::capability::{CapabilityKind, CapabilityMatrix, CapabilityStatus};
 use super::model::{ChromeModel, ChromeModelEvent};
 use super::windows::{
-    CloseExtensionWindowRequest, ExtensionWindows, UpdateHostWindowRequest, WindowEffect,
+    CloseExtensionWindowRequest, ExtensionWindows, OpenExtensionWindowRequest,
+    UpdateHostWindowRequest,
 };
 
 pub(crate) struct ExtensionBrokerPlugin;
@@ -134,9 +132,8 @@ pub fn drain_bridge_requests(
     mut response_cache: ResMut<BridgeResponseCache>,
     mut extension_windows: ResMut<ExtensionWindows>,
     mut seen: Local<SeenBridgeRequests>,
-    mut app_commands: MessageWriter<AppCommand>,
-    popups: Query<(Entity, &ExtensionPopup)>,
-    mut commands: Commands,
+    mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
+    mut open_window_requests: MessageWriter<OpenExtensionWindowRequest>,
     mut close_window_requests: MessageWriter<CloseExtensionWindowRequest>,
     mut update_host_window_requests: MessageWriter<UpdateHostWindowRequest>,
     mut model_events: MessageWriter<ChromeModelEvent>,
@@ -235,43 +232,17 @@ pub fn drain_bridge_requests(
                     authorization,
                     extension_conformance_enabled(),
                 );
-                for command in dispatched.commands {
-                    app_commands.write(command);
+                for request in dispatched.requests {
+                    stack_requests.write(request);
                 }
-                for effect in dispatched.effects {
-                    match effect {
-                        WindowEffect::Open { urls, window_type } => {
-                            let popup = if window_type == "popup" {
-                                popups.iter().find_map(|(entity, popup)| {
-                                    (popup.extension_id == extension_id).then_some(entity)
-                                })
-                            } else {
-                                None
-                            };
-                            let mut urls = urls.into_iter();
-                            if let Some(popup) = popup
-                                && let Some(Some(url)) = urls.next()
-                            {
-                                commands.trigger(RequestNavigate {
-                                    webview: popup,
-                                    url,
-                                });
-                            }
-                            for url in urls {
-                                app_commands.write(AppCommand::Browser(BrowserCommand::Open(
-                                    OpenCommand::InNewStack { url },
-                                )));
-                            }
-                        }
-                        WindowEffect::Close { tab_ids, urls } => {
-                            close_window_requests
-                                .write(CloseExtensionWindowRequest { tab_ids, urls });
-                        }
-                        WindowEffect::UpdateHost { window_id, update } => {
-                            update_host_window_requests
-                                .write(UpdateHostWindowRequest { window_id, update });
-                        }
-                    }
+                if let Some(request) = dispatched.open_window {
+                    open_window_requests.write(request);
+                }
+                if let Some(request) = dispatched.close_window {
+                    close_window_requests.write(request);
+                }
+                if let Some(request) = dispatched.update_host_window {
+                    update_host_window_requests.write(request);
                 }
                 for event in dispatched.events {
                     model_events.write(event);
@@ -796,21 +767,27 @@ pub fn fire_conformance_wake_timer(
 
 struct DispatchedApiRequest {
     response: BridgeServerMessage,
-    commands: Vec<AppCommand>,
-    effects: Vec<WindowEffect>,
+    requests: Vec<vmux_layout::stack::OpenRequest>,
+    open_window: Option<OpenExtensionWindowRequest>,
+    close_window: Option<CloseExtensionWindowRequest>,
+    update_host_window: Option<UpdateHostWindowRequest>,
     events: Vec<ChromeModelEvent>,
 }
 
 fn dispatched_response(response: BridgeServerMessage) -> DispatchedApiRequest {
     DispatchedApiRequest {
         response,
-        commands: Vec::new(),
-        effects: Vec::new(),
+        requests: Vec::new(),
+        open_window: None,
+        close_window: None,
+        update_host_window: None,
         events: Vec::new(),
     }
 }
 
-fn create_page_command(request: &ApiRequest) -> Result<AppCommand, ChromeError> {
+fn create_page_request(
+    request: &ApiRequest,
+) -> Result<vmux_layout::stack::OpenRequest, ChromeError> {
     let create_info = request
         .arguments
         .as_array()
@@ -825,9 +802,7 @@ fn create_page_command(request: &ApiRequest) -> Result<AppCommand, ChromeError> 
         })
         .filter(|url| !url.is_empty());
     let Some(url) = url else {
-        return Ok(AppCommand::Browser(BrowserCommand::Open(
-            OpenCommand::InNewStack { url: None },
-        )));
+        return Ok(vmux_layout::stack::OpenRequest { url: None });
     };
     let parsed = url::Url::parse(url)
         .map_err(|_| ChromeError::new("invalid_url", "extension page URL is invalid"))?;
@@ -841,11 +816,9 @@ fn create_page_command(request: &ApiRequest) -> Result<AppCommand, ChromeError> 
             ));
         }
     }
-    Ok(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack {
-            url: Some(url.to_string()),
-        },
-    )))
+    Ok(vmux_layout::stack::OpenRequest {
+        url: Some(url.to_string()),
+    })
 }
 
 fn dispatch_api_request(
@@ -881,8 +854,10 @@ fn dispatch_api_request(
                     request.request_id,
                     dispatched.result,
                 )),
-                commands: Vec::new(),
-                effects: dispatched.effects,
+                requests: Vec::new(),
+                open_window: dispatched.open_window,
+                close_window: dispatched.close_window,
+                update_host_window: dispatched.update_host_window,
                 events: dispatched.events,
             },
             Err(error) => dispatched_response(BridgeServerMessage::Response(ApiResponse::failure(
@@ -895,7 +870,7 @@ fn dispatch_api_request(
         (request.namespace.as_str(), request.method.as_str()),
         ("tabs", "query" | "get")
     ) {
-        return match super::tabs::ChromeTabs::of(model).dispatch(&request, authorization) {
+        return match super::tabs::ChromeTabs::from(model).dispatch(&request, authorization) {
             Ok(result) => dispatched_response(BridgeServerMessage::Response(ApiResponse::success(
                 request.request_id,
                 result,
@@ -910,14 +885,16 @@ fn dispatch_api_request(
         (request.namespace.as_str(), request.method.as_str()),
         ("tabs", "create")
     ) {
-        return match create_page_command(&request) {
-            Ok(command) => DispatchedApiRequest {
+        return match create_page_request(&request) {
+            Ok(stack_request) => DispatchedApiRequest {
                 response: BridgeServerMessage::Response(ApiResponse::success(
                     request.request_id,
                     serde_json::Value::Null,
                 )),
-                commands: vec![command],
-                effects: Vec::new(),
+                requests: vec![stack_request],
+                open_window: None,
+                close_window: None,
+                update_host_window: None,
                 events: Vec::new(),
             },
             Err(error) => dispatched_response(BridgeServerMessage::Response(ApiResponse::failure(
@@ -1184,13 +1161,14 @@ mod tests {
             false,
         );
 
-        assert!(matches!(
-            &dispatched.effects[0],
-            WindowEffect::Open { urls, window_type }
-                if window_type == "normal" && urls == &vec![Some(format!(
-                    "chrome-extension://{EXTENSION_ID}/popup/index.html"
-                ))]
-        ));
+        let open = dispatched.open_window.unwrap();
+        assert_eq!(open.window_type, "normal");
+        assert_eq!(
+            open.urls,
+            vec![Some(format!(
+                "chrome-extension://{EXTENSION_ID}/popup/index.html"
+            ))]
+        );
         let BridgeServerMessage::Response(response) = dispatched.response else {
             panic!("expected response");
         };
@@ -1219,7 +1197,7 @@ mod tests {
             false,
         );
 
-        assert!(dispatched.commands.is_empty());
+        assert!(dispatched.requests.is_empty());
         assert_eq!(
             dispatched.response,
             BridgeServerMessage::Response(ApiResponse::failure(
@@ -1274,7 +1252,8 @@ mod tests {
             .init_resource::<PendingBridgeEvents>()
             .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
-            .add_message::<AppCommand>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1356,7 +1335,7 @@ mod tests {
             &BridgeAuthorization::default(),
             true,
         );
-        assert!(enabled.commands.is_empty());
+        assert!(enabled.requests.is_empty());
         assert_eq!(
             enabled.response,
             BridgeServerMessage::Response(ApiResponse::success(
@@ -1372,7 +1351,7 @@ mod tests {
             &BridgeAuthorization::default(),
             false,
         );
-        assert!(disabled.commands.is_empty());
+        assert!(disabled.requests.is_empty());
         assert_eq!(
             disabled.response,
             BridgeServerMessage::Response(ApiResponse::failure(
@@ -1529,7 +1508,8 @@ mod tests {
             .init_resource::<ChromeModel>()
             .init_resource::<ConformanceWakeTimer>()
             .init_resource::<ExtensionWindows>()
-            .add_message::<AppCommand>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1598,7 +1578,8 @@ mod tests {
             .init_resource::<PendingBridgeEvents>()
             .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
-            .add_message::<AppCommand>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()
@@ -1653,7 +1634,8 @@ mod tests {
                 ..Default::default()
             })
             .init_resource::<ExtensionWindows>()
-            .add_message::<AppCommand>()
+            .add_message::<vmux_layout::stack::OpenRequest>()
+            .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_message::<ChromeModelEvent>()

@@ -252,27 +252,28 @@ mod platform {
         ROOT_CONTROLLER.set(window.window.ui_view_controller().cast());
     }
 
-    pub enum ScannerSupport {
-        Available,
-        Unavailable(String),
-    }
+    pub struct ScannerSupport(Option<String>);
 
     impl ScannerSupport {
         pub fn detect() -> Self {
             let Some(media_type) = (unsafe { AVMediaTypeVideo }) else {
-                return Self::Unavailable(translate("mobile-qr-camera-unavailable"));
+                return Self(Some(translate("mobile-qr-camera-unavailable")));
             };
             let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) };
             if matches!(
                 status,
                 AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted
             ) {
-                return Self::Available;
+                return Self(None);
             }
             match unsafe { AVCaptureDevice::defaultDeviceWithMediaType(media_type) } {
-                Some(_) => Self::Available,
-                None => Self::Unavailable(translate("mobile-qr-camera-unavailable")),
+                Some(_) => Self(None),
+                None => Self(Some(translate("mobile-qr-camera-unavailable"))),
             }
+        }
+
+        pub fn unavailable(self) -> Option<String> {
+            self.0
         }
     }
 
@@ -407,14 +408,15 @@ mod platform {
 
     pub fn install(_: &dioxus::mobile::DesktopContext) {}
 
-    pub enum ScannerSupport {
-        Available,
-        Unavailable(String),
-    }
+    pub struct ScannerSupport(Option<String>);
 
     impl ScannerSupport {
         pub fn detect() -> Self {
-            Self::Unavailable(translate("mobile-qr-unsupported-platform"))
+            Self(Some(translate("mobile-qr-unsupported-platform")))
+        }
+
+        pub fn unavailable(self) -> Option<String> {
+            self.0
         }
     }
 

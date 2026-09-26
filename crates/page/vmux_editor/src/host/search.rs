@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
 use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch, ExplorerSearchRequest};
@@ -16,18 +16,18 @@ const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_FILES_SCANNED: usize = 40_000;
 const MAX_PREVIEW_CHARS: usize = 240;
 
-pub(crate) struct ProjectSearchPlugin;
+pub(crate) struct SearchPlugin;
 
-impl Plugin for ProjectSearchPlugin {
+impl Plugin for SearchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(ExplorerSearchRequest,)>::default())
+        app.add_plugins(UiEventPlugin::<(ExplorerSearchRequest,)>::default())
             .add_observer(start_project_search)
             .add_systems(Update, finish_project_search);
     }
 }
 
 fn start_project_search(
-    trigger: On<BinReceive<ExplorerSearchRequest>>,
+    trigger: On<UiInput<ExplorerSearchRequest>>,
     views: Query<&FileView>,
     mut commands: Commands,
 ) {
@@ -35,7 +35,7 @@ fn start_project_search(
     let Ok(view) = views.get(entity) else {
         return;
     };
-    let Some(search) = ProjectSearch::of(&view.path, &trigger.event().payload) else {
+    let Some(search) = ProjectSearch::compile(&view.path, &trigger.event().payload) else {
         commands.entity(entity).remove::<RunningSearch>();
         return;
     };
@@ -76,11 +76,11 @@ struct SearchOutcome {
 struct ProjectSearch {
     root: PathBuf,
     query: String,
-    pattern: Regex,
+    pattern: SearchPattern,
 }
 
 impl ProjectSearch {
-    fn of(start: &Path, request: &ExplorerSearchRequest) -> Option<Self> {
+    fn compile(start: &Path, request: &ExplorerSearchRequest) -> Option<Self> {
         let pattern = SearchPattern::compile(request)?;
         Some(Self {
             root: project_root(start),
@@ -133,7 +133,7 @@ impl ProjectSearch {
     }
 
     fn scan(&self, path: &Path, budget: usize) -> Option<ExplorerSearchFile> {
-        let text = FileText::read(path)?;
+        let text = crate::encoding::DecodedText::read(path)?.text;
         let limit = budget.min(MAX_MATCHES_PER_FILE);
         let mut matches = Vec::new();
         let mut capped = false;
@@ -147,9 +147,9 @@ impl ProjectSearch {
             }
             matches.push(ExplorerSearchMatch {
                 line: index as u32 + 1,
-                col: Utf16Col::at(line, found.start()),
-                end_col: Utf16Col::at(line, found.end()),
-                preview: LinePreview::of(line),
+                col: SearchPattern::utf16_col(line, found.start()),
+                end_col: SearchPattern::utf16_col(line, found.end()),
+                preview: line.trim_end().chars().take(MAX_PREVIEW_CHARS).collect(),
             });
         }
         if matches.is_empty() {
@@ -163,10 +163,10 @@ impl ProjectSearch {
     }
 }
 
-struct SearchPattern;
+struct SearchPattern(Regex);
 
 impl SearchPattern {
-    fn compile(request: &ExplorerSearchRequest) -> Option<Regex> {
+    fn compile(request: &ExplorerSearchRequest) -> Option<Self> {
         if request.query.trim().is_empty() {
             return None;
         }
@@ -179,25 +179,26 @@ impl SearchPattern {
                 true => None,
                 false => Some(request.query.as_str()),
             };
-            source = WholeWord::around(&source, literal);
+            source = Self::whole_word(&source, literal);
         }
         RegexBuilder::new(&source)
             .case_insensitive(!request.case_sensitive)
             .size_limit(1 << 20)
             .build()
+            .map(Self)
             .ok()
     }
-}
 
-struct WholeWord;
+    fn find<'a>(&self, line: &'a str) -> Option<regex::Match<'a>> {
+        self.0.find(line)
+    }
 
-impl WholeWord {
-    fn around(source: &str, literal: Option<&str>) -> String {
+    fn whole_word(source: &str, literal: Option<&str>) -> String {
         let (lead, trail) = match literal {
             None => (true, true),
             Some(query) => (
-                Self::is_word(query.chars().next()),
-                Self::is_word(query.chars().next_back()),
+                Self::word_edge(query.chars().next()),
+                Self::word_edge(query.chars().next_back()),
             ),
         };
         let mut pattern = String::with_capacity(source.len() + 8);
@@ -213,32 +214,11 @@ impl WholeWord {
         pattern
     }
 
-    fn is_word(edge: Option<char>) -> bool {
+    fn word_edge(edge: Option<char>) -> bool {
         matches!(edge, Some(c) if c.is_alphanumeric() || c == '_')
     }
-}
 
-struct FileText;
-
-impl FileText {
-    fn read(path: &Path) -> Option<String> {
-        let bytes = std::fs::read(path).ok()?;
-        Some(crate::encoding::DecodedText::of(&bytes)?.text)
-    }
-}
-
-struct LinePreview;
-
-impl LinePreview {
-    fn of(line: &str) -> String {
-        line.trim_end().chars().take(MAX_PREVIEW_CHARS).collect()
-    }
-}
-
-struct Utf16Col;
-
-impl Utf16Col {
-    fn at(line: &str, byte: usize) -> u32 {
+    fn utf16_col(line: &str, byte: usize) -> u32 {
         let mut index = byte.min(line.len());
         while index > 0 && !line.is_char_boundary(index) {
             index -= 1;
@@ -274,7 +254,9 @@ mod tests {
         fn search(&self, request: ExplorerSearchRequest) -> SearchOutcome {
             let anchor = self.dir.path().join("anchor.rs");
             std::fs::write(&anchor, "").expect("anchor");
-            ProjectSearch::of(&anchor, &request).expect("pattern").run()
+            ProjectSearch::compile(&anchor, &request)
+                .expect("pattern")
+                .run()
         }
 
         fn named(&self, request: ExplorerSearchRequest) -> Vec<String> {
@@ -398,7 +380,7 @@ mod tests {
         std::fs::write(&anchor, "").expect("anchor");
 
         assert!(
-            ProjectSearch::of(
+            ProjectSearch::compile(
                 &anchor,
                 &ExplorerSearchRequest {
                     query: "   ".to_string(),
@@ -418,7 +400,7 @@ mod tests {
         std::fs::write(&anchor, "").expect("anchor");
 
         assert!(
-            ProjectSearch::of(
+            ProjectSearch::compile(
                 &anchor,
                 &ExplorerSearchRequest {
                     query: "[unclosed".to_string(),

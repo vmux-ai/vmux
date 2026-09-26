@@ -28,11 +28,13 @@ pub trait Outbox {
 
 pub struct AssetReply(wry::RequestAsyncResponder);
 
-impl AssetReply {
-    pub(crate) fn of(responder: wry::RequestAsyncResponder) -> Self {
+impl From<wry::RequestAsyncResponder> for AssetReply {
+    fn from(responder: wry::RequestAsyncResponder) -> Self {
         Self(responder)
     }
+}
 
+impl AssetReply {
     pub fn respond(self, status: u16, mime: &str, body: Vec<u8>) {
         let built = wry::http::Response::builder()
             .status(status)

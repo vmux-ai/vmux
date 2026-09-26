@@ -6,7 +6,7 @@ impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<ExpandedProjectDirs>()
             .init_resource::<RepoRoots>()
-            .init_resource::<vmux_command::snapshot::CommandBarProjectRoots>()
+            .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_observer(on_project_tree_toggle)
             .add_systems(
                 Update,
@@ -21,7 +21,7 @@ impl Plugin for SpaceProjectPlugin {
 }
 
 fn on_project_tree_toggle(
-    trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::ProjectTreeToggle>>,
+    trigger: On<bevy_cef::prelude::UiInput<vmux_core::event::ProjectTreeToggle>>,
     space_of_pane: vmux_layout::space::SpaceOfPane,
     mut expanded: Query<&mut ExpandedProjectDirs>,
     mut commands: Commands,
@@ -41,7 +41,7 @@ fn on_project_tree_toggle(
 
 fn publish_project_roots(
     projects: SpaceProjects,
-    mut roots: ResMut<vmux_command::snapshot::CommandBarProjectRoots>,
+    mut state: ResMut<vmux_command::snapshot::CommandBarProjection>,
 ) {
     let mut next = Vec::new();
     let mut active = None;
@@ -54,11 +54,12 @@ fn publish_project_roots(
         }
         next.push(project.path);
     }
-    if roots.roots != next {
-        roots.roots = next;
-    }
-    if roots.active != active {
-        roots.active = active;
+    let roots = vmux_command::snapshot::CommandBarProjectRoots {
+        roots: next,
+        active,
+    };
+    if state.projects != roots {
+        state.projects = roots;
     }
 }
 
@@ -145,7 +146,7 @@ const UNLISTED_DIRS: &[&str] = &[
 pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, vmux_setting::AppSettings>>,
     active_space: Option<Res<'w, super::spaces::ActiveSpace>>,
-    active_space_entity: Option<Res<'w, vmux_layout::space::ActiveSpaceEntity>>,
+    current_space: Query<'w, 's, Entity, With<vmux_layout::space::CurrentSpace>>,
     child_of: Query<'w, 's, &'static ChildOf>,
     spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
     space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
@@ -167,10 +168,7 @@ impl SpaceProjects<'_, '_> {
         let Some(active) = self.active_space.as_deref() else {
             return Vec::new();
         };
-        let space = self
-            .active_space_entity
-            .as_deref()
-            .and_then(|active| active.0);
+        let space = self.current_space.iter().next();
         self.rows_of(&active.record.id, space)
     }
 
@@ -219,7 +217,7 @@ struct SpaceOfTab<'w, 's> {
 }
 
 impl SpaceOfTab<'_, '_> {
-    fn of(&self, tab: Entity) -> Option<String> {
+    fn find(&self, tab: Entity) -> Option<String> {
         vmux_layout::space::space_id_of(tab, &self.child_of, &self.spaces, &self.ids)
     }
 }
@@ -228,7 +226,7 @@ impl SpaceOfTab<'_, '_> {
 struct RepoRoots(std::collections::HashMap<String, Option<String>>);
 
 impl RepoRoots {
-    fn of(&mut self, dir: &str) -> Option<String> {
+    fn resolve(&mut self, dir: &str) -> Option<String> {
         if let Some(held) = self.0.get(dir) {
             return held.clone();
         }
@@ -238,7 +236,7 @@ impl RepoRoots {
     }
 
     fn read(dir: &str) -> Option<String> {
-        let root = vmux_git::worktree::LinkedRepoRoot::of(std::path::Path::new(dir))?;
+        let root = vmux_git::worktree::LinkedRepoRoot::find(std::path::Path::new(dir))?;
         let root = root.to_string_lossy().into_owned();
         (root != dir && !root.is_empty()).then_some(root)
     }
@@ -274,7 +272,7 @@ fn remember_space_project(
         if dir.is_empty() {
             continue;
         }
-        let Some(space_id) = space_of_tab.of(tab_entity) else {
+        let Some(space_id) = space_of_tab.find(tab_entity) else {
             continue;
         };
         let project = match worktree.as_ref() {
@@ -291,7 +289,7 @@ fn remember_space_project(
                     });
                 vmux_setting::SpaceProject::checked_out(&worktree.repo_root, checkout)
             }
-            _ => match roots.of(dir) {
+            _ => match roots.resolve(dir) {
                 Some(root) => vmux_setting::SpaceProject::checked_out(&root, dir),
                 None => vmux_setting::SpaceProject::at(dir),
             },
@@ -361,17 +359,15 @@ mod tests {
         }
 
         fn toggle(&mut self, path: &str, pane_id: String) {
-            self.app
-                .world_mut()
-                .trigger(
-                    bevy_cef::prelude::BinReceive::<vmux_core::event::ProjectTreeToggle> {
-                        webview: Entity::PLACEHOLDER,
-                        payload: vmux_core::event::ProjectTreeToggle {
-                            path: path.to_string(),
-                            pane_id,
-                        },
-                    },
-                );
+            self.app.world_mut().trigger(bevy_cef::prelude::UiInput::<
+                vmux_core::event::ProjectTreeToggle,
+            > {
+                webview: Entity::PLACEHOLDER,
+                payload: vmux_core::event::ProjectTreeToggle {
+                    path: path.to_string(),
+                    pane_id,
+                },
+            });
             self.app.update();
         }
 

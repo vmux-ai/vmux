@@ -1,6 +1,78 @@
+use bevy::prelude::*;
+use bevy_cef::prelude::*;
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
-use vmux_core::event::FileEncoding;
+use vmux_core::event::{
+    FileEncoding, FileEncodingEvent, FileEncodingReopenRequest, FileEncodingSaveRequest,
+};
+
+use crate::edit::EditCommand;
+use crate::host::editing::EditRequest;
+use crate::host::editor::{Editor, FileView};
+use crate::host::file_lifecycle::{FileBuffer, FileLoadTask, ForcedEncoding};
+use crate::host::status::FileInitialMetaSent;
+
+pub(super) struct EncodingPlugin;
+
+impl Plugin for EncodingPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(UiEventPlugin::<(
+            FileEncodingReopenRequest,
+            FileEncodingSaveRequest,
+        )>::default())
+            .add_observer(reopen_with_encoding)
+            .add_observer(save_with_encoding);
+    }
+}
+
+fn reopen_with_encoding(
+    trigger: On<UiInput<FileEncodingReopenRequest>>,
+    views: Query<&FileView>,
+    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let encoding = trigger.event().payload.encoding;
+    let Ok(view) = views.get(entity) else {
+        return;
+    };
+    commands
+        .entity(entity)
+        .insert(ForcedEncoding {
+            path: view.path.clone(),
+            encoding,
+        })
+        .remove::<Editor>()
+        .remove::<vmux_git::GitDiffSource>()
+        .remove::<FileBuffer>()
+        .remove::<FileLoadTask>()
+        .remove::<FileInitialMetaSent>()
+        .remove::<crate::lsp::manager::LintRan>();
+    manager.change(&view.path);
+}
+
+fn save_with_encoding(
+    trigger: On<UiInput<FileEncodingSaveRequest>>,
+    mut editors: Query<&mut Editor>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok(mut edit) = editors.get_mut(entity) else {
+        return;
+    };
+    edit.core.buffer.encoding = trigger.event().payload.encoding;
+    commands.trigger(EditRequest::new(entity, vec![EditCommand::Save]));
+    if !browsers.can_emit_to(&entity) {
+        return;
+    }
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &FileEncodingEvent {
+            encoding: edit.core.buffer.encoding,
+        },
+    ));
+}
 
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 
@@ -16,8 +88,13 @@ pub struct DecodedText {
 }
 
 impl DecodedText {
-    pub fn of(bytes: &[u8]) -> Option<Self> {
-        if let Some(encoding) = Bom::of(bytes) {
+    pub fn read(path: &std::path::Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        Self::decode(&bytes)
+    }
+
+    pub fn decode(bytes: &[u8]) -> Option<Self> {
+        if let Some(encoding) = Bom::detect(bytes) {
             return Some(Self::forced(bytes, encoding));
         }
         if BinarySniff::rejects(bytes) {
@@ -30,7 +107,7 @@ impl DecodedText {
                 encoding: FileEncoding::Utf8,
             });
         }
-        Some(Self::forced(bytes, Detected::of(bytes)))
+        Some(Self::forced(bytes, Detected::encoding(bytes)))
     }
 
     pub fn forced(bytes: &[u8], encoding: FileEncoding) -> Self {
@@ -70,8 +147,8 @@ impl Utf16Sniff {
         }
         let capped = bytes.len().min(UTF16_SNIFF_BYTES);
         let sample = &bytes[..capped - capped % 2];
-        let le = Self::of(sample, u16::from_le_bytes);
-        let be = Self::of(sample, u16::from_be_bytes);
+        let le = Self::read(sample, u16::from_le_bytes);
+        let be = Self::read(sample, u16::from_be_bytes);
         match (le.reads_as_text(), be.reads_as_text()) {
             (false, false) => None,
             (true, false) => Some(FileEncoding::Utf16Le),
@@ -83,7 +160,7 @@ impl Utf16Sniff {
         }
     }
 
-    fn of(sample: &[u8], unit: fn([u8; 2]) -> u16) -> Self {
+    fn read(sample: &[u8], unit: fn([u8; 2]) -> u16) -> Self {
         let mut units = Vec::with_capacity(sample.len() / 2);
         for pair in sample.chunks_exact(2) {
             units.push(unit([pair[0], pair[1]]));
@@ -139,7 +216,7 @@ impl Bom {
     const UTF16LE: [u8; 2] = [0xFF, 0xFE];
     const UTF16BE: [u8; 2] = [0xFE, 0xFF];
 
-    fn of(bytes: &[u8]) -> Option<FileEncoding> {
+    fn detect(bytes: &[u8]) -> Option<FileEncoding> {
         if bytes.starts_with(&Self::UTF8) {
             return Some(FileEncoding::Utf8Bom);
         }
@@ -173,11 +250,12 @@ impl Bom {
 struct Detected;
 
 impl Detected {
-    fn of(bytes: &[u8]) -> FileEncoding {
+    fn encoding(bytes: &[u8]) -> FileEncoding {
         let head = &bytes[..bytes.len().min(DETECT_SAMPLE_BYTES)];
         let mut detector = EncodingDetector::new(Iso2022JpDetection::Allow);
         detector.feed(head, head.len() == bytes.len());
-        FileEncoding::of_charset(detector.guess(None, Utf8Detection::Deny))
+        FileEncoding::try_from(detector.guess(None, Utf8Detection::Deny).name())
+            .unwrap_or(FileEncoding::Windows1252)
     }
 }
 
@@ -295,7 +373,6 @@ impl Reencode {
 
 pub trait Charset: Sized {
     fn charset(self) -> &'static Encoding;
-    fn of_charset(charset: &'static Encoding) -> Self;
 }
 
 impl Charset for FileEncoding {
@@ -309,19 +386,6 @@ impl Charset for FileEncoding {
             Self::Big5 => encoding_rs::BIG5,
             Self::EucKr => encoding_rs::EUC_KR,
             Self::Windows1252 | Self::Iso8859_1 => encoding_rs::WINDOWS_1252,
-        }
-    }
-
-    fn of_charset(charset: &'static Encoding) -> Self {
-        match charset.name() {
-            "UTF-8" => Self::Utf8,
-            "Shift_JIS" => Self::ShiftJis,
-            "EUC-JP" => Self::EucJp,
-            "ISO-2022-JP" => Self::Iso2022Jp,
-            "GBK" | "gb18030" => Self::Gbk,
-            "Big5" => Self::Big5,
-            "EUC-KR" => Self::EucKr,
-            _ => Self::Windows1252,
         }
     }
 }
@@ -342,7 +406,7 @@ mod tests {
     fn a_shift_jis_file_decodes_to_the_japanese_it_holds() {
         let bytes = Reencode::bytes("日本語のテキスト\n", FileEncoding::ShiftJis);
 
-        let out = DecodedText::of(&bytes).expect("shift_jis is text");
+        let out = DecodedText::decode(&bytes).expect("shift_jis is text");
 
         assert_eq!(out.text, "日本語のテキスト\n");
         assert_eq!(out.encoding, FileEncoding::ShiftJis);
@@ -355,7 +419,7 @@ mod tests {
             FileEncoding::EucJp,
         );
 
-        let out = DecodedText::of(&bytes).expect("euc-jp is text");
+        let out = DecodedText::decode(&bytes).expect("euc-jp is text");
 
         assert_eq!(out.encoding, FileEncoding::EucJp);
         assert!(out.text.starts_with("吾輩は猫である"), "got {}", out.text);
@@ -370,7 +434,7 @@ mod tests {
         ] {
             let bytes = Reencode::bytes("héllo\n", encoding);
 
-            let out = DecodedText::of(&bytes).expect("a bom marks text");
+            let out = DecodedText::decode(&bytes).expect("a bom marks text");
 
             assert_eq!(out.encoding, encoding, "{}", encoding.label());
             assert_eq!(out.text, "héllo\n", "{}", encoding.label());
@@ -382,14 +446,14 @@ mod tests {
         let bytes = Reencode::bytes("x", FileEncoding::Utf8Bom);
 
         assert_eq!(bytes, [0xEF, 0xBB, 0xBF, b'x']);
-        assert_eq!(DecodedText::of(&bytes).unwrap().text, "x");
+        assert_eq!(DecodedText::decode(&bytes).unwrap().text, "x");
     }
 
     #[test]
     fn a_binary_file_is_refused_rather_than_assigned_an_encoding() {
         let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x08";
 
-        assert!(DecodedText::of(png).is_none());
+        assert!(DecodedText::decode(png).is_none());
     }
 
     #[test]
@@ -412,7 +476,7 @@ mod tests {
                     "{text:?} must be one the guard would have refused"
                 );
 
-                let out = DecodedText::of(&bytes).expect("bom-less utf-16 is text");
+                let out = DecodedText::decode(&bytes).expect("bom-less utf-16 is text");
 
                 assert_eq!(out.encoding, encoding, "{text:?} as {}", encoding.label());
                 assert_eq!(out.text, text, "{text:?} as {}", encoding.label());
@@ -442,7 +506,7 @@ mod tests {
         ];
 
         for (name, bytes) in cases {
-            assert!(DecodedText::of(bytes).is_none(), "{name} is not text");
+            assert!(DecodedText::decode(bytes).is_none(), "{name} is not text");
         }
     }
 
@@ -450,7 +514,7 @@ mod tests {
     fn utf8_text_carrying_a_nul_is_refused_rather_than_forced_into_utf16() {
         let bytes = b"log line\x00\x00\x00 more text\n";
 
-        assert!(DecodedText::of(bytes).is_none());
+        assert!(DecodedText::decode(bytes).is_none());
     }
 
     #[test]
@@ -468,7 +532,7 @@ mod tests {
             };
             let bytes = Reencode::bytes(text, encoding);
 
-            let out = DecodedText::of(&bytes).expect("legacy text stays text");
+            let out = DecodedText::decode(&bytes).expect("legacy text stays text");
 
             assert_eq!(out.encoding, encoding, "{}", encoding.label());
             assert_eq!(out.text, text, "{}", encoding.label());
@@ -477,7 +541,7 @@ mod tests {
 
     #[test]
     fn plain_ascii_is_utf8_rather_than_whatever_the_detector_prefers() {
-        let out = DecodedText::of(b"fn main() {}\n").expect("ascii is text");
+        let out = DecodedText::decode(b"fn main() {}\n").expect("ascii is text");
 
         assert_eq!(out.encoding, FileEncoding::Utf8);
         assert_eq!(out.text, "fn main() {}\n");
@@ -485,7 +549,7 @@ mod tests {
 
     #[test]
     fn utf8_japanese_without_a_bom_is_not_mistaken_for_a_legacy_encoding() {
-        let out = DecodedText::of("日本語のテキスト\n".as_bytes()).expect("utf-8 is text");
+        let out = DecodedText::decode("日本語のテキスト\n".as_bytes()).expect("utf-8 is text");
 
         assert_eq!(out.encoding, FileEncoding::Utf8);
         assert_eq!(out.text, "日本語のテキスト\n");
@@ -562,7 +626,7 @@ mod tests {
         for encoding in [FileEncoding::Utf16Le, FileEncoding::Utf16Be] {
             let bytes = Reencode::bytes("go 🚀\n", encoding);
 
-            assert_eq!(DecodedText::of(&bytes).unwrap().text, "go 🚀\n");
+            assert_eq!(DecodedText::decode(&bytes).unwrap().text, "go 🚀\n");
         }
     }
 }

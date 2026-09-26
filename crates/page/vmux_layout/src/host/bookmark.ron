@@ -1,0 +1,15 @@
+[
+    (
+        id: "bookmark_toggle_active",
+        label: "Toggle Active",
+        group: "Bookmark",
+        shortcuts: [(shortcut: Direct("Super+d"), when: None)],
+    ),
+    (id: "bookmark_pin_active", label: "Pin Active", group: "Bookmark"),
+    (
+        id: "bookmark_new_folder",
+        label: "New Folder",
+        group: "Bookmark",
+        hidden: true,
+    ),
+]

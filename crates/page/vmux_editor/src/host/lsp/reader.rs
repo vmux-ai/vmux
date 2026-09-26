@@ -1,4 +1,5 @@
 use std::io::BufReader;
+use std::path::PathBuf;
 use std::process::ChildStdout;
 use std::sync::mpsc;
 
@@ -16,6 +17,7 @@ pub struct Reader {
     events: crossbeam_channel::Sender<ServerEvent>,
     root_uri: String,
     root_name: String,
+    root: PathBuf,
 }
 
 impl Reader {
@@ -41,6 +43,7 @@ impl Reader {
             events,
             root_uri,
             root_name,
+            root: root.to_path_buf(),
         }
     }
 
@@ -52,7 +55,7 @@ impl Reader {
     }
 
     fn dispatch(&self, msg: Value) {
-        match Incoming::of(msg) {
+        match Incoming::parse(msg) {
             Incoming::Response { id, body } => self.resolve(id, body),
             Incoming::Request { id, method, params } => self.answer(id, &method, params),
             Incoming::Notification { method, params } => self.observe(&method, params),
@@ -108,6 +111,7 @@ impl Reader {
         let reply = ReplyHandle::new(id, self.outgoing.clone());
         let event = ServerEvent::ApplyEdit {
             reply: reply.clone(),
+            root: self.root.clone(),
             params,
         };
         if self.events.send(event).is_err() {

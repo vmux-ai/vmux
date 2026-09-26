@@ -1,22 +1,19 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
+use vmux_api::space::ProjectBranch;
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarWorkSnapshot, Contributions,
-    ContributionsChanged,
+    ClaimedUrl, CommandBarProjection, ContributedCommand, ContributedPage,
 };
 use vmux_core::KeyboardOwner;
 use vmux_core::PageMetadata;
 use vmux_ui::i18n::Locale;
 
 use crate::START_PAGE_URL;
-use crate::event::{
-    START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
-    StartSelectWorkspace,
-};
+use crate::event::{StartDataRequest, StartSelectWorkspace};
 use vmux_command::build_command_bar_open_payload;
 use vmux_core::launcher::{HostsLauncher, InlineTransitionRequested};
 use vmux_layout::settings::ResolvedLocale;
@@ -27,12 +24,13 @@ pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::ui::StartPage::plugin());
         app.world_mut().spawn((
             crate::PAGE_MANIFEST,
             vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
         ));
-        app.init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
+        app.init_resource::<CommandBarProjection>()
             .add_message::<InlineTransitionRequested>()
             .add_systems(
                 Update,
@@ -41,22 +39,23 @@ impl Plugin for StartPlugin {
                     begin_requested_inline_transition,
                 ),
             );
-        vmux_core::register_host_spawn(app, "start");
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             StartDataRequest,
             StartSelectWorkspace,
-            vmux_wire::command_bar::StartBranchesRequest,
-            vmux_wire::command_bar::StartGoToBranch,
-        )>::for_hosts(&["start"]))
+            vmux_api::command_bar::StartBranchesRequest,
+            vmux_api::command_bar::StartGoToBranch,
+        )>::default())
             .add_observer(on_start_data_request)
             .add_observer(on_start_select_workspace)
             .add_observer(on_start_branches_request)
             .add_observer(on_start_go_to_branch)
+            .add_observer(apply_chosen_project)
             .add_systems(
                 Update,
                 (
                     sync_live_start_pages,
                     drain_start_workspace_pickers,
+                    start_branch_reads,
                     drain_start_branch_reads,
                 ),
             );
@@ -83,15 +82,13 @@ struct StartPromptContextParams<'w, 's> {
             Option<Ref<'static, TabWorktree>>,
         ),
     >,
-    agent_models: Res<'w, vmux_command::snapshot::CommandBarAgentModels>,
-    agent_modes: Res<'w, vmux_command::snapshot::CommandBarAgentModes>,
-    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+    command_bar: Res<'w, CommandBarProjection>,
     warmed_branches_for: Local<'s, String>,
 }
 
 impl StartPromptContextParams<'_, '_> {
     fn changed(&self, tab: Option<Entity>) -> bool {
-        if self.agent_models.is_changed() || self.agent_modes.is_changed() {
+        if self.command_bar.is_changed() {
             return true;
         }
         let Some(tab) = tab else {
@@ -164,7 +161,7 @@ impl StartPromptContextParams<'_, '_> {
 }
 
 fn on_start_select_workspace(
-    trigger: On<BinReceive<StartSelectWorkspace>>,
+    trigger: On<UiInput<StartSelectWorkspace>>,
     child_of: Query<&ChildOf>,
     tabs: Query<(), With<Tab>>,
     pending: Query<&PendingStartWorkspacePicker>,
@@ -240,7 +237,6 @@ fn on_start_select_workspace(
 
 fn drain_start_workspace_pickers(
     mut pending: Query<(Entity, &mut PendingStartWorkspacePicker)>,
-    mut tabs: Query<&mut Tab>,
     mut commands: Commands,
 ) {
     for (entity, mut picker) in &mut pending {
@@ -254,26 +250,42 @@ fn drain_start_workspace_pickers(
             if initialize_git {
                 let _ = vmux_git::worktree::repository_init(&path);
             }
-            ChosenProject { path }.apply(picker.tab, &mut tabs, &mut commands);
+            commands.trigger(ChosenProject {
+                tab: picker.tab,
+                path,
+                worktree: None,
+            });
         }
         commands.entity(entity).despawn();
     }
 }
 
 #[derive(Component)]
+struct StartBranchQuery {
+    webview: Entity,
+    project: String,
+}
+
+#[derive(Component)]
 struct StartBranchRead {
     webview: Entity,
     project: String,
-    task: bevy::tasks::Task<Vec<vmux_wire::space::ProjectBranch>>,
+    task: Task<Vec<ProjectBranch>>,
 }
 
-impl StartBranchRead {
-    fn of(webview: Entity, project: &str, wake: vmux_core::host::wake::Wake) -> Option<Self> {
-        let project = project.trim().to_string();
+fn start_branch_reads(
+    queries: Query<(Entity, &StartBranchQuery), Added<StartBranchQuery>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, query) in &queries {
+        let project = query.project.trim().to_string();
         if project.is_empty() {
-            return None;
+            commands.entity(entity).despawn();
+            continue;
         }
         let root = std::path::PathBuf::from(&project);
+        let wake = vmux_core::host::wake::Wake::beside(proxy.as_deref());
         let task = IoTaskPool::get().spawn(async move {
             let _wake = wake;
             let mut branches = Vec::new();
@@ -282,7 +294,7 @@ impl StartBranchRead {
                 for holder in holders {
                     let checkout = holder.checkout_path();
                     let label = holder.checkout_label();
-                    branches.push(vmux_wire::space::ProjectBranch {
+                    branches.push(ProjectBranch {
                         branch: holder.branch,
                         checkout,
                         label,
@@ -293,27 +305,23 @@ impl StartBranchRead {
             }
             branches
         });
-        Some(Self {
-            webview,
+        commands.entity(entity).insert(StartBranchRead {
+            webview: query.webview,
             project,
             task,
-        })
+        });
+        commands.entity(entity).remove::<StartBranchQuery>();
     }
 }
 
 fn on_start_branches_request(
-    trigger: On<BinReceive<vmux_wire::command_bar::StartBranchesRequest>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    trigger: On<UiInput<vmux_api::command_bar::StartBranchesRequest>>,
     mut commands: Commands,
 ) {
-    let Some(read) = StartBranchRead::of(
-        trigger.event().webview,
-        &trigger.event().payload.project,
-        vmux_core::host::wake::Wake::of(proxy),
-    ) else {
-        return;
-    };
-    commands.spawn(read);
+    commands.spawn(StartBranchQuery {
+        webview: trigger.event().webview,
+        project: trigger.event().payload.project.clone(),
+    });
 }
 
 fn drain_start_branch_reads(
@@ -329,10 +337,11 @@ fn drain_start_branch_reads(
         if !browsers.can_emit_to(&read.webview) {
             continue;
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(
             read.webview,
-            vmux_wire::command_bar::START_PROJECT_BRANCHES_EVENT,
-            &vmux_wire::command_bar::StartProjectBranches {
+            &vmux_api::command_bar::StartProjectBranches {
                 project: read.project.clone(),
                 branches,
             },
@@ -341,10 +350,9 @@ fn drain_start_branch_reads(
 }
 
 fn on_start_go_to_branch(
-    trigger: On<BinReceive<vmux_wire::command_bar::StartGoToBranch>>,
+    trigger: On<UiInput<vmux_api::command_bar::StartGoToBranch>>,
     child_of: Query<&ChildOf>,
     tab_query: Query<(), With<Tab>>,
-    mut tabs: Query<&mut Tab>,
     mut commands: Commands,
 ) {
     let mut current = trigger.event().webview;
@@ -366,63 +374,88 @@ fn on_start_go_to_branch(
         let Ok(path) = std::path::PathBuf::from(checkout).canonicalize() else {
             return;
         };
-        ChosenProject { path }.apply(tab, &mut tabs, &mut commands);
+        commands.trigger(ChosenProject {
+            tab,
+            path,
+            worktree: None,
+        });
         return;
     }
     let Ok(root) = std::path::PathBuf::from(&evt.project).canonicalize() else {
         return;
     };
-    ChosenProject { path: root.clone() }.apply(tab, &mut tabs, &mut commands);
-    if evt.branch.trim().is_empty() {
-        return;
-    }
-    commands.entity(tab).insert(TabWorktree {
+    let worktree = (!evt.branch.trim().is_empty()).then(|| TabWorktree {
         repo_root: root.to_string_lossy().into_owned(),
         checkout_dir: String::new(),
         branch: evt.branch.clone(),
         base_ref: String::new(),
     });
+    commands.trigger(ChosenProject {
+        tab,
+        path: root,
+        worktree,
+    });
 }
 
+#[derive(EntityEvent)]
 struct ChosenProject {
+    #[event_target]
+    tab: Entity,
     path: std::path::PathBuf,
+    worktree: Option<TabWorktree>,
 }
 
-impl ChosenProject {
-    fn apply(&self, tab_entity: Entity, tabs: &mut Query<&mut Tab>, commands: &mut Commands) {
-        let Ok(mut tab) = tabs.get_mut(tab_entity) else {
-            return;
-        };
-        let dir = self.path.to_string_lossy().into_owned();
-        tab.startup_dir = Some(dir.clone());
-        if vmux_layout::worktree::is_generated_tab_name(&tab.name)
-            && let Some(name) = self.path.file_name().and_then(|name| name.to_str())
-            && !name.is_empty()
-        {
-            tab.name = name.to_string();
-        }
-        commands
-            .entity(tab_entity)
-            .insert((
-                TabWorkspace { project_dir: dir },
-                vmux_layout::tab::TabDirDecided,
-            ))
-            .remove::<(
-                TabWorktree,
-                vmux_layout::worktree::TabWorktreeReady,
-                vmux_layout::tab::TabWorktreeUnavailable,
-            )>();
+fn apply_chosen_project(
+    trigger: On<ChosenProject>,
+    mut tabs: Query<&mut Tab>,
+    mut commands: Commands,
+) {
+    let request = trigger.event();
+    let Ok(mut tab) = tabs.get_mut(request.tab) else {
+        return;
+    };
+    let dir = request.path.to_string_lossy().into_owned();
+    tab.startup_dir = Some(dir.clone());
+    if vmux_layout::worktree::is_generated_tab_name(&tab.name)
+        && let Some(name) = request.path.file_name().and_then(|name| name.to_str())
+        && !name.is_empty()
+    {
+        tab.name = name.to_string();
+    }
+    let mut entity = commands.entity(request.tab);
+    entity
+        .insert((
+            TabWorkspace { project_dir: dir },
+            vmux_layout::tab::TabDirDecided,
+        ))
+        .remove::<(
+            TabWorktree,
+            vmux_layout::worktree::TabWorktreeReady,
+            vmux_layout::tab::TabWorktreeUnavailable,
+        )>();
+    if let Some(worktree) = &request.worktree {
+        entity.insert(worktree.clone());
     }
 }
 
 fn sync_live_start_pages(
     tab_gather: TabGatherParams,
     mut prompt_context: StartPromptContextParams,
-    spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    contributions: Contributions,
-    mut contributions_changed: ContributionsChanged,
-    pages_snapshot: Res<CommandBarPagesSnapshot>,
-    work_snapshot: Res<CommandBarWorkSnapshot>,
+    contributions: (
+        Query<&ContributedPage>,
+        Query<&ContributedCommand>,
+        Query<
+            (),
+            Or<(
+                Changed<ContributedPage>,
+                Changed<ContributedCommand>,
+                Changed<ClaimedUrl>,
+            )>,
+        >,
+        RemovedComponents<ContributedPage>,
+        RemovedComponents<ContributedCommand>,
+        RemovedComponents<ClaimedUrl>,
+    ),
     locale: Option<Res<ResolvedLocale>>,
     focused: Res<vmux_layout::stack::FocusedStack>,
     starts: Query<
@@ -439,8 +472,17 @@ fn sync_live_start_pages(
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     space_projects: vmux_space::SpaceProjects,
+    definitions: Query<&vmux_command::CommandDefinition>,
     mut commands: Commands,
 ) {
+    let (
+        contributed_pages,
+        contributed_commands,
+        contribution_changes,
+        mut removed_pages,
+        mut removed_commands,
+        mut removed_claims,
+    ) = contributions;
     let cwd = prompt_context.cwd(tab_gather.active_tab.get());
     let git_info = (!cwd.is_empty())
         .then(|| {
@@ -453,11 +495,13 @@ fn sync_live_start_pages(
         .flatten();
     let git_changed = last_git.0 != cwd || last_git.1 != git_info;
     let focus_changed = focused.is_changed();
+    let contributions_changed = !contribution_changes.is_empty()
+        || removed_pages.read().next().is_some()
+        || removed_commands.read().next().is_some()
+        || removed_claims.read().next().is_some();
     let changed = should_refresh_start_payload(
-        spaces_snapshot.is_changed(),
-        contributions_changed.any(),
-        pages_snapshot.is_changed(),
-        work_snapshot.is_changed(),
+        prompt_context.command_bar.is_changed(),
+        contributions_changed,
         focus_changed,
     ) || prompt_context.changed(tab_gather.active_tab.get())
         || git_changed
@@ -490,45 +534,41 @@ fn sync_live_start_pages(
     if git_changed {
         *last_git = (cwd.clone(), git_info.clone());
     }
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
     let payload = build_start_payload(
         &tab_gather,
-        &spaces_snapshot,
-        &contributions,
-        &pages_snapshot,
-        &work_snapshot,
+        &prompt_context.command_bar,
+        &contributed_pages,
+        &contributed_commands,
         &prompt_context,
         tab_gather.active_tab.get(),
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
-        prompt_context.agent_models.agents.clone(),
-        prompt_context.agent_modes.agents.clone(),
+        prompt_context.command_bar.agent_models.agents.clone(),
+        prompt_context.command_bar.agent_modes.agents.clone(),
         &locale,
+        &definitions,
     );
-    let project = vmux_ui::launcher::palette::ActiveProject::of(&payload.prompt_context);
+    let project = vmux_ui::launcher::palette::ActiveProject::resolve(&payload.prompt_context);
     let warm_branches = !project.is_empty() && *prompt_context.warmed_branches_for != project;
     if warm_branches {
         *prompt_context.warmed_branches_for = project.clone();
     }
     for (e, focus_requested) in targets {
-        if warm_branches
-            && let Some(read) = StartBranchRead::of(
-                e,
-                &project,
-                vmux_core::host::wake::Wake::beside(prompt_context.proxy.as_deref()),
-            )
-        {
-            commands.spawn(read);
+        if warm_branches {
+            commands.spawn(StartBranchQuery {
+                webview: e,
+                project: project.clone(),
+            });
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            e,
-            START_COMMAND_BAR_OPEN_EVENT,
-            &payload,
-        ));
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(e, &payload));
         if focus_requested {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                e,
-                START_FOCUS_INPUT_EVENT,
-                &StartFocusInput,
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::from_event(
+                e, &vmux_api::command_bar::CommandBarFocusInput
             ));
         }
         commands.entity(e).try_insert(StartWorkSynced);
@@ -536,13 +576,11 @@ fn sync_live_start_pages(
 }
 
 fn should_refresh_start_payload(
-    spaces_changed: bool,
+    command_bar_changed: bool,
     contributions_changed: bool,
-    pages_changed: bool,
-    work_changed: bool,
     focus_changed: bool,
 ) -> bool {
-    spaces_changed || contributions_changed || pages_changed || work_changed || focus_changed
+    command_bar_changed || contributions_changed || focus_changed
 }
 
 fn should_focus_start_sync(
@@ -555,16 +593,15 @@ fn should_focus_start_sync(
 }
 
 fn on_start_data_request(
-    trigger: On<BinReceive<StartDataRequest>>,
+    trigger: On<UiInput<StartDataRequest>>,
     keyboard_targets: Query<(), With<KeyboardOwner>>,
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
-    spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    contributions: Contributions,
-    pages_snapshot: Res<CommandBarPagesSnapshot>,
-    work_snapshot: Res<CommandBarWorkSnapshot>,
+    contributed_pages: Query<&ContributedPage>,
+    contributed_commands: Query<&ContributedCommand>,
     locale: Option<Res<ResolvedLocale>>,
     space_projects: vmux_space::SpaceProjects,
+    definitions: Query<&vmux_command::CommandDefinition>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut commands: Commands,
 ) {
@@ -579,53 +616,52 @@ fn on_start_data_request(
             })
         })
         .flatten();
+    let definitions = definitions.iter().cloned().collect::<Vec<_>>();
     let payload = build_start_payload(
         &tab_gather,
-        &spaces_snapshot,
-        &contributions,
-        &pages_snapshot,
-        &work_snapshot,
+        &prompt_context.command_bar,
+        &contributed_pages,
+        &contributed_commands,
         &prompt_context,
         tab_gather.active_tab.get(),
         git_info.as_ref(),
         space_projects.rows(tab_gather.active_tab.get().unwrap_or(Entity::PLACEHOLDER)),
-        prompt_context.agent_models.agents.clone(),
-        prompt_context.agent_modes.agents.clone(),
+        prompt_context.command_bar.agent_models.agents.clone(),
+        prompt_context.command_bar.agent_modes.agents.clone(),
         &locale
             .as_deref()
             .map(|locale| locale.0.clone())
             .unwrap_or_else(Locale::preferred),
+        &definitions,
     );
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        START_COMMAND_BAR_OPEN_EVENT,
-        &payload,
-    ));
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(webview, &payload));
     if keyboard_targets.contains(webview) {
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            webview,
-            START_FOCUS_INPUT_EVENT,
-            &StartFocusInput,
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(
+            webview, &vmux_api::command_bar::CommandBarFocusInput
         ));
     }
 }
 
 fn build_start_payload(
     tab_gather: &TabGatherParams,
-    spaces_snapshot: &CommandBarSpacesSnapshot,
-    contributions: &Contributions,
-    pages_snapshot: &CommandBarPagesSnapshot,
-    work_snapshot: &CommandBarWorkSnapshot,
+    command_bar: &CommandBarProjection,
+    contributed_pages: &Query<&ContributedPage>,
+    contributed_commands: &Query<&ContributedCommand>,
     prompt_context: &StartPromptContextParams,
     active_tab: Option<Entity>,
     git_info: Option<&vmux_git::worktree::RepoInfo>,
-    projects: Vec<vmux_wire::space::ProjectRow>,
-    agent_models: Vec<vmux_wire::command_bar::AgentModels>,
-    agent_modes: Vec<vmux_wire::command_bar::AgentModes>,
+    projects: Vec<vmux_api::space::ProjectRow>,
+    agent_models: Vec<vmux_api::command_bar::AgentModels>,
+    agent_modes: Vec<vmux_api::command_bar::AgentModes>,
     locale: &Locale,
+    definitions: &[vmux_command::CommandDefinition],
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
-    let space_name = spaces_snapshot.active_space_name.clone();
+    let space_name = command_bar.spaces.active_space_name.clone();
     let tabs = gather_command_bar_tabs(
         active_tab,
         &tab_gather.all_children,
@@ -644,14 +680,16 @@ fn build_start_payload(
         false,
         space_name,
         String::new(),
-        spaces_snapshot,
-        contributions,
-        pages_snapshot,
-        work_snapshot,
+        &command_bar.spaces,
+        contributed_pages,
+        contributed_commands,
+        &command_bar.pages,
+        &command_bar.work,
         locale,
         active_stack_count,
         tabs,
         Some(OpenTarget::InPlace),
+        definitions,
     );
     payload.prompt_context = prompt_context.context(active_tab, git_info);
     payload.prompt_context.projects = projects;
@@ -666,7 +704,10 @@ fn mark_start_pages_as_launcher_hosts(
 ) {
     for (entity, meta) in starts.iter() {
         if meta.url.starts_with(START_PAGE_URL) {
-            commands.entity(entity).try_insert(HostsLauncher);
+            commands.entity(entity).try_insert((
+                HostsLauncher,
+                vmux_command::snapshot::CommandBarUiStateUpdates::default(),
+            ));
         }
     }
 }
@@ -696,31 +737,40 @@ fn begin_requested_inline_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_cef::prelude::BinReceive;
+    use bevy_cef::prelude::UiInput;
+    use vmux_api::command_bar::CommandBarUiState;
+    use vmux_core::host::UiStateWrite;
     use vmux_core::page::PageManifest;
 
     #[derive(Resource, Default)]
-    struct EmittedIds(Vec<String>);
+    struct EmittedIds(Vec<&'static str>);
 
-    fn capture_emit(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<EmittedIds>) {
-        emitted.0.push(trigger.id.clone());
+    fn capture_state(
+        trigger: On<UiStateWrite<CommandBarUiState>>,
+        mut emitted: ResMut<EmittedIds>,
+    ) {
+        let patch = trigger.event().patch();
+        let kind = if patch.snapshot.is_some() {
+            "snapshot"
+        } else if patch.focus_input.is_some() {
+            "focus"
+        } else {
+            "other"
+        };
+        emitted.0.push(kind);
     }
 
     fn start_ready_app() -> App {
         let mut app = App::new();
-        app.init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<CommandBarPagesSnapshot>()
-            .init_resource::<CommandBarWorkSnapshot>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModels>()
-            .init_resource::<vmux_command::snapshot::CommandBarAgentModes>()
+        app.init_resource::<CommandBarProjection>()
             .init_resource::<EmittedIds>()
             .add_observer(on_start_data_request)
-            .add_observer(capture_emit);
+            .add_observer(capture_state);
         app
     }
 
     fn emit_start_ready(app: &mut App, webview: Entity) {
-        app.world_mut().trigger(BinReceive {
+        app.world_mut().trigger(UiInput {
             webview,
             payload: StartDataRequest,
         });
@@ -786,9 +836,6 @@ mod tests {
         emit_start_ready(&mut app, webview);
 
         let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(
-            emitted,
-            &[START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT]
-        );
+        assert_eq!(emitted, &["snapshot", "focus"]);
     }
 }

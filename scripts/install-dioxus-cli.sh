@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${DIOXUS_CLI_VERSION:-0.7.9}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/../tool-versions.env"
+VERSION="$DIOXUS_CLI_VERSION"
 INSTALL_DIR="${DIOXUS_CLI_INSTALL_DIR:-$HOME/.local/bin}"
 
 if command -v dx >/dev/null 2>&1; then

@@ -11,17 +11,19 @@ use crate::{
 use bevy::{asset::Asset, prelude::*, window::PrimaryWindow, winit::WINIT_WINDOWS};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_core::page::PageEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
+use super::command::LayoutRequestSet;
+
 pub struct WindowLayoutPlugin;
 
 impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<WindowGeometry>()
+        app.add_plugins(vmux_command::CommandTypePlugin::<MinimizeWindowRequest>::default())
+            .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .init_resource::<FocusedWindow>()
@@ -33,13 +35,7 @@ impl Plugin for WindowLayoutPlugin {
             )
             .add_systems(
                 Startup,
-                (
-                    request_default_layout,
-                    spawn_requested_tab_layouts,
-                    discard_startup_tab_layout_requests,
-                )
-                    .chain()
-                    .in_set(LayoutStartupSet::DefaultTab),
+                request_default_layout.in_set(LayoutStartupSet::DefaultTab),
             )
             .add_systems(
                 Startup,
@@ -66,12 +62,15 @@ impl Plugin for WindowLayoutPlugin {
                     bevy::ecs::schedule::ApplyDeferred,
                     crate::stack::open_startup_url_if_no_stacks.before(PageOpenSet::ResolveTarget),
                     spawn_requested_tab_layouts
-                        .after(ReadAppCommands)
+                        .after(LayoutRequestSet::Handle)
                         .before(PageOpenSet::ResolveTarget),
                 )
                     .chain(),
             )
-            .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
+            .add_systems(
+                Update,
+                minimize_focused_window.in_set(LayoutRequestSet::Handle),
+            );
 
         app.init_resource::<Assets<WindowMaterial>>()
             .init_resource::<WindowBackground>();
@@ -80,6 +79,26 @@ impl Plugin for WindowLayoutPlugin {
 
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusedWindow(pub Option<Entity>);
+
+#[derive(Message)]
+struct MinimizeWindowRequest;
+
+impl vmux_command::CommandRequest for MinimizeWindowRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("window.ron"))
+            .select(&["minimize_window"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for MinimizeWindowRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "minimize_window")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WindowFocusSet;
@@ -125,21 +144,19 @@ impl Default for WindowBackground {
     }
 }
 
-fn handle_window_commands(
-    mut reader: MessageReader<AppCommand>,
+fn minimize_focused_window(
+    mut reader: MessageReader<MinimizeWindowRequest>,
     focused_window: Res<FocusedWindow>,
 ) {
-    for cmd in reader.read() {
-        if let AppCommand::Layout(LayoutCommand::Window(WindowCommand::Minimize)) = cmd {
-            let Some(entity) = focused_window.0 else {
-                continue;
-            };
-            WINIT_WINDOWS.with_borrow(|winit_windows| {
-                if let Some(winit_win) = winit_windows.get_window(entity) {
-                    winit_win.set_minimized(true);
-                }
-            });
-        }
+    for _ in reader.read() {
+        let Some(entity) = focused_window.0 else {
+            continue;
+        };
+        WINIT_WINDOWS.with_borrow(|winit_windows| {
+            if let Some(winit_win) = winit_windows.get_window(entity) {
+                winit_win.set_minimized(true);
+            }
+        });
     }
 }
 
@@ -464,10 +481,6 @@ fn request_default_layout(
     });
 }
 
-fn discard_startup_tab_layout_requests(mut requests: ResMut<Messages<TabLayoutSpawnRequest>>) {
-    requests.clear();
-}
-
 pub struct TabScaffold {
     pub tab: Entity,
     pub pane: Entity,
@@ -571,7 +584,7 @@ pub fn spawn_requested_tab_layouts(
             TabLayoutSpawnContent::StartupUrlOrPrompt => {
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
-                    url: vmux_core::EffectiveStartupUrl::of(effective_startup_url.as_deref()),
+                    url: vmux_core::EffectiveStartupUrl::resolve(effective_startup_url.as_deref()),
                     request_id: None,
                 });
             }
@@ -604,7 +617,7 @@ pub fn spawn_requested_tab_layouts(
 
 fn sync_window_layout_to_settings(
     settings: Res<LayoutSettings>,
-    hidden: Option<Res<crate::toggle::LayoutHidden>>,
+    hidden_windows: Query<(), With<crate::toggle::LayoutHidden>>,
     mut window_q: Query<
         (&HostWindow, &mut Node),
         (With<VmuxWindow>, Without<SideSheet>, Without<MainColumn>),
@@ -630,9 +643,7 @@ fn sync_window_layout_to_settings(
     let gap = crate::event::PANE_GAP_PX;
     let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
     for (host, mut node) in &mut window_q {
-        let full_padding = hidden
-            .as_deref()
-            .is_some_and(|hidden| hidden.is_hidden(host.0));
+        let full_padding = hidden_windows.contains(host.0);
         node.padding = UiRect {
             top: Val::Px(if full_padding { pad_top } else { 0.0 }),
             left: Val::Px(if full_padding { pad_left } else { 0.0 }),
@@ -1165,15 +1176,7 @@ mod tests {
             .insert_resource(vmux_core::EffectiveStartupUrl(
                 "vmux://sessions/vibe/".to_string(),
             ))
-            .add_systems(
-                Startup,
-                (
-                    request_default_layout,
-                    spawn_requested_tab_layouts,
-                    discard_startup_tab_layout_requests,
-                )
-                    .chain(),
-            )
+            .add_systems(Startup, request_default_layout)
             .add_systems(Update, spawn_requested_tab_layouts);
 
         app.world_mut().spawn(PrimaryWindow);
@@ -1246,25 +1249,9 @@ mod tests {
     }
 
     #[test]
-    fn window_padding_tracks_layout_window_settings() {
-        let source = include_str!("window.rs");
-        let sync_fn = source
-            .split("fn sync_window_layout_to_settings")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_main_column_gap_to_pane_count").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("settings.window.pad_top()"));
-        assert!(sync_fn.contains("settings.window.pad_right()"));
-        assert!(sync_fn.contains("settings.window.pad_bottom()"));
-        assert!(sync_fn.contains("settings.window.pad_left()"));
-    }
-
-    #[test]
     fn visible_fills_monitor_window_sync_clears_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::toggle::LayoutHidden>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 16.0 },

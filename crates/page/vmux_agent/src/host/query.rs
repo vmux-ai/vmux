@@ -1,116 +1,457 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::WriteAppCommands;
-use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{
-    AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage,
+use vmux_api::protocol::{
+    AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentCommandResult, AgentImage, AgentQuery,
+    AgentRecording, AgentRequestId, AgentSpace, ClientMessage, JsonValue, ProcessId,
+    ServiceMessage,
 };
+use vmux_command::WriteCommandRequests;
+use vmux_service::client::{ServiceInbound, ServiceRequest};
 use vmux_setting::AppSettings;
 use vmux_terminal::ServiceMessageSet;
 
 use crate::events::{
     AgentQueryRequest, RecordStartRequest, RecordStartResponse, RecordStopRequest,
     RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
-    snapshot_response_to_query_result,
 };
 use vmux_core::browser::{
-    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
+    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
+    BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
 
 use super::browser_pane::AgentBrowserResolve;
 
-pub(super) struct QueryPlugin;
+pub(crate) struct AgentQueryPlugin;
 
-impl Plugin for QueryPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            handle_agent_queries
-                .in_set(WriteAppCommands)
-                .after(ServiceMessageSet)
-                .after(super::workspace::send_pending_agent_continuations),
-        )
-        .add_systems(
-            Update,
-            (
-                forward_layout_apply_responses,
-                forward_layout_snapshot_responses,
-                forward_screenshot_responses,
-                forward_snapshot_responses,
-                forward_record_start_responses,
-                forward_record_stop_responses,
-                forward_simulator_control_responses,
-                forward_simulator_screenshot_responses,
-            ),
-        );
-    }
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct AgentQueryIngressSet;
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct AgentQuerySet;
+
+#[derive(Message)]
+struct WorkingDirectoryRequest {
+    request_id: AgentRequestId,
+    anchor: ProcessId,
+}
+
+#[derive(Message)]
+struct SettingsReadRequest {
+    request_id: AgentRequestId,
+}
+
+#[derive(Message)]
+struct SpaceListRequest {
+    request_id: AgentRequestId,
+}
+
+#[derive(Message)]
+struct CommandListRequest {
+    request_id: AgentRequestId,
+}
+
+#[derive(Message)]
+struct VaultStatusRequest {
+    request_id: AgentRequestId,
+}
+
+#[derive(Message)]
+struct BookmarkListRequest {
+    request_id: AgentRequestId,
+}
+
+#[derive(Message)]
+struct BrowserSnapshotResolveRequest {
+    request_id: AgentRequestId,
+    pane: Option<String>,
+    anchor: Option<ProcessId>,
+}
+
+#[derive(Message)]
+struct BrowserScrollResolveRequest {
+    request_id: AgentRequestId,
+    pane: Option<String>,
+    to: Option<String>,
+    delta: Option<i32>,
+    anchor: Option<ProcessId>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(super) struct ListedSpaces<'w, 's> {
-    spaces: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static vmux_layout::space::SpaceId,
-            &'static Name,
-            Has<vmux_core::Active>,
-            Option<&'static vmux_core::Order>,
-        ),
-        With<vmux_layout::space::Space>,
-    >,
-    focused_window: Option<Res<'w, vmux_layout::window::FocusedWindow>>,
-    child_of: Query<'w, 's, &'static ChildOf>,
-    host_windows: Query<'w, 's, &'static HostWindow>,
+struct AgentQueryRoutes<'w> {
+    layout: MessageWriter<'w, vmux_layout::apply::LayoutSnapshotRequest>,
+    working_directory: MessageWriter<'w, WorkingDirectoryRequest>,
+    settings: MessageWriter<'w, SettingsReadRequest>,
+    spaces: MessageWriter<'w, SpaceListRequest>,
+    commands: MessageWriter<'w, CommandListRequest>,
+    vault: MessageWriter<'w, VaultStatusRequest>,
+    bookmarks: MessageWriter<'w, BookmarkListRequest>,
+    screenshot: MessageWriter<'w, ScreenshotRequest>,
+    browser_snapshot: MessageWriter<'w, BrowserSnapshotResolveRequest>,
+    browser_scroll: MessageWriter<'w, BrowserScrollResolveRequest>,
+    record_start: MessageWriter<'w, RecordStartRequest>,
+    record_stop: MessageWriter<'w, RecordStopRequest>,
+    simulator_screenshot: MessageWriter<'w, vmux_simulator::SimulatorScreenshotRequest>,
+    simulator_tap: MessageWriter<'w, vmux_simulator::SimulatorTapRequest>,
+    simulator_swipe: MessageWriter<'w, vmux_simulator::SimulatorSwipeRequest>,
+    simulator_type_text: MessageWriter<'w, vmux_simulator::SimulatorTypeTextRequest>,
+    simulator_key_press: MessageWriter<'w, vmux_simulator::SimulatorKeyPressRequest>,
+    simulator_button_press: MessageWriter<'w, vmux_simulator::SimulatorButtonPressRequest>,
 }
 
-impl ListedSpaces<'_, '_> {
-    fn json(&self) -> String {
-        let mut rows: Vec<(u32, String, serde_json::Value)> = Vec::new();
-        for (entity, id, name, is_active, order) in &self.spaces {
-            let local = self
-                .focused_window
-                .as_deref()
+impl AgentQueryRoutes<'_> {
+    fn route(&mut self, request_id: AgentRequestId, query: &AgentQuery) {
+        match query {
+            AgentQuery::ReadLayout { anchor } => {
+                self.layout
+                    .write(vmux_layout::apply::LayoutSnapshotRequest {
+                        request_id: request_id.0,
+                        anchor: *anchor,
+                    });
+            }
+            AgentQuery::GetSettings => {
+                self.settings.write(SettingsReadRequest { request_id });
+            }
+            AgentQuery::ListSpaces => {
+                self.spaces.write(SpaceListRequest { request_id });
+            }
+            AgentQuery::Screenshot { pane } => {
+                self.screenshot.write(ScreenshotRequest {
+                    request_id: request_id.0,
+                    pane: pane.clone(),
+                });
+            }
+            AgentQuery::BrowserSnapshot { pane, anchor } => {
+                self.browser_snapshot.write(BrowserSnapshotResolveRequest {
+                    request_id,
+                    pane: pane.clone(),
+                    anchor: *anchor,
+                });
+            }
+            AgentQuery::BrowserScroll {
+                pane,
+                to,
+                delta,
+                anchor,
+            } => {
+                self.browser_scroll.write(BrowserScrollResolveRequest {
+                    request_id,
+                    pane: pane.clone(),
+                    to: to.clone(),
+                    delta: *delta,
+                    anchor: *anchor,
+                });
+            }
+            AgentQuery::RecordStart {
+                gif,
+                max_secs,
+                pane,
+            } => {
+                self.record_start.write(RecordStartRequest {
+                    request_id: request_id.0,
+                    gif: *gif,
+                    max_secs: *max_secs,
+                    pane: pane.clone(),
+                });
+            }
+            AgentQuery::RecordStop { dir, name } => {
+                self.record_stop.write(RecordStopRequest {
+                    request_id: request_id.0,
+                    dir: dir.clone(),
+                    name: name.clone(),
+                });
+            }
+            AgentQuery::BookmarkList => {
+                self.bookmarks.write(BookmarkListRequest { request_id });
+            }
+            AgentQuery::SimulatorScreenshot => {
+                self.simulator_screenshot
+                    .write(vmux_simulator::SimulatorScreenshotRequest {
+                        request_id: request_id.0,
+                    });
+            }
+            AgentQuery::SimulatorTap(tap) => {
+                self.simulator_tap
+                    .write(vmux_simulator::SimulatorTapRequest {
+                        request_id: request_id.0,
+                        x: tap.x,
+                        y: tap.y,
+                    });
+            }
+            AgentQuery::SimulatorSwipe(swipe) => {
+                self.simulator_swipe
+                    .write(vmux_simulator::SimulatorSwipeRequest {
+                        request_id: request_id.0,
+                        start_x: swipe.start_x,
+                        start_y: swipe.start_y,
+                        end_x: swipe.end_x,
+                        end_y: swipe.end_y,
+                        duration_ms: swipe.duration_ms,
+                    });
+            }
+            AgentQuery::SimulatorTypeText(input) => {
+                self.simulator_type_text
+                    .write(vmux_simulator::SimulatorTypeTextRequest {
+                        request_id: request_id.0,
+                        text: input.text.clone(),
+                    });
+            }
+            AgentQuery::SimulatorKeyPress(input) => {
+                self.simulator_key_press
+                    .write(vmux_simulator::SimulatorKeyPressRequest {
+                        request_id: request_id.0,
+                        keycode: input.keycode,
+                    });
+            }
+            AgentQuery::SimulatorButtonPress(input) => {
+                self.simulator_button_press
+                    .write(vmux_simulator::SimulatorButtonPressRequest {
+                        request_id: request_id.0,
+                        button: input.button,
+                    });
+            }
+            AgentQuery::WorkingDirectory { anchor } => {
+                self.working_directory.write(WorkingDirectoryRequest {
+                    request_id,
+                    anchor: *anchor,
+                });
+            }
+            AgentQuery::VaultStatus => {
+                self.vault.write(VaultStatusRequest { request_id });
+            }
+            AgentQuery::ListCommands => {
+                self.commands.write(CommandListRequest { request_id });
+            }
+            AgentQuery::ReadProcessOutput { .. }
+            | AgentQuery::ReadProcessTranscript { .. }
+            | AgentQuery::ProcessCommandExit { .. }
+            | AgentQuery::ProcessRunCompletion { .. } => {}
+        }
+    }
+}
+
+impl Plugin for AgentQueryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ServiceInbound>()
+            .add_message::<WorkingDirectoryRequest>()
+            .add_message::<SettingsReadRequest>()
+            .add_message::<SpaceListRequest>()
+            .add_message::<CommandListRequest>()
+            .add_message::<VaultStatusRequest>()
+            .add_message::<BookmarkListRequest>()
+            .add_message::<BrowserSnapshotResolveRequest>()
+            .add_message::<BrowserScrollResolveRequest>()
+            .add_systems(
+                Update,
+                receive_agent_queries
+                    .in_set(AgentQueryIngressSet)
+                    .after(ServiceMessageSet)
+                    .after(super::AgentContinuationSet),
+            )
+            .add_systems(
+                Update,
+                (
+                    answer_working_directory_queries,
+                    answer_settings_queries,
+                    answer_space_queries,
+                    answer_command_queries,
+                    answer_vault_queries,
+                    answer_bookmark_queries,
+                    route_browser_queries,
+                )
+                    .in_set(AgentQuerySet)
+                    .in_set(WriteCommandRequests)
+                    .after(AgentQueryIngressSet),
+            )
+            .add_systems(
+                Update,
+                (
+                    forward_layout_apply_responses,
+                    forward_layout_snapshot_responses,
+                    forward_screenshot_responses,
+                    forward_snapshot_responses,
+                    forward_browser_scroll_responses,
+                    forward_navigation_snapshot_responses,
+                    forward_record_start_responses,
+                    forward_record_stop_responses,
+                    forward_simulator_control_responses,
+                    forward_simulator_screenshot_responses,
+                ),
+            );
+    }
+}
+
+fn receive_agent_queries(
+    mut inbound: MessageReader<ServiceInbound>,
+    mut local: MessageReader<AgentQueryRequest>,
+    mut routes: AgentQueryRoutes,
+) {
+    for inbound in inbound.read() {
+        let ServiceMessage::AgentQuery { request_id, query } = &inbound.0 else {
+            continue;
+        };
+        routes.route(*request_id, query);
+    }
+    for request in local.read() {
+        routes.route(request.request_id, &request.query);
+    }
+}
+
+struct AgentSpaceCatalog(Vec<AgentSpace>);
+
+impl AgentSpaceCatalog {
+    fn collect(
+        spaces: &Query<
+            (
+                Entity,
+                &vmux_layout::space::SpaceId,
+                &Name,
+                Has<vmux_core::Active>,
+                Option<&vmux_core::Order>,
+            ),
+            With<vmux_layout::space::Space>,
+        >,
+        focused_window: Option<&vmux_layout::window::FocusedWindow>,
+        child_of: &Query<&ChildOf>,
+        host_windows: &Query<&HostWindow>,
+    ) -> Self {
+        let mut rows: Vec<(u32, AgentSpace)> = Vec::new();
+        for (entity, id, name, is_active, order) in spaces {
+            let local = focused_window
                 .and_then(|focused| focused.0)
                 .is_some_and(|focused| {
-                    vmux_layout::window::host_window_of(entity, &self.child_of, &self.host_windows)
+                    vmux_layout::window::host_window_of(entity, child_of, host_windows)
                         == Some(focused)
                 });
             let order = order.map(|order| order.0).unwrap_or(u32::MAX);
-            if let Some((existing_order, _, row)) = rows
-                .iter_mut()
-                .find(|(_, existing_id, _)| existing_id == &id.0)
+            if let Some((existing_order, row)) =
+                rows.iter_mut().find(|(_, existing)| existing.id == id.0)
             {
                 *existing_order = (*existing_order).min(order);
                 if local {
-                    row["is_active"] = serde_json::json!(is_active);
+                    row.is_active = is_active;
                 }
                 continue;
             }
             rows.push((
                 order,
-                id.0.clone(),
-                serde_json::json!({
-                    "id": id.0,
-                    "name": name.to_string(),
-                    "profile": vmux_space::model::bootstrap_profile_name(),
-                    "is_active": local && is_active,
-                }),
+                AgentSpace {
+                    id: id.0.clone(),
+                    name: name.to_string(),
+                    profile: vmux_space::model::bootstrap_profile_name(),
+                    is_active: local && is_active,
+                },
             ));
         }
-        rows.sort_by_key(|(order, _, _)| *order);
-        let rows: Vec<serde_json::Value> = rows.into_iter().map(|(_, _, row)| row).collect();
-        serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())
+        rows.sort_by_key(|(order, _)| *order);
+        Self(rows.into_iter().map(|(_, row)| row).collect())
     }
 }
 
-pub(super) fn handle_agent_queries(
-    mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Res<ServiceClient>>,
+fn answer_working_directory_queries(
+    mut reader: MessageReader<WorkingDirectoryRequest>,
+    browse: AgentBrowserResolve,
+    tabs: Query<&vmux_layout::tab::Tab>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for request in reader.read() {
+        let result = if browse.agent_pane(request.anchor).is_none() {
+            Err("agent pane not found".to_string())
+        } else if let Some(path) = browse.working_directory(request.anchor, &tabs) {
+            Ok(path.to_string_lossy().into_owned())
+        } else {
+            match super::run_terminal::AgentCwd::projects() {
+                Ok(path) => Ok(path.to_string_lossy().into_owned()),
+                Err(message) => Err(message),
+            }
+        };
+        service_requests.write(ServiceRequest(ClientMessage::AgentWorkingDirectoryResult {
+            request_id: request.request_id,
+            result,
+        }));
+    }
+}
+
+fn answer_settings_queries(
+    mut reader: MessageReader<SettingsReadRequest>,
     settings: Res<AppSettings>,
-    listed_spaces: ListedSpaces,
-    bm_pins: Query<
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for request in reader.read() {
+        let result = match serde_json::to_value(&*settings) {
+            Ok(settings) => Ok(JsonValue::from(settings)),
+            Err(error) => Err(format!("failed to serialize settings: {error}")),
+        };
+        service_requests.write(ServiceRequest(ClientMessage::AgentSettingsResult {
+            request_id: request.request_id,
+            result,
+        }));
+    }
+}
+
+fn answer_space_queries(
+    mut reader: MessageReader<SpaceListRequest>,
+    spaces: Query<
+        (
+            Entity,
+            &vmux_layout::space::SpaceId,
+            &Name,
+            Has<vmux_core::Active>,
+            Option<&vmux_core::Order>,
+        ),
+        With<vmux_layout::space::Space>,
+    >,
+    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+    child_of: Query<&ChildOf>,
+    host_windows: Query<&HostWindow>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for request in reader.read() {
+        let rows = AgentSpaceCatalog::collect(
+            &spaces,
+            focused_window.as_deref(),
+            &child_of,
+            &host_windows,
+        );
+        service_requests.write(ServiceRequest(ClientMessage::AgentSpacesResult {
+            request_id: request.request_id,
+            result: Ok(rows.0),
+        }));
+    }
+}
+
+fn answer_command_queries(
+    mut reader: MessageReader<CommandListRequest>,
+    commands: Query<&vmux_command::CommandDefinition>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for request in reader.read() {
+        let mut tools = commands
+            .iter()
+            .filter_map(vmux_command::CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandsResult {
+            request_id: request.request_id,
+            result: Ok(tools),
+        }));
+    }
+}
+
+fn answer_vault_queries(
+    mut reader: MessageReader<VaultStatusRequest>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for request in reader.read() {
+        service_requests.write(ServiceRequest(ClientMessage::AgentVaultStatusResult {
+            request_id: request.request_id,
+            result: Ok(vmux_core::profile::vault::status().snapshot()),
+        }));
+    }
+}
+
+fn answer_bookmark_queries(
+    mut reader: MessageReader<BookmarkListRequest>,
+    pins: Query<
         (
             &vmux_core::Uuid,
             &vmux_core::PageMetadata,
@@ -118,7 +459,7 @@ pub(super) fn handle_agent_queries(
         ),
         With<vmux_core::Pin>,
     >,
-    bm_folders: Query<
+    folders: Query<
         (
             &vmux_core::Uuid,
             &Name,
@@ -128,7 +469,7 @@ pub(super) fn handle_agent_queries(
         ),
         With<vmux_core::Folder>,
     >,
-    bm_top: Query<
+    top_level: Query<
         (
             &vmux_core::Uuid,
             &vmux_core::PageMetadata,
@@ -136,7 +477,7 @@ pub(super) fn handle_agent_queries(
         ),
         (With<vmux_core::Bookmark>, Without<ChildOf>),
     >,
-    bm_children: Query<
+    bookmarks: Query<
         (
             &vmux_core::Uuid,
             &vmux_core::PageMetadata,
@@ -144,354 +485,275 @@ pub(super) fn handle_agent_queries(
         ),
         With<vmux_core::Bookmark>,
     >,
-    mut layout_snapshot_writer: MessageWriter<vmux_layout::apply::LayoutSnapshotRequest>,
-    mut screenshot_writer: MessageWriter<ScreenshotRequest>,
-    mut browser_snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
-    mut browser_scroll_writer: MessageWriter<BrowserScrollRequest>,
-    mut record_start_writer: MessageWriter<RecordStartRequest>,
-    mut record_stop_writer: MessageWriter<RecordStopRequest>,
-    mut simulator_writers: (
-        MessageWriter<vmux_simulator::SimulatorControlRequest>,
-        MessageWriter<vmux_simulator::SimulatorScreenshotRequest>,
-    ),
-    (mut browse, tabs): (AgentBrowserResolve, Query<&vmux_layout::tab::Tab>),
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
-
     for request in reader.read() {
-        match request.query {
-            AgentQuery::ReadLayout { anchor } => {
-                layout_snapshot_writer.write(vmux_layout::apply::LayoutSnapshotRequest {
-                    request_id: request.request_id.0,
-                    anchor,
-                });
-            }
-            AgentQuery::WorkingDirectory { anchor } => {
-                let result = if browse.agent_pane(anchor).is_none() {
-                    AgentQueryResult::Error("agent pane not found".to_string())
-                } else if let Some(path) = browse.working_directory(anchor, &tabs) {
-                    AgentQueryResult::Text(path.to_string_lossy().into_owned())
-                } else {
-                    match super::run_terminal::AgentCwd::projects() {
-                        Ok(path) => AgentQueryResult::Text(path.to_string_lossy().into_owned()),
-                        Err(message) => AgentQueryResult::Error(message),
-                    }
-                };
-                service.0.send(ClientMessage::AgentQueryResponse {
-                    request_id: request.request_id,
-                    result,
-                });
-            }
-            AgentQuery::GetSettings => {
-                let result = AgentQueryResult::Settings(settings.to_json());
-                service.0.send(ClientMessage::AgentQueryResponse {
-                    request_id: request.request_id,
-                    result,
-                });
-            }
-            AgentQuery::ListSpaces => {
-                service.0.send(ClientMessage::AgentQueryResponse {
-                    request_id: request.request_id,
-                    result: AgentQueryResult::Spaces(listed_spaces.json()),
-                });
-            }
-            AgentQuery::VaultStatus => {
-                service.0.send(ClientMessage::AgentQueryResponse {
-                    request_id: request.request_id,
-                    result: AgentQueryResult::VaultStatus(
-                        vmux_core::profile::vault::status().snapshot(),
+        let mut pin_rows: Vec<(u32, AgentBookmark)> = pins
+            .iter()
+            .map(|(uuid, metadata, order)| {
+                (
+                    order.0,
+                    AgentBookmark::new(
+                        uuid.0.clone(),
+                        metadata.url.clone(),
+                        metadata.title.clone(),
+                        metadata.icon.favicon_url(),
                     ),
-                });
-            }
-            AgentQuery::BookmarkList => {
-                let row = |u: &vmux_core::Uuid, m: &vmux_core::PageMetadata| {
-                    serde_json::json!({
-                        "uuid": u.0,
-                        "url": m.url,
-                        "title": m.title,
-                        "favicon_url": m.icon.favicon_url(),
-                    })
-                };
-                let mut pin_rows: Vec<(u32, serde_json::Value)> =
-                    bm_pins.iter().map(|(u, m, o)| (o.0, row(u, m))).collect();
-                pin_rows.sort_by_key(|(order, _)| *order);
-                let pins: Vec<serde_json::Value> = pin_rows.into_iter().map(|(_, v)| v).collect();
-                let mut roots: Vec<(u32, serde_json::Value)> = Vec::new();
-                for (uuid, name, children, collapsed, order) in bm_folders.iter() {
-                    let mut kids: Vec<(u32, serde_json::Value)> = Vec::new();
-                    if let Some(children) = children {
-                        for child in children.iter() {
-                            if let Ok((u, m, order)) = bm_children.get(child) {
-                                kids.push((order.0, row(u, m)));
-                            }
-                        }
+                )
+            })
+            .collect();
+        pin_rows.sort_by_key(|(order, _)| *order);
+        let pins = pin_rows.into_iter().map(|(_, bookmark)| bookmark).collect();
+        let mut roots: Vec<(u32, AgentBookmarkNode)> = Vec::new();
+        for (uuid, name, children, collapsed, order) in &folders {
+            let mut child_rows: Vec<(u32, AgentBookmark)> = Vec::new();
+            if let Some(children) = children {
+                for child in children.iter() {
+                    if let Ok((child_uuid, metadata, child_order)) = bookmarks.get(child) {
+                        child_rows.push((
+                            child_order.0,
+                            AgentBookmark::new(
+                                child_uuid.0.clone(),
+                                metadata.url.clone(),
+                                metadata.title.clone(),
+                                metadata.icon.favicon_url(),
+                            ),
+                        ));
                     }
-                    kids.sort_by_key(|(order, _)| *order);
-                    let kids: Vec<serde_json::Value> =
-                        kids.into_iter().map(|(_, row)| row).collect();
-                    roots.push((
-                        order.0,
-                        serde_json::json!({
-                            "kind": "folder",
-                            "uuid": uuid.0,
-                            "name": name.as_str(),
-                            "collapsed": collapsed,
-                            "children": kids,
-                        }),
-                    ));
                 }
-                for (uuid, meta, order) in bm_top.iter() {
-                    let mut entry = row(uuid, meta);
-                    entry["kind"] = serde_json::json!("entry");
-                    roots.push((order.0, entry));
-                }
-                roots.sort_by_key(|(order, _)| *order);
-                let roots: Vec<serde_json::Value> = roots.into_iter().map(|(_, v)| v).collect();
-                let json =
-                    serde_json::to_string(&serde_json::json!({"pins": pins, "roots": roots}))
-                        .unwrap_or_else(|_| "{}".to_string());
-                service.0.send(ClientMessage::AgentQueryResponse {
-                    request_id: request.request_id,
-                    result: AgentQueryResult::Spaces(json),
-                });
             }
-            AgentQuery::Screenshot { ref pane } => {
-                screenshot_writer.write(ScreenshotRequest {
-                    request_id: request.request_id.0,
-                    pane: pane.clone(),
-                });
-            }
-            AgentQuery::BrowserSnapshot {
-                ref pane,
-                ref anchor,
-            } => {
-                browser_snapshot_writer.write(BrowserSnapshotRequest {
-                    request_id: request.request_id.0,
-                    pane: browse.resolve_pane(pane, anchor),
-                    webview: None,
-                });
-            }
-            AgentQuery::BrowserScroll {
-                ref pane,
-                ref to,
-                delta,
-                ref anchor,
-            } => {
-                browser_scroll_writer.write(BrowserScrollRequest {
-                    request_id: request.request_id.0,
-                    pane: browse.resolve_pane(pane, anchor),
-                    to: to.clone(),
-                    delta,
-                });
-            }
-            AgentQuery::RecordStart {
-                gif,
-                max_secs,
-                ref pane,
-            } => {
-                record_start_writer.write(RecordStartRequest {
-                    request_id: request.request_id.0,
-                    gif,
-                    max_secs,
-                    pane: pane.clone(),
-                });
-            }
-            AgentQuery::RecordStop { ref dir, ref name } => {
-                record_stop_writer.write(RecordStopRequest {
-                    request_id: request.request_id.0,
-                    dir: dir.clone(),
-                    name: name.clone(),
-                });
-            }
-            AgentQuery::SimulatorScreenshot => {
-                simulator_writers
-                    .1
-                    .write(vmux_simulator::SimulatorScreenshotRequest {
-                        request_id: request.request_id.0,
-                    });
-            }
-            AgentQuery::SimulatorControl { ref action } => {
-                simulator_writers
-                    .0
-                    .write(vmux_simulator::SimulatorControlRequest {
-                        request_id: request.request_id.0,
-                        action: action.clone(),
-                    });
-            }
-            AgentQuery::ReadTerminal { .. }
-            | AgentQuery::ReadTerminalFull { .. }
-            | AgentQuery::CommandExit { .. }
-            | AgentQuery::RunCompletion { .. } => {}
+            child_rows.sort_by_key(|(order, _)| *order);
+            let children = child_rows
+                .into_iter()
+                .map(|(_, bookmark)| bookmark)
+                .collect();
+            roots.push((
+                order.0,
+                AgentBookmarkNode::Folder {
+                    uuid: uuid.0.clone(),
+                    name: name.to_string(),
+                    collapsed,
+                    children,
+                },
+            ));
         }
+        for (uuid, metadata, order) in &top_level {
+            roots.push((
+                order.0,
+                AgentBookmarkNode::Entry {
+                    bookmark: AgentBookmark::new(
+                        uuid.0.clone(),
+                        metadata.url.clone(),
+                        metadata.title.clone(),
+                        metadata.icon.favicon_url(),
+                    ),
+                },
+            ));
+        }
+        roots.sort_by_key(|(order, _)| *order);
+        let roots = roots.into_iter().map(|(_, node)| node).collect();
+        service_requests.write(ServiceRequest(ClientMessage::AgentBookmarksResult {
+            request_id: request.request_id,
+            result: Ok(AgentBookmarks { pins, roots }),
+        }));
+    }
+}
+
+fn route_browser_queries(
+    mut snapshots: MessageReader<BrowserSnapshotResolveRequest>,
+    mut scrolls: MessageReader<BrowserScrollResolveRequest>,
+    mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
+    mut scroll_writer: MessageWriter<BrowserScrollRequest>,
+    mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
+    browse: AgentBrowserResolve,
+) {
+    for request in snapshots.read() {
+        let resolved = browse.resolve_pane(&request.pane, &request.anchor);
+        if let Some(request) = resolved.activation {
+            activate.write(request);
+        }
+        snapshot_writer.write(BrowserSnapshotRequest {
+            request_id: request.request_id.0,
+            pane: resolved.pane,
+            webview: None,
+        });
+    }
+
+    for request in scrolls.read() {
+        let resolved = browse.resolve_pane(&request.pane, &request.anchor);
+        if let Some(request) = resolved.activation {
+            activate.write(request);
+        }
+        scroll_writer.write(BrowserScrollRequest {
+            request_id: request.request_id.0,
+            pane: resolved.pane,
+            to: request.to.clone(),
+            delta: request.delta,
+        });
     }
 }
 
 fn forward_layout_apply_responses(
     mut reader: MessageReader<vmux_layout::apply::LayoutApplyResponse>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
         let result = match response.result.clone() {
             Ok(snapshot) => AgentCommandResult::Layout(snapshot),
             Err(message) => AgentCommandResult::Error(message),
         };
-        service.0.send(ClientMessage::AgentCommandResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
             request_id: AgentRequestId(response.request_id),
             result,
-        });
+        }));
     }
 }
 
 fn forward_layout_snapshot_responses(
     mut reader: MessageReader<vmux_layout::apply::LayoutSnapshotResponse>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentLayoutResult {
             request_id: AgentRequestId(response.request_id),
-            result: AgentQueryResult::Layout(response.snapshot.clone()),
-        });
+            result: Ok(response.snapshot.clone()),
+        }));
     }
 }
 
-fn screenshot_response_to_query_result(
-    result: &Result<ScreenshotImage, String>,
-) -> AgentQueryResult {
+fn screenshot_result(result: &Result<ScreenshotImage, String>) -> Result<AgentImage, String> {
     match result {
-        Ok(img) => AgentQueryResult::Image {
+        Ok(img) => Ok(AgentImage {
             path: img.path.clone(),
             png: img.png.clone(),
             width: img.width,
             height: img.height,
-        },
-        Err(message) => AgentQueryResult::Error(message.clone()),
+        }),
+        Err(message) => Err(message.clone()),
     }
 }
 
 fn forward_screenshot_responses(
     mut reader: MessageReader<ScreenshotResponse>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentScreenshotResult {
             request_id: AgentRequestId(response.request_id),
-            result: screenshot_response_to_query_result(&response.result),
-        });
+            result: screenshot_result(&response.result),
+        }));
     }
 }
 
 fn forward_snapshot_responses(
     mut reader: MessageReader<BrowserSnapshotResponse>,
-    service: Option<Res<ServiceClient>>,
-    mut nav_awaiting: ResMut<NavAwaitingSnapshot>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        if nav_awaiting.0.remove(&response.request_id) {
-            let result = match &response.result {
-                Ok(json) => AgentCommandResult::Text(json.clone()),
-                Err(message) => AgentCommandResult::Error(message.clone()),
-            };
-            service.0.send(ClientMessage::AgentCommandResponse {
-                request_id: AgentRequestId(response.request_id),
-                result,
-            });
-        } else {
-            service.0.send(ClientMessage::AgentQueryResponse {
-                request_id: AgentRequestId(response.request_id),
-                result: snapshot_response_to_query_result(&response.result),
-            });
-        }
+        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserSnapshotResult {
+            request_id: AgentRequestId(response.request_id),
+            result: response.result.clone(),
+        }));
     }
 }
 
-fn record_start_response_to_query_result(result: &Result<u32, String>) -> AgentQueryResult {
-    match result {
-        Ok(max_secs) => AgentQueryResult::Text(format!("recording started, max {max_secs}s")),
-        Err(message) => AgentQueryResult::Error(message.clone()),
+fn forward_browser_scroll_responses(
+    mut reader: MessageReader<BrowserScrollResponse>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for response in reader.read() {
+        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserScrollResult {
+            request_id: AgentRequestId(response.request_id),
+            result: response.result.clone(),
+        }));
+    }
+}
+
+fn forward_navigation_snapshot_responses(
+    mut reader: MessageReader<BrowserNavigationSnapshotResponse>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for response in reader.read() {
+        let result = match &response.result {
+            Ok(json) => AgentCommandResult::Text(json.clone()),
+            Err(message) => AgentCommandResult::Error(message.clone()),
+        };
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
+            request_id: AgentRequestId(response.request_id),
+            result,
+        }));
     }
 }
 
 fn forward_record_start_responses(
     mut reader: MessageReader<RecordStartResponse>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentRecordStartResult {
             request_id: AgentRequestId(response.request_id),
-            result: record_start_response_to_query_result(&response.result),
-        });
+            result: response.result.clone(),
+        }));
     }
 }
 
-fn record_stop_response_to_query_result(
-    result: &Result<RecordingInfo, String>,
-) -> AgentQueryResult {
+fn recording_result(result: &Result<RecordingInfo, String>) -> Result<AgentRecording, String> {
     match result {
-        Ok(info) => AgentQueryResult::Recording {
+        Ok(info) => Ok(AgentRecording {
             mp4_path: info.mp4_path.clone(),
             gif_path: info.gif_path.clone(),
             duration_ms: info.duration_ms,
             bytes: info.bytes,
             auto_stopped: info.auto_stopped,
-        },
-        Err(message) => AgentQueryResult::Error(message.clone()),
+        }),
+        Err(message) => Err(message.clone()),
     }
 }
 
 fn forward_record_stop_responses(
     mut reader: MessageReader<RecordStopResponse>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentRecordStopResult {
             request_id: AgentRequestId(response.request_id),
-            result: record_stop_response_to_query_result(&response.result),
-        });
+            result: recording_result(&response.result),
+        }));
     }
 }
 
 fn forward_simulator_control_responses(
     mut reader: MessageReader<vmux_simulator::SimulatorControlResponse>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        let result = match &response.result {
-            Ok(message) => AgentQueryResult::Text(message.clone()),
-            Err(message) => AgentQueryResult::Error(message.clone()),
-        };
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentSimulatorControlResult {
             request_id: AgentRequestId(response.request_id),
-            result,
-        });
+            result: response.result.clone(),
+        }));
     }
 }
 
 fn forward_simulator_screenshot_responses(
     mut reader: MessageReader<vmux_simulator::SimulatorScreenshotResponse>,
-    service: Option<Res<ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
         let result = match &response.result {
-            Ok(image) => AgentQueryResult::Image {
+            Ok(image) => Ok(AgentImage {
                 path: image.path.clone(),
                 png: image.png.clone(),
                 width: image.width,
                 height: image.height,
-            },
-            Err(message) => AgentQueryResult::Error(message.clone()),
+            }),
+            Err(message) => Err(message.clone()),
         };
-        service.0.send(ClientMessage::AgentQueryResponse {
-            request_id: AgentRequestId(response.request_id),
-            result,
-        });
+        service_requests.write(ServiceRequest(
+            ClientMessage::AgentSimulatorScreenshotResult {
+                request_id: AgentRequestId(response.request_id),
+                result,
+            },
+        ));
     }
 }
 
@@ -499,6 +761,90 @@ fn forward_simulator_screenshot_responses(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+
+    fn query_routing_app() -> App {
+        let mut app = App::new();
+        app.add_message::<ServiceInbound>()
+            .add_message::<AgentQueryRequest>()
+            .add_message::<vmux_layout::apply::LayoutSnapshotRequest>()
+            .add_message::<WorkingDirectoryRequest>()
+            .add_message::<SettingsReadRequest>()
+            .add_message::<SpaceListRequest>()
+            .add_message::<CommandListRequest>()
+            .add_message::<VaultStatusRequest>()
+            .add_message::<BookmarkListRequest>()
+            .add_message::<ScreenshotRequest>()
+            .add_message::<BrowserSnapshotResolveRequest>()
+            .add_message::<BrowserScrollResolveRequest>()
+            .add_message::<RecordStartRequest>()
+            .add_message::<RecordStopRequest>()
+            .add_message::<vmux_simulator::SimulatorScreenshotRequest>()
+            .add_message::<vmux_simulator::SimulatorTapRequest>()
+            .add_message::<vmux_simulator::SimulatorSwipeRequest>()
+            .add_message::<vmux_simulator::SimulatorTypeTextRequest>()
+            .add_message::<vmux_simulator::SimulatorKeyPressRequest>()
+            .add_message::<vmux_simulator::SimulatorButtonPressRequest>()
+            .add_systems(Update, receive_agent_queries);
+        app
+    }
+
+    #[test]
+    fn service_and_local_queries_are_decoded_into_typed_requests() {
+        let mut app = query_routing_app();
+        let service_request_id = AgentRequestId([1; 16]);
+        let local_request_id = AgentRequestId([2; 16]);
+        let mut screenshots = app
+            .world()
+            .resource::<Messages<ScreenshotRequest>>()
+            .get_cursor();
+        let mut vault = app
+            .world()
+            .resource::<Messages<VaultStatusRequest>>()
+            .get_cursor();
+
+        app.world_mut()
+            .write_message(ServiceInbound(ServiceMessage::AgentQuery {
+                request_id: service_request_id,
+                query: AgentQuery::Screenshot {
+                    pane: Some("pane:7".to_string()),
+                },
+            }));
+        app.world_mut().write_message(AgentQueryRequest {
+            request_id: local_request_id,
+            query: AgentQuery::VaultStatus,
+        });
+        app.update();
+
+        let screenshot = screenshots
+            .read(app.world().resource::<Messages<ScreenshotRequest>>())
+            .next()
+            .expect("expected screenshot request");
+        assert_eq!(screenshot.request_id, service_request_id.0);
+        assert_eq!(screenshot.pane.as_deref(), Some("pane:7"));
+        let vault = vault
+            .read(app.world().resource::<Messages<VaultStatusRequest>>())
+            .next()
+            .expect("expected vault request");
+        assert_eq!(vault.request_id, local_request_id);
+    }
+
+    fn collect_space_rows(
+        spaces: Query<
+            (
+                Entity,
+                &vmux_layout::space::SpaceId,
+                &Name,
+                Has<vmux_core::Active>,
+                Option<&vmux_core::Order>,
+            ),
+            With<vmux_layout::space::Space>,
+        >,
+        focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
+        child_of: Query<&ChildOf>,
+        host_windows: Query<&HostWindow>,
+    ) -> Vec<AgentSpace> {
+        AgentSpaceCatalog::collect(&spaces, focused_window.as_deref(), &child_of, &host_windows).0
+    }
 
     #[test]
     fn listed_spaces_are_global_but_active_state_is_window_local() {
@@ -529,62 +875,53 @@ mod tests {
             ChildOf(second_root),
         ));
 
-        let json = app
-            .world_mut()
-            .run_system_once(|spaces: ListedSpaces| spaces.json())
-            .unwrap();
-        let rows: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        let rows = app.world_mut().run_system_once(collect_space_rows).unwrap();
 
         assert_eq!(rows.len(), 2);
-        assert_eq!(
-            rows.iter().find(|row| row["id"] == "shared").unwrap()["is_active"],
-            false
+        assert!(
+            !rows
+                .iter()
+                .find(|row| row.id == "shared")
+                .unwrap()
+                .is_active
         );
-        assert_eq!(
-            rows.iter().find(|row| row["id"] == "local").unwrap()["is_active"],
-            true
-        );
+        assert!(rows.iter().find(|row| row.id == "local").unwrap().is_active);
     }
 
     #[test]
     pub(crate) fn screenshot_response_maps_ok_and_err() {
-        let ok = screenshot_response_to_query_result(&Ok(ScreenshotImage {
+        let ok = screenshot_result(&Ok(ScreenshotImage {
             path: "/tmp/a.png".into(),
             png: vec![9, 8, 7],
             width: 10,
             height: 20,
-        }));
-        assert!(matches!(
-            ok,
-            AgentQueryResult::Image { path, png, width, height }
-                if path == "/tmp/a.png" && png == vec![9, 8, 7] && width == 10 && height == 20
-        ));
+        }))
+        .unwrap();
+        assert_eq!(ok.path, "/tmp/a.png");
+        assert_eq!(ok.png, vec![9, 8, 7]);
+        assert_eq!(ok.width, 10);
+        assert_eq!(ok.height, 20);
 
-        let err = screenshot_response_to_query_result(&Err("nope".to_string()));
-        assert!(matches!(err, AgentQueryResult::Error(m) if m == "nope"));
-    }
-
-    #[test]
-    pub(crate) fn record_start_response_maps_ok_and_err() {
-        let ok = record_start_response_to_query_result(&Ok(120));
-        assert!(matches!(ok, AgentQueryResult::Text(t) if t.contains("120")));
-        let err = record_start_response_to_query_result(&Err("nope".to_string()));
-        assert!(matches!(err, AgentQueryResult::Error(m) if m == "nope"));
+        assert_eq!(
+            screenshot_result(&Err("nope".to_string())),
+            Err("nope".to_string())
+        );
     }
 
     #[test]
     pub(crate) fn record_stop_response_maps_ok_and_err() {
-        let ok = record_stop_response_to_query_result(&Ok(RecordingInfo {
+        let ok = recording_result(&Ok(RecordingInfo {
             mp4_path: "/tmp/x.mp4".into(),
             gif_path: None,
             duration_ms: 1000,
             bytes: 42,
             auto_stopped: false,
-        }));
-        assert!(
-            matches!(ok, AgentQueryResult::Recording { mp4_path, .. } if mp4_path == "/tmp/x.mp4")
+        }))
+        .unwrap();
+        assert_eq!(ok.mp4_path, "/tmp/x.mp4");
+        assert_eq!(
+            recording_result(&Err("boom".to_string())),
+            Err("boom".to_string())
         );
-        let err = record_stop_response_to_query_result(&Err("boom".to_string()));
-        assert!(matches!(err, AgentQueryResult::Error(m) if m == "boom"));
     }
 }

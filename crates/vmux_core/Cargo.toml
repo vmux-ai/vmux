@@ -10,9 +10,12 @@ publish = false
 percent-encoding = "2"
 rkyv = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+similar = "2"
 uuid = { workspace = true }
 vmux_profile = { path = "../vmux_profile" }
-vmux_wire = { path = "../vmux_wire", features = ["bevy"] }
+vmux_path = { path = "../vmux_path" }
+vmux_api = { path = "../vmux_api", features = ["bevy"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
@@ -25,7 +28,6 @@ bevy_cef_core = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
-serde_json = { workspace = true }
 sha2 = "0.10"
 toml = { workspace = true }
 url = { workspace = true }

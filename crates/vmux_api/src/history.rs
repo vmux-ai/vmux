@@ -1,0 +1,53 @@
+#[vmux_api::contract]
+pub struct HistoryEntry {
+    pub url_entity_bits: u64,
+    pub url: String,
+    pub title: String,
+    pub favicon_url: String,
+    pub visit_created_at: i64,
+    pub visit_count: u32,
+    pub last_visited_at: i64,
+}
+
+#[vmux_api::ui_event(url = "vmux://history/")]
+pub struct HistoryQueryRequest {
+    pub query: Option<String>,
+    pub offset: u32,
+    pub limit: u32,
+    pub request_id: u64,
+}
+
+#[vmux_api::contract]
+pub struct HistoryQueryResponse {
+    pub request_id: u64,
+    pub offset: u32,
+    pub entries: Vec<HistoryEntry>,
+    pub has_more: bool,
+}
+
+#[vmux_api::ui_event(url = "vmux://history/")]
+pub struct HistoryDeleteRequest {
+    pub url_entity_bits: u64,
+}
+
+#[vmux_api::ui_event(url = "vmux://history/")]
+pub struct HistoryClearAllRequest;
+
+#[vmux_api::ui_event(url = "vmux://history/")]
+pub struct HistoryOpenRequest {
+    pub url: String,
+    pub in_new_stack: bool,
+}
+
+#[vmux_api::ui_event(urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/"])]
+pub struct HistorySuggestionsRequest {
+    pub query: String,
+    pub limit: u32,
+    pub request_id: u64,
+}
+
+#[vmux_api::contract]
+pub struct HistorySuggestionsResponse {
+    pub request_id: u64,
+    pub entries: Vec<HistoryEntry>,
+}

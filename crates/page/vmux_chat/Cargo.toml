@@ -26,12 +26,11 @@ pulldown-cmark = { version = "0.12", default-features = false, features = [
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-similar = "2"
 unicode-segmentation = "1"
 vmux_core = { path = "../../vmux_core" }
-vmux_service = { path = "../../host/vmux_service" }
+vmux_native = { path = "../../vmux_native" }
 vmux_ui = { path = "../../vmux_ui" }
-vmux_wire = { path = "../../vmux_wire", features = ["bevy"] }
+vmux_api = { path = "../../vmux_api", features = ["bevy"] }
 
 [lints]
 workspace = true

@@ -1,62 +1,41 @@
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+enum Events {}
+
+impl vmux_api::BinEventFamily for Events {
+    const TARGET: vmux_api::BinEventTarget =
+        vmux_api::BinEventTarget::Urls(&["vmux://agent/", "vmux://agents/"]);
+}
+
+#[vmux_api::ui_event(Default)]
 pub struct AgentInstallRunRequest {
     pub agent: String,
 }
 
-pub const AGENT_SETUP_PREREQ_EVENT: &str = "agent_setup_prereq";
-
-pub const AGENT_SETUP_RESULT_EVENT: &str = "agent_setup_result";
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct AgentSetupPrereqRequest {
     pub agent: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct AgentSetupPrereqStatus {
     pub needs_homebrew: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct AgentSetupResult {
     pub agent: String,
     pub ok: bool,
+}
+
+#[vmux_api::ui_state_patch(Default)]
+pub struct AgentSetupUiStatePatch {
+    pub prereq: Option<AgentSetupPrereqStatus>,
+    pub result: Option<AgentSetupResult>,
+}
+
+#[vmux_api::ui_state(Default)]
+pub struct AgentSetupUiState {
+    pub sequence: u64,
+    pub patches: Vec<AgentSetupUiStatePatch>,
 }
 
 #[cfg(test)]

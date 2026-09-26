@@ -6,10 +6,11 @@
 
 pub mod event;
 pub mod schema;
+pub mod state;
 pub mod themes;
 
 #[cfg(ui)]
-pub mod page;
+pub mod ui;
 
 #[cfg(host)]
 mod host;

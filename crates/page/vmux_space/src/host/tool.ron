@@ -1,0 +1,36 @@
+[
+    (
+        name: "list_spaces",
+        description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with rename_space / delete_space.",
+        input_schema: (type: Object),
+    ),
+    (
+        name: "create_space",
+        description: "Create a new space and switch to it. An omitted name is generated automatically.",
+        input_schema: (
+            type: Object,
+            properties: {"name": (type: String)},
+        ),
+    ),
+    (
+        name: "rename_space",
+        description: "Rename a space by stable ID. Use list_spaces to discover IDs.",
+        input_schema: (
+            type: Object,
+            required: ["space_id", "name"],
+            properties: {
+                "space_id": (type: String),
+                "name": (type: String),
+            },
+        ),
+    ),
+    (
+        name: "delete_space",
+        description: "Delete a space by stable ID. Use list_spaces to discover IDs.",
+        input_schema: (
+            type: Object,
+            required: ["space_id"],
+            properties: {"space_id": (type: String)},
+        ),
+    ),
+]

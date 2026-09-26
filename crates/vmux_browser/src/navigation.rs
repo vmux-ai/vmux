@@ -1,7 +1,12 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_command::{AppCommand, BrowserBarCommand, BrowserCommand, ReadAppCommands};
-use vmux_core::page::{HostHistoryDelta, HostHistoryNavigation};
+use vmux_api::VmuxRoute;
+#[cfg(test)]
+use vmux_command::CommandDefinition;
+use vmux_command::{
+    CommandDispatch, CommandRuntimePlugin, ReadCommandRequests, RegisterCommandDefinitions,
+};
+use vmux_core::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::Browser;
@@ -15,39 +20,78 @@ use vmux_layout::{
 use vmux_terminal::{self as terminal, Terminal};
 
 use crate::input::RecentBrowserInteraction;
-use crate::{NavPending, PendingNavSnapshots, send_page_open_response};
+use crate::{PendingNavigationUpdate, send_page_open_response};
 
 pub(crate) struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                drain_committed_navigation,
-                handle_browser_navigate_requests.after(vmux_terminal::ServiceMessageSet),
-                handle_browser_go_back_requests,
-                handle_browser_go_forward_requests,
-                handle_open_in_new_stack_requests,
-                handle_browser_open_history.in_set(ReadAppCommands),
-            ),
-        )
-        .add_systems(
-            Update,
-            (sync_page_metadata_to_tab, spawn_visit_on_navigation)
-                .chain()
-                .after(vmux_layout::apply_cef_state_from_webview),
-        );
+        app.add_message::<vmux_service::client::ServiceRequest>();
+        if !app.is_plugin_added::<CommandRuntimePlugin>() {
+            app.add_plugins(CommandRuntimePlugin);
+        }
+        app.add_message::<OpenHistoryRequest>()
+            .add_systems(
+                Startup,
+                spawn_history_command.in_set(RegisterCommandDefinitions),
+            )
+            .add_observer(issue_open_history)
+            .add_systems(
+                Update,
+                (
+                    drain_committed_navigation,
+                    handle_browser_navigate_requests.after(vmux_terminal::ServiceMessageSet),
+                    handle_browser_go_back_requests,
+                    handle_browser_go_forward_requests,
+                    handle_open_in_new_stack_requests,
+                    handle_browser_open_history.in_set(ReadCommandRequests),
+                ),
+            )
+            .add_systems(
+                Update,
+                (sync_page_metadata_to_tab, spawn_visit_on_navigation)
+                    .chain()
+                    .after(vmux_layout::apply_cef_state_from_webview),
+            );
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenHistoryRequest;
+
+#[derive(Component)]
+struct OpenHistoryBinding;
+
+fn spawn_history_command(mut commands: Commands) {
+    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("history.ron"));
+    commands.spawn((definitions.take("browser_open_history"), OpenHistoryBinding));
+    definitions.assert_all_registered();
+}
+
+fn issue_open_history(
+    trigger: On<CommandDispatch>,
+    registered: Query<(), With<OpenHistoryBinding>>,
+    mut requests: MessageWriter<OpenHistoryRequest>,
+) {
+    if registered.contains(trigger.event().command()) {
+        requests.write(OpenHistoryRequest);
     }
 }
 
 fn drain_committed_navigation(
     receiver: Res<WebviewCommittedNavigationReceiver>,
-    infrastructure: Res<crate::extensions::bridge_page::ExtensionInfrastructureEntities>,
+    infrastructure: Query<(), With<crate::extensions::bridge_page::ExtensionInfrastructureWebview>>,
+    retired_infrastructure: Query<
+        &crate::extensions::bridge_page::RetiredExtensionInfrastructureWebview,
+    >,
     mut writer: MessageWriter<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
 ) {
     while let Ok(ev) = receiver.0.try_recv() {
-        if infrastructure.contains(ev.webview) {
+        if infrastructure.contains(ev.webview)
+            || retired_infrastructure
+                .iter()
+                .any(|retired| retired.contains(ev.webview))
+        {
             continue;
         }
         writer.write(ev);
@@ -99,17 +143,16 @@ pub(crate) fn sync_page_metadata_to_tab(
             continue;
         }
         let content_is_web = meta.url.starts_with("http://") || meta.url.starts_with("https://");
-        let content_is_agent =
-            meta.url.starts_with("vmux://sessions/") || meta.url.starts_with("vmux://agent/");
-        if parent_meta.as_ref().is_some_and(|m| {
-            m.url.starts_with("vmux://sessions/") || m.url.starts_with("vmux://agent/")
+        let content_is_agent = VmuxRoute::parse(&meta.url).is_some_and(|route| route.is_agent());
+        if parent_meta.as_ref().is_some_and(|metadata| {
+            VmuxRoute::parse(&metadata.url).is_some_and(|route| route.is_agent())
         }) && !content_is_web
             && !content_is_agent
         {
             continue;
         }
         if let Some(parent_url) = parent_meta.as_ref().map(|m| m.url.as_str())
-            && parent_url.starts_with("vmux://")
+            && VmuxRoute::parse(parent_url).is_some()
             && (meta.url.starts_with("data:") || meta.url.is_empty())
         {
             continue;
@@ -133,7 +176,8 @@ fn handle_browser_go_back_requests(
     pane_children: Query<&Children, With<Pane>>,
     stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut host_history: HostHistoryNavigation,
+    host_histories: Query<(), With<HostHistory>>,
+    mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -154,7 +198,11 @@ fn handle_browser_go_back_requests(
         ) else {
             continue;
         };
-        if host_history.stepped(webview, HostHistoryDelta::Back) {
+        if host_histories.contains(webview) {
+            host_history_steps.write(HostHistoryStep {
+                webview,
+                delta: HostHistoryDelta::Back,
+            });
             continue;
         }
         commands.trigger(bevy_cef::prelude::RequestGoBack { webview });
@@ -170,7 +218,8 @@ fn handle_browser_go_forward_requests(
     pane_children: Query<&Children, With<Pane>>,
     stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut host_history: HostHistoryNavigation,
+    host_histories: Query<(), With<HostHistory>>,
+    mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -191,7 +240,11 @@ fn handle_browser_go_forward_requests(
         ) else {
             continue;
         };
-        if host_history.stepped(webview, HostHistoryDelta::Forward) {
+        if host_histories.contains(webview) {
+            host_history_steps.write(HostHistoryStep {
+                webview,
+                delta: HostHistoryDelta::Forward,
+            });
             continue;
         }
         commands.trigger(bevy_cef::prelude::RequestGoForward { webview });
@@ -199,24 +252,19 @@ fn handle_browser_go_forward_requests(
 }
 
 fn handle_browser_open_history(
-    mut reader: MessageReader<AppCommand>,
+    mut reader: MessageReader<OpenHistoryRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     mut writer: MessageWriter<PageOpenRequest>,
 ) {
-    for cmd in reader.read() {
-        if matches!(
-            cmd,
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenHistory))
-        ) {
-            let Some(pane) = focus.pane else {
-                continue;
-            };
-            writer.write(PageOpenRequest {
-                target: PageOpenTarget::NewStackInPane(pane),
-                url: "vmux://history/".to_string(),
-                request_id: None,
-            });
-        }
+    for _ in reader.read() {
+        let Some(pane) = focus.pane else {
+            continue;
+        };
+        writer.write(PageOpenRequest {
+            target: PageOpenTarget::NewStackInPane(pane),
+            url: "vmux://history/".to_string(),
+            request_id: None,
+        });
     }
 }
 
@@ -244,16 +292,16 @@ pub(crate) fn handle_browser_navigate_requests(
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
-    service: Option<Res<vmux_service::client::ServiceClient>>,
     mut commands: Commands,
     mut page_open_writer: MessageWriter<PageOpenRequest>,
-    mut pending_nav: ResMut<PendingNavSnapshots>,
+    mut pending_navigation: MessageWriter<PendingNavigationUpdate>,
     time: Res<Time>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &vmux_core::LastActivatedAt), With<vmux_layout::stack::Stack>>,
     stack_metadata: Query<&PageMetadata, With<Stack>>,
-    recent_interaction: Res<RecentBrowserInteraction>,
-    mut activate: MessageWriter<vmux_layout::active_panes::ActivatePane>,
+    recent_interactions: Query<&RecentBrowserInteraction>,
+    mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
+    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
 ) {
     for request in reader.read() {
         let vmux_layout::BrowserNavigateRequest {
@@ -263,6 +311,7 @@ pub(crate) fn handle_browser_navigate_requests(
             new_stack,
             profile,
         } = request.clone();
+        let is_vmux_route = VmuxRoute::parse(&url).is_some();
 
         if let Some(s) = pane.as_deref() {
             if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
@@ -271,13 +320,19 @@ pub(crate) fn handle_browser_navigate_requests(
                 let replace_start = !new_stack
                     && active_stack.is_some_and(|stack| {
                         stack_metadata.get(stack).is_ok_and(|metadata| {
-                            metadata.url.trim_end_matches('/')
-                                == vmux_start::START_PAGE_URL.trim_end_matches('/')
+                            VmuxRoute::parse(&metadata.url).is_some_and(|route| {
+                                VmuxRoute::parse(vmux_start::START_PAGE_URL)
+                                    .is_some_and(|start| route.same_page(&start))
+                            })
                         })
                     });
-                if new_stack && !url.starts_with("vmux://") && !url.starts_with("file:") {
-                    let activate_new =
-                        active_stack.is_none_or(|stack| !recent_interaction.active(stack));
+                if new_stack && !is_vmux_route && !url.starts_with("file:") {
+                    let activate_new = active_stack.is_none_or(|stack| {
+                        let Ok(interaction) = recent_interactions.get(stack) else {
+                            return true;
+                        };
+                        !interaction.active()
+                    });
                     let stack = commands
                         .spawn((
                             vmux_layout::stack::stack_bundle(),
@@ -290,9 +345,9 @@ pub(crate) fn handle_browser_navigate_requests(
                         ))
                         .id();
                     if let Some(profile) = profile {
-                        activate.write(vmux_layout::active_panes::ActivatePane {
-                            profile: vmux_layout::active_panes::ProfileId::Agent(profile),
-                            active: vmux_layout::active_panes::ActiveStack {
+                        activate.write(vmux_layout::active_pane::ActivatePane {
+                            profile: vmux_layout::active_pane::ProfileId::Agent(profile),
+                            active: vmux_layout::active_pane::ActiveStack {
                                 tab: None,
                                 pane: Some(target),
                                 stack: Some(stack),
@@ -307,10 +362,7 @@ pub(crate) fn handle_browser_navigate_requests(
                     });
                     continue;
                 }
-                let in_place = if replace_start
-                    || url.starts_with("vmux://")
-                    || url.starts_with("file:")
-                {
+                let in_place = if replace_start || is_vmux_route || url.starts_with("file:") {
                     None
                 } else {
                     vmux_layout::target::active_webview_for_tab(active_stack, &browsers, &terminals)
@@ -320,23 +372,18 @@ pub(crate) fn handle_browser_navigate_requests(
                         webview,
                         url: url.clone(),
                     });
-                    let displaced = match request_id {
-                        Some(rid) => pending_nav.0.insert(
+                    let update = match request_id {
+                        Some(request_id) => PendingNavigationUpdate::set(
                             webview,
-                            NavPending {
-                                request_id: rid,
-                                started: time.elapsed(),
-                                saw_loading: false,
-                                pane: Some(target.to_bits().to_string()),
-                            },
+                            request_id,
+                            time.elapsed(),
+                            Some(target.to_bits().to_string()),
                         ),
-                        None => pending_nav.0.remove(&webview),
+                        None => PendingNavigationUpdate::clear(webview),
                     };
-                    if let Some(old) = displaced {
-                        send_page_open_response(&service, Some(old.request_id), Ok(()));
-                    }
+                    pending_navigation.write(update);
                     if request_id.is_none() {
-                        send_page_open_response(&service, None, Ok(()));
+                        send_page_open_response(&mut service_requests, None, Ok(()));
                     }
                 } else {
                     let target = active_stack
@@ -351,7 +398,7 @@ pub(crate) fn handle_browser_navigate_requests(
                 }
             } else {
                 send_page_open_response(
-                    &service,
+                    &mut service_requests,
                     request_id,
                     Err(format!("browser_navigate: invalid pane id '{s}'")),
                 );
@@ -359,8 +406,10 @@ pub(crate) fn handle_browser_navigate_requests(
         } else if let Some(stack) = focus.stack.filter(|stack| {
             !new_stack
                 && stack_metadata.get(*stack).is_ok_and(|metadata| {
-                    metadata.url.trim_end_matches('/')
-                        == vmux_start::START_PAGE_URL.trim_end_matches('/')
+                    VmuxRoute::parse(&metadata.url).is_some_and(|route| {
+                        VmuxRoute::parse(vmux_start::START_PAGE_URL)
+                            .is_some_and(|start| route.same_page(&start))
+                    })
                 })
         }) {
             page_open_writer.write(PageOpenRequest {
@@ -371,10 +420,10 @@ pub(crate) fn handle_browser_navigate_requests(
         } else if let Some(webview) =
             vmux_layout::target::active_webview_for_tab(focus.stack, &browsers, &terminals)
         {
-            if url.starts_with("vmux://") || url.starts_with("file:") {
+            if is_vmux_route || url.starts_with("file:") {
                 let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) else {
                     send_page_open_response(
-                        &service,
+                        &mut service_requests,
                         request_id,
                         Err("browser_navigate: no focused pane for vmux URL".to_string()),
                     );
@@ -390,23 +439,18 @@ pub(crate) fn handle_browser_navigate_requests(
                     webview,
                     url: url.clone(),
                 });
-                let displaced = match request_id {
-                    Some(rid) => pending_nav.0.insert(
+                let update = match request_id {
+                    Some(request_id) => PendingNavigationUpdate::set(
                         webview,
-                        NavPending {
-                            request_id: rid,
-                            started: time.elapsed(),
-                            saw_loading: false,
-                            pane: focus.pane.map(|p| p.to_bits().to_string()),
-                        },
+                        request_id,
+                        time.elapsed(),
+                        focus.pane.map(|pane| pane.to_bits().to_string()),
                     ),
-                    None => pending_nav.0.remove(&webview),
+                    None => PendingNavigationUpdate::clear(webview),
                 };
-                if let Some(old) = displaced {
-                    send_page_open_response(&service, Some(old.request_id), Ok(()));
-                }
+                pending_navigation.write(update);
                 if request_id.is_none() {
-                    send_page_open_response(&service, None, Ok(()));
+                    send_page_open_response(&mut service_requests, None, Ok(()));
                 }
             }
         } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
@@ -417,7 +461,7 @@ pub(crate) fn handle_browser_navigate_requests(
             });
         } else {
             send_page_open_response(
-                &service,
+                &mut service_requests,
                 request_id,
                 Err("browser_navigate: no focused pane".to_string()),
             );
@@ -448,22 +492,26 @@ mod committed_navigation_tests {
         let mut app = App::new();
         let infrastructure = app
             .world_mut()
-            .spawn(crate::extensions::bridge_page::ExtensionBridgeWebview {
-                extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-                role: crate::extensions::bridge_page::ExtensionBridgeRole::Transport,
-            })
+            .spawn((
+                crate::extensions::bridge_page::ExtensionBridgeWebview {
+                    extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                    role: crate::extensions::bridge_page::ExtensionBridgeRole::Transport,
+                },
+                crate::extensions::bridge_page::ExtensionInfrastructureWebview,
+            ))
             .id();
         let visible = app.world_mut().spawn_empty().id();
         let (sender, receiver) = async_channel::unbounded();
         app.insert_resource(WebviewCommittedNavigationReceiver(receiver))
-            .init_resource::<crate::extensions::bridge_page::ExtensionInfrastructureEntities>()
             .init_resource::<Collected>()
             .add_message::<WebviewCommittedNavigationEvent>()
             .add_systems(Update, (drain_committed_navigation, collect).chain());
-        app.world_mut()
-            .resource_mut::<crate::extensions::bridge_page::ExtensionInfrastructureEntities>()
-            .insert(infrastructure);
         app.world_mut().despawn(infrastructure);
+        app.world_mut().spawn(
+            crate::extensions::bridge_page::RetiredExtensionInfrastructureWebview::new(
+                infrastructure,
+            ),
+        );
         for webview in [infrastructure, visible] {
             sender
                 .send_blocking(WebviewCommittedNavigationEvent {
@@ -479,5 +527,50 @@ mod committed_navigation_tests {
         app.update();
 
         assert_eq!(app.world().resource::<Collected>().0, [visible]);
+    }
+}
+
+#[cfg(test)]
+mod command_definition_tests {
+    use super::*;
+    use vmux_command::CommandInvocation;
+
+    #[test]
+    fn history_mcp_definition_dispatches_to_the_typed_request() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(CommandRuntimePlugin)
+            .add_message::<OpenHistoryRequest>()
+            .add_systems(Startup, spawn_history_command)
+            .add_observer(issue_open_history);
+        app.update();
+
+        let mut query = app.world_mut().query::<&CommandDefinition>();
+        let tools = query
+            .iter(app.world())
+            .filter_map(CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["browser_open_history"],
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<CommandInvocation>>()
+            .write(CommandInvocation::new(
+                Entity::PLACEHOLDER,
+                "browser_open_history",
+            ));
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<OpenHistoryRequest>>()
+                .drain()
+                .count(),
+            1,
+        );
     }
 }

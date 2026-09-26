@@ -307,20 +307,11 @@ pub fn note_source_position(source: &str, start_line: u32, offset: u32) -> (u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PkgAction {
+pub enum PackageOperation {
     Install,
     Update,
     Uninstall,
     None,
-}
-
-pub fn should_apply_explorer_chrome(
-    local_client_id: u64,
-    latest_request_id: u64,
-    event_client_id: u64,
-    event_request_id: u64,
-) -> bool {
-    event_client_id != local_client_id || event_request_id >= latest_request_id
 }
 
 pub fn merge_tree_motion_rows(current: &[TreeRow], next: &[TreeRow]) -> Vec<(TreeRow, bool)> {
@@ -374,17 +365,17 @@ pub fn pkg_status_class(status: LspPkgStatus) -> &'static str {
     }
 }
 
-pub fn pkg_action(status: LspPkgStatus, installable: bool) -> PkgAction {
+pub fn package_operation(status: LspPkgStatus, installable: bool) -> PackageOperation {
     match status {
-        LspPkgStatus::Installed | LspPkgStatus::Running => PkgAction::Uninstall,
-        LspPkgStatus::Outdated => PkgAction::Update,
-        LspPkgStatus::Installing => PkgAction::None,
-        LspPkgStatus::OnPath => PkgAction::None,
+        LspPkgStatus::Installed | LspPkgStatus::Running => PackageOperation::Uninstall,
+        LspPkgStatus::Outdated => PackageOperation::Update,
+        LspPkgStatus::Installing => PackageOperation::None,
+        LspPkgStatus::OnPath => PackageOperation::None,
         LspPkgStatus::Available | LspPkgStatus::Failed => {
             if installable {
-                PkgAction::Install
+                PackageOperation::Install
             } else {
-                PkgAction::None
+                PackageOperation::None
             }
         }
     }
@@ -459,34 +450,54 @@ pub fn gutter_width(total_lines: u32) -> usize {
     digits.max(3)
 }
 
-pub struct DisplayCells;
+#[derive(Clone, Copy)]
+struct DisplayCellWidth(u32);
 
-impl DisplayCells {
-    pub fn of_char(ch: char) -> u32 {
-        UnicodeWidthChar::width(ch).unwrap_or(0) as u32
+impl From<char> for DisplayCellWidth {
+    fn from(character: char) -> Self {
+        Self(UnicodeWidthChar::width(character).unwrap_or(0) as u32)
     }
+}
 
-    pub fn of_str(text: &str) -> u32 {
+impl DisplayCellWidth {
+    fn get(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DisplayCells<'a> {
+    text: &'a str,
+}
+
+impl<'a> From<&'a str> for DisplayCells<'a> {
+    fn from(text: &'a str) -> Self {
+        Self { text }
+    }
+}
+
+impl DisplayCells<'_> {
+    pub fn width(self) -> u32 {
         let mut cells = 0;
-        for ch in text.chars() {
-            cells += Self::of_char(ch);
+        for character in self.text.chars() {
+            cells += DisplayCellWidth::from(character).get();
         }
         cells
     }
 
-    pub fn char_at(text: &str, cell: u32) -> usize {
+    pub fn char_at(self, cell: u32) -> usize {
         let mut cells = 0;
-        for (index, ch) in text.chars().enumerate() {
+        for (index, character) in self.text.chars().enumerate() {
             if cells >= cell {
                 return index;
             }
-            let width = Self::of_char(ch);
+            let width = DisplayCellWidth::from(character).get();
             if cells + width > cell {
                 return index;
             }
             cells += width;
         }
-        text.chars().count()
+        self.text.chars().count()
     }
 }
 
@@ -517,7 +528,7 @@ impl CellMetrics {
     }
 
     fn advance_of(self, ch: char) -> f64 {
-        match DisplayCells::of_char(ch) {
+        match DisplayCellWidth::from(ch).get() {
             0 => 0.0,
             2 => self.wide_advance(),
             cells => self.narrow * f64::from(cells),
@@ -536,7 +547,8 @@ impl<'a> ColumnRuler<'a> {
     }
 
     pub fn wrapped_row(text: &'a str, metrics: CellMetrics, wrap_columns: u16, index: u32) -> Self {
-        if wrap_columns == 0 || index == 0 && u32::from(wrap_columns) >= DisplayCells::of_str(text)
+        if wrap_columns == 0
+            || index == 0 && u32::from(wrap_columns) >= DisplayCells::from(text).width()
         {
             return Self::new(text, metrics);
         }
@@ -553,7 +565,7 @@ impl<'a> ColumnRuler<'a> {
                 end = at;
                 break;
             }
-            cells += DisplayCells::of_char(ch);
+            cells += DisplayCellWidth::from(ch).get();
         }
         let start = start.unwrap_or(text.len());
         Self::new(&text[start..end.max(start)], metrics)
@@ -566,7 +578,7 @@ impl<'a> ColumnRuler<'a> {
             if cells >= col {
                 return x;
             }
-            let width = DisplayCells::of_char(ch);
+            let width = DisplayCellWidth::from(ch).get();
             let advance = self.metrics.advance_of(ch);
             if cells + width > col {
                 return x + advance * f64::from(col - cells) / f64::from(width);
@@ -597,7 +609,7 @@ impl<'a> ColumnRuler<'a> {
     pub fn advance_at(&self, col: u32) -> f64 {
         let mut cells = 0;
         for ch in self.text.chars() {
-            let width = DisplayCells::of_char(ch);
+            let width = DisplayCellWidth::from(ch).get();
             if width == 0 {
                 continue;
             }
@@ -616,7 +628,7 @@ impl<'a> ColumnRuler<'a> {
         let mut cells = 0;
         let mut at = 0.0;
         for ch in self.text.chars() {
-            let width = DisplayCells::of_char(ch);
+            let width = DisplayCellWidth::from(ch).get();
             if width == 0 {
                 continue;
             }
@@ -936,19 +948,31 @@ mod tests {
     }
 
     #[test]
-    fn pkg_action_by_status() {
+    fn package_operation_by_status() {
         assert_eq!(
-            pkg_action(LspPkgStatus::Available, true),
-            PkgAction::Install
+            package_operation(LspPkgStatus::Available, true),
+            PackageOperation::Install
         );
-        assert_eq!(pkg_action(LspPkgStatus::Available, false), PkgAction::None);
         assert_eq!(
-            pkg_action(LspPkgStatus::Installed, true),
-            PkgAction::Uninstall
+            package_operation(LspPkgStatus::Available, false),
+            PackageOperation::None
         );
-        assert_eq!(pkg_action(LspPkgStatus::Outdated, true), PkgAction::Update);
-        assert_eq!(pkg_action(LspPkgStatus::Installing, true), PkgAction::None);
-        assert_eq!(pkg_action(LspPkgStatus::OnPath, true), PkgAction::None);
+        assert_eq!(
+            package_operation(LspPkgStatus::Installed, true),
+            PackageOperation::Uninstall
+        );
+        assert_eq!(
+            package_operation(LspPkgStatus::Outdated, true),
+            PackageOperation::Update
+        );
+        assert_eq!(
+            package_operation(LspPkgStatus::Installing, true),
+            PackageOperation::None
+        );
+        assert_eq!(
+            package_operation(LspPkgStatus::OnPath, true),
+            PackageOperation::None
+        );
     }
 
     #[test]
@@ -956,14 +980,6 @@ mod tests {
         assert_eq!(pkg_status_label(LspPkgStatus::OnPath), "On PATH");
         assert_eq!(pkg_status_label(LspPkgStatus::Installed), "Installed");
         assert_eq!(pkg_status_label(LspPkgStatus::Available), "Available");
-    }
-
-    #[test]
-    fn rapid_explorer_toggle_ignores_stale_echoes() {
-        assert!(!should_apply_explorer_chrome(7, 3, 7, 1));
-        assert!(!should_apply_explorer_chrome(7, 3, 7, 2));
-        assert!(should_apply_explorer_chrome(7, 3, 7, 3));
-        assert!(should_apply_explorer_chrome(7, 3, 9, 1));
     }
 
     #[test]
@@ -1107,12 +1123,12 @@ mod column_tests {
         let text = "ab今c😀d\u{0301}e";
         let ruler = ColumnRuler::new(text, MENLO);
 
-        assert_eq!(DisplayCells::of_str(text), 9);
+        assert_eq!(DisplayCells::from(text).width(), 9);
 
         let mut boundaries = vec![0];
         let mut cells = 0;
         for ch in text.chars() {
-            cells += DisplayCells::of_char(ch);
+            cells += DisplayCellWidth::from(ch).get();
             boundaries.push(cells);
         }
         boundaries.dedup();
@@ -1180,10 +1196,10 @@ mod column_tests {
 
     #[test]
     fn cell_and_character_columns_diverge_on_wide_text() {
-        assert_eq!(DisplayCells::of_str("今日の予定は？"), 14);
-        assert_eq!(DisplayCells::char_at("今日の予定は？", 14), 7);
-        assert_eq!(DisplayCells::char_at("今日の予定は？", 4), 2);
-        assert_eq!(DisplayCells::char_at("ab今", 3), 2);
-        assert_eq!(DisplayCells::char_at("ab今", 4), 3);
+        assert_eq!(DisplayCells::from("今日の予定は？").width(), 14);
+        assert_eq!(DisplayCells::from("今日の予定は？").char_at(14), 7);
+        assert_eq!(DisplayCells::from("今日の予定は？").char_at(4), 2);
+        assert_eq!(DisplayCells::from("ab今").char_at(3), 2);
+        assert_eq!(DisplayCells::from("ab今").char_at(4), 3);
     }
 }

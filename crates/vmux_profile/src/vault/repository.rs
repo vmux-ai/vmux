@@ -4,7 +4,6 @@ use std::process::{Command, Output};
 use super::recovery::{RECOVERY_DIR, RECOVERY_FILE, read_recovery_envelope};
 use super::snapshot::{
     FORMAT_VERSION, INDEX_FILE, MANIFEST_FILE, MANIFEST_VERSION, OBJECTS_DIR, RemoteManifest,
-    write_atomic,
 };
 
 pub(super) fn validate_empty_vault_repository(repository: &Path) -> Result<(), String> {
@@ -40,10 +39,11 @@ pub(super) fn read_manifest(repository: &Path) -> Result<RemoteManifest, String>
 pub(super) fn write_manifest(repository: &Path, manifest: &RemoteManifest) -> Result<(), String> {
     let source = ron::ser::to_string_pretty(manifest, ron::ser::PrettyConfig::new())
         .map_err(|error| error.to_string())?;
-    write_atomic(
-        &repository.join(MANIFEST_FILE),
+    vmux_path::AtomicFile::write(
+        repository.join(MANIFEST_FILE),
         format!("{source}\n").as_bytes(),
     )
+    .map_err(|error| error.to_string())
 }
 
 pub(super) fn manifest_from_ref(repository: &Path, branch: &str) -> Result<RemoteManifest, String> {

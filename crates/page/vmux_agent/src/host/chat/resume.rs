@@ -1,34 +1,36 @@
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
+use super::{AgentChatView, ChatResumeProjection};
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
-use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
+use crate::strategy::{AgentStrategies, acp_agent_kind};
+use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_chat::event::{
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest,
+    ChatResumeQueryRequest, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession,
 };
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
 use vmux_session::AcpSession;
 use vmux_session::AgentSession;
-use vmux_wire::chat::{PROMPT_HISTORY_EVENT, PromptHistory, PromptHistoryRequest};
 
 pub(super) struct ChatResumePlugin;
 
 impl Plugin for ChatResumePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(
+        app.add_plugins(UiEventPlugin::<(
             ResumeListRequest,
+            ChatResumeQueryRequest,
             ResumeSession,
-            RuntimeSwitchRequest,
             PromptHistoryRequest,
-        )>::for_hosts(super::CHAT_EVENT_HOSTS))
+        )>::default())
             .init_resource::<ResumableScan>()
             .add_observer(on_resume_list_request)
+            .add_observer(on_chat_resume_query_request)
+            .add_observer(on_chat_resume_query)
             .add_observer(on_resume_session)
-            .add_observer(on_runtime_switch_request)
             .add_observer(on_prompt_history_request)
             .add_systems(
                 Update,
@@ -49,8 +51,54 @@ struct ResumeListTask {
 
 struct ResumeListAnswer {
     sessions: ResumableSessions,
-    scanned: Option<Vec<crate::client::cli::strategy::ResumableSession>>,
+    scanned: Option<Vec<crate::runtime::cli::strategy::ResumableSession>>,
     labels: RepoLabels,
+}
+
+#[derive(EntityEvent)]
+pub(super) struct ChatResumeQuery {
+    #[event_target]
+    webview: Entity,
+    active: bool,
+    query: String,
+}
+
+impl ChatResumeQuery {
+    pub(super) fn new(webview: Entity, active: bool, query: String) -> Self {
+        Self {
+            webview,
+            active,
+            query,
+        }
+    }
+}
+
+impl ChatResumeProjection {
+    fn start(&mut self, active: bool, query: String) -> Option<u64> {
+        if self.0.active == active && self.0.query == query {
+            return None;
+        }
+        self.0.request_id = self.0.request_id.wrapping_add(1).max(1);
+        self.0.active = active;
+        self.0.query = query;
+        self.0.sessions.clear();
+        self.0.total = 0;
+        self.0.loading = active;
+        Some(self.0.request_id)
+    }
+
+    fn finish(&mut self, sessions: &ResumableSessions) -> bool {
+        if self.0.request_id != sessions.request_id
+            || self.0.query != sessions.query
+            || !self.0.active
+        {
+            return false;
+        }
+        self.0.sessions.clone_from(&sessions.sessions);
+        self.0.total = sessions.total;
+        self.0.loading = false;
+        true
+    }
 }
 
 #[derive(Component)]
@@ -74,11 +122,11 @@ struct RepoLabels {
 }
 
 impl RepoLabels {
-    fn of(&mut self, cwd: &std::path::Path, fallback: &str) -> (String, String) {
+    fn resolve(&mut self, cwd: &std::path::Path, fallback: &str) -> (String, String) {
         if let Some(held) = self.by_dir.get(cwd) {
             return held.clone();
         }
-        let read = match vmux_git::worktree::RepoLabel::of(cwd) {
+        let read = match vmux_git::worktree::RepoLabel::read(cwd) {
             Some(label) => (label.project, label.branch),
             None => (fallback.to_string(), String::new()),
         };
@@ -88,7 +136,7 @@ impl RepoLabels {
 }
 
 fn resume_entries(
-    sessions: Vec<crate::client::cli::strategy::ResumableSession>,
+    sessions: Vec<crate::runtime::cli::strategy::ResumableSession>,
     active_kind: Option<AgentKind>,
     active_name: &str,
     labels: &mut RepoLabels,
@@ -111,7 +159,7 @@ fn resume_entries(
             sid: session.sid.clone(),
         }
         .format();
-        let (project, branch) = labels.of(&session.cwd, &dir);
+        let (project, branch) = labels.resolve(&session.cwd, &dir);
         let latest = strategies.latest_message(session.kind, &session.transcript);
         entries.push(ResumableSessionEntry {
             kind: session.kind.as_url_segment().to_string(),
@@ -164,7 +212,7 @@ fn resume_agent_name(
 
 #[derive(Resource, Default)]
 struct ResumableScan {
-    sessions: Vec<crate::client::cli::strategy::ResumableSession>,
+    sessions: Vec<crate::runtime::cli::strategy::ResumableSession>,
     labels: RepoLabels,
     read_at: Option<std::time::Instant>,
 }
@@ -224,10 +272,10 @@ struct Preferred;
 
 impl Preferred {
     fn first(
-        sessions: &[crate::client::cli::strategy::ResumableSession],
+        sessions: &[crate::runtime::cli::strategy::ResumableSession],
         kind: Option<AgentKind>,
         project: Option<&std::path::Path>,
-    ) -> Vec<crate::client::cli::strategy::ResumableSession> {
+    ) -> Vec<crate::runtime::cli::strategy::ResumableSession> {
         if kind.is_none() && project.is_none() {
             return sessions.to_vec();
         }
@@ -248,13 +296,13 @@ struct PromptHistoryTask {
 }
 
 fn on_prompt_history_request(
-    trigger: On<BinReceive<PromptHistoryRequest>>,
+    trigger: On<UiInput<PromptHistoryRequest>>,
     strategies: Option<Res<AgentStrategies>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let wake = vmux_core::host::wake::Wake::of(proxy);
+    let wake = vmux_core::host::wake::Wake::from_resource(proxy);
     let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
     let asked = trigger.event().payload.clone();
     let Some(kind) = AgentKind::from_url_segment(&asked.agent) else {
@@ -279,16 +327,14 @@ fn drain_prompt_history_tasks(
             continue;
         };
         commands.entity(entity).despawn();
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            task.webview,
-            PROMPT_HISTORY_EVENT,
-            &history,
-        ));
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::from_event(task.webview, &history));
     }
 }
 
 fn on_resume_list_request(
-    trigger: On<BinReceive<ResumeListRequest>>,
+    trigger: On<UiInput<ResumeListRequest>>,
     strategies: Option<Res<AgentStrategies>>,
     ask: ResumeAsk,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -296,41 +342,40 @@ fn on_resume_list_request(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let wake = vmux_core::host::wake::Wake::of(proxy);
+    let wake = vmux_core::host::wake::Wake::from_resource(proxy);
     let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
     let (kind, agent_name) = ask.agent_of(webview);
     let project = ask.project_of(webview);
+    let request_id = trigger.event().payload.request_id;
+    let query = trigger.event().payload.query.clone();
     let offset = trigger.event().payload.offset;
     let mut labels = scan.labels.clone();
-    let held = scan.is_fresh().then(|| {
-        let total = scan.sessions.len() as u32;
-        let ranked = Preferred::first(&scan.sessions, kind, project.as_deref());
-        let page: Vec<_> = ranked
+    let held = scan
+        .is_fresh()
+        .then(|| Preferred::first(&scan.sessions, kind, project.as_deref()));
+    let task = IoTaskPool::get().spawn(async move {
+        let _wake = wake;
+        let (ranked, scanned) = match held {
+            Some(ranked) => (ranked, None),
+            None => {
+                let all = strategies.list_all_sessions().await;
+                let ranked = Preferred::first(&all, kind, project.as_deref());
+                (ranked, Some(all))
+            }
+        };
+        let mut built = resume_entries(ranked, kind, &agent_name, &mut labels, &strategies);
+        built.retain(|session| session.matches(&query));
+        let total = built.len() as u32;
+        let sessions = built
             .into_iter()
             .skip(offset as usize)
             .take(ResumableSessions::PAGE as usize)
             .collect();
-        (page, total)
-    });
-    let task = IoTaskPool::get().spawn(async move {
-        let _wake = wake;
-        let (page, total, scanned) = match held {
-            Some((page, total)) => (page, total, None),
-            None => {
-                let all = strategies.list_all_sessions().await;
-                let total = all.len() as u32;
-                let page = Preferred::first(&all, kind, project.as_deref())
-                    .into_iter()
-                    .skip(offset as usize)
-                    .take(ResumableSessions::PAGE as usize)
-                    .collect();
-                (page, total, Some(all))
-            }
-        };
-        let built = resume_entries(page, kind, &agent_name, &mut labels, &strategies);
         ResumeListAnswer {
             sessions: ResumableSessions {
-                sessions: built,
+                request_id,
+                query,
+                sessions,
                 offset,
                 total,
             },
@@ -341,8 +386,52 @@ fn on_resume_list_request(
     commands.spawn(ResumeListTask { webview, task });
 }
 
+fn on_chat_resume_query_request(
+    trigger: On<UiInput<ChatResumeQueryRequest>>,
+    mut commands: Commands,
+) {
+    commands.trigger(ChatResumeQuery::new(
+        trigger.event().webview,
+        trigger.event().payload.active,
+        trigger.event().payload.query.clone(),
+    ));
+}
+
+fn on_chat_resume_query(
+    trigger: On<ChatResumeQuery>,
+    mut projections: Query<&mut ChatResumeProjection, With<AgentChatView>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event_target();
+    let request = trigger.event();
+    let Ok(mut projection) = projections.get_mut(webview) else {
+        return;
+    };
+    let Some(request_id) = projection.start(request.active, request.query.clone()) else {
+        return;
+    };
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+            webview,
+            &projection.0,
+        ),
+    );
+    if !request.active {
+        return;
+    }
+    commands.trigger(UiInput {
+        webview,
+        payload: ResumeListRequest {
+            request_id,
+            query: request.query.clone(),
+            offset: 0,
+        },
+    });
+}
+
 fn drain_resume_list_tasks(
     mut tasks: Query<(Entity, &mut ResumeListTask)>,
+    mut projections: Query<&mut ChatResumeProjection, With<AgentChatView>>,
     mut scan: ResMut<ResumableScan>,
     mut commands: Commands,
 ) {
@@ -356,11 +445,21 @@ fn drain_resume_list_tasks(
             scan.sessions = scanned;
             scan.read_at = Some(std::time::Instant::now());
         }
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            task.webview,
-            RESUMABLE_SESSIONS_EVENT,
-            &answer.sessions,
-        ));
+        if let Ok(mut projection) = projections.get_mut(task.webview) {
+            if !projection.finish(&answer.sessions) {
+                continue;
+            }
+            commands.trigger(
+                vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+                    task.webview,
+                    &projection.0,
+                ),
+            );
+        } else {
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_api::command_bar::CommandBarUiState,
+            >::from_event(task.webview, &answer.sessions));
+        }
     }
 }
 
@@ -394,7 +493,7 @@ fn drain_resume_handoff_tasks(
 }
 
 fn on_resume_session(
-    trigger: On<BinReceive<ResumeSession>>,
+    trigger: On<UiInput<ResumeSession>>,
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     settings: Res<vmux_setting::AppSettings>,
@@ -423,13 +522,11 @@ fn on_resume_session(
         let task = IoTaskPool::get().spawn(async move {
             let messages = strategies.load_transcript(kind, &source_sid)?;
             let built = build_context(&messages, DEFAULT_CONTEXT_LIMIT);
-            let messages_json = serde_json::to_string(&messages)
-                .map_err(|err| format!("serialize imported conversation: {err}"))?;
             Ok(StackSessionHandoff {
                 source_agent,
                 source_kind: kind,
                 source_sid,
-                messages_json,
+                messages,
                 context: built.text,
                 truncated: built.truncated,
             })
@@ -453,75 +550,35 @@ fn on_resume_session(
     });
 }
 
-fn on_runtime_switch_request(
-    trigger: On<BinReceive<RuntimeSwitchRequest>>,
-    child_of: Query<&ChildOf>,
-    acp_sessions: Query<&AcpSession>,
-    settings: Res<vmux_setting::AppSettings>,
-    mut swap: MessageWriter<SwapStackSession>,
-) {
-    let to = trigger.event().payload.to.clone();
-    let Ok(parent) = child_of.get(trigger.event().webview) else {
-        return;
-    };
-    let stack = parent.parent();
-    let Ok(acp) = acp_sessions.get(stack) else {
-        bevy::log::warn!("runtime switch: current pane is not an ACP session");
-        return;
-    };
-    let acp_ids: Vec<String> = settings.agent.acp.iter().map(|c| c.id.clone()).collect();
-    let Some((target_url, cwd)) = runtime_switch_target(
-        &acp.agent_id,
-        acp.resume.as_deref(),
-        &acp.cwd,
-        &to,
-        &acp_ids,
-    ) else {
-        bevy::log::warn!(
-            "runtime switch to '{to}' unavailable for ACP agent '{}' (no shared session id yet)",
-            acp.agent_id
-        );
-        return;
-    };
-    swap.write(SwapStackSession {
-        stack,
-        target_url,
-        cwd,
-        handoff: None,
-    });
-}
-
-fn runtime_switch_target(
-    agent_id: &str,
-    resume: Option<&str>,
-    cwd: &std::path::Path,
-    to: &str,
-    acp_ids: &[String],
-) -> Option<(String, std::path::PathBuf)> {
-    let kind = acp_agent_kind(agent_id)?;
-    if !kind_supports_cross_runtime(kind) {
-        return None;
-    }
-    let sid = resume?;
-    let target = match to {
-        "cli" => crate::AgentUrl::Cli {
-            kind,
-            sid: sid.to_string(),
-        },
-        "acp" => crate::AgentUrl::for_session(kind, sid, true, acp_ids),
-        _ => return None,
-    };
-    Some((target.format(), cwd.to_path_buf()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use crate::strategy::kind_supports_cross_runtime;
+
+    #[test]
+    fn resume_projection_rejects_stale_results() {
+        let mut projection = ChatResumeProjection::default();
+        let stale = projection.start(true, "old".into()).unwrap();
+        let current = projection.start(true, "new".into()).unwrap();
+        assert!(!projection.finish(&ResumableSessions {
+            request_id: stale,
+            query: "old".into(),
+            ..Default::default()
+        }));
+        assert!(projection.0.loading);
+        assert!(projection.finish(&ResumableSessions {
+            request_id: current,
+            query: "new".into(),
+            total: 1,
+            ..Default::default()
+        }));
+        assert_eq!(projection.0.total, 1);
+        assert!(!projection.0.loading);
+    }
 
     #[test]
     fn resume_results_include_all_agent_kinds_with_source_labels() {
-        use crate::client::cli::strategy::ResumableSession;
+        use crate::runtime::cli::strategy::ResumableSession;
         use std::time::SystemTime;
 
         let session = |kind, sid: &str| ResumableSession {
@@ -578,50 +635,6 @@ mod tests {
         assert_eq!(
             resume_agent_name(None, None, Some("custom-acp")),
             "custom-acp"
-        );
-    }
-
-    #[test]
-    fn runtime_switch_builtin_acp_agents_to_cli() {
-        let cases = [
-            ("claude", "claude"),
-            ("claude-acp", "claude"),
-            ("codex", "codex"),
-            ("codex-acp", "codex"),
-            ("vibe", "vibe"),
-            ("mistral-vibe", "vibe"),
-        ];
-        let ids = cases
-            .iter()
-            .map(|(id, _)| (*id).to_string())
-            .collect::<Vec<_>>();
-        for (agent_id, cli_segment) in cases {
-            let got = runtime_switch_target(agent_id, Some("sid-9"), Path::new("/w"), "cli", &ids);
-            assert_eq!(
-                got,
-                Some((
-                    format!("vmux://sessions/{cli_segment}/cli/sid-9"),
-                    std::path::PathBuf::from("/w")
-                ))
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_switch_requires_session_id() {
-        let ids = vec!["claude".to_string()];
-        assert_eq!(
-            runtime_switch_target("claude", None, Path::new("/w"), "cli", &ids),
-            None
-        );
-    }
-
-    #[test]
-    fn runtime_switch_gated_for_unknown_agent() {
-        let ids = vec!["claude".to_string()];
-        assert_eq!(
-            runtime_switch_target("custom", Some("s"), Path::new("/w"), "cli", &ids),
-            None
         );
     }
 }

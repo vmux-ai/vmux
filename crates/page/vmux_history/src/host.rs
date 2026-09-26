@@ -1,6 +1,7 @@
 pub mod prune;
 pub mod query;
 pub mod spawn;
+mod state;
 pub mod transition;
 
 use bevy::prelude::*;
@@ -12,13 +13,15 @@ pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::ui::HistoryPage::plugin());
         app.world_mut().spawn((
             crate::PAGE_MANIFEST,
             NativelyHosted::page(crate::PAGE_URL, "History"),
         ));
-        vmux_core::register_host_spawn(app, "history");
         app.add_plugins((
             crate::spawn::HistorySpawnPlugin,
+            crate::host::state::StatePlugin,
             crate::query::HistoryQueryPlugin,
             crate::prune::HistoryPrunePlugin,
         ));

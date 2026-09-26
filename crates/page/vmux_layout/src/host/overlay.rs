@@ -2,16 +2,14 @@ use std::collections::BTreeSet;
 
 use crate::event::LayoutOverlayEvent;
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 pub struct LayoutOverlayPlugin;
 
 impl Plugin for LayoutOverlayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(LayoutOverlayEvent,)>::for_hosts(
-            &["layout"],
-        ))
-        .add_observer(on_layout_overlay_emit);
+        app.add_plugins(UiEventPlugin::<(LayoutOverlayEvent,)>::default())
+            .add_observer(on_layout_overlay_emit);
     }
 }
 
@@ -19,7 +17,7 @@ impl Plugin for LayoutOverlayPlugin {
 pub struct LayoutOverlayActive(BTreeSet<String>);
 
 fn on_layout_overlay_emit(
-    trigger: On<BinReceive<LayoutOverlayEvent>>,
+    trigger: On<UiInput<LayoutOverlayEvent>>,
     mut active: Query<&mut LayoutOverlayActive>,
     mut commands: Commands,
 ) {

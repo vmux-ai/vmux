@@ -5,8 +5,7 @@
 )]
 
 mod appearance;
-mod bookmark_menu;
-mod bookmark_persistence;
+mod bookmark;
 mod boot_status;
 #[cfg(any(feature = "recording", feature = "screenshots"))]
 mod capture_output;
@@ -20,10 +19,9 @@ mod display;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
 mod key_claim;
-mod log_forward;
-mod mcp_connection;
 #[cfg(target_os = "macos")]
-mod native_keyboard;
+mod keyboard;
+mod log_forward;
 #[cfg(feature = "native-notifications")]
 mod notify;
 mod os_menu;
@@ -38,7 +36,6 @@ mod remote;
 mod runtime;
 #[cfg(feature = "screenshots")]
 mod screenshot;
-mod tools;
 
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod splash;
@@ -56,42 +53,36 @@ use bevy::window::{
     WindowPosition, WindowResolution,
 };
 
-use crate::plugins::{DesktopPlugins, FeaturePlugins, VmuxCorePlugins};
-use {vmux_browser::BrowserPlugin, vmux_layout::LayoutPlugin};
+use crate::{persistence::PersistencePlugin, plugins::DesktopPlugins};
 
 pub struct VmuxPlugin;
 
 impl Plugin for VmuxPlugin {
     fn build(&self, app: &mut App) {
-        let primary_window = window_config(false);
-        let window_plugin = WindowPlugin {
-            primary_window: Some(primary_window),
+        let winit_settings = runtime::foreground_winit_settings(false, false);
+        app.insert_resource(winit_settings).add_plugins((
+            DefaultPlugins
+                .set(Self::window())
+                .set(bevy::log::LogPlugin {
+                    filter: "bevy_camera_controller=warn".into(),
+                    custom_layer: crate::log_forward::file_log_layer,
+                    ..default()
+                }),
+            PersistencePlugin,
+            vmux_app::VmuxPlugin::builder().desktop().build(),
+            DesktopPlugins,
+        ));
+    }
+}
+
+impl VmuxPlugin {
+    fn window() -> WindowPlugin {
+        WindowPlugin {
+            primary_window: Some(window_config(false)),
             close_when_requested: false,
             exit_condition: ExitCondition::DontExit,
             ..default()
-        };
-
-        let winit_settings = runtime::foreground_winit_settings(false, false);
-        app.insert_resource(winit_settings).add_plugins((
-            VmuxCorePlugins,
-            DefaultPlugins.set(window_plugin).set(bevy::log::LogPlugin {
-                filter: "bevy_camera_controller=warn".into(),
-                custom_layer: crate::log_forward::file_log_layer,
-                ..default()
-            }),
-            LayoutPlugin,
-            FeaturePlugins,
-            BrowserPlugin,
-            DesktopPlugins,
-        ));
-
-        #[cfg(target_os = "macos")]
-        app.add_plugins(vmux_browser::native_page::NativePagePlugin::in_pane(
-            &vmux_git::page::NATIVE_PAGE,
-        ))
-        .add_plugins(vmux_browser::native_page::NativePagePlugin::in_pane(
-            &vmux_git::page::LEGACY_NATIVE_PAGE,
-        ));
+        }
     }
 }
 
@@ -172,27 +163,9 @@ mod tests {
 
     #[test]
     fn window_plugin_keeps_app_alive_after_last_window_closes() {
-        let source = include_str!("lib.rs");
-        assert!(
-            source.contains("ExitCondition::DontExit"),
-            "WindowPlugin must opt out of automatic exit so Vmux.app survives last-window-close"
-        );
-    }
+        let plugin = VmuxPlugin::window();
 
-    #[test]
-    fn desktop_uses_single_layout_crate_for_cef_and_layout() {
-        let source = include_str!("lib.rs");
-
-        assert!(source.contains("vmux_layout::"));
-        assert!(!source.contains(&["vmux_layout", "::footer"].concat()));
-        assert!(!source.contains(&["vmux_", "header::HeaderPlugin"].concat()));
-        assert!(!source.contains(&["vmux_", "side_sheet::SideSheetPlugin"].concat()));
-    }
-
-    #[test]
-    fn dev_build_has_no_tick_logger() {
-        let source = include_str!("lib.rs");
-
-        assert!(!source.contains(&["app", ".update", "():"].concat()));
+        assert!(matches!(plugin.exit_condition, ExitCondition::DontExit));
+        assert!(!plugin.close_when_requested);
     }
 }

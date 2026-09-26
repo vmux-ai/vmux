@@ -23,7 +23,8 @@ pub(crate) struct HostFocusPlugin;
 impl Plugin for HostFocusPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HostFocusIntent>()
-            .add_systems(Update, publish_native_page_owns_escape)
+            .init_resource::<KeyboardContext>()
+            .add_systems(Update, sync_keyboard_context.in_set(KeyboardContextSet))
             .add_systems(
                 PostUpdate,
                 (compute_host_focus_intent, apply_windowed_host_focus)
@@ -40,17 +41,26 @@ fn page_owns_escape(terminal_focused: bool, overlay_open: bool) -> bool {
     terminal_focused || overlay_open
 }
 
-fn publish_native_page_owns_escape(
+fn sync_keyboard_context(
     terminal_focus_q: Query<(), (With<Terminal>, With<KeyboardOwner>)>,
     overlay_q: OverlayStateQuery,
+    mut context: ResMut<KeyboardContext>,
 ) {
-    let overlay_owns_input = OverlayState::of_any(&overlay_q).owns_input();
-    crate::set_native_page_owns_escape(page_owns_escape(
-        !terminal_focus_q.is_empty(),
-        overlay_owns_input,
-    ));
-    crate::set_native_text_entry_owns_keys(overlay_owns_input);
+    let overlay_owns_input = OverlayState::from_query(&overlay_q).owns_input();
+    *context = KeyboardContext {
+        page_owns_escape: page_owns_escape(!terminal_focus_q.is_empty(), overlay_owns_input),
+        text_entry_owns_keys: overlay_owns_input,
+    };
 }
+
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyboardContext {
+    pub page_owns_escape: bool,
+    pub text_entry_owns_keys: bool,
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct KeyboardContextSet;
 
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostFocusIntent {
@@ -94,7 +104,7 @@ pub(crate) fn compute_host_focus_intent(
 ) {
     let next = if let Some((modal, windowed, shown_inline)) = modal_q.iter().find_map(
         |(entity, node, visibility, keyboard_target, windowed, shown_inline)| {
-            OverlayState::of(
+            OverlayState::resolve(
                 node.display,
                 visibility.copied().unwrap_or_default(),
                 keyboard_target,
@@ -139,7 +149,7 @@ fn set_intent(intent: &mut ResMut<HostFocusIntent>, next: HostFocusIntent) {
     }
 }
 
-fn windowed_focus_action(
+fn windowed_focus_target(
     intent: HostFocusIntent,
     has_browser: bool,
     has_native_focus: Option<bool>,
@@ -177,7 +187,7 @@ pub(crate) fn apply_windowed_host_focus(
         ),
         _ => (false, None),
     };
-    if let Some(webview) = windowed_focus_action(
+    if let Some(webview) = windowed_focus_target(
         *intent,
         has_browser,
         has_native_focus,
@@ -199,8 +209,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<HostFocusIntent>()
+            .init_resource::<KeyboardContext>()
             .insert_resource(FocusedStack::default())
-            .add_systems(Update, compute_host_focus_intent);
+            .add_systems(Update, (sync_keyboard_context, compute_host_focus_intent));
         app
     }
 
@@ -247,6 +258,45 @@ mod tests {
         let mut app = app();
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    #[test]
+    fn overlay_publishes_keyboard_ownership_through_ecs() {
+        let mut app = app();
+        app.world_mut().spawn((
+            WindowOverlay,
+            Node {
+                display: Display::Flex,
+                ..default()
+            },
+            KeyboardOwner,
+        ));
+
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<KeyboardContext>(),
+            KeyboardContext {
+                page_owns_escape: true,
+                text_entry_owns_keys: true,
+            }
+        );
+    }
+
+    #[test]
+    fn focused_terminal_keeps_escape_without_claiming_text_entry() {
+        let mut app = app();
+        app.world_mut().spawn((Terminal, KeyboardOwner));
+
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<KeyboardContext>(),
+            KeyboardContext {
+                page_owns_escape: true,
+                text_entry_owns_keys: false,
+            }
+        );
     }
 
     #[test]
@@ -405,12 +455,12 @@ mod tests {
     }
 
     #[test]
-    fn windowed_focus_action_focuses_available_target_once() {
+    fn windowed_focus_target_focuses_available_target_once() {
         let webview = Entity::from_bits(1);
         let mut focused = None;
 
         assert_eq!(
-            windowed_focus_action(
+            windowed_focus_target(
                 HostFocusIntent::Windowed(webview),
                 true,
                 None,
@@ -421,7 +471,7 @@ mod tests {
         );
         assert_eq!(focused, Some(webview));
         assert_eq!(
-            windowed_focus_action(
+            windowed_focus_target(
                 HostFocusIntent::Windowed(webview),
                 true,
                 None,
@@ -434,12 +484,12 @@ mod tests {
     }
 
     #[test]
-    fn windowed_focus_action_refocuses_after_browser_reappears() {
+    fn windowed_focus_target_refocuses_after_browser_reappears() {
         let webview = Entity::from_bits(1);
         let mut focused = None;
 
         assert_eq!(
-            windowed_focus_action(
+            windowed_focus_target(
                 HostFocusIntent::Windowed(webview),
                 true,
                 None,
@@ -449,7 +499,7 @@ mod tests {
             Some(webview)
         );
         assert_eq!(
-            windowed_focus_action(
+            windowed_focus_target(
                 HostFocusIntent::Windowed(webview),
                 false,
                 None,
@@ -460,7 +510,7 @@ mod tests {
         );
         assert_eq!(focused, None);
         assert_eq!(
-            windowed_focus_action(
+            windowed_focus_target(
                 HostFocusIntent::Windowed(webview),
                 true,
                 None,
@@ -472,12 +522,12 @@ mod tests {
     }
 
     #[test]
-    fn windowed_focus_action_recovers_lost_native_focus() {
+    fn windowed_focus_target_recovers_lost_native_focus() {
         let webview = Entity::from_bits(1);
         let mut focused = Some(webview);
 
         assert_eq!(
-            windowed_focus_action(
+            windowed_focus_target(
                 HostFocusIntent::Windowed(webview),
                 true,
                 Some(false),
@@ -489,12 +539,12 @@ mod tests {
     }
 
     #[test]
-    fn windowed_focus_action_preserves_held_native_focus() {
+    fn windowed_focus_target_preserves_held_native_focus() {
         let webview = Entity::from_bits(1);
         let mut focused = Some(webview);
 
         assert_eq!(
-            windowed_focus_action(
+            windowed_focus_target(
                 HostFocusIntent::Windowed(webview),
                 true,
                 Some(true),
@@ -506,13 +556,13 @@ mod tests {
     }
 
     #[test]
-    fn windowed_focus_action_focuses_changed_target() {
+    fn windowed_focus_target_focuses_changed_target() {
         let previous = Entity::from_bits(1);
         let next = Entity::from_bits(2);
         let mut focused = Some(previous);
 
         assert_eq!(
-            windowed_focus_action(
+            windowed_focus_target(
                 HostFocusIntent::Windowed(next),
                 true,
                 Some(false),
@@ -530,7 +580,7 @@ mod tests {
         let mut focused = Some(webview);
 
         assert_eq!(
-            windowed_focus_action(
+            windowed_focus_target(
                 HostFocusIntent::Windowed(webview),
                 true,
                 Some(true),
@@ -542,22 +592,22 @@ mod tests {
     }
 
     #[test]
-    fn windowed_focus_action_clears_cache_for_winit_host() {
+    fn windowed_focus_target_clears_cache_for_winit_host() {
         let mut focused = Some(Entity::from_bits(1));
 
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::WinitHost, false, None, &mut focused, false),
+            windowed_focus_target(HostFocusIntent::WinitHost, false, None, &mut focused, false),
             None
         );
         assert_eq!(focused, None);
     }
 
     #[test]
-    fn windowed_focus_action_clears_cache_when_unmanaged() {
+    fn windowed_focus_target_clears_cache_when_unmanaged() {
         let mut focused = Some(Entity::from_bits(1));
 
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::WinitHost, false, None, &mut focused, false),
+            windowed_focus_target(HostFocusIntent::WinitHost, false, None, &mut focused, false),
             None
         );
         assert_eq!(focused, None);

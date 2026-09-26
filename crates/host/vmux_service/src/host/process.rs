@@ -1,4 +1,3 @@
-use crate::protocol::{ProcessId, ProcessInfo, ServiceMessage};
 use alacritty_terminal::{
     event::{Event as TermEvent, EventListener as TermEventListener},
     grid::{Dimensions, Scroll},
@@ -19,6 +18,7 @@ use std::{
 #[cfg(unix)]
 use std::{os::unix::ffi::OsStrExt, path::Component};
 use tokio::sync::{broadcast, mpsc};
+use vmux_api::protocol::{ProcessId, ProcessInfo, ServiceMessage};
 use vmux_core::event::*;
 
 const MAX_PTY_CHUNKS_PER_POLL: usize = 64;
@@ -172,6 +172,7 @@ fn run_pty_reader(
             }
         }
     }
+    let _ = wake_tx.send(process_id);
 }
 
 #[derive(Clone)]
@@ -552,6 +553,7 @@ impl Process {
                         Err(_) => break,
                     }
                 }
+                let _ = wake_tx.send(wake_process_id);
             })
             .map_err(|e| format!("failed to spawn PTY reader: {e}"))?;
 
@@ -881,8 +883,8 @@ impl Process {
         self.sync_viewport();
     }
 
-    pub fn copy_mode_key(&mut self, key: crate::protocol::CopyModeKey) -> Option<String> {
-        use crate::protocol::CopyModeKey as K;
+    pub fn copy_mode_key(&mut self, key: vmux_api::protocol::CopyModeKey) -> Option<String> {
+        use vmux_api::protocol::CopyModeKey as K;
         let cols = self.cols;
         let rows = self.rows;
         let (cur_col, cur_row, last_find) = {
@@ -1501,12 +1503,12 @@ impl Process {
             for event in self.osc133.feed(&data) {
                 let kind = match event {
                     crate::host::osc133::Osc133Event::CommandStart => {
-                        crate::protocol::CommandLifecycleKind::Started
+                        vmux_api::protocol::CommandLifecycleKind::Started
                     }
                     crate::host::osc133::Osc133Event::CommandEnd(exit_code) => {
                         self.command_ended_seq = self.command_ended_seq.wrapping_add(1);
                         self.last_command_exit = exit_code;
-                        crate::protocol::CommandLifecycleKind::Ended { exit_code }
+                        vmux_api::protocol::CommandLifecycleKind::Ended { exit_code }
                     }
                 };
                 let _ = self.patch_tx.send(ServiceMessage::CommandLifecycle {
@@ -1773,11 +1775,7 @@ impl Process {
         let grid = self.term.grid();
         let num_lines = grid.screen_lines();
         let offset = grid.display_offset() as i32;
-
-        let mut lines = Vec::with_capacity(num_lines);
-        for row_idx in 0..num_lines {
-            lines.push(build_line(&self.term, row_idx, offset));
-        }
+        let lines = self.visible_lines();
 
         let cursor_point = grid.cursor.point;
         let scrolled_back = offset > 0;
@@ -1800,6 +1798,30 @@ impl Process {
             cols: grid.columns() as u16,
             rows: num_lines as u16,
         }
+    }
+
+    pub fn visible_text(&self) -> String {
+        self.visible_lines()
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.text.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn visible_lines(&self) -> Vec<TermLine> {
+        let grid = self.term.grid();
+        let num_lines = grid.screen_lines();
+        let offset = grid.display_offset() as i32;
+        let mut lines = Vec::with_capacity(num_lines);
+        for row_idx in 0..num_lines {
+            lines.push(build_line(&self.term, row_idx, offset));
+        }
+        lines
     }
 
     pub fn full_text(&self) -> String {
@@ -1924,6 +1946,19 @@ impl ProcessManager {
             }
         }
         exited
+    }
+
+    pub fn reap_exited(&mut self) {
+        let exited = self.poll_all();
+        for id in exited {
+            let keep = self
+                .processes
+                .get(&id)
+                .is_some_and(|process| process.keep_after_exit());
+            if !keep {
+                self.remove_process(&id);
+            }
+        }
     }
 
     pub fn remove_process(&mut self, id: &ProcessId) {
@@ -2399,7 +2434,7 @@ mod tests {
         let mut saw_end = false;
         while let Ok(msg) = rx.try_recv() {
             if let ServiceMessage::CommandLifecycle {
-                kind: crate::protocol::CommandLifecycleKind::Ended { exit_code },
+                kind: vmux_api::protocol::CommandLifecycleKind::Ended { exit_code },
                 ..
             } = msg
             {
@@ -2504,11 +2539,11 @@ mod tests {
 
         process.process_output_for_test(b"\x1b[?1049h\x1b[Hone\r\ntwo\r\nthree\x1b[H");
         process.enter_copy_mode();
-        process.copy_mode_key(crate::protocol::CopyModeKey::StartLineSelection);
-        process.copy_mode_key(crate::protocol::CopyModeKey::Up);
+        process.copy_mode_key(vmux_api::protocol::CopyModeKey::StartLineSelection);
+        process.copy_mode_key(vmux_api::protocol::CopyModeKey::Up);
 
         assert_eq!(process.copy_mode.as_ref().unwrap().cursor.1, 1);
-        process.copy_mode_key(crate::protocol::CopyModeKey::Up);
+        process.copy_mode_key(vmux_api::protocol::CopyModeKey::Up);
         process.kill();
 
         assert_eq!(*captured.lock().unwrap(), b"\x1b[<64;7;5M".to_vec());

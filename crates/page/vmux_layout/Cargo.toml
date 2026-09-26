@@ -17,8 +17,9 @@ path = "src/lib.rs"
 rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_core = { path = "../../vmux_core" }
+vmux_native = { path = "../../vmux_native" }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_api = { path = "../../vmux_api" }
 
 [dev-dependencies]
 serde_json = { workspace = true }
@@ -41,6 +42,8 @@ vmux_command = { path = "../vmux_command" }
 vmux_flex = { path = "../../vmux_flex" }
 vmux_git = { path = "../../vmux_git" }
 vmux_history = { path = "../vmux_history" }
+vmux_macro = { path = "../../vmux_macro" }
+vmux_tool = { path = "../../vmux_tool" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

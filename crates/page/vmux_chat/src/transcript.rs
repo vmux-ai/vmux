@@ -1,11 +1,14 @@
 use dioxus::prelude::*;
-use std::collections::HashMap;
+use vmux_api::chat::{
+    ChatDiffLineKind, ChatItem, ChatPlanStatus, ChatSubagentState, ChatSubagentStatus,
+    ChatSubagentSummary, ChatToolArgument, ChatToolArgumentValue, ChatToolArguments, ChatToolCall,
+    ChatToolChild, ChatToolChildCall, ChatTurn, ChatTurnRow, WORKING_VERB_IDS,
+};
+use vmux_api::prompt_media::ChatAttachment;
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
-use vmux_wire::chat::{ChatBlock, ChatItem, ChatTurn, WORKING_VERB_IDS};
-use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 
 use crate::activity::{
     ActivityIcon, ActivityIconView, FileActivityIcon, ToolActivityIcon, ToolPresentation,
@@ -142,8 +145,6 @@ pub fn MessageCopyButton(text: String) -> Element {
 pub fn ChatItemRow(
     absolute_index: usize,
     item: ChatItem,
-    attachment_previews: Signal<HashMap<String, ChatAttachment>>,
-    latest_tool_block: Option<usize>,
     agent_name: String,
     agent_avatar: Option<String>,
     agent_color: String,
@@ -192,7 +193,6 @@ pub fn ChatItemRow(
                         for attachment in attachments {
                             UserAttachment {
                                 attachment: attachment.clone(),
-                                previews: attachment_previews,
                             }
                         }
                     }
@@ -203,7 +203,6 @@ pub fn ChatItemRow(
             TurnView {
                 turn_index: key,
                 turn: turn.clone(),
-                latest_tool_index: latest_tool_block,
                 agent_name,
                 agent_avatar,
                 agent_color,
@@ -213,15 +212,8 @@ pub fn ChatItemRow(
 }
 
 #[component]
-fn UserAttachment(
-    attachment: ChatSubmitAttachment,
-    previews: Signal<HashMap<String, ChatAttachment>>,
-) -> Element {
-    let preview_data_url = previews
-        .read()
-        .get(&attachment.path)
-        .map(|preview| preview.preview_data_url.clone())
-        .unwrap_or_default();
+fn UserAttachment(attachment: ChatAttachment) -> Element {
+    let preview_data_url = &attachment.preview_data_url;
     if attachment.mime_type.starts_with("image/") && !preview_data_url.is_empty() {
         return rsx! {
             figure {
@@ -252,35 +244,13 @@ fn UserAttachment(
 pub fn TurnView(
     turn_index: usize,
     turn: ChatTurn,
-    latest_tool_index: Option<usize>,
     agent_name: String,
     agent_avatar: Option<String>,
     agent_color: String,
 ) -> Element {
     let key = turn_index;
     let turn = &turn;
-    let reconnecting = matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. }));
-    let block_count = turn.blocks.len();
-    let blocks = turn
-        .blocks
-        .iter()
-        .enumerate()
-        .filter_map(|(key, block)| {
-            if turn.parent_tool_index(key).is_some() {
-                return None;
-            }
-            let children = turn
-                .blocks
-                .iter()
-                .enumerate()
-                .filter(|(child_key, _)| turn.parent_tool_index(*child_key) == Some(key))
-                .map(|(index, child)| (index, child.clone()))
-                .collect::<Vec<_>>();
-            Some((key, block.clone(), children))
-        })
-        .collect::<Vec<_>>();
-    let live_tool = turn.running.then_some(latest_tool_index).flatten();
-    let items = TurnItem::over(blocks.clone(), live_tool);
+    let reconnecting = matches!(turn.rows.last(), Some(ChatTurnRow::Reconnect { .. }));
     let duration_label = turn.duration_secs.map(|duration| {
         if turn.step_count == 0 {
             let elapsed = fmt_elapsed(duration);
@@ -308,42 +278,19 @@ pub fn TurnView(
             )
         }
     });
-    let copy_text = turn
-        .blocks
-        .iter()
-        .filter_map(|block| match block {
-            ChatBlock::Text(text) if !text.is_empty() => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
     rsx! {
         div {
             key: "{key}",
             class: "flex w-full flex-col gap-2 [contain-intrinsic-size:auto_180px] [content-visibility:auto]",
-            if !blocks.is_empty() || turn.running || duration_label.is_some() {
+            if !turn.rows.is_empty() || turn.running || duration_label.is_some() {
                 AssistantTurn {
                     name: agent_name,
                     avatar_src: agent_avatar,
                     avatar_background: agent_color,
-                    copy_text,
+                    copy_text: turn.copy_text.clone(),
                     created_at_ms: turn.created_at_ms,
-                    for item in items {
-                        match item {
-                            TurnItem::Block((j, block, children)) => rsx! {
-                                TurnBlock {
-                                    key: "{j}",
-                                    block_index: j,
-                                    block,
-                                    nested: children,
-                                    latest_thinking: j + 1 == block_count,
-                                    latest_tool: live_tool == Some(j),
-                                }
-                            },
-                            TurnItem::FinishedTools(held) => rsx! {
-                                FinishedToolCalls { key: "tools-{held[0].0}", blocks: held }
-                            },
-                        }
+                    for row in turn.rows.iter().cloned() {
+                        TurnBlock { key: "{row.index()}", row }
                     }
                     if turn.running && !reconnecting {
                         WorkingIndicator {}
@@ -404,45 +351,15 @@ pub fn WorkingIndicator() -> Element {
     }
 }
 
-fn normalized_tool_args(args: &str) -> Option<serde_json::Value> {
-    let mut value = serde_json::from_str::<serde_json::Value>(args).ok()?;
-    while let serde_json::Value::Object(map) = &value {
-        let Some(arguments) = map.get("arguments") else {
-            break;
-        };
-        if map.contains_key("server") || map.contains_key("tool") || map.contains_key("name") {
-            value = arguments.clone();
-        } else {
-            break;
-        }
-    }
-    Some(value)
-}
-
-fn tool_arg_label(key: &str) -> String {
-    let mut label = key.replace('_', " ");
-    if let Some(first) = label.get_mut(0..1) {
-        first.make_ascii_uppercase();
-    }
-    label
-}
-
-fn tool_arg_is_path(key: &str, value: &str) -> bool {
-    matches!(
-        key,
-        "path" | "file" | "file_path" | "cwd" | "dir" | "directory" | "workdir"
-    ) || value.starts_with('/')
-}
-
 #[component]
-fn ToolArg(name: String, value: serde_json::Value) -> Element {
-    let key = name;
-    let label = tool_arg_label(&key);
+fn ToolArg(argument: ChatToolArgument) -> Element {
+    let key = argument.name;
+    let label = argument.label;
     let row_class = "relative flex min-w-0 items-center gap-3 py-1.5 pl-1 before:absolute before:-left-3 before:top-1/2 before:h-px before:w-2 before:bg-foreground/20";
     let label_class =
         "shrink-0 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground/80";
-    match value {
-        serde_json::Value::String(text) if tool_arg_is_path(&key, &text) => rsx! {
+    match argument.value {
+        ChatToolArgumentValue::Path(text) => rsx! {
             div { class: "{row_class}",
                 {rsx! { TypeIcon { path: text.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-85" } }}
                 if !key.is_empty() {
@@ -451,25 +368,18 @@ fn ToolArg(name: String, value: serde_json::Value) -> Element {
                 code { class: "min-w-0 flex-1 truncate text-right font-mono text-[11px] text-foreground/80", title: "{text}", "{text}" }
             }
         },
-        serde_json::Value::String(text)
-            if matches!(
-                key.as_str(),
-                "cmd" | "command" | "script" | "patch" | "text" | "content"
-            ) || text.contains('\n') =>
-        {
-            rsx! {
-                div { class: "relative py-1.5 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
-                    if !key.is_empty() {
-                        div { class: "mb-1.5 flex items-center gap-1.5 {label_class}",
-                            span { class: "h-1.5 w-1.5 rounded-full bg-success/70" }
-                            "{label}"
-                        }
+        ChatToolArgumentValue::Code(text) => rsx! {
+            div { class: "relative py-1.5 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
+                if !key.is_empty() {
+                    div { class: "mb-1.5 flex items-center gap-1.5 {label_class}",
+                        span { class: "h-1.5 w-1.5 rounded-full bg-success/70" }
+                        "{label}"
                     }
-                    pre { class: "max-h-56 overflow-auto whitespace-pre-wrap break-words border-l border-foreground/20 py-1 pl-3 font-mono text-[11px] leading-relaxed text-foreground/80", "{text}" }
                 }
+                pre { class: "max-h-56 overflow-auto whitespace-pre-wrap break-words border-l border-foreground/20 py-1 pl-3 font-mono text-[11px] leading-relaxed text-foreground/80", "{text}" }
             }
-        }
-        serde_json::Value::String(text) => rsx! {
+        },
+        ChatToolArgumentValue::Text(text) => rsx! {
             div { class: "{row_class}",
                 if !key.is_empty() {
                     span { class: "{label_class}", "{label}" }
@@ -477,7 +387,7 @@ fn ToolArg(name: String, value: serde_json::Value) -> Element {
                 code { class: "min-w-0 flex-1 truncate text-right font-mono text-[11px] text-foreground/80", title: "{text}", "{text}" }
             }
         },
-        serde_json::Value::Bool(value) => {
+        ChatToolArgumentValue::Bool(value) => {
             let tone = if value {
                 "bg-success/10 text-success ring-success/20"
             } else {
@@ -492,7 +402,7 @@ fn ToolArg(name: String, value: serde_json::Value) -> Element {
                 }
             }
         }
-        serde_json::Value::Number(value) => rsx! {
+        ChatToolArgumentValue::Number(value) => rsx! {
             div { class: "{row_class}",
                 if !key.is_empty() {
                     span { class: "{label_class}", "{label}" }
@@ -500,31 +410,31 @@ fn ToolArg(name: String, value: serde_json::Value) -> Element {
                 code { class: "ml-auto font-mono text-[11px] tabular-nums text-cyan-600 dark:text-cyan-300", "{value}" }
             }
         },
-        serde_json::Value::Array(values) => rsx! {
+        ChatToolArgumentValue::List(values) => rsx! {
             div { class: "relative py-1 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
                 if !key.is_empty() {
                     div { class: "mb-1 {label_class}", "{label}" }
                 }
                 div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
-                    for (index , value) in values.into_iter().enumerate() {
-                        ToolArg { name: format!("{}", index + 1), value }
+                    for value in values {
+                        ToolArg { argument: value }
                     }
                 }
             }
         },
-        serde_json::Value::Object(values) => rsx! {
+        ChatToolArgumentValue::Object(values) => rsx! {
             div { class: "relative py-1 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
                 if !key.is_empty() {
                     div { class: "mb-1 {label_class}", "{label}" }
                 }
                 div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
-                    for (child_key , child_value) in values {
-                        ToolArg { name: child_key, value: child_value }
+                    for value in values {
+                        ToolArg { argument: value }
                     }
                 }
             }
         },
-        serde_json::Value::Null => rsx! {
+        ChatToolArgumentValue::Null => rsx! {
             div { class: "{row_class}",
                 if !key.is_empty() {
                     span { class: "{label_class}", "{label}" }
@@ -536,58 +446,30 @@ fn ToolArg(name: String, value: serde_json::Value) -> Element {
 }
 
 #[component]
-fn ToolArgs(args: String) -> Element {
-    let args = args.as_str();
-    let Some(value) = normalized_tool_args(args) else {
-        return rsx! {
-            pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{args}" }
-        };
-    };
-    match value {
-        serde_json::Value::Object(map) if map.is_empty() => rsx! {},
-        serde_json::Value::Object(map) => rsx! {
+fn ToolArgs(arguments: ChatToolArguments) -> Element {
+    match arguments {
+        ChatToolArguments::None => rsx! {},
+        ChatToolArguments::Fields(fields) => rsx! {
             div { class: "ml-1 mt-2 flex flex-col border-l border-foreground/20 pl-3", aria_label: "Tool arguments",
-                for (key , value) in map {
-                    ToolArg { name: key, value: value }
+                for argument in fields {
+                    ToolArg { argument }
                 }
             }
         },
-        value => rsx! {
-            div { class: "ml-1 mt-2 border-l border-foreground/20 pl-3", ToolArg { name: String::new(), value: value } }
+        ChatToolArguments::Value(value) => rsx! {
+            div { class: "ml-1 mt-2 border-l border-foreground/20 pl-3",
+                ToolArg { argument: ChatToolArgument { name: String::new(), label: String::new(), value } }
+            }
         },
-    }
-}
-
-type NestedBlock = (usize, ChatBlock);
-type PlacedBlock = (usize, ChatBlock, Vec<NestedBlock>);
-
-enum TurnItem {
-    Block(PlacedBlock),
-    FinishedTools(Vec<PlacedBlock>),
-}
-
-impl TurnItem {
-    fn over(placed: Vec<PlacedBlock>, live_tool: Option<usize>) -> Vec<Self> {
-        let mut items: Vec<Self> = Vec::new();
-        for block in placed {
-            let foldable =
-                matches!(block.1, ChatBlock::ToolUse { .. }) && live_tool != Some(block.0);
-            if !foldable {
-                items.push(Self::Block(block));
-                continue;
-            }
-            match items.last_mut() {
-                Some(Self::FinishedTools(held)) => held.push(block),
-                _ => items.push(Self::FinishedTools(vec![block])),
-            }
-        }
-        items
+        ChatToolArguments::Raw(raw) => rsx! {
+            pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{raw}" }
+        },
     }
 }
 
 #[component]
-fn FinishedToolCalls(blocks: Vec<PlacedBlock>) -> Element {
-    let count = blocks.len() as i64;
+fn FinishedToolCalls(calls: Vec<ChatToolCall>) -> Element {
+    let count = calls.len() as i64;
     rsx! {
         details { class: "disclosure",
             summary { class: "flex cursor-pointer select-none items-center gap-2 rounded-xl px-2 py-1 text-sm text-muted-foreground list-none transition-colors hover:bg-foreground/[0.025] [&::-webkit-details-marker]:hidden",
@@ -597,13 +479,40 @@ fn FinishedToolCalls(blocks: Vec<PlacedBlock>) -> Element {
                 DisclosureIcon {}
             }
             div { class: "mt-1 flex flex-col gap-1",
-                for (index , block , children) in blocks {
-                    TurnBlock {
-                        block_index: index,
-                        block,
-                        nested: children,
-                        latest_thinking: false,
-                        latest_tool: false,
+                for call in calls {
+                    ToolCall { call }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolCall(call: ChatToolCall) -> Element {
+    let key = call.index;
+    let label = ToolPresentation::for_call(call.kind, &call.fallback_label).label;
+    let children = call.children.clone();
+    rsx! {
+        div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
+            ToolActivityIcon {
+                name: call.name.clone(),
+                file_path: call.file_path.clone(),
+                activity: call.activity,
+            }
+            div { class: "min-w-0",
+                details { open: call.live, class: "disclosure text-sm text-muted-foreground",
+                    summary { class: ROW_SUMMARY,
+                        span { class: "font-medium", "{label}" }
+                        DisclosureIcon {}
+                    }
+                    div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
+                    ToolArgs { arguments: call.arguments.clone() }
+                }
+                if !children.is_empty() {
+                    div { class: "agent-context-tree ml-0.5 mt-1.5 flex flex-col gap-1 border-l pl-3",
+                        for child in children {
+                            ToolChild { key: "{child.index()}", child }
+                        }
                     }
                 }
             }
@@ -612,32 +521,96 @@ fn FinishedToolCalls(blocks: Vec<PlacedBlock>) -> Element {
 }
 
 #[component]
-pub fn TurnBlock(
-    block_index: usize,
-    block: ChatBlock,
-    nested: Vec<(usize, ChatBlock)>,
-    latest_thinking: bool,
-    latest_tool: bool,
-) -> Element {
-    let key = block_index;
-    let block = &block;
-    let children: Vec<(usize, &ChatBlock)> = nested
-        .iter()
-        .map(|(index, child)| (*index, child))
-        .collect();
-    let children = children.as_slice();
-    match block {
-        ChatBlock::Text(text) => rsx! {
+fn SubagentRow(subagent: ChatSubagentState) -> Element {
+    let key = subagent.index;
+    let status_label = subagent_status_label(subagent.status);
+    let status_class = subagent_status_class(subagent.status);
+    let title = if subagent.title.is_empty() {
+        translate("agent-subagent")
+    } else {
+        subagent.title.clone()
+    };
+    let children = subagent.children.clone();
+    rsx! {
+        div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl bg-violet-500/[0.025] px-2 py-1.5 ring-1 ring-inset ring-violet-500/10 transition-colors hover:bg-violet-500/[0.05]",
+            ActivityIconView { kind: ActivityIcon::Subagent }
+            div { class: "min-w-0",
+                details { open: subagent.status == ChatSubagentStatus::Running, class: "disclosure text-sm text-muted-foreground",
+                    summary { class: "{ROW_SUMMARY} flex-wrap",
+                        span { class: "font-medium text-foreground/85", "{title}" }
+                        span { class: "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
+                        DisclosureIcon {}
+                    }
+                    div { class: "mt-2 flex flex-wrap gap-1.5 text-[10px]",
+                        span { class: "rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-700 dark:text-violet-300", "{subagent.provider}" }
+                        if !subagent.activity.is_empty() {
+                            span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{subagent.activity}" }
+                        }
+                        if let Some(agent_name) = &subagent.agent_name {
+                            span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{agent_name}" }
+                        }
+                        if let Some(model) = &subagent.model {
+                            span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 font-mono text-foreground/60", "{model}" }
+                        }
+                        if let Some(effort) = &subagent.reasoning_effort {
+                            span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{effort}" }
+                        }
+                    }
+                    if let Some(prompt) = &subagent.prompt {
+                        div { class: "mt-2 rounded-lg bg-foreground/[0.025] p-2 text-xs leading-relaxed text-foreground/75 ring-1 ring-inset ring-foreground/10",
+                            div { class: "mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70", {translate("agent-prompt")} }
+                            div { class: "whitespace-pre-wrap", "{prompt}" }
+                        }
+                    }
+                    div { class: "mt-2 grid gap-1 text-[10px] text-muted-foreground/75",
+                        if let Some(thread_id) = &subagent.thread_id {
+                            div { span { class: "font-semibold", {format!("{} ", translate("agent-thread"))} } code { class: "font-mono", "{thread_id}" } }
+                        }
+                        if let Some(parent_thread_id) = &subagent.parent_thread_id {
+                            div { span { class: "font-semibold", {format!("{} ", translate("agent-parent"))} } code { class: "font-mono", "{parent_thread_id}" } }
+                        }
+                        if !subagent.child_threads.is_empty() {
+                            div { span { class: "font-semibold", {format!("{} ", translate("agent-children"))} } code { class: "break-all font-mono", "{subagent.child_threads}" } }
+                        }
+                        div { span { class: "font-semibold", {format!("{} ", translate("agent-call"))} } code { class: "font-mono", "{subagent.call_id}" } }
+                    }
+                    if !subagent.raw_input.is_empty() && subagent.raw_input != "{}" {
+                        details { class: "disclosure mt-2 text-[11px] text-muted-foreground",
+                            summary { class: ROW_SUMMARY,
+                                span { class: "font-medium", {translate("agent-raw-event")} }
+                                DisclosureIcon {}
+                            }
+                            pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{subagent.raw_input}" }
+                        }
+                    }
+                }
+                if !children.is_empty() {
+                    div { class: "agent-context-tree ml-0.5 mt-2 flex flex-col gap-1 border-l border-violet-500/25 pl-3",
+                        for child in children {
+                            ToolChild { key: "{child.index()}", child }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn TurnBlock(row: ChatTurnRow) -> Element {
+    let key = row.index();
+    match row {
+        ChatTurnRow::Text { text, .. } => rsx! {
             div {
                 key: "{key}",
                 class: CHAT_MD_CLASS,
-                dangerous_inner_html: md_to_html(text),
+                dangerous_inner_html: md_to_html(&text),
             }
         },
-        ChatBlock::Thinking(text) => rsx! {
+        ChatTurnRow::Thinking { text, latest, .. } => rsx! {
             div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
                 ActivityIconView { kind: ActivityIcon::Thinking }
-                details { open: latest_thinking, class: "disclosure min-w-0 text-sm text-muted-foreground",
+                details { open: latest, class: "disclosure min-w-0 text-sm text-muted-foreground",
                     summary { class: ROW_SUMMARY,
                         span { class: "font-medium", {translate("agent-thinking")} }
                         DisclosureIcon {}
@@ -646,108 +619,10 @@ pub fn TurnBlock(
                 }
             }
         },
-        ChatBlock::ToolUse { name, args, .. } => {
-            let ToolPresentation { icon, label } = ToolPresentation::of(name, args);
-            rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
-                    ToolActivityIcon { name: name.clone(), args: args.clone(), fallback: icon }
-                    div { class: "min-w-0",
-                        details { open: latest_tool, class: "disclosure text-sm text-muted-foreground",
-                            summary { class: ROW_SUMMARY,
-                                span { class: "font-medium", "{label}" }
-                                DisclosureIcon {}
-                            }
-                            div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
-                            if !args.is_empty() && args != "{}" {
-                                ToolArgs { args: args.to_string() }
-                            }
-                        }
-                        if !children.is_empty() {
-                            div { class: "agent-context-tree ml-0.5 mt-1.5 flex flex-col gap-1 border-l pl-3",
-                                for (child_key , child) in children {
-                                    ToolChild { child_key: *child_key, block: (*child).clone() }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        ChatBlock::Subagent(subagent) => {
-            let status_label = subagent_status_label(&subagent.status);
-            let status_class = subagent_status_class(&subagent.status);
-            let title = if subagent.title.is_empty() {
-                translate("agent-subagent")
-            } else {
-                subagent.title.replace('_', " ")
-            };
-            let action = subagent.action.replace('_', " ");
-            let child_threads = subagent.child_thread_ids.join(", ");
-            rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl bg-violet-500/[0.025] px-2 py-1.5 ring-1 ring-inset ring-violet-500/10 transition-colors hover:bg-violet-500/[0.05]",
-                    ActivityIconView { kind: ActivityIcon::Subagent }
-                    div { class: "min-w-0",
-                        details { open: subagent.status == "in_progress", class: "disclosure text-sm text-muted-foreground",
-                            summary { class: "{ROW_SUMMARY} flex-wrap",
-                                span { class: "font-medium text-foreground/85", "{title}" }
-                                span { class: "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                                DisclosureIcon {}
-                            }
-                            div { class: "mt-2 flex flex-wrap gap-1.5 text-[10px]",
-                                span { class: "rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-700 dark:text-violet-300", "{subagent.provider}" }
-                                if !subagent.action.is_empty() {
-                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{action}" }
-                                }
-                                if let Some(agent_name) = &subagent.agent_name {
-                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{agent_name}" }
-                                }
-                                if let Some(model) = &subagent.model {
-                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 font-mono text-foreground/60", "{model}" }
-                                }
-                                if let Some(effort) = &subagent.reasoning_effort {
-                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{effort}" }
-                                }
-                            }
-                            if let Some(prompt) = &subagent.prompt {
-                                div { class: "mt-2 rounded-lg bg-foreground/[0.025] p-2 text-xs leading-relaxed text-foreground/75 ring-1 ring-inset ring-foreground/10",
-                                    div { class: "mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70", {translate("agent-prompt")} }
-                                    div { class: "whitespace-pre-wrap", "{prompt}" }
-                                }
-                            }
-                            div { class: "mt-2 grid gap-1 text-[10px] text-muted-foreground/75",
-                                if let Some(thread_id) = &subagent.thread_id {
-                                    div { span { class: "font-semibold", {format!("{} ", translate("agent-thread"))} } code { class: "font-mono", "{thread_id}" } }
-                                }
-                                if let Some(parent_thread_id) = &subagent.parent_thread_id {
-                                    div { span { class: "font-semibold", {format!("{} ", translate("agent-parent"))} } code { class: "font-mono", "{parent_thread_id}" } }
-                                }
-                                if !child_threads.is_empty() {
-                                    div { span { class: "font-semibold", {format!("{} ", translate("agent-children"))} } code { class: "break-all font-mono", "{child_threads}" } }
-                                }
-                                div { span { class: "font-semibold", {format!("{} ", translate("agent-call"))} } code { class: "font-mono", "{subagent.call_id}" } }
-                            }
-                            if !subagent.raw_input.is_empty() && subagent.raw_input != "{}" {
-                                details { class: "disclosure mt-2 text-[11px] text-muted-foreground",
-                                    summary { class: ROW_SUMMARY,
-                                        span { class: "font-medium", {translate("agent-raw-event")} }
-                                        DisclosureIcon {}
-                                    }
-                                    pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{subagent.raw_input}" }
-                                }
-                            }
-                        }
-                        if !children.is_empty() {
-                            div { class: "agent-context-tree ml-0.5 mt-2 flex flex-col gap-1 border-l border-violet-500/25 pl-3",
-                                for (child_key , child) in children {
-                                    ToolChild { child_key: *child_key, block: (*child).clone() }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        ChatBlock::Plan { steps } => {
+        ChatTurnRow::Tool(call) => rsx! { ToolCall { call } },
+        ChatTurnRow::FinishedTools { calls, .. } => rsx! { FinishedToolCalls { calls } },
+        ChatTurnRow::Subagent(subagent) => rsx! { SubagentRow { subagent } },
+        ChatTurnRow::Plan { steps, .. } => {
             let n = steps.len();
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-indigo-500/[0.035]",
@@ -767,8 +642,8 @@ pub fn TurnBlock(
                         ul { class: "mt-2 flex flex-col gap-1.5 border-l border-indigo-500/20 pl-3",
                             for (i , step) in steps.iter().enumerate() {
                                 li { key: "{i}", class: "flex items-start gap-2 text-xs",
-                                    span { class: "mt-px {plan_glyph_class(&step.status)}", "{plan_glyph(&step.status)}" }
-                                    span { class: plan_text_class(&step.status), "{step.content}" }
+                                    span { class: "mt-px {plan_glyph_class(step.status)}", "{plan_glyph(step.status)}" }
+                                    span { class: plan_text_class(step.status), "{step.content}" }
                                 }
                             }
                         }
@@ -776,42 +651,20 @@ pub fn TurnBlock(
                 }
             }
         }
-        ChatBlock::Diff {
-            path,
-            old_text,
-            new_text,
-            ..
-        } => {
-            let old = old_text.as_deref().unwrap_or("");
-            let lines: Vec<(String, &'static str)> =
-                similar::TextDiff::from_lines(old, new_text.as_str())
-                    .iter_all_changes()
-                    .filter_map(|c| match c.tag() {
-                        similar::ChangeTag::Delete => Some((
-                            format!("- {}", c.value().trim_end_matches('\n')),
-                            "px-3 bg-red-500/10 text-red-300",
-                        )),
-                        similar::ChangeTag::Insert => Some((
-                            format!("+ {}", c.value().trim_end_matches('\n')),
-                            "px-3 bg-success/10 text-success",
-                        )),
-                        similar::ChangeTag::Equal => None,
-                    })
-                    .collect();
-            let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
+        ChatTurnRow::Diff(diff) => {
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-success/[0.035]",
-                    FileActivityIcon { path: path.clone(), write: true }
+                    FileActivityIcon { path: diff.path.clone(), write: true }
                     details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                         summary { class: ROW_SUMMARY,
                             span { class: "font-medium", {format!("{} ", translate("agent-edited"))} }
-                            code { class: "truncate font-mono text-xs text-foreground/70", "{fname}" }
+                            code { class: "truncate font-mono text-xs text-foreground/70", "{diff.name}" }
                             DisclosureIcon {}
                         }
                         div { class: "mt-2 overflow-hidden rounded-lg ring-1 ring-inset ring-foreground/10",
                             div { class: "overflow-x-auto bg-foreground/[0.02] py-1 font-mono text-[11px] leading-relaxed",
-                                for (i , (line , cls)) in lines.iter().enumerate() {
-                                    div { key: "{i}", class: "{cls}", "{line}" }
+                                for (i , line) in diff.lines.iter().enumerate() {
+                                    div { key: "{i}", class: diff_line_class(line.kind), "{diff_line_prefix(line.kind)} {line.text}" }
                                 }
                             }
                         }
@@ -819,12 +672,12 @@ pub fn TurnBlock(
                 }
             }
         }
-        ChatBlock::ToolResult {
+        ChatTurnRow::ToolResult {
             content, is_error, ..
         } => rsx! {
-            StandaloneToolResult { result_key: key, content: content.clone(), is_error: *is_error }
+            StandaloneToolResult { result_key: key as usize, content, is_error }
         },
-        ChatBlock::Reconnect { attempt, total } => rsx! {
+        ChatTurnRow::Reconnect { attempt, total, .. } => rsx! {
             div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-2.5 rounded-xl px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-amber-500/[0.035]",
                 ActivityIconView { kind: ActivityIcon::Reconnect }
                 span {
@@ -832,8 +685,8 @@ pub fn TurnBlock(
                     {translate_with(
                         "agent-reconnecting",
                         &[
-                            ("attempt", TranslationValue::Number(*attempt as i64)),
-                            ("total", TranslationValue::Number(*total as i64)),
+                            ("attempt", TranslationValue::Number(attempt as i64)),
+                            ("total", TranslationValue::Number(total as i64)),
                         ],
                     )}
                 }
@@ -843,71 +696,79 @@ pub fn TurnBlock(
 }
 
 #[component]
-fn ToolChild(child_key: usize, block: ChatBlock) -> Element {
-    let key = child_key;
-    let block = &block;
-    match block {
-        ChatBlock::ToolUse { name, args, .. } => {
-            let label = ToolPresentation::of(name, args).label;
-            rsx! {
-                details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
-                    summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "font-medium", "{label}" }
-                        DisclosureIcon {}
-                    }
-                    div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
-                    if !args.is_empty() && args != "{}" {
-                        ToolArgs { args: args.to_string() }
-                    }
-                }
-            }
-        }
-        ChatBlock::Subagent(subagent) => {
-            let status_label = subagent_status_label(&subagent.status);
-            let status_class = subagent_status_class(&subagent.status);
-            rsx! {
-                details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
-                    summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "font-medium", "{subagent.title}" }
-                        span { class: "rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                        DisclosureIcon {}
-                    }
-                    div { class: "mt-1 flex flex-wrap gap-1 text-[10px]",
-                        span { class: "rounded-full bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300", "{subagent.provider}" }
-                        if let Some(agent_name) = &subagent.agent_name {
-                            span { class: "rounded-full bg-foreground/[0.055] px-1.5 py-0.5", "{agent_name}" }
-                        }
-                    }
-                    if let Some(prompt) = &subagent.prompt {
-                        div { class: "mt-1.5 whitespace-pre-wrap rounded-lg bg-foreground/[0.025] p-2 text-[11px] leading-relaxed ring-1 ring-inset ring-foreground/10", "{prompt}" }
-                    }
-                }
-            }
-        }
-        ChatBlock::ToolResult {
-            content, is_error, ..
+fn ToolChild(child: ChatToolChild) -> Element {
+    match child {
+        ChatToolChild::Tool(call) => rsx! { ToolChildCall { call } },
+        ChatToolChild::Subagent(subagent) => rsx! { SubagentChild { subagent } },
+        ChatToolChild::Result {
+            index,
+            content,
+            is_error,
         } => rsx! {
-            NestedToolResult { result_key: key, content: content.clone(), is_error: *is_error }
+            NestedToolResult { result_key: index as usize, content, is_error }
         },
-        _ => rsx! {},
     }
 }
 
-fn subagent_status_label(status: &str) -> String {
-    match status {
-        "in_progress" => translate("agent-status-running"),
-        "completed" => translate("agent-status-done"),
-        "failed" => translate("agent-status-failed"),
-        _ => translate("agent-status-pending"),
+#[component]
+fn ToolChildCall(call: ChatToolChildCall) -> Element {
+    let label = ToolPresentation::for_call(call.kind, &call.fallback_label).label;
+    rsx! {
+        details { class: "disclosure text-xs text-muted-foreground",
+            summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                span { class: "font-medium", "{label}" }
+                DisclosureIcon {}
+            }
+            div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{call.name}" }
+            ToolArgs { arguments: call.arguments }
+        }
     }
 }
 
-fn subagent_status_class(status: &str) -> &'static str {
+#[component]
+fn SubagentChild(subagent: ChatSubagentSummary) -> Element {
+    let status_label = subagent_status_label(subagent.status);
+    let status_class = subagent_status_class(subagent.status);
+    let title = if subagent.title.is_empty() {
+        translate("agent-subagent")
+    } else {
+        subagent.title.clone()
+    };
+    rsx! {
+        details { class: "disclosure text-xs text-muted-foreground",
+            summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                span { class: "font-medium", "{title}" }
+                span { class: "rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
+                DisclosureIcon {}
+            }
+            div { class: "mt-1 flex flex-wrap gap-1 text-[10px]",
+                span { class: "rounded-full bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300", "{subagent.provider}" }
+                if let Some(agent_name) = &subagent.agent_name {
+                    span { class: "rounded-full bg-foreground/[0.055] px-1.5 py-0.5", "{agent_name}" }
+                }
+            }
+            if let Some(prompt) = &subagent.prompt {
+                div { class: "mt-1.5 whitespace-pre-wrap rounded-lg bg-foreground/[0.025] p-2 text-[11px] leading-relaxed ring-1 ring-inset ring-foreground/10", "{prompt}" }
+            }
+        }
+    }
+}
+
+fn subagent_status_label(status: ChatSubagentStatus) -> String {
     match status {
-        "in_progress" => "bg-violet-500/10 text-violet-700 dark:text-violet-300",
-        "completed" => "bg-success/10 text-success",
-        "failed" => "bg-red-500/10 text-red-700 dark:text-red-300",
-        _ => "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        ChatSubagentStatus::Running => translate("agent-status-running"),
+        ChatSubagentStatus::Complete => translate("agent-status-done"),
+        ChatSubagentStatus::Failed => translate("agent-status-failed"),
+        ChatSubagentStatus::Pending => translate("agent-status-pending"),
+    }
+}
+
+fn subagent_status_class(status: ChatSubagentStatus) -> &'static str {
+    match status {
+        ChatSubagentStatus::Running => "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+        ChatSubagentStatus::Complete => "bg-success/10 text-success",
+        ChatSubagentStatus::Failed => "bg-red-500/10 text-red-700 dark:text-red-300",
+        ChatSubagentStatus::Pending => "bg-amber-500/10 text-amber-700 dark:text-amber-300",
     }
 }
 
@@ -992,27 +853,41 @@ pub fn fmt_elapsed(secs: u32) -> String {
     }
 }
 
-fn plan_glyph(status: &str) -> &'static str {
+fn plan_glyph(status: ChatPlanStatus) -> &'static str {
     match status {
-        "completed" => "✓",
-        "in_progress" => "◐",
-        _ => "○",
+        ChatPlanStatus::Complete => "✓",
+        ChatPlanStatus::Active => "◐",
+        ChatPlanStatus::Pending => "○",
     }
 }
 
-fn plan_glyph_class(status: &str) -> &'static str {
+fn plan_glyph_class(status: ChatPlanStatus) -> &'static str {
     match status {
-        "completed" => "text-success",
-        "in_progress" => "text-amber-500",
-        _ => "text-muted-foreground",
+        ChatPlanStatus::Complete => "text-success",
+        ChatPlanStatus::Active => "text-amber-500",
+        ChatPlanStatus::Pending => "text-muted-foreground",
     }
 }
 
-fn plan_text_class(status: &str) -> &'static str {
+fn plan_text_class(status: ChatPlanStatus) -> &'static str {
     match status {
-        "completed" => "text-muted-foreground line-through",
-        "in_progress" => "text-foreground",
-        _ => "text-muted-foreground",
+        ChatPlanStatus::Complete => "text-muted-foreground line-through",
+        ChatPlanStatus::Active => "text-foreground",
+        ChatPlanStatus::Pending => "text-muted-foreground",
+    }
+}
+
+fn diff_line_class(kind: ChatDiffLineKind) -> &'static str {
+    match kind {
+        ChatDiffLineKind::Removed => "px-3 bg-red-500/10 text-red-300",
+        ChatDiffLineKind::Added => "px-3 bg-success/10 text-success",
+    }
+}
+
+fn diff_line_prefix(kind: ChatDiffLineKind) -> &'static str {
+    match kind {
+        ChatDiffLineKind::Removed => "-",
+        ChatDiffLineKind::Added => "+",
     }
 }
 

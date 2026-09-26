@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use vmux_command::WriteAppCommands;
-use vmux_service::client::ServiceClient;
-use vmux_service::protocol::ClientMessage;
+use vmux_api::protocol::ClientMessage;
+use vmux_command::WriteCommandRequests;
+use vmux_service::client::ServiceRequest;
+use vmux_service::plugin::ServiceConnected;
 use vmux_terminal::ServiceMessageSet;
 
 use crate::events::AgentChoiceSelected;
@@ -17,16 +18,19 @@ pub(super) struct WorkspacePlugin;
 
 impl Plugin for WorkspacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(handle_agent_choice_selected).add_systems(
-            Update,
-            (
-                drain_workspace_picker_tasks.after(super::self_command::handle_agent_self_commands),
-                send_pending_agent_continuations,
-            )
-                .chain()
-                .in_set(WriteAppCommands)
-                .after(ServiceMessageSet),
-        );
+        app.add_message::<ServiceRequest>()
+            .add_observer(resume_agent_choice)
+            .add_observer(initialize_git_agent_choice)
+            .add_systems(
+                Update,
+                (
+                    drain_workspace_picker_tasks.after(super::self_command::SelfCommandSet),
+                    send_pending_agent_continuations.in_set(super::AgentContinuationSet),
+                )
+                    .chain()
+                    .in_set(WriteCommandRequests)
+                    .after(ServiceMessageSet),
+            );
     }
 }
 
@@ -49,18 +53,17 @@ pub(crate) struct PendingAgentContinuation(String);
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PendingAgentChoice {
     pub(crate) session_entity: Entity,
-    pub(crate) action: PendingAgentChoiceAction,
     pub(crate) question: String,
     pub(crate) options: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PendingAgentChoiceAction {
-    Resume,
-    InitializeGit {
-        tab_entity: Entity,
-        workspace: PathBuf,
-    },
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ResumeAgentChoice;
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InitializeGitAgentChoice {
+    pub(crate) tab_entity: Entity,
+    pub(crate) workspace: PathBuf,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -86,10 +89,9 @@ pub(crate) struct WorkspacePickerContext<'w, 's> {
     pub(crate) proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
 }
 
-fn handle_agent_choice_selected(
+fn resume_agent_choice(
     trigger: On<AgentChoiceSelected>,
-    choices: Query<&PendingAgentChoice>,
-    tabs: Query<(), With<vmux_layout::tab::Tab>>,
+    choices: Query<&PendingAgentChoice, With<ResumeAgentChoice>>,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -99,33 +101,48 @@ fn handle_agent_choice_selected(
     let Some(selected) = choice.options.get(event.index) else {
         return;
     };
-    let continuation = match &choice.action {
-        PendingAgentChoiceAction::Resume => format!(
-            "VMUX USER CHOICE: For \"{}\", the user selected \"{}\". Continue the original request in this same conversation.",
-            choice.question, selected
-        ),
-        PendingAgentChoiceAction::InitializeGit {
-            tab_entity,
-            workspace,
-        } => {
-            if !tabs.contains(*tab_entity) {
-                failed_workspace_continuation("The project tab no longer exists")
-            } else if event.index == 0 {
-                match vmux_git::worktree::repository_init(workspace) {
-                    Ok(root) => new_git_workspace_ready_continuation(&root),
-                    Err(error) => git_initialization_failed_continuation(workspace, &error.0),
-                }
-            } else {
-                plain_workspace_ready_continuation(workspace)
-            }
+    let continuation = format!(
+        "VMUX USER CHOICE: For \"{}\", the user selected \"{}\". Continue the original request in this same conversation.",
+        choice.question, selected
+    );
+    commands
+        .entity(choice.session_entity)
+        .insert(PendingAgentContinuation(continuation));
+    commands
+        .entity(event.webview)
+        .remove::<(PendingAgentChoice, ResumeAgentChoice)>()
+        .remove::<crate::host::chat::ChatSynced>();
+}
+
+fn initialize_git_agent_choice(
+    trigger: On<AgentChoiceSelected>,
+    choices: Query<(&PendingAgentChoice, &InitializeGitAgentChoice), Without<ResumeAgentChoice>>,
+    tabs: Query<(), With<vmux_layout::tab::Tab>>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let Ok((choice, initialize)) = choices.get(event.webview) else {
+        return;
+    };
+    if choice.options.get(event.index).is_none() {
+        return;
+    }
+    let continuation = if !tabs.contains(initialize.tab_entity) {
+        failed_workspace_continuation("The project tab no longer exists")
+    } else if event.index == 0 {
+        match vmux_git::worktree::repository_init(&initialize.workspace) {
+            Ok(root) => new_git_workspace_ready_continuation(&root),
+            Err(error) => git_initialization_failed_continuation(&initialize.workspace, &error.0),
         }
+    } else {
+        plain_workspace_ready_continuation(&initialize.workspace)
     };
     commands
         .entity(choice.session_entity)
         .insert(PendingAgentContinuation(continuation));
     commands
         .entity(event.webview)
-        .remove::<PendingAgentChoice>()
+        .remove::<(PendingAgentChoice, InitializeGitAgentChoice)>()
         .remove::<crate::host::chat::ChatSynced>();
 }
 
@@ -441,11 +458,12 @@ fn drain_workspace_picker_tasks(
     mut acp_sessions: Query<&mut vmux_session::AcpSession>,
     child_of: Query<&ChildOf>,
     mut commands: Commands,
-    service: Option<Res<ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
+    if connected.is_none() {
         return;
-    };
+    }
     for (picker_entity, mut picker) in &mut pickers {
         let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
             continue;
@@ -472,7 +490,7 @@ fn drain_workspace_picker_tasks(
                         ) {
                             Ok((execution_dir, rebind, kind)) => {
                                 if let Some(message) = rebind {
-                                    service.0.send(message);
+                                    service_requests.write(ServiceRequest(message));
                                 }
                                 match kind {
                                     SelectedWorkspaceKind::Git { .. } => {
@@ -483,18 +501,20 @@ fn drain_workspace_picker_tasks(
                                     {
                                         commands
                                             .entity(picker.agent_entity)
-                                            .insert(PendingAgentChoice {
-                                                session_entity: picker.session_entity,
-                                                action: PendingAgentChoiceAction::InitializeGit {
+                                            .insert((
+                                                PendingAgentChoice {
+                                                    session_entity: picker.session_entity,
+                                                    question: INITIALIZE_GIT_QUESTION.to_string(),
+                                                    options: INITIALIZE_GIT_OPTIONS
+                                                        .into_iter()
+                                                        .map(str::to_string)
+                                                        .collect(),
+                                                },
+                                                InitializeGitAgentChoice {
                                                     tab_entity: picker.tab_entity,
                                                     workspace: execution_dir,
                                                 },
-                                                question: INITIALIZE_GIT_QUESTION.to_string(),
-                                                options: INITIALIZE_GIT_OPTIONS
-                                                    .into_iter()
-                                                    .map(str::to_string)
-                                                    .collect(),
-                                            })
+                                            ))
                                             .remove::<crate::host::chat::ChatSynced>();
                                         None
                                     }
@@ -527,7 +547,7 @@ fn drain_workspace_picker_tasks(
     }
 }
 
-pub(super) fn send_pending_agent_continuations(
+fn send_pending_agent_continuations(
     mut sessions: Query<(
         Entity,
         &PendingAgentContinuation,
@@ -536,8 +556,9 @@ pub(super) fn send_pending_agent_continuations(
         Option<&AgentSession>,
         Option<&mut crate::run_state::AgentRunState>,
     )>,
-    service: Option<Res<ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for (entity, continuation, acp, page, cli, state) in &mut sessions {
         if cli.is_some() {
@@ -550,9 +571,9 @@ pub(super) fn send_pending_agent_continuations(
                 .remove::<PendingAgentContinuation>();
             continue;
         }
-        let Some(service) = service.as_deref() else {
+        if connected.is_none() {
             continue;
-        };
+        }
         let sid = acp
             .map(|session| session.sid.as_str())
             .or_else(|| page.map(|session| session.sid.as_str()));
@@ -565,9 +586,10 @@ pub(super) fn send_pending_agent_continuations(
         ) {
             continue;
         }
-        service
-            .0
-            .send(chat_agent_continuation_message(sid, &continuation.0));
+        service_requests.write(ServiceRequest(chat_agent_continuation_message(
+            sid,
+            &continuation.0,
+        )));
         *state = crate::run_state::AgentRunState::Streaming;
         commands.entity(entity).remove::<PendingAgentContinuation>();
     }
@@ -578,9 +600,9 @@ mod tests {
     use super::*;
     use crate::host::run_terminal::AgentCwd;
     use crate::host::test_support::init_worktree_test_repo;
+    use vmux_api::protocol::ProcessId;
+    use vmux_api::protocol::SharedMessage;
     use vmux_core::agent::AgentKind;
-    use vmux_service::protocol::ProcessId;
-    use vmux_service::protocol::SharedMessage;
 
     #[test]
     pub(crate) fn workspace_selection_continuations_resume_original_request() {
@@ -600,16 +622,19 @@ mod tests {
     #[test]
     pub(crate) fn selected_agent_choice_resumes_session() {
         let mut app = App::new();
-        app.add_observer(handle_agent_choice_selected);
+        app.add_observer(resume_agent_choice)
+            .add_observer(initialize_git_agent_choice);
         let session = app.world_mut().spawn_empty().id();
         let webview = app
             .world_mut()
-            .spawn(PendingAgentChoice {
-                session_entity: session,
-                action: PendingAgentChoiceAction::Resume,
-                question: "Mode?".into(),
-                options: vec!["Fast".into(), "Safe".into()],
-            })
+            .spawn((
+                PendingAgentChoice {
+                    session_entity: session,
+                    question: "Mode?".into(),
+                    options: vec!["Fast".into(), "Safe".into()],
+                },
+                ResumeAgentChoice,
+            ))
             .id();
 
         app.world_mut()
@@ -629,7 +654,8 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let workspace_path = workspace.path().canonicalize().unwrap();
         let mut app = App::new();
-        app.add_observer(handle_agent_choice_selected);
+        app.add_observer(resume_agent_choice)
+            .add_observer(initialize_git_agent_choice);
         let session = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
@@ -640,18 +666,20 @@ mod tests {
             .id();
         let webview = app
             .world_mut()
-            .spawn(PendingAgentChoice {
-                session_entity: session,
-                action: PendingAgentChoiceAction::InitializeGit {
+            .spawn((
+                PendingAgentChoice {
+                    session_entity: session,
+                    question: INITIALIZE_GIT_QUESTION.into(),
+                    options: INITIALIZE_GIT_OPTIONS
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                },
+                InitializeGitAgentChoice {
                     tab_entity: tab,
                     workspace: workspace_path.clone(),
                 },
-                question: INITIALIZE_GIT_QUESTION.into(),
-                options: INITIALIZE_GIT_OPTIONS
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
-            })
+            ))
             .id();
 
         app.world_mut()
@@ -673,6 +701,7 @@ mod tests {
     pub(crate) fn cli_workspace_continuation_queues_terminal_prompt_without_service_wait() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .add_message::<ServiceRequest>()
             .add_systems(Update, send_pending_agent_continuations);
         let entity = app
             .world_mut()
@@ -706,9 +735,11 @@ mod tests {
     pub(crate) fn chat_workspace_continuation_is_private_same_session_input() {
         assert!(matches!(
             chat_agent_continuation_message("sid-1", "continue original request"),
-            ClientMessage::Shared(SharedMessage::Agent {
+            ClientMessage::Shared(SharedMessage::AgentInput {
                 sid,
-                action: vmux_wire::protocol::AgentAction::Input { text, context, .. },
+                text,
+                context,
+                ..
             })
                 if sid == "sid-1"
                     && text.is_empty()

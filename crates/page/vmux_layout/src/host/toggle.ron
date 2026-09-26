@@ -1,0 +1,8 @@
+[
+    (
+        id: "toggle_layout",
+        label: "Toggle Layout",
+        group: "Layout > Layout",
+        shortcuts: [(shortcut: Direct("Super+Shift+S"), when: None)],
+    ),
+]

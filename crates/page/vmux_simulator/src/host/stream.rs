@@ -30,7 +30,7 @@ impl StreamServer {
         pixels: Option<(u32, u32)>,
     ) -> io::Result<Self> {
         let axe = axe.path().to_path_buf();
-        let layout = BgraFrameLayout::of(pixels.ok_or_else(|| {
+        let layout = BgraFrameLayout::try_from(pixels.ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 "simulator pixel size is unavailable",
@@ -252,7 +252,7 @@ impl StreamServer {
             }
         }
         socket.set_read_timeout(None)?;
-        let Some(request) = StreamRequest::of(&request, capability) else {
+        let Some(request) = StreamRequest::parse(&request, capability) else {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "simulator stream capability is missing or invalid",
@@ -263,7 +263,7 @@ impl StreamServer {
 
     #[cfg(test)]
     fn request_has_capability(request: &[u8], capability: &str) -> bool {
-        StreamRequest::of(request, capability).is_some()
+        StreamRequest::parse(request, capability).is_some()
     }
 
     fn write_preflight(socket: &mut TcpStream) -> io::Result<()> {
@@ -299,7 +299,7 @@ enum StreamRequest {
 }
 
 impl StreamRequest {
-    fn of(request: &[u8], capability: &str) -> Option<Self> {
+    fn parse(request: &[u8], capability: &str) -> Option<Self> {
         let expected_path = format!("/{capability}");
         let line = request.split(|byte| *byte == b'\n').next()?;
         let line = std::str::from_utf8(line).ok()?.trim_end_matches('\r');
@@ -352,8 +352,10 @@ struct BgraFrameLayout {
     frame_bytes: usize,
 }
 
-impl BgraFrameLayout {
-    fn of((source_width, source_height): (u32, u32)) -> io::Result<Self> {
+impl TryFrom<(u32, u32)> for BgraFrameLayout {
+    type Error = io::Error;
+
+    fn try_from((source_width, source_height): (u32, u32)) -> Result<Self, Self::Error> {
         let width = source_width / 2;
         let height = source_height / 2;
         let row_bytes = width.checked_mul(4).ok_or_else(|| {
@@ -393,7 +395,9 @@ impl BgraFrameLayout {
             frame_bytes,
         })
     }
+}
 
+impl BgraFrameLayout {
     fn jpeg(self, bgra: &[u8], quality: u8) -> io::Result<Vec<u8>> {
         if bgra.len() != self.frame_bytes {
             return Err(io::Error::new(
@@ -489,7 +493,7 @@ mod tests {
 
     #[test]
     fn bgra_layout_matches_core_video_stride_alignment() {
-        let layout = BgraFrameLayout::of((1206, 2622)).unwrap();
+        let layout = BgraFrameLayout::try_from((1206, 2622)).unwrap();
 
         assert_eq!(layout.width, 603);
         assert_eq!(layout.height, 1311);
@@ -499,7 +503,7 @@ mod tests {
 
     #[test]
     fn bgra_frames_encode_as_bounded_jpeg_images() {
-        let layout = BgraFrameLayout::of((120, 240)).unwrap();
+        let layout = BgraFrameLayout::try_from((120, 240)).unwrap();
         let mut bgra = vec![0; layout.frame_bytes];
         for pixel in bgra.chunks_exact_mut(4) {
             pixel.copy_from_slice(&[30, 20, 10, 255]);
@@ -528,7 +532,7 @@ mod tests {
             "secret"
         ));
         assert_eq!(
-            StreamRequest::of(
+            StreamRequest::parse(
                 b"OPTIONS /secret HTTP/1.1\r\nAccess-Control-Request-Private-Network: true\r\n\r\n",
                 "secret"
             ),
@@ -561,7 +565,7 @@ mod tests {
     #[test]
     fn a_frame_request_carries_the_generation_it_has_already_drawn() {
         assert_eq!(
-            StreamRequest::of(b"GET /secret?after=42 HTTP/1.1\r\n\r\n", "secret"),
+            StreamRequest::parse(b"GET /secret?after=42 HTTP/1.1\r\n\r\n", "secret"),
             Some(StreamRequest::Frames { after: 42 })
         );
     }

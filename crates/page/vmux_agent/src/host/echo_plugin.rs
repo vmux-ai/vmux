@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 use vmux_setting::SettingsLoadSet;
 
-use crate::client::page::strategy_components::{
+use crate::echo;
+use crate::runtime::provider::index::ProviderStrategyIndex;
+use crate::runtime::provider::strategy::{
     BuildRequestFn, Endpoint, EnvVarName, ParseSseFn, Strategy, StrategyKey, StrategyKind,
     StrategyVariant,
 };
-use crate::client::page::strategy_index::PageStrategyIndex;
-use crate::echo;
 use crate::{AgentKind, AgentVariant};
 
 pub struct EchoPlugin;
@@ -20,7 +20,7 @@ impl Plugin for EchoPlugin {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct EchoProvider;
 
-fn register_echo_strategy(mut commands: Commands, idx: Option<Res<PageStrategyIndex>>) {
+fn register_echo_strategy(mut commands: Commands, idx: Option<Res<ProviderStrategyIndex>>) {
     let key = StrategyKey {
         provider: echo::PROVIDER.to_string(),
         model: echo::DEFAULT_MODEL.to_string(),
@@ -46,11 +46,11 @@ fn register_echo_strategy(mut commands: Commands, idx: Option<Res<PageStrategyIn
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::page::strategy_indexer::{on_strategy_added, on_strategy_removed};
+    use crate::runtime::provider::indexer::{on_strategy_added, on_strategy_removed};
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.insert_resource(PageStrategyIndex::default())
+        app.insert_resource(ProviderStrategyIndex::default())
             .add_observer(on_strategy_added)
             .add_observer(on_strategy_removed)
             .add_plugins(EchoPlugin);
@@ -61,7 +61,7 @@ mod tests {
     fn spawns_echo_entity_without_any_env_var() {
         let mut app = test_app();
         app.update();
-        let idx = app.world().resource::<PageStrategyIndex>();
+        let idx = app.world().resource::<ProviderStrategyIndex>();
         assert!(idx.get_by_strs("echo", "echo").is_some());
     }
 
@@ -76,7 +76,7 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(count, 1);
-        let idx = app.world().resource::<PageStrategyIndex>();
+        let idx = app.world().resource::<ProviderStrategyIndex>();
         assert!(idx.get_by_strs("echo", "echo").is_some());
     }
 }

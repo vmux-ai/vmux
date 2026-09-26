@@ -11,9 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, mpsc};
 use vmux_core::ProcessId;
 
-use crate::process::{ProcessManager, PtyInputWriter};
-use crate::protocol::ServiceMessage;
+use crate::process::ProcessManager;
 use crate::remote::RemoteSession;
+use vmux_api::protocol::ServiceMessage;
 
 struct AcpHandle {
     input_tx: mpsc::UnboundedSender<AcpInput>,
@@ -39,7 +39,6 @@ impl AcpSessionManager {
         cwd: PathBuf,
         anchor: ProcessId,
         manager: Arc<tokio::sync::Mutex<ProcessManager>>,
-        input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
         mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
         resume: Option<String>,
         effort: Option<String>,
@@ -49,14 +48,7 @@ impl AcpSessionManager {
         }
         let (input_tx, input_rx) = mpsc::unbounded_channel();
         let (stream_tx, _) = broadcast::channel(256);
-        let shared = Arc::new(AcpShared::new(
-            sid.clone(),
-            cwd,
-            anchor,
-            stream_tx,
-            manager,
-            input_writers,
-        ));
+        let shared = Arc::new(AcpShared::new(sid.clone(), cwd, anchor, stream_tx, manager));
         tokio::spawn(driver::run(
             command,
             args,

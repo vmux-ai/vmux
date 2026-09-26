@@ -1,11 +1,12 @@
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
-use vmux_wire::command_bar::{CommandBarOpenEvent, CommandBarPage, CommandBarTab, OpenId};
-use vmux_wire::page::PageEmit;
+use vmux_api::command_bar::{
+    CommandBarOpenEvent, CommandBarPage, CommandBarTab, CommandBarUiState, OpenId,
+};
+use vmux_api::page::PageEmit;
 
-use crate::event::START_COMMAND_BAR_OPEN_EVENT;
-use vmux_wire::icon::PageIcon;
-use vmux_wire::room::{RemoteAgent, RemoteSession};
+use vmux_api::icon::PageIcon;
+use vmux_api::room::{RemoteAgent, RemoteSession};
 
 pub struct StartRosterPlugin;
 
@@ -17,10 +18,10 @@ impl Plugin for StartRosterPlugin {
             .add_systems(
                 Update,
                 (
-                    Launcher::project
+                    project_launcher
                         .in_set(LauncherProjection)
                         .run_if(resource_changed::<Roster>),
-                    Launcher::emit
+                    emit_launcher
                         .after(LauncherProjection)
                         .run_if(resource_changed::<Launcher>),
                 ),
@@ -38,21 +39,29 @@ pub struct Roster {
 }
 
 #[derive(Resource, Default)]
-pub struct Launcher(pub CommandBarOpenEvent);
+pub struct Launcher {
+    snapshot: CommandBarOpenEvent,
+    sequence: u64,
+}
+
+fn project_launcher(roster: Res<Roster>, mut launcher: ResMut<Launcher>) {
+    launcher.snapshot = Launcher::snapshot(&roster);
+}
+
+fn emit_launcher(mut launcher: ResMut<Launcher>, mut emits: MessageWriter<PageEmit>) {
+    launcher.sequence = launcher.sequence.wrapping_add(1).max(1);
+    let state = CommandBarUiState {
+        sequence: launcher.sequence,
+        patches: vec![launcher.snapshot.clone().into()],
+    };
+    let Some(emit) = PageEmit::from_state(&state) else {
+        return;
+    };
+    emits.write(emit);
+}
 
 impl Launcher {
-    fn project(roster: Res<Roster>, mut launcher: ResMut<Launcher>) {
-        launcher.0 = Self::of(&roster);
-    }
-
-    fn emit(launcher: Res<Launcher>, mut emits: MessageWriter<PageEmit>) {
-        let Some(emit) = PageEmit::of(START_COMMAND_BAR_OPEN_EVENT, &launcher.0) else {
-            return;
-        };
-        emits.write(emit);
-    }
-
-    fn of(roster: &Roster) -> CommandBarOpenEvent {
+    fn snapshot(roster: &Roster) -> CommandBarOpenEvent {
         let mut tabs = Vec::with_capacity(roster.sessions.len());
         for (index, session) in roster.sessions.iter().enumerate() {
             let cwd = vmux_ui::file_icon::FilePath(&session.cwd).name();
@@ -98,10 +107,10 @@ impl Launcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_wire::room::{RemoteStatus, RoomId};
+    use vmux_api::room::{RemoteStatus, RoomId};
 
     impl Roster {
-        fn of_one() -> Self {
+        fn one() -> Self {
             Self {
                 sessions: vec![Self::session("api")],
                 agents: vec![RemoteAgent {
@@ -113,7 +122,7 @@ mod tests {
             }
         }
 
-        fn of_sessions(names: &[&str]) -> Self {
+        fn with_sessions(names: &[&str]) -> Self {
             Self {
                 sessions: names.iter().map(|name| Self::session(name)).collect(),
                 agents: Vec::new(),
@@ -147,7 +156,7 @@ mod tests {
         }
 
         fn launcher(&self) -> &CommandBarOpenEvent {
-            &self.0.world().resource::<Launcher>().0
+            &self.0.world().resource::<Launcher>().snapshot
         }
 
         fn reroster(&mut self, roster: Roster) {
@@ -158,7 +167,7 @@ mod tests {
 
     #[test]
     fn every_session_is_addressed_by_the_index_it_comes_back_as() {
-        let roster = Roster::of_sessions(&["alpha", "beta", "gamma"]);
+        let roster = Roster::with_sessions(&["alpha", "beta", "gamma"]);
         let names: Vec<String> = roster.sessions.iter().map(|s| s.name.clone()).collect();
         let started = Started::with(roster);
         let tabs = &started.launcher().tabs;
@@ -176,7 +185,7 @@ mod tests {
 
     #[test]
     fn a_session_row_says_where_the_session_is() {
-        let started = Started::with(Roster::of_one());
+        let started = Started::with(Roster::one());
         let tab = &started.launcher().tabs[0];
 
         assert_eq!(tab.url, "vmux://sessions/sid-api");
@@ -189,7 +198,7 @@ mod tests {
 
     #[test]
     fn an_agent_becomes_a_prompt_target() {
-        let started = Started::with(Roster::of_one());
+        let started = Started::with(Roster::one());
         let pages = &started.launcher().pages;
 
         assert_eq!(pages.len(), 1);
@@ -199,7 +208,7 @@ mod tests {
 
     #[test]
     fn a_refresh_does_not_read_as_a_reopen() {
-        let started = Started::with(Roster::of_one());
+        let started = Started::with(Roster::one());
         assert!(!started.launcher().open_id.is_open());
     }
 
@@ -208,7 +217,7 @@ mod tests {
         let mut started = Started::with(Roster::default());
         assert!(started.launcher().tabs.is_empty());
 
-        started.reroster(Roster::of_one());
+        started.reroster(Roster::one());
         assert_eq!(
             started.launcher().tabs.len(),
             1,

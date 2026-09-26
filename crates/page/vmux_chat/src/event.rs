@@ -1,73 +1,37 @@
-pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
-pub const CHAT_HISTORY_PAGE_EVENT: &str = "chat_history_page";
-pub const COMPOSER_CONTEXT_EVENT: &str = "composer_context";
-pub const MODE_STATE_EVENT: &str = "mode_state";
 pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
 pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
 pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
-pub use vmux_wire::chat::{
-    CHAT_KEY_EVENT, ChatKey, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
+pub use vmux_api::chat::{
+    ChatKey, ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
+    SlashCommand, SlashCommandEntry, SlashCommands,
 };
-pub use vmux_wire::prompt_media::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
-    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
-    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
-    ChatSubmitAttachment,
+use vmux_api::json::JsonValue;
+pub use vmux_api::prompt_media::{
+    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
+    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
 };
-pub use vmux_wire::protocol::ApprovalDecision;
-pub use vmux_wire::room::ModelOptionEntry;
+pub use vmux_api::protocol::ApprovalDecision;
+pub use vmux_api::room::ModelOptionEntry;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+enum Events {}
+
+impl vmux_api::BinEventFamily for Events {
+    const TARGET: vmux_api::BinEventTarget =
+        vmux_api::BinEventTarget::Urls(&["vmux://sessions/", "vmux://agent/", "vmux://start/"]);
+}
+
+#[vmux_api::contract(Default, Eq)]
 pub struct QueuedPromptSnapshot {
     pub id: u64,
     pub text: String,
-    pub attachment_names: Vec<String>,
-    pub attachment_paths: Vec<String>,
+    pub attachments: Vec<ChatAttachment>,
 }
 
-impl QueuedPromptSnapshot {
-    pub fn image_paths(&self) -> Vec<String> {
-        let mut paths = Vec::new();
-        for path in &self.attachment_paths {
-            if vmux_ui::file_icon::FilePath(path).is_image() {
-                paths.push(path.clone());
-            }
-        }
-        paths
-    }
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ChatSnapshot {
-    pub messages_json: String,
-    pub messages_start: u32,
-    pub messages_total: u32,
     pub status: String,
     pub error: String,
-    pub approval_call_id: String,
-    pub approval_name: String,
-    pub approval_args_json: String,
+    pub approval: Option<PendingApproval>,
     pub queued: Vec<QueuedPromptSnapshot>,
     pub paused: bool,
     pub agent_name: String,
@@ -87,18 +51,97 @@ pub struct ChatSnapshot {
     pub choice_options: Vec<String>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Eq)]
+pub struct PendingApproval {
+    pub call_id: String,
+    pub name: String,
+    pub details: Vec<ApprovalDetail>,
+}
+
+impl PendingApproval {
+    pub fn new(call_id: String, name: String, args: &JsonValue) -> Self {
+        Self {
+            call_id,
+            name,
+            details: ApprovalDetail::rows(args),
+        }
+    }
+}
+
+#[vmux_api::contract(Eq)]
+pub struct ApprovalDetail {
+    pub label: String,
+    pub value: String,
+}
+
+impl ApprovalDetail {
+    fn rows(value: &JsonValue) -> Vec<Self> {
+        let mut details = Vec::new();
+        Self::flatten("", value, &mut details);
+        details
+    }
+
+    fn flatten(path: &str, value: &JsonValue, details: &mut Vec<Self>) {
+        if let JsonValue::Object(fields) = value {
+            for (name, value) in fields {
+                let child_path = if path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{path}.{name}")
+                };
+                Self::flatten(&child_path, value, details);
+            }
+            return;
+        }
+        let value = match value {
+            JsonValue::String(value) => value.clone(),
+            other => serde_json::to_string_pretty(&Self::readable(other)).unwrap_or_default(),
+        };
+        details.push(Self {
+            label: Self::label(path),
+            value,
+        });
+    }
+
+    fn readable(value: &JsonValue) -> serde_json::Value {
+        match value {
+            JsonValue::Null => serde_json::Value::Null,
+            JsonValue::Bool(value) => serde_json::Value::Bool(*value),
+            JsonValue::Number(value) => serde_json::from_str(value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.clone())),
+            JsonValue::String(value) => serde_json::Value::String(value.clone()),
+            JsonValue::Array(values) => {
+                serde_json::Value::Array(values.iter().map(Self::readable).collect())
+            }
+            JsonValue::Object(fields) => {
+                let mut object = serde_json::Map::new();
+                for (name, value) in fields {
+                    object.insert(name.clone(), Self::readable(value));
+                }
+                serde_json::Value::Object(object)
+            }
+        }
+    }
+
+    fn label(path: &str) -> String {
+        let path = path.strip_prefix("arguments.").unwrap_or(path);
+        let label = if path.is_empty() { "details" } else { path };
+        label
+            .split('.')
+            .map(|part| {
+                let words = part.replace('_', " ");
+                let mut chars = words.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
+#[vmux_api::contract(Default, Eq)]
 pub struct ComposerContext {
     pub cwd: String,
     pub workspace_name: String,
@@ -114,230 +157,144 @@ pub struct ComposerContext {
     pub projects: Vec<vmux_core::event::ProjectRow>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default, Eq)]
 pub struct ModeState {
     pub current_mode_id: String,
-    pub modes: Vec<vmux_service::protocol::AcpModeOption>,
+    pub modes: Vec<vmux_api::protocol::AcpModeOption>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct SelectMode {
     pub mode_id: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatHistoryRequest {
-    pub before: u32,
-    pub limit: u32,
+    pub generation: u64,
+    pub request_id: u64,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatHistoryPage {
-    pub items_json: String,
-    pub start: u32,
-    pub end: u32,
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatTranscriptState {
+    pub generation: u64,
+    pub request_id: u64,
+    pub prepend_revision: u64,
+    pub items: Vec<ChatItem>,
+    pub loaded_start: u32,
     pub total: u32,
+    pub loading: bool,
+    #[serde(default)]
+    pub active_subagents: u32,
+    #[serde(default)]
+    pub active_tasks: u32,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatSubmit {
     pub text: String,
-    pub attachments: Vec<ChatSubmitAttachment>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
+pub struct ChatDraftChanged {
+    pub text: String,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ChatRemoveAttachment {
+    pub path: String,
+}
+
+#[vmux_api::ui_event(Default)]
 pub struct ChatChoiceSelected {
     pub index: u32,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatApproval {
     pub call_id: String,
     pub decision: ApprovalDecision,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatCancel;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
+pub struct ChatStop;
+
+#[vmux_api::ui_event(Default)]
 pub struct ChatResume;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatClearQueue;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatCancelQueuedPrompt {
     pub id: u64,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatEscape;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
+pub struct ChatSlashCommandRequest {
+    pub command: SlashCommand,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct ChatComposerEffect {
+    pub revision: u64,
+    pub draft: String,
+    pub focus: bool,
+}
+
+#[vmux_api::ui_event(Default)]
 pub struct ChatSelectWorkspace;
 
-pub const CHAT_PROJECT_BRANCHES_EVENT: &str = "chat_project_branches";
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatBranchesRequest {
     pub project: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatProjectBranches {
+#[vmux_api::contract(Default)]
+pub struct ChatBranchesState {
+    pub request_id: u64,
     pub project: String,
     pub branches: Vec<ChatBranch>,
+    pub loading: bool,
+}
+
+#[vmux_api::contract(Default)]
+pub struct ChatMediaState {
+    pub request_id: u64,
+    pub query: String,
+    pub entries: Vec<ChatMediaEntry>,
+    pub loading: bool,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ChatMediaQueryRequest {
+    pub query: String,
+}
+
+#[vmux_api::contract(Default)]
+pub struct ChatResumeState {
+    pub request_id: u64,
+    pub query: String,
+    pub sessions: Vec<ResumableSessionEntry>,
+    pub total: u32,
+    pub loading: bool,
+    pub active: bool,
+}
+
+#[vmux_api::ui_event(Default)]
+pub struct ChatResumeQueryRequest {
+    pub active: bool,
+    pub query: String,
 }
 
 pub use vmux_core::event::ProjectBranch as ChatBranch;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatGoToBranch {
     pub project: String,
     pub branch: String,
@@ -345,18 +302,7 @@ pub struct ChatGoToBranch {
     pub checkout: String,
 }
 
-pub const MODEL_STATE_EVENT: &str = "model_state";
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::contract(Default)]
 pub struct ModelState {
     pub current_model_id: String,
     pub current_model_name: String,
@@ -368,66 +314,24 @@ pub struct ModelState {
     pub effort_levels: Vec<String>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct SelectModel {
     pub model_id: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct SetAgentEffort {
     pub agent_key: String,
     pub level: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[vmux_api::ui_event(Default)]
 pub struct ChatOpenPage {
     pub url: String,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct RuntimeSwitchRequest {
-    pub to: String,
-}
-
-pub use vmux_wire::chat::{
-    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, ToolName, WORKING_VERB_IDS,
-    latest_tool_location,
+pub use vmux_api::chat::{
+    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, WORKING_VERB_IDS,
 };
 
 #[cfg(test)]
@@ -437,9 +341,6 @@ mod tests {
     #[test]
     fn chat_snapshot_rkyv_roundtrip() {
         let v = ChatSnapshot {
-            messages_json: "[]".to_string(),
-            messages_start: 12,
-            messages_total: 60,
             status: "streaming".to_string(),
             conversation_title: "Refine generated summaries".to_string(),
             handoff_source: "Codex".to_string(),
@@ -451,14 +352,18 @@ mod tests {
                 QueuedPromptSnapshot {
                     id: 4,
                     text: "a".into(),
-                    attachment_names: vec!["image.png".into()],
-                    attachment_paths: vec!["/tmp/image.png".into()],
+                    attachments: vec![ChatAttachment {
+                        path: "/tmp/image.png".into(),
+                        name: "image.png".into(),
+                        mime_type: "image/png".into(),
+                        size: 3,
+                        preview_data_url: "data:image/png;base64,cG5n".into(),
+                    }],
                 },
                 QueuedPromptSnapshot {
                     id: 9,
                     text: "b".into(),
-                    attachment_names: Vec::new(),
-                    attachment_paths: Vec::new(),
+                    attachments: Vec::new(),
                 },
             ],
             paused: true,
@@ -468,8 +373,6 @@ mod tests {
         let back = rkyv::from_bytes::<ChatSnapshot, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.status, "streaming");
         assert_eq!(back.conversation_title, "Refine generated summaries");
-        assert_eq!(back.messages_start, 12);
-        assert_eq!(back.messages_total, 60);
         assert_eq!(back.queued.len(), 2);
         assert_eq!(back.queued[0].id, 4);
         assert_eq!(back.queued[0].text, "a");
@@ -484,16 +387,26 @@ mod tests {
     }
 
     #[test]
-    fn chat_history_page_rkyv_roundtrip() {
-        let value = ChatHistoryPage {
-            items_json: "[]".into(),
-            start: 4,
-            end: 44,
+    fn chat_transcript_state_rkyv_roundtrip() {
+        let value = ChatTranscriptState {
+            generation: 3,
+            request_id: 7,
+            prepend_revision: 2,
+            items: vec![ChatItem::user("older")],
+            loaded_start: 4,
             total: 92,
+            loading: true,
+            active_subagents: 2,
+            active_tasks: 3,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
-        let back = rkyv::from_bytes::<ChatHistoryPage, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!((back.start, back.end, back.total), (4, 44, 92));
+        let back = rkyv::from_bytes::<ChatTranscriptState, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!((back.generation, back.request_id), (3, 7));
+        assert_eq!((back.loaded_start, back.total), (4, 92));
+        assert_eq!(back.prepend_revision, 2);
+        assert!(back.loading);
+        assert_eq!((back.active_subagents, back.active_tasks), (2, 3));
+        assert_eq!(back.items, vec![ChatItem::user("older")]);
     }
 
     #[test]
@@ -531,16 +444,47 @@ mod tests {
     }
 
     #[test]
+    fn pending_approval_projects_nested_details_and_recovers_invalid_numbers() {
+        let args = JsonValue::Object(vec![
+            (
+                "arguments".into(),
+                JsonValue::Object(vec![(
+                    "path".into(),
+                    JsonValue::String("/tmp/SKILL.md".into()),
+                )]),
+            ),
+            ("attempt".into(), JsonValue::Number("invalid".into())),
+        ]);
+
+        let approval = PendingApproval::new("call-1".into(), "read_file".into(), &args);
+
+        assert_eq!(
+            approval.details,
+            vec![
+                ApprovalDetail {
+                    label: "Path".into(),
+                    value: "/tmp/SKILL.md".into(),
+                },
+                ApprovalDetail {
+                    label: "Attempt".into(),
+                    value: "\"invalid\"".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn chat_item_turn_roundtrip() {
         let items = vec![
             ChatItem::User {
                 text: "hi".into(),
                 context: Some("project policy".into()),
-                attachments: vec![ChatSubmitAttachment {
+                attachments: vec![ChatAttachment {
                     path: "/tmp/image.png".into(),
                     name: "image.png".into(),
                     mime_type: "image/png".into(),
                     size: 3,
+                    preview_data_url: "data:image/png;base64,cG5n".into(),
                 }],
                 created_at_ms: 100,
             },
@@ -558,6 +502,7 @@ mod tests {
                 duration_secs: Some(12),
                 step_count: 2,
                 created_at_ms: 200,
+                ..Default::default()
             }),
         ];
         let json = serde_json::to_string(&items).unwrap();
@@ -590,152 +535,10 @@ mod tests {
     }
 
     #[test]
-    fn tool_children_associate_with_their_parent_call() {
-        let turn = ChatTurn {
-            blocks: vec![
-                ChatBlock::ToolUse {
-                    call_id: "read-1".into(),
-                    name: "read_file".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolUse {
-                    call_id: "review-1".into(),
-                    name: "guardian_review".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolResult {
-                    call_id: "read-1".into(),
-                    content: "file contents".into(),
-                    is_error: false,
-                },
-                ChatBlock::ToolResult {
-                    call_id: "review-1".into(),
-                    content: "review complete".into(),
-                    is_error: false,
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert_eq!(turn.parent_tool_index(0), None);
-        assert_eq!(turn.parent_tool_index(1), Some(0));
-        assert_eq!(turn.parent_tool_index(2), Some(0));
-        assert_eq!(turn.parent_tool_index(3), Some(0));
-    }
-
-    #[test]
-    fn latest_top_level_tool_ignores_results_and_nested_tools() {
-        let turn = ChatTurn {
-            blocks: vec![
-                ChatBlock::ToolUse {
-                    call_id: "first".into(),
-                    name: "read_file".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolResult {
-                    call_id: "first".into(),
-                    content: "done".into(),
-                    is_error: false,
-                },
-                ChatBlock::ToolUse {
-                    call_id: "nested".into(),
-                    name: "guardian_review".into(),
-                    args: "{}".into(),
-                    parent_call_id: Some("first".into()),
-                },
-                ChatBlock::ToolUse {
-                    call_id: "second".into(),
-                    name: "run".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert_eq!(turn.latest_top_level_tool_index(), Some(3));
-    }
-
-    #[test]
-    fn latest_tool_location_selects_only_the_newest_turn_tool() {
-        let tool = |call_id: &str| ChatBlock::ToolUse {
-            call_id: call_id.into(),
-            name: "run".into(),
-            args: "{}".into(),
-            parent_call_id: None,
-        };
-        let items = vec![
-            ChatItem::Turn(ChatTurn {
-                blocks: vec![tool("old")],
-                ..Default::default()
-            }),
-            ChatItem::User {
-                text: "next".into(),
-                context: None,
-                attachments: Vec::new(),
-                created_at_ms: 0,
-            },
-            ChatItem::Turn(ChatTurn {
-                blocks: vec![ChatBlock::Text("working".into()), tool("new")],
-                ..Default::default()
-            }),
-        ];
-
-        assert_eq!(latest_tool_location(&items), Some((2, 1)));
-    }
-
-    #[test]
-    fn empty_call_ids_do_not_associate() {
-        let turn = ChatTurn {
-            blocks: vec![
-                ChatBlock::ToolUse {
-                    call_id: String::new(),
-                    name: "read_file".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolResult {
-                    call_id: String::new(),
-                    content: "file contents".into(),
-                    is_error: false,
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert_eq!(turn.parent_tool_index(0), None);
-        assert_eq!(turn.parent_tool_index(1), None);
-    }
-
-    #[test]
-    fn standalone_guardian_owns_its_result() {
-        let turn = ChatTurn {
-            blocks: vec![
-                ChatBlock::ToolUse {
-                    call_id: "review-1".into(),
-                    name: "guardian_review".into(),
-                    args: "{}".into(),
-                    parent_call_id: None,
-                },
-                ChatBlock::ToolResult {
-                    call_id: "review-1".into(),
-                    content: "review complete".into(),
-                    is_error: false,
-                },
-            ],
-            ..Default::default()
-        };
-
-        assert_eq!(turn.parent_tool_index(0), None);
-        assert_eq!(turn.parent_tool_index(1), Some(0));
-    }
-
-    #[test]
     fn resumable_sessions_rkyv_roundtrip() {
         let v = ResumableSessions {
+            request_id: 8,
+            query: "auth".into(),
             sessions: vec![ResumableSessionEntry {
                 kind: "claude".into(),
                 sid: "sid-9".into(),
@@ -756,6 +559,8 @@ mod tests {
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&v).unwrap();
         let back = rkyv::from_bytes::<ResumableSessions, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back.request_id, 8);
+        assert_eq!(back.query, "auth");
         assert_eq!(back.sessions.len(), 1);
         assert_eq!(back.sessions[0].sid, "sid-9");
         assert_eq!(back.sessions[0].latest, "and the tests");

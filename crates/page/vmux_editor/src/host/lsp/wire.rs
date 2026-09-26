@@ -8,7 +8,7 @@ pub enum RequestId {
 }
 
 impl RequestId {
-    pub fn of(value: &Value) -> Option<Self> {
+    pub fn parse(value: &Value) -> Option<Self> {
         if let Some(n) = value.as_i64() {
             return Some(Self::Number(n));
         }
@@ -79,8 +79,8 @@ pub enum Incoming {
 }
 
 impl Incoming {
-    pub fn of(mut msg: Value) -> Self {
-        let id = msg.get("id").and_then(RequestId::of);
+    pub fn parse(mut msg: Value) -> Self {
+        let id = msg.get("id").and_then(RequestId::parse);
         let Some(method) = msg.get("method").and_then(|v| v.as_str()).map(String::from) else {
             return match id {
                 Some(id) => Self::Response { id, body: msg },
@@ -111,7 +111,7 @@ mod tests {
             "method": "workspace/applyEdit",
             "params": {"edit": {}},
         });
-        let Incoming::Request { id, method, params } = Incoming::of(msg) else {
+        let Incoming::Request { id, method, params } = Incoming::parse(msg) else {
             panic!("id + method must classify as a request, not a response");
         };
         assert_eq!(id, RequestId::Number(1000));
@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn response_keeps_the_whole_envelope() {
         let Incoming::Response { id, body } =
-            Incoming::of(json!({"jsonrpc": "2.0", "id": 7, "result": {"ok": true}}))
+            Incoming::parse(json!({"jsonrpc": "2.0", "id": 7, "result": {"ok": true}}))
         else {
             panic!("id without method is a response");
         };
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn notification_has_no_id() {
         let Incoming::Notification { method, .. } =
-            Incoming::of(json!({"method": "window/logMessage", "params": {}}))
+            Incoming::parse(json!({"method": "window/logMessage", "params": {}}))
         else {
             panic!("method without id is a notification");
         };
@@ -143,14 +143,14 @@ mod tests {
     #[test]
     fn neither_id_nor_method_is_invalid() {
         assert!(matches!(
-            Incoming::of(json!({"jsonrpc": "2.0"})),
+            Incoming::parse(json!({"jsonrpc": "2.0"})),
             Incoming::Invalid
         ));
     }
 
     #[test]
     fn string_ids_survive_classification_and_replay() {
-        let Incoming::Request { id, .. } = Incoming::of(json!({
+        let Incoming::Request { id, .. } = Incoming::parse(json!({
             "id": "req-1", "method": "client/registerCapability", "params": {},
         })) else {
             panic!("a string id is still an id");

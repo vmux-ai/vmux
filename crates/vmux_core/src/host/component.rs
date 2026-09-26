@@ -8,42 +8,51 @@ pub fn now_millis() -> i64 {
         .as_millis() as i64
 }
 
-#[derive(Component, Clone, Debug, Default, PartialEq)]
-pub struct PageIdentity {
-    pub title: Option<String>,
-    pub icon: Option<crate::PageIcon>,
-}
-
-impl PageIdentity {
-    pub fn of_title(title: impl Into<String>) -> Self {
-        Self {
-            title: Some(title.into()),
-            icon: None,
-        }
-    }
-}
-
-impl crate::PageMetadata {
-    pub fn title_with<'a>(&'a self, identity: Option<&'a PageIdentity>) -> &'a str {
-        match identity.and_then(|identity| identity.title.as_deref()) {
-            Some(title) if !title.is_empty() => title,
-            _ => &self.title,
-        }
-    }
-
-    pub fn icon_with<'a>(&'a self, identity: Option<&'a PageIdentity>) -> &'a crate::PageIcon {
-        match identity.and_then(|identity| identity.icon.as_ref()) {
-            Some(icon) if !icon.is_none() => icon,
-            _ => &self.icon,
-        }
-    }
-}
-
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyboardOwner;
 
 #[derive(Component, Clone, Debug)]
 pub struct AgentWorkingDir(pub String);
+
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct JsonArguments(pub serde_json::Value);
+
+impl JsonArguments {
+    pub fn parse<T: serde::de::DeserializeOwned>(&self, name: &str) -> Result<T, String> {
+        serde_json::from_value(self.0.clone())
+            .map_err(|error| format!("{name}: invalid arguments: {error}"))
+    }
+}
+
+impl TryFrom<&vmux_api::json::JsonValue> for JsonArguments {
+    type Error = String;
+
+    fn try_from(input: &vmux_api::json::JsonValue) -> Result<Self, Self::Error> {
+        let value = serde_json::Value::try_from(input)
+            .map_err(|error| format!("invalid JSON arguments: {error}"))?;
+        if !value.is_object() {
+            return Err("command arguments must be a JSON object".to_string());
+        }
+        Ok(Self(value))
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessAnchor(pub crate::ProcessId);
+
+impl ProcessAnchor {
+    pub fn required(value: Option<&Self>, name: &str) -> Result<crate::ProcessId, String> {
+        value.map(|anchor| anchor.0).ok_or_else(|| {
+            format!("{name} requires an agent anchor (not available to this client)")
+        })
+    }
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct HostShell(pub String);
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RegistrationOrder(pub u32);
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
@@ -180,7 +189,7 @@ pub struct EffectiveStartupUrl(pub String);
 impl EffectiveStartupUrl {
     pub const START_PAGE: &'static str = "vmux://start/";
 
-    pub fn of(resolved: Option<&Self>) -> String {
+    pub fn resolve(resolved: Option<&Self>) -> String {
         match resolved {
             Some(url) if !url.0.is_empty() => url.0.clone(),
             _ => Self::START_PAGE.to_string(),

@@ -9,15 +9,12 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
-use vmux_command::event::LAYOUT_COMMAND_BAR_OPEN_EVENT;
+use vmux_api::BinEvent;
+use vmux_api::command_bar::CommandBarUiState;
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
-use vmux_layout::{
-    Header, LayoutCef,
-    event::{STACKS_EVENT, TABS_EVENT},
-    side_sheet::SideSheet,
-};
+use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState};
 
 #[cfg(not(target_os = "macos"))]
 use crate::{
@@ -34,8 +31,7 @@ pub(crate) struct FrameRatePlugin;
 
 impl Plugin for FrameRatePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LayoutFrameRateBurst>()
-            .add_observer(request_layout_frame_burst)
+        app.add_observer(request_layout_frame_burst)
             .add_systems(Update, cap_uncapped_webview_frame_rate)
             .add_systems(
                 Last,
@@ -178,7 +174,7 @@ fn refresh_active_windowed_hover(
     >,
     mut state: Local<WindowedHoverRefreshState>,
 ) {
-    if OverlayState::of_any(&overlay_q).owns_input() {
+    if OverlayState::from_query(&overlay_q).owns_input() {
         *state = WindowedHoverRefreshState::default();
         return;
     }
@@ -229,6 +225,7 @@ const PAGE_MAX_FRAME_RATE: i32 = 60;
 
 fn cap_uncapped_webview_frame_rate(
     uncapped: Query<Entity, (With<WebviewSource>, Without<WebviewMaxFrameRate>)>,
+    layouts: Query<Entity, (With<LayoutCef>, Without<LayoutFrameRateState>)>,
     mut commands: Commands,
 ) {
     for entity in &uncapped {
@@ -236,31 +233,43 @@ fn cap_uncapped_webview_frame_rate(
             .entity(entity)
             .insert(WebviewMaxFrameRate(PAGE_MAX_FRAME_RATE));
     }
-}
-#[derive(Resource, Default)]
-struct LayoutFrameRateBurst {
-    pub(crate) last_emit: Option<std::time::Instant>,
+    for entity in &layouts {
+        commands
+            .entity(entity)
+            .insert(LayoutFrameRateState::default());
+    }
 }
 
 fn request_layout_frame_burst(
     trigger: On<BinHostEmitEvent>,
-    mut layouts: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
+    mut layouts: Query<
+        (&mut WebviewMaxFrameRate, Option<&mut LayoutFrameRateState>),
+        With<LayoutCef>,
+    >,
     browsers: NonSend<Browsers>,
-    mut burst: ResMut<LayoutFrameRateBurst>,
+    mut commands: Commands,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    if !matches!(
-        trigger.id.as_str(),
-        TABS_EVENT | STACKS_EVENT | LAYOUT_COMMAND_BAR_OPEN_EVENT
-    ) {
+    if trigger.id() != LayoutUiState::id() && trigger.id() != CommandBarUiState::id() {
         return;
     }
-    let Ok(mut cap) = layouts.get_mut(trigger.webview) else {
+    let Ok((mut cap, state)) = layouts.get_mut(trigger.webview()) else {
         return;
     };
+    let now = std::time::Instant::now();
     cap.0 = LAYOUT_ACTIVE_FRAME_RATE;
-    browsers.set_windowless_frame_rate(&trigger.webview, LAYOUT_ACTIVE_FRAME_RATE);
-    burst.last_emit = Some(std::time::Instant::now());
+    browsers.set_windowless_frame_rate(&trigger.webview(), LAYOUT_ACTIVE_FRAME_RATE);
+    match state {
+        Some(mut state) => state.last_emit = Some(now),
+        None => {
+            commands
+                .entity(trigger.webview())
+                .insert(LayoutFrameRateState {
+                    last_emit: Some(now),
+                    ..default()
+                });
+        }
+    }
     if let Some(proxy) = proxy {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
@@ -287,53 +296,59 @@ fn sync_layout_cef_frame_rate(
     mut key_events: MessageReader<KeyboardInput>,
     buttons: Res<ButtonInput<MouseButton>>,
     mut layout_q: Query<
-        (&HostWindow, &mut WebviewMaxFrameRate, Has<KeyboardOwner>),
+        (
+            &HostWindow,
+            &mut WebviewMaxFrameRate,
+            &mut LayoutFrameRateState,
+            Has<KeyboardOwner>,
+        ),
         With<LayoutCef>,
     >,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
-    burst: Res<LayoutFrameRateBurst>,
-    mut state: Local<LayoutFrameRateState>,
 ) {
-    let owns_keyboard = layout_q.iter().any(|(host, _, keyboard_target)| {
-        host.0 == focused_window.0.unwrap_or(Entity::PLACEHOLDER) && keyboard_target
-    });
     let inside = NativeLayout::pointer_is_inside();
     let pointer = vmux_layout::native_pointer::snapshot();
-    let native_changed = pointer.is_some_and(|pointer| {
-        if pointer.sequence == state.native_sequence {
-            return false;
-        }
-        state.native_sequence = pointer.sequence;
-        true
-    });
-    let pointer_moved = native_changed || cursor_events.read().count() > 0;
+    let cursor_moved = cursor_events.read().count() > 0;
     let button_changed = button_events.read().count() > 0;
     let wheel_changed = wheel_events.read().count() > 0;
     let key_changed = key_events.read().count() > 0;
-    let input_changed = pointer_moved || button_changed || wheel_changed;
     let now = std::time::Instant::now();
-    if (inside || state.dragging_layout) && (button_changed || wheel_changed)
-        || (owns_keyboard && key_changed)
-    {
-        state.last_input = Some(now);
-    }
     let native_dragging = pointer.is_some_and(|pointer| {
         pointer.buttons.left || pointer.buttons.right || pointer.buttons.middle
     });
     let any_pressed = native_dragging || buttons.get_pressed().next().is_some();
-    if !any_pressed {
-        state.dragging_layout = false;
-    } else if inside && input_changed {
-        state.dragging_layout = true;
-    }
-    let desired = layout_frame_rate(
-        now,
-        state.last_input.max(burst.last_emit),
-        state.dragging_layout,
-    );
-    for (host, mut cap, _) in &mut layout_q {
-        let target = if Some(host.0) == focused_window.0 {
-            desired
+    for (host, mut cap, mut state, owns_keyboard) in &mut layout_q {
+        let focused = Some(host.0) == focused_window.0;
+        let native_changed = focused
+            && pointer.is_some_and(|pointer| {
+                if pointer.sequence == state.native_sequence {
+                    return false;
+                }
+                state.native_sequence = pointer.sequence;
+                true
+            });
+        let input_changed = native_changed || cursor_moved || button_changed || wheel_changed;
+        if focused
+            && ((inside || state.dragging_layout) && (button_changed || wheel_changed)
+                || (owns_keyboard && key_changed))
+        {
+            state.last_input = Some(now);
+        }
+        if focused {
+            if !any_pressed {
+                state.dragging_layout = false;
+            } else if inside && input_changed {
+                state.dragging_layout = true;
+            }
+        } else {
+            state.dragging_layout = false;
+        }
+        let target = if focused {
+            layout_frame_rate(
+                now,
+                state.last_input.max(state.last_emit),
+                state.dragging_layout,
+            )
         } else {
             LAYOUT_IDLE_FRAME_RATE
         };
@@ -346,7 +361,10 @@ fn sync_layout_cef_frame_rate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_layout::event::PANE_TREE_EVENT;
+    use vmux_api::command_bar::CommandBarOpenEvent;
+
+    #[vmux_api::host_event(target = any)]
+    struct OtherEvent;
 
     #[test]
     fn layout_frame_rate_bursts_after_input() {
@@ -367,44 +385,26 @@ mod tests {
     fn layout_host_emit_requests_frame_burst() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<LayoutFrameRateBurst>()
             .add_observer(request_layout_frame_burst);
         app.world_mut().insert_non_send(Browsers::default());
         let other = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .trigger(BinHostEmitEvent::from_bytes(other, "other", Vec::new()));
-        assert!(
-            app.world()
-                .resource::<LayoutFrameRateBurst>()
-                .last_emit
-                .is_none()
-        );
+            .trigger(BinHostEmitEvent::from_event(other, &OtherEvent));
+        assert!(app.world().get::<LayoutFrameRateState>(other).is_none());
 
         let layout = app
             .world_mut()
             .spawn((LayoutCef, WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE)))
             .id();
-        app.world_mut().trigger(BinHostEmitEvent::from_bytes(
+        app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
-            PANE_TREE_EVENT,
-            Vec::new(),
+            &LayoutUiState::default(),
         ));
+        app.update();
         assert!(
             app.world()
-                .resource::<LayoutFrameRateBurst>()
-                .last_emit
-                .is_none()
-        );
-        assert_eq!(
-            app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
-            LAYOUT_IDLE_FRAME_RATE
-        );
-        app.world_mut()
-            .trigger(BinHostEmitEvent::from_bytes(layout, "tabs", Vec::new()));
-        assert!(
-            app.world()
-                .resource::<LayoutFrameRateBurst>()
-                .last_emit
+                .get::<LayoutFrameRateState>(layout)
+                .and_then(|state| state.last_emit)
                 .is_some()
         );
         assert_eq!(
@@ -415,10 +415,12 @@ mod tests {
         app.world_mut()
             .entity_mut(layout)
             .insert(WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE));
-        app.world_mut().trigger(BinHostEmitEvent::from_bytes(
+        app.world_mut().trigger(BinHostEmitEvent::from_event(
             layout,
-            LAYOUT_COMMAND_BAR_OPEN_EVENT,
-            Vec::new(),
+            &CommandBarUiState {
+                sequence: 1,
+                patches: vec![CommandBarOpenEvent::default().into()],
+            },
         ));
         assert_eq!(
             app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,

@@ -18,7 +18,8 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
 vmux_core = { path = "../../vmux_core" }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_native = { path = "../../vmux_native" }
+vmux_api = { path = "../../vmux_api" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
@@ -27,6 +28,7 @@ bevy_ecs = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 libc = "0.2"
 serde_json = { workspace = true }
+vmux_tool = { path = "../../vmux_tool" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

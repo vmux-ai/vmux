@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
+pub type TerminalUiStateUpdates = super::UiState<crate::event::TerminalUiState>;
+
 #[derive(Component)]
+#[require(TerminalUiStateUpdates)]
 pub struct Terminal;
 
 #[derive(Component)]
@@ -40,11 +43,6 @@ pub struct TerminalSpawnRequest {
     pub cwd: Option<std::path::PathBuf>,
     pub target: TerminalSpawnTarget,
     pub metadata: Option<crate::PageMetadata>,
-}
-
-#[derive(Message, Debug, Clone)]
-pub struct ProcessesMonitorSpawnRequest {
-    pub target_stack: Entity,
 }
 
 #[cfg(test)]

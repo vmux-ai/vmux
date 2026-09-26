@@ -1,66 +1,10 @@
-pub use vmux_wire::command_bar::*;
-
-use vmux_core::PageMetadata;
-
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct BookmarksCommandEvent {
-    pub command: String,
-    #[serde(default)]
-    pub uuid: Option<String>,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub url: Option<String>,
-    #[serde(default)]
-    pub metadata: Option<PageMetadata>,
-    #[serde(default)]
-    pub folder: Option<String>,
-    #[serde(default)]
-    pub target_uuid: Option<String>,
-}
+pub use vmux_api::command_bar::*;
 
 #[cfg(host)]
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchEngineSetting(pub SearchEngine);
 
-pub const LAYOUT_COMMAND_BAR_OPEN_EVENT: &str = "layout-command-bar-open";
-
-pub const LAYOUT_COMMAND_BAR_CLOSE_EVENT: &str = "layout-command-bar-close";
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct CommandBarPanelCloseEvent;
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PanelPlacement {
     pub left: f64,
     pub top: f64,
@@ -93,20 +37,8 @@ pub fn clamp_panel_placement(
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct CommandBarPanelActiveEvent {
+#[vmux_api::ui_event(Copy, Default, Eq, url = "vmux://layout/")]
+pub struct CommandBarPanelRequest {
     pub active: bool,
 }
 

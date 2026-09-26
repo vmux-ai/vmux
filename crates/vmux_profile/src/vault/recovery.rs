@@ -13,7 +13,6 @@ use super::repository::{
 };
 use super::snapshot::{
     KEY_LEN, decode_hex, decrypt_bytes, encrypt_bytes, hex, load_encrypted_snapshot, validate_key,
-    write_atomic,
 };
 use super::sync::{reconcile_local, write_local_state};
 use super::{repository_dir, root_dir};
@@ -118,10 +117,11 @@ impl VaultRecovery {
             .map_err(|error| error.to_string())?;
         let directory = self.repository.join(RECOVERY_DIR);
         std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-        write_atomic(
-            &directory.join(RECOVERY_FILE),
+        vmux_path::AtomicFile::write(
+            directory.join(RECOVERY_FILE),
             format!("{source}\n").as_bytes(),
-        )?;
+        )
+        .map_err(|error| error.to_string())?;
         let finalization = (|| {
             manifest.version = MANIFEST_VERSION;
             write_manifest(&self.repository, &manifest)?;

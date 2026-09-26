@@ -15,12 +15,13 @@ path = "src/lib.rs"
 
 [dependencies]
 rkyv = { workspace = true }
+ron = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
 vmux_core = { path = "../../vmux_core" }
 vmux_history = { path = "../vmux_history", default-features = false }
-vmux_wire = { path = "../../vmux_wire" }
+vmux_api = { path = "../../vmux_api" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
@@ -30,6 +31,7 @@ ignore = "0.4"
 muda = "0.19"
 vmux_flex = { path = "../../vmux_flex" }
 vmux_macro = { path = "../../vmux_macro" }
+vmux_tool = { path = "../../vmux_tool" }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]

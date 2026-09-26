@@ -24,7 +24,7 @@ fluent-bundle = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 unic-langid = { workspace = true }
-vmux_wire = { path = "../vmux_wire" }
+vmux_api = { path = "../vmux_api" }
 
 [build-dependencies]
 sha2 = { version = "0.10" }

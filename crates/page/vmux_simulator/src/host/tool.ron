@@ -1,0 +1,65 @@
+[
+    (
+        name: "simulator_screenshot",
+        description: "Capture the attached iOS Simulator screen and return it inline. Use the returned pixel dimensions and image coordinates with simulator_tap and simulator_swipe.",
+        input_schema: (type: Object),
+    ),
+    (
+        name: "simulator_tap",
+        description: "Tap the attached iOS Simulator at x,y pixel coordinates from simulator_screenshot.",
+        input_schema: (
+            type: Object,
+            required: ["x", "y"],
+            properties: {
+                "x": (type: Integer, minimum: Some(0)),
+                "y": (type: Integer, minimum: Some(0)),
+            },
+        ),
+    ),
+    (
+        name: "simulator_swipe",
+        description: "Swipe the attached iOS Simulator between pixel coordinates from simulator_screenshot. duration_ms defaults to 300.",
+        input_schema: (
+            type: Object,
+            required: ["start_x", "start_y", "end_x", "end_y"],
+            properties: {
+                "start_x": (type: Integer, minimum: Some(0)),
+                "start_y": (type: Integer, minimum: Some(0)),
+                "end_x": (type: Integer, minimum: Some(0)),
+                "end_y": (type: Integer, minimum: Some(0)),
+                "duration_ms": (type: Integer, minimum: Some(1), maximum: Some(10000)),
+            },
+        ),
+    ),
+    (
+        name: "simulator_type",
+        description: "Type text into the focused control in the attached iOS Simulator.",
+        input_schema: (
+            type: Object,
+            required: ["text"],
+            properties: {"text": (type: String, min_length: Some(1))},
+        ),
+    ),
+    (
+        name: "simulator_key",
+        description: "Press one HID keycode in the attached iOS Simulator. Common codes: Enter 40, Backspace 42, Tab 43, Space 44.",
+        input_schema: (
+            type: Object,
+            required: ["keycode"],
+            properties: {
+                "keycode": (type: Integer, minimum: Some(0), maximum: Some(255)),
+            },
+        ),
+    ),
+    (
+        name: "simulator_button",
+        description: "Press a hardware button on the attached iOS Simulator.",
+        input_schema: (
+            type: Object,
+            required: ["button"],
+            properties: {
+                "button": (type: String, values: ["home", "lock", "siri"]),
+            },
+        ),
+    ),
+]

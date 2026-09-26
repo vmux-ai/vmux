@@ -17,6 +17,9 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
+vmux_api = { path = "../../vmux_api" }
+vmux_native = { path = "../../vmux_native" }
+vmux_path = { path = "../../vmux_path" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
@@ -24,12 +27,13 @@ bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 notify = { workspace = true }
 ron = { workspace = true }
-tempfile = "3"
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../../vmux_core" }
 vmux_flex = { path = "../../vmux_flex" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_macro = { path = "../../vmux_macro" }
+vmux_tool = { path = "../../vmux_tool" }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }

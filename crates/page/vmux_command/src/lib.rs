@@ -1,14 +1,16 @@
 #![cfg_attr(ui, allow(non_snake_case))]
 
-#[cfg(ui)]
-pub mod page;
+extern crate self as vmux_command;
+
 #[cfg(ui)]
 pub mod panel;
+#[cfg(ui)]
+pub mod ui;
 
 pub mod event;
 pub mod size;
-pub use vmux_wire::open_target;
-pub use vmux_wire::prompt_media;
+pub use vmux_api::open_target;
+pub use vmux_api::prompt_media;
 
 #[cfg(host)]
 pub mod host;

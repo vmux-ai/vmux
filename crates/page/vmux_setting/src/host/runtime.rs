@@ -774,35 +774,6 @@ pub enum ShortcutDef {
     Leader(KeyComboDef),
 }
 
-impl ShortcutSettings {
-    pub fn keymap(&self) -> vmux_command::shortcut::Keymap {
-        use vmux_command::shortcut::{Binding, Keymap, Source, When};
-
-        let leader = self.leader.to_key_combo();
-        let mut keymap = Keymap::defaults();
-        keymap.chord_timeout_ms = self.chord_timeout_ms;
-        if let Some(leader) = &leader {
-            keymap.set_leader(leader);
-        }
-
-        let mut configured = Vec::new();
-        for entry in &self.bindings {
-            let shortcut = match leader.as_ref() {
-                Some(leader) => entry.binding.to_shortcut_with_leader(leader),
-                None => entry.binding.to_shortcut(),
-            };
-            let Some(shortcut) = shortcut else { continue };
-            configured.push(Binding {
-                shortcut,
-                command: entry.command.clone(),
-                when: entry.when.as_deref().and_then(When::parse),
-            });
-        }
-        keymap.extend(Source::Settings, configured);
-        keymap
-    }
-}
-
 impl ShortcutDef {
     pub fn to_shortcut(&self) -> Option<vmux_command::shortcut::Shortcut> {
         match self {
@@ -1658,29 +1629,13 @@ fn persist_settings_to_disk(
         let bytes = request.ron_bytes.as_bytes();
         let hash = settings_content_hash(bytes);
         last_hash.0 = Some(hash);
-        if let Err(e) = atomic_write(&watcher.path, bytes) {
+        if let Err(e) = vmux_path::AtomicFile::write(&watcher.path, bytes) {
             bevy::log::warn!(
                 "settings: failed to persist {}: {e}",
                 watcher.path.display()
             );
         }
     }
-}
-
-fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    let parent = path.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "settings path has no parent",
-        )
-    })?;
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-    use std::io::Write;
-    tmp.write_all(bytes)?;
-    tmp.flush()?;
-    tmp.persist(path)
-        .map_err(|e| std::io::Error::other(format!("persist failed: {e}")))?;
-    Ok(())
 }
 
 #[cfg(test)]

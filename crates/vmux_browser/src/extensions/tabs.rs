@@ -10,11 +10,13 @@ pub(crate) struct ChromeTabs<'a> {
     model: &'a ChromeModel,
 }
 
-impl<'a> ChromeTabs<'a> {
-    pub(crate) fn of(model: &'a ChromeModel) -> Self {
+impl<'a> From<&'a ChromeModel> for ChromeTabs<'a> {
+    fn from(model: &'a ChromeModel) -> Self {
         Self { model }
     }
+}
 
+impl ChromeTabs<'_> {
     pub(crate) fn dispatch(
         &self,
         request: &ApiRequest,
@@ -31,7 +33,7 @@ impl<'a> ChromeTabs<'a> {
     }
 
     fn query(&self, request: &ApiRequest, authorization: &BridgeAuthorization) -> Value {
-        let filter = TabFilter::of(Self::argument(request));
+        let filter = TabFilter::from_options(Self::argument(request));
         let mut matched = Vec::new();
         for tab in &self.model.tabs {
             if filter.matches(tab, self.focused_window()) {
@@ -103,8 +105,8 @@ struct UrlFilter {
     patterns: Vec<String>,
 }
 
-impl UrlFilter {
-    fn of(url: &Value) -> Self {
+impl From<&Value> for UrlFilter {
+    fn from(url: &Value) -> Self {
         let mut patterns = Vec::new();
         match url {
             Value::String(single) => patterns.push(single.clone()),
@@ -119,7 +121,9 @@ impl UrlFilter {
         }
         Self { patterns }
     }
+}
 
+impl UrlFilter {
     fn matches(&self, url: &str) -> bool {
         for pattern in &self.patterns {
             if let Ok(parsed) = ChromeMatchPattern::parse(pattern) {
@@ -165,7 +169,7 @@ impl UrlFilter {
 }
 
 impl TabFilter {
-    fn of(options: Option<&Value>) -> Self {
+    fn from_options(options: Option<&Value>) -> Self {
         let Some(options) = options.and_then(Value::as_object) else {
             return Self::everything();
         };
@@ -191,7 +195,7 @@ impl TabFilter {
                 .and_then(Value::as_u64)
                 .map(|index| index as u32),
             current_window,
-            urls: options.get("url").map(UrlFilter::of),
+            urls: options.get("url").map(UrlFilter::from),
         }
     }
 
@@ -346,7 +350,7 @@ mod tests {
             vec![json!({ "active": true, "currentWindow": true })],
         );
 
-        let result = ChromeTabs::of(&model)
+        let result = ChromeTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
@@ -361,7 +365,7 @@ mod tests {
             vec![json!({ "url": ["https://accounts.google.com/*"] })],
         );
 
-        let result = ChromeTabs::of(&model)
+        let result = ChromeTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
@@ -376,7 +380,7 @@ mod tests {
             vec![json!({ "url": "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/popup/*" })],
         );
 
-        let result = ChromeTabs::of(&model)
+        let result = ChromeTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
@@ -388,7 +392,7 @@ mod tests {
         let model = ChromeModel::fixture();
         let request = WorkerCall::to("get", vec![json!(1)]);
 
-        let error = ChromeTabs::of(&model)
+        let error = ChromeTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect_err("no such tab");
 
@@ -400,7 +404,7 @@ mod tests {
         let model = ChromeModel::fixture();
         let request = WorkerCall::to("query", vec![json!({ "active": true, "windowId": -2 })]);
 
-        let result = ChromeTabs::of(&model)
+        let result = ChromeTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
@@ -412,7 +416,7 @@ mod tests {
         let model = ChromeModel::fixture();
         let request = WorkerCall::to("get", vec![json!(4294967306i64)]);
 
-        let error = ChromeTabs::of(&model)
+        let error = ChromeTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect_err("out of range");
 
@@ -428,7 +432,7 @@ mod tests {
             ..BridgeAuthorization::fixture()
         };
 
-        let result = ChromeTabs::of(&model)
+        let result = ChromeTabs::from(&model)
             .dispatch(&request, &authorization)
             .expect("get answers");
 

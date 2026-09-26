@@ -1,17 +1,18 @@
-use crate::process::{Process, ProcessManager, PtyInputWriter};
-use crate::protocol::{
-    AgentAction, AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
-    ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
-};
-use crate::{read_message, write_message};
+use crate::process::{Process, ProcessManager};
+use bevy::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
-use tokio::time::MissedTickBehavior;
+use vmux_api::protocol::{
+    AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
+    ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
+};
+
+use super::query::{ProcessQueries, ProcessQueryPlugin};
 
 static SERVICE_STARTED: OnceLock<Instant> = OnceLock::new();
 
@@ -19,21 +20,89 @@ pub(crate) fn init_started_at() {
     SERVICE_STARTED.get_or_init(Instant::now);
 }
 
-const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(16);
-type InputWriters = Arc<Mutex<HashMap<ProcessId, PtyInputWriter>>>;
 type PendingQueries = Arc<
     Mutex<
-        HashMap<
-            crate::protocol::AgentRequestId,
-            tokio::sync::oneshot::Sender<crate::protocol::AgentQueryResult>,
-        >,
+        HashMap<vmux_api::protocol::AgentRequestId, tokio::sync::oneshot::Sender<ServiceMessage>>,
     >,
 >;
+
+pub(crate) struct ServiceDaemonPlugin {
+    listener: std::sync::Mutex<Option<UnixListener>>,
+    manager: Arc<Mutex<ProcessManager>>,
+    runtime: tokio::runtime::Handle,
+    exit: mpsc::Sender<()>,
+    queries: ProcessQueries,
+    query_plugin: std::sync::Mutex<Option<ProcessQueryPlugin>>,
+}
+
+impl ServiceDaemonPlugin {
+    pub(crate) fn new(
+        listener: UnixListener,
+        wake: mpsc::UnboundedSender<ProcessId>,
+        runtime: tokio::runtime::Handle,
+        exit: mpsc::Sender<()>,
+    ) -> Self {
+        let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
+        let (query_plugin, queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake);
+        Self {
+            listener: std::sync::Mutex::new(Some(listener)),
+            manager,
+            runtime,
+            exit,
+            queries,
+            query_plugin: std::sync::Mutex::new(Some(query_plugin)),
+        }
+    }
+}
+
+impl Plugin for ServiceDaemonPlugin {
+    fn build(&self, app: &mut App) {
+        let listener = self
+            .listener
+            .lock()
+            .unwrap()
+            .take()
+            .expect("service daemon plugin can only be built once");
+        let manager = Arc::clone(&self.manager);
+        let server_manager = Arc::clone(&manager);
+        let queries = self.queries.clone();
+        let exit = self.exit.clone();
+        let query_plugin = self
+            .query_plugin
+            .lock()
+            .unwrap()
+            .take()
+            .expect("service daemon plugin can only be built once");
+        app.add_plugins(query_plugin);
+        let task = self.runtime.spawn(async move {
+            run_server(listener, server_manager, queries).await;
+            let _ = exit.send(()).await;
+        });
+        app.world_mut().spawn((
+            Name::new("vmux service daemon"),
+            ServiceDaemon,
+            ServiceServerTask(task),
+        ));
+    }
+}
+
+#[derive(Component)]
+struct ServiceDaemon;
+
+#[derive(Component)]
+struct ServiceServerTask(tokio::task::JoinHandle<()>);
+
+impl Drop for ServiceServerTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 type PendingCommands = Arc<
     Mutex<
         HashMap<
-            crate::protocol::AgentRequestId,
-            tokio::sync::oneshot::Sender<crate::protocol::AgentCommandResult>,
+            vmux_api::protocol::AgentRequestId,
+            tokio::sync::oneshot::Sender<vmux_api::protocol::AgentCommandResult>,
         >,
     >,
 >;
@@ -140,9 +209,11 @@ where
     mgr.processes.get_mut(&id).map(f)
 }
 
-pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<ProcessId>) {
-    let manager = Arc::new(Mutex::new(ProcessManager::new(wake_tx)));
-    let input_writers = Arc::new(Mutex::new(HashMap::new()));
+async fn run_server(
+    listener: UnixListener,
+    manager: Arc<Mutex<ProcessManager>>,
+    process_queries: ProcessQueries,
+) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
     let pending_commands: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
@@ -165,40 +236,6 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
 
     init_started_at();
 
-    let poll_mgr = Arc::clone(&manager);
-    let poll_input_writers = Arc::clone(&input_writers);
-    let poll_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(PROCESS_POLL_INTERVAL);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        loop {
-            interval.tick().await;
-
-            let reaped = {
-                let mut mgr = poll_mgr.lock().await;
-                let exited = mgr.poll_all();
-                let mut reaped = Vec::new();
-                for id in &exited {
-                    let keep = mgr
-                        .processes
-                        .get(id)
-                        .is_some_and(|process| process.keep_after_exit());
-                    if !keep {
-                        mgr.remove_process(id);
-                        reaped.push(*id);
-                    }
-                }
-                reaped
-            };
-            if !reaped.is_empty() {
-                let mut writers = poll_input_writers.lock().await;
-                for id in reaped {
-                    writers.remove(&id);
-                }
-            }
-        }
-    });
-
     loop {
         tokio::select! {
             accept = listener.accept() => {
@@ -210,25 +247,25 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
                     }
                 };
                 let mgr = Arc::clone(&manager);
-                let input_writers = Arc::clone(&input_writers);
                 let agent_tx = agent_tx.clone();
                 let pending_queries = Arc::clone(&pending_queries);
                 let pending_commands = Arc::clone(&pending_commands);
                 let pending_tool_calls = Arc::clone(&pending_tool_calls);
                 let agent_manager = Arc::clone(&agent_manager);
                 let acp_manager = Arc::clone(&acp_manager);
+                let process_queries = process_queries.clone();
                 let shutdown_tx = shutdown_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_client(
                         stream,
                         mgr,
-                        input_writers,
                         agent_tx,
                         pending_queries,
                         pending_commands,
                         pending_tool_calls,
                         agent_manager,
                         acp_manager,
+                        process_queries,
                         shutdown_tx,
                     )
                     .await
@@ -245,13 +282,12 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
     }
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    poll_handle.abort();
     remote_handle.abort();
     tracing::info!("server: drain complete, exiting");
 }
 
-fn command_result_to_content(result: crate::protocol::AgentCommandResult) -> (String, bool) {
-    use crate::protocol::AgentCommandResult;
+fn command_result_to_content(result: vmux_api::protocol::AgentCommandResult) -> (String, bool) {
+    use vmux_api::protocol::AgentCommandResult;
     match result {
         AgentCommandResult::Ok => ("ok".to_string(), false),
         AgentCommandResult::Text(text) => (text, false),
@@ -262,50 +298,124 @@ fn command_result_to_content(result: crate::protocol::AgentCommandResult) -> (St
     }
 }
 
-fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String, bool) {
-    use crate::protocol::AgentQueryResult;
-    match result {
-        AgentQueryResult::Layout(snapshot) => {
-            (serde_json::to_string(&snapshot).unwrap_or_default(), false)
-        }
-        AgentQueryResult::VaultStatus(snapshot) => (
-            serde_json::to_string_pretty(&snapshot).unwrap_or_default(),
-            false,
-        ),
-        AgentQueryResult::Text(text) => (text, false),
-        AgentQueryResult::Settings(json) => (json, false),
-        AgentQueryResult::Spaces(json) => (json, false),
-        AgentQueryResult::CommandExit { seq, exit } => {
-            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
-            (format!("{{\"seq\":{seq},\"exit\":{exit}}}"), false)
-        }
-        AgentQueryResult::RunCompletion { token, exit } => {
-            let token = token.map_or_else(|| "null".to_string(), |t| format!("\"{t}\""));
-            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
-            (format!("{{\"token\":{token},\"exit\":{exit}}}"), false)
-        }
-        AgentQueryResult::Image {
-            path,
-            width,
-            height,
-            ..
-        } => (format!("saved {path} ({width}×{height})"), false),
-        AgentQueryResult::Recording {
-            mp4_path,
-            gif_path,
-            duration_ms,
-            bytes,
-            auto_stopped,
-        } => {
-            let secs = duration_ms as f64 / 1000.0;
-            let gif = gif_path.map(|g| format!(" + {g}")).unwrap_or_default();
-            let auto = if auto_stopped { " (auto-stopped)" } else { "" };
-            (
-                format!("recorded {secs:.1}s -> {mp4_path} ({bytes} bytes){gif}{auto}"),
+fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)> {
+    let content = match response {
+        ServiceMessage::AgentLayoutResult { result, .. } => match result {
+            Ok(snapshot) => (serde_json::to_string(&snapshot).unwrap_or_default(), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentVaultStatusResult { result, .. } => match result {
+            Ok(snapshot) => (
+                serde_json::to_string_pretty(&snapshot).unwrap_or_default(),
                 false,
-            )
-        }
-        AgentQueryResult::Error(message) => (message, true),
+            ),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::ProcessOutputResult { result, .. }
+        | ServiceMessage::ProcessTranscriptResult { result, .. }
+        | ServiceMessage::AgentBrowserSnapshotResult { result, .. }
+        | ServiceMessage::AgentBrowserScrollResult { result, .. }
+        | ServiceMessage::AgentSimulatorControlResult { result, .. }
+        | ServiceMessage::AgentWorkingDirectoryResult { result, .. } => match result {
+            Ok(text) => (text, false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentSettingsResult { result, .. } => match result {
+            Ok(settings) => {
+                let value =
+                    serde_json::Value::try_from(&settings).unwrap_or(serde_json::Value::Null);
+                (serde_json::to_string(&value).unwrap_or_default(), false)
+            }
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentSpacesResult { result, .. } => match result {
+            Ok(spaces) => (serde_json::to_string(&spaces).unwrap_or_default(), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentBookmarksResult { result, .. } => match result {
+            Ok(bookmarks) => (serde_json::to_string(&bookmarks).unwrap_or_default(), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentCommandsResult { result, .. } => match result {
+            Ok(commands) => (serde_json::to_string(&commands).unwrap_or_default(), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::ProcessCommandExitResult { result, .. } => match result {
+            Ok(result) => {
+                let exit = result
+                    .exit
+                    .map_or_else(|| "null".to_string(), |code| code.to_string());
+                (
+                    format!("{{\"seq\":{},\"exit\":{exit}}}", result.sequence),
+                    false,
+                )
+            }
+            Err(message) => (message, true),
+        },
+        ServiceMessage::ProcessRunCompletionResult { result, .. } => match result {
+            Ok(result) => {
+                let token = result
+                    .token
+                    .map_or_else(|| "null".to_string(), |token| format!("\"{token}\""));
+                let exit = result
+                    .exit
+                    .map_or_else(|| "null".to_string(), |code| code.to_string());
+                (format!("{{\"token\":{token},\"exit\":{exit}}}"), false)
+            }
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentScreenshotResult { result, .. }
+        | ServiceMessage::AgentSimulatorScreenshotResult { result, .. } => match result {
+            Ok(image) => (
+                format!("saved {} ({}×{})", image.path, image.width, image.height),
+                false,
+            ),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentRecordStartResult { result, .. } => match result {
+            Ok(max_secs) => (format!("recording started, max {max_secs}s"), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentRecordStopResult { result, .. } => match result {
+            Ok(recording) => {
+                let secs = recording.duration_ms as f64 / 1000.0;
+                let gif = recording
+                    .gif_path
+                    .map(|path| format!(" + {path}"))
+                    .unwrap_or_default();
+                let auto = if recording.auto_stopped {
+                    " (auto-stopped)"
+                } else {
+                    ""
+                };
+                (
+                    format!(
+                        "recorded {secs:.1}s -> {} ({} bytes){gif}{auto}",
+                        recording.mp4_path, recording.bytes
+                    ),
+                    false,
+                )
+            }
+            Err(message) => (message, true),
+        },
+        _ => return None,
+    };
+    Some(content)
+}
+
+async fn route_agent_query_response(
+    request_id: vmux_api::protocol::AgentRequestId,
+    response: ServiceMessage,
+    pending_queries: &PendingQueries,
+    broker: &crate::agent_broker::AgentBroker,
+) {
+    let pending = pending_queries.lock().await.remove(&request_id);
+    if let Some(tx) = pending {
+        let _ = tx.send(response);
+        return;
+    }
+    if let Some((content, is_error)) = query_response_to_content(response) {
+        broker.resolve_tool(request_id, content, is_error).await;
     }
 }
 
@@ -313,13 +423,13 @@ fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String
 async fn handle_client(
     stream: tokio::net::UnixStream,
     manager: Arc<Mutex<ProcessManager>>,
-    input_writers: InputWriters,
     agent_tx: broadcast::Sender<ServiceMessage>,
     pending_queries: PendingQueries,
     pending_commands: PendingCommands,
     pending_tool_calls: crate::agent_broker::PendingToolCalls,
     agent_manager: Arc<Mutex<crate::agent::AgentSessionManager>>,
     acp_manager: Arc<Mutex<crate::acp::AcpSessionManager>>,
+    process_queries: ProcessQueries,
     shutdown_tx: mpsc::Sender<()>,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
@@ -340,13 +450,14 @@ async fn handle_client(
     let mut created_processes: Vec<ProcessId> = Vec::new();
 
     loop {
-        let msg: Option<ClientMessage> = match read_message!(&mut reader, ClientMessage) {
-            Ok(msg) => msg,
-            Err(error) => {
-                tracing::warn!(%error, "client stream ended mid-frame");
-                break;
-            }
-        };
+        let msg: Option<ClientMessage> =
+            match crate::framing::read_client_message(&mut reader).await {
+                Ok(msg) => msg,
+                Err(error) => {
+                    tracing::warn!(%error, "client stream ended mid-frame");
+                    break;
+                }
+            };
         let Some(msg) = msg else {
             break;
         };
@@ -364,27 +475,23 @@ async fn handle_client(
                 let created = {
                     let mut mgr = manager.lock().await;
                     mgr.create_process(process_id, command, args, cwd, env, cols, rows)
-                        .map(|(id, pid)| (id, pid, mgr.input_writer(&id)))
                 };
                 match created {
-                    Ok((id, pid, input_writer)) => {
+                    Ok((id, pid)) => {
                         created_processes.push(id);
-                        if let Some(input_writer) = input_writer {
-                            input_writers.lock().await.insert(id, input_writer);
-                        }
                         let resp = ServiceMessage::ProcessCreated {
                             process_id: id,
                             pid,
                         };
                         let w = writer.clone();
                         let mut w = w.lock().await;
-                        write_message!(&mut *w, &resp)?;
+                        crate::framing::write_service_message(&mut *w, &resp).await?;
                     }
                     Err(reason) => {
                         let resp = ServiceMessage::ProcessCreateFailed { process_id, reason };
                         let w = writer.clone();
                         let mut w = w.lock().await;
-                        write_message!(&mut *w, &resp)?;
+                        crate::framing::write_service_message(&mut *w, &resp).await?;
                     }
                 }
             }
@@ -427,7 +534,7 @@ async fn handle_client(
                         message: format!("process not found: {process_id}"),
                     };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -438,16 +545,12 @@ async fn handle_client(
             }
 
             ClientMessage::ProcessInput { process_id, data } => {
-                let can_write = {
+                let writer = {
                     let mgr = manager.lock().await;
                     mgr.processes
                         .get(&process_id)
-                        .is_some_and(|process| !process.is_copy_mode())
-                };
-                let writer = if can_write {
-                    input_writers.lock().await.get(&process_id).cloned()
-                } else {
-                    None
+                        .filter(|process| !process.is_copy_mode())
+                        .map(Process::input_writer)
                 };
                 if let Some(writer) = writer {
                     Process::write_input_to_writer(&writer, &data);
@@ -494,11 +597,10 @@ async fn handle_client(
                 let processes = mgr.processes.values().map(|p| p.info()).collect::<Vec<_>>();
                 let resp = ServiceMessage::ProcessList { processes };
                 let mut w = writer.lock().await;
-                write_message!(&mut *w, &resp)?;
+                crate::framing::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::KillProcess { process_id } => {
-                input_writers.lock().await.remove(&process_id);
                 let mut mgr = manager.lock().await;
                 mgr.remove_process(&process_id);
                 if let Some(handle) = attached.lock().await.remove(&process_id) {
@@ -511,13 +613,13 @@ async fn handle_client(
                 if let Some(process) = mgr.processes.get(&process_id) {
                     let snap = process.snapshot();
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &snap)?;
+                    crate::framing::write_service_message(&mut *w, &snap).await?;
                 } else {
                     let resp = ServiceMessage::Error {
                         message: format!("process not found: {process_id}"),
                     };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -560,7 +662,7 @@ async fn handle_client(
                         .unwrap_or_default();
                 let resp = ServiceMessage::SelectionText { process_id, text };
                 let mut w = writer.lock().await;
-                write_message!(&mut *w, &resp)?;
+                crate::framing::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::EnterCopyMode { process_id } => {
@@ -578,7 +680,7 @@ async fn handle_client(
                 {
                     let resp = ServiceMessage::SelectionText { process_id, text };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -624,7 +726,7 @@ async fn handle_client(
                         message: message.to_string(),
                     };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                     continue;
                 }
 
@@ -650,12 +752,11 @@ async fn handle_client(
                     let mut mgr = manager.lock().await;
                     mgr.shutdown();
                 }
-                input_writers.lock().await.clear();
                 let resp = ServiceMessage::ProcessList {
                     processes: Vec::new(),
                 };
                 let mut w = writer.lock().await;
-                write_message!(&mut *w, &resp)?;
+                crate::framing::write_service_message(&mut *w, &resp).await?;
                 shutdown_tx.send(()).await.ok();
                 break;
             }
@@ -674,124 +775,214 @@ async fn handle_client(
                     process_count,
                 };
                 let mut w = writer.lock().await;
-                write_message!(&mut *w, &resp)?;
+                crate::framing::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::AgentQuery { request_id, query } => {
-                let query = match query {
-                    crate::protocol::AgentQuery::ReadTerminal { process_id } => {
-                        let result = {
-                            let mgr = manager.lock().await;
-                            match mgr.processes.get(&process_id) {
-                                Some(process) => {
-                                    let text = match process.snapshot() {
-                                        ServiceMessage::Snapshot { lines, .. } => lines
-                                            .iter()
-                                            .map(|line| {
-                                                line.spans
-                                                    .iter()
-                                                    .map(|span| span.text.as_str())
-                                                    .collect::<String>()
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("\n"),
-                                        _ => String::new(),
-                                    };
-                                    crate::protocol::AgentQueryResult::Text(text)
-                                }
-                                None => crate::protocol::AgentQueryResult::Error(format!(
-                                    "process not found: {process_id}"
-                                )),
-                            }
-                        };
-                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
-                        let mut w = writer.lock().await;
-                        write_message!(&mut *w, &resp)?;
+                let response = match query {
+                    vmux_api::protocol::AgentQuery::ReadProcessOutput { process_id } => {
+                        ServiceMessage::ProcessOutputResult {
+                            request_id,
+                            result: process_queries.output(process_id).await,
+                        }
+                    }
+                    vmux_api::protocol::AgentQuery::ReadProcessTranscript { process_id } => {
+                        ServiceMessage::ProcessTranscriptResult {
+                            request_id,
+                            result: process_queries.transcript(process_id).await,
+                        }
+                    }
+                    vmux_api::protocol::AgentQuery::ProcessCommandExit { process_id } => {
+                        let result = process_queries.command_exit(process_id).await;
+                        ServiceMessage::ProcessCommandExitResult { request_id, result }
+                    }
+                    vmux_api::protocol::AgentQuery::ProcessRunCompletion { process_id } => {
+                        let result = process_queries.run_completion(process_id).await;
+                        ServiceMessage::ProcessRunCompletionResult { request_id, result }
+                    }
+                    query => {
+                        let broker = broker.clone();
+                        let writer = writer.clone();
+                        tokio::spawn(async move {
+                            let response = match broker.query(request_id, query).await {
+                                Ok(response) => response,
+                                Err(message) => ServiceMessage::Error { message },
+                            };
+                            let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&response) {
+                                Ok(bytes) => bytes,
+                                Err(_) => return,
+                            };
+                            let mut writer = writer.lock().await;
+                            let _ = crate::framing::write_raw_frame(&mut *writer, &bytes).await;
+                        });
                         continue;
                     }
-                    crate::protocol::AgentQuery::ReadTerminalFull { process_id } => {
-                        let result = {
-                            let mgr = manager.lock().await;
-                            match mgr.processes.get(&process_id) {
-                                Some(process) => {
-                                    crate::protocol::AgentQueryResult::Text(process.full_text())
-                                }
-                                None => crate::protocol::AgentQueryResult::Error(format!(
-                                    "process not found: {process_id}"
-                                )),
-                            }
-                        };
-                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
-                        let mut w = writer.lock().await;
-                        write_message!(&mut *w, &resp)?;
-                        continue;
-                    }
-                    crate::protocol::AgentQuery::CommandExit { process_id } => {
-                        let result = {
-                            let mgr = manager.lock().await;
-                            match mgr.processes.get(&process_id) {
-                                Some(process) => {
-                                    let (seq, exit) = process.command_status();
-                                    crate::protocol::AgentQueryResult::CommandExit { seq, exit }
-                                }
-                                None => crate::protocol::AgentQueryResult::Error(format!(
-                                    "process not found: {process_id}"
-                                )),
-                            }
-                        };
-                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
-                        let mut w = writer.lock().await;
-                        write_message!(&mut *w, &resp)?;
-                        continue;
-                    }
-                    crate::protocol::AgentQuery::RunCompletion { process_id } => {
-                        let result = {
-                            let mgr = manager.lock().await;
-                            match mgr.processes.get(&process_id) {
-                                Some(process) => {
-                                    let (token, exit) = match process.run_completion() {
-                                        Some((token, exit)) => (Some(token), Some(exit)),
-                                        None => (None, None),
-                                    };
-                                    crate::protocol::AgentQueryResult::RunCompletion { token, exit }
-                                }
-                                None => crate::protocol::AgentQueryResult::Error(format!(
-                                    "process not found: {process_id}"
-                                )),
-                            }
-                        };
-                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
-                        let mut w = writer.lock().await;
-                        write_message!(&mut *w, &resp)?;
-                        continue;
-                    }
-                    other => other,
                 };
-
-                let broker = broker.clone();
-                let writer = writer.clone();
-                tokio::spawn(async move {
-                    let resp = match broker.query(request_id, query).await {
-                        Ok(result) => ServiceMessage::AgentQueryResult { request_id, result },
-                        Err(message) => ServiceMessage::Error { message },
-                    };
-                    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&resp) {
-                        Ok(b) => b,
-                        Err(_) => return,
-                    };
-                    let mut w = writer.lock().await;
-                    let _ = crate::framing::write_raw_frame(&mut *w, &bytes).await;
-                });
+                let mut writer = writer.lock().await;
+                crate::framing::write_service_message(&mut *writer, &response).await?;
             }
 
-            ClientMessage::AgentQueryResponse { request_id, result } => {
-                let pending = pending_queries.lock().await.remove(&request_id);
-                if let Some(tx) = pending {
-                    let _ = tx.send(result);
-                } else {
-                    let (content, is_error) = query_result_to_content(result);
-                    broker.resolve_tool(request_id, content, is_error).await;
-                }
+            ClientMessage::AgentLayoutResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentLayoutResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::ProcessOutputResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::ProcessOutputResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::ProcessTranscriptResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::ProcessTranscriptResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::ProcessCommandExitResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::ProcessCommandExitResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::ProcessRunCompletionResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::ProcessRunCompletionResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentSettingsResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentSettingsResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentSpacesResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentSpacesResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentScreenshotResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentScreenshotResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentBrowserSnapshotResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentBrowserSnapshotResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentBrowserScrollResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentBrowserScrollResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentRecordStartResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentRecordStartResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentRecordStopResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentRecordStopResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentBookmarksResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentBookmarksResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentSimulatorScreenshotResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentSimulatorScreenshotResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentSimulatorControlResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentSimulatorControlResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentWorkingDirectoryResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentWorkingDirectoryResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentVaultStatusResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentVaultStatusResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentCommandsResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentCommandsResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
             }
 
             ClientMessage::AgentCommandResponse { request_id, result } => {
@@ -827,30 +1018,24 @@ async fn handle_client(
                 if let Err(message) = result {
                     let resp = ServiceMessage::Error { message };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
             ClientMessage::Shared(
                 SharedMessage::ListSessions
                 | SharedMessage::AgentCommand(_)
-                | SharedMessage::Agent {
-                    action: AgentAction::ListMedia { .. },
-                    ..
-                },
+                | SharedMessage::AgentListMedia { .. },
             ) => {
                 tracing::warn!("local socket: ignoring a remote-only request");
             }
 
-            ClientMessage::Shared(SharedMessage::Agent {
-                sid,
-                action: AgentAction::Attach,
-            }) => {
+            ClientMessage::Shared(SharedMessage::AgentAttach { sid }) => {
                 let rx = agent_manager.lock().await.subscribe(&sid);
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = agent_manager.lock().await.snapshot(&sid).await {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &snapshot)?;
+                        crate::framing::write_service_message(&mut *w, &snapshot).await?;
                     }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();
@@ -893,15 +1078,12 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::Shared(SharedMessage::Agent {
+            ClientMessage::Shared(SharedMessage::AgentInput {
                 sid,
-                action:
-                    AgentAction::Input {
-                        text,
-                        context,
-                        attachments,
-                        preferred_mode,
-                    },
+                text,
+                context,
+                attachments,
+                preferred_mode,
             }) => {
                 route_agent_input(
                     &acp_manager,
@@ -923,7 +1105,7 @@ async fn handle_client(
                 {
                     let resp = ServiceMessage::Error { message };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -959,10 +1141,7 @@ async fn handle_client(
                 );
             }
 
-            ClientMessage::Shared(SharedMessage::Agent {
-                sid,
-                action: AgentAction::Cancel,
-            }) => {
+            ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
                         .lock()
@@ -976,9 +1155,10 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::Shared(SharedMessage::Agent {
+            ClientMessage::Shared(SharedMessage::AgentApprove {
                 sid,
-                action: AgentAction::Approve { call_id, decision },
+                call_id,
+                decision,
             }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
@@ -1051,7 +1231,6 @@ async fn handle_client(
                     std::path::PathBuf::from(cwd),
                     anchor,
                     Arc::clone(&manager),
-                    Arc::clone(&input_writers),
                     mcp_servers,
                     resume_acp_session_id,
                     effort,
@@ -1060,19 +1239,19 @@ async fn handle_client(
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = acp_manager.lock().await.snapshot(&sid) {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &snapshot)?;
+                        crate::framing::write_service_message(&mut *w, &snapshot).await?;
                     }
                     if let Some(agent_info) = acp_manager.lock().await.agent_info(&sid) {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &agent_info)?;
+                        crate::framing::write_service_message(&mut *w, &agent_info).await?;
                     }
                     if let Some(model_info) = acp_manager.lock().await.model_info(&sid) {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &model_info)?;
+                        crate::framing::write_service_message(&mut *w, &model_info).await?;
                     }
                     if let Some(mode_info) = acp_manager.lock().await.mode_info(&sid) {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &mode_info)?;
+                        crate::framing::write_service_message(&mut *w, &mode_info).await?;
                     }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();
@@ -1134,8 +1313,26 @@ async fn handle_client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId};
     use tokio::sync::oneshot;
+    use vmux_api::protocol::{AgentCommandResult, AgentQuery, AgentRequestId};
+
+    async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<ProcessId>) {
+        let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
+        let (_query_plugin, process_queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake);
+        let mut server = Box::pin(super::run_server(
+            listener,
+            Arc::clone(&manager),
+            process_queries,
+        ));
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = &mut server => return,
+                _ = interval.tick() => manager.lock().await.reap_exited(),
+            }
+        }
+    }
 
     #[test]
     fn page_agent_prompt_appends_attachment_paths() {
@@ -1156,7 +1353,10 @@ mod tests {
         let prompt = compose_agent_prompt(&page_agent_prompt(String::new(), &[]), Some("resume"));
 
         assert!(prompt.contains("resume"));
-        assert_eq!(crate::protocol::extract_display_prompt(&prompt), Some(""));
+        assert_eq!(
+            vmux_api::protocol::extract_display_prompt(&prompt),
+            Some("")
+        );
     }
 
     #[test]
@@ -1176,28 +1376,28 @@ mod tests {
         );
     }
 
-    #[test]
-    fn acp_spawn_replays_agent_info_after_subscribing() {
-        let production = include_str!("server.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("server production source");
-        assert!(production.contains("acp_manager.lock().await.agent_info(&sid)"));
-    }
-
     #[tokio::test]
     async fn pending_queries_roundtrips_oneshot() {
         let pending: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
         let request_id = AgentRequestId::new();
-        let (tx, rx) = oneshot::channel::<AgentQueryResult>();
+        let (tx, rx) = oneshot::channel::<ServiceMessage>();
         pending.lock().await.insert(request_id, tx);
 
-        let result = AgentQueryResult::Settings("{}".into());
+        let response = ServiceMessage::AgentSettingsResult {
+            request_id,
+            result: Ok(vmux_api::protocol::JsonValue::Object(Vec::new())),
+        };
         let resp_tx = pending.lock().await.remove(&request_id).expect("entry");
-        resp_tx.send(result.clone()).expect("send");
+        resp_tx.send(response).expect("send");
 
         let received = rx.await.expect("recv");
-        assert_eq!(received, result);
+        assert!(matches!(
+            received,
+            ServiceMessage::AgentSettingsResult {
+                request_id: received_id,
+                result: Ok(_),
+            } if received_id == request_id
+        ));
     }
 
     #[tokio::test]
@@ -1226,7 +1426,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_message_breaks_run_server() {
-        use crate::protocol::ClientMessage;
+        use vmux_api::protocol::ClientMessage;
 
         let dir = std::env::temp_dir().join(format!("vmux-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1235,7 +1435,7 @@ mod tests {
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
 
         let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
-        let server = tokio::spawn(super::run_server(listener, wake_tx));
+        let server = tokio::spawn(run_test_server(listener, wake_tx));
 
         let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
         let (_r, mut w) = stream.into_split();
@@ -1324,7 +1524,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_disconnect_reaps_created_processes() {
-        use crate::protocol::ClientMessage;
+        use vmux_api::protocol::ClientMessage;
 
         let dir = std::env::temp_dir().join(format!("vmux-reap-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1335,7 +1535,7 @@ mod tests {
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
 
         let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
-        let server = tokio::spawn(super::run_server(listener, wake_tx));
+        let server = tokio::spawn(run_test_server(listener, wake_tx));
 
         let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
         let (r, mut w) = stream.into_split();
@@ -1391,7 +1591,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_client_that_dies_mid_frame_still_has_its_processes_reaped() {
-        use crate::protocol::ClientMessage;
+        use vmux_api::protocol::ClientMessage;
 
         let dir = std::env::temp_dir().join(format!("vmux-torn-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1402,7 +1602,7 @@ mod tests {
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
 
         let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
-        let server = tokio::spawn(super::run_server(listener, wake_tx));
+        let server = tokio::spawn(run_test_server(listener, wake_tx));
 
         let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
         let (r, mut w) = stream.into_split();

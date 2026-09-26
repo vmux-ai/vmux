@@ -1,0 +1,71 @@
+[
+    (
+        id: "file_toggle_explorer",
+        label: "Toggle Explorer",
+        group: "Editor",
+        hidden: true,
+        shortcuts: [(shortcut: Direct("Super+b"), when: Some("files"))],
+    ),
+    (
+        id: "file_reveal_in_explorer",
+        label: "Reveal In Explorer",
+        group: "Editor",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("Super+Shift+e"), when: Some("files")),
+            (shortcut: Direct("Ctrl+Shift+e"), when: Some("files")),
+        ],
+    ),
+    (
+        id: "file_find",
+        label: "Find In File",
+        group: "Editor",
+        shortcuts: [(shortcut: Direct("Super+f"), when: Some("files"))],
+    ),
+    (
+        id: "file_find_in_files",
+        label: "Find In Files",
+        group: "Editor",
+        shortcuts: [
+            (shortcut: Direct("Super+Shift+f"), when: Some("files")),
+            (shortcut: Direct("Ctrl+Shift+f"), when: Some("files")),
+        ],
+    ),
+    (
+        id: "file_panel_next",
+        label: "Next Panel Row",
+        group: "Editor",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("ArrowDown"), when: Some("files.panel")),
+            (shortcut: Direct("j"), when: Some("files.panel")),
+        ],
+    ),
+    (
+        id: "file_panel_previous",
+        label: "Previous Panel Row",
+        group: "Editor",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("ArrowUp"), when: Some("files.panel")),
+            (shortcut: Direct("k"), when: Some("files.panel")),
+        ],
+    ),
+    (
+        id: "file_panel_choose",
+        label: "Choose Panel Row",
+        group: "Editor",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("Enter"), when: Some("files.panel")),
+            (shortcut: Direct("Tab"), when: Some("files.panel")),
+        ],
+    ),
+    (
+        id: "file_panel_dismiss",
+        label: "Close Panel",
+        group: "Editor",
+        hidden: true,
+        shortcuts: [(shortcut: Direct("Escape"), when: Some("files.panel"))],
+    ),
+]

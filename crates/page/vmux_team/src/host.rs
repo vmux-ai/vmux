@@ -1,40 +1,76 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
-use bevy_ecs::system::SystemParam;
+use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 
 use vmux_agent::AgentRunState;
-use vmux_command::{AppCommand, BrowserCommand, OpenCommand};
+use vmux_agent::events::AgentCommandRequest;
+use vmux_api::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 use vmux_core::agent::SessionId;
 use vmux_core::event::team::{
-    ProfileRow, TEAM_EVENT, TEAM_PAGE_URL, TeamCommandEvent, TeamEvent, TeamMemberRow,
+    ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
+    TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
 };
-use vmux_core::page::PageReady;
+use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::profile::{ProfileId, ProfileLabel};
 use vmux_core::team::{Agent, Profile, User};
 use vmux_core::{PageMetadata, focus_pane_entity};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
-use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
+use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
+use vmux_layout::space::{CurrentSpace, Space, space_of};
 use vmux_layout::stack::Stack;
-use vmux_service::agent_events::AgentCommandRequest;
-use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
+use vmux_service::client::ServiceRequest;
+
+use crate::projection::TeamStateProjection;
 
 pub struct TeamPlugin;
 
 impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::ui::TeamPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
+        app.add_plugins((
+            HostedPagePlugin::<Team>::default(),
+            TeamProjectionPlugin,
+            TeamIntentPlugin,
+            crate::TeamToolPlugin,
+        ))
+        .add_systems(Startup, (spawn_user_profile, spawn_profile_labels));
+    }
+}
+
+struct TeamProjectionPlugin;
+
+impl Plugin for TeamProjectionPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ServiceRequest>()
+            .add_plugins(UiStatePlugin::<TeamEvent>::default())
+            .add_observer(replay_team)
+            .add_systems(
+                Update,
+                (sync_user_profile_name, project_team, publish_team).chain(),
+            )
+            .add_systems(Update, answer_list_team);
+    }
+}
+
+struct TeamIntentPlugin;
+
+impl Plugin for TeamIntentPlugin {
+    fn build(&self, app: &mut App) {
         app.add_message::<ProfileSwitchRequested>()
-            .add_systems(Startup, (spawn_user_profile, spawn_profile_labels))
-            .add_systems(Update, (sync_user_profile_name, emit_team).chain())
-            .add_systems(Update, answer_list_team)
-            .add_plugins(HostedPagePlugin::<Team>::default())
-            .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
-                "team", "layout", "spaces",
-            ]))
-            .add_observer(on_team_command)
-            .add_observer(reset_team_sent_on_page_ready);
+            .add_plugins(UiEventPlugin::<(
+                TeamOpenRequest,
+                TeamMemberFocusRequest,
+                TeamProfileCreateRequest,
+                TeamProfileSwitchRequest,
+                TeamProfileUpdateRequest,
+            )>::default())
+            .add_observer(on_team_open_request)
+            .add_observer(on_team_member_focus_request)
+            .add_observer(on_team_profile_create_request)
+            .add_observer(on_team_profile_switch_request)
+            .add_observer(on_team_profile_update_request);
     }
 }
 
@@ -62,37 +98,8 @@ impl HostedPage for Team {
     const TITLE: &'static str = "Team";
 }
 
-#[derive(Component)]
-struct TeamListSent;
-
-#[derive(SystemParam)]
-struct TeamViews<'w, 's> {
-    pending_layout:
-        Query<'w, 's, Entity, (With<LayoutCef>, With<PageReady>, Without<TeamListSent>)>,
-    sent_layout: Query<'w, 's, Entity, (With<LayoutCef>, With<PageReady>, With<TeamListSent>)>,
-    pending_team: Query<'w, 's, Entity, (With<Team>, With<PageReady>, Without<TeamListSent>)>,
-    sent_team: Query<'w, 's, Entity, (With<Team>, With<PageReady>, With<TeamListSent>)>,
-    pending_spaces: Query<
-        'w,
-        's,
-        Entity,
-        (
-            With<vmux_space::Spaces>,
-            With<PageReady>,
-            Without<TeamListSent>,
-        ),
-    >,
-    sent_spaces: Query<
-        'w,
-        's,
-        Entity,
-        (
-            With<vmux_space::Spaces>,
-            With<PageReady>,
-            With<TeamListSent>,
-        ),
-    >,
-}
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+struct TeamPresentation(TeamEvent);
 
 fn spawn_user_profile(mut commands: Commands) {
     let mut identity = commands.spawn((Profile::user(), User, Name::new("Profile: User")));
@@ -257,6 +264,7 @@ fn build_profiles(
         profiles.push(ProfileRow {
             id: id.0.clone(),
             name: name.as_str().to_string(),
+            color: vmux_api::avatar::hash_color(&id.0),
             is_active,
         });
     }
@@ -272,8 +280,7 @@ fn build_profiles(
 
 fn answer_list_team(
     mut reader: MessageReader<AgentCommandRequest>,
-    service: Option<Res<ServiceClient>>,
-    active_space: Res<ActiveSpaceEntity>,
+    current_space: Query<Entity, With<CurrentSpace>>,
     user_q: Query<(Entity, &Profile), With<User>>,
     agent_q: Query<(
         Entity,
@@ -287,6 +294,7 @@ fn answer_list_team(
     space_marker: Query<(), With<Space>>,
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         if !matches!(
@@ -295,11 +303,8 @@ fn answer_list_team(
         ) {
             continue;
         }
-        let Some(service) = service.as_ref() else {
-            continue;
-        };
         let members = build_team_members(
-            active_space.0,
+            current_space.iter().next(),
             &user_q,
             &agent_q,
             &child_of,
@@ -311,17 +316,17 @@ fn answer_list_team(
             Ok(json) => AgentCommandResult::Text(json),
             Err(error) => AgentCommandResult::Error(format!("list_team: {error}")),
         };
-        service.0.send(ClientMessage::AgentCommandResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
             request_id: request.request_id,
             result,
-        });
+        }));
     }
 }
 
-fn emit_team(
-    browsers: NonSend<Browsers>,
-    views: TeamViews,
-    active_space: Res<ActiveSpaceEntity>,
+fn project_team(
+    views: Query<Entity, Or<(With<LayoutCef>, With<Team>, With<vmux_space::Spaces>)>>,
+    presentations: Query<&TeamPresentation>,
+    current_space: Query<Entity, With<CurrentSpace>>,
     active_spaces: Query<Entity, (With<Space>, With<vmux_core::Active>)>,
     user_q: Query<(Entity, &Profile), With<User>>,
     agent_q: Query<(
@@ -338,24 +343,9 @@ fn emit_team(
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
     profile_labels: Query<(&ProfileId, &Name, Has<vmux_core::Active>), With<ProfileLabel>>,
-    mut last: Local<std::collections::HashMap<Entity, TeamEvent>>,
     mut commands: Commands,
 ) {
-    for (entity, pending) in views
-        .pending_layout
-        .iter()
-        .chain(views.pending_team.iter())
-        .chain(views.pending_spaces.iter())
-        .map(|entity| (entity, true))
-        .chain(
-            views
-                .sent_layout
-                .iter()
-                .chain(views.sent_team.iter())
-                .chain(views.sent_spaces.iter())
-                .map(|entity| (entity, false)),
-        )
-    {
+    for entity in &views {
         let target_space = space_of(entity, &child_of, &space_marker).or_else(|| {
             let window = vmux_layout::window::host_window_of(entity, &child_of, &host_windows)?;
             active_spaces.iter().find(|space| {
@@ -363,9 +353,9 @@ fn emit_team(
                     == Some(window)
             })
         });
-        let payload = TeamEvent {
-            members: build_team_members(
-                target_space.or(active_space.0),
+        let presentation = TeamPresentation(TeamStateProjection::build(
+            build_team_members(
+                target_space.or_else(|| current_space.iter().next()),
                 &user_q,
                 &agent_q,
                 &child_of,
@@ -373,30 +363,61 @@ fn emit_team(
                 &meta_q,
                 &children_q,
             ),
-            profiles: build_profiles(&profile_labels),
-        };
-        if !pending && last.get(&entity) == Some(&payload) {
+            build_profiles(&profile_labels),
+        ));
+        if presentations
+            .get(entity)
+            .is_ok_and(|current| current == &presentation)
+        {
             continue;
         }
-        if !browsers.can_emit_to(&entity) {
-            continue;
-        }
-        commands.trigger(BinHostEmitEvent::from_rkyv(entity, TEAM_EVENT, &payload));
-        commands.entity(entity).insert(TeamListSent);
-        last.insert(entity, payload);
+        commands.entity(entity).insert(presentation);
     }
 }
 
-fn reset_team_sent_on_page_ready(
-    trigger: On<BinReceive<PageReady>>,
-    views: Query<(), Or<(With<Team>, With<LayoutCef>, With<vmux_space::Spaces>)>>,
+fn publish_team(
+    presentations: Query<(Entity, &TeamPresentation), Changed<TeamPresentation>>,
+    direct_views: Query<(), Or<(With<Team>, With<vmux_space::Spaces>)>>,
+    layout_cefs: Query<(), With<LayoutCef>>,
+    mut commands: Commands,
+) {
+    for (entity, presentation) in &presentations {
+        if direct_views.contains(entity) {
+            commands.trigger(UiStateWrite::<TeamEvent>::from_event(
+                entity,
+                &presentation.0,
+            ));
+        }
+        if layout_cefs.contains(entity) {
+            commands
+                .entity(entity)
+                .insert(LayoutTeamProjection(presentation.0.clone()));
+        }
+    }
+}
+
+fn replay_team(
+    trigger: On<UiInput<vmux_core::page::PageReady>>,
+    presentations: Query<&TeamPresentation>,
+    direct_views: Query<(), Or<(With<Team>, With<vmux_space::Spaces>)>>,
+    layout_cefs: Query<(), With<LayoutCef>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    if views.get(entity).is_err() {
+    let Ok(presentation) = presentations.get(entity) else {
         return;
+    };
+    if direct_views.contains(entity) {
+        commands.trigger(UiStateWrite::<TeamEvent>::from_event(
+            entity,
+            &presentation.0,
+        ));
     }
-    commands.entity(entity).remove::<TeamListSent>();
+    if layout_cefs.contains(entity) {
+        commands
+            .entity(entity)
+            .insert(LayoutTeamProjection(presentation.0.clone()));
+    }
 }
 
 fn open_team_stack_in_space(
@@ -416,116 +437,104 @@ fn parse_member_entity(member_id: &str) -> Option<Entity> {
     Entity::try_from_bits(bits)
 }
 
-fn on_team_command(
-    trigger: On<BinReceive<TeamCommandEvent>>,
-    mut messages: ResMut<bevy::ecs::message::Messages<AppCommand>>,
-    mut issued: ResMut<bevy::ecs::message::Messages<vmux_command::CommandIssued>>,
-    user: Query<Entity, With<User>>,
-    active_space: Res<ActiveSpaceEntity>,
+fn on_team_open_request(
+    _trigger: On<UiInput<TeamOpenRequest>>,
+    mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
+    current_space: Query<Entity, With<CurrentSpace>>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
-    agents: Query<Entity, With<Agent>>,
     child_of: Query<&ChildOf>,
     spaces: Query<(), With<Space>>,
-    mut space_profiles: Query<&mut vmux_layout::profile::Profile, With<Space>>,
-    mut active_record: Option<ResMut<vmux_space::ActiveSpace>>,
-    mut profile_switches: MessageWriter<ProfileSwitchRequested>,
-    mut profile_labels: Query<
-        (Entity, &ProfileId, &mut Name, Has<vmux_core::Active>),
-        With<ProfileLabel>,
-    >,
     mut commands: Commands,
 ) {
-    let event = &trigger.event().payload;
-    match event.command.as_str() {
-        "create_profile" => {
-            let Some(name) = event.profile_name.as_deref() else {
-                return;
-            };
-            let name = name.trim().to_string();
-            match vmux_core::profile::create_profile(&name) {
-                Ok(profile_id) => {
-                    commands.spawn((ProfileLabel, ProfileId(profile_id.clone()), Name::new(name)));
-                    profile_switches.write(ProfileSwitchRequested { profile_id });
-                }
-                Err(error) => bevy::log::warn!("profile create failed: {error}"),
-            }
-            return;
-        }
-        "switch_profile" => {
-            let Some(profile_id) = event.profile_id.as_deref() else {
-                return;
-            };
-            let profile_id = vmux_core::profile::sanitize_profile(profile_id);
-            if profile_id != vmux_core::profile::active_profile_name()
-                && vmux_core::profile::profile_exists(&profile_id)
-            {
-                let found = profile_labels
-                    .iter()
-                    .any(|(_, id, _, _)| id.0 == profile_id);
-                if found {
-                    profile_switches.write(ProfileSwitchRequested { profile_id });
-                }
-            }
-            return;
-        }
-        "update_profile" => {
-            let (Some(profile_id), Some(name)) =
-                (event.profile_id.as_deref(), event.profile_name.as_deref())
-            else {
-                return;
-            };
-            let profile_id = vmux_core::profile::sanitize_profile(profile_id);
-            if let Err(error) = vmux_core::profile::set_profile_display_name(&profile_id, name) {
-                bevy::log::warn!("profile update failed: {error}");
-                return;
-            }
-            let name = name.trim().to_string();
-            for (_, id, mut label, _) in &mut profile_labels {
-                if id.0 == profile_id {
-                    *label = Name::new(name.clone());
-                }
-            }
-            if profile_id == vmux_core::profile::active_profile_name() {
-                for mut profile in &mut space_profiles {
-                    profile.name.clone_from(&name);
-                }
-                if let Some(active) = active_record.as_deref_mut() {
-                    active.record.profile.clone_from(&name);
-                }
-                if let Ok(entity) = user.single() {
-                    commands.entity(entity).insert(Profile::user_named(name));
-                }
-            }
-            return;
-        }
-        _ => {}
-    }
-
-    if let Some(member_id) = event.member_id.as_deref() {
-        if let Some(entity) = parse_member_entity(member_id)
-            && agents.get(entity).is_ok()
-        {
-            focus_pane_entity(entity, &mut commands, &child_of);
-        }
-        return;
-    }
-
-    if let Some(space) = active_space.0
+    if let Some(space) = current_space.iter().next()
         && let Some(stack) = open_team_stack_in_space(space, &stacks, &child_of, &spaces)
     {
         focus_pane_entity(stack, &mut commands, &child_of);
         return;
     }
 
-    let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
-    let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+    stack_requests.write(vmux_layout::stack::OpenRequest {
         url: Some(TEAM_PAGE_URL.to_string()),
-    }));
-    issued.write(vmux_command::CommandIssued {
-        caller,
-        command: cmd.clone(),
     });
-    messages.write(cmd);
+}
+
+fn on_team_member_focus_request(
+    trigger: On<UiInput<TeamMemberFocusRequest>>,
+    agents: Query<Entity, With<Agent>>,
+    child_of: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    let Some(entity) = parse_member_entity(&trigger.event().payload.member_id) else {
+        return;
+    };
+    if agents.get(entity).is_ok() {
+        focus_pane_entity(entity, &mut commands, &child_of);
+    }
+}
+
+fn on_team_profile_create_request(
+    trigger: On<UiInput<TeamProfileCreateRequest>>,
+    mut profile_switches: MessageWriter<ProfileSwitchRequested>,
+    mut commands: Commands,
+) {
+    let name = trigger.event().payload.name.trim().to_string();
+    match vmux_core::profile::create_profile(&name) {
+        Ok(profile_id) => {
+            commands.spawn((ProfileLabel, ProfileId(profile_id.clone()), Name::new(name)));
+            profile_switches.write(ProfileSwitchRequested { profile_id });
+        }
+        Err(error) => bevy::log::warn!("profile create failed: {error}"),
+    }
+}
+
+fn on_team_profile_switch_request(
+    trigger: On<UiInput<TeamProfileSwitchRequest>>,
+    profile_labels: Query<&ProfileId, With<ProfileLabel>>,
+    mut profile_switches: MessageWriter<ProfileSwitchRequested>,
+) {
+    let profile_id = vmux_core::profile::sanitize_profile(&trigger.event().payload.profile_id);
+    if profile_id == vmux_core::profile::active_profile_name()
+        || !vmux_core::profile::profile_exists(&profile_id)
+    {
+        return;
+    }
+    if profile_labels.iter().any(|id| id.0 == profile_id) {
+        profile_switches.write(ProfileSwitchRequested { profile_id });
+    }
+}
+
+fn on_team_profile_update_request(
+    trigger: On<UiInput<TeamProfileUpdateRequest>>,
+    user: Query<Entity, With<User>>,
+    mut space_profiles: Query<&mut vmux_layout::profile::Profile, With<Space>>,
+    mut active_record: Option<ResMut<vmux_space::ActiveSpace>>,
+    mut profile_labels: Query<(&ProfileId, &mut Name), With<ProfileLabel>>,
+    mut commands: Commands,
+) {
+    let request = &trigger.event().payload;
+    let profile_id = vmux_core::profile::sanitize_profile(&request.profile_id);
+    if let Err(error) = vmux_core::profile::set_profile_display_name(&profile_id, &request.name) {
+        bevy::log::warn!("profile update failed: {error}");
+        return;
+    }
+    let name = request.name.trim().to_string();
+    for (id, mut label) in &mut profile_labels {
+        if id.0 == profile_id {
+            *label = Name::new(name.clone());
+        }
+    }
+    if profile_id != vmux_core::profile::active_profile_name() {
+        return;
+    }
+    for mut profile in &mut space_profiles {
+        profile.name.clone_from(&name);
+    }
+    if let Some(active) = active_record.as_deref_mut() {
+        active.record.profile.clone_from(&name);
+    }
+    if let Ok(entity) = user.single() {
+        commands.entity(entity).insert(Profile::user_named(name));
+    }
 }
 
 #[cfg(test)]
@@ -574,6 +583,50 @@ mod tests {
             true,
         );
         assert!(row.is_done_unseen);
+    }
+
+    #[test]
+    fn team_view_owns_active_profile_and_agent_presentation() {
+        let mut app = App::new();
+        app.add_message::<AgentCommandRequest>()
+            .add_plugins(TeamProjectionPlugin);
+        let space = app
+            .world_mut()
+            .spawn((Space, vmux_core::Active, CurrentSpace))
+            .id();
+        app.world_mut().spawn((Profile::user(), User));
+        app.world_mut().spawn((
+            Profile::agent(AgentKind::Codex),
+            Agent {
+                sid: String::new(),
+                kind: Some(AgentKind::Codex),
+            },
+            ChildOf(space),
+        ));
+        app.world_mut().spawn((
+            ProfileLabel,
+            ProfileId("work".to_string()),
+            Name::new("Work"),
+            vmux_core::Active,
+        ));
+        let view = app.world_mut().spawn(Team).id();
+
+        app.update();
+
+        let presentation = app.world().get::<TeamPresentation>(view).unwrap();
+        assert_eq!(
+            presentation
+                .0
+                .active_profile
+                .as_ref()
+                .map(|row| row.id.as_str()),
+            Some("work")
+        );
+        assert_eq!(presentation.0.agents.len(), 1);
+        assert_eq!(
+            presentation.0.agents[0].subtitle,
+            vmux_api::team::TeamAgentSubtitle::Role
+        );
     }
 
     #[test]
@@ -647,18 +700,15 @@ mod tests {
 
     fn command_app() -> App {
         let mut app = App::new();
-        app.add_message::<AppCommand>()
-            .add_message::<vmux_command::CommandIssued>()
-            .add_message::<ProfileSwitchRequested>()
-            .add_observer(on_team_command);
+        app.add_message::<vmux_layout::stack::OpenRequest>()
+            .add_plugins(TeamIntentPlugin);
         app
     }
 
     #[test]
     fn agent_avatar_click_focuses_agent_stack() {
         let mut app = command_app();
-        let space = app.world_mut().spawn(Space).id();
-        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
         let stack = app
             .world_mut()
             .spawn((
@@ -671,13 +721,10 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(BinReceive::<TeamCommandEvent> {
+        app.world_mut().trigger(UiInput::<TeamMemberFocusRequest> {
             webview: Entity::PLACEHOLDER,
-            payload: TeamCommandEvent {
-                command: "focus".to_string(),
-                member_id: Some(stack.to_bits().to_string()),
-                profile_id: None,
-                profile_name: None,
+            payload: TeamMemberFocusRequest {
+                member_id: stack.to_bits().to_string(),
             },
         });
         app.world_mut().flush();
@@ -689,18 +736,12 @@ mod tests {
     #[test]
     fn user_click_reuses_open_team_stack() {
         let mut app = command_app();
-        let space = app.world_mut().spawn(Space).id();
-        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
         let team = spawn_team_stack(app.world_mut(), space);
 
-        app.world_mut().trigger(BinReceive::<TeamCommandEvent> {
+        app.world_mut().trigger(UiInput::<TeamOpenRequest> {
             webview: Entity::PLACEHOLDER,
-            payload: TeamCommandEvent {
-                command: "open".to_string(),
-                member_id: None,
-                profile_id: None,
-                profile_name: None,
-            },
+            payload: TeamOpenRequest,
         });
         app.world_mut().flush();
 
@@ -710,8 +751,7 @@ mod tests {
     #[test]
     fn acp_agent_appears_in_roster_with_registry_icon() {
         let mut app = App::new();
-        let space = app.world_mut().spawn(Space).id();
-        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        let space = app.world_mut().spawn((Space, CurrentSpace)).id();
         app.world_mut().spawn((Profile::user(), User));
         app.world_mut().spawn((
             Profile::registry("Mistral Vibe", "mistral-vibe"),
@@ -730,7 +770,7 @@ mod tests {
         let rows = app
             .world_mut()
             .run_system_once(
-                |active: Res<ActiveSpaceEntity>,
+                |current_space: Query<Entity, With<CurrentSpace>>,
                  user_q: Query<(Entity, &Profile), With<User>>,
                  agent_q: Query<(
                     Entity,
@@ -745,7 +785,7 @@ mod tests {
                  meta_q: Query<&PageMetadata>,
                  children_q: Query<&Children>| {
                     build_team_members(
-                        active.0,
+                        current_space.iter().next(),
                         &user_q,
                         &agent_q,
                         &child_of,

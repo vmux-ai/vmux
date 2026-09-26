@@ -1,0 +1,53 @@
+[
+    (
+        name: "screenshot",
+        description: r#"Capture the vmux window as a PNG and return it inline so you can SEE the current UI (use it to verify your own UI changes). Captures the whole window exactly as it appears on screen - all visible panes (browser, terminal, editor) and layout UI. Optionally pass `pane` (a pane:<id> or stack:<id> from read_layout) to crop to just that region. The full-resolution image is saved under the active vmux profile's recording directory and a downscaled copy is returned inline. macOS only; the first call may prompt for Screen Recording permission - grant it in System Settings > Privacy & Security > Screen Recording, then call again."#,
+        input_schema: (
+            type: Object,
+            properties: {
+                "pane": (
+                    type: String,
+                    description: Some("Optional pane:<id> or stack:<id> to crop to; whole window if omitted."),
+                ),
+            },
+        ),
+    ),
+    (
+        name: "record_start",
+        description: r#"Start recording the vmux window to an mp4 video (optionally also a GIF). Returns immediately so you can drive the UI with other tools to demonstrate a feature, then call record_stop. Record in ONE live take: start, perform the few actions you want to show, then stop. Do NOT rehearse, build elaborate layouts, or take screenshots to verify - just capture the live interaction in a single pass. Auto-stops after `max_secs` (default 600) as a safety cap. Only one recording at a time. macOS only; the first call may prompt for Screen Recording permission - grant it in System Settings > Privacy & Security > Screen Recording, then call again."#,
+        input_schema: (
+            type: Object,
+            properties: {
+                "gif": (
+                    type: Boolean,
+                    description: Some("Also emit a GIF next to the mp4 (default false)."),
+                ),
+                "max_secs": (
+                    type: Integer,
+                    description: Some("Auto-stop cap in seconds (default 600)."),
+                ),
+                "pane": (
+                    type: String,
+                    description: Some("Optional pane:<id> or stack:<id> to crop to; whole window if omitted."),
+                ),
+            },
+        ),
+    ),
+    (
+        name: "record_stop",
+        description: r#"Stop the active recording and write the file(s). Returns the mp4 path, duration, and size (plus the GIF path if one was requested). By default saves to the active vmux profile's recording directory; pass `dir` (absolute) and `name` (basename, no extension) to save elsewhere - e.g. dir=<repo>/docs/recording, name=<feature> to drop a demo straight into the repo."#,
+        input_schema: (
+            type: Object,
+            properties: {
+                "dir": (
+                    type: String,
+                    description: Some("Absolute output directory (default: active vmux profile recording directory)."),
+                ),
+                "name": (
+                    type: String,
+                    description: Some("Output basename without extension (default vmux-<timestamp>)."),
+                ),
+            },
+        ),
+    ),
+]

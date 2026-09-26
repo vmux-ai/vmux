@@ -12,7 +12,6 @@ impl Plugin for RuntimePlatformPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, activate_app_during_boot)
             .add_systems(Update, grab_key_window_on_pane_hover)
-            .add_systems(Update, hide_on_native_quit_request)
             .add_systems(
                 Startup,
                 (
@@ -39,12 +38,6 @@ static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
 static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
 static NATIVE_WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
-
-fn hide_on_native_quit_request(mut lifecycle: MessageWriter<super::LifecycleEvent>) {
-    if crate::native_keyboard::take_quit_request() {
-        lifecycle.write(super::LifecycleEvent::HideAllWindows);
-    }
-}
 
 fn activate_primary_window_on_startup(
     primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
@@ -205,7 +198,7 @@ fn activate_app_during_boot(
 
 type NativeThrottle = Arc<dyn Fn(Duration) + Send + Sync>;
 
-fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> NativeThrottle {
+fn native_throttle(name: &'static str, callback: impl Fn() + Send + 'static) -> NativeThrottle {
     let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
     let thread_pending_interval_ns = Arc::clone(&pending_interval_ns);
     let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -235,7 +228,7 @@ fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> Na
                             }
                         }
                     }
-                    action();
+                    callback();
                     last_fire = Some(Instant::now());
                     interval_ns = thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel);
                     if interval_ns == u64::MAX {
@@ -252,8 +245,8 @@ fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> Na
     })
 }
 
-impl NativeWindowFrame {
-    fn of(rect: objc2_foundation::NSRect) -> Self {
+impl From<objc2_foundation::NSRect> for NativeWindowFrame {
+    fn from(rect: objc2_foundation::NSRect) -> Self {
         Self {
             x: rect.origin.x,
             y: rect.origin.y,
@@ -261,13 +254,15 @@ impl NativeWindowFrame {
             height: rect.size.height,
         }
     }
+}
 
-    fn rect(self) -> objc2_foundation::NSRect {
+impl From<NativeWindowFrame> for objc2_foundation::NSRect {
+    fn from(frame: NativeWindowFrame) -> Self {
         use objc2_foundation::{NSPoint, NSRect, NSSize};
 
         NSRect::new(
-            NSPoint::new(self.x, self.y),
-            NSSize::new(self.width, self.height),
+            NSPoint::new(frame.x, frame.y),
+            NSSize::new(frame.width, frame.height),
         )
     }
 }
@@ -285,7 +280,7 @@ fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWi
         window.setStyleMask(style | NSWindowStyleMask::Resizable);
     }
     let cursor = NSEvent::mouseLocation();
-    let frame = NativeWindowFrame::of(window.frame());
+    let frame = NativeWindowFrame::from(window.frame());
     let edges = native_resize_edges(frame, cursor.x, cursor.y, 8.0);
     if !edges.any() {
         return None;
@@ -312,7 +307,7 @@ fn update_native_window_resize(event: &objc2_app_kit::NSEvent, drag: NativeWindo
     };
     let cursor = NSEvent::mouseLocation();
     let frame = resized_native_window_frame(drag, cursor.x, cursor.y);
-    window.setFrame_display(frame.rect(), true);
+    window.setFrame_display(frame.into(), true);
 }
 
 const TITLEBAR_DOUBLE_CLICK_SLOP_PX: f32 = 8.0;
@@ -342,7 +337,7 @@ impl WindowTitlebarGesture {
             objc2_app_kit::NSEvent::doubleClickInterval(),
             TITLEBAR_DOUBLE_CLICK_SLOP_PX,
         );
-        let gesture = Self::of(count, Self::double_click_action().as_deref());
+        let gesture = Self::resolve(count, Self::double_click_action().as_deref());
         match gesture {
             Self::Drag => window.performWindowDragWithEvent(event),
             Self::Zoom => zoom.animate(window),
@@ -356,8 +351,8 @@ impl WindowTitlebarGesture {
         use objc2_foundation::{NSString, NSUserDefaults};
 
         let defaults = NSUserDefaults::standardUserDefaults();
-        let action = defaults.stringForKey(&NSString::from_str("AppleActionOnDoubleClick"))?;
-        Some(action.to_string())
+        let behavior = defaults.stringForKey(&NSString::from_str("AppleActionOnDoubleClick"))?;
+        Some(behavior.to_string())
     }
 }
 
@@ -368,12 +363,11 @@ impl WindowZoom {
         let Some(screen) = window.screen() else {
             return;
         };
-        let target = self
-            .toggled(
-                NativeWindowFrame::of(window.frame()),
-                NativeWindowFrame::of(screen.visibleFrame()),
-            )
-            .rect();
+        let target = self.toggled(
+            NativeWindowFrame::from(window.frame()),
+            NativeWindowFrame::from(screen.visibleFrame()),
+        );
+        let target = target.into();
         let duration = window.animationResizeTime(target);
         let changes = block2::RcBlock::new(move |context: NonNull<NSAnimationContext>| {
             unsafe { context.as_ref() }.setDuration(duration);
@@ -406,7 +400,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         let event_type = ev.r#type();
         let mut titlebar_gesture = None;
         let capture_window_gesture = match event_type {
-            NSEventType::LeftMouseDown if !event_window_wears_the_window_chrome(ev) => {
+            NSEventType::LeftMouseDown if !event_belongs_to_main_window_frame(ev) => {
                 titlebar_clicks
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -473,7 +467,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 | NSEventType::RightMouseDragged
                 | NSEventType::OtherMouseDragged
         );
-        let event_belongs_to_main_window = event_window_wears_the_window_chrome(ev);
+        let event_belongs_to_main_window = event_belongs_to_main_window_frame(ev);
         let button_event = matches!(
             event_type,
             NSEventType::LeftMouseDown
@@ -643,7 +637,7 @@ fn event_window_is_key(event: &objc2_app_kit::NSEvent) -> bool {
     event.window(mtm).is_some_and(|window| window.isKeyWindow())
 }
 
-fn event_window_wears_the_window_chrome(event: &objc2_app_kit::NSEvent) -> bool {
+fn event_belongs_to_main_window_frame(event: &objc2_app_kit::NSEvent) -> bool {
     let Some(mtm) = objc2::MainThreadMarker::new() else {
         return false;
     };
