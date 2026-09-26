@@ -13,9 +13,15 @@ pub struct ToolRegistryPlugin;
 
 impl Plugin for ToolRegistryPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Name::new("Tool registry"), NextToolOrder::default()));
         app.configure_sets(
+            Startup,
+            (ToolStartupSet::Registry, ToolStartupSet::Manifest).chain(),
+        )
+        .add_systems(
+            Startup,
+            spawn_tool_registry.in_set(ToolStartupSet::Registry),
+        )
+        .configure_sets(
             Update,
             (
                 ToolResolveSet,
@@ -65,14 +71,16 @@ where
         if !app.is_plugin_added::<ToolRegistryPlugin>() {
             app.add_plugins(ToolRegistryPlugin);
         }
-        app.world_mut()
-            .spawn(ToolManifestSource::<T>::new(self.manifest));
-        app.add_systems(Startup, register_tools::<T>.in_set(RegisterTools))
+        app.insert_resource(ToolManifestSource::<T>::new(self.manifest))
+            .add_systems(
+                Startup,
+                register_tools::<T>.in_set(ToolStartupSet::Manifest),
+            )
             .add_systems(Update, route_tools::<T>.in_set(ToolRouteSet));
     }
 }
 
-#[derive(Component)]
+#[derive(Resource)]
 struct ToolManifestSource<T> {
     source: &'static str,
     marker: PhantomData<fn() -> T>,
@@ -87,35 +95,37 @@ impl<T> ToolManifestSource<T> {
     }
 }
 
+fn spawn_tool_registry(mut commands: Commands) {
+    commands.spawn((Name::new("Tool registry"), NextToolOrder::default()));
+}
+
 fn register_tools<T>(
-    manifests: Query<(Entity, &ToolManifestSource<T>)>,
+    manifest: Res<ToolManifestSource<T>>,
     mut commands: Commands,
     mut next_order: Single<&mut NextToolOrder>,
 ) where
     T: Component + serde::de::DeserializeOwned + Serialize,
 {
-    for (manifest_entity, manifest) in &manifests {
-        let manifest = ToolManifest::<T>::from_ron(manifest.source);
-        for entry in manifest.0 {
-            let (seed, kind) = entry.into_seed();
-            let order = next_order.0;
-            next_order.0 += 1;
-            let mut entity = commands.spawn((
-                RegisteredTool,
-                Name::new(seed.name),
-                ToolAliases(seed.aliases),
-                ToolDescription(seed.description),
-                ToolInputSchema(seed.input_schema),
-                ToolAccess(seed.availability),
-                RegistrationOrder(order),
-                kind,
-            ));
-            if seed.shell_aware {
-                entity.insert(ShellAware);
-            }
+    let manifest = ToolManifest::<T>::from_ron(manifest.source);
+    for entry in manifest.0 {
+        let (seed, kind) = entry.into_seed();
+        let order = next_order.0;
+        next_order.0 += 1;
+        let mut entity = commands.spawn((
+            RegisteredTool,
+            Name::new(seed.name),
+            ToolAliases(seed.aliases),
+            ToolDescription(seed.description),
+            ToolInputSchema(seed.input_schema),
+            ToolAccess(seed.availability),
+            RegistrationOrder(order),
+            kind,
+        ));
+        if seed.shell_aware {
+            entity.insert(ShellAware);
         }
-        commands.entity(manifest_entity).despawn();
     }
+    commands.remove_resource::<ToolManifestSource<T>>();
 }
 
 fn route_tools<T>(
@@ -137,6 +147,12 @@ fn route_tools<T>(
 pub struct ToolResolveSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+enum ToolStartupSet {
+    Registry,
+    Manifest,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 struct ToolRouteSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
@@ -144,9 +160,6 @@ pub struct ToolRequestSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 struct ToolRequestFlush;
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-pub struct RegisterTools;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub struct ToolDispatchSet;

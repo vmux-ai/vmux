@@ -28,13 +28,13 @@ pub struct McpConnectionPlugin;
 
 impl Plugin for McpConnectionPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(McpRuntime);
         app.add_plugins((
             UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
             UiStatePlugin::<McpServers>::default(),
         ))
         .add_message::<PageOpenRequest>()
         .add_message::<McpSnapshotRequest>()
+        .add_systems(Startup, spawn_mcp_runtime)
         .add_observer(request_mcp_connections)
         .add_observer(request_palette_mcp_connections)
         .add_observer(begin_mcp_snapshot)
@@ -51,6 +51,10 @@ impl Plugin for McpConnectionPlugin {
                 .chain(),
         );
     }
+}
+
+fn spawn_mcp_runtime(mut commands: Commands) {
+    commands.spawn(McpRuntime);
 }
 
 fn request_mcp_connections(trigger: On<UiInput<McpServersRequest>>, mut commands: Commands) {
