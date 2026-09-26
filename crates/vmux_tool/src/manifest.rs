@@ -75,6 +75,15 @@ impl ToolsManifest {
             .collect()
     }
 
+    pub(crate) fn add_packages(&mut self, provider: &str, names: &[String]) -> usize {
+        let mut imported = 0;
+        for name in names {
+            imported += usize::from(!self.contains(provider, name));
+            self.set_package(provider, name, true);
+        }
+        imported
+    }
+
     pub fn read(path: &Path) -> Result<Self, String> {
         if !path.is_file() {
             return Ok(Self::default());
@@ -193,14 +202,6 @@ impl ToolStore {
     }
 }
 
-pub fn root_dir() -> PathBuf {
-    ToolStore::current().root()
-}
-
-pub fn manifest_path() -> PathBuf {
-    ToolStore::current().manifest_path()
-}
-
 pub(crate) fn migrate_legacy_storage_in(config_dir: &Path) -> Result<(), String> {
     let legacy_root = config_dir.join("registry");
     let tools_root = config_dir.join("tools");
@@ -239,52 +240,10 @@ fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String>
     }
 }
 
-pub fn load_manifest() -> Result<ToolsManifest, String> {
-    ToolStore::current().load()
-}
-
-pub fn load_manifest_from(path: &Path) -> Result<ToolsManifest, String> {
-    ToolsManifest::read(path)
-}
-
-pub fn write_manifest(manifest: &ToolsManifest) -> Result<(), String> {
-    ToolStore::current().save(manifest)
-}
-
-pub fn write_manifest_to(path: &Path, manifest: &ToolsManifest) -> Result<(), String> {
-    manifest.write_to(path)
-}
-
-pub(crate) fn add_packages(
-    manifest: &mut ToolsManifest,
-    provider: &str,
-    names: &[String],
-) -> usize {
-    let mut imported = 0;
-    for name in names {
-        imported += usize::from(!manifest.contains(provider, name));
-        manifest.set_package(provider, name, true);
-    }
-    imported
-}
-
 pub(crate) fn normalize_names(names: &mut Vec<String>) {
     names.retain(|name| !name.trim().is_empty());
     names.sort_by_key(|name| name.to_ascii_lowercase());
     names.dedup();
-}
-
-pub(crate) fn expand_user_path(path: &Path) -> Result<PathBuf, String> {
-    if let Ok(relative) = path.strip_prefix("~") {
-        return Ok(home_dir().join(relative));
-    }
-    if path.is_absolute() {
-        Ok(path.to_path_buf())
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(path))
-            .map_err(|error| error.to_string())
-    }
 }
 
 pub(crate) fn home_dir() -> PathBuf {
@@ -295,8 +254,4 @@ pub(crate) fn home_dir() -> PathBuf {
 
 fn manifest_version() -> u32 {
     MANIFEST_VERSION
-}
-
-pub fn managed_package_set(manifest: &ToolsManifest, provider: &str) -> BTreeSet<String> {
-    manifest.managed_packages(provider)
 }

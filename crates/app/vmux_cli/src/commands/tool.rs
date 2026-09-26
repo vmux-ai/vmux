@@ -40,7 +40,9 @@ pub fn run(args: ToolArgs) -> io::Result<()> {
     match args.command {
         ToolCommand::Status => status(),
         ToolCommand::Apply => {
-            let manifest = vmux_tool::load_manifest().map_err(io::Error::other)?;
+            let manifest = vmux_tool::ToolStore::current()
+                .load()
+                .map_err(io::Error::other)?;
             let linked = vmux_tool::apply_enabled_dotfiles(&manifest).map_err(io::Error::other)?;
             println!("linked {linked} file(s)");
             Ok(())
@@ -88,13 +90,14 @@ fn import(provider: ToolImportProvider, path: Option<PathBuf>) -> io::Result<()>
                 println!("imported {imported} dotfile package(s)");
             } else {
                 let packages = vmux_tool::dotfile_packages().map_err(io::Error::other)?;
-                let mut manifest = vmux_tool::load_manifest().map_err(io::Error::other)?;
+                let store = vmux_tool::ToolStore::current();
+                let mut manifest = store.load().map_err(io::Error::other)?;
                 let mut imported = 0;
                 for package in packages {
                     imported += usize::from(!manifest.dotfiles.packages.contains(&package));
                     manifest.set_dotfile_package(&package, true);
                 }
-                vmux_tool::write_manifest(&manifest).map_err(io::Error::other)?;
+                store.save(&manifest).map_err(io::Error::other)?;
                 println!("imported {imported} dotfile package(s)");
             }
         }
@@ -103,8 +106,9 @@ fn import(provider: ToolImportProvider, path: Option<PathBuf>) -> io::Result<()>
 }
 
 fn status() -> io::Result<()> {
-    let manifest = vmux_tool::load_manifest().map_err(io::Error::other)?;
-    println!("{}", vmux_tool::root_dir().display());
+    let store = vmux_tool::ToolStore::current();
+    let manifest = store.load().map_err(io::Error::other)?;
+    println!("{}", store.root().display());
     for (provider, packages) in &manifest.packages {
         println!("{provider} ({})", packages.len());
         for package in packages {

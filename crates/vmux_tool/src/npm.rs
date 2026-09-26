@@ -5,10 +5,7 @@ use bevy_ecs::prelude::*;
 use bevy_tasks::IoTaskPool;
 use vmux_core::tool::{ToolImportRequest, ToolProvider};
 
-use crate::manifest::{
-    ToolStore, add_packages, expand_user_path, load_manifest_from, normalize_names,
-    write_manifest_to,
-};
+use crate::manifest::{ToolStore, ToolsManifest, normalize_names};
 use crate::{
     ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
     ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
@@ -123,15 +120,15 @@ fn import_npm_manifest_in(store: &ToolStore, path: &Path) -> Result<usize, Strin
 }
 
 pub fn import_npm_manifest_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
-    let path = expand_user_path(path)?;
+    let path = ToolStore::current().expand_user_path(path)?;
     let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let packages = parse_npm_manifest(&source)?;
     if packages.is_empty() {
         return Err(format!("no dependencies found in {}", path.display()));
     }
-    let mut manifest = load_manifest_from(manifest_path)?;
-    let imported = add_packages(&mut manifest, "npm", &packages);
-    write_manifest_to(manifest_path, &manifest)?;
+    let mut manifest = ToolsManifest::read(manifest_path)?;
+    let imported = manifest.add_packages("npm", &packages);
+    manifest.write_to(manifest_path)?;
     Ok(imported)
 }
 

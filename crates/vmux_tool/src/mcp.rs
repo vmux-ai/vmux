@@ -7,7 +7,7 @@ use bevy_tasks::IoTaskPool;
 use serde::{Deserialize, Serialize};
 use vmux_core::tool::{ToolAdoptRequest, ToolForgetRequest, ToolImportRequest, ToolProvider};
 
-use crate::manifest::{ToolStore, expand_user_path, load_manifest_from, write_manifest_to};
+use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
     ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
     ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
@@ -494,12 +494,12 @@ fn import_mcp_config_in(store: &ToolStore, path: &Path) -> Result<usize, String>
 }
 
 pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
-    let path = expand_user_path(path)?;
+    let path = ToolStore::current().expand_user_path(path)?;
     let servers = parse_mcp_config_file(&path)?;
     if servers.is_empty() {
         return Err(format!("no MCP servers found in {}", path.display()));
     }
-    let mut manifest = load_manifest_from(manifest_path)?;
+    let mut manifest = ToolsManifest::read(manifest_path)?;
     let mut imported = 0;
     for (name, definition) in servers {
         if name == "vmux" {
@@ -508,7 +508,7 @@ pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, 
         imported += usize::from(manifest.mcp.servers.get(&name) != Some(&definition));
         manifest.mcp.servers.insert(name, definition);
     }
-    write_manifest_to(manifest_path, &manifest)?;
+    manifest.write_to(manifest_path)?;
     Ok(imported)
 }
 

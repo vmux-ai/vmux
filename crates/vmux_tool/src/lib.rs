@@ -176,9 +176,9 @@ mod tests {
         manifest.set_package("npm", "eslint", true);
         manifest.set_package("npm", "typescript", true);
         manifest.set_dotfile_package("shell", true);
-        write_manifest_to(&path, &manifest).unwrap();
+        manifest.write_to(&path).unwrap();
 
-        let loaded = load_manifest_from(&path).unwrap();
+        let loaded = ToolsManifest::read(&path).unwrap();
         assert_eq!(loaded.packages["npm"], ["eslint", "typescript"]);
         assert_eq!(loaded.dotfiles.packages, ["shell"]);
     }
@@ -190,7 +190,7 @@ mod tests {
         let mut manifest = ToolsManifest::default();
         manifest.set_package("npm", "typescript", true);
 
-        write_manifest_to(&path, &manifest).unwrap();
+        manifest.write_to(&path).unwrap();
 
         let source = std::fs::read_to_string(path).unwrap();
         assert!(source.contains("[packages]"));
@@ -215,7 +215,7 @@ mod tests {
         assert!(!legacy_root.exists());
         let tools_root = temp.path().join("tools");
         assert_eq!(
-            load_manifest_from(&tools_root.join("tools.toml"))
+            ToolsManifest::read(&tools_root.join("tools.toml"))
                 .unwrap()
                 .packages["npm"],
             ["typescript"]
@@ -232,7 +232,7 @@ mod tests {
         let path = temp.path().join("tools.toml");
         std::fs::write(&path, "version = 2\n").unwrap();
         assert!(
-            load_manifest_from(&path)
+            ToolsManifest::read(&path)
                 .unwrap_err()
                 .contains("unsupported tools manifest version: 2")
         );
@@ -473,7 +473,7 @@ command = "vmux"
         let mcp = temp.path().join("mcp.json");
         let mut manifest = ToolsManifest::default();
         manifest.set_package("npm", "existing", true);
-        write_manifest_to(&manifest_path, &manifest).unwrap();
+        manifest.write_to(&manifest_path).unwrap();
         std::fs::write(&brewfile, "brew \"ripgrep\"\ncask \"ghostty\"\n").unwrap();
         std::fs::write(&package_json, r#"{"devDependencies":{"eslint":"1"}}"#).unwrap();
         std::fs::write(
@@ -491,7 +491,7 @@ command = "vmux"
             1
         );
         assert_eq!(import_mcp_config_to(&mcp, &manifest_path).unwrap(), 1);
-        let loaded = load_manifest_from(&manifest_path).unwrap();
+        let loaded = ToolsManifest::read(&manifest_path).unwrap();
         assert_eq!(loaded.packages["npm"], ["eslint", "existing"]);
         assert!(loaded.mcp.servers.contains_key("docs"));
     }
@@ -532,7 +532,7 @@ command = "vmux"
         std::fs::write(dotfiles.join("shell/.zshrc"), "managed").unwrap();
         let mut manifest = ToolsManifest::default();
         manifest.set_dotfile_package("shell", true);
-        write_manifest_to(&manifest_path, &manifest).unwrap();
+        manifest.write_to(&manifest_path).unwrap();
         apply_dotfile_package_in(&dotfiles, &home, "shell").unwrap();
 
         assert_eq!(
@@ -542,7 +542,7 @@ command = "vmux"
         );
         assert!(!home.join(".zshrc").exists());
         assert!(
-            load_manifest_from(&manifest_path)
+            ToolsManifest::read(&manifest_path)
                 .unwrap()
                 .dotfiles
                 .packages
@@ -610,7 +610,7 @@ command = "vmux"
         assert!(source.symlink_metadata().unwrap().file_type().is_symlink());
         assert_eq!(std::fs::read_to_string(source).unwrap(), "echo hi");
         assert_eq!(
-            load_manifest_from(&manifest).unwrap().dotfiles.packages,
+            ToolsManifest::read(&manifest).unwrap().dotfiles.packages,
             ["shell"]
         );
     }
@@ -635,7 +635,7 @@ command = "vmux"
             "git"
         );
         assert_eq!(
-            load_manifest_from(&manifest).unwrap().dotfiles.packages,
+            ToolsManifest::read(&manifest).unwrap().dotfiles.packages,
             ["git", "shell"]
         );
         assert!(source.join("git/.gitconfig").is_file());

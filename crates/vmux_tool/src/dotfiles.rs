@@ -11,9 +11,7 @@ use vmux_core::tool::{
     ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
 };
 
-use crate::manifest::{
-    ToolStore, ToolsManifest, expand_user_path, load_manifest_from, write_manifest_to,
-};
+use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
     ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
     ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
@@ -771,7 +769,7 @@ pub fn import_dotfiles_to(
     dotfiles_root: &Path,
     manifest_path: &Path,
 ) -> Result<usize, String> {
-    let source = expand_user_path(path)?;
+    let source = ToolStore::current().expand_user_path(path)?;
     if !source.is_dir() {
         return Err(format!(
             "dotfile root is not a directory: {}",
@@ -803,7 +801,7 @@ pub fn import_dotfiles_to(
             return Err(format!("Tools dotfile package already exists: {name}"));
         }
     }
-    let mut manifest = load_manifest_from(manifest_path)?;
+    let mut manifest = ToolsManifest::read(manifest_path)?;
     std::fs::create_dir_all(dotfiles_root).map_err(|error| error.to_string())?;
     let mut staged = Vec::new();
     for (name, package_source) in &packages {
@@ -837,7 +835,7 @@ pub fn import_dotfiles_to(
     for (name, _) in &packages {
         manifest.set_dotfile_package(name, true);
     }
-    if let Err(error) = write_manifest_to(manifest_path, &manifest) {
+    if let Err(error) = manifest.write_to(manifest_path) {
         for path in &installed {
             let _ = std::fs::remove_dir_all(path);
         }
@@ -973,7 +971,7 @@ pub fn disable_and_unlink_dotfile_package_in(
     package: &str,
 ) -> Result<usize, String> {
     validate_package_name(package)?;
-    let mut manifest = load_manifest_from(manifest_path)?;
+    let mut manifest = ToolsManifest::read(manifest_path)?;
     let links = if dotfiles_root.join(package).is_dir() {
         plan_dotfile_package_in(dotfiles_root, home, package)?
             .links
@@ -995,7 +993,7 @@ pub fn disable_and_unlink_dotfile_package_in(
         removed.push(link);
     }
     manifest.set_dotfile_package(package, false);
-    if let Err(error) = write_manifest_to(manifest_path, &manifest) {
+    if let Err(error) = manifest.write_to(manifest_path) {
         let rollback = restore_dotfile_links(&removed);
         return Err(match rollback {
             Ok(()) => error,
@@ -1133,9 +1131,9 @@ pub fn adopt_dotfile_in(
         let _ = std::fs::rename(&destination, &path);
         return Err(error.to_string());
     }
-    let mut manifest = load_manifest_from(manifest_path)?;
+    let mut manifest = ToolsManifest::read(manifest_path)?;
     manifest.set_dotfile_package(package, true);
-    if let Err(error) = write_manifest_to(manifest_path, &manifest) {
+    if let Err(error) = manifest.write_to(manifest_path) {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::rename(&destination, &path);
         return Err(error);
