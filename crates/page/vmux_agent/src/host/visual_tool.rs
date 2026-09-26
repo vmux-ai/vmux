@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentQuery, SimulatorButton, SimulatorInput};
 use vmux_core::JsonArguments;
 use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolDispatchError, ToolDispatchSet, ToolQuery,
-    ToolRequestSet,
+    AddedTool, McpToolPlugin, ToolDispatchError, ToolDispatchSet, ToolQuery, ToolRequestSet,
 };
 
 pub struct VisualToolPlugin;

@@ -499,11 +499,11 @@ pub(crate) fn spawn_with_identity(
 #[cfg(test)]
 mod live {
     use super::*;
+    use crate::RemoteAuthorizationStore;
     use std::net::Ipv4Addr;
     use std::sync::Arc;
     use tokio::sync::{Mutex, broadcast};
     use vmux_api::protocol::SharedResponse;
-    use crate::RemoteAuthorizationStore;
     use vmux_transport::DeviceId;
     use vmux_transport::quic::endpoint::{SelfSignedIdentity, Trust};
 

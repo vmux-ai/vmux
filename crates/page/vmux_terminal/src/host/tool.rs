@@ -4,8 +4,7 @@ use vmux_core::JsonArguments;
 use vmux_service::protocol::AgentCommand;
 
 use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet,
-    ToolRequestSet,
+    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolRequestSet,
 };
 
 pub struct TerminalToolPlugin;
