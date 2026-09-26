@@ -10216,11 +10216,7 @@ name = "vmux_app"
 version = "0.0.34"
 dependencies = [
  "bevy_app",
- "bevy_ecs",
- "serde",
- "serde_json",
  "vmux_agent",
- "vmux_api",
  "vmux_browser",
  "vmux_chat",
  "vmux_command",
@@ -10320,14 +10316,25 @@ name = "vmux_cli"
 version = "0.0.34"
 dependencies = [
  "assert_cmd",
+ "bevy_app",
  "clap",
  "predicates",
  "serde_json",
  "tempfile",
  "tokio",
- "vmux_app",
+ "vmux_agent",
+ "vmux_browser",
+ "vmux_command",
+ "vmux_editor",
+ "vmux_knowledge",
+ "vmux_layout",
  "vmux_mcp",
  "vmux_service",
+ "vmux_setting",
+ "vmux_simulator",
+ "vmux_space",
+ "vmux_team",
+ "vmux_terminal",
  "vmux_tool",
  "vmux_transport",
 ]
