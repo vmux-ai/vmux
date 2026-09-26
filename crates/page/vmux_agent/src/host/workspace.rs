@@ -25,7 +25,7 @@ impl Plugin for WorkspacePlugin {
                 Update,
                 (
                     drain_workspace_picker_tasks.after(super::self_command::SelfCommandSet),
-                    send_pending_agent_continuations,
+                    send_pending_agent_continuations.in_set(super::AgentContinuationSet),
                 )
                     .chain()
                     .in_set(WriteCommandRequests)
@@ -547,7 +547,7 @@ fn drain_workspace_picker_tasks(
     }
 }
 
-pub(super) fn send_pending_agent_continuations(
+fn send_pending_agent_continuations(
     mut sessions: Query<(
         Entity,
         &PendingAgentContinuation,
