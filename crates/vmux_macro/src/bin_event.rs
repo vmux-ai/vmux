@@ -7,7 +7,8 @@ use syn::{DeriveInput, Ident, LitInt, LitStr, Path, Token, bracketed};
 mod keyword {
     syn::custom_keyword!(any);
     syn::custom_keyword!(target);
-    syn::custom_keyword!(targets);
+    syn::custom_keyword!(url);
+    syn::custom_keyword!(urls);
     syn::custom_keyword!(version);
 }
 
@@ -19,8 +20,8 @@ pub(crate) enum Direction {
 
 enum Target {
     Any,
-    Host(LitStr),
-    Hosts(Vec<LitStr>),
+    Url(LitStr),
+    Urls(Vec<LitStr>),
 }
 
 struct Args {
@@ -49,14 +50,17 @@ impl Parse for Args {
                 if target.is_some() {
                     return Err(syn::Error::new_spanned(key, "duplicate target"));
                 }
-                target = if input.peek(keyword::any) {
-                    input.parse::<keyword::any>()?;
-                    Some(Target::Any)
-                } else {
-                    Some(Target::Host(input.parse()?))
-                };
-            } else if input.peek(keyword::targets) {
-                let key: keyword::targets = input.parse()?;
+                input.parse::<keyword::any>()?;
+                target = Some(Target::Any);
+            } else if input.peek(keyword::url) {
+                let key: keyword::url = input.parse()?;
+                input.parse::<Token![=]>()?;
+                if target.is_some() {
+                    return Err(syn::Error::new_spanned(key, "duplicate target"));
+                }
+                target = Some(Target::Url(input.parse()?));
+            } else if input.peek(keyword::urls) {
+                let key: keyword::urls = input.parse()?;
                 input.parse::<Token![=]>()?;
                 if target.is_some() {
                     return Err(syn::Error::new_spanned(key, "duplicate target"));
@@ -67,7 +71,7 @@ impl Parse for Args {
                     .parse_terminated(|input| input.parse::<LitStr>(), Token![,])?
                     .into_iter()
                     .collect();
-                target = Some(Target::Hosts(values));
+                target = Some(Target::Urls(values));
             } else {
                 derives.push(input.parse()?);
             }
@@ -134,9 +138,9 @@ fn implementation(
         .unwrap_or_default();
     let target = match target {
         Some(Target::Any) => quote! { ::vmux_api::BinEventTarget::Any },
-        Some(Target::Host(host)) => quote! { ::vmux_api::BinEventTarget::Host(#host) },
-        Some(Target::Hosts(hosts)) => {
-            quote! { ::vmux_api::BinEventTarget::Hosts(&[#(#hosts),*]) }
+        Some(Target::Url(url)) => quote! { ::vmux_api::BinEventTarget::Url(#url) },
+        Some(Target::Urls(urls)) => {
+            quote! { ::vmux_api::BinEventTarget::Urls(&[#(#urls),*]) }
         }
         None => quote! { <Events as ::vmux_api::BinEventFamily>::TARGET },
     };

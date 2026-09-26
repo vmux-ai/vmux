@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
 use crate::client::{ServiceClient, ServiceHandle, ServiceInbound, ServiceRequest, ServiceWake};
-use crate::protocol::ClientMessage;
+use vmux_api::protocol::ClientMessage;
 
 #[derive(Component)]
 struct ServiceConnectRetry {

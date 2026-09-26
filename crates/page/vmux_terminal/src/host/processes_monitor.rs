@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
+use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_command::{CommandDefinition, CommandInvocation, CommandRequest, CommandTypePlugin};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
@@ -9,7 +10,6 @@ use vmux_history::LastActivatedAt;
 use vmux_service::client::ServiceRequest;
 use vmux_service::event::*;
 use vmux_service::plugin::ServiceConnected;
-use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
 use crate::plugin::reattach_terminal_bundle;
@@ -105,7 +105,7 @@ fn open_services(
 }
 
 #[derive(Message)]
-pub(crate) struct ServiceProcessSnapshot(pub(crate) Vec<vmux_service::protocol::ProcessInfo>);
+pub(crate) struct ServiceProcessSnapshot(pub(crate) Vec<vmux_api::protocol::ProcessInfo>);
 
 #[derive(Component)]
 struct ProcessMonitor {
@@ -142,8 +142,8 @@ struct ServiceProcess {
     uptime_secs: u64,
 }
 
-impl From<&vmux_service::protocol::ProcessInfo> for ServiceProcess {
-    fn from(process: &vmux_service::protocol::ProcessInfo) -> Self {
+impl From<&vmux_api::protocol::ProcessInfo> for ServiceProcess {
+    fn from(process: &vmux_api::protocol::ProcessInfo) -> Self {
         Self {
             shell: process.shell.clone(),
             cwd: process.cwd.clone(),
@@ -595,8 +595,8 @@ mod tests {
         ProcessId([byte; 16])
     }
 
-    fn process_info(id: ProcessId) -> vmux_service::protocol::ProcessInfo {
-        vmux_service::protocol::ProcessInfo {
+    fn process_info(id: ProcessId) -> vmux_api::protocol::ProcessInfo {
+        vmux_api::protocol::ProcessInfo {
             id,
             shell: "/bin/sh".to_string(),
             cwd: String::new(),

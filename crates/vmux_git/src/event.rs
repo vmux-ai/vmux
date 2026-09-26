@@ -6,7 +6,7 @@ use vmux_core::input::KeyModifiers;
 
 use crate::state::{GitBranchCollection, GitPanel};
 
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitKeyRequest {
     pub key: String,
     pub code: String,
@@ -63,125 +63,125 @@ impl GitKeyRequest {
     }
 }
 
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitPanelSelectRequest {
     pub panel: GitPanel,
 }
 
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitFileSelectRequest {
     pub path_bytes: Vec<u8>,
 }
 
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitBranchCollectionSelectRequest {
     pub collection: GitBranchCollection,
 }
 
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitBranchSelectRequest {
     pub reference: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitCommitSelectRequest {
     pub commit: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitStashSelectRequest {
     pub reference: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitDiscardFileRequest {
     pub path_bytes: Vec<u8>,
 }
 
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitRepositoryRequest {
     pub path: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitRepositoryPickerRequest {
     pub path: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitConfigEditRequest {
     pub repo_root: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitUpdateCheckRequest;
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitBranchLogRequest {
     pub repo_root: String,
     pub branch: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitDirectoryOpenRequest {
     pub path: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitDirectorySelectRequest {
     pub index: u32,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitDirectoryAscendRequest {
     pub target: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitDirectoryDescendRequest {
     pub target: String,
 }
-#[vmux_api::ui_event(Copy, Eq, Default, target = "git")]
+#[vmux_api::ui_event(Copy, Eq, Default, url = "git://")]
 pub struct GitDirectoryToggleHiddenRequest;
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitDiffRequest {
     pub repo_root: String,
     pub path: String,
     pub path_bytes: Vec<u8>,
     pub reference: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitStageRequest {
     pub repo_root: String,
     pub path: String,
     pub path_bytes: Vec<u8>,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitUnstageRequest {
     pub repo_root: String,
     pub path: String,
     pub path_bytes: Vec<u8>,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitDiscardRequest {
     pub repo_root: String,
     pub path: String,
     pub path_bytes: Vec<u8>,
 }
-#[vmux_api::ui_event(Eq, targets = ["git", "files"])]
+#[vmux_api::ui_event(Eq, urls = ["git://", "file://"])]
 pub struct GitCommitRequest {
     pub path: String,
     pub message: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitFetchRequest {
     pub path: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitPullRequest {
     pub path: String,
 }
-#[vmux_api::ui_event(Eq, targets = ["git", "files"])]
+#[vmux_api::ui_event(Eq, urls = ["git://", "file://"])]
 pub struct GitPushRequest {
     pub path: String,
 }
-#[vmux_api::ui_event(Eq, target = "git")]
+#[vmux_api::ui_event(Eq, url = "git://")]
 pub struct GitStageAllRequest {
     pub path: String,
 }
-#[vmux_api::ui_event(Eq, targets = ["git", "files"])]
+#[vmux_api::ui_event(Eq, urls = ["git://", "file://"])]
 pub struct GitHunkRequest {
     pub repo_root: String,
     pub path: String,
@@ -268,7 +268,7 @@ pub struct GitBranchLog {
     pub commits: Vec<GitCommitEntry>,
 }
 
-#[vmux_api::ui_event_variants(Eq, target = "git", shared(repo_root: String))]
+#[vmux_api::ui_event_variants(Eq, url = "git://", shared(repo_root: String))]
 pub enum GitOperation {
     Amend,
     CheckoutCommit { commit: String },

@@ -109,7 +109,7 @@ pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
 pub const SIDE_SHEET_MIN_WIDTH_PX: f32 = 160.0;
 pub const SIDE_SHEET_MAX_WIDTH_PX: f32 = 640.0;
 
-#[vmux_api::ui_event(Copy, target = "layout")]
+#[vmux_api::ui_event(Copy, url = "vmux://layout/")]
 pub struct SideSheetResizeEvent {
     pub width: f32,
     pub settled: bool,
@@ -139,7 +139,7 @@ impl SideSheetResizeEvent {
     }
 }
 
-#[vmux_api::ui_event(Default, target = "layout")]
+#[vmux_api::ui_event(Default, url = "vmux://layout/")]
 pub struct WindowDragRegionEvent {
     pub id: String,
     #[serde(default)]
@@ -333,16 +333,16 @@ mod tests {
         assert_eq!(TabDropPlacement::After.destination(0, 2, 3), 2);
     }
 }
-#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
 pub struct HeaderBackRequest;
 
-#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
 pub struct HeaderForwardRequest;
 
-#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
 pub struct HeaderReloadRequest;
 
-#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
 pub struct HeaderAddressFocusRequest;
 
 #[vmux_api::contract(Default, Eq)]
@@ -440,20 +440,20 @@ pub struct TabRow {
     pub is_done_unseen: bool,
 }
 
-#[vmux_api::ui_event(Eq, target = "layout")]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
 pub struct TabCreateRequest;
 
-#[vmux_api::ui_event(Eq, target = "layout")]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
 pub struct TabCloseRequest {
     pub tab_id: Option<String>,
 }
 
-#[vmux_api::ui_event(Eq, target = "layout")]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
 pub struct TabActivateRequest {
     pub tab_id: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "layout")]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
 pub struct TabReorderRequest {
     pub tab_id: String,
     pub target_tab_id: String,
@@ -527,30 +527,30 @@ pub struct StackNode {
     pub bg_color: Option<String>,
 }
 
-#[vmux_api::ui_event(Eq, target = "layout")]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
 pub struct SideSheetStackActivateRequest {
     pub pane_id: u64,
     pub stack_id: u64,
 }
 
-#[vmux_api::ui_event(Eq, target = "layout")]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
 pub struct SideSheetStackCloseRequest {
     pub pane_id: u64,
     pub stack_id: u64,
 }
 
-#[vmux_api::ui_event(Eq, target = "layout")]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
 pub struct SideSheetStackCreateRequest {
     pub pane_id: u64,
 }
 
-#[vmux_api::ui_event(Eq, target = "layout")]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
 pub struct SideSheetProjectOpenRequest {
     pub pane_id: u64,
     pub path: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "layout")]
+#[vmux_api::ui_event(Eq, url = "vmux://layout/")]
 pub struct SideSheetSectionRequest {
     pub pane_id: u64,
     pub path: String,
@@ -594,27 +594,27 @@ pub struct RemoteDevice {
     pub id: String,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq, target = "layout")]
+#[vmux_api::ui_event(Copy, Default, Eq, url = "vmux://layout/")]
 pub struct RemoteRequest {
     pub enabled: bool,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
 pub struct RemotePairingShowRequest;
 
-#[vmux_api::ui_event(Copy, Eq, target = "layout")]
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://layout/")]
 pub struct RemotePairingDismissRequest;
 
-#[vmux_api::ui_event(Default, Eq, target = "layout")]
+#[vmux_api::ui_event(Default, Eq, url = "vmux://layout/")]
 pub struct LayoutOverlayEvent {
     pub id: String,
     pub active: bool,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq, target = "layout")]
+#[vmux_api::ui_event(Copy, Default, Eq, url = "vmux://layout/")]
 pub struct RemoteCopyEvent;
 
-#[vmux_api::ui_event(Default, Eq, target = "layout")]
+#[vmux_api::ui_event(Default, Eq, url = "vmux://layout/")]
 pub struct RemoteRevokeRequest {
     pub client_id: String,
 }

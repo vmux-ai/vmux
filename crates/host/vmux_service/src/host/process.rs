@@ -1,4 +1,3 @@
-use crate::protocol::{ProcessId, ProcessInfo, ServiceMessage};
 use alacritty_terminal::{
     event::{Event as TermEvent, EventListener as TermEventListener},
     grid::{Dimensions, Scroll},
@@ -19,6 +18,7 @@ use std::{
 #[cfg(unix)]
 use std::{os::unix::ffi::OsStrExt, path::Component};
 use tokio::sync::{broadcast, mpsc};
+use vmux_api::protocol::{ProcessId, ProcessInfo, ServiceMessage};
 use vmux_core::event::*;
 
 const MAX_PTY_CHUNKS_PER_POLL: usize = 64;
@@ -883,8 +883,8 @@ impl Process {
         self.sync_viewport();
     }
 
-    pub fn copy_mode_key(&mut self, key: crate::protocol::CopyModeKey) -> Option<String> {
-        use crate::protocol::CopyModeKey as K;
+    pub fn copy_mode_key(&mut self, key: vmux_api::protocol::CopyModeKey) -> Option<String> {
+        use vmux_api::protocol::CopyModeKey as K;
         let cols = self.cols;
         let rows = self.rows;
         let (cur_col, cur_row, last_find) = {
@@ -1503,12 +1503,12 @@ impl Process {
             for event in self.osc133.feed(&data) {
                 let kind = match event {
                     crate::host::osc133::Osc133Event::CommandStart => {
-                        crate::protocol::CommandLifecycleKind::Started
+                        vmux_api::protocol::CommandLifecycleKind::Started
                     }
                     crate::host::osc133::Osc133Event::CommandEnd(exit_code) => {
                         self.command_ended_seq = self.command_ended_seq.wrapping_add(1);
                         self.last_command_exit = exit_code;
-                        crate::protocol::CommandLifecycleKind::Ended { exit_code }
+                        vmux_api::protocol::CommandLifecycleKind::Ended { exit_code }
                     }
                 };
                 let _ = self.patch_tx.send(ServiceMessage::CommandLifecycle {
@@ -2434,7 +2434,7 @@ mod tests {
         let mut saw_end = false;
         while let Ok(msg) = rx.try_recv() {
             if let ServiceMessage::CommandLifecycle {
-                kind: crate::protocol::CommandLifecycleKind::Ended { exit_code },
+                kind: vmux_api::protocol::CommandLifecycleKind::Ended { exit_code },
                 ..
             } = msg
             {
@@ -2539,11 +2539,11 @@ mod tests {
 
         process.process_output_for_test(b"\x1b[?1049h\x1b[Hone\r\ntwo\r\nthree\x1b[H");
         process.enter_copy_mode();
-        process.copy_mode_key(crate::protocol::CopyModeKey::StartLineSelection);
-        process.copy_mode_key(crate::protocol::CopyModeKey::Up);
+        process.copy_mode_key(vmux_api::protocol::CopyModeKey::StartLineSelection);
+        process.copy_mode_key(vmux_api::protocol::CopyModeKey::Up);
 
         assert_eq!(process.copy_mode.as_ref().unwrap().cursor.1, 1);
-        process.copy_mode_key(crate::protocol::CopyModeKey::Up);
+        process.copy_mode_key(vmux_api::protocol::CopyModeKey::Up);
         process.kill();
 
         assert_eq!(*captured.lock().unwrap(), b"\x1b[<64;7;5M".to_vec());

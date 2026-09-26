@@ -12,7 +12,7 @@ use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUse
 use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender, HostWindow, ZoomLevel};
 use bevy_cef_core::prelude::{
     BinIpcEventRaw, Browsers, CefRequest, CefResponse, Requester, Responser,
-    asset_load_path_from_request_url, embedded_page_host_of,
+    asset_load_path_from_request_url,
 };
 use vmux_core::PageOpenSet;
 use vmux_core::host::page::HostsPage;
@@ -332,11 +332,11 @@ fn forward_host_emit(host_emit: On<BinHostEmitEvent>, hosted: Option<NonSend<Hos
     let Some(page) = hosted.get(host_emit.webview()) else {
         return;
     };
-    let host = embedded_page_host_of(page.page.url).unwrap_or_default();
-    if !host_emit.target().accepts(&host) {
+    if !host_emit.target().accepts(page.page.url) {
         warn!(
-            "blocked binary host event {} for unexpected native page host {host}",
-            host_emit.id()
+            "blocked binary host event {} for unexpected native page URL {}",
+            host_emit.id(),
+            page.page.url
         );
         return;
     }
@@ -471,7 +471,6 @@ impl PageEmbedder {
             outbox: Rc::new(PageOutbox {
                 bin_ipc: self.bin_ipc.clone(),
                 webview: entity,
-                host: RefCell::new(embedded_page_host_of(url).unwrap_or_default()),
                 page_url: page_url.clone(),
                 metadata: self.metadata.clone(),
                 waker: self.waker.clone(),
@@ -536,7 +535,6 @@ pub(crate) fn accept_page_wakes(_: bevy::ecs::system::NonSendMarker) {
 struct PageOutbox {
     bin_ipc: async_channel::Sender<BinIpcEventRaw>,
     webview: Entity,
-    host: RefCell<String>,
     page_url: Rc<RefCell<String>>,
     metadata: NativePageMetadataSender,
     waker: PageWaker,
@@ -547,7 +545,7 @@ impl vmux_native::Outbox for PageOutbox {
         self.bin_ipc
             .send_blocking(BinIpcEventRaw {
                 webview: self.webview,
-                host: self.host.borrow().clone(),
+                page_url: self.page_url.borrow().clone(),
                 id: id.to_string(),
                 payload: bytes.to_vec(),
             })
@@ -555,7 +553,6 @@ impl vmux_native::Outbox for PageOutbox {
     }
 
     fn set_page(&self, url: &str) {
-        *self.host.borrow_mut() = embedded_page_host_of(url).unwrap_or_default();
         *self.page_url.borrow_mut() = url.to_string();
     }
 
@@ -869,13 +866,12 @@ mod tests {
     }
 
     #[test]
-    fn a_navigated_page_emits_as_its_new_host() {
+    fn a_navigated_page_emits_from_its_new_url() {
         let (tx, rx) = async_channel::bounded(1);
         let (metadata_tx, _metadata_rx) = async_channel::bounded(1);
         let outbox = PageOutbox {
             bin_ipc: tx,
             webview: bevy::prelude::Entity::PLACEHOLDER,
-            host: std::cell::RefCell::new("start".to_string()),
             page_url: std::rc::Rc::new(std::cell::RefCell::new("vmux://start/".to_string())),
             metadata: NativePageMetadataSender(metadata_tx),
             waker: super::PageWaker(None),
@@ -885,7 +881,7 @@ mod tests {
         vmux_native::Outbox::send(&outbox, "event", &[1, 2, 3]).unwrap();
 
         let emitted = rx.recv_blocking().unwrap();
-        assert_eq!(emitted.host, "sessions");
+        assert_eq!(emitted.page_url, "vmux://sessions/claude");
     }
 
     #[test]
@@ -907,7 +903,6 @@ mod tests {
         let outbox = PageOutbox {
             bin_ipc: async_channel::unbounded().0,
             webview: page,
-            host: std::cell::RefCell::new("history".to_string()),
             page_url: std::rc::Rc::new(std::cell::RefCell::new("vmux://history/".to_string())),
             metadata: NativePageMetadataSender(metadata_tx),
             waker: super::PageWaker(None),

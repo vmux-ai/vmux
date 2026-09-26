@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_api::protocol::{AgentCommand, AgentQuery, JsonValue, layout};
+use vmux_api::protocol::{
+    AgentCommand, AgentInvokeCommand, AgentQuery, AgentUpdateLayout, JsonValue, layout,
+};
 use vmux_core::{JsonArguments, ProcessAnchor};
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
 
@@ -11,7 +13,7 @@ pub struct LayoutToolPlugin;
 
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<LayoutTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<LayoutTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -89,9 +91,11 @@ fn update_layout(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::UpdateLayout {
-                layout: args.0.clone(),
-            })));
+            .insert(ToolCommand(Ok(AgentCommand::UpdateLayout(
+                AgentUpdateLayout {
+                    layout: args.0.clone(),
+                },
+            ))));
     }
 }
 
@@ -102,10 +106,10 @@ fn select_tab(
     for (entity, args) in &requests {
         let index = args.index;
         let command = if (1..=8).contains(&index) {
-            Ok(AgentCommand::InvokeCommand {
+            Ok(AgentCommand::InvokeCommand(AgentInvokeCommand {
                 id: format!("tab_select_{index}"),
                 args: JsonValue::Object(Vec::new()),
-            })
+            }))
         } else {
             Err(format!(
                 "select_tab.index must be between 1 and 8, got {index}"

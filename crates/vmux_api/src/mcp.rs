@@ -16,7 +16,7 @@ pub struct McpServerEntry {
     pub status: McpServerStatus,
 }
 
-#[vmux_api::ui_state(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
+#[vmux_api::ui_state(Default, Eq, urls = ["vmux://command-bar/", "vmux://layout/", "vmux://sessions/", "vmux://agent/", "vmux://start/"])]
 pub struct McpServers {
     pub loaded: bool,
     pub loading: bool,
@@ -25,7 +25,7 @@ pub struct McpServers {
     pub result: Option<McpServerResult>,
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
+#[vmux_api::ui_event(Default, Eq, urls = ["vmux://command-bar/", "vmux://layout/", "vmux://sessions/", "vmux://agent/", "vmux://start/"])]
 pub struct McpServersRequest;
 
 #[vmux_api::contract(Copy, Default, Eq)]
@@ -41,7 +41,7 @@ pub struct McpServerPending {
     pub operation: McpServerOperation,
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "layout", "sessions", "agent", "start"])]
+#[vmux_api::ui_event(Default, Eq, urls = ["vmux://command-bar/", "vmux://layout/", "vmux://sessions/", "vmux://agent/", "vmux://start/"])]
 pub struct McpServerRequest {
     pub id: String,
 }

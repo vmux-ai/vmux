@@ -3,14 +3,15 @@ use serde::{Deserialize, Serialize};
 use vmux_api::protocol::AgentQuery;
 use vmux_core::JsonArguments;
 use vmux_tool::{
-    AddedTool, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery, ToolRequestSet,
+    AddedTool, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
+    ToolRequestSet,
 };
 
 pub struct CaptureToolPlugin;
 
 impl Plugin for CaptureToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<CaptureTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<CaptureTool>::new(include_str!(
             "capture_tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))

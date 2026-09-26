@@ -38,7 +38,7 @@ pub struct LspPackageStatus {
     pub version: Option<String>,
 }
 
-#[vmux_api::ui_state(Eq, target = "lsp")]
+#[vmux_api::ui_state(Eq, url = "vmux://lsp/")]
 pub struct LspManagerUiState {
     pub packages: Vec<LspPackage>,
     pub progress: Vec<LspInstallProgress>,

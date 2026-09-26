@@ -6,8 +6,8 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
 use vmux_command::{
-    CommandDefinition, CommandInvocation, CommandMcp, CommandRequest, CommandTypePlugin,
-    InputSchema, ReadCommandRequests,
+    CommandDefinition, CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin,
+    ReadCommandRequests,
 };
 use vmux_core::{
     HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
@@ -83,26 +83,7 @@ pub enum NavigationRequest {
 
 impl CommandRequest for NavigationRequest {
     fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("browser_prev_page", "Back", "Browser > Navigation")
-                .accelerator("super+[")
-                .mcp(CommandMcp::new("Back", InputSchema::object()).allow_agent()),
-            CommandDefinition::new("browser_next_page", "Forward", "Browser > Navigation")
-                .accelerator("super+]")
-                .mcp(CommandMcp::new("Forward", InputSchema::object()).allow_agent()),
-            CommandDefinition::new("browser_reload", "Reload", "Browser > Navigation")
-                .accelerator("super+r")
-                .direct("Super+r")
-                .mcp(CommandMcp::new("Reload", InputSchema::object()).allow_agent()),
-            CommandDefinition::new("browser_hard_reload", "Hard Reload", "Browser > Navigation")
-                .accelerator("super+shift+r")
-                .direct("Super+Shift+R")
-                .mcp(CommandMcp::new("Hard Reload", InputSchema::object()).allow_agent()),
-            CommandDefinition::new("browser_stop", "Stop Loading", "Browser > Navigation")
-                .accelerator("super+.")
-                .hidden()
-                .mcp(CommandMcp::new("Stop Loading", InputSchema::object()).allow_agent()),
-        ]
+        CommandDefinitions::from_ron(include_str!("navigation.ron")).into_vec()
     }
 }
 
@@ -140,19 +121,7 @@ impl OpenRequest {
 
 impl CommandRequest for OpenRequest {
     fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("open_in_place", "Open Here", "Browser > Open").mcp(
-                CommandMcp::new(
-                    "Navigate the currently focused stack to the given URL. Equivalent to the user typing a URL in the address bar. Use when the user asks to 'go to', 'navigate to', or 'open' a URL without specifying placement; the current page is replaced. If url is omitted, opens the configured startup URL.",
-                    InputSchema::object().optional(
-                        "url",
-                        InputSchema::string().description(
-                            "Absolute URL to open. If omitted, opens the startup URL.",
-                        ),
-                    ),
-                ),
-            ),
-        ]
+        CommandDefinitions::from_ron(include_str!("open.ron")).into_vec()
     }
 }
 
@@ -177,17 +146,7 @@ pub enum ZoomRequest {
 
 impl CommandRequest for ZoomRequest {
     fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("browser_zoom_in", "Zoom In", "Browser > View")
-                .accelerator("super+=")
-                .mcp(CommandMcp::new("Zoom In", InputSchema::object()).allow_agent()),
-            CommandDefinition::new("browser_zoom_out", "Zoom Out", "Browser > View")
-                .accelerator("super+-")
-                .mcp(CommandMcp::new("Zoom Out", InputSchema::object()).allow_agent()),
-            CommandDefinition::new("browser_zoom_reset", "Actual Size", "Browser > View")
-                .accelerator("super+0")
-                .mcp(CommandMcp::new("Actual Size", InputSchema::object()).allow_agent()),
-        ]
+        CommandDefinitions::from_ron(include_str!("zoom.ron")).into_vec()
     }
 }
 
@@ -210,11 +169,7 @@ pub struct ShowDevToolsRequest;
 
 impl CommandRequest for ShowDevToolsRequest {
     fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("browser_dev_tools", "Developer Tools", "Browser > View")
-                .accelerator("super+alt+i")
-                .mcp(CommandMcp::new("Developer Tools", InputSchema::object()).allow_agent()),
-        ]
+        CommandDefinitions::from_ron(include_str!("dev_tools.ron")).into_vec()
     }
 }
 

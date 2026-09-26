@@ -1,6 +1,6 @@
 pub const TEAM_PAGE_URL: &str = "vmux://team/";
 
-#[vmux_api::ui_state(Default, Eq, targets = ["team", "layout", "spaces"])]
+#[vmux_api::ui_state(Default, Eq, urls = ["vmux://team/", "vmux://layout/", "vmux://spaces/"])]
 pub struct TeamEvent {
     pub members: Vec<TeamMemberRow>,
     #[serde(default)]
@@ -54,25 +54,25 @@ pub struct TeamMemberRow {
     pub is_done_unseen: bool,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq, targets = ["team", "layout", "spaces"])]
+#[vmux_api::ui_event(Copy, Default, Eq, urls = ["vmux://team/", "vmux://layout/", "vmux://spaces/"])]
 pub struct TeamOpenRequest;
 
-#[vmux_api::ui_event(Default, Eq, targets = ["team", "layout", "spaces"])]
+#[vmux_api::ui_event(Default, Eq, urls = ["vmux://team/", "vmux://layout/", "vmux://spaces/"])]
 pub struct TeamMemberFocusRequest {
     pub member_id: String,
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = ["team", "layout", "spaces"])]
+#[vmux_api::ui_event(Default, Eq, urls = ["vmux://team/", "vmux://layout/", "vmux://spaces/"])]
 pub struct TeamProfileCreateRequest {
     pub name: String,
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = ["team", "layout", "spaces"])]
+#[vmux_api::ui_event(Default, Eq, urls = ["vmux://team/", "vmux://layout/", "vmux://spaces/"])]
 pub struct TeamProfileSwitchRequest {
     pub profile_id: String,
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = ["team", "layout", "spaces"])]
+#[vmux_api::ui_event(Default, Eq, urls = ["vmux://team/", "vmux://layout/", "vmux://spaces/"])]
 pub struct TeamProfileUpdateRequest {
     pub profile_id: String,
     pub name: String,

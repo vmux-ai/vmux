@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_api::protocol::{AgentCommand, AgentQuery, AgentSpaceCommand};
+use vmux_api::protocol::{
+    AgentCommand, AgentQuery, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+};
 use vmux_core::JsonArguments;
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
 
@@ -11,7 +13,7 @@ pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<SpaceTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<SpaceTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -105,8 +107,8 @@ fn create(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::SpaceCommand(
-                AgentSpaceCommand::Create {
+            .insert(ToolCommand(Ok(AgentCommand::SpaceCreate(
+                AgentSpaceCreate {
                     name: args.name.clone().filter(|name| !name.trim().is_empty()),
                 },
             ))));
@@ -123,7 +125,7 @@ fn rename(
         } else if args.name.trim().is_empty() {
             Err("rename_space.name is empty".to_string())
         } else {
-            Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Rename {
+            Ok(AgentCommand::SpaceRename(AgentSpaceRename {
                 space_id: args.space_id.clone(),
                 name: args.name.clone(),
             }))
@@ -141,7 +143,7 @@ fn delete(
         let command = if space_id.trim().is_empty() {
             Err("delete_space.space_id is empty".to_string())
         } else {
-            Ok(AgentCommand::SpaceCommand(AgentSpaceCommand::Delete {
+            Ok(AgentCommand::SpaceDelete(AgentSpaceDelete {
                 space_id: space_id.clone(),
             }))
         };

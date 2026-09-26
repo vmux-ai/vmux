@@ -1,10 +1,13 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_api::protocol::{AgentCommand, AgentQuery};
+use vmux_api::protocol::{
+    AgentBrowserHistorySearch, AgentBrowserHistoryStep, AgentBrowserInstallExtension,
+    AgentBrowserNavigate, AgentCommand, AgentQuery,
+};
 use vmux_core::{JsonArguments, ProcessAnchor};
 
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
 
@@ -12,7 +15,7 @@ pub struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<BrowserTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<BrowserTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -217,10 +220,10 @@ fn navigate(
         let command = if args.url.trim().is_empty() {
             Err("browser_navigate.url is empty".to_string())
         } else {
-            Ok(AgentCommand::BrowserNavigate {
+            Ok(AgentCommand::BrowserNavigate(AgentBrowserNavigate {
                 url: args.url.clone(),
                 pane: args.pane.clone(),
-            })
+            }))
         };
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -233,9 +236,11 @@ fn go_back(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::BrowserGoBack {
-                pane: args.pane.clone(),
-            })));
+            .insert(ToolCommand(Ok(AgentCommand::BrowserGoBack(
+                AgentBrowserHistoryStep {
+                    pane: args.pane.clone(),
+                },
+            ))));
     }
 }
 
@@ -246,9 +251,11 @@ fn go_forward(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::BrowserGoForward {
-                pane: args.pane.clone(),
-            })));
+            .insert(ToolCommand(Ok(AgentCommand::BrowserGoForward(
+                AgentBrowserHistoryStep {
+                    pane: args.pane.clone(),
+                },
+            ))));
     }
 }
 
@@ -260,10 +267,12 @@ fn history_search(
         let command = if args.query.trim().is_empty() {
             Err("browser_history_search.query is empty".to_string())
         } else {
-            Ok(AgentCommand::BrowserHistorySearch {
-                query: args.query.clone(),
-                limit: args.limit.unwrap_or(20).min(100),
-            })
+            Ok(AgentCommand::BrowserHistorySearch(
+                AgentBrowserHistorySearch {
+                    query: args.query.clone(),
+                    limit: args.limit.unwrap_or(20).min(100),
+                },
+            ))
         };
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -278,9 +287,11 @@ fn install_extension(
         let command = if source.trim().is_empty() {
             Err("browser_install_extension.source is empty".to_string())
         } else {
-            Ok(AgentCommand::BrowserInstallExtension {
-                source: source.clone(),
-            })
+            Ok(AgentCommand::BrowserInstallExtension(
+                AgentBrowserInstallExtension {
+                    source: source.clone(),
+                },
+            ))
         };
         commands.entity(entity).insert(ToolCommand(command));
     }

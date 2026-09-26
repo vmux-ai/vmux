@@ -1,38 +1,34 @@
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
-use vmux_api::protocol::{AgentBookmarkCommand, AgentBookmarkPage, AgentCommand, AgentQuery};
-use vmux_core::JsonArguments;
+use serde::Deserialize;
+use vmux_api::protocol::{
+    AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkId, AgentBookmarkPage,
+    AgentBookmarkPinUrl, AgentCommand, AgentQuery,
+};
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
-    ToolRequestSet,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
 };
 
 pub struct BookmarkToolPlugin;
 
 impl Plugin for BookmarkToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<BookmarkTool>::new(include_str!(
-            "bookmark_tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(
-            Update,
-            (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
-        );
+        app.add_plugins(ToolManifestPlugin::new(include_str!("bookmark_tool.ron")))
+            .register_tool::<BookmarkListArgs>("bookmark_list")
+            .register_tool::<BookmarkAddArgs>("bookmark_add")
+            .register_tool::<BookmarkRemoveArgs>("bookmark_remove")
+            .register_tool::<BookmarkPinArgs>("bookmark_pin")
+            .register_tool::<BookmarkUnpinArgs>("bookmark_unpin")
+            .register_tool::<BookmarkFolderCreateArgs>("bookmark_folder_create")
+            .add_systems(
+                Update,
+                (list, add, remove, pin, unpin, create_folder).in_set(ToolDispatchSet),
+            );
     }
 }
 
-#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[expect(clippy::enum_variant_names)]
-enum BookmarkTool {
-    BookmarkList,
-    BookmarkAdd,
-    BookmarkRemove,
-    BookmarkPin,
-    BookmarkUnpin,
-    BookmarkFolderCreate,
-}
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BookmarkListArgs {}
 
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -82,60 +78,11 @@ struct BookmarkFolderCreateArgs {
     name: String,
 }
 
-fn list(mut commands: Commands, calls: Query<(Entity, &BookmarkTool), AddedTool<BookmarkTool>>) {
-    for (request, tool) in &calls {
-        if *tool != BookmarkTool::BookmarkList {
-            continue;
-        }
+fn list(mut commands: Commands, calls: Query<Entity, AddedTool<BookmarkListArgs>>) {
+    for request in &calls {
         commands
             .entity(request)
             .insert(ToolQuery(Ok(AgentQuery::BookmarkList)));
-    }
-}
-
-fn parse(
-    mut commands: Commands,
-    calls: Query<(Entity, &Name, &JsonArguments, &BookmarkTool), AddedTool<BookmarkTool>>,
-) {
-    for (request, name, arguments, tool) in &calls {
-        let parsed =
-            match tool {
-                BookmarkTool::BookmarkList => continue,
-                BookmarkTool::BookmarkAdd => {
-                    arguments
-                        .parse::<BookmarkAddArgs>(name.as_str())
-                        .map(|args| {
-                            commands.entity(request).insert(args);
-                        })
-                }
-                BookmarkTool::BookmarkRemove => arguments
-                    .parse::<BookmarkRemoveArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    }),
-                BookmarkTool::BookmarkPin => {
-                    arguments
-                        .parse::<BookmarkPinArgs>(name.as_str())
-                        .map(|args| {
-                            commands.entity(request).insert(args);
-                        })
-                }
-                BookmarkTool::BookmarkUnpin => arguments
-                    .parse::<BookmarkUnpinArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    }),
-                BookmarkTool::BookmarkFolderCreate => arguments
-                    .parse::<BookmarkFolderCreateArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    }),
-            };
-        if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchError::new(message));
-        }
     }
 }
 
@@ -146,7 +93,7 @@ fn add(
     for (entity, args) in &requests {
         let command =
             RequiredText::get(args.url.clone(), "bookmark_add.url is required").map(|url| {
-                AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add {
+                AgentCommand::BookmarkAdd(AgentBookmarkAdd {
                     page: AgentBookmarkPage {
                         url,
                         title: args.title.clone(),
@@ -165,7 +112,7 @@ fn remove(
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_remove.uuid is required")
-            .map(|uuid| AgentCommand::BookmarkCommand(AgentBookmarkCommand::Remove { uuid }));
+            .map(|uuid| AgentCommand::BookmarkRemove(AgentBookmarkId { uuid }));
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -178,21 +125,20 @@ fn pin(
         let command = match args {
             BookmarkPinArgs::Existing(args) => {
                 RequiredText::get(args.uuid.clone(), "bookmark_pin.uuid is required")
-                    .map(|uuid| AgentBookmarkCommand::Pin { uuid })
+                    .map(|uuid| AgentCommand::BookmarkPin(AgentBookmarkId { uuid }))
             }
             BookmarkPinArgs::Page(args) => {
                 RequiredText::get(args.url.clone(), "bookmark_pin.url is required").map(|url| {
-                    AgentBookmarkCommand::PinUrl {
+                    AgentCommand::BookmarkPinUrl(AgentBookmarkPinUrl {
                         page: AgentBookmarkPage {
                             url,
                             title: args.title.clone(),
                             favicon_url: args.favicon_url.clone(),
                         },
-                    }
+                    })
                 })
             }
-        }
-        .map(AgentCommand::BookmarkCommand);
+        };
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -203,7 +149,7 @@ fn unpin(
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_unpin.uuid is required")
-            .map(|uuid| AgentCommand::BookmarkCommand(AgentBookmarkCommand::Unpin { uuid }));
+            .map(|uuid| AgentCommand::BookmarkUnpin(AgentBookmarkId { uuid }));
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -214,9 +160,8 @@ fn create_folder(
 ) {
     for (entity, args) in &requests {
         let command =
-            RequiredText::get(args.name.clone(), "bookmark_folder_create.name is required").map(
-                |name| AgentCommand::BookmarkCommand(AgentBookmarkCommand::CreateFolder { name }),
-            );
+            RequiredText::get(args.name.clone(), "bookmark_folder_create.name is required")
+                .map(|name| AgentCommand::BookmarkFolderCreate(AgentBookmarkFolderCreate { name }));
         commands.entity(entity).insert(ToolCommand(command));
     }
 }

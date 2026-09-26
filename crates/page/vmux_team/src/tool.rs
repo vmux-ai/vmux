@@ -1,16 +1,17 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_api::protocol::AgentCommand;
+use vmux_api::protocol::{AgentCommand, AgentRenameProfile};
 use vmux_core::JsonArguments;
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolRequestSet,
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin,
+    ToolRequestSet,
 };
 
 pub struct TeamToolPlugin;
 
 impl Plugin for TeamToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<TeamTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<TeamTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -57,9 +58,9 @@ fn rename_profile(
         let command = if name.is_empty() {
             Err("rename_profile.name is empty".to_string())
         } else {
-            Ok(AgentCommand::RenameProfile {
+            Ok(AgentCommand::RenameProfile(AgentRenameProfile {
                 name: name.to_string(),
-            })
+            }))
         };
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -124,9 +125,9 @@ mod tests {
     fn rename_profile_dispatches_trimmed_name() {
         assert_eq!(
             TeamTool::dispatch(serde_json::json!({"name": "  Junichi  "})),
-            Ok(AgentCommand::RenameProfile {
+            Ok(AgentCommand::RenameProfile(AgentRenameProfile {
                 name: "Junichi".to_string(),
-            })
+            }))
         );
         assert!(TeamTool::dispatch(serde_json::json!({"name": "  "})).is_err());
     }

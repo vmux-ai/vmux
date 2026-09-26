@@ -26,31 +26,31 @@ impl bevy::prelude::Plugin for KeyStrokePlugin {
     }
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = [
-        "terminal",
-        "files",
+#[vmux_api::ui_event(Default, Eq, urls = [
+        "vmux://terminal/",
+        "file://",
         "projects",
         "knowledge",
-        "command-bar",
-        "layout",
-        "agent",
-        "start",
-        "spaces",
+        "vmux://command-bar/",
+        "vmux://layout/",
+        "vmux://agent/",
+        "vmux://start/",
+        "vmux://spaces/",
     ])]
 pub struct PageKeyContext {
     pub keys: Vec<String>,
 }
 
-#[vmux_api::ui_state(Default, Eq, targets = [
-    "terminal",
-    "files",
+#[vmux_api::ui_state(Default, Eq, urls = [
+    "vmux://terminal/",
+    "file://",
     "projects",
     "knowledge",
-    "command-bar",
-    "layout",
-    "agent",
-    "start",
-    "spaces",
+    "vmux://command-bar/",
+    "vmux://layout/",
+    "vmux://agent/",
+    "vmux://start/",
+    "vmux://spaces/",
 ])]
 pub struct KeyClaims {
     pub keys: Vec<ClaimedKey>,
@@ -116,16 +116,16 @@ impl KeyModifiers {
     }
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = [
-        "terminal",
-        "files",
+#[vmux_api::ui_event(Default, Eq, urls = [
+        "vmux://terminal/",
+        "file://",
         "projects",
         "knowledge",
-        "command-bar",
-        "layout",
-        "agent",
-        "start",
-        "spaces",
+        "vmux://command-bar/",
+        "vmux://layout/",
+        "vmux://agent/",
+        "vmux://start/",
+        "vmux://spaces/",
     ])]
 pub struct KeyStroke {
     pub key: String,

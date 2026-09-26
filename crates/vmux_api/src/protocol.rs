@@ -160,10 +160,10 @@ mod tests {
     #[test]
     fn empty_browser_navigate_url_is_invalid() {
         assert_eq!(
-            validate_agent_command(&AgentCommand::BrowserNavigate {
+            validate_agent_command(&AgentCommand::BrowserNavigate(AgentBrowserNavigate {
                 url: String::new(),
                 pane: None,
-            }),
+            })),
             Err(AgentCommandValidationError::EmptyBrowserUrl)
         );
     }
@@ -171,11 +171,11 @@ mod tests {
     #[test]
     fn empty_agent_shell_command_is_invalid() {
         assert_eq!(
-            validate_agent_command(&AgentCommand::RunShell {
+            validate_agent_command(&AgentCommand::RunShell(AgentRunShell {
                 command: String::new(),
                 cwd: String::new(),
                 mode: AgentShellMode::NewTab,
-            }),
+            })),
             Err(AgentCommandValidationError::EmptyShellCommand)
         );
     }
@@ -183,10 +183,10 @@ mod tests {
     #[test]
     fn empty_terminal_send_text_is_invalid() {
         assert_eq!(
-            validate_agent_command(&AgentCommand::TerminalSend {
+            validate_agent_command(&AgentCommand::TerminalSend(AgentTerminalSend {
                 text: String::new(),
                 terminal: None,
-            }),
+            })),
             Err(AgentCommandValidationError::EmptyTerminalText)
         );
     }
@@ -215,9 +215,9 @@ mod tests {
     #[test]
     fn empty_rename_profile_name_is_invalid() {
         assert_eq!(
-            validate_agent_command(&AgentCommand::RenameProfile {
+            validate_agent_command(&AgentCommand::RenameProfile(AgentRenameProfile {
                 name: "  ".to_string(),
-            }),
+            })),
             Err(AgentCommandValidationError::EmptyProfileName)
         );
     }
@@ -294,15 +294,13 @@ mod tests {
 
     #[test]
     fn agent_query_simulator_control_rkyv_round_trip() {
-        let query = AgentQuery::SimulatorControl {
-            input: SimulatorInput::Swipe {
-                start_x: 120,
-                start_y: 700,
-                end_x: 120,
-                end_y: 200,
-                duration_ms: 300,
-            },
-        };
+        let query = AgentQuery::SimulatorSwipe(SimulatorSwipe {
+            start_x: 120,
+            start_y: 700,
+            end_x: 120,
+            end_y: 200,
+            duration_ms: 300,
+        });
 
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&query).unwrap();
         let recovered: AgentQuery =
@@ -400,10 +398,10 @@ mod tests {
 
     #[test]
     fn notify_command_rkyv_roundtrip() {
-        let cmd = AgentCommand::Notify {
+        let cmd = AgentCommand::Notify(AgentNotify {
             title: Some("done".to_string()),
             body: None,
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let back: AgentCommand =
             rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
@@ -425,58 +423,58 @@ mod tests {
 
     #[test]
     fn open_beside_round_trips_and_validates() {
-        let cmd = AgentCommand::OpenBeside {
+        let cmd = AgentCommand::OpenBeside(AgentOpenBeside {
             anchor: ProcessId::new(),
             direction: Some(AgentPaneDirection::Right),
             url: "vmux://terminal/".into(),
             focus: true,
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let back: AgentCommand =
             rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back, cmd);
         assert!(validate_agent_command(&cmd).is_ok());
 
-        let empty = AgentCommand::OpenBeside {
+        let empty = AgentCommand::OpenBeside(AgentOpenBeside {
             anchor: ProcessId::new(),
             direction: Some(AgentPaneDirection::Right),
             url: "  ".into(),
             focus: true,
-        };
+        });
         assert!(validate_agent_command(&empty).is_err());
     }
 
     #[test]
     fn file_touched_round_trips_and_validates() {
-        let cmd = AgentCommand::FileTouched {
+        let cmd = AgentCommand::FileTouched(AgentFileTouched {
             anchor: ProcessId::new(),
             path: "/abs/x.rs".into(),
             line: Some(42),
             col: Some(4),
             end_col: Some(12),
             kind: FileTouchKind::Edit,
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let back: AgentCommand =
             rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back, cmd);
         assert!(validate_agent_command(&cmd).is_ok());
 
-        let empty = AgentCommand::FileTouched {
+        let empty = AgentCommand::FileTouched(AgentFileTouched {
             anchor: ProcessId::new(),
             path: "  ".into(),
             line: None,
             col: None,
             end_col: None,
             kind: FileTouchKind::Read,
-        };
+        });
         assert!(validate_agent_command(&empty).is_err());
     }
 
     #[test]
     fn agent_command_update_layout_rkyv_round_trip() {
         use crate::protocol::layout::{Focus, LayoutNode, LayoutSnapshot, Tab};
-        let cmd = AgentCommand::UpdateLayout {
+        let cmd = AgentCommand::UpdateLayout(AgentUpdateLayout {
             layout: LayoutSnapshot {
                 tabs: vec![Tab {
                     id: Some("tab:1".into()),
@@ -494,7 +492,7 @@ mod tests {
                     stack: None,
                 },
             },
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let recovered: AgentCommand =
             rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
@@ -568,10 +566,10 @@ mod tests {
 
     #[test]
     fn browser_navigate_with_pane_roundtrips() {
-        let cmd = AgentCommand::BrowserNavigate {
+        let cmd = AgentCommand::BrowserNavigate(AgentBrowserNavigate {
             url: "https://example.com".to_string(),
             pane: Some("12345".to_string()),
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, cmd);
@@ -579,10 +577,10 @@ mod tests {
 
     #[test]
     fn browser_navigate_without_pane_roundtrips() {
-        let cmd = AgentCommand::BrowserNavigate {
+        let cmd = AgentCommand::BrowserNavigate(AgentBrowserNavigate {
             url: "https://example.com".to_string(),
             pane: None,
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, cmd);
@@ -590,10 +588,10 @@ mod tests {
 
     #[test]
     fn terminal_send_with_terminal_roundtrips() {
-        let cmd = AgentCommand::TerminalSend {
+        let cmd = AgentCommand::TerminalSend(AgentTerminalSend {
             text: "hi".to_string(),
             terminal: Some("67890".to_string()),
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, cmd);
@@ -654,10 +652,10 @@ mod tests {
 
     #[test]
     fn update_settings_command_rkyv_roundtrip() {
-        let cmd = AgentCommand::UpdateSettings {
+        let cmd = AgentCommand::UpdateSettings(AgentUpdateSettings {
             path: "layout.pane.gap".to_string(),
             value: JsonValue::Number("12.0".to_string()),
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, cmd);
@@ -665,7 +663,7 @@ mod tests {
 
     #[test]
     fn run_with_placement_override_rkyv_roundtrip() {
-        let cmd = AgentCommand::RunWithPlacementOverride {
+        let cmd = AgentCommand::RunWithPlacementOverride(AgentRun {
             anchor: ProcessId::new(),
             command: "cargo test".into(),
             direction: AgentPaneDirection::Bottom,
@@ -674,7 +672,7 @@ mod tests {
             mode: PlacementMode::Split,
             terminal: None,
             done_marker: Some("token".into()),
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, cmd);
@@ -716,49 +714,49 @@ mod tests {
 
     #[test]
     fn update_settings_validation_rejects_empty_path() {
-        let cmd = AgentCommand::UpdateSettings {
+        let cmd = AgentCommand::UpdateSettings(AgentUpdateSettings {
             path: "".to_string(),
             value: JsonValue::Number("1".to_string()),
-        };
+        });
         assert!(validate_agent_command(&cmd).is_err());
     }
 
     #[test]
     fn create_worktree_validation_rejects_empty_branch() {
-        let cmd = AgentCommand::CreateWorktreeOnBranch {
+        let cmd = AgentCommand::CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch {
             anchor: ProcessId::new(),
             branch: "  ".to_string(),
             project: None,
-        };
+        });
         assert!(validate_agent_command(&cmd).is_err());
     }
 
     #[test]
     fn workspace_commands_rkyv_roundtrip() {
         let commands = [
-            AgentCommand::ChooseWorkspace {
+            AgentCommand::ChooseWorkspace(AgentChooseWorkspace {
                 anchor: ProcessId::new(),
-            },
-            AgentCommand::CreateWorktreeOnBranch {
+            }),
+            AgentCommand::CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch {
                 anchor: ProcessId::new(),
                 branch: "feature/fun-terminal".into(),
                 project: None,
-            },
-            AgentCommand::RequestUserChoice {
+            }),
+            AgentCommand::RequestUserChoice(AgentRequestUserChoice {
                 anchor: ProcessId::new(),
                 question: "Repository?".into(),
                 options: vec!["Local".into(), "Remote".into(), "Create".into()],
-            },
-            AgentCommand::ChooseWorkspaceAtPath {
+            }),
+            AgentCommand::ChooseWorkspaceAtPath(AgentChooseWorkspaceAtPath {
                 anchor: ProcessId::new(),
                 path: "/repo".into(),
-            },
-            AgentCommand::PrepareWorktree {
+            }),
+            AgentCommand::PrepareWorktree(AgentPrepareWorktree {
                 anchor: ProcessId::new(),
                 path: Some("/repo-wt".into()),
                 task: Some("feature".into()),
                 create: false,
-            },
+            }),
         ];
         for command in commands {
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
@@ -769,12 +767,12 @@ mod tests {
 
     #[test]
     fn write_knowledge_rkyv_roundtrip() {
-        let command = AgentCommand::WriteKnowledge {
+        let command = AgentCommand::WriteKnowledge(AgentWriteKnowledge {
             anchor: ProcessId::new(),
             path: Some("projects/yc.md".into()),
             title: "YC".into(),
             content: "Notes".into(),
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, command);
@@ -783,17 +781,17 @@ mod tests {
     #[test]
     fn knowledge_read_commands_roundtrip_and_validate() {
         let commands = [
-            AgentCommand::SearchKnowledge {
+            AgentCommand::SearchKnowledge(AgentSearchKnowledge {
                 anchor: ProcessId::new(),
                 query: "Obsidian links".into(),
                 limit: 20,
-            },
-            AgentCommand::ReadKnowledge {
+            }),
+            AgentCommand::ReadKnowledge(AgentReadKnowledge {
                 anchor: ProcessId::new(),
                 path: "projects/obsidian-gap-analysis.md".into(),
                 line: 1,
                 limit: 200,
-            },
+            }),
         ];
         for command in commands {
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();

@@ -1,16 +1,16 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
+use vmux_api::protocol::{
+    AgentBrowserNavigate, AgentCommand as ServiceAgentCommand, AgentCommandResult,
+    AgentOpenInNewStack, AgentRequestId, AgentShellMode, SharedAgentCommand,
+};
 use vmux_command::{CommandDefinition, CommandInvocation};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
 };
 use vmux_service::client::ServiceRequest;
-use vmux_service::protocol::{
-    AgentBookmarkCommand, AgentCommand as ServiceAgentCommand, AgentCommandResult, AgentRequestId,
-    AgentShellMode, AgentSpaceCommand, SharedAgentCommand,
-};
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 use vmux_terminal::TerminalStackSpawnRequest;
@@ -108,10 +108,10 @@ fn focused_id(kind: vmux_layout::protocol::NodeKind, entity: Option<Entity>) -> 
 }
 
 fn preserve_current_focus_in_layout_snapshot(
-    snapshot: &mut vmux_service::protocol::layout::LayoutSnapshot,
+    snapshot: &mut vmux_api::protocol::layout::LayoutSnapshot,
     focus: &FocusedStack,
 ) {
-    snapshot.focused = vmux_service::protocol::layout::Focus {
+    snapshot.focused = vmux_api::protocol::layout::Focus {
         tab: focused_id(vmux_layout::protocol::NodeKind::Tab, focus.tab),
         pane: focused_id(vmux_layout::protocol::NodeKind::Pane, focus.pane),
         stack: focused_id(vmux_layout::protocol::NodeKind::Stack, focus.stack),
@@ -156,18 +156,18 @@ fn handle_command_invocations(
     agents: Query<(
         Entity,
         &vmux_core::team::Agent,
-        Option<&vmux_service::protocol::ProcessId>,
+        Option<&vmux_api::protocol::ProcessId>,
     )>,
     user: Query<Entity, With<vmux_core::team::User>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
-            ServiceAgentCommand::FileTouched { .. }
-            | ServiceAgentCommand::FileSearch { .. }
-            | ServiceAgentCommand::TurnEnded { .. } => AgentCommandResult::Ok,
-            ServiceAgentCommand::InvokeCommand { id, args } => {
-                let args = match vmux_core::JsonArguments::try_from(args) {
+            ServiceAgentCommand::FileTouched(_)
+            | ServiceAgentCommand::FileSearch(_)
+            | ServiceAgentCommand::TurnEnded(_) => AgentCommandResult::Ok,
+            ServiceAgentCommand::InvokeCommand(command) => {
+                let args = match vmux_core::JsonArguments::try_from(&command.args) {
                     Ok(args) => args.0,
                     Err(message) => {
                         service_requests.write(ServiceRequest(
@@ -193,10 +193,10 @@ fn handle_command_invocations(
                 .unwrap_or(Entity::PLACEHOLDER);
                 let Some(definition) = command_definitions
                     .iter()
-                    .find(|definition| definition.matches(id))
+                    .find(|definition| definition.matches(&command.id))
                 else {
                     service_requests.write(ServiceRequest(request.response(
-                        AgentCommandResult::Error(format!("unknown app command: {id}")),
+                        AgentCommandResult::Error(format!("unknown app command: {}", command.id)),
                     )));
                     continue;
                 };
@@ -233,67 +233,64 @@ fn handle_terminal_commands(
 ) {
     for request in reader.read() {
         let result = match &request.command {
-            ServiceAgentCommand::NewTerminalTab {
-                cwd,
-                command,
-                args,
-                env,
-            } => match focus.pane.filter(|pane| panes.contains(*pane)) {
-                None => AgentCommandResult::Error("no active pane".to_string()),
-                Some(pane) => match valid_cwd(cwd) {
-                    Err(message) => AgentCommandResult::Error(message),
-                    Ok(cwd) => {
-                        let activate = !request.origin.is_agent();
-                        let cwd = cwd.or_else(|| {
-                            active_space
-                                .as_ref()
-                                .and_then(|space| settings.startup_dir(&space.record.id))
-                        });
-                        if command.trim().is_empty() {
-                            terminal_spawn.write(TerminalStackSpawnRequest {
-                                pane,
-                                cwd,
-                                shell: None,
-                                agent_run: false,
-                                pending_input: None,
-                                process_id: None,
-                                activate,
+            ServiceAgentCommand::NewTerminalTab(command) => {
+                match focus.pane.filter(|pane| panes.contains(*pane)) {
+                    None => AgentCommandResult::Error("no active pane".to_string()),
+                    Some(pane) => match valid_cwd(&command.cwd) {
+                        Err(message) => AgentCommandResult::Error(message),
+                        Ok(cwd) => {
+                            let activate = !request.origin.is_agent();
+                            let cwd = cwd.or_else(|| {
+                                active_space
+                                    .as_ref()
+                                    .and_then(|space| settings.startup_dir(&space.record.id))
                             });
-                            AgentCommandResult::Ok
-                        } else if let Some(cwd) = cwd {
-                            process_spawn.write(ProcessStackSpawnRequest {
-                                pane,
-                                command: command.clone(),
-                                args: args.clone(),
-                                cwd,
-                                env: env.clone(),
-                                activate,
-                            });
-                            AgentCommandResult::Ok
-                        } else {
-                            AgentCommandResult::Error(
-                                "project directory is required to run a command".to_string(),
-                            )
+                            if command.command.trim().is_empty() {
+                                terminal_spawn.write(TerminalStackSpawnRequest {
+                                    pane,
+                                    cwd,
+                                    shell: None,
+                                    agent_run: false,
+                                    pending_input: None,
+                                    process_id: None,
+                                    activate,
+                                });
+                                AgentCommandResult::Ok
+                            } else if let Some(cwd) = cwd {
+                                process_spawn.write(ProcessStackSpawnRequest {
+                                    pane,
+                                    command: command.command.clone(),
+                                    args: command.args.clone(),
+                                    cwd,
+                                    env: command.env.clone(),
+                                    activate,
+                                });
+                                AgentCommandResult::Ok
+                            } else {
+                                AgentCommandResult::Error(
+                                    "project directory is required to run a command".to_string(),
+                                )
+                            }
                         }
-                    }
-                },
-            },
-            ServiceAgentCommand::RunShell { command, cwd, mode } => {
-                let mode = match mode {
+                    },
+                }
+            }
+            ServiceAgentCommand::RunShell(command) => {
+                let mode = match command.mode {
                     AgentShellMode::Active => vmux_terminal::ShellMode::Active,
                     AgentShellMode::NewTab => vmux_terminal::ShellMode::NewTab,
                 };
                 run_shell.write(vmux_terminal::RunShellRequest {
-                    command: command.clone(),
-                    cwd: cwd.clone(),
+                    command: command.command.clone(),
+                    cwd: command.cwd.clone(),
                     mode,
                 });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::TerminalSend { text, terminal } => {
+            ServiceAgentCommand::TerminalSend(command) => {
                 terminal_send.write(vmux_terminal::TerminalSendRequest {
-                    text: text.clone(),
-                    terminal: terminal.clone(),
+                    text: command.text.clone(),
+                    terminal: command.terminal.clone(),
                 });
                 AgentCommandResult::Ok
             }
@@ -317,8 +314,8 @@ fn handle_browser_commands(
 ) {
     for request in reader.read() {
         let result = match &request.command {
-            ServiceAgentCommand::BrowserNavigate { url, pane } => {
-                let mut pane = pane.clone();
+            ServiceAgentCommand::BrowserNavigate(command) => {
+                let mut pane = command.pane.clone();
                 let mut new_stack = false;
                 let mut profile = None;
                 if pane.is_none()
@@ -336,7 +333,7 @@ fn handle_browser_commands(
                         open_beside.write(vmux_layout::OpenBesideRequest {
                             pane: agent_pane,
                             direction: None,
-                            url: url.clone(),
+                            url: command.url.clone(),
                             request_id: request.request_id.0,
                             focus: false,
                         });
@@ -351,7 +348,7 @@ fn handle_browser_commands(
                     }
                 }
                 navigate.write(vmux_layout::BrowserNavigateRequest {
-                    url: url.clone(),
+                    url: command.url.clone(),
                     pane,
                     request_id: Some(request.request_id.0),
                     new_stack,
@@ -359,14 +356,14 @@ fn handle_browser_commands(
                 });
                 continue;
             }
-            ServiceAgentCommand::BrowserInstallExtension { source } => {
+            ServiceAgentCommand::BrowserInstallExtension(command) => {
                 install_extension.write(vmux_layout::ExtensionInstallRequest {
-                    source: source.clone(),
+                    source: command.source.clone(),
                 });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::BrowserGoBack { pane } => {
-                let resolved = browse.command_pane(pane, &request.origin);
+            ServiceAgentCommand::BrowserGoBack(command) => {
+                let resolved = browse.command_pane(&command.pane, &request.origin);
                 if let Some(request) = resolved.activation {
                     activate.write(request);
                 }
@@ -375,8 +372,8 @@ fn handle_browser_commands(
                 });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::BrowserGoForward { pane } => {
-                let resolved = browse.command_pane(pane, &request.origin);
+            ServiceAgentCommand::BrowserGoForward(command) => {
+                let resolved = browse.command_pane(&command.pane, &request.origin);
                 if let Some(request) = resolved.activation {
                     activate.write(request);
                 }
@@ -385,12 +382,18 @@ fn handle_browser_commands(
                 });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::BrowserHistorySearch { query, limit } => {
-                bevy::log::info!("browser_history_search: query={:?} limit={}", query, limit);
+            ServiceAgentCommand::BrowserHistorySearch(command) => {
+                bevy::log::info!(
+                    "browser_history_search: query={:?} limit={}",
+                    command.query,
+                    command.limit
+                );
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::OpenInNewStack { url } => {
-                open_stack.write(vmux_layout::OpenInNewStackRequest { url: url.clone() });
+            ServiceAgentCommand::OpenInNewStack(command) => {
+                open_stack.write(vmux_layout::OpenInNewStackRequest {
+                    url: command.url.clone(),
+                });
                 AgentCommandResult::Ok
             }
             _ => continue,
@@ -404,7 +407,7 @@ fn handle_desktop_commands(
     agents: Query<(
         Entity,
         &vmux_core::team::Agent,
-        Option<&vmux_service::protocol::ProcessId>,
+        Option<&vmux_api::protocol::ProcessId>,
     )>,
     user: Query<Entity, With<vmux_core::team::User>>,
     focus: Res<FocusedStack>,
@@ -418,7 +421,7 @@ fn handle_desktop_commands(
 ) {
     for request in reader.read() {
         let result = match &request.command {
-            ServiceAgentCommand::Notify { title, body } => {
+            ServiceAgentCommand::Notify(command) => {
                 let caller = match &request.origin {
                     CommandOrigin::Agent {
                         anchor: Some(pid), ..
@@ -437,31 +440,35 @@ fn handle_desktop_commands(
                     Some(caller) => {
                         attention.write(vmux_core::notify::AgentAttention {
                             entity: caller,
-                            title: title.clone(),
-                            body: body.clone(),
+                            title: command.title.clone(),
+                            body: command.body.clone(),
                         });
                         AgentCommandResult::Ok
                     }
                     None => AgentCommandResult::Error("notify: caller not found".to_string()),
                 }
             }
-            ServiceAgentCommand::FocusPane { pane } => {
+            ServiceAgentCommand::FocusPane(command) => {
                 if request.origin.is_agent() {
                     AgentCommandResult::Error("focus_pane is disabled for agents".to_string())
                 } else {
-                    focus_pane.write(FocusPaneRequest { pane: pane.clone() });
+                    focus_pane.write(FocusPaneRequest {
+                        pane: command.pane.clone(),
+                    });
                     AgentCommandResult::Ok
                 }
             }
-            ServiceAgentCommand::RenameProfile { name } => {
-                rename_profile.write(RenameProfileRequest { name: name.clone() });
+            ServiceAgentCommand::RenameProfile(command) => {
+                rename_profile.write(RenameProfileRequest {
+                    name: command.name.clone(),
+                });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::UpdateSettings { path, value } => {
-                match serde_json::Value::try_from(value) {
+            ServiceAgentCommand::UpdateSettings(command) => {
+                match serde_json::Value::try_from(&command.value) {
                     Ok(value) => {
                         let mut updated = (*settings).clone();
-                        match updated.apply_update(path, value) {
+                        match updated.apply_update(&command.path, value) {
                             Ok(ron_bytes) => {
                                 if request.origin.is_agent()
                                     && updated.agent.allow_run_placement_override
@@ -486,8 +493,8 @@ fn handle_desktop_commands(
                     )),
                 }
             }
-            ServiceAgentCommand::UpdateLayout { layout } => {
-                let mut layout = layout.clone();
+            ServiceAgentCommand::UpdateLayout(command) => {
+                let mut layout = command.layout.clone();
                 if request.origin.is_agent() {
                     preserve_current_focus_in_layout_snapshot(&mut layout, &focus);
                 }
@@ -512,25 +519,23 @@ fn handle_space_commands(
 ) {
     for request in reader.read() {
         let result = match &request.command {
-            ServiceAgentCommand::SpaceCommand(command) => {
-                match command {
-                    AgentSpaceCommand::Create { name } => {
-                        create_requests.write(vmux_core::event::space::SpaceCreateRequest {
-                            name: name.clone().unwrap_or_default(),
-                        });
-                    }
-                    AgentSpaceCommand::Rename { space_id, name } => {
-                        rename_requests.write(vmux_core::event::space::SpaceRenameRequest {
-                            space_id: space_id.clone(),
-                            name: name.clone(),
-                        });
-                    }
-                    AgentSpaceCommand::Delete { space_id } => {
-                        delete_requests.write(vmux_core::event::space::SpaceDeleteRequest {
-                            space_id: space_id.clone(),
-                        });
-                    }
-                }
+            ServiceAgentCommand::SpaceCreate(command) => {
+                create_requests.write(vmux_core::event::space::SpaceCreateRequest {
+                    name: command.name.clone().unwrap_or_default(),
+                });
+                AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::SpaceRename(command) => {
+                rename_requests.write(vmux_core::event::space::SpaceRenameRequest {
+                    space_id: command.space_id.clone(),
+                    name: command.name.clone(),
+                });
+                AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::SpaceDelete(command) => {
+                delete_requests.write(vmux_core::event::space::SpaceDeleteRequest {
+                    space_id: command.space_id.clone(),
+                });
                 AgentCommandResult::Ok
             }
             _ => continue,
@@ -551,49 +556,53 @@ fn handle_bookmark_commands(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
-        let ServiceAgentCommand::BookmarkCommand(command) = &request.command else {
-            continue;
-        };
-        match command {
-            AgentBookmarkCommand::Add { page, folder } => {
+        match &request.command {
+            ServiceAgentCommand::BookmarkAdd(command) => {
                 add_requests.write(vmux_layout::bookmark::AddRequest {
                     metadata: vmux_core::PageMetadata {
-                        title: page.title.clone().unwrap_or_default(),
-                        url: page.url.clone(),
+                        title: command.page.title.clone().unwrap_or_default(),
+                        url: command.page.url.clone(),
                         icon: vmux_core::PageIcon::favicon(
-                            page.favicon_url.clone().unwrap_or_default(),
+                            command.page.favicon_url.clone().unwrap_or_default(),
                         ),
                         bg_color: None,
                     },
-                    folder: folder.clone(),
+                    folder: command.folder.clone(),
                 });
             }
-            AgentBookmarkCommand::Remove { uuid } => {
-                remove_requests.write(vmux_layout::bookmark::RemoveRequest { uuid: uuid.clone() });
+            ServiceAgentCommand::BookmarkRemove(command) => {
+                remove_requests.write(vmux_layout::bookmark::RemoveRequest {
+                    uuid: command.uuid.clone(),
+                });
             }
-            AgentBookmarkCommand::Pin { uuid } => {
-                pin_requests.write(vmux_layout::bookmark::PinRequest { uuid: uuid.clone() });
+            ServiceAgentCommand::BookmarkPin(command) => {
+                pin_requests.write(vmux_layout::bookmark::PinRequest {
+                    uuid: command.uuid.clone(),
+                });
             }
-            AgentBookmarkCommand::PinUrl { page } => {
+            ServiceAgentCommand::BookmarkPinUrl(command) => {
                 pin_url_requests.write(vmux_layout::bookmark::PinUrlRequest {
                     metadata: vmux_core::PageMetadata {
-                        title: page.title.clone().unwrap_or_default(),
-                        url: page.url.clone(),
+                        title: command.page.title.clone().unwrap_or_default(),
+                        url: command.page.url.clone(),
                         icon: vmux_core::PageIcon::favicon(
-                            page.favicon_url.clone().unwrap_or_default(),
+                            command.page.favicon_url.clone().unwrap_or_default(),
                         ),
                         bg_color: None,
                     },
                 });
             }
-            AgentBookmarkCommand::Unpin { uuid } => {
-                unpin_requests.write(vmux_layout::bookmark::UnpinRequest { uuid: uuid.clone() });
+            ServiceAgentCommand::BookmarkUnpin(command) => {
+                unpin_requests.write(vmux_layout::bookmark::UnpinRequest {
+                    uuid: command.uuid.clone(),
+                });
             }
-            AgentBookmarkCommand::CreateFolder { name } => {
+            ServiceAgentCommand::BookmarkFolderCreate(command) => {
                 create_folder_requests.write(vmux_layout::bookmark::CreateFolderRequest::root(
-                    name.clone(),
+                    command.name.clone(),
                 ));
             }
+            _ => continue,
         }
         service_requests.write(ServiceRequest(request.response(AgentCommandResult::Ok)));
     }
@@ -643,14 +652,14 @@ fn forward_history_open_intent(
 ) {
     for intent in intents.read() {
         let command = if intent.in_new_stack {
-            ServiceAgentCommand::OpenInNewStack {
+            ServiceAgentCommand::OpenInNewStack(AgentOpenInNewStack {
                 url: intent.url.clone(),
-            }
+            })
         } else {
-            ServiceAgentCommand::BrowserNavigate {
+            ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                 url: intent.url.clone(),
                 pane: None,
-            }
+            })
         };
         requests.write(AgentCommandRequest {
             request_id: AgentRequestId::new(),
@@ -665,7 +674,7 @@ mod tests {
     use super::*;
     use crate::host::AgentSessionPlugin;
     use crate::host::test_support::test_settings;
-    use vmux_service::protocol::ProcessId;
+    use vmux_api::protocol::{AgentTerminalSend, AgentUpdateSettings, ProcessId};
     use vmux_terminal::Terminal;
 
     #[derive(Resource, Default)]
@@ -726,10 +735,10 @@ mod tests {
                         sid: Some("test-agent".to_string()),
                         anchor: None,
                     },
-                    command: ServiceAgentCommand::UpdateSettings {
+                    command: ServiceAgentCommand::UpdateSettings(AgentUpdateSettings {
                         path: path.to_string(),
                         value,
-                    },
+                    }),
                 });
             app.update();
             assert!(
@@ -746,10 +755,10 @@ mod tests {
             .write(AgentCommandRequest {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::User,
-                command: ServiceAgentCommand::UpdateSettings {
+                command: ServiceAgentCommand::UpdateSettings(AgentUpdateSettings {
                     path: "agent.allow_run_placement_override".to_string(),
                     value: vmux_api::json::JsonValue::Bool(true),
-                },
+                }),
             });
         app.update();
         assert!(
@@ -802,10 +811,10 @@ mod tests {
             .write(AgentCommandRequest {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::User,
-                command: ServiceAgentCommand::TerminalSend {
+                command: ServiceAgentCommand::TerminalSend(AgentTerminalSend {
                     text: "ls".to_string(),
                     terminal: None,
-                },
+                }),
             });
 
         app.update();
@@ -836,7 +845,7 @@ mod tests {
 
     #[test]
     pub(crate) fn agent_layout_snapshot_keeps_current_focus() {
-        use vmux_service::protocol::layout::{Focus, LayoutNode, LayoutSnapshot, Tab};
+        use vmux_api::protocol::layout::{Focus, LayoutNode, LayoutSnapshot, Tab};
         let mut snapshot = LayoutSnapshot {
             tabs: vec![
                 Tab {

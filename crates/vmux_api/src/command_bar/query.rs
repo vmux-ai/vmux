@@ -50,7 +50,7 @@ impl CommandBarQuery<'_> {
     }
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_event(Default, Eq, urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/"])]
 pub struct PathCompleteRequest {
     pub request_id: u64,
     pub query: String,

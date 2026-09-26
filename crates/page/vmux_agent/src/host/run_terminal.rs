@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use vmux_api::protocol::ProcessId;
 use vmux_core::PageMetadata;
 use vmux_layout::pane::{Pane, PaneSplit};
-use vmux_service::protocol::ProcessId;
 use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{AgentRunTerminal, ProcessExited, Terminal, TerminalStackSpawnRequest};
@@ -171,7 +171,7 @@ impl AgentPane {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn split(
         &self,
-        direction: &vmux_service::protocol::AgentPaneDirection,
+        direction: &vmux_api::protocol::AgentPaneDirection,
         focus: bool,
         pane_children: &Query<&Children, With<Pane>>,
         tab_filter: &Query<Entity, With<vmux_layout::stack::Stack>>,
@@ -194,10 +194,10 @@ impl AgentPane {
     }
 
     pub(crate) fn direction(
-        d: &vmux_service::protocol::AgentPaneDirection,
+        d: &vmux_api::protocol::AgentPaneDirection,
     ) -> vmux_command::open_target::PaneDirection {
+        use vmux_api::protocol::AgentPaneDirection as D;
         use vmux_command::open_target::PaneDirection;
-        use vmux_service::protocol::AgentPaneDirection as D;
         match d {
             D::Top => PaneDirection::Top,
             D::Right => PaneDirection::Right,
@@ -1342,7 +1342,7 @@ mod tests {
     ) {
         let mut split_batch = std::collections::HashSet::new();
         let split = AgentPane::new(input.pane).split(
-            &vmux_service::protocol::AgentPaneDirection::Bottom,
+            &vmux_api::protocol::AgentPaneDirection::Bottom,
             false,
             &pane_children,
             &tab_filter,

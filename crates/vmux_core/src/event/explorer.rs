@@ -81,63 +81,63 @@ pub struct ExplorerPanelEvent {
     pub request_id: u64,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct ExplorerTreeToggle {
     pub path: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct ExplorerTreePrefetch {
     pub path: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct ExplorerTreeRefresh {
     pub path: String,
 }
 
-#[vmux_api::ui_event(Default, Eq, target = "files")]
+#[vmux_api::ui_event(Default, Eq, url = "file://")]
 pub struct ExplorerRevealCurrent;
 
-#[vmux_api::ui_event(Copy, Default, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Default, Eq, url = "file://")]
 pub struct ExplorerCollapseAll;
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct ExplorerCreate {
     pub parent: String,
     pub name: String,
     pub is_dir: bool,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct ExplorerRename {
     pub path: String,
     pub name: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct ExplorerDelete {
     pub path: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct ExplorerCloseEditor {
     pub path: String,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Default, Eq, url = "file://")]
 pub struct ExplorerPanelSetVisible {
     pub visible: bool,
     pub client_id: u64,
     pub request_id: u64,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, url = "file://")]
 pub struct ExplorerPanelWidth {
     pub px: u32,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct ExplorerGoto {
     pub path: String,
     pub line: u32,
@@ -166,7 +166,7 @@ pub struct ExplorerSearchEvent {
     pub capped: bool,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct ExplorerSearchOpen {
     pub path: String,
     pub line: u32,
@@ -174,7 +174,7 @@ pub struct ExplorerSearchOpen {
     pub end_col: u32,
 }
 
-#[vmux_api::ui_event(Default, Eq, target = "files")]
+#[vmux_api::ui_event(Default, Eq, url = "file://")]
 pub struct ExplorerSearchRequest {
     pub query: String,
     pub regex: bool,

@@ -3,21 +3,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use vmux_api::protocol::{
-    AgentCommand, AgentQuery, AgentRequestId, ClientMessage, FileTouchKind, ProcessId,
-    ServiceMessage,
+    AgentCommand, AgentFileSearch, AgentFileTouched, AgentQuery, AgentRequestId, ClientMessage,
+    FileTouchKind, ProcessId, ServiceMessage,
 };
 use vmux_core::{JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::McpExecution;
 use vmux_service::client::ServiceConnection;
 use vmux_tool::{
-    AddedTool, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolRequestSet,
+    AddedTool, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolRequestSet,
 };
 
 pub struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<FileTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<FileTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -201,14 +201,14 @@ async fn read_file_result(
         .map_err(|error| format!("read_file: {error}"))?;
     if let Some(anchor) = anchor {
         let _ = run_agent_command(
-            AgentCommand::FileTouched {
+            AgentCommand::FileTouched(AgentFileTouched {
                 anchor,
                 path: path.to_string_lossy().into_owned(),
                 line: offset,
                 col: None,
                 end_col: None,
                 kind: FileTouchKind::Read,
-            },
+            }),
             Some(anchor),
         )
         .await;
@@ -336,14 +336,14 @@ async fn grep_result(
             && let Ok(path) = std::fs::canonicalize(file)
         {
             let _ = run_agent_command(
-                AgentCommand::FileTouched {
+                AgentCommand::FileTouched(AgentFileTouched {
                     anchor,
                     path: path.to_string_lossy().into_owned(),
                     line: first_line.get(file).copied(),
                     col: first_cols.get(file).map(|cols| cols.0),
                     end_col: first_cols.get(file).map(|cols| cols.1),
                     kind: FileTouchKind::Read,
-                },
+                }),
                 Some(anchor),
             )
             .await;
@@ -367,12 +367,12 @@ async fn grep_result(
             .collect::<Vec<_>>();
         if !matches.is_empty() {
             let _ = run_agent_command(
-                AgentCommand::FileSearch {
+                AgentCommand::FileSearch(AgentFileSearch {
                     anchor,
                     root: search_path.to_string_lossy().into_owned(),
                     query: query.clone(),
                     matches,
-                },
+                }),
                 Some(anchor),
             )
             .await;

@@ -245,7 +245,7 @@ pub struct FileNoteEvent {
     pub reveal_line: Option<u32>,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct FilePropertyEdit {
     pub original_key: String,
     pub key: String,
@@ -254,7 +254,7 @@ pub struct FilePropertyEdit {
     pub remove: bool,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct KnowledgeLinkOpen {
     pub path: String,
     pub title: String,
@@ -269,14 +269,14 @@ pub struct FileErrorEvent {
     pub undecodable: bool,
 }
 
-#[vmux_api::ui_event(Default, target = "files")]
+#[vmux_api::ui_event(Default, url = "file://")]
 pub struct FileResizeEvent {
     pub char_height: f32,
     pub viewport_height: f32,
     pub wrap_columns: u16,
 }
 
-#[vmux_api::ui_event(target = "files")]
+#[vmux_api::ui_event(url = "file://")]
 pub struct FileVideoRect {
     pub path: String,
     pub x: f32,
@@ -285,7 +285,7 @@ pub struct FileVideoRect {
     pub h: f32,
 }
 
-#[vmux_api::ui_event(Eq, Default, target = "files")]
+#[vmux_api::ui_event(Eq, Default, url = "file://")]
 pub struct FileScrollEvent {
     pub top_row: u32,
     pub needs_rows: bool,
@@ -297,7 +297,7 @@ pub struct FileScrollByEvent {
     pub lines: i32,
 }
 
-#[vmux_api::ui_event(Copy, Eq, Default, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, Default, url = "file://")]
 pub struct FileFoldToggle {
     pub line: u32,
 }
@@ -327,7 +327,7 @@ pub struct FileThemeEvent {
     pub line_height: f32,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct FilePreviewRequest {
     pub path: String,
     pub thumb: bool,
@@ -361,7 +361,7 @@ pub struct FilePreviewEvent {
     pub kind: PreviewKind,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct FileOpenEvent {
     pub path: String,
 }
@@ -374,17 +374,17 @@ pub struct FileMediaEvent {
     pub abs_path: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct FileOpenExternalRequest {
     pub path: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "files")]
+#[vmux_api::ui_event(Eq, url = "file://")]
 pub struct FileTextInput {
     pub text: String,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, url = "file://")]
 pub struct FilePointerEvent {
     pub line: u32,
     pub col: u32,
@@ -425,7 +425,7 @@ pub struct FileViewModeEvent {
     pub mode: FileViewMode,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, url = "file://")]
 pub struct FileViewModeSet {
     pub mode: FileViewMode,
 }
@@ -435,7 +435,7 @@ pub struct FileKeymapEvent {
     pub keymap: crate::editor::KeymapKind,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, url = "file://")]
 pub struct FileKeymapSet {
     pub keymap: crate::editor::KeymapKind,
 }
@@ -446,7 +446,7 @@ pub struct FileShapeEvent {
     pub line_ending: FileLineEnding,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, url = "file://")]
 pub struct FileShapeSet {
     pub indent: FileIndent,
     pub line_ending: FileLineEnding,
@@ -457,17 +457,17 @@ pub struct FileEncodingEvent {
     pub encoding: FileEncoding,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, url = "file://")]
 pub struct FileEncodingReopenRequest {
     pub encoding: FileEncoding,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, url = "file://")]
 pub struct FileEncodingSaveRequest {
     pub encoding: FileEncoding,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, url = "file://")]
 pub struct FileStatusPickerOpen {
     pub picker: CommandBarPicker,
 }
@@ -499,12 +499,12 @@ pub enum TidyChoice {
     Dismiss,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "files")]
+#[vmux_api::ui_event(Copy, Eq, url = "file://")]
 pub struct FileTidyRequest {
     pub choice: TidyChoice,
 }
 
-#[vmux_api::ui_event(Default, Eq, target = "files")]
+#[vmux_api::ui_event(Default, Eq, url = "file://")]
 pub struct FileFindRequest {
     pub query: String,
     pub step: bool,

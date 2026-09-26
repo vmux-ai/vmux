@@ -70,24 +70,6 @@ pub enum SimulatorButton {
 }
 
 #[vmux_api::contract(Eq)]
-pub enum SimulatorInput {
-    Tap {
-        x: u32,
-        y: u32,
-    },
-    Swipe {
-        start_x: u32,
-        start_y: u32,
-        end_x: u32,
-        end_y: u32,
-        duration_ms: u32,
-    },
-    TypeText(String),
-    Key(u8),
-    Button(SimulatorButton),
-}
-
-#[vmux_api::contract(Eq)]
 pub struct FileSearchMatch {
     pub path: String,
     pub line: u32,
@@ -97,196 +79,289 @@ pub struct FileSearchMatch {
 }
 
 #[vmux_api::contract(Eq)]
-pub enum AgentSpaceCommand {
-    Create { name: Option<String> },
-    Rename { space_id: String, name: String },
-    Delete { space_id: String },
-}
-
-#[vmux_api::contract(Eq)]
 pub struct AgentBookmarkPage {
     pub url: String,
     pub title: Option<String>,
     pub favicon_url: Option<String>,
 }
 
-#[vmux_api::contract(Eq)]
-pub enum AgentBookmarkCommand {
-    Add {
-        page: AgentBookmarkPage,
-        folder: Option<String>,
-    },
-    Remove {
-        uuid: String,
-    },
-    Pin {
-        uuid: String,
-    },
-    PinUrl {
-        page: AgentBookmarkPage,
-    },
-    Unpin {
-        uuid: String,
-    },
-    CreateFolder {
-        name: String,
-    },
+#[vmux_api::contract]
+pub struct AgentInvokeCommand {
+    pub id: String,
+    #[rkyv(attr(allow(dead_code)))]
+    pub args: JsonValue,
 }
 
-#[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[vmux_api::contract]
+pub struct AgentNewTerminalTab {
+    pub cwd: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+#[vmux_api::contract]
+pub struct AgentRunShell {
+    pub command: String,
+    pub cwd: String,
+    pub mode: AgentShellMode,
+}
+
+#[vmux_api::contract]
+pub struct AgentBrowserNavigate {
+    pub url: String,
+    pub pane: Option<String>,
+}
+
+#[vmux_api::contract]
+pub struct AgentBrowserInstallExtension {
+    pub source: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentTerminalSend {
+    pub text: String,
+    pub terminal: Option<String>,
+}
+
+#[vmux_api::contract]
+pub struct AgentFocusPane {
+    pub pane: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentRenameProfile {
+    pub name: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentUpdateSettings {
+    pub path: String,
+    pub value: JsonValue,
+}
+
+#[vmux_api::contract]
+pub struct AgentUpdateLayout {
+    pub layout: crate::protocol::layout::LayoutSnapshot,
+}
+
+#[vmux_api::contract]
+pub struct AgentBrowserHistoryStep {
+    pub pane: Option<String>,
+}
+
+#[vmux_api::contract]
+pub struct AgentBrowserHistorySearch {
+    pub query: String,
+    pub limit: u32,
+}
+
+#[vmux_api::contract]
+pub struct AgentOpenInNewStack {
+    pub url: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentSpaceCreate {
+    pub name: Option<String>,
+}
+
+#[vmux_api::contract]
+pub struct AgentSpaceRename {
+    pub space_id: String,
+    pub name: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentSpaceDelete {
+    pub space_id: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentOpenBeside {
+    pub anchor: ProcessId,
+    pub direction: Option<AgentPaneDirection>,
+    pub url: String,
+    pub focus: bool,
+}
+
+#[vmux_api::contract]
+pub struct AgentRun {
+    pub anchor: ProcessId,
+    pub command: String,
+    pub direction: AgentPaneDirection,
+    pub focus: bool,
+    pub beside: Option<ProcessId>,
+    pub mode: PlacementMode,
+    pub terminal: Option<ProcessId>,
+    pub done_marker: Option<String>,
+}
+
+#[vmux_api::contract]
+pub struct AgentNotify {
+    pub title: Option<String>,
+    pub body: Option<String>,
+}
+
+#[vmux_api::contract]
+pub struct AgentFileTouched {
+    pub anchor: ProcessId,
+    pub path: String,
+    pub line: Option<u32>,
+    pub col: Option<u32>,
+    pub end_col: Option<u32>,
+    pub kind: FileTouchKind,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct AgentCreateWorktree {
+    pub anchor: ProcessId,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct AgentTurnEnded {
+    pub anchor: ProcessId,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct AgentResumeInAcp {
+    pub anchor: ProcessId,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct AgentChooseWorkspace {
+    pub anchor: ProcessId,
+}
+
+#[vmux_api::contract]
+pub struct AgentCreateWorktreeOnBranch {
+    pub anchor: ProcessId,
+    pub branch: String,
+    pub project: Option<String>,
+}
+
+#[vmux_api::contract]
+pub struct AgentBookmarkAdd {
+    pub page: AgentBookmarkPage,
+    pub folder: Option<String>,
+}
+
+#[vmux_api::contract]
+pub struct AgentBookmarkId {
+    pub uuid: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentBookmarkPinUrl {
+    pub page: AgentBookmarkPage,
+}
+
+#[vmux_api::contract]
+pub struct AgentBookmarkFolderCreate {
+    pub name: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentRequestUserChoice {
+    pub anchor: ProcessId,
+    pub question: String,
+    pub options: Vec<String>,
+}
+
+#[vmux_api::contract]
+pub struct AgentChooseWorkspaceAtPath {
+    pub anchor: ProcessId,
+    pub path: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentPrepareWorktree {
+    pub anchor: ProcessId,
+    pub path: Option<String>,
+    pub task: Option<String>,
+    pub create: bool,
+}
+
+#[vmux_api::contract]
+pub struct AgentFileSearch {
+    pub anchor: ProcessId,
+    pub root: String,
+    pub query: String,
+    pub matches: Vec<FileSearchMatch>,
+}
+
+#[vmux_api::contract]
+pub struct AgentSetConversationTitle {
+    pub anchor: ProcessId,
+    pub title: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentWriteKnowledge {
+    pub anchor: ProcessId,
+    pub path: Option<String>,
+    pub title: String,
+    pub content: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentSearchKnowledge {
+    pub anchor: ProcessId,
+    pub query: String,
+    pub limit: u16,
+}
+
+#[vmux_api::contract]
+pub struct AgentReadKnowledge {
+    pub anchor: ProcessId,
+    pub path: String,
+    pub line: u32,
+    pub limit: u32,
+}
+
+#[vmux_api::contract]
 pub enum AgentCommand {
-    InvokeCommand {
-        id: String,
-        #[rkyv(attr(allow(dead_code)))]
-        args: JsonValue,
-    },
-    NewTerminalTab {
-        cwd: String,
-        command: String,
-        args: Vec<String>,
-        env: Vec<(String, String)>,
-    },
-    RunShell {
-        command: String,
-        cwd: String,
-        mode: AgentShellMode,
-    },
-    BrowserNavigate {
-        url: String,
-        pane: Option<String>,
-    },
-    BrowserInstallExtension {
-        source: String,
-    },
-    TerminalSend {
-        text: String,
-        terminal: Option<String>,
-    },
-    FocusPane {
-        pane: String,
-    },
-    RenameProfile {
-        name: String,
-    },
-    UpdateSettings {
-        path: String,
-        value: JsonValue,
-    },
-    UpdateLayout {
-        layout: crate::protocol::layout::LayoutSnapshot,
-    },
-    BrowserGoBack {
-        pane: Option<String>,
-    },
-    BrowserGoForward {
-        pane: Option<String>,
-    },
-    BrowserHistorySearch {
-        query: String,
-        limit: u32,
-    },
-    OpenInNewStack {
-        url: String,
-    },
-    SpaceCommand(AgentSpaceCommand),
-    OpenBeside {
-        anchor: ProcessId,
-        direction: Option<AgentPaneDirection>,
-        url: String,
-        focus: bool,
-    },
-    Run {
-        anchor: ProcessId,
-        command: String,
-        direction: AgentPaneDirection,
-        focus: bool,
-        beside: Option<ProcessId>,
-        mode: PlacementMode,
-        terminal: Option<ProcessId>,
-        done_marker: Option<String>,
-    },
-    Notify {
-        title: Option<String>,
-        body: Option<String>,
-    },
-    FileTouched {
-        anchor: ProcessId,
-        path: String,
-        line: Option<u32>,
-        col: Option<u32>,
-        end_col: Option<u32>,
-        kind: FileTouchKind,
-    },
-    CreateWorktree {
-        anchor: ProcessId,
-    },
-    TurnEnded {
-        anchor: ProcessId,
-    },
-    RunWithPlacementOverride {
-        anchor: ProcessId,
-        command: String,
-        direction: AgentPaneDirection,
-        focus: bool,
-        beside: Option<ProcessId>,
-        mode: PlacementMode,
-        terminal: Option<ProcessId>,
-        done_marker: Option<String>,
-    },
-    ResumeInAcp {
-        anchor: ProcessId,
-    },
-    ChooseWorkspace {
-        anchor: ProcessId,
-    },
-    CreateWorktreeOnBranch {
-        anchor: ProcessId,
-        branch: String,
-        project: Option<String>,
-    },
-    BookmarkCommand(AgentBookmarkCommand),
-    RequestUserChoice {
-        anchor: ProcessId,
-        question: String,
-        options: Vec<String>,
-    },
-    ChooseWorkspaceAtPath {
-        anchor: ProcessId,
-        path: String,
-    },
-    PrepareWorktree {
-        anchor: ProcessId,
-        path: Option<String>,
-        task: Option<String>,
-        create: bool,
-    },
-    FileSearch {
-        anchor: ProcessId,
-        root: String,
-        query: String,
-        matches: Vec<FileSearchMatch>,
-    },
-    SetConversationTitle {
-        anchor: ProcessId,
-        title: String,
-    },
-    WriteKnowledge {
-        anchor: ProcessId,
-        path: Option<String>,
-        title: String,
-        content: String,
-    },
-    SearchKnowledge {
-        anchor: ProcessId,
-        query: String,
-        limit: u16,
-    },
-    ReadKnowledge {
-        anchor: ProcessId,
-        path: String,
-        line: u32,
-        limit: u32,
-    },
+    InvokeCommand(AgentInvokeCommand),
+    NewTerminalTab(AgentNewTerminalTab),
+    RunShell(AgentRunShell),
+    BrowserNavigate(AgentBrowserNavigate),
+    BrowserInstallExtension(AgentBrowserInstallExtension),
+    TerminalSend(AgentTerminalSend),
+    FocusPane(AgentFocusPane),
+    RenameProfile(AgentRenameProfile),
+    UpdateSettings(AgentUpdateSettings),
+    UpdateLayout(AgentUpdateLayout),
+    BrowserGoBack(AgentBrowserHistoryStep),
+    BrowserGoForward(AgentBrowserHistoryStep),
+    BrowserHistorySearch(AgentBrowserHistorySearch),
+    OpenInNewStack(AgentOpenInNewStack),
+    SpaceCreate(AgentSpaceCreate),
+    SpaceRename(AgentSpaceRename),
+    SpaceDelete(AgentSpaceDelete),
+    OpenBeside(AgentOpenBeside),
+    Run(AgentRun),
+    Notify(AgentNotify),
+    FileTouched(AgentFileTouched),
+    CreateWorktree(AgentCreateWorktree),
+    TurnEnded(AgentTurnEnded),
+    RunWithPlacementOverride(AgentRun),
+    ResumeInAcp(AgentResumeInAcp),
+    ChooseWorkspace(AgentChooseWorkspace),
+    CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch),
+    BookmarkAdd(AgentBookmarkAdd),
+    BookmarkRemove(AgentBookmarkId),
+    BookmarkPin(AgentBookmarkId),
+    BookmarkPinUrl(AgentBookmarkPinUrl),
+    BookmarkUnpin(AgentBookmarkId),
+    BookmarkFolderCreate(AgentBookmarkFolderCreate),
+    RequestUserChoice(AgentRequestUserChoice),
+    ChooseWorkspaceAtPath(AgentChooseWorkspaceAtPath),
+    PrepareWorktree(AgentPrepareWorktree),
+    FileSearch(AgentFileSearch),
+    SetConversationTitle(AgentSetConversationTitle),
+    WriteKnowledge(AgentWriteKnowledge),
+    SearchKnowledge(AgentSearchKnowledge),
+    ReadKnowledge(AgentReadKnowledge),
     Shared(SharedAgentCommand),
 }
 
@@ -398,114 +473,112 @@ impl std::error::Error for AgentCommandValidationError {}
 
 pub fn validate_agent_command(command: &AgentCommand) -> Result<(), AgentCommandValidationError> {
     match command {
-        AgentCommand::InvokeCommand { id, .. } if id.trim().is_empty() => {
+        AgentCommand::InvokeCommand(request) if request.id.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyCommandId)
         }
-        AgentCommand::RunShell { command, .. } if command.trim().is_empty() => {
+        AgentCommand::RunShell(request) if request.command.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyShellCommand)
         }
-        AgentCommand::BrowserNavigate { url, .. } if url.trim().is_empty() => {
+        AgentCommand::BrowserNavigate(request) if request.url.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyBrowserUrl)
         }
-        AgentCommand::BrowserInstallExtension { source } if source.trim().is_empty() => {
+        AgentCommand::BrowserInstallExtension(request) if request.source.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyExtensionSource)
         }
-        AgentCommand::TerminalSend { text, .. } if text.is_empty() => {
+        AgentCommand::TerminalSend(request) if request.text.is_empty() => {
             Err(AgentCommandValidationError::EmptyTerminalText)
         }
-        AgentCommand::FocusPane { pane } if pane.trim().is_empty() => {
+        AgentCommand::FocusPane(request) if request.pane.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyPaneId)
         }
-        AgentCommand::RenameProfile { name } if name.trim().is_empty() => {
+        AgentCommand::RenameProfile(request) if request.name.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyProfileName)
         }
-        AgentCommand::UpdateSettings { path, .. } if path.trim().is_empty() => {
+        AgentCommand::UpdateSettings(request) if request.path.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptySettingsPath)
         }
-        AgentCommand::BrowserHistorySearch { query, .. } if query.trim().is_empty() => {
+        AgentCommand::BrowserHistorySearch(request) if request.query.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyHistoryQuery)
         }
-        AgentCommand::OpenInNewStack { url, .. } if url.trim().is_empty() => {
+        AgentCommand::OpenInNewStack(request) if request.url.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyStackUrl)
         }
-        AgentCommand::SpaceCommand(AgentSpaceCommand::Create { name: Some(name) })
+        AgentCommand::SpaceCreate(AgentSpaceCreate { name: Some(name) })
             if name.trim().is_empty() =>
         {
             Err(AgentCommandValidationError::EmptySpaceName)
         }
-        AgentCommand::SpaceCommand(AgentSpaceCommand::Rename { space_id, name })
+        AgentCommand::SpaceRename(AgentSpaceRename { space_id, name })
             if space_id.trim().is_empty() || name.trim().is_empty() =>
         {
             Err(AgentCommandValidationError::InvalidSpaceRename)
         }
-        AgentCommand::SpaceCommand(AgentSpaceCommand::Delete { space_id })
-            if space_id.trim().is_empty() =>
-        {
+        AgentCommand::SpaceDelete(AgentSpaceDelete { space_id }) if space_id.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptySpaceId)
         }
-        AgentCommand::BookmarkCommand(AgentBookmarkCommand::Add { page, .. })
-        | AgentCommand::BookmarkCommand(AgentBookmarkCommand::PinUrl { page })
+        AgentCommand::BookmarkAdd(AgentBookmarkAdd { page, .. })
+        | AgentCommand::BookmarkPinUrl(AgentBookmarkPinUrl { page })
             if page.url.trim().is_empty() =>
         {
             Err(AgentCommandValidationError::EmptyBookmarkUrl)
         }
-        AgentCommand::BookmarkCommand(AgentBookmarkCommand::Remove { uuid })
-        | AgentCommand::BookmarkCommand(AgentBookmarkCommand::Pin { uuid })
-        | AgentCommand::BookmarkCommand(AgentBookmarkCommand::Unpin { uuid })
+        AgentCommand::BookmarkRemove(AgentBookmarkId { uuid })
+        | AgentCommand::BookmarkPin(AgentBookmarkId { uuid })
+        | AgentCommand::BookmarkUnpin(AgentBookmarkId { uuid })
             if uuid.trim().is_empty() =>
         {
             Err(AgentCommandValidationError::EmptyBookmarkId)
         }
-        AgentCommand::BookmarkCommand(AgentBookmarkCommand::CreateFolder { name })
+        AgentCommand::BookmarkFolderCreate(AgentBookmarkFolderCreate { name })
             if name.trim().is_empty() =>
         {
             Err(AgentCommandValidationError::EmptyBookmarkFolderName)
         }
-        AgentCommand::OpenBeside { url, .. } if url.trim().is_empty() => {
+        AgentCommand::OpenBeside(request) if request.url.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyBesideUrl)
         }
-        AgentCommand::Run { command, .. }
-        | AgentCommand::RunWithPlacementOverride { command, .. }
-            if command.trim().is_empty() =>
+        AgentCommand::Run(request) | AgentCommand::RunWithPlacementOverride(request)
+            if request.command.trim().is_empty() =>
         {
             Err(AgentCommandValidationError::EmptyRunCommand)
         }
-        AgentCommand::FileTouched { path, .. } if path.trim().is_empty() => {
+        AgentCommand::FileTouched(request) if request.path.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyFilePath)
         }
-        AgentCommand::CreateWorktreeOnBranch { branch, .. } if branch.trim().is_empty() => {
+        AgentCommand::CreateWorktreeOnBranch(request) if request.branch.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyBranch)
         }
-        AgentCommand::RequestUserChoice {
-            question, options, ..
-        } if question.trim().is_empty()
-            || options.len() < 2
-            || options.len() > 9
-            || options.iter().any(|option| option.trim().is_empty()) =>
+        AgentCommand::RequestUserChoice(request)
+            if request.question.trim().is_empty()
+                || request.options.len() < 2
+                || request.options.len() > 9
+                || request
+                    .options
+                    .iter()
+                    .any(|option| option.trim().is_empty()) =>
         {
             Err(AgentCommandValidationError::InvalidUserChoice)
         }
-        AgentCommand::ChooseWorkspaceAtPath { path, .. } if path.trim().is_empty() => {
+        AgentCommand::ChooseWorkspaceAtPath(request) if request.path.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyWorkspacePath)
         }
-        AgentCommand::WriteKnowledge {
-            path,
-            title,
-            content,
-            ..
-        } if path.as_ref().is_some_and(|path| path.trim().is_empty())
-            || title.trim().is_empty()
-            || content.trim().is_empty() =>
+        AgentCommand::WriteKnowledge(request)
+            if request
+                .path
+                .as_ref()
+                .is_some_and(|path| path.trim().is_empty())
+                || request.title.trim().is_empty()
+                || request.content.trim().is_empty() =>
         {
             Err(AgentCommandValidationError::InvalidKnowledgeWrite)
         }
-        AgentCommand::SearchKnowledge { query, limit, .. }
-            if query.trim().is_empty() || *limit == 0 || *limit > 100 =>
+        AgentCommand::SearchKnowledge(request)
+            if request.query.trim().is_empty() || request.limit == 0 || request.limit > 100 =>
         {
             Err(AgentCommandValidationError::InvalidKnowledgeSearch)
         }
-        AgentCommand::ReadKnowledge { path, limit, .. }
-            if path.trim().is_empty() || *limit == 0 || *limit > 2_000 =>
+        AgentCommand::ReadKnowledge(request)
+            if request.path.trim().is_empty() || request.limit == 0 || request.limit > 2_000 =>
         {
             Err(AgentCommandValidationError::InvalidKnowledgeRead)
         }

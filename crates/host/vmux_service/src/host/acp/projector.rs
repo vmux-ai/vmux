@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 use crate::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
-use crate::protocol::AgentAttachment;
 use agent_client_protocol::schema::v1::{
     ContentBlock, Plan, PlanEntryStatus, SessionUpdate, ToolCall, ToolCallContent,
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
+use vmux_api::protocol::AgentAttachment;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
@@ -21,7 +21,7 @@ pub enum Intent {
     FileTouched {
         path: String,
         line: Option<u32>,
-        kind: crate::protocol::FileTouchKind,
+        kind: vmux_api::protocol::FileTouchKind,
     },
     WorkspaceChanged {
         name: String,
@@ -69,8 +69,8 @@ fn workspace_changed_intent(
     }]
 }
 
-fn file_touch_kind(kind: ToolKind) -> Option<crate::protocol::FileTouchKind> {
-    use crate::protocol::FileTouchKind;
+fn file_touch_kind(kind: ToolKind) -> Option<vmux_api::protocol::FileTouchKind> {
+    use vmux_api::protocol::FileTouchKind;
     match kind {
         ToolKind::Read => Some(FileTouchKind::Read),
         ToolKind::Edit | ToolKind::Delete | ToolKind::Move => Some(FileTouchKind::Edit),
@@ -1324,7 +1324,7 @@ mod tests {
                 intent,
                 Intent::FileTouched { path, line: None, kind }
                     if path == "/repo/src/main.rs"
-                        && *kind == crate::protocol::FileTouchKind::Edit
+                        && *kind == vmux_api::protocol::FileTouchKind::Edit
             )));
         }
     }
@@ -1399,7 +1399,7 @@ mod tests {
         assert!(intents.iter().any(|i| matches!(
             i,
             Intent::FileTouched { path, line: None, kind }
-                if path == "/repo/src/main.rs" && *kind == crate::protocol::FileTouchKind::Read
+                if path == "/repo/src/main.rs" && *kind == vmux_api::protocol::FileTouchKind::Read
         )));
     }
 
@@ -1421,7 +1421,7 @@ mod tests {
         assert!(intents.iter().any(|intent| matches!(
             intent,
             Intent::FileTouched { path, line: None, kind }
-                if path == "/repo/new.rs" && *kind == crate::protocol::FileTouchKind::Edit
+                if path == "/repo/new.rs" && *kind == vmux_api::protocol::FileTouchKind::Edit
         )));
     }
 
@@ -1477,7 +1477,7 @@ mod tests {
         assert!(intents.iter().any(|intent| matches!(
             intent,
             Intent::FileTouched { path, line: None, kind }
-                if path == "/repo/new.rs" && *kind == crate::protocol::FileTouchKind::Edit
+                if path == "/repo/new.rs" && *kind == vmux_api::protocol::FileTouchKind::Edit
         )));
     }
 
@@ -1501,7 +1501,7 @@ mod tests {
         assert!(intents.iter().any(|intent| matches!(
             intent,
             Intent::FileTouched { path, line: None, kind }
-                if path == "/repo/new.rs" && *kind == crate::protocol::FileTouchKind::Edit
+                if path == "/repo/new.rs" && *kind == vmux_api::protocol::FileTouchKind::Edit
         )));
     }
 
@@ -1564,7 +1564,7 @@ mod tests {
             vec![&Intent::FileTouched {
                 path: "/repo/new.rs".to_string(),
                 line: None,
-                kind: crate::protocol::FileTouchKind::Read,
+                kind: vmux_api::protocol::FileTouchKind::Read,
             }]
         );
     }

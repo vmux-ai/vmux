@@ -8,6 +8,7 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
+use vmux_api::protocol::{ClientMessage, ProcessId, ServiceMessage};
 use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_core::input::KeyStroke;
@@ -22,7 +23,6 @@ use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_service::{
     client::{ServiceInbound, ServiceRequest},
     plugin::{ServiceConnected, ServiceUnavailable},
-    protocol::{ClientMessage, ProcessId, ServiceMessage},
 };
 use vmux_setting::AppSettings;
 
@@ -1200,7 +1200,7 @@ fn should_close_terminal_stack_on_exit(is_agent: bool, retain_on_exit: bool) -> 
 }
 
 #[cfg(test)]
-fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_service::protocol::CopyModeKey> {
+fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_api::protocol::CopyModeKey> {
     map_copy_mode_key_from_input(CopyModeKeyInput {
         key,
         key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
@@ -1211,8 +1211,8 @@ fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_service::protocol::Co
 
 fn map_copy_mode_key_from_input(
     input: CopyModeKeyInput<'_>,
-) -> Option<vmux_service::protocol::CopyModeKey> {
-    use vmux_service::protocol::CopyModeKey as K;
+) -> Option<vmux_api::protocol::CopyModeKey> {
+    use vmux_api::protocol::CopyModeKey as K;
     match (input.key, input.ctrl) {
         (Key::ArrowLeft, _) => Some(K::Left),
         (Key::ArrowRight, _) => Some(K::Right),
@@ -1266,7 +1266,7 @@ fn map_copy_mode_key_with_state(
     copy_mode: &mut TerminalCopyMode,
     key: &Key,
     ctrl: bool,
-) -> Option<vmux_service::protocol::CopyModeKey> {
+) -> Option<vmux_api::protocol::CopyModeKey> {
     map_copy_mode_keys_with_state(
         copy_mode,
         CopyModeKeyInput {
@@ -1283,8 +1283,8 @@ fn map_copy_mode_key_with_state(
 fn map_copy_mode_keys_with_state(
     copy_mode: &mut TerminalCopyMode,
     input: CopyModeKeyInput<'_>,
-) -> Vec<vmux_service::protocol::CopyModeKey> {
-    use vmux_service::protocol::CopyModeKey as K;
+) -> Vec<vmux_api::protocol::CopyModeKey> {
+    use vmux_api::protocol::CopyModeKey as K;
 
     let state = &mut copy_mode.input;
     if let Some(pending) = state.pending_key.take() {
@@ -1351,8 +1351,8 @@ fn map_copy_mode_keys_with_state(
 
 fn repeat_copy_mode_key(
     state: &mut CopyModeInputState,
-    key: vmux_service::protocol::CopyModeKey,
-) -> Vec<vmux_service::protocol::CopyModeKey> {
+    key: vmux_api::protocol::CopyModeKey,
+) -> Vec<vmux_api::protocol::CopyModeKey> {
     let repeat = if copy_mode_key_uses_count(key) {
         state.count.take().unwrap_or(1)
     } else {
@@ -1362,8 +1362,8 @@ fn repeat_copy_mode_key(
     vec![key; repeat as usize]
 }
 
-fn copy_mode_key_uses_count(key: vmux_service::protocol::CopyModeKey) -> bool {
-    use vmux_service::protocol::CopyModeKey as K;
+fn copy_mode_key_uses_count(key: vmux_api::protocol::CopyModeKey) -> bool {
+    use vmux_api::protocol::CopyModeKey as K;
     !matches!(
         key,
         K::StartSelection | K::StartLineSelection | K::Copy | K::Exit
@@ -2019,8 +2019,8 @@ fn is_copy_mode_active(mode: &TerminalMode, copy_mode: &TerminalCopyMode) -> boo
     mode.copy_mode || copy_mode.active
 }
 
-fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
-    use vmux_service::protocol::CopyModeKey as K;
+fn copy_mode_key_exits(key: vmux_api::protocol::CopyModeKey) -> bool {
+    use vmux_api::protocol::CopyModeKey as K;
     matches!(key, K::Copy | K::Exit)
 }
 
@@ -2032,7 +2032,7 @@ pub struct ProcessExitedEvent {
 #[derive(Message, Debug, Clone)]
 pub struct CommandLifecycleEvent {
     pub process_id: ProcessId,
-    pub kind: vmux_service::protocol::CommandLifecycleKind,
+    pub kind: vmux_api::protocol::CommandLifecycleKind,
 }
 
 #[derive(Message, Debug, Clone)]
@@ -2797,7 +2797,7 @@ mod tests {
 
     #[test]
     fn vim_visual_keys_map_to_copy_mode_actions() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
         assert_eq!(
             map_copy_mode_key(&Key::Character("v".into()), false),
@@ -2827,7 +2827,7 @@ mod tests {
 
     #[test]
     fn vim_g_ends_visual_selection_at_last_non_blank() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
         let mut copy_mode = TerminalCopyMode::default();
 
@@ -2843,7 +2843,7 @@ mod tests {
 
     #[test]
     fn vim_visual_motion_keys_map_to_copy_mode_actions() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
         let mut copy_mode = TerminalCopyMode::default();
 
@@ -2909,7 +2909,7 @@ mod tests {
 
     #[test]
     fn shifted_minus_resolves_g_() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
         let mut copy_mode = TerminalCopyMode::default();
 
@@ -2954,7 +2954,7 @@ mod tests {
 
     #[test]
     fn exiting_copy_mode_clears_local_latch() {
-        use vmux_service::protocol::CopyModeKey as K;
+        use vmux_api::protocol::CopyModeKey as K;
 
         let mut copy_mode = TerminalCopyMode::default();
         copy_mode.set(true);

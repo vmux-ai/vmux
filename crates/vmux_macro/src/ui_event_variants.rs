@@ -9,14 +9,15 @@ mod keyword {
     syn::custom_keyword!(any);
     syn::custom_keyword!(shared);
     syn::custom_keyword!(target);
-    syn::custom_keyword!(targets);
+    syn::custom_keyword!(url);
+    syn::custom_keyword!(urls);
     syn::custom_keyword!(version);
 }
 
 enum Target {
     Any,
-    Host(LitStr),
-    Hosts(Vec<LitStr>),
+    Url(LitStr),
+    Urls(Vec<LitStr>),
 }
 
 struct Args {
@@ -56,14 +57,17 @@ impl Parse for Args {
                 if target.is_some() {
                     return Err(syn::Error::new_spanned(key, "duplicate target"));
                 }
-                target = if input.peek(keyword::any) {
-                    input.parse::<keyword::any>()?;
-                    Some(Target::Any)
-                } else {
-                    Some(Target::Host(input.parse()?))
-                };
-            } else if input.peek(keyword::targets) {
-                let key: keyword::targets = input.parse()?;
+                input.parse::<keyword::any>()?;
+                target = Some(Target::Any);
+            } else if input.peek(keyword::url) {
+                let key: keyword::url = input.parse()?;
+                input.parse::<Token![=]>()?;
+                if target.is_some() {
+                    return Err(syn::Error::new_spanned(key, "duplicate target"));
+                }
+                target = Some(Target::Url(input.parse()?));
+            } else if input.peek(keyword::urls) {
+                let key: keyword::urls = input.parse()?;
                 input.parse::<Token![=]>()?;
                 if target.is_some() {
                     return Err(syn::Error::new_spanned(key, "duplicate target"));
@@ -74,7 +78,7 @@ impl Parse for Args {
                     .parse_terminated(|input| input.parse::<LitStr>(), Token![,])?
                     .into_iter()
                     .collect();
-                target = Some(Target::Hosts(values));
+                target = Some(Target::Urls(values));
             } else {
                 derives.push(input.parse()?);
             }
@@ -104,8 +108,8 @@ impl Args {
         }
         match &self.target {
             Some(Target::Any) => args.push(quote!(target = any)),
-            Some(Target::Host(host)) => args.push(quote!(target = #host)),
-            Some(Target::Hosts(hosts)) => args.push(quote!(targets = [#(#hosts),*])),
+            Some(Target::Url(url)) => args.push(quote!(url = #url)),
+            Some(Target::Urls(urls)) => args.push(quote!(urls = [#(#urls),*])),
             None => {}
         }
         quote!(#(#args),*)
@@ -262,7 +266,7 @@ mod tests {
                 CheckoutCommit { commit: String },
             }
         };
-        let output = expand(quote!(Eq, target = "git", shared(repo_root: String)), input).unwrap();
+        let output = expand(quote!(Eq, url = "git://", shared(repo_root: String)), input).unwrap();
         let file = parse2::<syn::File>(output).unwrap();
         let names = file
             .items

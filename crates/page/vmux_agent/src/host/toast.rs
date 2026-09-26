@@ -21,7 +21,7 @@ pub enum ToastLevel {
     Error,
 }
 
-#[vmux_api::ui_event(Message, targets = ["agent", "agents"])]
+#[vmux_api::ui_event(Message, urls = ["vmux://agent/", "vmux://agents/"])]
 pub struct AgentToast {
     pub session_sid: String,
     pub level: ToastLevel,

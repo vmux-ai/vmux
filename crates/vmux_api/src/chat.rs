@@ -382,7 +382,7 @@ pub enum ChatKey {
     Cancel,
 }
 
-#[vmux_api::ui_event(Default, Eq, targets = ["sessions", "agent", "start"])]
+#[vmux_api::ui_event(Default, Eq, urls = ["vmux://sessions/", "vmux://agent/", "vmux://start/"])]
 pub struct PromptHistoryRequest {
     pub agent: String,
     pub cwd: String,
@@ -493,13 +493,13 @@ impl SlashCommandEntry {
 pub struct SlashCommands {
     pub commands: Vec<SlashCommandEntry>,
 }
-#[vmux_api::ui_event(Default, targets = ["sessions", "agent", "start"])]
+#[vmux_api::ui_event(Default, urls = ["vmux://sessions/", "vmux://agent/", "vmux://start/"])]
 pub struct ResumeListRequest {
     pub request_id: u64,
     pub query: String,
     pub offset: u32,
 }
-#[vmux_api::ui_event(Default, targets = ["sessions", "agent", "start"])]
+#[vmux_api::ui_event(Default, urls = ["vmux://sessions/", "vmux://agent/", "vmux://start/"])]
 pub struct ResumeSession {
     pub kind: String,
     pub sid: String,

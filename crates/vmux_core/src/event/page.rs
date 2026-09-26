@@ -1,4 +1,4 @@
-#[vmux_api::ui_event(Default, Eq, target = "git")]
+#[vmux_api::ui_event(Default, Eq, url = "git://")]
 pub struct PageContextRequest {}
 
 #[cfg(host)]

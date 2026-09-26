@@ -2,8 +2,10 @@ use super::device::{Axe, SimulatorDevice};
 use super::hid::{HidBroker, HidRequest};
 use super::{
     ActiveSimulatorView, DevicePixels, DevicePoints, HardwareButtonRequest,
-    SimulatorClipboardRequest, SimulatorControlRequest, SimulatorControlResponse,
-    SimulatorFocusRequest, SimulatorFocusSet, SimulatorInputSet, SimulatorSoftwareKeyboardRequest,
+    SimulatorButtonPressRequest, SimulatorClipboardRequest, SimulatorControlResponse,
+    SimulatorFocusRequest, SimulatorFocusSet, SimulatorInputSet, SimulatorKeyPressRequest,
+    SimulatorSoftwareKeyboardRequest, SimulatorSwipeRequest, SimulatorTapRequest,
+    SimulatorTypeTextRequest,
 };
 use crate::event::{
     HardwareButton, SimulatorClipboardCopyRequest, SimulatorClipboardCutRequest,
@@ -19,7 +21,7 @@ use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use vmux_api::protocol::{SimulatorButton, SimulatorInput};
+use vmux_api::protocol::SimulatorButton;
 use vmux_core::host::page::PageReady;
 
 pub(super) struct SimulatorInputPlugin;
@@ -34,7 +36,11 @@ impl Plugin for SimulatorInputPlugin {
                 (
                     handle_button_requests,
                     handle_clipboard_requests,
-                    handle_control_requests,
+                    handle_tap_requests,
+                    handle_swipe_requests,
+                    handle_type_text_requests,
+                    handle_key_press_requests,
+                    handle_button_press_requests,
                     send_key_requests,
                 )
                     .chain()
@@ -583,10 +589,9 @@ fn handle_clipboard_requests(
     }
 }
 
-fn handle_control_requests(
-    mut requests: MessageReader<SimulatorControlRequest>,
+fn handle_tap_requests(
+    mut requests: MessageReader<SimulatorTapRequest>,
     mut responses: MessageWriter<SimulatorControlResponse>,
-    mut inputs: MessageWriter<SimulatorInputRequest>,
     active: Query<Entity, With<ActiveSimulatorView>>,
     attachments: ControlAttachments,
 ) {
@@ -604,65 +609,156 @@ fn handle_control_requests(
         let Ok((_, _, _, points, pixels, hid)) = attachments.get(target) else {
             continue;
         };
-        let result = match &request.input {
-            SimulatorInput::Tap { x, y } => match (control_coordinates(points, pixels), hid) {
-                (Ok(coordinates), Some(hid)) => {
-                    hid.dispatch(HidRequest::tap(coordinates.point((*x, *y))));
-                    Ok(format!("tapped simulator at ({x}, {y})"))
-                }
-                (Err(error), _) => Err(error),
-                (_, None) => Err("simulator input is unavailable".to_string()),
-            },
-            SimulatorInput::Swipe {
-                start_x,
-                start_y,
-                end_x,
-                end_y,
-                duration_ms,
-            } => match (control_coordinates(points, pixels), hid) {
-                (Ok(coordinates), Some(hid)) => {
-                    let from = coordinates.point((*start_x, *start_y));
-                    let to = coordinates.point((*end_x, *end_y));
-                    hid.dispatch(HidRequest::swipe(from, to, *duration_ms));
-                    Ok(format!(
-                        "swiped simulator from ({start_x}, {start_y}) to ({end_x}, {end_y})"
-                    ))
-                }
-                (Err(error), _) => Err(error),
-                (_, None) => Err("simulator input is unavailable".to_string()),
-            },
-            SimulatorInput::TypeText(text) => {
-                inputs.write(SimulatorInputRequest {
-                    view: Some(target),
-                    operation: SimulatorInputOperation::Text { text: text.clone() },
-                });
-                Ok("typed text into simulator".to_string())
+        let result = match (control_coordinates(points, pixels), hid) {
+            (Ok(coordinates), Some(hid)) => {
+                hid.dispatch(HidRequest::tap(coordinates.point((request.x, request.y))));
+                Ok(format!(
+                    "tapped simulator at ({}, {})",
+                    request.x, request.y
+                ))
             }
-            SimulatorInput::Key(keycode) => {
-                inputs.write(SimulatorInputRequest {
-                    view: Some(target),
-                    operation: SimulatorInputOperation::Key {
-                        code: u16::from(*keycode),
-                    },
-                });
-                Ok(format!("pressed simulator keycode {keycode}"))
-            }
-            SimulatorInput::Button(button) => {
-                let button = match button {
-                    SimulatorButton::Home => HardwareButton::Home,
-                    SimulatorButton::Lock => HardwareButton::Lock,
-                    SimulatorButton::Siri => HardwareButton::Siri,
-                };
-                inputs.write(SimulatorInputRequest {
-                    view: Some(target),
-                    operation: SimulatorInputOperation::HardwareButton { button },
-                });
-                Ok("pressed simulator hardware button".to_string())
-            }
+            (Err(error), _) => Err(error),
+            (_, None) => Err("simulator input is unavailable".to_string()),
         };
         responses.write(SimulatorControlResponse {
             request_id: request.request_id,
             result,
+        });
+    }
+}
+
+fn handle_swipe_requests(
+    mut requests: MessageReader<SimulatorSwipeRequest>,
+    mut responses: MessageWriter<SimulatorControlResponse>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
+    attachments: ControlAttachments,
+) {
+    let active = active.iter().next();
+    for request in requests.read() {
+        let target =
+            ActiveSimulatorView::select(active, attachments.iter().map(|(entity, ..)| entity));
+        let Some(target) = target else {
+            responses.write(SimulatorControlResponse {
+                request_id: request.request_id,
+                result: Err("no iOS Simulator is attached".to_string()),
+            });
+            continue;
+        };
+        let Ok((_, _, _, points, pixels, hid)) = attachments.get(target) else {
+            continue;
+        };
+        let result = match (control_coordinates(points, pixels), hid) {
+            (Ok(coordinates), Some(hid)) => {
+                let from = coordinates.point((request.start_x, request.start_y));
+                let to = coordinates.point((request.end_x, request.end_y));
+                hid.dispatch(HidRequest::swipe(from, to, request.duration_ms));
+                Ok(format!(
+                    "swiped simulator from ({}, {}) to ({}, {})",
+                    request.start_x, request.start_y, request.end_x, request.end_y
+                ))
+            }
+            (Err(error), _) => Err(error),
+            (_, None) => Err("simulator input is unavailable".to_string()),
+        };
+        responses.write(SimulatorControlResponse {
+            request_id: request.request_id,
+            result,
+        });
+    }
+}
+
+fn handle_type_text_requests(
+    mut requests: MessageReader<SimulatorTypeTextRequest>,
+    mut responses: MessageWriter<SimulatorControlResponse>,
+    mut inputs: MessageWriter<SimulatorInputRequest>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
+    attachments: ControlAttachments,
+) {
+    let active = active.iter().next();
+    for request in requests.read() {
+        let target =
+            ActiveSimulatorView::select(active, attachments.iter().map(|(entity, ..)| entity));
+        let Some(target) = target else {
+            responses.write(SimulatorControlResponse {
+                request_id: request.request_id,
+                result: Err("no iOS Simulator is attached".to_string()),
+            });
+            continue;
+        };
+        inputs.write(SimulatorInputRequest {
+            view: Some(target),
+            operation: SimulatorInputOperation::Text {
+                text: request.text.clone(),
+            },
+        });
+        responses.write(SimulatorControlResponse {
+            request_id: request.request_id,
+            result: Ok("typed text into simulator".to_string()),
+        });
+    }
+}
+
+fn handle_key_press_requests(
+    mut requests: MessageReader<SimulatorKeyPressRequest>,
+    mut responses: MessageWriter<SimulatorControlResponse>,
+    mut inputs: MessageWriter<SimulatorInputRequest>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
+    attachments: ControlAttachments,
+) {
+    let active = active.iter().next();
+    for request in requests.read() {
+        let target =
+            ActiveSimulatorView::select(active, attachments.iter().map(|(entity, ..)| entity));
+        let Some(target) = target else {
+            responses.write(SimulatorControlResponse {
+                request_id: request.request_id,
+                result: Err("no iOS Simulator is attached".to_string()),
+            });
+            continue;
+        };
+        inputs.write(SimulatorInputRequest {
+            view: Some(target),
+            operation: SimulatorInputOperation::Key {
+                code: u16::from(request.keycode),
+            },
+        });
+        responses.write(SimulatorControlResponse {
+            request_id: request.request_id,
+            result: Ok(format!("pressed simulator keycode {}", request.keycode)),
+        });
+    }
+}
+
+fn handle_button_press_requests(
+    mut requests: MessageReader<SimulatorButtonPressRequest>,
+    mut responses: MessageWriter<SimulatorControlResponse>,
+    mut inputs: MessageWriter<SimulatorInputRequest>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
+    attachments: ControlAttachments,
+) {
+    let active = active.iter().next();
+    for request in requests.read() {
+        let target =
+            ActiveSimulatorView::select(active, attachments.iter().map(|(entity, ..)| entity));
+        let Some(target) = target else {
+            responses.write(SimulatorControlResponse {
+                request_id: request.request_id,
+                result: Err("no iOS Simulator is attached".to_string()),
+            });
+            continue;
+        };
+        let button = match request.button {
+            SimulatorButton::Home => HardwareButton::Home,
+            SimulatorButton::Lock => HardwareButton::Lock,
+            SimulatorButton::Siri => HardwareButton::Siri,
+        };
+        inputs.write(SimulatorInputRequest {
+            view: Some(target),
+            operation: SimulatorInputOperation::HardwareButton { button },
+        });
+        responses.write(SimulatorControlResponse {
+            request_id: request.request_id,
+            result: Ok("pressed simulator hardware button".to_string()),
         });
     }
 }

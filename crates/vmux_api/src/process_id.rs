@@ -2,7 +2,17 @@
 use bevy_ecs::component::Component;
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 #[cfg_attr(bevy_linked, derive(Component))]
 pub struct ProcessId(pub [u8; 16]);

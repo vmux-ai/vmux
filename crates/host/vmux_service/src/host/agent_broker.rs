@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, broadcast, oneshot};
 
-use crate::protocol::{
+use vmux_api::protocol::{
     AGENT_COMMAND_TIMEOUT, AGENT_QUERY_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentCommand,
     AgentCommandResult, AgentQuery, AgentRequestId, BROWSER_NAVIGATE_TIMEOUT, JsonValue, ProcessId,
     ServiceMessage,
@@ -17,14 +17,14 @@ const NO_SUBSCRIBER: &str = "no desktop subscribed to agent commands";
 
 fn query_timeout(query: &AgentQuery) -> std::time::Duration {
     match query {
-        AgentQuery::RecordStop { .. } => crate::protocol::RECORD_STOP_TIMEOUT,
+        AgentQuery::RecordStop { .. } => vmux_api::protocol::RECORD_STOP_TIMEOUT,
         _ => AGENT_QUERY_TIMEOUT,
     }
 }
 
 fn command_timeout(command: &AgentCommand) -> std::time::Duration {
     match command {
-        AgentCommand::BrowserNavigate { .. } => BROWSER_NAVIGATE_TIMEOUT,
+        AgentCommand::BrowserNavigate(_) => BROWSER_NAVIGATE_TIMEOUT,
         _ => AGENT_COMMAND_TIMEOUT,
     }
 }
@@ -163,6 +163,7 @@ impl AgentBroker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_api::protocol::{AgentBrowserNavigate, AgentOpenInNewStack};
 
     fn broker() -> (AgentBroker, broadcast::Sender<ServiceMessage>) {
         let (agent_tx, _) = broadcast::channel::<ServiceMessage>(16);
@@ -184,21 +185,24 @@ mod tests {
             dir: None,
             name: None,
         };
-        assert_eq!(query_timeout(&stop), crate::protocol::RECORD_STOP_TIMEOUT);
+        assert_eq!(
+            query_timeout(&stop),
+            vmux_api::protocol::RECORD_STOP_TIMEOUT
+        );
         assert_eq!(query_timeout(&AgentQuery::GetSettings), AGENT_QUERY_TIMEOUT);
     }
 
     #[test]
     fn browser_navigate_gets_longer_timeout() {
-        let navigate = AgentCommand::BrowserNavigate {
+        let navigate = AgentCommand::BrowserNavigate(AgentBrowserNavigate {
             url: "https://example.com".into(),
             pane: None,
-        };
+        });
         assert_eq!(command_timeout(&navigate), BROWSER_NAVIGATE_TIMEOUT);
         assert_eq!(
-            command_timeout(&AgentCommand::OpenInNewStack {
+            command_timeout(&AgentCommand::OpenInNewStack(AgentOpenInNewStack {
                 url: "https://example.com".into(),
-            }),
+            })),
             AGENT_COMMAND_TIMEOUT
         );
     }
@@ -210,9 +214,9 @@ mod tests {
             .command(
                 AgentRequestId::new(),
                 None,
-                AgentCommand::OpenInNewStack {
+                AgentCommand::OpenInNewStack(AgentOpenInNewStack {
                     url: "https://x".into(),
-                },
+                }),
             )
             .await
             .unwrap_err();
@@ -237,9 +241,9 @@ mod tests {
             .command(
                 AgentRequestId::new(),
                 None,
-                AgentCommand::OpenInNewStack {
+                AgentCommand::OpenInNewStack(AgentOpenInNewStack {
                     url: "https://x".into(),
-                },
+                }),
             )
             .await
             .unwrap();
@@ -255,9 +259,9 @@ mod tests {
             .command(
                 AgentRequestId::new(),
                 None,
-                AgentCommand::OpenInNewStack {
+                AgentCommand::OpenInNewStack(AgentOpenInNewStack {
                     url: "https://x".into(),
-                },
+                }),
             )
             .await
             .unwrap_err();

@@ -126,24 +126,24 @@ pub struct ToolOperationNotice {
     pub message: String,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 6, target = "tools")]
+#[vmux_api::ui_state(Default, Eq, version = 6, url = "vmux://tools/")]
 pub struct ToolsUiState {
     pub snapshot: ToolsSnapshot,
     pub pending: Vec<ToolOperationKey>,
     pub notice: Option<ToolOperationNotice>,
 }
 
-#[vmux_api::ui_event(Default, Eq, target = "tools")]
+#[vmux_api::ui_event(Default, Eq, url = "vmux://tools/")]
 pub struct ToolsRefreshRequest {
     pub refresh: bool,
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolOpenRequest {
     pub path: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolsNavigateRequest {
     pub url: String,
 }
@@ -163,53 +163,53 @@ impl ToolsNavigateRequest {
     }
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolInstallRequest {
     pub provider: ToolProvider,
     pub id: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolUpdateRequest {
     pub provider: ToolProvider,
     pub id: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolUninstallRequest {
     pub provider: ToolProvider,
     pub id: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolForgetRequest {
     pub provider: ToolProvider,
     pub id: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolAdoptRequest {
     pub provider: ToolProvider,
     pub id: String,
     pub value: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolLinkRequest {
     pub provider: ToolProvider,
     pub id: String,
 }
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolUnlinkRequest {
     pub provider: ToolProvider,
     pub id: String,
 }
 
-#[vmux_api::ui_event(Default, Eq, target = "tools")]
+#[vmux_api::ui_event(Default, Eq, url = "vmux://tools/")]
 pub struct ToolApplyRequest;
 
-#[vmux_api::ui_event(Eq, target = "tools")]
+#[vmux_api::ui_event(Eq, url = "vmux://tools/")]
 pub struct ToolImportRequest {
     pub provider: ToolProvider,
     pub value: String,

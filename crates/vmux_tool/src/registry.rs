@@ -4,7 +4,9 @@ use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
-use vmux_api::protocol::{AgentCommand, AgentCommandTool, AgentQuery, JsonValue};
+use vmux_api::protocol::{
+    AgentCommand, AgentCommandTool, AgentInvokeCommand, AgentQuery, JsonValue,
+};
 use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
 
 use vmux_api::InputSchema;
@@ -15,11 +17,20 @@ impl Plugin for ToolRegistryPlugin {
     fn build(&self, app: &mut App) {
         app.configure_sets(
             Startup,
-            (ToolStartupSet::Registry, ToolStartupSet::Manifest).chain(),
+            (
+                ToolStartupSet::Registry,
+                ToolStartupSet::Manifest,
+                ToolStartupSet::Binding,
+            )
+                .chain(),
         )
         .add_systems(
             Startup,
             spawn_tool_registry.in_set(ToolStartupSet::Registry),
+        )
+        .add_systems(
+            Startup,
+            register_tool_manifests.in_set(ToolStartupSet::Manifest),
         )
         .configure_sets(
             Update,
@@ -49,12 +60,58 @@ impl Plugin for ToolRegistryPlugin {
     }
 }
 
-pub struct ToolManifestPlugin<T> {
+pub struct ToolManifestPlugin {
+    manifest: &'static str,
+}
+
+impl ToolManifestPlugin {
+    pub const fn new(manifest: &'static str) -> Self {
+        Self { manifest }
+    }
+}
+
+impl Plugin for ToolManifestPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<ToolRegistryPlugin>() {
+            app.add_plugins(ToolRegistryPlugin);
+        }
+        app.world_mut().spawn(ToolManifestSource(self.manifest));
+    }
+
+    fn is_unique(&self) -> bool {
+        false
+    }
+}
+
+pub trait ToolAppExt {
+    fn register_tool<T>(&mut self, name: &'static str) -> &mut Self
+    where
+        T: Component + serde::de::DeserializeOwned;
+}
+
+impl ToolAppExt for App {
+    fn register_tool<T>(&mut self, name: &'static str) -> &mut Self
+    where
+        T: Component + serde::de::DeserializeOwned,
+    {
+        if !self.is_plugin_added::<ToolRegistryPlugin>() {
+            self.add_plugins(ToolRegistryPlugin);
+        }
+        self.world_mut().spawn(ToolBindingSource::<T> {
+            name,
+            marker: PhantomData,
+        });
+        self.add_systems(Startup, bind_tool::<T>.in_set(ToolStartupSet::Binding))
+            .add_systems(Update, parse_tool::<T>.in_set(ToolRequestSet))
+    }
+}
+
+pub struct ToolKindManifestPlugin<T> {
     manifest: &'static str,
     marker: PhantomData<fn() -> T>,
 }
 
-impl<T> ToolManifestPlugin<T> {
+impl<T> ToolKindManifestPlugin<T> {
     pub const fn new(manifest: &'static str) -> Self {
         Self {
             manifest,
@@ -63,7 +120,7 @@ impl<T> ToolManifestPlugin<T> {
     }
 }
 
-impl<T> Plugin for ToolManifestPlugin<T>
+impl<T> Plugin for ToolKindManifestPlugin<T>
 where
     T: Component + Clone + serde::de::DeserializeOwned + Serialize,
 {
@@ -72,22 +129,25 @@ where
             app.add_plugins(ToolRegistryPlugin);
         }
         app.world_mut()
-            .spawn(ToolManifestSource::<T>::new(self.manifest));
+            .spawn(ToolKindManifestSource::<T>::new(self.manifest));
         app.add_systems(
             Startup,
-            register_tools::<T>.in_set(ToolStartupSet::Manifest),
+            register_kind_tools::<T>.in_set(ToolStartupSet::Manifest),
         )
-        .add_systems(Update, route_tools::<T>.in_set(ToolRouteSet));
+        .add_systems(Update, route_kind_tools::<T>.in_set(ToolRouteSet));
     }
 }
 
 #[derive(Component)]
-struct ToolManifestSource<T> {
+struct ToolManifestSource(&'static str);
+
+#[derive(Component)]
+struct ToolKindManifestSource<T> {
     source: &'static str,
     marker: PhantomData<fn() -> T>,
 }
 
-impl<T> ToolManifestSource<T> {
+impl<T> ToolKindManifestSource<T> {
     fn new(source: &'static str) -> Self {
         Self {
             source,
@@ -100,15 +160,43 @@ fn spawn_tool_registry(mut commands: Commands) {
     commands.spawn((Name::new("Tool registry"), NextToolOrder::default()));
 }
 
-fn register_tools<T>(
-    manifests: Query<(Entity, &ToolManifestSource<T>)>,
+fn register_tool_manifests(
+    manifests: Query<(Entity, &ToolManifestSource)>,
+    mut commands: Commands,
+    mut next_order: Single<&mut NextToolOrder>,
+) {
+    for (source_entity, source) in &manifests {
+        let manifest = ToolManifest::from_ron(source.0);
+        for entry in manifest.0 {
+            let seed = entry.into_seed();
+            let order = next_order.0;
+            next_order.0 += 1;
+            let mut entity = commands.spawn((
+                RegisteredTool,
+                Name::new(seed.name),
+                ToolAliases(seed.aliases),
+                ToolDescription(seed.description),
+                ToolInputSchema(seed.input_schema),
+                ToolAccess(seed.availability),
+                RegistrationOrder(order),
+            ));
+            if seed.shell_aware {
+                entity.insert(ShellAware);
+            }
+        }
+        commands.entity(source_entity).despawn();
+    }
+}
+
+fn register_kind_tools<T>(
+    manifests: Query<(Entity, &ToolKindManifestSource<T>)>,
     mut commands: Commands,
     mut next_order: Single<&mut NextToolOrder>,
 ) where
     T: Component + serde::de::DeserializeOwned + Serialize,
 {
     for (source_entity, source) in &manifests {
-        let manifest = ToolManifest::<T>::from_ron(source.source);
+        let manifest = ToolKindManifest::<T>::from_ron(source.source);
         for entry in manifest.0 {
             let (seed, kind) = entry.into_seed();
             let order = next_order.0;
@@ -131,7 +219,7 @@ fn register_tools<T>(
     }
 }
 
-fn route_tools<T>(
+fn route_kind_tools<T>(
     mut commands: Commands,
     calls: Query<(Entity, &ToolTarget), Added<ToolCall>>,
     tools: Query<&T>,
@@ -146,6 +234,58 @@ fn route_tools<T>(
     }
 }
 
+#[derive(Component)]
+struct ToolBindingSource<T> {
+    name: &'static str,
+    marker: PhantomData<fn() -> T>,
+}
+
+#[derive(Component)]
+struct ToolBinding<T>(PhantomData<fn() -> T>);
+
+fn bind_tool<T>(
+    bindings: Query<(Entity, &ToolBindingSource<T>)>,
+    tools: Query<(Entity, &Name), With<RegisteredTool>>,
+    mut commands: Commands,
+) where
+    T: Component,
+{
+    for (binding_entity, binding) in &bindings {
+        let Some((tool_entity, _)) = tools.iter().find(|(_, name)| name.as_str() == binding.name)
+        else {
+            panic!("tool manifest does not define {}", binding.name);
+        };
+        commands
+            .entity(tool_entity)
+            .insert(ToolBinding::<T>(PhantomData));
+        commands.entity(binding_entity).despawn();
+    }
+}
+
+fn parse_tool<T>(
+    calls: Query<(Entity, &Name, &JsonArguments, &ToolTarget), Added<ToolCall>>,
+    tools: Query<(), With<ToolBinding<T>>>,
+    mut commands: Commands,
+) where
+    T: Component + serde::de::DeserializeOwned,
+{
+    for (request, name, arguments, target) in &calls {
+        if !tools.contains(target.0) {
+            continue;
+        }
+        match arguments.parse::<T>(name.as_str()) {
+            Ok(arguments) => {
+                commands.entity(request).insert(arguments);
+            }
+            Err(message) => {
+                commands
+                    .entity(request)
+                    .insert(ToolDispatchError::new(message));
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub struct ToolResolveSet;
 
@@ -153,6 +293,7 @@ pub struct ToolResolveSet;
 enum ToolStartupSet {
     Registry,
     Manifest,
+    Binding,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
@@ -412,10 +553,12 @@ fn dispatch_command_calls(mut commands: Commands, calls: PendingCommandCalls) {
     for (entity, name, arguments) in &calls {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::InvokeCommand {
-                id: name.as_str().to_string(),
-                args: JsonValue::from(arguments.0.clone()),
-            })));
+            .insert(ToolCommand(Ok(AgentCommand::InvokeCommand(
+                AgentInvokeCommand {
+                    id: name.as_str().to_string(),
+                    args: JsonValue::from(arguments.0.clone()),
+                },
+            ))));
     }
 }
 
@@ -430,7 +573,7 @@ struct ToolSeed {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ToolEntry<K> {
+struct ToolKindEntry<K> {
     kind: K,
     #[serde(default)]
     aliases: Vec<String>,
@@ -442,7 +585,7 @@ struct ToolEntry<K> {
     shell_aware: bool,
 }
 
-impl<K: Component + Serialize> ToolEntry<K> {
+impl<K: Component + Serialize> ToolKindEntry<K> {
     fn into_seed(self) -> (ToolSeed, K) {
         let Value::String(name) =
             serde_json::to_value(&self.kind).expect("tool kind must serialize")
@@ -463,14 +606,57 @@ impl<K: Component + Serialize> ToolEntry<K> {
     }
 }
 
-struct ToolManifest<K>(Vec<ToolEntry<K>>);
+struct ToolKindManifest<K>(Vec<ToolKindEntry<K>>);
 
-impl<K> ToolManifest<K>
+impl<K> ToolKindManifest<K>
 where
     K: Component + serde::de::DeserializeOwned + Serialize,
 {
     fn from_ron(source: &str) -> Self {
-        let entries: Vec<ToolEntry<K>> =
+        let entries: Vec<ToolKindEntry<K>> =
+            ron::from_str(source).expect("embedded tool definitions must be valid RON");
+        for entry in &entries {
+            entry
+                .input_schema
+                .validate()
+                .expect("embedded tool input schemas must be valid");
+        }
+        Self(entries)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToolEntry {
+    name: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    description: String,
+    input_schema: InputSchema,
+    #[serde(default)]
+    availability: ToolAvailability,
+    #[serde(default)]
+    shell_aware: bool,
+}
+
+impl ToolEntry {
+    fn into_seed(self) -> ToolSeed {
+        ToolSeed {
+            name: self.name,
+            aliases: self.aliases,
+            description: self.description,
+            input_schema: self.input_schema,
+            availability: self.availability,
+            shell_aware: self.shell_aware,
+        }
+    }
+}
+
+struct ToolManifest(Vec<ToolEntry>);
+
+impl ToolManifest {
+    fn from_ron(source: &str) -> Self {
+        let entries: Vec<ToolEntry> =
             ron::from_str(source).expect("embedded tool definitions must be valid RON");
         for entry in &entries {
             entry

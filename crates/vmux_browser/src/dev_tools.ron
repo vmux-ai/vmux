@@ -1,0 +1,9 @@
+[
+    (
+        id: "browser_dev_tools",
+        label: "Developer Tools",
+        group: "Browser > View",
+        accelerator: Some("super+alt+i"),
+        mcp: Some((description: "Developer Tools", allow_agent: true)),
+    ),
+]

@@ -26,8 +26,51 @@ pub struct CommandShortcut {
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CommandManifestEntry<K> {
-    kind: K,
+struct CommandMcpManifest {
+    description: String,
+    #[serde(default)]
+    input_schema: Option<vmux_api::InputSchema>,
+    #[serde(default)]
+    allow_agent: bool,
+}
+
+impl CommandMcpManifest {
+    fn into_mcp(self) -> CommandMcp {
+        let input_schema = self
+            .input_schema
+            .unwrap_or_else(vmux_api::InputSchema::object);
+        let definition = CommandMcp::new(self.description, input_schema);
+        if self.allow_agent {
+            return definition.allow_agent();
+        }
+        definition
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct NoCommandKind;
+
+struct CommandDefinitionDefaults;
+
+impl CommandDefinitionDefaults {
+    fn native_menu() -> bool {
+        true
+    }
+}
+
+fn deserialize_command_kind<'de, D, K>(deserializer: D) -> Result<Option<K>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    K: serde::Deserialize<'de>,
+{
+    K::deserialize(deserializer).map(Some)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, bound(deserialize = "K: serde::Deserialize<'de>"))]
+struct CommandDefinitionManifest<K = NoCommandKind> {
+    #[serde(default, deserialize_with = "deserialize_command_kind")]
+    kind: Option<K>,
     id: String,
     #[serde(default)]
     aliases: Vec<String>,
@@ -37,49 +80,83 @@ struct CommandManifestEntry<K> {
     accelerator: Option<String>,
     #[serde(default)]
     hidden: bool,
-    #[serde(default = "CommandManifestEntry::<K>::native_menu_default")]
+    #[serde(default = "CommandDefinitionDefaults::native_menu")]
     native_menu: bool,
     #[serde(default)]
     shortcut_label: Option<String>,
     #[serde(default)]
     shortcuts: Vec<CommandShortcut>,
+    #[serde(default)]
+    mcp: Option<CommandMcpManifest>,
 }
 
-impl<K> CommandManifestEntry<K> {
-    fn native_menu_default() -> bool {
-        true
+impl<K> CommandDefinitionManifest<K> {
+    fn into_definition(self) -> CommandDefinition {
+        CommandDefinition {
+            id: self.id,
+            aliases: self.aliases,
+            label: self.label,
+            group: self.group,
+            accelerator: self.accelerator,
+            hidden: self.hidden,
+            native_menu: self.native_menu,
+            shortcut_label: self.shortcut_label,
+            shortcuts: self.shortcuts,
+            mcp: self.mcp.map(CommandMcpManifest::into_mcp),
+        }
     }
 
-    fn into_command(self) -> (CommandDefinition, K) {
-        (
-            CommandDefinition {
-                id: self.id,
-                aliases: self.aliases,
-                label: self.label,
-                group: self.group,
-                accelerator: self.accelerator,
-                hidden: self.hidden,
-                native_menu: self.native_menu,
-                shortcut_label: self.shortcut_label,
-                shortcuts: self.shortcuts,
-                mcp: None,
-            },
-            self.kind,
-        )
+    fn validate(&self) {
+        if let Some(mcp) = &self.mcp
+            && let Some(input_schema) = &mcp.input_schema
+        {
+            input_schema
+                .validate()
+                .expect("embedded command input schemas must be valid");
+        }
     }
 }
 
-pub struct CommandManifest<K>(Vec<CommandManifestEntry<K>>);
+pub struct CommandManifest<K>(Vec<CommandDefinitionManifest<K>>);
 
 impl<K: serde::de::DeserializeOwned> CommandManifest<K> {
     pub fn from_ron(source: &str) -> Self {
-        let entries =
+        let entries: Vec<CommandDefinitionManifest<K>> =
             ron::from_str(source).expect("embedded command definitions must be valid RON");
+        for entry in &entries {
+            entry.validate();
+        }
         Self(entries)
     }
 
     pub fn into_commands(self) -> impl Iterator<Item = (CommandDefinition, K)> {
-        self.0.into_iter().map(CommandManifestEntry::into_command)
+        self.0.into_iter().map(|mut entry| {
+            let kind = entry
+                .kind
+                .take()
+                .expect("embedded command definitions must include kind");
+            (entry.into_definition(), kind)
+        })
+    }
+}
+
+pub struct CommandDefinitions(Vec<CommandDefinitionManifest>);
+
+impl CommandDefinitions {
+    pub fn from_ron(source: &str) -> Self {
+        let definitions: Vec<CommandDefinitionManifest> =
+            ron::from_str(source).expect("embedded command definitions must be valid RON");
+        for definition in &definitions {
+            definition.validate();
+        }
+        Self(definitions)
+    }
+
+    pub fn into_vec(self) -> Vec<CommandDefinition> {
+        self.0
+            .into_iter()
+            .map(CommandDefinitionManifest::into_definition)
+            .collect()
     }
 }
 

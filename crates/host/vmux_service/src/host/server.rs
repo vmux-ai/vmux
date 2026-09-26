@@ -1,8 +1,4 @@
 use crate::process::{Process, ProcessManager};
-use crate::protocol::{
-    AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
-    ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
-};
 use crate::{read_message, write_message};
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -12,6 +8,10 @@ use std::time::Instant;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
+use vmux_api::protocol::{
+    AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
+    ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
+};
 
 use super::query::{ProcessQueries, ProcessQueryPlugin};
 
@@ -22,7 +22,9 @@ pub(crate) fn init_started_at() {
 }
 
 type PendingQueries = Arc<
-    Mutex<HashMap<crate::protocol::AgentRequestId, tokio::sync::oneshot::Sender<ServiceMessage>>>,
+    Mutex<
+        HashMap<vmux_api::protocol::AgentRequestId, tokio::sync::oneshot::Sender<ServiceMessage>>,
+    >,
 >;
 
 pub(crate) struct ServiceDaemonPlugin {
@@ -100,8 +102,8 @@ impl Drop for ServiceServerTask {
 type PendingCommands = Arc<
     Mutex<
         HashMap<
-            crate::protocol::AgentRequestId,
-            tokio::sync::oneshot::Sender<crate::protocol::AgentCommandResult>,
+            vmux_api::protocol::AgentRequestId,
+            tokio::sync::oneshot::Sender<vmux_api::protocol::AgentCommandResult>,
         >,
     >,
 >;
@@ -285,8 +287,8 @@ async fn run_server(
     tracing::info!("server: drain complete, exiting");
 }
 
-fn command_result_to_content(result: crate::protocol::AgentCommandResult) -> (String, bool) {
-    use crate::protocol::AgentCommandResult;
+fn command_result_to_content(result: vmux_api::protocol::AgentCommandResult) -> (String, bool) {
+    use vmux_api::protocol::AgentCommandResult;
     match result {
         AgentCommandResult::Ok => ("ok".to_string(), false),
         AgentCommandResult::Text(text) => (text, false),
@@ -403,7 +405,7 @@ fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)>
 }
 
 async fn route_agent_query_response(
-    request_id: crate::protocol::AgentRequestId,
+    request_id: vmux_api::protocol::AgentRequestId,
     response: ServiceMessage,
     pending_queries: &PendingQueries,
     broker: &crate::agent_broker::AgentBroker,
@@ -778,23 +780,23 @@ async fn handle_client(
 
             ClientMessage::AgentQuery { request_id, query } => {
                 let response = match query {
-                    crate::protocol::AgentQuery::ReadProcessOutput { process_id } => {
+                    vmux_api::protocol::AgentQuery::ReadProcessOutput { process_id } => {
                         ServiceMessage::ProcessOutputResult {
                             request_id,
                             result: process_queries.output(process_id).await,
                         }
                     }
-                    crate::protocol::AgentQuery::ReadProcessTranscript { process_id } => {
+                    vmux_api::protocol::AgentQuery::ReadProcessTranscript { process_id } => {
                         ServiceMessage::ProcessTranscriptResult {
                             request_id,
                             result: process_queries.transcript(process_id).await,
                         }
                     }
-                    crate::protocol::AgentQuery::ProcessCommandExit { process_id } => {
+                    vmux_api::protocol::AgentQuery::ProcessCommandExit { process_id } => {
                         let result = process_queries.command_exit(process_id).await;
                         ServiceMessage::ProcessCommandExitResult { request_id, result }
                     }
-                    crate::protocol::AgentQuery::ProcessRunCompletion { process_id } => {
+                    vmux_api::protocol::AgentQuery::ProcessRunCompletion { process_id } => {
                         let result = process_queries.run_completion(process_id).await;
                         ServiceMessage::ProcessRunCompletionResult { request_id, result }
                     }
@@ -1311,8 +1313,8 @@ async fn handle_client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{AgentCommandResult, AgentQuery, AgentRequestId};
     use tokio::sync::oneshot;
+    use vmux_api::protocol::{AgentCommandResult, AgentQuery, AgentRequestId};
 
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<ProcessId>) {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
@@ -1351,7 +1353,10 @@ mod tests {
         let prompt = compose_agent_prompt(&page_agent_prompt(String::new(), &[]), Some("resume"));
 
         assert!(prompt.contains("resume"));
-        assert_eq!(crate::protocol::extract_display_prompt(&prompt), Some(""));
+        assert_eq!(
+            vmux_api::protocol::extract_display_prompt(&prompt),
+            Some("")
+        );
     }
 
     #[test]
@@ -1380,7 +1385,7 @@ mod tests {
 
         let response = ServiceMessage::AgentSettingsResult {
             request_id,
-            result: Ok(crate::protocol::JsonValue::Object(Vec::new())),
+            result: Ok(vmux_api::protocol::JsonValue::Object(Vec::new())),
         };
         let resp_tx = pending.lock().await.remove(&request_id).expect("entry");
         resp_tx.send(response).expect("send");
@@ -1421,7 +1426,7 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_message_breaks_run_server() {
-        use crate::protocol::ClientMessage;
+        use vmux_api::protocol::ClientMessage;
 
         let dir = std::env::temp_dir().join(format!("vmux-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1519,7 +1524,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_disconnect_reaps_created_processes() {
-        use crate::protocol::ClientMessage;
+        use vmux_api::protocol::ClientMessage;
 
         let dir = std::env::temp_dir().join(format!("vmux-reap-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1586,7 +1591,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_client_that_dies_mid_frame_still_has_its_processes_reaped() {
-        use crate::protocol::ClientMessage;
+        use vmux_api::protocol::ClientMessage;
 
         let dir = std::env::temp_dir().join(format!("vmux-torn-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

@@ -1,8 +1,8 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
+use vmux_api::protocol::ClientMessage;
 use vmux_service::client::ServiceRequest;
 use vmux_service::plugin::ServiceConnected;
-use vmux_service::protocol::ClientMessage;
 
 use super::plugin::{
     AwaitingProcessCreated, PendingServiceCreate, ServiceMessageSet, ShellOutputSeen,
@@ -111,7 +111,7 @@ fn flush_terminal_input(
     inputs: Query<(Entity, &TerminalInput, &TerminalInputTarget)>,
     terminals: Query<
         (
-            &vmux_service::protocol::ProcessId,
+            &vmux_api::protocol::ProcessId,
             Has<ShellOutputSeen>,
             Has<PendingServiceCreate>,
             Has<AwaitingProcessCreated>,

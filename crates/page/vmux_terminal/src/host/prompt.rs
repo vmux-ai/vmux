@@ -1,10 +1,7 @@
 use bevy::prelude::*;
+use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_core::input::KeyStroke;
-use vmux_service::{
-    client::ServiceRequest,
-    plugin::ServiceConnected,
-    protocol::{ClientMessage, ProcessId},
-};
+use vmux_service::{client::ServiceRequest, plugin::ServiceConnected};
 
 use super::plugin::ServiceMessageSet;
 

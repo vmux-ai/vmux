@@ -1,0 +1,19 @@
+[
+    (
+        id: "open_in_place",
+        label: "Open Here",
+        group: "Browser > Open",
+        mcp: Some((
+            description: "Navigate the currently focused stack to the given URL. Equivalent to the user typing a URL in the address bar. Use when the user asks to 'go to', 'navigate to', or 'open' a URL without specifying placement; the current page is replaced. If url is omitted, opens the configured startup URL.",
+            input_schema: Some((
+                type: Object,
+                properties: {
+                    "url": (
+                        type: String,
+                        description: Some("Absolute URL to open. If omitted, opens the startup URL."),
+                    ),
+                },
+            )),
+        )),
+    ),
+]

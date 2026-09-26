@@ -1,5 +1,5 @@
 pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
-#[vmux_api::ui_event(Copy, Default, Eq, target = "settings")]
+#[vmux_api::ui_event(Copy, Default, Eq, url = "vmux://settings/")]
 pub struct CheckForUpdatesEvent;
 
 #[vmux_api::contract(Default, Eq)]
@@ -29,7 +29,7 @@ pub struct CheckForUpdatesRequest;
 #[derive(bevy::prelude::Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);
 
-#[vmux_api::ui_event(Default, Eq, version = 2, target = "settings")]
+#[vmux_api::ui_event(Default, Eq, version = 2, url = "vmux://settings/")]
 pub struct SettingsRequest {
     pub path: String,
     pub value: vmux_api::json::JsonValue,

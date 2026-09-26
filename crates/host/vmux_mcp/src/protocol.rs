@@ -7,10 +7,8 @@ use std::io::{self, BufRead, Write};
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
+use vmux_api::protocol::{AgentCommand, AgentQuery, AgentRequestId, ClientMessage, ServiceMessage};
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
-use vmux_service::protocol::{
-    AgentCommand, AgentQuery, AgentRequestId, ClientMessage, ServiceMessage,
-};
 
 pub struct McpPlugin {
     config: McpConfig,
@@ -18,7 +16,7 @@ pub struct McpPlugin {
 
 impl McpPlugin {
     pub fn new(
-        anchor: Option<vmux_service::protocol::ProcessId>,
+        anchor: Option<vmux_api::protocol::ProcessId>,
         acp_session: bool,
         acp_terminals: bool,
         run_block_timeout: Duration,
@@ -95,7 +93,7 @@ pub struct McpServer {
 
 #[derive(Component, Clone)]
 struct McpConfig {
-    anchor: Option<vmux_service::protocol::ProcessId>,
+    anchor: Option<vmux_api::protocol::ProcessId>,
     acp_session: bool,
     acp_terminals: bool,
     run_block_timeout: Duration,
@@ -498,9 +496,9 @@ fn initialize_result(params: &Value) -> Value {
 
 async fn run_agent_command(
     command: AgentCommand,
-    anchor: Option<vmux_service::protocol::ProcessId>,
+    anchor: Option<vmux_api::protocol::ProcessId>,
 ) -> Result<Value, String> {
-    let request_id = vmux_service::protocol::AgentRequestId::new();
+    let request_id = vmux_api::protocol::AgentRequestId::new();
     let connection = vmux_service::client::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
@@ -535,9 +533,9 @@ async fn run_agent_command(
 }
 
 pub fn command_result_to_mcp_response(
-    result: vmux_service::protocol::AgentCommandResult,
+    result: vmux_api::protocol::AgentCommandResult,
 ) -> Result<Value, String> {
-    use vmux_service::protocol::AgentCommandResult;
+    use vmux_api::protocol::AgentCommandResult;
     match result {
         AgentCommandResult::Ok => Ok(json!({
             "content": [{"type": "text", "text": "ok"}]
@@ -605,7 +603,7 @@ fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId>
     }
 }
 
-async fn run_agent_query(query: vmux_service::protocol::AgentQuery) -> Result<Value, String> {
+async fn run_agent_query(query: vmux_api::protocol::AgentQuery) -> Result<Value, String> {
     let connection = vmux_service::client::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
@@ -858,7 +856,7 @@ mod tests {
     fn image_query_result_maps_to_text_and_image_blocks() {
         let resp = query_response_to_mcp_response(ServiceMessage::AgentScreenshotResult {
             request_id: AgentRequestId::new(),
-            result: Ok(vmux_service::protocol::AgentImage {
+            result: Ok(vmux_api::protocol::AgentImage {
                 path: "/tmp/shot.png".into(),
                 png: vec![137, 80, 78, 71],
                 width: 800,
@@ -884,7 +882,7 @@ mod tests {
     fn recording_maps_to_text_block() {
         let v = query_response_to_mcp_response(ServiceMessage::AgentRecordStopResult {
             request_id: AgentRequestId::new(),
-            result: Ok(vmux_service::protocol::AgentRecording {
+            result: Ok(vmux_api::protocol::AgentRecording {
                 mp4_path: "/tmp/x.mp4".into(),
                 gif_path: Some("/tmp/x.gif".into()),
                 duration_ms: 7400,

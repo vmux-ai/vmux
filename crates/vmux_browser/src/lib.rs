@@ -699,8 +699,8 @@ fn send_page_open_response(
     request_id: Option<[u8; 16]>,
     result: Result<(), String>,
 ) {
+    use vmux_api::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
     use vmux_service::client::ServiceRequest;
-    use vmux_service::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
     let Some(request_id) = request_id else {
         return;
     };
@@ -1046,6 +1046,9 @@ mod tests {
         use vmux_agent::events::AgentCommandRequest;
         use vmux_agent::host::AgentSessionPlugin;
         use vmux_agent::strategy::AgentStrategies;
+        use vmux_api::protocol::{
+            AgentBrowserNavigate, AgentCommand as ServiceAgentCommand, AgentRequestId,
+        };
         use vmux_core::{
             LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
             PageOpenId, PageOpenSet, PageOpenTask,
@@ -1055,7 +1058,6 @@ mod tests {
             FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
         };
         use vmux_layout::stack::FocusedStack;
-        use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId};
         use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
         use vmux_terminal::Terminal;
 
@@ -1181,10 +1183,10 @@ mod tests {
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
                     origin: vmux_agent::events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "https://example.com".to_string(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1219,10 +1221,10 @@ mod tests {
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
                     origin: vmux_agent::events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "https://example.com".to_string(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1371,10 +1373,10 @@ mod tests {
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
                     origin: vmux_agent::events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "https://example.com".to_string(),
                         pane: Some(pane_b.to_bits().to_string()),
-                    },
+                    }),
                 });
 
             app.update();
@@ -1416,10 +1418,10 @@ mod tests {
                 .write(AgentCommandRequest {
                     request_id,
                     origin: vmux_agent::events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://terminal/".to_string(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1617,10 +1619,10 @@ mod tests {
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
                     origin: vmux_agent::events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://terminal/".to_string(),
                         pane: Some(pane_b.to_bits().to_string()),
-                    },
+                    }),
                 });
 
             app.update();
@@ -1667,10 +1669,10 @@ mod tests {
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
                     origin: vmux_agent::events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://nonsense/".to_string(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1795,10 +1797,10 @@ mod tests {
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
                     origin: vmux_agent::events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://sessions/claude/cli/".into(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();
@@ -1841,10 +1843,10 @@ mod tests {
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
                     origin: vmux_agent::events::CommandOrigin::User,
-                    command: ServiceAgentCommand::BrowserNavigate {
+                    command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://sessions/codex/cli/".into(),
                         pane: None,
-                    },
+                    }),
                 });
 
             app.update();

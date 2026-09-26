@@ -71,8 +71,8 @@ where
     }
 }
 
-fn host_allowed(target: BinEventTarget, host: &str) -> bool {
-    target.accepts(host)
+fn page_url_allowed(target: BinEventTarget, page_url: &str) -> bool {
+    target.accepts(page_url)
 }
 
 fn register_event<E>(app: &mut App)
@@ -132,7 +132,7 @@ where
     E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
-    if event.id != E::id() || !host_allowed(E::TARGET, &event.host) {
+    if event.id != E::id() || !page_url_allowed(E::TARGET, &event.page_url) {
         return None;
     }
     rkyv::from_bytes::<E, rkyv::rancor::Error>(&event.payload).ok()
@@ -190,7 +190,7 @@ mod tests {
         value: u32,
     }
 
-    #[vmux_api::ui_event(Eq, target = "allowed")]
+    #[vmux_api::ui_event(Eq, url = "vmux://allowed/")]
     struct RestrictedEvent {
         value: u32,
     }
@@ -203,7 +203,7 @@ mod tests {
             .into_vec();
         let raw = BinIpcEventRaw {
             webview: Entity::PLACEHOLDER,
-            host: String::new(),
+            page_url: String::new(),
             id: BetaEvent::id().to_string(),
             payload: bytes,
         };
@@ -219,7 +219,7 @@ mod tests {
             .into_vec();
         let raw = BinIpcEventRaw {
             webview: Entity::PLACEHOLDER,
-            host: String::new(),
+            page_url: String::new(),
             id: AlphaEvent::id().to_string(),
             payload: bytes,
         };
@@ -237,7 +237,7 @@ mod tests {
             .into_vec();
         let raw = BinIpcEventRaw {
             webview: Entity::PLACEHOLDER,
-            host: "other".to_string(),
+            page_url: "vmux://other/".to_string(),
             id: RestrictedEvent::id().to_string(),
             payload: bytes,
         };
@@ -246,30 +246,36 @@ mod tests {
     }
 
     #[test]
-    fn host_allowed_without_owner_accepts_any_host() {
-        assert!(host_allowed(BinEventTarget::Any, "history"));
-        assert!(host_allowed(BinEventTarget::Any, ""));
+    fn unrestricted_target_accepts_any_page_url() {
+        assert!(page_url_allowed(BinEventTarget::Any, "vmux://history/"));
+        assert!(page_url_allowed(BinEventTarget::Any, ""));
     }
 
     #[test]
-    fn host_allowed_restricts_to_owner_hosts() {
-        assert!(host_allowed(BinEventTarget::Host("history"), "history"));
-        assert!(!host_allowed(
-            BinEventTarget::Host("history"),
-            "command-bar"
+    fn page_url_target_restricts_to_owner_pages() {
+        assert!(page_url_allowed(
+            BinEventTarget::Url("vmux://history/"),
+            "vmux://history/"
         ));
-        assert!(host_allowed(
-            BinEventTarget::Hosts(&["debug", "layout"]),
-            "layout"
+        assert!(!page_url_allowed(
+            BinEventTarget::Url("vmux://history/"),
+            "vmux://command-bar/"
         ));
-        assert!(host_allowed(
-            BinEventTarget::Hosts(&["debug", "layout"]),
-            "debug"
+        assert!(page_url_allowed(
+            BinEventTarget::Urls(&["vmux://debug/", "vmux://layout/"]),
+            "vmux://layout/"
         ));
-        assert!(!host_allowed(
-            BinEventTarget::Hosts(&["debug", "layout"]),
-            "terminal"
+        assert!(page_url_allowed(
+            BinEventTarget::Urls(&["vmux://debug/", "vmux://layout/"]),
+            "vmux://debug/diagnostics"
         ));
-        assert!(!host_allowed(BinEventTarget::Hosts(&[]), "history"));
+        assert!(!page_url_allowed(
+            BinEventTarget::Urls(&["vmux://debug/", "vmux://layout/"]),
+            "vmux://terminal/"
+        ));
+        assert!(!page_url_allowed(
+            BinEventTarget::Urls(&[]),
+            "vmux://history/"
+        ));
     }
 }

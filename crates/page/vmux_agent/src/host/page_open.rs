@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use vmux_api::protocol::AgentAttachment;
 use vmux_core::KeyboardOwner;
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::{
     PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
-use vmux_service::protocol::AgentAttachment;
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 

@@ -1,16 +1,20 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_api::protocol::{AgentQuery, SimulatorButton, SimulatorInput};
+use vmux_api::protocol::{
+    AgentQuery, SimulatorButton, SimulatorButtonPress, SimulatorKeyPress, SimulatorSwipe,
+    SimulatorTap, SimulatorTypeText,
+};
 use vmux_core::JsonArguments;
 use vmux_tool::{
-    AddedTool, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery, ToolRequestSet,
+    AddedTool, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
+    ToolRequestSet,
 };
 
 pub struct SimulatorToolPlugin;
 
 impl Plugin for SimulatorToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<SimulatorTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<SimulatorTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -138,12 +142,10 @@ fn tap(mut commands: Commands, requests: Query<(Entity, &TapArgs), AddedTool<Tap
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::Tap {
-                    x: args.x,
-                    y: args.y,
-                },
-            })));
+            .insert(ToolQuery(Ok(AgentQuery::SimulatorTap(SimulatorTap {
+                x: args.x,
+                y: args.y,
+            }))));
     }
 }
 
@@ -151,15 +153,13 @@ fn swipe(mut commands: Commands, requests: Query<(Entity, &SwipeArgs), AddedTool
     for (entity, args) in &requests {
         let duration_ms = args.duration_ms.unwrap_or(300);
         let query = if (1..=10_000).contains(&duration_ms) {
-            Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::Swipe {
-                    start_x: args.start_x,
-                    start_y: args.start_y,
-                    end_x: args.end_x,
-                    end_y: args.end_y,
-                    duration_ms,
-                },
-            })
+            Ok(AgentQuery::SimulatorSwipe(SimulatorSwipe {
+                start_x: args.start_x,
+                start_y: args.start_y,
+                end_x: args.end_x,
+                end_y: args.end_y,
+                duration_ms,
+            }))
         } else {
             Err("simulator_swipe.duration_ms must be between 1 and 10000".to_string())
         };
@@ -172,9 +172,9 @@ fn type_text(mut commands: Commands, requests: Query<(Entity, &TypeArgs), AddedT
         let query = if args.text.is_empty() {
             Err("simulator_type.text is empty".to_string())
         } else {
-            Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::TypeText(args.text.clone()),
-            })
+            Ok(AgentQuery::SimulatorTypeText(SimulatorTypeText {
+                text: args.text.clone(),
+            }))
         };
         commands.entity(entity).insert(ToolQuery(query));
     }
@@ -184,9 +184,11 @@ fn key(mut commands: Commands, requests: Query<(Entity, &KeyArgs), AddedTool<Key
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::Key(args.keycode),
-            })));
+            .insert(ToolQuery(Ok(AgentQuery::SimulatorKeyPress(
+                SimulatorKeyPress {
+                    keycode: args.keycode,
+                },
+            ))));
     }
 }
 
@@ -194,9 +196,11 @@ fn button(mut commands: Commands, requests: Query<(Entity, &ButtonArgs), AddedTo
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::Button(args.button.into()),
-            })));
+            .insert(ToolQuery(Ok(AgentQuery::SimulatorButtonPress(
+                SimulatorButtonPress {
+                    button: args.button.into(),
+                },
+            ))));
     }
 }
 
@@ -273,9 +277,7 @@ mod tests {
         );
         assert_eq!(
             SimulatorTool::dispatch("simulator_tap", serde_json::json!({"x": 120, "y": 240}),),
-            Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::Tap { x: 120, y: 240 },
-            })
+            Ok(AgentQuery::SimulatorTap(SimulatorTap { x: 120, y: 240 }))
         );
         assert_eq!(
             SimulatorTool::dispatch(
@@ -287,33 +289,31 @@ mod tests {
                     "end_y": 200,
                 }),
             ),
-            Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::Swipe {
-                    start_x: 100,
-                    start_y: 700,
-                    end_x: 100,
-                    end_y: 200,
-                    duration_ms: 300,
-                },
-            })
+            Ok(AgentQuery::SimulatorSwipe(SimulatorSwipe {
+                start_x: 100,
+                start_y: 700,
+                end_x: 100,
+                end_y: 200,
+                duration_ms: 300,
+            }))
         );
         assert_eq!(
             SimulatorTool::dispatch("simulator_type", serde_json::json!({"text": "hello"})),
-            Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::TypeText("hello".to_string()),
-            })
+            Ok(AgentQuery::SimulatorTypeText(SimulatorTypeText {
+                text: "hello".to_string(),
+            }))
         );
         assert_eq!(
             SimulatorTool::dispatch("simulator_key", serde_json::json!({"keycode": 40})),
-            Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::Key(40),
-            })
+            Ok(AgentQuery::SimulatorKeyPress(SimulatorKeyPress {
+                keycode: 40,
+            }))
         );
         assert_eq!(
             SimulatorTool::dispatch("simulator_button", serde_json::json!({"button": "home"}),),
-            Ok(AgentQuery::SimulatorControl {
-                input: SimulatorInput::Button(SimulatorButton::Home),
-            })
+            Ok(AgentQuery::SimulatorButtonPress(SimulatorButtonPress {
+                button: SimulatorButton::Home,
+            }))
         );
     }
 

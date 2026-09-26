@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use vmux_api::protocol::ClientMessage;
 use vmux_command::WriteCommandRequests;
 use vmux_service::client::ServiceRequest;
 use vmux_service::plugin::ServiceConnected;
-use vmux_service::protocol::ClientMessage;
 use vmux_terminal::ServiceMessageSet;
 
 use crate::events::AgentChoiceSelected;
@@ -600,9 +600,9 @@ mod tests {
     use super::*;
     use crate::host::run_terminal::AgentCwd;
     use crate::host::test_support::init_worktree_test_repo;
+    use vmux_api::protocol::ProcessId;
+    use vmux_api::protocol::SharedMessage;
     use vmux_core::agent::AgentKind;
-    use vmux_service::protocol::ProcessId;
-    use vmux_service::protocol::SharedMessage;
 
     #[test]
     pub(crate) fn workspace_selection_continuations_resume_original_request() {

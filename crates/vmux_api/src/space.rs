@@ -12,7 +12,7 @@ pub struct SpacesUiStatePatch {
     pub snapshot: Option<Box<SpacesListEvent>>,
 }
 
-#[vmux_api::ui_state(Default, target = "spaces")]
+#[vmux_api::ui_state(Default, url = "vmux://spaces/")]
 pub struct SpacesUiState {
     pub sequence: u64,
     pub patches: Vec<SpacesUiStatePatch>,
@@ -28,36 +28,36 @@ pub struct SpaceRow {
     pub startup_dir: String,
 }
 
-#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
+#[vmux_api::ui_event(Eq, urls = ["vmux://spaces/", "vmux://layout/"])]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
 pub struct SpaceOpenPageRequest;
 
-#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
+#[vmux_api::ui_event(Eq, urls = ["vmux://spaces/", "vmux://layout/"])]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
 pub struct SpaceAttachRequest {
     pub space_id: String,
 }
 
-#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
+#[vmux_api::ui_event(Eq, urls = ["vmux://spaces/", "vmux://layout/"])]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
 pub struct SpaceDeleteRequest {
     pub space_id: String,
 }
 
-#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
+#[vmux_api::ui_event(Eq, urls = ["vmux://spaces/", "vmux://layout/"])]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
 pub struct SpaceRenameRequest {
     pub space_id: String,
     pub name: String,
 }
 
-#[vmux_api::ui_event(Eq, targets = ["spaces", "layout"])]
+#[vmux_api::ui_event(Eq, urls = ["vmux://spaces/", "vmux://layout/"])]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::message::Message))]
 pub struct SpaceCreateRequest {
     pub name: String,
 }
 
-#[vmux_api::ui_event(Eq, targets = ["spaces", "layout", "git"])]
+#[vmux_api::ui_event(Eq, urls = ["vmux://spaces/", "vmux://layout/", "git://"])]
 pub struct ProjectActivateRequest {
     pub path: String,
     pub branch: String,
@@ -65,7 +65,7 @@ pub struct ProjectActivateRequest {
     pub pane_id: Option<u64>,
 }
 
-#[vmux_api::ui_event(Eq, target = "spaces")]
+#[vmux_api::ui_event(Eq, url = "vmux://spaces/")]
 pub struct ProjectForgetRequest {
     pub path: String,
 }
@@ -104,7 +104,7 @@ impl ProjectRowKind {
     }
 }
 
-#[vmux_api::ui_event(Default, Eq, target = "layout")]
+#[vmux_api::ui_event(Default, Eq, url = "vmux://layout/")]
 pub struct ProjectTreeToggle {
     pub path: String,
     #[serde(default)]

@@ -17,6 +17,7 @@ clap = { version = "4", features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 vmux_agent = { path = "../../page/vmux_agent" }
+vmux_api = { path = "../../vmux_api" }
 vmux_browser = { path = "../../vmux_browser" }
 vmux_command = { path = "../../page/vmux_command" }
 vmux_editor = { path = "../../page/vmux_editor" }

@@ -4,7 +4,6 @@ pub use vmux_api::service as event;
 pub mod ui;
 
 pub mod message;
-pub mod protocol;
 pub mod remote;
 
 pub const PAGE_URL: &str = "vmux://services/";

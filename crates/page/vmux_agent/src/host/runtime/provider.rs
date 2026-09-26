@@ -15,9 +15,9 @@ use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_mes
 use crate::run_state::AgentRunState;
 use crate::run_state_kind::LastRunStateKind;
 use crate::toast::ToastPlugin;
+use vmux_api::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
 use vmux_service::client::ServiceRequest;
 use vmux_service::plugin::ServiceConnected;
-use vmux_service::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
 use vmux_session::AcpSession;
 use vmux_session::{
     AgentApprovalPolicy, AgentMessageTimes, AgentMessages, AgentSession, PromptQueue,
@@ -412,7 +412,7 @@ mod tests {
         use crate::events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
-        use vmux_service::protocol::AgentRunStatus;
+        use vmux_api::protocol::AgentRunStatus;
         use vmux_session::AcpSession;
         use vmux_session::PromptQueue;
 
@@ -464,7 +464,7 @@ mod tests {
         use crate::events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
-        use vmux_service::protocol::AgentRunStatus;
+        use vmux_api::protocol::AgentRunStatus;
         use vmux_session::AcpSession;
         use vmux_session::PromptQueue;
 
@@ -525,7 +525,7 @@ mod tests {
         use crate::events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
-        use vmux_service::protocol::AgentRunStatus;
+        use vmux_api::protocol::AgentRunStatus;
         use vmux_session::AcpSession;
         use vmux_session::PromptQueue;
 

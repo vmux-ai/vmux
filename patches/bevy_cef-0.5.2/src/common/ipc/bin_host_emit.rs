@@ -73,12 +73,12 @@ impl Plugin for BinHostEmitPlugin {
 }
 
 fn bin_host_emit(trigger: On<BinHostEmitEvent>, browsers: NonSend<Browsers>) {
-    let Some(host) = browsers.page_host(&trigger.webview()) else {
+    let Some(page_url) = browsers.page_url(&trigger.webview()) else {
         return;
     };
-    if !trigger.target().accepts(&host) {
+    if !trigger.target().accepts(&page_url) {
         warn!(
-            "blocked binary host event {} for unexpected page host {host}",
+            "blocked binary host event {} for unexpected page URL {page_url}",
             trigger.id()
         );
         return;
@@ -91,7 +91,7 @@ mod tests {
     use super::*;
     use bevy::prelude::Entity;
 
-    #[vmux_api::host_event(target = "test-host")]
+    #[vmux_api::host_event(url = "vmux://test-host/")]
     struct TestPayload {
         value: u32,
     }
@@ -101,7 +101,7 @@ mod tests {
         let original = TestPayload { value: 42 };
         let event = BinHostEmitEvent::from_event(Entity::PLACEHOLDER, &original);
         assert_eq!(event.id(), "test_payload@1");
-        assert_eq!(event.target(), BinEventTarget::Host("test-host"));
+        assert_eq!(event.target(), BinEventTarget::Url("vmux://test-host/"));
         let recovered =
             rkyv::from_bytes::<TestPayload, rkyv::rancor::Error>(event.payload()).expect("decode");
         assert_eq!(original, recovered);

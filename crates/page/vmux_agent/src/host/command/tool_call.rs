@@ -1,6 +1,6 @@
 use bevy::prelude::*;
+use vmux_api::protocol::{AgentRequestId, ClientMessage};
 use vmux_service::client::ServiceRequest;
-use vmux_service::protocol::{AgentRequestId, ClientMessage};
 
 use crate::events::{AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin};
 
@@ -149,7 +149,7 @@ fn fail_agent_tool_calls(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_service::protocol::AgentQuery;
+    use vmux_api::protocol::AgentQuery;
 
     #[derive(Resource, Default)]
     struct CapturedAgentQueries(Vec<AgentQuery>);

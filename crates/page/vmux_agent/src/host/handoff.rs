@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{AgentKind, AssistantBlock, Message};
 
-pub const HANDOFF_PROMPT_PREFIX: &str = vmux_service::protocol::PRIVATE_CONTEXT_PREFIX;
+pub const HANDOFF_PROMPT_PREFIX: &str = vmux_api::protocol::PRIVATE_CONTEXT_PREFIX;
 pub const OMITTED_MARKER: &str = "[Older source turns omitted]";
 pub const DEFAULT_CONTEXT_LIMIT: usize = 64 * 1024;
 
@@ -95,7 +95,7 @@ fn context_segment(message: &Message) -> Option<String> {
 
 #[cfg(test)]
 fn wire_prompt(context: &str, display_text: &str) -> String {
-    vmux_service::protocol::compose_agent_prompt(display_text, Some(context))
+    vmux_api::protocol::compose_agent_prompt(display_text, Some(context))
 }
 
 pub fn sanitize_replayed_messages(messages: &mut [Message], first_prompt: Option<&str>) {
@@ -105,10 +105,10 @@ pub fn sanitize_replayed_messages(messages: &mut [Message], first_prompt: Option
             continue;
         };
         if let Some(display_text) =
-            vmux_service::protocol::extract_display_prompt(text).map(str::to_string)
+            vmux_api::protocol::extract_display_prompt(text).map(str::to_string)
         {
             *text = display_text;
-        } else if vmux_service::protocol::has_private_context_envelope(text)
+        } else if vmux_api::protocol::has_private_context_envelope(text)
             && let Some(display_text) = fallback.take()
         {
             *text = display_text.to_string();

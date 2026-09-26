@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
-use vmux_command::WriteCommandRequests;
-use vmux_service::client::{ServiceInbound, ServiceRequest};
-use vmux_service::protocol::{
+use vmux_api::protocol::{
     AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentCommandResult, AgentImage, AgentQuery,
     AgentRecording, AgentRequestId, AgentSpace, ClientMessage, JsonValue, ProcessId,
     ServiceMessage,
 };
+use vmux_command::WriteCommandRequests;
+use vmux_service::client::{ServiceInbound, ServiceRequest};
 use vmux_setting::AppSettings;
 use vmux_terminal::ServiceMessageSet;
 
@@ -91,7 +91,11 @@ struct AgentQueryRoutes<'w> {
     record_start: MessageWriter<'w, RecordStartRequest>,
     record_stop: MessageWriter<'w, RecordStopRequest>,
     simulator_screenshot: MessageWriter<'w, vmux_simulator::SimulatorScreenshotRequest>,
-    simulator_control: MessageWriter<'w, vmux_simulator::SimulatorControlRequest>,
+    simulator_tap: MessageWriter<'w, vmux_simulator::SimulatorTapRequest>,
+    simulator_swipe: MessageWriter<'w, vmux_simulator::SimulatorSwipeRequest>,
+    simulator_type_text: MessageWriter<'w, vmux_simulator::SimulatorTypeTextRequest>,
+    simulator_key_press: MessageWriter<'w, vmux_simulator::SimulatorKeyPressRequest>,
+    simulator_button_press: MessageWriter<'w, vmux_simulator::SimulatorButtonPressRequest>,
 }
 
 impl AgentQueryRoutes<'_> {
@@ -165,11 +169,44 @@ impl AgentQueryRoutes<'_> {
                         request_id: request_id.0,
                     });
             }
-            AgentQuery::SimulatorControl { input } => {
-                self.simulator_control
-                    .write(vmux_simulator::SimulatorControlRequest {
+            AgentQuery::SimulatorTap(tap) => {
+                self.simulator_tap
+                    .write(vmux_simulator::SimulatorTapRequest {
                         request_id: request_id.0,
-                        input: input.clone(),
+                        x: tap.x,
+                        y: tap.y,
+                    });
+            }
+            AgentQuery::SimulatorSwipe(swipe) => {
+                self.simulator_swipe
+                    .write(vmux_simulator::SimulatorSwipeRequest {
+                        request_id: request_id.0,
+                        start_x: swipe.start_x,
+                        start_y: swipe.start_y,
+                        end_x: swipe.end_x,
+                        end_y: swipe.end_y,
+                        duration_ms: swipe.duration_ms,
+                    });
+            }
+            AgentQuery::SimulatorTypeText(input) => {
+                self.simulator_type_text
+                    .write(vmux_simulator::SimulatorTypeTextRequest {
+                        request_id: request_id.0,
+                        text: input.text.clone(),
+                    });
+            }
+            AgentQuery::SimulatorKeyPress(input) => {
+                self.simulator_key_press
+                    .write(vmux_simulator::SimulatorKeyPressRequest {
+                        request_id: request_id.0,
+                        keycode: input.keycode,
+                    });
+            }
+            AgentQuery::SimulatorButtonPress(input) => {
+                self.simulator_button_press
+                    .write(vmux_simulator::SimulatorButtonPressRequest {
+                        request_id: request_id.0,
+                        button: input.button,
                     });
             }
             AgentQuery::WorkingDirectory { anchor } => {
@@ -742,7 +779,11 @@ mod tests {
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStopRequest>()
             .add_message::<vmux_simulator::SimulatorScreenshotRequest>()
-            .add_message::<vmux_simulator::SimulatorControlRequest>()
+            .add_message::<vmux_simulator::SimulatorTapRequest>()
+            .add_message::<vmux_simulator::SimulatorSwipeRequest>()
+            .add_message::<vmux_simulator::SimulatorTypeTextRequest>()
+            .add_message::<vmux_simulator::SimulatorKeyPressRequest>()
+            .add_message::<vmux_simulator::SimulatorButtonPressRequest>()
             .add_systems(Update, receive_agent_queries);
         app
     }

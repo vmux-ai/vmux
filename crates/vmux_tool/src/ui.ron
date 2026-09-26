@@ -1,0 +1,16 @@
+(
+    url: "vmux://tools/",
+    title: "Tools",
+    title_message_id: "tools-title",
+    keywords: [
+        "packages",
+        "tools",
+        "dotfiles",
+        "homebrew",
+        "npm",
+        "mcp",
+        "import",
+    ],
+    icon: "Hammer",
+    command_bar: true,
+)

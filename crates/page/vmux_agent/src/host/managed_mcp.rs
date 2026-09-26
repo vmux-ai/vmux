@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
+use vmux_api::protocol::{ManagedMcpServer, ManagedMcpTransport};
 use vmux_core::profile::mcp_credentials::McpCredentialAccess;
 #[cfg(not(test))]
 use vmux_core::profile::mcp_credentials::McpCredentialStorage;
-use vmux_service::protocol::{ManagedMcpServer, ManagedMcpTransport};
 use vmux_tool::{McpServerManifest, McpTransport};
 
 #[cfg(not(test))]
