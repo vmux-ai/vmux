@@ -41,7 +41,15 @@ impl From<SharedMessage> for ClientMessage {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames,
+    Debug,
+    Clone,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    VariantNames,
 )]
 pub enum SharedAgentCommand {
     NewAgentChat {

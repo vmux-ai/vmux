@@ -6,13 +6,13 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::agent_broker::AgentBroker;
 use crate::message::{AssistantBlock, Message};
-use crate::protocol::{
-    AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, JsonValue, ServiceMessage,
-    SharedEvent,
-};
 use crate::providers::{anthropic, mistral, openai};
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
+use vmux_api::protocol::{
+    AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, JsonValue, ServiceMessage,
+    SharedEvent,
+};
 
 pub struct PageProvider {
     pub build_request: BuildRequest,

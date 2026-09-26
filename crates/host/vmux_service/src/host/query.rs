@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 
 use crate::process::ProcessManager;
-use crate::protocol::{AgentCommandExit, AgentRunCompletion, ProcessId};
+use vmux_api::protocol::{AgentCommandExit, AgentRunCompletion, ProcessId};
 
 #[derive(Component)]
 struct ProcessOutputQuery {

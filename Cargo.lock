@@ -10324,6 +10324,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "vmux_agent",
+ "vmux_api",
  "vmux_browser",
  "vmux_command",
  "vmux_editor",
@@ -10646,6 +10647,8 @@ dependencies = [
  "muda 0.19.2",
  "proc-macro2",
  "quote",
+ "ron 0.8.1",
+ "serde",
  "syn 2.0.117",
 ]
 
@@ -10981,6 +10984,7 @@ dependencies = [
  "tracing",
  "unicode-width",
  "url",
+ "vmux_api",
  "vmux_clipboard",
  "vmux_command",
  "vmux_core",

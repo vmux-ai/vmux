@@ -1,16 +1,17 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_api::protocol::{AgentCommand, JsonValue};
+use vmux_api::protocol::{AgentCommand, AgentInvokeCommand, AgentNotify, JsonValue};
 use vmux_core::JsonArguments;
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolRequestSet,
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin,
+    ToolRequestSet,
 };
 
 pub struct CommandToolPlugin;
 
 impl Plugin for CommandToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<CommandTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<CommandTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -81,9 +82,11 @@ fn open_command_bar(
             "path" => Ok("browser_open_path_bar"),
             other => Err(format!("unknown command bar mode: {other}")),
         };
-        let command = result.map(|id| AgentCommand::InvokeCommand {
-            id: id.to_string(),
-            args: JsonValue::Object(Vec::new()),
+        let command = result.map(|id| {
+            AgentCommand::InvokeCommand(AgentInvokeCommand {
+                id: id.to_string(),
+                args: JsonValue::Object(Vec::new()),
+            })
         });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -93,10 +96,10 @@ fn notify(mut commands: Commands, requests: Query<(Entity, &NotifyArgs), AddedTo
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::Notify {
+            .insert(ToolCommand(Ok(AgentCommand::Notify(AgentNotify {
                 title: args.title.clone(),
                 body: args.body.clone(),
-            })));
+            }))));
     }
 }
 
@@ -164,10 +167,10 @@ mod tests {
         ] {
             assert_eq!(
                 CommandTool::dispatch("open_command_bar", serde_json::json!({"mode": mode})),
-                Ok(AgentCommand::InvokeCommand {
+                Ok(AgentCommand::InvokeCommand(AgentInvokeCommand {
                     id: id.to_string(),
                     args: JsonValue::Object(Vec::new()),
-                })
+                }))
             );
         }
         assert!(
@@ -183,17 +186,17 @@ mod tests {
                 "notify",
                 serde_json::json!({"title": "done", "body": "built X"}),
             ),
-            Ok(AgentCommand::Notify {
+            Ok(AgentCommand::Notify(AgentNotify {
                 title: Some("done".to_string()),
                 body: Some("built X".to_string()),
-            })
+            }))
         );
         assert_eq!(
             CommandTool::dispatch("notify", serde_json::json!({})),
-            Ok(AgentCommand::Notify {
+            Ok(AgentCommand::Notify(AgentNotify {
                 title: None,
                 body: None,
-            })
+            }))
         );
     }
 }

@@ -82,7 +82,7 @@ fn live_status() -> Option<(u64, u32)> {
 }
 
 fn live_status_inner() -> std::io::Result<Option<(u64, u32)>> {
-    use crate::protocol::{ClientMessage, ServiceMessage};
+    use vmux_api::protocol::{ClientMessage, ServiceMessage};
     let stream = std::os::unix::net::UnixStream::connect(ServicePaths::current().socket())?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;

@@ -1,9 +1,65 @@
 use proc_macro2::TokenStream;
 use quote::quote;
+use serde::Deserialize;
+use std::path::PathBuf;
 use syn::parse::{Parse, ParseStream};
-use syn::{Data, DeriveInput, Expr, ExprArray, Fields, Ident, LitStr, Path, Token, Type};
+use syn::{
+    Data, DeriveInput, Expr, ExprArray, Fields, Ident, LitStr, Path, Token, Type, parse_quote,
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageManifestFile {
+    url: String,
+    title: String,
+    #[serde(default)]
+    title_message_id: String,
+    #[serde(default)]
+    replaces_command: String,
+    #[serde(default)]
+    keywords: Vec<String>,
+    #[serde(default)]
+    icon: String,
+    #[serde(default)]
+    command_bar: bool,
+}
+
+impl PageManifestFile {
+    fn read(file: &LitStr) -> syn::Result<Self> {
+        let crate_root = std::env::var_os("CARGO_MANIFEST_DIR")
+            .map(PathBuf::from)
+            .ok_or_else(|| syn::Error::new(file.span(), "CARGO_MANIFEST_DIR is not set"))?;
+        let path = crate_root.join(file.value());
+        let source = std::fs::read_to_string(&path).map_err(|error| {
+            syn::Error::new(
+                file.span(),
+                format!("failed to read page manifest {}: {error}", path.display()),
+            )
+        })?;
+        ron::from_str(&source).map_err(|error| {
+            syn::Error::new(
+                file.span(),
+                format!("failed to parse page manifest {}: {error}", path.display()),
+            )
+        })
+    }
+
+    fn icon(&self, file: &LitStr) -> syn::Result<Option<Expr>> {
+        if self.icon.is_empty() {
+            return Ok(None);
+        }
+        let icon = syn::parse_str::<Ident>(&self.icon).map_err(|error| {
+            syn::Error::new(
+                file.span(),
+                format!("page manifest icon must be a BuiltinIcon variant: {error}"),
+            )
+        })?;
+        Ok(Some(parse_quote!(::vmux_core::BuiltinIcon::#icon)))
+    }
+}
 
 struct Args {
+    file: Option<LitStr>,
     url: Expr,
     title: LitStr,
     component: Path,
@@ -38,6 +94,7 @@ enum Placement {
 
 impl Parse for Args {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let mut file = None;
         let mut url = None;
         let mut title = None;
         let mut component = None;
@@ -71,6 +128,10 @@ impl Parse for Args {
                 "transparent" => transparent = true,
                 "manifest" => manifest = true,
                 "command_bar" => command_bar = true,
+                "file" => {
+                    input.parse::<Token![=]>()?;
+                    file = Some(input.parse()?);
+                }
                 "url" => {
                     input.parse::<Token![=]>()?;
                     url = Some(input.parse()?);
@@ -157,8 +218,39 @@ impl Parse for Args {
             }
         }
 
+        if let Some(manifest_file) = file.as_ref() {
+            let page = PageManifestFile::read(manifest_file)?;
+            if url.is_none() {
+                let value = LitStr::new(&page.url, manifest_file.span());
+                url = Some(parse_quote!(#value));
+            }
+            if title.is_none() {
+                title = Some(LitStr::new(&page.title, manifest_file.span()));
+            }
+            if title_message_id.is_none() && !page.title_message_id.is_empty() {
+                title_message_id = Some(LitStr::new(&page.title_message_id, manifest_file.span()));
+            }
+            if replaces_command.is_none() && !page.replaces_command.is_empty() {
+                replaces_command = Some(LitStr::new(&page.replaces_command, manifest_file.span()));
+            }
+            if keywords.is_none() {
+                let values = page
+                    .keywords
+                    .iter()
+                    .map(|value| LitStr::new(value, manifest_file.span()))
+                    .collect::<Vec<_>>();
+                keywords = Some(parse_quote!([#(#values),*]));
+            }
+            if icon.is_none() {
+                icon = page.icon(manifest_file)?;
+            }
+            command_bar |= page.command_bar;
+            manifest = true;
+        }
+
         Ok(Self {
-            url: url.ok_or_else(|| input.error("page requires url"))?,
+            file,
+            url: url.ok_or_else(|| input.error("page requires url or file"))?,
             title: title.unwrap_or_else(|| LitStr::new("", proc_macro2::Span::call_site())),
             component: component.ok_or_else(|| input.error("page requires component"))?,
             placement,
@@ -222,6 +314,11 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
     }
 
     let ident = &input.ident;
+    let manifest_dependency = args.file.as_ref().map(|file| {
+        quote! {
+            const _: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", #file));
+        }
+    });
     let manifest_host = if args.manifest {
         let Expr::Lit(url) = &args.url else {
             return Err(syn::Error::new_spanned(
@@ -317,6 +414,8 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
     });
 
     Ok(quote! {
+        #manifest_dependency
+
         #input
 
         impl #ident {
@@ -347,4 +446,45 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_manifest_file_parses_static_metadata() {
+        let manifest = ron::from_str::<PageManifestFile>(
+            r#"(
+                url: "vmux://tools/",
+                title: "Tools",
+                title_message_id: "tools-title",
+                keywords: ["tools", "mcp"],
+                icon: "Hammer",
+                command_bar: true,
+            )"#,
+        )
+        .unwrap();
+
+        assert_eq!(manifest.url, "vmux://tools/");
+        assert_eq!(manifest.title, "Tools");
+        assert_eq!(manifest.title_message_id, "tools-title");
+        assert_eq!(manifest.keywords, ["tools", "mcp"]);
+        assert_eq!(manifest.icon, "Hammer");
+        assert!(manifest.command_bar);
+    }
+
+    #[test]
+    fn page_manifest_file_rejects_unknown_metadata() {
+        assert!(
+            ron::from_str::<PageManifestFile>(
+                r#"(
+                    url: "vmux://tools/",
+                    title: "Tools",
+                    unknown: true,
+                )"#,
+            )
+            .is_err()
+        );
+    }
 }

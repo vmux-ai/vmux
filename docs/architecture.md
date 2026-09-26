@@ -400,6 +400,9 @@ Each feature declares its own native page with `#[vmux_native::page(...)]`. The 
 owns the route, renderer description and registration plugin. Building the feature plugin
 spawns that registration as an ECS entity. `vmux_browser` only discovers registrations and
 runs the native-page lifecycle; it has no catalog of which product pages exist.
+Static route, title, icon, keyword, and command-bar metadata may live in a crate-relative RON
+file selected with `file = "src/ui.ron"`; renderer components and typed ECS capabilities remain
+in the Rust attribute.
 
 A page's components are ordinary Dioxus — the *same* code the phone runs. What differs is
 who executes them. There is no renderer and no `dioxus-desktop`: `PageDom` owns a

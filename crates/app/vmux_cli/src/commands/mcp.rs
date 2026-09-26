@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use bevy_app::{App, Plugin};
 use clap::Args;
-use vmux_service::protocol::ProcessId;
+use vmux_api::protocol::ProcessId;
 
 #[derive(Clone, Debug, Args)]
 pub struct McpArgs {

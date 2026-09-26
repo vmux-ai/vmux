@@ -4,13 +4,13 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use crate::events::AgentCommandRequest;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
+use vmux_api::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 use vmux_api::room::RemoteModelState;
 use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommands,
 };
 use vmux_command::event::{StartSelectMode, StartSelectModel};
 use vmux_service::client::ServiceRequest;
-use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 use vmux_session::AcpSession;
 
 pub(super) struct ChatModelPlugin;
@@ -1040,12 +1040,12 @@ mod tests {
                     default_model_id: "default".into(),
                     pending: None,
                     models: vec![
-                        vmux_service::protocol::AcpModelOption {
+                        vmux_api::protocol::AcpModelOption {
                             id: "default".into(),
                             name: "Default".into(),
                             description: None,
                         },
-                        vmux_service::protocol::AcpModelOption {
+                        vmux_api::protocol::AcpModelOption {
                             id: "fable".into(),
                             name: "Fable".into(),
                             description: None,
@@ -1328,12 +1328,12 @@ mod tests {
                     default_model_id: "default".into(),
                     pending: None,
                     models: vec![
-                        vmux_service::protocol::AcpModelOption {
+                        vmux_api::protocol::AcpModelOption {
                             id: "default".into(),
                             name: "Default".into(),
                             description: None,
                         },
-                        vmux_service::protocol::AcpModelOption {
+                        vmux_api::protocol::AcpModelOption {
                             id: "fable".into(),
                             name: "Fable".into(),
                             description: None,

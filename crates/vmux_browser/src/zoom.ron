@@ -1,0 +1,23 @@
+[
+    (
+        id: "browser_zoom_in",
+        label: "Zoom In",
+        group: "Browser > View",
+        accelerator: Some("super+="),
+        mcp: Some((description: "Zoom In", allow_agent: true)),
+    ),
+    (
+        id: "browser_zoom_out",
+        label: "Zoom Out",
+        group: "Browser > View",
+        accelerator: Some("super+-"),
+        mcp: Some((description: "Zoom Out", allow_agent: true)),
+    ),
+    (
+        id: "browser_zoom_reset",
+        label: "Actual Size",
+        group: "Browser > View",
+        accelerator: Some("super+0"),
+        mcp: Some((description: "Actual Size", allow_agent: true)),
+    ),
+]

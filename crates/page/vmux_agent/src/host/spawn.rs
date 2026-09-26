@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use std::sync::atomic::{AtomicU64, Ordering};
+use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_command::WriteCommandRequests;
 use vmux_core::KeyboardOwner;
 use vmux_core::agent::{
@@ -12,7 +13,6 @@ use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::ForcePaneClose;
 use vmux_service::client::ServiceRequest;
 use vmux_service::plugin::ServiceConnected;
-use vmux_service::protocol::{ClientMessage, ProcessId};
 use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{

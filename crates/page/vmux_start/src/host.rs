@@ -738,7 +738,7 @@ fn begin_requested_inline_transition(
 mod tests {
     use super::*;
     use bevy_cef::prelude::UiInput;
-    use vmux_api::command_bar::{CommandBarUiState, CommandBarUiStatePatch};
+    use vmux_api::command_bar::CommandBarUiState;
     use vmux_core::host::UiStateWrite;
     use vmux_core::page::PageManifest;
 

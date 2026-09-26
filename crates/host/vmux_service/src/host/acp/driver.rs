@@ -30,11 +30,11 @@ use vmux_core::ProcessId;
 
 use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
 use crate::process::ProcessManager;
-use crate::protocol::{
+use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
+use vmux_api::protocol::{
     AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
     ServiceMessage, SharedEvent, compose_agent_prompt,
 };
-use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
@@ -572,14 +572,14 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
                 shared.emit(ServiceMessage::AgentCommand {
                     request_id: AgentRequestId::new(),
                     anchor: Some(shared.anchor),
-                    command: AgentCommand::FileTouched {
+                    command: AgentCommand::FileTouched(vmux_api::protocol::AgentFileTouched {
                         anchor: shared.anchor,
                         path,
                         line,
                         col: None,
                         end_col: None,
                         kind,
-                    },
+                    }),
                 });
             }
             Intent::WorkspaceChanged {
@@ -596,14 +596,14 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
 struct AcpModelInfoState {
     config_id: String,
     current_model_id: String,
-    models: Vec<crate::protocol::AcpModelOption>,
+    models: Vec<vmux_api::protocol::AcpModelOption>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AcpModeInfoState {
     config_id: String,
     current_mode_id: String,
-    modes: Vec<crate::protocol::AcpModeOption>,
+    modes: Vec<vmux_api::protocol::AcpModeOption>,
 }
 
 impl AcpModeInfoState {
@@ -652,7 +652,7 @@ fn model_info(config_options: &[SessionConfigOption]) -> Option<AcpModelInfoStat
         current_model_id: select.current_value.to_string(),
         models: options
             .into_iter()
-            .map(|option| crate::protocol::AcpModelOption {
+            .map(|option| vmux_api::protocol::AcpModelOption {
                 id: option.value.to_string(),
                 name: option.name.clone(),
                 description: option.description.clone(),
@@ -712,7 +712,7 @@ fn mode_info(
             current_mode_id: select.current_value.to_string(),
             modes: options
                 .into_iter()
-                .map(|option| crate::protocol::AcpModeOption {
+                .map(|option| vmux_api::protocol::AcpModeOption {
                     id: option.value.to_string(),
                     name: option.name.clone(),
                     description: option.description.clone(),
@@ -727,7 +727,7 @@ fn mode_info(
         modes: legacy
             .available_modes
             .iter()
-            .map(|mode| crate::protocol::AcpModeOption {
+            .map(|mode| vmux_api::protocol::AcpModeOption {
                 id: mode.id.to_string(),
                 name: mode.name.clone(),
                 description: mode.description.clone(),
@@ -3088,7 +3088,7 @@ mod tests {
     fn private_context_wraps_wire_prompt_without_changing_display_text() {
         let wire = compose_agent_prompt("continue here", Some("prior conversation"));
 
-        assert!(wire.starts_with(crate::protocol::PRIVATE_CONTEXT_PREFIX));
+        assert!(wire.starts_with(vmux_api::protocol::PRIVATE_CONTEXT_PREFIX));
         assert!(wire.contains("prior conversation"));
         assert!(wire.ends_with("continue here"));
         assert_eq!(compose_agent_prompt("plain", None), "plain");

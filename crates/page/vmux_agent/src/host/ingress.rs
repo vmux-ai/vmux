@@ -6,8 +6,8 @@ use crate::events::{
     PageAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
+use vmux_api::protocol::{ServiceMessage, SharedEvent};
 use vmux_service::client::ServiceInbound;
-use vmux_service::protocol::{ServiceMessage, SharedEvent};
 use vmux_terminal::ServiceMessageSet;
 
 pub(crate) struct AgentIngressPlugin;
@@ -238,7 +238,7 @@ fn route_service_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_service::protocol::{AgentCommand, AgentRequestId};
+    use vmux_api::protocol::{AgentCommand, AgentRequestId};
 
     #[test]
     fn routes_agent_messages_without_terminal_ownership() {
@@ -249,9 +249,9 @@ mod tests {
             .write_message(ServiceInbound(ServiceMessage::AgentCommand {
                 request_id,
                 anchor: None,
-                command: AgentCommand::RenameProfile {
+                command: AgentCommand::RenameProfile(vmux_api::protocol::AgentRenameProfile {
                     name: "Profile".into(),
-                },
+                }),
             }));
         app.world_mut()
             .write_message(ServiceInbound(ServiceMessage::Shared(

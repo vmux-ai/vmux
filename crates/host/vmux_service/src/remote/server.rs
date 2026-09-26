@@ -10,8 +10,8 @@ use crate::acp::AcpSessionManager;
 use crate::agent::AgentSessionManager;
 use crate::agent_broker::AgentBroker;
 use crate::message::Message;
-use crate::protocol::AgentAttachment;
 use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
+use vmux_api::protocol::AgentAttachment;
 
 pub(crate) const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_ATTACHMENTS: usize = 16;
@@ -102,11 +102,11 @@ fn remote_enabled_at(path: &std::path::Path) -> bool {
 
 pub(crate) async fn broker_result(
     state: &RemoteState,
-    command: crate::protocol::AgentCommand,
-) -> Option<crate::protocol::AgentCommandResult> {
+    command: vmux_api::protocol::AgentCommand,
+) -> Option<vmux_api::protocol::AgentCommandResult> {
     state
         .broker
-        .command(crate::protocol::AgentRequestId::new(), None, command)
+        .command(vmux_api::protocol::AgentRequestId::new(), None, command)
         .await
         .ok()
 }

@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_api::protocol::{AgentCommand, AgentQuery, JsonValue};
+use vmux_api::protocol::{AgentCommand, AgentQuery, AgentUpdateSettings, JsonValue};
 use vmux_core::JsonArguments;
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
 
@@ -11,7 +11,7 @@ pub struct SettingToolPlugin;
 
 impl Plugin for SettingToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<SettingTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<SettingTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -78,10 +78,10 @@ fn update_settings(
         let command = if args.path.trim().is_empty() {
             Err("update_settings.path is empty".to_string())
         } else {
-            Ok(AgentCommand::UpdateSettings {
+            Ok(AgentCommand::UpdateSettings(AgentUpdateSettings {
                 path: args.path.clone(),
                 value: JsonValue::from(args.value.clone()),
-            })
+            }))
         };
         commands.entity(entity).insert(ToolCommand(command));
     }

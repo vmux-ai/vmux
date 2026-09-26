@@ -9,7 +9,7 @@ pub struct HistoryEntry {
     pub last_visited_at: i64,
 }
 
-#[vmux_api::ui_event(target = "history")]
+#[vmux_api::ui_event(url = "vmux://history/")]
 pub struct HistoryQueryRequest {
     pub query: Option<String>,
     pub offset: u32,
@@ -25,21 +25,21 @@ pub struct HistoryQueryResponse {
     pub has_more: bool,
 }
 
-#[vmux_api::ui_event(target = "history")]
+#[vmux_api::ui_event(url = "vmux://history/")]
 pub struct HistoryDeleteRequest {
     pub url_entity_bits: u64,
 }
 
-#[vmux_api::ui_event(target = "history")]
+#[vmux_api::ui_event(url = "vmux://history/")]
 pub struct HistoryClearAllRequest;
 
-#[vmux_api::ui_event(target = "history")]
+#[vmux_api::ui_event(url = "vmux://history/")]
 pub struct HistoryOpenRequest {
     pub url: String,
     pub in_new_stack: bool,
 }
 
-#[vmux_api::ui_event(targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_event(urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/"])]
 pub struct HistorySuggestionsRequest {
     pub query: String,
     pub limit: u32,

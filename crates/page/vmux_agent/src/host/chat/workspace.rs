@@ -3,10 +3,13 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::{AgentChatView, ChatBranchesProjection};
 use crate::events::{AgentCommandRequest, CommandOrigin};
+use vmux_api::protocol::{
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCommand as ServiceAgentCommand,
+    AgentCreateWorktreeOnBranch, AgentRequestId,
+};
 use vmux_chat::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };
-use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId};
 use vmux_session::AcpSession;
 use vmux_session::AgentApprovalPolicy;
 
@@ -316,16 +319,16 @@ fn on_chat_go_to_branch(
     let checkout = evt.checkout.trim();
     let command = if checkout.is_empty() {
         let project = evt.project.trim();
-        ServiceAgentCommand::CreateWorktreeOnBranch {
+        ServiceAgentCommand::CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch {
             anchor: session.anchor,
             branch: evt.branch.clone(),
             project: (!project.is_empty()).then(|| project.to_string()),
-        }
+        })
     } else {
-        ServiceAgentCommand::ChooseWorkspaceAtPath {
+        ServiceAgentCommand::ChooseWorkspaceAtPath(AgentChooseWorkspaceAtPath {
             anchor: session.anchor,
             path: checkout.to_string(),
-        }
+        })
     };
     requests.write(AgentCommandRequest {
         request_id: AgentRequestId::new(),
@@ -349,9 +352,9 @@ fn on_chat_select_workspace(
     requests.write(AgentCommandRequest {
         request_id: AgentRequestId::new(),
         origin: CommandOrigin::User,
-        command: ServiceAgentCommand::ChooseWorkspace {
+        command: ServiceAgentCommand::ChooseWorkspace(AgentChooseWorkspace {
             anchor: session.anchor,
-        },
+        }),
     });
 }
 
@@ -400,8 +403,8 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert!(matches!(requests[0].origin, CommandOrigin::User));
         assert!(matches!(
-            requests[0].command,
-            ServiceAgentCommand::ChooseWorkspace { anchor: got } if got == anchor
+            &requests[0].command,
+            ServiceAgentCommand::ChooseWorkspace(command) if command.anchor == anchor
         ));
     }
 
@@ -438,12 +441,11 @@ mod tests {
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(requests.len(), 1);
-        let ServiceAgentCommand::CreateWorktreeOnBranch { project, .. } = &requests[0].command
-        else {
+        let ServiceAgentCommand::CreateWorktreeOnBranch(command) = &requests[0].command else {
             panic!("an unheld branch creates a worktree");
         };
         assert_eq!(
-            project.as_deref(),
+            command.project.as_deref(),
             Some("/tmp/elsewhere"),
             "without it the worktree lands under whatever project the tab happens to hold"
         );

@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use crossbeam_channel::Receiver;
+use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_core::LastActivatedAt;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::{PlacementCtx, resolve_spiral_pane};
 use vmux_layout::stack::stack_bundle;
 use vmux_service::client::ServiceRequest;
-use vmux_service::protocol::{ClientMessage, SharedMessage};
 use vmux_terminal::reattach_terminal_bundle;
 
 use crate::events::AgentApprovalRequest;
@@ -117,7 +117,7 @@ pub struct AcpModelState {
     pub current_model_id: String,
     pub default_model_id: String,
     pub(crate) pending: Option<PendingAcpModelSelection>,
-    pub models: Vec<vmux_service::protocol::AcpModelOption>,
+    pub models: Vec<vmux_api::protocol::AcpModelOption>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -448,7 +448,7 @@ fn acp_auto_approval_message(
         ClientMessage::Shared(SharedMessage::AgentApprove {
             sid: session.sid.clone(),
             call_id: request.call_id.clone(),
-            decision: vmux_service::protocol::ApprovalDecision::AllowAlways,
+            decision: vmux_api::protocol::ApprovalDecision::AllowAlways,
         })
     })
 }
@@ -664,7 +664,7 @@ mod tests {
             }))
                 if sid == "s1"
                     && call_id == "call-1"
-                    && decision == vmux_service::protocol::ApprovalDecision::AllowAlways
+                    && decision == vmux_api::protocol::ApprovalDecision::AllowAlways
         ));
     }
 
@@ -999,7 +999,7 @@ mod tests {
     #[test]
     fn live_acp_model_info_updates_only_matching_session() {
         use crate::events::PageAgentModelInfo;
-        use vmux_service::protocol::AcpModelOption;
+        use vmux_api::protocol::AcpModelOption;
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
@@ -1046,7 +1046,7 @@ mod tests {
     #[test]
     fn model_results_preserve_latest_pending_selection() {
         use crate::events::{PageAgentModelInfo, PageAgentModelSelectionResult};
-        use vmux_service::protocol::AcpModelOption;
+        use vmux_api::protocol::AcpModelOption;
 
         let models = vec![
             AcpModelOption {

@@ -1,11 +1,11 @@
 [
     (
-        kind: bookmark_list,
+        name: "bookmark_list",
         description: r#"List all pins (favicon quick-access) and bookmarks (saved pages, optionally inside folders) for the current profile. Returns JSON: {pins:[{uuid,url,title,favicon_url}], roots:[ {kind:"entry",...} | {kind:"folder",uuid,name,collapsed,children:[...]} ]}."#,
         input_schema: (type: Object),
     ),
     (
-        kind: bookmark_add,
+        name: "bookmark_add",
         description: r#"Save a page as a bookmark. Optional folder (a folder uuid from bookmark_list) nests it; omit for top level."#,
         input_schema: (
             type: Object,
@@ -19,7 +19,7 @@
         ),
     ),
     (
-        kind: bookmark_remove,
+        name: "bookmark_remove",
         description: "Remove a bookmark by its uuid (from bookmark_list).",
         input_schema: (
             type: Object,
@@ -28,7 +28,7 @@
         ),
     ),
     (
-        kind: bookmark_pin,
+        name: "bookmark_pin",
         description: r#"Pin a page to the favicon grid. Provide a bookmark uuid to promote an existing bookmark, OR a url (+optional title/favicon_url) to pin a page directly."#,
         input_schema: (
             one_of: [
@@ -49,7 +49,7 @@
         ]),
     ),
     (
-        kind: bookmark_unpin,
+        name: "bookmark_unpin",
         description: "Unpin a pin by its uuid (from bookmark_list).",
         input_schema: (
             type: Object,
@@ -58,7 +58,7 @@
         ),
     ),
     (
-        kind: bookmark_folder_create,
+        name: "bookmark_folder_create",
         description: "Create a bookmark folder with the given name.",
         input_schema: (
             type: Object,

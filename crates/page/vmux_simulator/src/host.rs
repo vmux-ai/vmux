@@ -13,7 +13,6 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use hid::HidBroker;
 use stream::StreamServer;
-use vmux_api::protocol::SimulatorInput;
 use vmux_core::PageMetadata;
 use vmux_core::host::page::{NativelyHosted, PageReady};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
@@ -38,7 +37,11 @@ impl Plugin for SimulatorPlugin {
             .add_message::<SimulatorClipboardRequest>()
             .add_message::<SimulatorSoftwareKeyboardRequest>()
             .add_message::<SimulatorFocusRequest>()
-            .add_message::<SimulatorControlRequest>()
+            .add_message::<SimulatorTapRequest>()
+            .add_message::<SimulatorSwipeRequest>()
+            .add_message::<SimulatorTypeTextRequest>()
+            .add_message::<SimulatorKeyPressRequest>()
+            .add_message::<SimulatorButtonPressRequest>()
             .add_message::<SimulatorControlResponse>()
             .add_message::<SimulatorScreenshotRequest>()
             .add_message::<SimulatorScreenshotResponse>()
@@ -85,10 +88,39 @@ pub struct SimulatorSoftwareKeyboardRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SimulatorFocusRequest(pub Option<Entity>);
 
-#[derive(Message, Clone)]
-pub struct SimulatorControlRequest {
+#[derive(Message, Clone, Copy)]
+pub struct SimulatorTapRequest {
     pub request_id: [u8; 16],
-    pub input: SimulatorInput,
+    pub x: u32,
+    pub y: u32,
+}
+
+#[derive(Message, Clone, Copy)]
+pub struct SimulatorSwipeRequest {
+    pub request_id: [u8; 16],
+    pub start_x: u32,
+    pub start_y: u32,
+    pub end_x: u32,
+    pub end_y: u32,
+    pub duration_ms: u32,
+}
+
+#[derive(Message, Clone)]
+pub struct SimulatorTypeTextRequest {
+    pub request_id: [u8; 16],
+    pub text: String,
+}
+
+#[derive(Message, Clone, Copy)]
+pub struct SimulatorKeyPressRequest {
+    pub request_id: [u8; 16],
+    pub keycode: u8,
+}
+
+#[derive(Message, Clone, Copy)]
+pub struct SimulatorButtonPressRequest {
+    pub request_id: [u8; 16],
+    pub button: vmux_api::protocol::SimulatorButton,
 }
 
 #[derive(Message, Clone)]

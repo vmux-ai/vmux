@@ -4,14 +4,16 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use vmux_api::protocol::{
-    AgentCommand, AgentPaneDirection, AgentQuery, AgentRequestId, AgentRunCompletion,
-    ClientMessage, PlacementMode, ProcessId, ServiceMessage,
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCommand, AgentCreateWorktreeOnBranch,
+    AgentOpenBeside, AgentPaneDirection, AgentPrepareWorktree, AgentQuery, AgentRequestId,
+    AgentRequestUserChoice, AgentResumeInAcp, AgentRun, AgentRunCompletion, ClientMessage,
+    PlacementMode, ProcessId, ServiceMessage,
 };
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_service::client::ServiceConnection;
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
 
@@ -22,7 +24,7 @@ pub struct WorkspaceToolPlugin;
 
 impl Plugin for WorkspaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<WorkspaceTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<WorkspaceTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -163,7 +165,7 @@ fn resume_in_acp(
             continue;
         }
         let result = ProcessAnchor::required(anchor, name.as_str())
-            .map(|anchor| AgentCommand::ResumeInAcp { anchor });
+            .map(|anchor| AgentCommand::ResumeInAcp(AgentResumeInAcp { anchor }));
         commands.entity(request).insert(ToolCommand(result));
     }
 }
@@ -224,12 +226,12 @@ fn open_page(
             if args.url.trim().is_empty() {
                 return Err("open_page.url is empty".to_string());
             }
-            Ok(AgentCommand::OpenBeside {
+            Ok(AgentCommand::OpenBeside(AgentOpenBeside {
                 anchor,
                 direction: args.direction.map(Into::into),
                 url: args.url.clone(),
                 focus: args.focus,
-            })
+            }))
         });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -251,12 +253,12 @@ fn open_file(
             } else {
                 format!("file://{path}")
             };
-            Ok(AgentCommand::OpenBeside {
+            Ok(AgentCommand::OpenBeside(AgentOpenBeside {
                 anchor,
                 direction: args.direction.map(Into::into),
                 url,
                 focus: args.focus,
-            })
+            }))
         });
         match command {
             Ok(command) if protocol_requests.contains(entity) => {
@@ -320,28 +322,20 @@ fn run(
                 "page",
             )?;
             let mode = args.mode.map(Into::into).unwrap_or(PlacementMode::Auto);
+            let run = AgentRun {
+                anchor,
+                command,
+                direction,
+                focus: args.focus,
+                beside,
+                mode,
+                terminal,
+                done_marker: None,
+            };
             let command = if placement_override {
-                AgentCommand::RunWithPlacementOverride {
-                    anchor,
-                    command,
-                    direction,
-                    focus: args.focus,
-                    beside,
-                    mode,
-                    terminal,
-                    done_marker: None,
-                }
+                AgentCommand::RunWithPlacementOverride(run)
             } else {
-                AgentCommand::Run {
-                    anchor,
-                    command,
-                    direction,
-                    focus: args.focus,
-                    beside,
-                    mode,
-                    terminal,
-                    done_marker: None,
-                }
+                AgentCommand::Run(run)
             };
             Ok(command)
         });
@@ -393,18 +387,18 @@ fn create_worktree(
     for (entity, name, anchor, args) in &requests {
         let command = ProcessAnchor::required(anchor, name.as_str()).map(|anchor| {
             if let Some(branch) = args.branch.clone().and_then(Trimmed::into_option) {
-                AgentCommand::CreateWorktreeOnBranch {
+                AgentCommand::CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch {
                     anchor,
                     branch,
                     project: None,
-                }
+                })
             } else {
-                AgentCommand::PrepareWorktree {
+                AgentCommand::PrepareWorktree(AgentPrepareWorktree {
                     anchor,
                     path: args.path.clone().and_then(Trimmed::into_option),
                     task: args.task.clone().and_then(Trimmed::into_option),
                     create: args.create,
-                }
+                })
             }
         });
         commands.entity(entity).insert(ToolCommand(command));
@@ -446,11 +440,11 @@ fn request_user_choice(
             if !(2..=9).contains(&options.len()) {
                 return Err("request_user_choice requires 2 to 9 options".to_string());
             }
-            Ok(AgentCommand::RequestUserChoice {
+            Ok(AgentCommand::RequestUserChoice(AgentRequestUserChoice {
                 anchor,
                 question,
                 options,
-            })
+            }))
         });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -466,8 +460,10 @@ fn select_project(
     for (entity, name, anchor, args) in &requests {
         let command = ProcessAnchor::required(anchor, name.as_str()).map(|anchor| {
             match args.path.clone().and_then(Trimmed::into_option) {
-                Some(path) => AgentCommand::ChooseWorkspaceAtPath { anchor, path },
-                None => AgentCommand::ChooseWorkspace { anchor },
+                Some(path) => {
+                    AgentCommand::ChooseWorkspaceAtPath(AgentChooseWorkspaceAtPath { anchor, path })
+                }
+                None => AgentCommand::ChooseWorkspace(AgentChooseWorkspace { anchor }),
             }
         });
         commands.entity(entity).insert(ToolCommand(command));
@@ -571,9 +567,8 @@ fn run_done_token(request_id: AgentRequestId) -> String {
 
 fn blocking_run_with_marker(mut run: AgentCommand, request_id: AgentRequestId) -> AgentCommand {
     match &mut run {
-        AgentCommand::Run { done_marker, .. }
-        | AgentCommand::RunWithPlacementOverride { done_marker, .. } => {
-            *done_marker = Some(run_done_token(request_id));
+        AgentCommand::Run(run) | AgentCommand::RunWithPlacementOverride(run) => {
+            run.done_marker = Some(run_done_token(request_id));
         }
         _ => {}
     }

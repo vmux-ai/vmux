@@ -232,7 +232,7 @@ pub struct GitUiStatePatch {
     pub shortcut_help_toggle: Option<GitShortcutHelpToggle>,
 }
 
-#[vmux_api::ui_state(Default, target = "git")]
+#[vmux_api::ui_state(Default, url = "git://")]
 pub struct GitUiState {
     pub sequence: u64,
     pub patches: Vec<GitUiStatePatch>,

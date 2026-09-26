@@ -1,4 +1,4 @@
-#[vmux_api::ui_state(Default, target = "simulator")]
+#[vmux_api::ui_state(Default, url = "vmux://simulator/")]
 pub struct SimulatorReady {
     pub port: u16,
     pub capability: String,
@@ -9,7 +9,7 @@ pub struct SimulatorReady {
     pub frame_stride: u32,
 }
 
-#[vmux_api::ui_event(Default, target = "simulator")]
+#[vmux_api::ui_event(Default, url = "vmux://simulator/")]
 pub struct SimulatorTouch {
     pub phase: SimulatorTouchPhase,
     pub x: f32,
@@ -26,7 +26,7 @@ pub enum SimulatorTouchPhase {
     Tap,
 }
 
-#[vmux_api::ui_event_variants(Eq, target = "simulator")]
+#[vmux_api::ui_event_variants(Eq, url = "vmux://simulator/")]
 pub enum SimulatorInputOperation {
     Text {
         text: String,
@@ -58,7 +58,7 @@ pub enum HardwareButton {
     Siri,
 }
 
-#[vmux_api::ui_event_variants(Copy, Eq, target = "simulator")]
+#[vmux_api::ui_event_variants(Copy, Eq, url = "vmux://simulator/")]
 pub enum SimulatorClipboardOperation {
     Copy,
     Cut,
@@ -66,7 +66,7 @@ pub enum SimulatorClipboardOperation {
     SelectAll,
 }
 
-#[vmux_api::ui_event(Copy, Eq, target = "simulator")]
+#[vmux_api::ui_event(Copy, Eq, url = "vmux://simulator/")]
 pub struct SimulatorSoftwareKeyboard;
 
 impl HardwareButton {

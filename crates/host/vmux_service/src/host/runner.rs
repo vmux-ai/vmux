@@ -4,7 +4,7 @@ use bevy_app::prelude::*;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 
-use crate::protocol::ProcessId;
+use vmux_api::protocol::ProcessId;
 
 const HOUSEKEEPING_FLOOR: Duration = Duration::from_secs(1);
 

@@ -87,7 +87,7 @@ impl TermViewportPatch {
     }
 }
 
-#[vmux_api::ui_event(Eq, Default, target = "terminal")]
+#[vmux_api::ui_event(Eq, Default, url = "vmux://terminal/")]
 pub struct TermScrollEvent {
     pub top_row: u32,
     pub follow: bool,
@@ -113,7 +113,7 @@ pub const MOD_ALT: u8 = 2;
 pub const MOD_SHIFT: u8 = 4;
 pub const MOD_SUPER: u8 = 8;
 
-#[vmux_api::ui_event(Default, target = "terminal")]
+#[vmux_api::ui_event(Default, url = "vmux://terminal/")]
 pub struct TermMouseEvent {
     pub button: u8,
     pub col: u16,
@@ -124,12 +124,12 @@ pub struct TermMouseEvent {
     pub moving: bool,
 }
 
-#[vmux_api::ui_event(Default, Eq, target = "terminal")]
+#[vmux_api::ui_event(Default, Eq, url = "vmux://terminal/")]
 pub struct TermLinkOpenRequest {
     pub url: String,
 }
 
-#[vmux_api::ui_event(Default, target = "terminal")]
+#[vmux_api::ui_event(Default, url = "vmux://terminal/")]
 pub struct TermResizeEvent {
     pub char_width: f32,
     pub char_height: f32,
@@ -154,7 +154,7 @@ pub struct TerminalUiStatePatch {
     pub prompt_draft: Option<AgentPromptDraftEvent>,
 }
 
-#[vmux_api::ui_state(Default, target = "terminal")]
+#[vmux_api::ui_state(Default, url = "vmux://terminal/")]
 pub struct TerminalUiState {
     pub sequence: u64,
     pub patches: Vec<TerminalUiStatePatch>,

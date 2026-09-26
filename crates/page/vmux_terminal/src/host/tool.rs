@@ -1,17 +1,18 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use vmux_api::protocol::{AgentCommand, AgentTerminalSend};
 use vmux_core::JsonArguments;
-use vmux_service::protocol::AgentCommand;
 
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolRequestSet,
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin,
+    ToolRequestSet,
 };
 
 pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<TerminalTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<TerminalTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -67,10 +68,10 @@ fn dispatch(
         let command = if text.is_empty() {
             Err("terminal_send.text is empty".to_string())
         } else {
-            Ok(AgentCommand::TerminalSend {
+            Ok(AgentCommand::TerminalSend(AgentTerminalSend {
                 text,
                 terminal: args.terminal.clone(),
-            })
+            }))
         };
         commands.entity(entity).insert(ToolCommand(command));
     }

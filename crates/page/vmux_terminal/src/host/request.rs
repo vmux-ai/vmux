@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_service::protocol::ProcessId;
+use vmux_api::protocol::ProcessId;
 
 use crate::host::input_queue::{
     InputQueuePlugin, NextTerminalInputSequence, enqueue_terminal_input,

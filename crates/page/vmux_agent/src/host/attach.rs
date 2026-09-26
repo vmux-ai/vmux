@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
+use vmux_api::protocol::{
+    AgentCommand as ServiceAgentCommand, AgentCommandResult, ClientMessage, ProcessId,
+};
 use vmux_command::WriteCommandRequests;
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentKind;
 use vmux_service::client::ServiceRequest;
-use vmux_service::protocol::{
-    AgentCommand as ServiceAgentCommand, AgentCommandResult, ClientMessage, ProcessId,
-};
 use vmux_setting::AppSettings;
 use vmux_terminal::ServiceMessageSet;
 use vmux_terminal::Terminal;
@@ -151,7 +151,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
         bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
         icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
     });
-    let anchor = vmux_service::protocol::ProcessId::new();
+    let anchor = vmux_api::protocol::ProcessId::new();
     commands.entity(stack).insert((
         vmux_session::AcpSession {
             agent_id: agent_id.to_string(),
@@ -291,9 +291,10 @@ fn handle_resume_in_acp(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
-        let ServiceAgentCommand::ResumeInAcp { anchor } = &request.command else {
+        let ServiceAgentCommand::ResumeInAcp(command) = &request.command else {
             continue;
         };
+        let anchor = &command.anchor;
         let result = if !matches!(
             &request.origin,
             CommandOrigin::Agent {
@@ -351,7 +352,7 @@ fn handle_resume_in_acp(
 mod tests {
     use super::*;
     use crate::host::test_support::test_settings;
-    use vmux_service::protocol::AgentRequestId;
+    use vmux_api::protocol::AgentRequestId;
     use vmux_terminal::Terminal;
 
     #[test]
@@ -519,7 +520,9 @@ mod tests {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::ResumeInAcp { anchor },
+                command: ServiceAgentCommand::ResumeInAcp(vmux_api::protocol::AgentResumeInAcp {
+                    anchor,
+                }),
             });
 
         app.update();

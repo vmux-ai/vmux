@@ -1,4 +1,4 @@
-#[vmux_api::ui_state(Default, target = "settings")]
+#[vmux_api::ui_state(Default, url = "vmux://settings/")]
 pub struct SettingsUiState {
     pub sections: Vec<SettingsSection>,
     pub fields: Vec<SettingsRenderField>,

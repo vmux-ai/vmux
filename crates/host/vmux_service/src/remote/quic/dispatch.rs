@@ -158,7 +158,7 @@ fn new_chat_op_id(command: &SharedAgentCommand) -> Option<ClientOpId> {
 }
 
 async fn broker(state: &RemoteState, command: SharedAgentCommand) -> SharedResponse {
-    use crate::protocol::AgentCommandResult;
+    use vmux_api::protocol::AgentCommandResult;
     match super::super::server::broker_result(state, command.into()).await {
         Some(AgentCommandResult::Text(json)) => SharedResponse::BrokerJson(json),
         Some(AgentCommandResult::Ok) | Some(AgentCommandResult::Layout(_)) => SharedResponse::Ok,

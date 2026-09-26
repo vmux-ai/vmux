@@ -17,24 +17,10 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_native::page(
-    url = "vmux://tools/",
-    title = "Tools",
+    file = "src/ui.ron",
     component = Page,
     subtree,
-    takes = vmux_core::PageMetadata,
-    manifest,
-    title_message_id = "tools-title",
-    keywords = [
-        "packages",
-        "tools",
-        "dotfiles",
-        "homebrew",
-        "npm",
-        "mcp",
-        "import"
-    ],
-    icon = vmux_core::BuiltinIcon::Hammer,
-    command_bar
+    takes = vmux_core::PageMetadata
 )]
 pub struct ToolsPage;
 

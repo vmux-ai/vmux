@@ -37,7 +37,7 @@ pub fn clamp_panel_placement(
     }
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq, target = "layout")]
+#[vmux_api::ui_event(Copy, Default, Eq, url = "vmux://layout/")]
 pub struct CommandBarPanelRequest {
     pub active: bool,
 }

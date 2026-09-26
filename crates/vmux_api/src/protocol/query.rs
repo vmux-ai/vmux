@@ -1,5 +1,35 @@
-use super::SimulatorInput;
+use super::SimulatorButton;
 use crate::{ProcessId, json::JsonValue};
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct SimulatorTap {
+    pub x: u32,
+    pub y: u32,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct SimulatorSwipe {
+    pub start_x: u32,
+    pub start_y: u32,
+    pub end_x: u32,
+    pub end_y: u32,
+    pub duration_ms: u32,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct SimulatorTypeText {
+    pub text: String,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct SimulatorKeyPress {
+    pub keycode: u8,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct SimulatorButtonPress {
+    pub button: SimulatorButton,
+}
 
 #[vmux_api::contract(Eq)]
 pub struct AgentSpace {
@@ -104,9 +134,11 @@ pub enum AgentQuery {
     },
     BookmarkList,
     SimulatorScreenshot,
-    SimulatorControl {
-        input: SimulatorInput,
-    },
+    SimulatorTap(SimulatorTap),
+    SimulatorSwipe(SimulatorSwipe),
+    SimulatorTypeText(SimulatorTypeText),
+    SimulatorKeyPress(SimulatorKeyPress),
+    SimulatorButtonPress(SimulatorButtonPress),
     WorkingDirectory {
         anchor: ProcessId,
     },

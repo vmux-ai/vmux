@@ -1,9 +1,12 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use vmux_api::protocol::{AgentCommand, AgentQuery};
+use vmux_api::protocol::{
+    AgentCommand, AgentOpenBeside, AgentQuery, AgentReadKnowledge, AgentSearchKnowledge,
+    AgentSetConversationTitle, AgentWriteKnowledge,
+};
 use vmux_core::{JsonArguments, ProcessAnchor};
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
 
@@ -11,7 +14,7 @@ pub struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolManifestPlugin::<KnowledgeTool>::new(include_str!(
+        app.add_plugins(ToolKindManifestPlugin::<KnowledgeTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -158,12 +161,12 @@ fn open_vault(
                     VaultProvider::Github => "vmux://vault/?provider=github",
                     VaultProvider::CloudFolder => "vmux://vault/?provider=cloud_folder",
                 };
-                AgentCommand::OpenBeside {
+                AgentCommand::OpenBeside(AgentOpenBeside {
                     anchor,
                     direction: None,
                     url: url.to_string(),
                     focus: true,
-                }
+                })
             });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -196,7 +199,9 @@ fn set_conversation_title(
                 if title.chars().count() > 120 {
                     return Err("set_conversation_title.title exceeds 120 characters".to_string());
                 }
-                Ok(AgentCommand::SetConversationTitle { anchor, title })
+                Ok(AgentCommand::SetConversationTitle(
+                    AgentSetConversationTitle { anchor, title },
+                ))
             });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -224,11 +229,11 @@ fn search(
                 if !(1..=100).contains(&limit) {
                     return Err("search_knowledge.limit must be between 1 and 100".to_string());
                 }
-                Ok(AgentCommand::SearchKnowledge {
+                Ok(AgentCommand::SearchKnowledge(AgentSearchKnowledge {
                     anchor,
                     query,
                     limit: limit as u16,
-                })
+                }))
             });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -260,12 +265,12 @@ fn read(
                 if !(1..=2_000).contains(&limit) {
                     return Err("read_knowledge.limit must be between 1 and 2000".to_string());
                 }
-                Ok(AgentCommand::ReadKnowledge {
+                Ok(AgentCommand::ReadKnowledge(AgentReadKnowledge {
                     anchor,
                     path,
                     line: line as u32,
                     limit: limit as u32,
-                })
+                }))
             });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -292,12 +297,12 @@ fn write(
                 let title = Text::required(args.title.clone(), "write_knowledge.title is empty")?;
                 let content =
                     Text::required(args.content.clone(), "write_knowledge.content is empty")?;
-                Ok(AgentCommand::WriteKnowledge {
+                Ok(AgentCommand::WriteKnowledge(AgentWriteKnowledge {
                     anchor,
                     path,
                     title,
                     content,
-                })
+                }))
             });
         commands.entity(entity).insert(ToolCommand(command));
     }

@@ -17,7 +17,7 @@ enum Events {}
 
 impl vmux_api::BinEventFamily for Events {
     const TARGET: vmux_api::BinEventTarget =
-        vmux_api::BinEventTarget::Hosts(&["sessions", "agent", "start"]);
+        vmux_api::BinEventTarget::Urls(&["vmux://sessions/", "vmux://agent/", "vmux://start/"]);
 }
 
 #[vmux_api::contract(Default, Eq)]

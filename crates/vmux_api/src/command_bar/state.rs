@@ -20,13 +20,13 @@ pub struct CommandBarUiStatePatch {
     pub focus_input: Option<CommandBarFocusInput>,
 }
 
-#[vmux_api::ui_state(Default, targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_state(Default, urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/"])]
 pub struct CommandBarUiState {
     pub sequence: u64,
     pub patches: Vec<CommandBarUiStatePatch>,
 }
 
-#[vmux_api::ui_state(Default, targets = ["command-bar", "start", "layout"])]
+#[vmux_api::ui_state(Default, urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/"])]
 pub struct CommandPaletteState {
     pub open_id: super::OpenId,
     pub projection: super::CommandPaletteProjection,

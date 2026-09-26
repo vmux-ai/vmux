@@ -30,7 +30,7 @@ struct AgentInstallPane {
     setup_stack: Entity,
     setup_webview: Entity,
     agent: AgentKind,
-    process_id: vmux_service::protocol::ProcessId,
+    process_id: vmux_api::protocol::ProcessId,
     armed: bool,
 }
 
@@ -100,7 +100,7 @@ fn detect_agent_install_outcome(
     setup_stacks: Query<&vmux_core::PageMetadata, With<vmux_layout::stack::Stack>>,
     mut commands: Commands,
 ) {
-    use vmux_service::protocol::CommandLifecycleKind;
+    use vmux_api::protocol::CommandLifecycleKind;
     for ev in events.read() {
         for (install_pane, mut pane) in &mut install_panes {
             if pane.process_id != ev.process_id {
@@ -210,7 +210,7 @@ fn on_agent_install_run(
         true,
         already_split,
     );
-    let process_id = vmux_service::protocol::ProcessId::new();
+    let process_id = vmux_api::protocol::ProcessId::new();
     commands.entity(install_pane).insert(AgentInstallPane {
         setup_stack,
         setup_webview: webview,
@@ -337,7 +337,7 @@ mod tests {
                 setup_stack: Entity::PLACEHOLDER,
                 setup_webview,
                 agent: AgentKind::Codex,
-                process_id: vmux_service::protocol::ProcessId::new(),
+                process_id: vmux_api::protocol::ProcessId::new(),
                 armed: false,
             },
             AgentInstallCompleted {

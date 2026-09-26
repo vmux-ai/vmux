@@ -222,7 +222,7 @@ fn tidy_follow_pane(
 fn tidy_on_agent_attention(
     mut reader: MessageReader<vmux_core::notify::AgentAttention>,
     settings: Option<Res<AppSettings>>,
-    agents: Query<&vmux_service::protocol::ProcessId, With<vmux_core::team::Agent>>,
+    agents: Query<&vmux_api::protocol::ProcessId, With<vmux_core::team::Agent>>,
     layout: AgentFileLayout,
     last_activated: Query<&vmux_core::LastActivatedAt>,
     pending: Query<(), With<PendingTidy>>,

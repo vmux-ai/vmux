@@ -2,10 +2,11 @@ use std::io::{self, Read};
 
 use bevy_ecs::prelude::*;
 use clap::Args;
-use vmux_service::client::ServiceConnection;
-use vmux_service::protocol::{
-    AGENT_COMMAND_TIMEOUT, AgentCommand, AgentRequestId, ClientMessage, ProcessId, ServiceMessage,
+use vmux_api::protocol::{
+    AGENT_COMMAND_TIMEOUT, AgentCommand, AgentRequestId, AgentTurnEnded, ClientMessage, ProcessId,
+    ServiceMessage,
 };
+use vmux_service::client::ServiceConnection;
 
 #[derive(Args, Clone, Component, Debug)]
 pub struct NotifyTurnEndRequest {
@@ -36,7 +37,7 @@ impl NotifyTurnEndRequest {
             .send(&ClientMessage::AgentCommand {
                 request_id,
                 anchor: Some(anchor),
-                command: AgentCommand::TurnEnded { anchor },
+                command: AgentCommand::TurnEnded(AgentTurnEnded { anchor }),
             })
             .await
             .is_err()

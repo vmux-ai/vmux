@@ -3,7 +3,7 @@ use crate::PageMetadata;
 enum Events {}
 
 impl crate::BinEventFamily for Events {
-    const TARGET: crate::BinEventTarget = crate::BinEventTarget::Host("layout");
+    const TARGET: crate::BinEventTarget = crate::BinEventTarget::Url("vmux://layout/");
 }
 
 #[vmux_api::contract(Eq, Default)]

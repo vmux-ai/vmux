@@ -628,10 +628,10 @@ impl Browsers {
         self.externally_hosted.contains(webview) || self.host_emit_ready(webview)
     }
 
-    pub fn page_host(&self, webview: &Entity) -> Option<String> {
+    pub fn page_url(&self, webview: &Entity) -> Option<String> {
         let browser = self.browsers.get(webview)?;
         let frame = browser.client.main_frame()?;
-        crate::util::embedded_page_host_of(&frame.url().into_string())
+        Some(frame.url().into_string())
     }
 
     /// Declare that `webview`'s page is served by another engine.

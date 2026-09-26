@@ -1,4 +1,3 @@
-use crate::protocol::{ClientMessage, ServiceMessage};
 use crate::{DaemonBinary, DaemonIdentity, ServicePaths};
 use bevy_ecs::prelude::*;
 use std::sync::Arc;
@@ -6,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tokio::sync::Mutex as TokioMutex;
+use vmux_api::protocol::{ClientMessage, ServiceMessage};
 
 pub struct ServiceConnection {
     reader: TokioMutex<BufReader<tokio::net::unix::OwnedReadHalf>>,
@@ -150,7 +150,7 @@ impl ServiceHandle {
                 let mut stream = stream;
                 crate::write_message_blocking!(
                     &mut stream,
-                    &crate::protocol::ClientMessage::Shutdown
+                    &vmux_api::protocol::ClientMessage::Shutdown
                 )
             });
             tracing::info!(?outcome, "replaced running daemon");

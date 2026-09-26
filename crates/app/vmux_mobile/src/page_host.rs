@@ -46,7 +46,7 @@ const MODEL_FETCH_ATTEMPTS: u8 = 5;
 
 const MODEL_RETRY_INTERVAL_MS: u32 = 1_000;
 
-const MOBILE_PAGE_HOSTS: &[&str] = &["sessions", "agent", "start"];
+const MOBILE_PAGE_URLS: &[&str] = &["vmux://sessions/", "vmux://agent/", "vmux://start/"];
 
 pub(crate) struct MobileHost {
     epoch: u64,
@@ -151,7 +151,7 @@ impl PageHost for MobileHost {
         id: &str,
         bytes: &[u8],
     ) -> Result<(), EventListenerError> {
-        if !target.accepts_any(MOBILE_PAGE_HOSTS) {
+        if !target.accepts_any(MOBILE_PAGE_URLS) {
             return Err(EventListenerError::Unsupported);
         }
         match id {
@@ -202,7 +202,7 @@ impl PageHost for MobileHost {
         id: &str,
         on_bytes: BytesListener,
     ) -> Result<(), EventListenerError> {
-        if !target.accepts_any(MOBILE_PAGE_HOSTS) {
+        if !target.accepts_any(MOBILE_PAGE_URLS) {
             return Err(EventListenerError::Unsupported);
         }
         match id {

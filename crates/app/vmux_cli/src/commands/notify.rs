@@ -2,11 +2,11 @@ use std::io;
 
 use bevy_ecs::prelude::*;
 use clap::Args;
-use vmux_service::client::ServiceConnection;
-use vmux_service::protocol::{
-    AGENT_COMMAND_TIMEOUT, AgentCommand, AgentCommandResult, AgentRequestId, ClientMessage,
-    ProcessId, ServiceMessage,
+use vmux_api::protocol::{
+    AGENT_COMMAND_TIMEOUT, AgentCommand, AgentCommandResult, AgentNotify, AgentRequestId,
+    ClientMessage, ProcessId, ServiceMessage,
 };
+use vmux_service::client::ServiceConnection;
 
 #[derive(Args, Clone, Component, Debug)]
 pub struct NotifyRequest {
@@ -45,10 +45,10 @@ impl NotifyRequest {
             .send(&ClientMessage::AgentCommand {
                 request_id,
                 anchor,
-                command: AgentCommand::Notify {
+                command: AgentCommand::Notify(AgentNotify {
                     title: self.title,
                     body: self.body,
-                },
+                }),
             })
             .await
         {

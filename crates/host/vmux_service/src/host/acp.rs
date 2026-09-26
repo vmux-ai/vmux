@@ -12,8 +12,8 @@ use tokio::sync::{broadcast, mpsc};
 use vmux_core::ProcessId;
 
 use crate::process::ProcessManager;
-use crate::protocol::ServiceMessage;
 use crate::remote::RemoteSession;
+use vmux_api::protocol::ServiceMessage;
 
 struct AcpHandle {
     input_tx: mpsc::UnboundedSender<AcpInput>,
