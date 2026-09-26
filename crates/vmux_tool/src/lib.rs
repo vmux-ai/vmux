@@ -3,10 +3,14 @@
 #[cfg(not(target_os = "ios"))]
 mod connection;
 mod dotfiles;
+#[cfg(ui)]
+mod extension;
 mod homebrew;
 mod manifest;
 mod mcp;
 mod npm;
+#[cfg(ui)]
+mod ui;
 
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
@@ -28,6 +32,9 @@ pub struct ToolPlugin;
 
 impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins((ui::ToolsPage::plugin(), extension::ExtensionsPage::plugin()));
+
         app.add_plugins((
             ToolRuntimePlugin,
             npm::NpmToolPlugin,
@@ -35,7 +42,21 @@ impl Plugin for ToolPlugin {
             mcp::McpToolPlugin,
             dotfiles::DotfileToolPlugin,
         ));
+
+        #[cfg(all(host, ui))]
+        app.add_systems(bevy_app::Startup, spawn_tool_page);
     }
+}
+
+#[cfg(all(host, ui))]
+fn spawn_tool_page(mut commands: Commands) {
+    commands.spawn((
+        ui::ToolsPage::MANIFEST,
+        vmux_core::host::page::NativelyHosted::subtree(
+            ui::ToolsPage::URL,
+            ui::ToolsPage::NATIVE.title,
+        ),
+    ));
 }
 
 pub struct ToolRuntimePlugin;

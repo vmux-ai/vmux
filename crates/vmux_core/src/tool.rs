@@ -91,7 +91,6 @@ pub struct ToolCategory {
 pub struct ToolsSnapshot {
     pub loaded: bool,
     pub root: String,
-    pub vault: crate::vault::VaultSnapshot,
     pub categories: Vec<ToolCategory>,
     pub installed: u32,
     pub updates: u32,
@@ -127,7 +126,7 @@ pub struct ToolOperationNotice {
     pub message: String,
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 5, target = "tools")]
+#[vmux_api::ui_state(Default, Eq, version = 6, target = "tools")]
 pub struct ToolsUiState {
     pub snapshot: ToolsSnapshot,
     pub pending: Vec<ToolOperationKey>,

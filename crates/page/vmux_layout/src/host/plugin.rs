@@ -34,24 +34,7 @@ impl Plugin for LayoutPlugin {
         {
             app.add_plugins((
                 crate::ui::LayoutPage::plugin(),
-                crate::tool_page::ToolsPage::plugin(),
-                crate::vault_page::VaultPage::plugin(),
-                crate::extensions_page::ExtensionsPage::plugin(),
                 crate::error_page::ErrorPage::plugin(),
-            ));
-            app.world_mut().spawn((
-                crate::tool_page::ToolsPage::MANIFEST,
-                vmux_core::host::page::NativelyHosted::subtree(
-                    crate::tool_page::ToolsPage::URL,
-                    crate::tool_page::ToolsPage::NATIVE.title,
-                ),
-            ));
-            app.world_mut().spawn((
-                crate::vault_page::VaultPage::MANIFEST,
-                vmux_core::host::page::NativelyHosted::page(
-                    crate::vault_page::VaultPage::URL,
-                    crate::vault_page::VaultPage::NATIVE.title,
-                ),
             ));
         }
         app.add_plugins((LayoutContractPlugin, LayoutRequestPlugin))

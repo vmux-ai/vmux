@@ -1,5 +1,6 @@
 [package]
 name = "vmux_tool"
+build = "../build_cfg.rs"
 description = "Tool inventory, manifests, imports, and dotfile management"
 version.workspace = true
 edition.workspace = true
@@ -15,6 +16,10 @@ toml = { workspace = true }
 vmux_path = { path = "../vmux_path" }
 vmux_profile = { path = "../vmux_profile" }
 vmux_core = { path = "../vmux_core" }
+vmux_api = { path = "../vmux_api" }
+vmux_layout = { path = "../page/vmux_layout" }
+vmux_native = { path = "../vmux_native" }
+vmux_ui = { path = "../vmux_ui", default-features = false }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 bevy = { workspace = true }
@@ -24,8 +29,9 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 ring = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
-vmux_api = { path = "../vmux_api" }
-vmux_layout = { path = "../page/vmux_layout" }
+
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+dioxus = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

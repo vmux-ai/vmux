@@ -7,6 +7,9 @@ use bevy::window::{MonitorSelection, WindowMode};
 
 pub(crate) struct WindowStatePlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct SyncWindowFullscreen;
+
 impl Plugin for WindowStatePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreUpdate, ensure_window_state).add_systems(
@@ -24,7 +27,8 @@ impl Plugin for WindowStatePlugin {
             (
                 sync_fullscreen_signal_from_mode,
                 restore_fullscreen_from_window_mode,
-            ),
+            )
+                .in_set(SyncWindowFullscreen),
         );
     }
 }

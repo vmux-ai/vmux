@@ -45,12 +45,12 @@ impl From<&ExtRow> for Approval {
 
 #[component]
 pub fn Page() -> Element {
-    let active_route = use_signal(|| crate::tool_page::ToolsRoute::Extensions);
+    let active_route = use_signal(|| crate::ui::ToolsRoute::Extensions);
     rsx! { ExtensionsManager { active_route } }
 }
 
 #[component]
-pub(crate) fn ExtensionsManager(active_route: Signal<crate::tool_page::ToolsRoute>) -> Element {
+pub(crate) fn ExtensionsManager(active_route: Signal<crate::ui::ToolsRoute>) -> Element {
     let locale = use_theme();
     let state = use_ui_state::<ExtensionsEvent>();
     let mut search = use_signal(String::new);
@@ -77,7 +77,7 @@ pub(crate) fn ExtensionsManager(active_route: Signal<crate::tool_page::ToolsRout
 
     rsx! {
         ManagerPage {
-            crate::tool_page::ToolsManagerTabs { active_route }
+            crate::ui::ToolsManagerTabs { active_route }
             ManagerHeader {
                 title: translate("extensions-title"),
                 count: snapshot.extensions.len(),
@@ -97,7 +97,7 @@ pub(crate) fn ExtensionsManager(active_route: Signal<crate::tool_page::ToolsRout
                         ManagerButton {
                             variant: ManagerButtonVariant::Primary,
                             onclick: move |_| {
-                                let _ = send(&crate::event::RestartRequestEvent);
+                                let _ = send(&vmux_layout::event::RestartRequestEvent);
                             },
                             {translate("extensions-relaunch")}
                         }

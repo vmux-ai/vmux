@@ -8,6 +8,8 @@ pub enum VmuxPlugin {
     Core(VmuxCorePlugin),
     #[plugin(feature = "layout", desktop, requires(core))]
     Layout(vmux_layout::LayoutPlugin),
+    #[plugin(feature = "vault", desktop, requires(layout))]
+    Vault(vmux_vault::VaultPlugin),
     #[plugin(feature = "core", option = core, desktop)]
     KeyStroke(vmux_core::input::KeyStrokePlugin),
     #[plugin(feature = "terminal", desktop, requires(layout, service))]
