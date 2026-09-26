@@ -24,8 +24,40 @@ pub struct AgentSessionToEntity(pub HashMap<(AgentKind, String), Entity>);
 #[derive(Resource, Default, Debug)]
 pub struct AgentSessionDirty(pub bool);
 
+pub(crate) struct AgentSessionLifecyclePlugin;
+
+impl Plugin for AgentSessionLifecyclePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<AgentSessionToEntity>()
+            .init_resource::<AgentSessionDirty>()
+            .add_message::<AgentSessionExited>()
+            .add_systems(Startup, start_agent_session_watchers)
+            .add_systems(
+                Update,
+                (track_session_id_inserts, track_session_id_removals).chain(),
+            )
+            .add_systems(
+                Update,
+                (mark_dirty_on_fs_change, mark_dirty_on_pending_added),
+            )
+            .add_systems(
+                Update,
+                (
+                    discover_pending_agent_sessions,
+                    detect_file_end_time_exit,
+                    clear_agent_session_dirty,
+                )
+                    .chain()
+                    .after(mark_dirty_on_fs_change)
+                    .after(mark_dirty_on_pending_added)
+                    .run_if(agent_session_dirty_run_condition),
+            )
+            .add_systems(Update, format_agent_url.after(track_session_id_inserts));
+    }
+}
+
 #[allow(clippy::type_complexity)]
-pub fn format_agent_url(
+fn format_agent_url(
     strategies: Res<AgentStrategies>,
     mut q: Query<
         (Option<&SessionId>, &AgentSession, &mut PageMetadata),
@@ -270,7 +302,7 @@ mod url_tests {
     }
 }
 
-pub fn mark_dirty_on_pending_added(
+fn mark_dirty_on_pending_added(
     added_pending: Query<(), Added<PendingAgentSession>>,
     added_session: Query<(), Added<SessionId>>,
     mut dirty: ResMut<AgentSessionDirty>,
@@ -280,15 +312,15 @@ pub fn mark_dirty_on_pending_added(
     }
 }
 
-pub fn agent_session_dirty_run_condition(dirty: Res<AgentSessionDirty>) -> bool {
+fn agent_session_dirty_run_condition(dirty: Res<AgentSessionDirty>) -> bool {
     dirty.0
 }
 
-pub fn clear_agent_session_dirty(mut dirty: ResMut<AgentSessionDirty>) {
+fn clear_agent_session_dirty(mut dirty: ResMut<AgentSessionDirty>) {
     dirty.0 = false;
 }
 
-pub fn discover_pending_agent_sessions(
+fn discover_pending_agent_sessions(
     mut commands: Commands,
     strategies: Res<AgentStrategies>,
     map: Res<AgentSessionToEntity>,
@@ -318,7 +350,7 @@ pub fn discover_pending_agent_sessions(
     }
 }
 
-pub fn track_session_id_inserts(
+fn track_session_id_inserts(
     mut map: ResMut<AgentSessionToEntity>,
     inserted: Query<(Entity, &SessionId, &AgentSession), Added<SessionId>>,
 ) {
@@ -327,7 +359,7 @@ pub fn track_session_id_inserts(
     }
 }
 
-pub fn track_session_id_removals(
+fn track_session_id_removals(
     mut map: ResMut<AgentSessionToEntity>,
     mut removed: RemovedComponents<SessionId>,
 ) {
@@ -395,7 +427,7 @@ struct AgentSessionWatcher {
     _watcher: RecommendedWatcher,
 }
 
-pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
+fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
     for strategy in strategies.cli_strategies() {
         let root = strategy.sessions_root();
         if std::fs::create_dir_all(&root).is_err() {
@@ -421,7 +453,7 @@ pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<Agen
     }
 }
 
-pub fn mark_dirty_on_fs_change(
+fn mark_dirty_on_fs_change(
     watchers: Query<&AgentSessionWatcher>,
     mut dirty: ResMut<AgentSessionDirty>,
 ) {
@@ -435,7 +467,7 @@ pub fn mark_dirty_on_fs_change(
     }
 }
 
-pub fn detect_file_end_time_exit(
+fn detect_file_end_time_exit(
     mut commands: Commands,
     mut exited_writer: MessageWriter<AgentSessionExited>,
     strategies: Res<AgentStrategies>,

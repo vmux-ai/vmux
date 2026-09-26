@@ -18,7 +18,7 @@ use crate::session::AgentSession;
 
 use super::follow::file_touch_url;
 use super::run_terminal::{
-    AgentCwd, AgentPane, AgentTerminalRegions, NextPaneSpawnSequence, PagerEnv,
+    AgentCwd, AgentPane, AgentTerminalRegion, NextPaneSpawnSequence, PagerEnv,
     PendingRunTerminalSpawn, PendingRunTerminalSpawns, ProjectsDirectory, RunCommand,
     RunPlacementPolicy, RunTerminal, RunTerminalBucketPanes, RunTerminalCandidate,
 };
@@ -51,14 +51,14 @@ impl Plugin for SelfCommandPlugin {
 
 fn resolve_self_pane(
     anchor: ProcessId,
-    agent_terms: &Query<(Entity, &ProcessId, &ChildOf)>,
+    agent_terms: &Query<(Entity, &ProcessId, &ChildOf, Option<&AgentTerminalRegion>)>,
     child_of_q: &Query<&ChildOf>,
-) -> Option<(Entity, Entity)> {
+) -> Option<(Entity, Entity, AgentTerminalRegion)> {
     use bevy::ecs::relationship::Relationship;
-    let (term, _, term_co) = agent_terms.iter().find(|(_, pid, _)| **pid == anchor)?;
+    let (term, _, term_co, region) = agent_terms.iter().find(|(_, pid, _, _)| **pid == anchor)?;
     let stack = term_co.get();
     let pane = child_of_q.get(stack).ok()?.get();
-    Some((term, pane))
+    Some((term, pane, region.copied().unwrap_or_default()))
 }
 
 fn ancestor_self_tab(
@@ -196,7 +196,7 @@ pub(crate) struct AgentSelfCommandWriters<'w> {
 #[allow(clippy::too_many_arguments)]
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
+    agent_terms: Query<(Entity, &ProcessId, &ChildOf, Option<&AgentTerminalRegion>)>,
     term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
     run_terms: Query<
         (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
@@ -214,7 +214,6 @@ fn handle_agent_self_commands(
     service: Option<Res<ServiceClient>>,
     active_space: Option<Res<ActiveSpace>>,
     settings: Res<AppSettings>,
-    mut regions: ResMut<AgentTerminalRegions>,
     mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
     mut tab_worktree: AgentTabWorktreeContext,
     mut workspace_picker: WorkspacePickerContext,
@@ -236,6 +235,7 @@ fn handle_agent_self_commands(
     let mut terminal_spawns: Vec<TerminalStackSpawnRequest> = Vec::new();
     let mut pending_run_spawns = PendingRunTerminalSpawns::default();
     let mut failed_worktree_anchors = std::collections::HashSet::new();
+    let mut terminal_regions = std::collections::HashMap::new();
     let mut workspace_picker_tabs: std::collections::HashSet<Entity> = workspace_picker
         .pickers
         .iter()
@@ -262,7 +262,7 @@ fn handle_agent_self_commands(
                 focus,
             } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("self process not found".to_string()),
-                Some((_, pane)) => {
+                Some((_, pane, _)) => {
                     let focus = request.origin.allows_focus(*focus);
                     writers.open_beside.write(vmux_layout::OpenBesideRequest {
                         pane,
@@ -319,7 +319,7 @@ fn handle_agent_self_commands(
                         Err(error) => AgentCommandResult::Error(error),
                     },
                     None => 'spawn: {
-                        let Some((agent_term, self_pane)) =
+                        let Some((agent_term, self_pane, stored_region)) =
                             resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q)
                         else {
                             break 'spawn AgentCommandResult::Error(
@@ -385,10 +385,13 @@ fn handle_agent_self_commands(
                         {
                             break 'spawn AgentCommandResult::Text(pid.to_string());
                         }
+                        let region = terminal_regions
+                            .entry(*anchor)
+                            .or_insert((agent_term, stored_region));
                         if beside.is_none()
                             && *mode == vmux_service::protocol::PlacementMode::Auto
                             && let Some(candidate) =
-                                regions.choose_reusable_terminal(*anchor, self_pane, &candidates)
+                                region.1.choose_reusable_terminal(self_pane, &candidates)
                         {
                             let Ok(launch) = launch_q.get(candidate.terminal) else {
                                 break 'spawn AgentCommandResult::Error(format!(
@@ -401,8 +404,8 @@ fn handle_agent_self_commands(
                                 launch,
                                 PagerEnv::Set,
                             ));
-                            regions.run_terminals.insert(*anchor, candidate.pid);
-                            regions.run_panes.insert(*anchor, candidate.pane);
+                            region.1.run_terminal = Some(candidate.pid);
+                            region.1.run_pane = Some(candidate.pane);
                             let sequence =
                                 NextPaneSpawnSequence::take(&mut spawn_counter, &ctx.seq_q);
                             commands.entity(candidate.pane).insert(sequence);
@@ -440,8 +443,9 @@ fn handle_agent_self_commands(
                         let target_pane = match (beside_pane, *mode) {
                             (anchor_pane, PlacementMode::Split) => {
                                 let bucket_pane = if anchor_pane.is_none() {
-                                    regions
-                                        .choose_bucket_pane(*anchor, self_pane, &candidates)
+                                    region
+                                        .1
+                                        .choose_bucket_pane(self_pane, &candidates)
                                         .filter(|pane| terminal_bucket_panes.contains(*pane))
                                         .or_else(|| terminal_bucket_panes.newest(self_pane))
                                 } else {
@@ -496,10 +500,10 @@ fn handle_agent_self_commands(
                             process_id: Some(new_pid),
                             activate: focus,
                         });
-                        regions.run_panes.insert(*anchor, target_pane);
+                        region.1.run_pane = Some(target_pane);
                         if beside.is_none() && *mode != vmux_service::protocol::PlacementMode::Split
                         {
-                            regions.run_terminals.insert(*anchor, new_pid);
+                            region.1.run_terminal = Some(new_pid);
                             pending_run_spawns.insert(
                                 *anchor,
                                 PendingRunTerminalSpawn {
@@ -519,7 +523,7 @@ fn handle_agent_self_commands(
                 options,
             } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, _)) => {
+                Some((agent_entity, _, _)) => {
                     let Some(session_entity) = ancestor_agent_session(
                         agent_entity,
                         &acp_sessions,
@@ -561,7 +565,7 @@ fn handle_agent_self_commands(
             ServiceAgentCommand::SetConversationTitle { anchor, title } => {
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                     None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some((agent_entity, _)) => {
+                    Some((agent_entity, _, _)) => {
                         let Some(session_entity) = ancestor_agent_session(
                             agent_entity,
                             &acp_sessions,
@@ -700,7 +704,7 @@ fn handle_agent_self_commands(
                 content,
             } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((_, pane)) => {
+                Some((_, pane, _)) => {
                     match vmux_core::knowledge::KnowledgeVault::user().write_note(
                         path.as_deref(),
                         title,
@@ -724,7 +728,7 @@ fn handle_agent_self_commands(
             | ServiceAgentCommand::ChooseWorkspaceAtPath { anchor, .. } => {
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                     None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some((agent_entity, pane)) => {
+                    Some((agent_entity, pane, _)) => {
                         let Some(tab_entity) =
                             ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
                         else {
@@ -797,7 +801,7 @@ fn handle_agent_self_commands(
                 create,
             } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, pane)) => {
+                Some((agent_entity, pane, _)) => {
                     let Some(tab_entity) =
                         ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
                     else {
@@ -951,7 +955,7 @@ fn handle_agent_self_commands(
             ServiceAgentCommand::CreateWorktree { anchor } => {
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                     None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some((_, pane)) => {
+                    Some((_, pane, _)) => {
                         let mut cur = pane;
                         let tab_e = loop {
                             if tab_worktree.tabs.get(cur).is_ok() {
@@ -1083,7 +1087,7 @@ fn handle_agent_self_commands(
                 project,
             } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, pane)) => {
+                Some((agent_entity, pane, _)) => {
                     let Some(tab_entity) =
                         ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
                     else {
@@ -1205,6 +1209,9 @@ fn handle_agent_self_commands(
     }
     for spawn in terminal_spawns {
         writers.terminal_stack_spawn.write(spawn);
+    }
+    for (_, (entity, region)) in terminal_regions {
+        commands.entity(entity).insert(region);
     }
 }
 

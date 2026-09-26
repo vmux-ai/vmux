@@ -47,7 +47,6 @@ pub use self::attach::{
     attach_acp_agent_to_stack, attach_page_agent_to_stack, page_agent_placeholder_url,
 };
 pub use self::provider::AgentExecutableOverride;
-pub use self::run_terminal::AgentTerminalRegions;
 pub use vmux_space::cwd::valid_cwd;
 
 pub(crate) use self::run_terminal::agent_terminal_shell;
@@ -70,8 +69,8 @@ pub use runtime::cli::strategy::CliAgentStrategy;
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
 pub use tool::WorkspaceToolPlugin;
-pub use visual_tool::VisualToolPlugin;
 pub use url::{AgentKind, AgentUrl};
+pub use visual_tool::VisualToolPlugin;
 pub use vmux_session::room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
     MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomEventIndex,

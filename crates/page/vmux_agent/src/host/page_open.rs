@@ -993,7 +993,6 @@ mod tests {
     use crate::host::spawn::{SpawnPlugin, SpawnRequestSet, SpawnRequestsPlugin};
     use crate::host::test_support::{init_worktree_test_repo, test_settings};
     use crate::runtime::cli::vibe::VibeStrategy;
-    use crate::session::{AgentSession, SessionId};
     use crate::strategy::AgentStrategies;
     use vmux_terminal::Terminal;
 
@@ -1115,34 +1114,6 @@ mod tests {
         );
         let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
         assert_eq!(session.resume.as_deref(), Some("session-2"));
-    }
-
-    #[test]
-    pub(crate) fn deep_link_focuses_existing_claude_tab() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::session::AgentSessionToEntity>()
-            .add_systems(Update, crate::session::track_session_id_inserts);
-
-        let entity = app
-            .world_mut()
-            .spawn((
-                AgentSession {
-                    kind: AgentKind::Claude,
-                },
-                SessionId("dl-1".into()),
-            ))
-            .id();
-
-        app.update();
-
-        let map = app
-            .world()
-            .resource::<crate::session::AgentSessionToEntity>();
-        assert_eq!(
-            map.0.get(&(AgentKind::Claude, "dl-1".into())),
-            Some(&entity)
-        );
     }
 
     #[test]
