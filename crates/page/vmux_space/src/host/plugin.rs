@@ -382,6 +382,9 @@ fn broadcast_spaces_to_views(
             continue;
         }
         if layout_ui.contains(entity) {
+            commands
+                .entity(entity)
+                .insert(vmux_layout::projection::SpacesProjection(payload.clone()));
             commands.trigger(vmux_core::host::UiStateWrite::<
                 vmux_layout::state::LayoutUiState,
             >::from_event(entity, &payload));
