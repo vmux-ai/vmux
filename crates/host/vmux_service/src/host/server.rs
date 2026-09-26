@@ -1,4 +1,4 @@
-use crate::process::{Process, ProcessManager, PtyInputWriter};
+use crate::process::{Process, ProcessManager};
 use crate::protocol::{
     AgentAttachment, AgentRequest, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
     ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
@@ -20,7 +20,6 @@ pub(crate) fn init_started_at() {
 }
 
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(16);
-type InputWriters = Arc<Mutex<HashMap<ProcessId, PtyInputWriter>>>;
 type PendingQueries = Arc<
     Mutex<
         HashMap<
@@ -142,7 +141,6 @@ where
 
 pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<ProcessId>) {
     let manager = Arc::new(Mutex::new(ProcessManager::new(wake_tx)));
-    let input_writers = Arc::new(Mutex::new(HashMap::new()));
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
     let pending_commands: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
@@ -166,7 +164,6 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
     init_started_at();
 
     let poll_mgr = Arc::clone(&manager);
-    let poll_input_writers = Arc::clone(&input_writers);
     let poll_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(PROCESS_POLL_INTERVAL);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -174,26 +171,15 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
         loop {
             interval.tick().await;
 
-            let reaped = {
-                let mut mgr = poll_mgr.lock().await;
-                let exited = mgr.poll_all();
-                let mut reaped = Vec::new();
-                for id in &exited {
-                    let keep = mgr
-                        .processes
-                        .get(id)
-                        .is_some_and(|process| process.keep_after_exit());
-                    if !keep {
-                        mgr.remove_process(id);
-                        reaped.push(*id);
-                    }
-                }
-                reaped
-            };
-            if !reaped.is_empty() {
-                let mut writers = poll_input_writers.lock().await;
-                for id in reaped {
-                    writers.remove(&id);
+            let mut mgr = poll_mgr.lock().await;
+            let exited = mgr.poll_all();
+            for id in exited {
+                let keep = mgr
+                    .processes
+                    .get(&id)
+                    .is_some_and(|process| process.keep_after_exit());
+                if !keep {
+                    mgr.remove_process(&id);
                 }
             }
         }
@@ -210,7 +196,6 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
                     }
                 };
                 let mgr = Arc::clone(&manager);
-                let input_writers = Arc::clone(&input_writers);
                 let agent_tx = agent_tx.clone();
                 let pending_queries = Arc::clone(&pending_queries);
                 let pending_commands = Arc::clone(&pending_commands);
@@ -222,7 +207,6 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
                     if let Err(e) = handle_client(
                         stream,
                         mgr,
-                        input_writers,
                         agent_tx,
                         pending_queries,
                         pending_commands,
@@ -324,7 +308,6 @@ fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String
 async fn handle_client(
     stream: tokio::net::UnixStream,
     manager: Arc<Mutex<ProcessManager>>,
-    input_writers: InputWriters,
     agent_tx: broadcast::Sender<ServiceMessage>,
     pending_queries: PendingQueries,
     pending_commands: PendingCommands,
@@ -375,14 +358,10 @@ async fn handle_client(
                 let created = {
                     let mut mgr = manager.lock().await;
                     mgr.create_process(process_id, command, args, cwd, env, cols, rows)
-                        .map(|(id, pid)| (id, pid, mgr.input_writer(&id)))
                 };
                 match created {
-                    Ok((id, pid, input_writer)) => {
+                    Ok((id, pid)) => {
                         created_processes.push(id);
-                        if let Some(input_writer) = input_writer {
-                            input_writers.lock().await.insert(id, input_writer);
-                        }
                         let resp = ServiceMessage::ProcessCreated {
                             process_id: id,
                             pid,
@@ -449,16 +428,12 @@ async fn handle_client(
             }
 
             ClientMessage::ProcessInput { process_id, data } => {
-                let can_write = {
+                let writer = {
                     let mgr = manager.lock().await;
                     mgr.processes
                         .get(&process_id)
-                        .is_some_and(|process| !process.is_copy_mode())
-                };
-                let writer = if can_write {
-                    input_writers.lock().await.get(&process_id).cloned()
-                } else {
-                    None
+                        .filter(|process| !process.is_copy_mode())
+                        .map(Process::input_writer)
                 };
                 if let Some(writer) = writer {
                     Process::write_input_to_writer(&writer, &data);
@@ -509,7 +484,6 @@ async fn handle_client(
             }
 
             ClientMessage::KillProcess { process_id } => {
-                input_writers.lock().await.remove(&process_id);
                 let mut mgr = manager.lock().await;
                 mgr.remove_process(&process_id);
                 if let Some(handle) = attached.lock().await.remove(&process_id) {
@@ -661,7 +635,6 @@ async fn handle_client(
                     let mut mgr = manager.lock().await;
                     mgr.shutdown();
                 }
-                input_writers.lock().await.clear();
                 let resp = ServiceMessage::ProcessList {
                     processes: Vec::new(),
                 };
@@ -1062,7 +1035,6 @@ async fn handle_client(
                     std::path::PathBuf::from(cwd),
                     anchor,
                     Arc::clone(&manager),
-                    Arc::clone(&input_writers),
                     mcp_servers,
                     resume_acp_session_id,
                     effort,
