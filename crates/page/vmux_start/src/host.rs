@@ -749,10 +749,13 @@ mod tests {
         trigger: On<UiStateWrite<CommandBarUiState>>,
         mut emitted: ResMut<EmittedIds>,
     ) {
-        let kind = match trigger.event().patch() {
-            CommandBarUiStatePatch::Snapshot(_) => "snapshot",
-            CommandBarUiStatePatch::FocusInput(_) => "focus",
-            _ => "other",
+        let patch = trigger.event().patch();
+        let kind = if patch.snapshot.is_some() {
+            "snapshot"
+        } else if patch.focus_input.is_some() {
+            "focus"
+        } else {
+            "other"
         };
         emitted.0.push(kind);
     }

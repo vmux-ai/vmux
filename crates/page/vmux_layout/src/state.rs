@@ -7,27 +7,27 @@ use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkStateEvent};
 use vmux_core::event::space::SpacesListEvent;
 use vmux_core::event::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent};
 
-#[vmux_api::ui_state_patch]
-pub enum LayoutUiStatePatch {
-    Layout(LayoutGeometry),
-    Stacks(StackNavigationState),
-    Tabs(TabListState),
-    Bookmarks(BookmarkStateEvent),
-    PaneTree(PaneTreeState),
-    SideSheet(SideSheetState),
-    Spaces(SpacesListEvent),
-    Projects(TabBoundaryState),
-    Remote(RemoteUiState),
-    Extensions(ExtensionsEvent),
-    ExtensionPopup(ExtensionPopupEvent),
-    ExtensionPopupSize(ExtensionPopupSizeEvent),
-    UpdateProgress(UpdateProgress),
-    UpdateReady(UpdateReady),
-    UpdateCleared(UpdateCleared),
-    BookmarkMenu(BookmarkMenuEffect),
-    Reload(ReloadEffect),
-    ActiveSession(Box<ActiveSessionState>),
-    Header(HeaderState),
+#[vmux_api::ui_state_patch(Default)]
+pub struct LayoutUiStatePatch {
+    pub layout: Option<LayoutGeometry>,
+    pub stacks: Option<StackNavigationState>,
+    pub tabs: Option<TabListState>,
+    pub bookmarks: Option<BookmarkStateEvent>,
+    pub pane_tree: Option<PaneTreeState>,
+    pub side_sheet: Option<SideSheetState>,
+    pub spaces: Option<SpacesListEvent>,
+    pub projects: Option<TabBoundaryState>,
+    pub remote: Option<RemoteUiState>,
+    pub extensions: Option<ExtensionsEvent>,
+    pub extension_popup: Option<ExtensionPopupEvent>,
+    pub extension_popup_size: Option<ExtensionPopupSizeEvent>,
+    pub update_progress: Option<UpdateProgress>,
+    pub update_ready: Option<UpdateReady>,
+    pub update_cleared: Option<UpdateCleared>,
+    pub bookmark_menu: Option<BookmarkMenuEffect>,
+    pub reload: Option<ReloadEffect>,
+    pub active_session: Option<Box<ActiveSessionState>>,
+    pub header: Option<HeaderState>,
 }
 
 #[vmux_api::ui_state(Default, target = "layout")]
@@ -52,7 +52,7 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let decoded = rkyv::from_bytes::<LayoutUiState, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded.sequence, 4);
-        assert!(matches!(decoded.patches[0], LayoutUiStatePatch::Layout(_)));
-        assert!(matches!(decoded.patches[1], LayoutUiStatePatch::Stacks(_)));
+        assert!(decoded.patches[0].layout.is_some());
+        assert!(decoded.patches[1].stacks.is_some());
     }
 }

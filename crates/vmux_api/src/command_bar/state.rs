@@ -7,17 +7,17 @@ use crate::space::ProjectBranch;
 #[vmux_api::contract(Copy, Default, Eq)]
 pub struct CommandBarFocusInput;
 
-#[vmux_api::ui_state_patch]
-pub enum CommandBarUiStatePatch {
-    Snapshot(Box<CommandBarOpenEvent>),
-    PathCompletion(PathCompleteResponse),
-    HistorySuggestions(HistorySuggestionsResponse),
-    PromptHistory(Box<PromptHistory>),
-    ProjectBranches(Box<StartProjectBranches>),
-    ResumableSessions(Box<ResumableSessions>),
-    Attachments(Box<ChatAttachments>),
-    MediaEntries(Box<ChatMediaEntries>),
-    FocusInput(CommandBarFocusInput),
+#[vmux_api::ui_state_patch(Default)]
+pub struct CommandBarUiStatePatch {
+    pub snapshot: Option<Box<CommandBarOpenEvent>>,
+    pub path_completion: Option<PathCompleteResponse>,
+    pub history_suggestions: Option<HistorySuggestionsResponse>,
+    pub prompt_history: Option<Box<PromptHistory>>,
+    pub project_branches: Option<Box<StartProjectBranches>>,
+    pub resumable_sessions: Option<Box<ResumableSessions>>,
+    pub attachments: Option<Box<ChatAttachments>>,
+    pub media_entries: Option<Box<ChatMediaEntries>>,
+    pub focus_input: Option<CommandBarFocusInput>,
 }
 
 #[vmux_api::ui_state(Default, targets = ["command-bar", "start", "layout"])]
@@ -65,13 +65,8 @@ mod tests {
         let decoded = rkyv::from_bytes::<CommandBarUiState, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded.sequence, 4);
-        assert!(matches!(
-            decoded.patches.as_slice(),
-            [
-                CommandBarUiStatePatch::Snapshot(_),
-                CommandBarUiStatePatch::PathCompletion(_),
-            ]
-        ));
+        assert!(decoded.patches[0].snapshot.is_some());
+        assert!(decoded.patches[1].path_completion.is_some());
     }
 
     #[test]

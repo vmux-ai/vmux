@@ -156,7 +156,7 @@ impl<S: BatchedUiState> UiStateWrite<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{FileDirtyEvent, FileUiState, FileUiStatePatch};
+    use crate::event::{FileDirtyEvent, FileUiState};
     use bevy_cef::prelude::UiInput;
     use vmux_api::BinEvent;
     use vmux_api::git::FileGitState;
@@ -250,13 +250,14 @@ mod tests {
         let emitted = &app.world().resource::<Emitted>().0;
         assert_eq!(emitted.len(), 1);
         assert_eq!(emitted[0].sequence, 1);
-        assert!(matches!(
-            emitted[0].patches.as_slice(),
-            [
-                FileUiStatePatch::Dirty(FileDirtyEvent { dirty: true }),
-                FileUiStatePatch::Dirty(FileDirtyEvent { dirty: false })
-            ]
-        ));
+        assert_eq!(
+            emitted[0]
+                .patches
+                .iter()
+                .filter_map(|patch| patch.dirty.as_ref().map(|event| event.dirty))
+                .collect::<Vec<_>>(),
+            [true, false]
+        );
     }
 
     #[test]

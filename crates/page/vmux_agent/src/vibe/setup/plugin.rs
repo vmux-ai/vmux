@@ -277,7 +277,6 @@ fn auto_redirect_agent_setup_when_installed(
 
 #[cfg(test)]
 mod tests {
-    use super::super::event::AgentSetupUiStatePatch;
     use super::*;
     use vmux_core::host::UiStateWrite;
 
@@ -288,7 +287,7 @@ mod tests {
         trigger: On<UiStateWrite<AgentSetupUiState>>,
         mut published: ResMut<Published>,
     ) {
-        let AgentSetupUiStatePatch::Result(result) = trigger.event().patch() else {
+        let Some(result) = &trigger.event().patch().result else {
             return;
         };
         published

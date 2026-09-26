@@ -27,10 +27,10 @@ mod tests {
         patches: Vec<TestPatch>,
     }
 
-    #[vmux_api::ui_state_patch]
-    enum TestPatch {
-        Number(u32),
-        Text(String),
+    #[vmux_api::ui_state_patch(Default)]
+    struct TestPatch {
+        number: Option<u32>,
+        text: Option<String>,
     }
 
     #[test]

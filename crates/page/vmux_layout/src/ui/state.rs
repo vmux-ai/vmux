@@ -61,32 +61,62 @@ impl LayoutPageState {
     }
 
     fn apply(&mut self, patch: &LayoutUiStatePatch) {
-        match patch {
-            LayoutUiStatePatch::Layout(event) => self.layout = Some(*event),
-            LayoutUiStatePatch::Stacks(event) => self.stacks = Some(event.clone()),
-            LayoutUiStatePatch::Tabs(event) => self.tabs = Some(event.clone()),
-            LayoutUiStatePatch::Bookmarks(event) => self.bookmarks = event.clone(),
-            LayoutUiStatePatch::PaneTree(event) => self.pane_tree = Some(event.clone()),
-            LayoutUiStatePatch::SideSheet(event) => self.side_sheet = Some(event.clone()),
-            LayoutUiStatePatch::Spaces(event) => self.spaces = Some(event.clone()),
-            LayoutUiStatePatch::Projects(event) => self.projects = event.clone(),
-            LayoutUiStatePatch::ActiveSession(event) => self.active_session = event.session.clone(),
-            LayoutUiStatePatch::Header(event) => self.header = event.clone(),
-            LayoutUiStatePatch::Remote(event) => self.remote = event.clone(),
-            LayoutUiStatePatch::Extensions(event) => self.extensions = event.clone(),
-            LayoutUiStatePatch::ExtensionPopup(event) => self.extension_popup = event.clone(),
-            LayoutUiStatePatch::ExtensionPopupSize(event) => {
-                self.extension_popup_size = event.clone()
-            }
-            LayoutUiStatePatch::UpdateProgress(event) => {
-                self.update = Some(UpdatePhase::from(event))
-            }
-            LayoutUiStatePatch::UpdateReady(event) => self.update = Some(UpdatePhase::from(event)),
-            LayoutUiStatePatch::UpdateCleared(_) => self.update = None,
-            LayoutUiStatePatch::BookmarkMenu(event) => self.bookmark_menu = event.clone(),
-            LayoutUiStatePatch::Reload(effect) => {
-                self.reload_revision = self.reload_revision.max(effect.revision)
-            }
+        if let Some(event) = patch.layout {
+            self.layout = Some(event);
+        }
+        if let Some(event) = &patch.stacks {
+            self.stacks = Some(event.clone());
+        }
+        if let Some(event) = &patch.tabs {
+            self.tabs = Some(event.clone());
+        }
+        if let Some(event) = &patch.bookmarks {
+            self.bookmarks = event.clone();
+        }
+        if let Some(event) = &patch.pane_tree {
+            self.pane_tree = Some(event.clone());
+        }
+        if let Some(event) = &patch.side_sheet {
+            self.side_sheet = Some(event.clone());
+        }
+        if let Some(event) = &patch.spaces {
+            self.spaces = Some(event.clone());
+        }
+        if let Some(event) = &patch.projects {
+            self.projects = event.clone();
+        }
+        if let Some(event) = &patch.active_session {
+            self.active_session = event.session.clone();
+        }
+        if let Some(event) = &patch.header {
+            self.header = event.clone();
+        }
+        if let Some(event) = &patch.remote {
+            self.remote = event.clone();
+        }
+        if let Some(event) = &patch.extensions {
+            self.extensions = event.clone();
+        }
+        if let Some(event) = &patch.extension_popup {
+            self.extension_popup = event.clone();
+        }
+        if let Some(event) = &patch.extension_popup_size {
+            self.extension_popup_size = event.clone();
+        }
+        if let Some(event) = &patch.update_progress {
+            self.update = Some(UpdatePhase::from(event));
+        }
+        if let Some(event) = &patch.update_ready {
+            self.update = Some(UpdatePhase::from(event));
+        }
+        if patch.update_cleared.is_some() {
+            self.update = None;
+        }
+        if let Some(event) = &patch.bookmark_menu {
+            self.bookmark_menu = event.clone();
+        }
+        if let Some(effect) = &patch.reload {
+            self.reload_revision = self.reload_revision.max(effect.revision);
         }
     }
 
@@ -161,13 +191,16 @@ mod tests {
     fn transient_layout_effects_are_applied_from_ui_state() {
         let mut state = LayoutPageState::default();
 
-        state.apply(&LayoutUiStatePatch::BookmarkMenu(BookmarkMenuEffect {
-            revision: 4,
-            input: Some(vmux_api::bookmark::BookmarkMenuInput::Rename {
-                uuid: "bookmark".to_string(),
-            }),
-        }));
-        state.apply(&LayoutUiStatePatch::Reload(ReloadEffect { revision: 7 }));
+        state.apply(
+            &BookmarkMenuEffect {
+                revision: 4,
+                input: Some(vmux_api::bookmark::BookmarkMenuInput::Rename {
+                    uuid: "bookmark".to_string(),
+                }),
+            }
+            .into(),
+        );
+        state.apply(&ReloadEffect { revision: 7 }.into());
 
         assert_eq!(state.bookmark_menu.revision, 4);
         assert_eq!(

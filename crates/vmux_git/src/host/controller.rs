@@ -17,7 +17,7 @@ use crate::event::{
 use crate::state::{
     GitBranchCollection, GitBranchPrompt, GitBranchPromptRequested, GitOperationEligibility,
     GitPageContext, GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal,
-    GitShortcutHelpToggle, GitUiState, GitUiStatePatch, GitWorkspaceChanged,
+    GitShortcutHelpToggle, GitUiState, GitWorkspaceChanged,
 };
 
 use super::directory::GitDirectoryNavigation;
@@ -716,58 +716,54 @@ fn on_git_ui_state_write(
     let Ok((mut state, mut controller, mut directory)) = pages.get_mut(webview) else {
         return;
     };
-    match trigger.event().patch() {
-        GitUiStatePatch::Context(GitPageContext {
-            working_directory,
-            page_url,
-        }) => {
-            let path = crate::GitUrl::parse(page_url)
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_else(|| working_directory.clone());
-            state.reset(path.clone());
-            controller.reset(String::new());
-            *directory = GitDirectoryNavigation::default();
-            commands.trigger(UiInput {
-                webview,
-                payload: crate::event::GitDirectoryOpenRequest { path },
-            });
-        }
-        GitUiStatePatch::RepositoryPicked(GitRepositoryPicked { path }) => {
-            if !path.is_empty() {
-                *directory = GitDirectoryNavigation::default();
-                commands.trigger(UiInput {
-                    webview,
-                    payload: crate::event::GitDirectoryOpenRequest { path: path.clone() },
-                });
-            }
-        }
-        GitUiStatePatch::Workspace(GitWorkspaceChanged {
-            path,
-            branch,
-            error,
-        }) => {
-            if !error.is_empty() {
-                state.apply_workspace_error(error.clone());
-                return;
-            }
-            if path.is_empty() || path == state.workspace() {
-                return;
-            }
-            state.reset(path.clone());
-            controller.reset(branch.clone());
-            *directory = GitDirectoryNavigation::default();
-            commands.trigger(UiInput {
-                webview,
-                payload: GitRepositoryRequest { path: path.clone() },
-            });
-        }
-        GitUiStatePatch::Snapshot(_)
-        | GitUiStatePatch::Directory(_)
-        | GitUiStatePatch::Controller(_)
-        | GitUiStatePatch::BranchPrompt(_)
-        | GitUiStatePatch::SelectionReveal(_)
-        | GitUiStatePatch::ShortcutHelpToggle(_) => {}
+    let patch = trigger.event().patch();
+    if let Some(GitPageContext {
+        working_directory,
+        page_url,
+    }) = &patch.context
+    {
+        let path = crate::GitUrl::parse(page_url)
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| working_directory.clone());
+        state.reset(path.clone());
+        controller.reset(String::new());
+        *directory = GitDirectoryNavigation::default();
+        commands.trigger(UiInput {
+            webview,
+            payload: crate::event::GitDirectoryOpenRequest { path },
+        });
     }
+    if let Some(GitRepositoryPicked { path }) = &patch.repository_picked
+        && !path.is_empty()
+    {
+        *directory = GitDirectoryNavigation::default();
+        commands.trigger(UiInput {
+            webview,
+            payload: crate::event::GitDirectoryOpenRequest { path: path.clone() },
+        });
+    }
+    let Some(GitWorkspaceChanged {
+        path,
+        branch,
+        error,
+    }) = &patch.workspace
+    else {
+        return;
+    };
+    if !error.is_empty() {
+        state.apply_workspace_error(error.clone());
+        return;
+    }
+    if path.is_empty() || path == state.workspace() {
+        return;
+    }
+    state.reset(path.clone());
+    controller.reset(branch.clone());
+    *directory = GitDirectoryNavigation::default();
+    commands.trigger(UiInput {
+        webview,
+        payload: GitRepositoryRequest { path: path.clone() },
+    });
 }
 
 fn on_key_request(

@@ -4,7 +4,7 @@ use crate::event::{
     HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryOpenRequest,
     HistoryQueryRequest,
 };
-use crate::state::{HistoryUiState, HistoryUiStatePatch};
+use crate::state::HistoryUiState;
 use dioxus::prelude::*;
 use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
@@ -51,7 +51,9 @@ pub fn Page() -> Element {
         }
         handled_sequence.set(state.sequence);
         for patch in &state.patches {
-            let HistoryUiStatePatch::Query(response) = patch;
+            let Some(response) = &patch.query else {
+                continue;
+            };
             if response.request_id < *last_reset_id.peek() {
                 continue;
             }

@@ -246,10 +246,10 @@ mod tests {
 
     impl Echoed {
         fn record(trigger: On<FileUiStateWrite>, mut echoed: ResMut<Self>) {
-            let FileUiStatePatch::Key(key) = trigger.event().patch() else {
+            let Some(key) = trigger.event().patch().key else {
                 return;
             };
-            echoed.0.push((trigger.event().webview(), *key));
+            echoed.0.push((trigger.event().webview(), key));
         }
     }
 

@@ -456,7 +456,7 @@ mod tests {
     use crate::host::runner::test_repo;
     use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
     use vmux_api::BinEvent;
-    use vmux_core::event::{FileUiState, FileUiStatePatch};
+    use vmux_core::event::FileUiState;
 
     #[derive(Resource, Default)]
     struct Emitted(Vec<FileUiState>);
@@ -556,11 +556,10 @@ mod tests {
             app.update();
             let published = app.world().resource::<Emitted>().0.iter().any(|state| {
                 state.patches.iter().any(|patch| {
-                    matches!(
-                        patch,
-                        FileUiStatePatch::GitState(state)
-                            if state.path == file.to_string_lossy() && state.has_diff
-                    )
+                    patch
+                        .git_state
+                        .as_ref()
+                        .is_some_and(|state| state.path == file.to_string_lossy() && state.has_diff)
                 })
             });
             if published {

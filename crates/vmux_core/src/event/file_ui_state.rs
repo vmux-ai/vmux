@@ -9,42 +9,42 @@ use super::{
 };
 use vmux_api::git::FileGitState;
 
-#[vmux_api::ui_state_patch]
-pub enum FileUiStatePatch {
-    Meta(FileMetaEvent),
-    Viewport(FileViewportPatch),
-    Note(FileNoteEvent),
-    Error(FileErrorEvent),
-    ScrollBy(FileScrollByEvent),
-    Directory(FileDirEvent),
-    Theme(FileThemeEvent),
-    Preview(FilePreviewEvent),
-    Media(FileMediaEvent),
-    Cursor(FileCursorEvent),
-    Dirty(FileDirtyEvent),
-    ViewMode(FileViewModeEvent),
-    Keymap(FileKeymapEvent),
-    Shape(FileShapeEvent),
-    Encoding(FileEncodingEvent),
-    TidyPrompt(FileTidyPromptEvent),
-    ExplorerTree(ExplorerTreeEvent),
-    ExplorerFocus(ExplorerFocusEvent),
-    ExplorerFsResult(ExplorerFsResult),
-    OpenEditors(OpenEditorsEvent),
-    Outline(OutlineEvent),
-    ExplorerPanel(ExplorerPanelEvent),
-    ExplorerSearch(ExplorerSearchEvent),
-    Diagnostics(FileDiagnostics),
-    LspStatus(FileLspStatus),
-    LspInstallProgress(LspInstallProgress),
-    LspPackageStatus(LspPackageStatus),
-    Hover(FileHover),
-    CodeActions(FileCodeActions),
-    EditFailed(FileEditFailure),
-    RenameBegin(FileRenamePrompt),
-    Panel(FilePanelState),
-    GitState(FileGitState),
-    Key(FileKey),
+#[vmux_api::ui_state_patch(Default)]
+pub struct FileUiStatePatch {
+    pub meta: Option<FileMetaEvent>,
+    pub viewport: Option<FileViewportPatch>,
+    pub note: Option<FileNoteEvent>,
+    pub error: Option<FileErrorEvent>,
+    pub scroll_by: Option<FileScrollByEvent>,
+    pub directory: Option<FileDirEvent>,
+    pub theme: Option<FileThemeEvent>,
+    pub preview: Option<FilePreviewEvent>,
+    pub media: Option<FileMediaEvent>,
+    pub cursor: Option<FileCursorEvent>,
+    pub dirty: Option<FileDirtyEvent>,
+    pub view_mode: Option<FileViewModeEvent>,
+    pub keymap: Option<FileKeymapEvent>,
+    pub shape: Option<FileShapeEvent>,
+    pub encoding: Option<FileEncodingEvent>,
+    pub tidy_prompt: Option<FileTidyPromptEvent>,
+    pub explorer_tree: Option<ExplorerTreeEvent>,
+    pub explorer_focus: Option<ExplorerFocusEvent>,
+    pub explorer_fs_result: Option<ExplorerFsResult>,
+    pub open_editors: Option<OpenEditorsEvent>,
+    pub outline: Option<OutlineEvent>,
+    pub explorer_panel: Option<ExplorerPanelEvent>,
+    pub explorer_search: Option<ExplorerSearchEvent>,
+    pub diagnostics: Option<FileDiagnostics>,
+    pub lsp_status: Option<FileLspStatus>,
+    pub lsp_install_progress: Option<LspInstallProgress>,
+    pub lsp_package_status: Option<LspPackageStatus>,
+    pub hover: Option<FileHover>,
+    pub code_actions: Option<FileCodeActions>,
+    pub edit_failed: Option<FileEditFailure>,
+    pub rename_begin: Option<FileRenamePrompt>,
+    pub panel: Option<FilePanelState>,
+    pub git_state: Option<FileGitState>,
+    pub key: Option<FileKey>,
 }
 
 #[vmux_api::ui_state(Default, target = "files")]
@@ -80,8 +80,8 @@ mod tests {
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let decoded = rkyv::from_bytes::<FileUiState, rkyv::rancor::Error>(&bytes).unwrap();
-        assert!(matches!(decoded.patches[0], FileUiStatePatch::Meta(_)));
-        assert!(matches!(decoded.patches[1], FileUiStatePatch::Dirty(_)));
+        assert!(decoded.patches[0].meta.is_some());
+        assert!(decoded.patches[1].dirty.is_some());
         assert_eq!(decoded.sequence, 1);
     }
 }

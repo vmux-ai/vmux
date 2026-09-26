@@ -1,8 +1,8 @@
 use crate::event::HistoryQueryResponse;
 
-#[vmux_api::ui_state_patch]
-pub enum HistoryUiStatePatch {
-    Query(HistoryQueryResponse),
+#[vmux_api::ui_state_patch(Default)]
+pub struct HistoryUiStatePatch {
+    pub query: Option<HistoryQueryResponse>,
 }
 
 #[vmux_api::ui_state(Default, target = "history")]
@@ -33,10 +33,8 @@ mod tests {
         let decoded = rkyv::from_bytes::<HistoryUiState, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded.sequence, 3);
-        assert!(matches!(
-            decoded.patches.as_slice(),
-            [HistoryUiStatePatch::Query(response)]
-                if response.request_id == 7 && response.offset == 50
-        ));
+        let response = decoded.patches[0].query.as_ref().unwrap();
+        assert_eq!(response.request_id, 7);
+        assert_eq!(response.offset, 50);
     }
 }
