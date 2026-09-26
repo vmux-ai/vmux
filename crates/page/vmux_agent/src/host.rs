@@ -10,6 +10,7 @@ pub(crate) mod approval;
 pub mod attach;
 pub mod attention;
 pub mod browser_pane;
+mod capture_tool;
 pub mod chat;
 pub mod command;
 pub mod command_bar;
@@ -39,7 +40,6 @@ pub mod strategy;
 pub mod toast;
 mod tool;
 pub mod url;
-mod visual_tool;
 pub mod workspace;
 
 #[cfg(test)]
@@ -51,6 +51,7 @@ pub use self::attach::{
     attach_acp_agent_to_stack, attach_page_agent_to_stack, page_agent_placeholder_url,
 };
 pub use self::provider::AgentExecutableOverride;
+pub use capture_tool::CaptureToolPlugin;
 pub use vmux_space::cwd::valid_cwd;
 
 pub(crate) use self::run_terminal::agent_terminal_shell;
@@ -74,7 +75,6 @@ pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
 pub use tool::WorkspaceToolPlugin;
 pub use url::{AgentKind, AgentUrl};
-pub use visual_tool::VisualToolPlugin;
 pub use vmux_session::room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
     MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomMember,

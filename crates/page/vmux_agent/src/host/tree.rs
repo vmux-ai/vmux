@@ -29,7 +29,7 @@ impl Plugin for AgentPlugin {
             AgentSessionPlugin,
             AgentPagesPlugin,
             crate::WorkspaceToolPlugin,
-            crate::VisualToolPlugin,
+            crate::CaptureToolPlugin,
             crate::runtime::AgentRuntimePlugin,
         ));
     }

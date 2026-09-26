@@ -4,7 +4,6 @@ use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{
     AgentBookmarkCommand, AgentCommand, AgentQuery, AgentSpaceCommand, JsonValue, ProcessId,
-    SimulatorButton, SimulatorInput,
 };
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
@@ -535,76 +534,6 @@ fn dispatch_query(name: &str, args: serde_json::Value) -> Result<AgentQuery, Str
 }
 
 #[test]
-fn record_tools_are_listed() {
-    let names = tool_names();
-    assert!(names.contains(&"record_start".to_string()));
-    assert!(names.contains(&"record_stop".to_string()));
-}
-
-#[test]
-fn simulator_tools_are_listed() {
-    let names = tool_names();
-    for name in [
-        "simulator_screenshot",
-        "simulator_tap",
-        "simulator_swipe",
-        "simulator_type",
-        "simulator_key",
-        "simulator_button",
-    ] {
-        assert!(names.contains(&name.to_string()), "missing {name}");
-    }
-}
-
-#[test]
-fn simulator_controls_dispatch_to_queries() {
-    assert_eq!(
-        dispatch_query("simulator_screenshot", serde_json::json!({})).unwrap(),
-        AgentQuery::SimulatorScreenshot
-    );
-    assert_eq!(
-        dispatch_query("simulator_tap", serde_json::json!({"x": 120, "y": 240})).unwrap(),
-        AgentQuery::SimulatorControl {
-            input: SimulatorInput::Tap { x: 120, y: 240 }
-        }
-    );
-    assert_eq!(
-        dispatch_query(
-            "simulator_swipe",
-            serde_json::json!({"start_x": 100, "start_y": 700, "end_x": 100, "end_y": 200})
-        )
-        .unwrap(),
-        AgentQuery::SimulatorControl {
-            input: SimulatorInput::Swipe {
-                start_x: 100,
-                start_y: 700,
-                end_x: 100,
-                end_y: 200,
-                duration_ms: 300,
-            }
-        }
-    );
-    assert_eq!(
-        dispatch_query("simulator_type", serde_json::json!({"text": "hello"})).unwrap(),
-        AgentQuery::SimulatorControl {
-            input: SimulatorInput::TypeText("hello".to_string())
-        }
-    );
-    assert_eq!(
-        dispatch_query("simulator_key", serde_json::json!({"keycode": 40})).unwrap(),
-        AgentQuery::SimulatorControl {
-            input: SimulatorInput::Key(40)
-        }
-    );
-    assert_eq!(
-        dispatch_query("simulator_button", serde_json::json!({"button": "home"})).unwrap(),
-        AgentQuery::SimulatorControl {
-            input: SimulatorInput::Button(SimulatorButton::Home)
-        }
-    );
-}
-
-#[test]
 fn browser_snapshot_dispatches_to_query_with_pane() {
     let q = dispatch_query(
         "browser_snapshot",
@@ -735,60 +664,6 @@ fn install_extension_rejects_empty_source() {
 }
 
 #[test]
-fn record_start_dispatch_defaults() {
-    let q = dispatch_query("record_start", serde_json::json!({})).unwrap();
-    assert_eq!(
-        q,
-        AgentQuery::RecordStart {
-            gif: false,
-            max_secs: 600,
-            pane: None
-        }
-    );
-}
-
-#[test]
-fn record_start_dispatch_args() {
-    let q = dispatch_query(
-        "record_start",
-        serde_json::json!({"gif": true, "max_secs": 30, "pane": "pane:3"}),
-    )
-    .unwrap();
-    assert_eq!(
-        q,
-        AgentQuery::RecordStart {
-            gif: true,
-            max_secs: 30,
-            pane: Some("pane:3".into())
-        }
-    );
-}
-
-#[test]
-fn record_stop_dispatch_args() {
-    let q = dispatch_query(
-        "record_stop",
-        serde_json::json!({"dir": "/tmp/out", "name": "feature-x"}),
-    )
-    .unwrap();
-    assert_eq!(
-        q,
-        AgentQuery::RecordStop {
-            dir: Some("/tmp/out".into()),
-            name: Some("feature-x".into())
-        }
-    );
-    let empty = dispatch_query("record_stop", serde_json::json!({})).unwrap();
-    assert_eq!(
-        empty,
-        AgentQuery::RecordStop {
-            dir: None,
-            name: None
-        }
-    );
-}
-
-#[test]
 fn local_tool_registry_includes_handwritten_tools() {
     let names = tool_names();
 
@@ -864,39 +739,6 @@ fn agent_tool_dispatch_preserves_runtime_command_name_and_arguments() {
 #[test]
 fn unknown_tool_returns_error() {
     assert!(dispatch_from_tool_call("nope_not_a_tool", serde_json::json!({})).is_err());
-}
-
-#[test]
-fn list_tools_includes_notify() {
-    assert!(tool_names().contains(&"notify".to_string()));
-}
-
-#[test]
-fn notify_dispatches_to_notify_command() {
-    let command = dispatch_command(
-        "notify",
-        serde_json::json!({"title": "done", "body": "built X"}),
-    )
-    .unwrap();
-    assert_eq!(
-        command,
-        AgentCommand::Notify {
-            title: Some("done".to_string()),
-            body: Some("built X".to_string()),
-        }
-    );
-}
-
-#[test]
-fn notify_allows_empty_args() {
-    let command = dispatch_command("notify", serde_json::json!({})).unwrap();
-    assert_eq!(
-        command,
-        AgentCommand::Notify {
-            title: None,
-            body: None,
-        }
-    );
 }
 
 #[test]
@@ -1231,23 +1073,6 @@ fn terminal_send_missing_text_returns_error() {
 }
 
 #[test]
-fn rename_profile_dispatches_with_name() {
-    let command =
-        dispatch_command("rename_profile", serde_json::json!({"name": "Junichi"})).unwrap();
-    assert_eq!(
-        command,
-        AgentCommand::RenameProfile {
-            name: "Junichi".to_string()
-        }
-    );
-}
-
-#[test]
-fn rename_profile_empty_name_returns_error() {
-    assert!(dispatch_from_tool_call("rename_profile", serde_json::json!({"name": "  "})).is_err());
-}
-
-#[test]
 fn list_tools_includes_select_tab() {
     let names = tool_names();
     assert!(names.contains(&"select_tab".to_string()));
@@ -1276,37 +1101,6 @@ fn tool_list_includes_read_and_update_layout() {
     let names = tool_names();
     assert!(names.contains(&"read_layout".to_string()));
     assert!(names.contains(&"update_layout".to_string()));
-}
-
-#[test]
-fn list_tools_includes_screenshot() {
-    assert!(tool_names().contains(&"screenshot".to_string()));
-}
-
-#[test]
-fn screenshot_dispatches_to_query_with_and_without_pane() {
-    let target = dispatch_from_tool_call("screenshot", serde_json::json!({})).unwrap();
-    assert!(matches!(
-        target,
-        DispatchTarget::Query(vmux_api::protocol::AgentQuery::Screenshot { pane: None })
-    ));
-
-    let target =
-        dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "stack:7" })).unwrap();
-    assert!(matches!(
-        target,
-        DispatchTarget::Query(vmux_api::protocol::AgentQuery::Screenshot { pane: Some(p) })
-            if p == "stack:7"
-    ));
-
-    let target =
-        dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "  " })).unwrap();
-    assert!(matches!(
-        target,
-        DispatchTarget::Query(vmux_api::protocol::AgentQuery::Screenshot { pane: None })
-    ));
-
-    assert!(dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": 123 })).is_err());
 }
 
 #[test]
