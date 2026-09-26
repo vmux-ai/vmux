@@ -4,8 +4,8 @@ use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
+use vmux_api::protocol::{AgentCommand, AgentCommandTool, AgentQuery, JsonValue};
 use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
-use vmux_service::protocol::{AgentCommand, AgentQuery, JsonValue};
 
 use vmux_api::InputSchema;
 
@@ -71,16 +71,17 @@ where
         if !app.is_plugin_added::<ToolRegistryPlugin>() {
             app.add_plugins(ToolRegistryPlugin);
         }
-        app.insert_resource(ToolManifestSource::<T>::new(self.manifest))
-            .add_systems(
-                Startup,
-                register_tools::<T>.in_set(ToolStartupSet::Manifest),
-            )
-            .add_systems(Update, route_tools::<T>.in_set(ToolRouteSet));
+        app.world_mut()
+            .spawn(ToolManifestSource::<T>::new(self.manifest));
+        app.add_systems(
+            Startup,
+            register_tools::<T>.in_set(ToolStartupSet::Manifest),
+        )
+        .add_systems(Update, route_tools::<T>.in_set(ToolRouteSet));
     }
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 struct ToolManifestSource<T> {
     source: &'static str,
     marker: PhantomData<fn() -> T>,
@@ -100,32 +101,34 @@ fn spawn_tool_registry(mut commands: Commands) {
 }
 
 fn register_tools<T>(
-    manifest: Res<ToolManifestSource<T>>,
+    manifests: Query<(Entity, &ToolManifestSource<T>)>,
     mut commands: Commands,
     mut next_order: Single<&mut NextToolOrder>,
 ) where
     T: Component + serde::de::DeserializeOwned + Serialize,
 {
-    let manifest = ToolManifest::<T>::from_ron(manifest.source);
-    for entry in manifest.0 {
-        let (seed, kind) = entry.into_seed();
-        let order = next_order.0;
-        next_order.0 += 1;
-        let mut entity = commands.spawn((
-            RegisteredTool,
-            Name::new(seed.name),
-            ToolAliases(seed.aliases),
-            ToolDescription(seed.description),
-            ToolInputSchema(seed.input_schema),
-            ToolAccess(seed.availability),
-            RegistrationOrder(order),
-            kind,
-        ));
-        if seed.shell_aware {
-            entity.insert(ShellAware);
+    for (source_entity, source) in &manifests {
+        let manifest = ToolManifest::<T>::from_ron(source.source);
+        for entry in manifest.0 {
+            let (seed, kind) = entry.into_seed();
+            let order = next_order.0;
+            next_order.0 += 1;
+            let mut entity = commands.spawn((
+                RegisteredTool,
+                Name::new(seed.name),
+                ToolAliases(seed.aliases),
+                ToolDescription(seed.description),
+                ToolInputSchema(seed.input_schema),
+                ToolAccess(seed.availability),
+                RegistrationOrder(order),
+                kind,
+            ));
+            if seed.shell_aware {
+                entity.insert(ShellAware);
+            }
         }
+        commands.entity(source_entity).despawn();
     }
-    commands.remove_resource::<ToolManifestSource<T>>();
 }
 
 fn route_tools<T>(
@@ -310,7 +313,7 @@ fn resolve_tool_invocations(
 impl ToolDefinition {
     pub fn merge_commands(
         mut definitions: Vec<Self>,
-        commands: Vec<vmux_service::protocol::AgentCommandTool>,
+        commands: Vec<AgentCommandTool>,
     ) -> Result<Vec<Self>, String> {
         for command in commands {
             let input_schema = Value::try_from(&command.input_schema)

@@ -7,14 +7,14 @@ use bevy::prelude::*;
 use crate::AgentVariant;
 use crate::approval;
 use crate::events::{AgentApprovalRequest, AgentDelta};
+use crate::events::{
+    PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus,
+    PageAgentSnapshot,
+};
 use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
 use crate::run_state::AgentRunState;
 use crate::run_state_kind::LastRunStateKind;
 use crate::toast::ToastPlugin;
-use vmux_service::agent_events::{
-    PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus,
-    PageAgentSnapshot,
-};
 use vmux_service::client::ServiceRequest;
 use vmux_service::plugin::ServiceConnected;
 use vmux_service::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn interrupted_status_pauses_queue_and_idles() {
-        use vmux_service::agent_events::{
+        use crate::events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_service::protocol::AgentRunStatus;
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn flush_pending_interrupt_does_not_pause() {
-        use vmux_service::agent_events::{
+        use crate::events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_service::protocol::AgentRunStatus;
@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn flush_pending_error_rearms_queue() {
-        use vmux_service::agent_events::{
+        use crate::events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_service::protocol::AgentRunStatus;

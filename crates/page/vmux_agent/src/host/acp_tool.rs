@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use bevy::prelude::*;
 use vmux_core::event::InstallPhase;
+use vmux_core::tool::{ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus};
 use vmux_editor::lsp::package_path::{PackageName, PackagePath};
 use vmux_editor::lsp::{archive, download, store};
 use vmux_service::client::ServiceRequest;
@@ -11,6 +13,10 @@ use vmux_service::plugin::ServiceConnected;
 use vmux_service::protocol::{ClientMessage, ManagedMcpServer};
 use vmux_session::AcpSession;
 use vmux_setting::{AcpAgentConfig, AppSettings};
+use vmux_tool::{
+    ToolInventory, ToolInventoryItem, ToolOperator, ToolProviderId, ToolProviderSnapshot,
+    ToolScanner, ToolStore, ToolsManifest,
+};
 
 use crate::acp_registry::{self, BinaryTarget, RegistryAgent};
 use crate::run_state::AgentRunState;
@@ -23,7 +29,123 @@ impl Plugin for AcpToolPlugin {
             .add_message::<AcpPackageChanged>()
             .add_message::<vmux_core::agent::SwapStackSession>()
             .add_observer(cancel_acp_install_on_remove)
+            .add_systems(Startup, spawn_tool_provider)
             .add_systems(Update, (start_acp_installs, poll_acp_installs).chain());
+    }
+}
+
+fn spawn_tool_provider(mut commands: Commands) {
+    commands.spawn((
+        Name::new("ACP tool provider"),
+        ToolProviderId(ToolProvider::Acp),
+        ToolScanner::new(scan_tools),
+        ToolOperator::new(operate_tool),
+    ));
+}
+
+fn scan_tools(
+    _store: &ToolStore,
+    manifest: &mut ToolsManifest,
+    refresh: bool,
+) -> Result<ToolProviderSnapshot, String> {
+    let catalog = if refresh {
+        acp_registry::fetch_blocking()
+            .ok()
+            .or_else(acp_registry::load_cached)
+    } else {
+        acp_registry::load_cached()
+    };
+    let catalog = catalog
+        .map(|registry| {
+            registry
+                .agents
+                .into_iter()
+                .map(|agent| (agent.id.clone(), agent))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let receipts = store::installed(&acp_registry::agents_dir());
+    let inventory = receipts
+        .into_values()
+        .filter(|receipt| receipt.source_id.starts_with("acp:"))
+        .map(|receipt| {
+            let agent = catalog.get(receipt.name.as_str());
+            let latest = agent.and_then(|agent| agent.version.clone());
+            ToolInventoryItem {
+                id: receipt.name.as_str().to_string(),
+                name: agent
+                    .map(|agent| agent.name.clone())
+                    .unwrap_or_else(|| receipt.name.as_str().to_string()),
+                icon: agent.and_then(|agent| agent.icon.clone()),
+                version: receipt.version.clone(),
+                detail: agent
+                    .and_then(|agent| agent.description.clone())
+                    .unwrap_or_else(|| "ACP agent".to_string()),
+                status: if receipt.version.is_some()
+                    && latest.is_some()
+                    && receipt.version != latest
+                {
+                    ToolStatus::Outdated
+                } else {
+                    ToolStatus::Installed
+                },
+                removable: true,
+            }
+        })
+        .collect();
+    Ok(ToolInventory::new(ToolProvider::Acp, inventory)
+        .reconcile(manifest)
+        .into())
+}
+
+fn operate_tool(
+    store: &ToolStore,
+    operation: &ToolOperationKey,
+    _value: &str,
+) -> Result<String, String> {
+    let id = operation.item_id.trim();
+    match operation.kind {
+        ToolOperationKind::Install | ToolOperationKind::Update => {
+            if id.is_empty() {
+                return Err("package name is required".to_string());
+            }
+            resolve_from_registry(id, None, |_, _, _| {})?;
+            store.set_managed_package(ToolProvider::Acp, id, true)?;
+            let operation = if operation.kind == ToolOperationKind::Install {
+                "installed"
+            } else {
+                "updated"
+            };
+            Ok(format!("{id} {operation}"))
+        }
+        ToolOperationKind::Uninstall => {
+            if id.is_empty() {
+                return Err("package name is required".to_string());
+            }
+            uninstall(id)?;
+            store.set_managed_package(ToolProvider::Acp, id, false)?;
+            Ok(format!("{id} removed"))
+        }
+        ToolOperationKind::Forget => {
+            store.set_managed_package(ToolProvider::Acp, id, false)?;
+            Ok(format!("{id} removed from tools.toml"))
+        }
+        ToolOperationKind::Adopt => {
+            store.set_managed_package(ToolProvider::Acp, id, true)?;
+            Ok(format!("{id} is now managed"))
+        }
+        ToolOperationKind::Import => {
+            let mut manifest = store.load()?;
+            let before = manifest.managed_packages(ToolProvider::Acp.id()).len();
+            let _ = scan_tools(store, &mut manifest, false)?;
+            let imported = manifest
+                .managed_packages(ToolProvider::Acp.id())
+                .len()
+                .saturating_sub(before);
+            store.save(&manifest)?;
+            Ok(format!("imported {imported} acp item(s)"))
+        }
+        _ => Err(format!("ACP does not support {:?}", operation.kind)),
     }
 }
 

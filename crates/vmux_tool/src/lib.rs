@@ -11,6 +11,8 @@ mod host;
 mod manifest;
 mod mcp;
 mod npm;
+mod process;
+mod provider;
 mod registry;
 #[cfg(ui)]
 mod ui;
@@ -27,11 +29,10 @@ use vmux_core::tool::{
 pub use connection::McpConnectionPlugin;
 pub use dotfiles::*;
 pub use homebrew::*;
-#[cfg(all(host, ui))]
-pub use host::{ToolScanOutput, ToolScanRequest};
 pub use manifest::*;
 pub use mcp::*;
 pub use npm::*;
+pub use provider::*;
 pub use registry::*;
 
 pub struct ToolPlugin;

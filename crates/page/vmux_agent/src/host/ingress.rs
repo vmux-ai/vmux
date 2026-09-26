@@ -1,11 +1,11 @@
-use bevy::prelude::*;
-use vmux_service::agent_events::{
+use crate::events::{
     AgentCommandRequest, AgentToolCallRequest, CommandOrigin, PageAgentAcpTerminalCreated,
     PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentInfo,
     PageAgentModeInfo, PageAgentModeSelectionResult, PageAgentModelInfo,
     PageAgentModelSelectionResult, PageAgentRunStatus, PageAgentSessionCreated, PageAgentSnapshot,
     PageAgentWorkspaceChanged,
 };
+use bevy::prelude::*;
 use vmux_service::client::ServiceInbound;
 use vmux_service::protocol::{ServiceMessage, SharedEvent};
 use vmux_terminal::ServiceMessageSet;

@@ -7,7 +7,6 @@ pub use vmux_transport::DeviceId;
 pub mod acp;
 pub mod agent;
 pub mod agent_broker;
-pub mod agent_events;
 pub mod bundle;
 pub mod cleanup;
 pub mod cli;

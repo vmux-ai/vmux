@@ -20,6 +20,7 @@ pub enum PageOpenTarget {
     ActiveStack,
     NewStack,
     Stack(Entity),
+    ContainingStack(Entity),
     ActiveStackInPane(Entity),
     NewStackInPane(Entity),
 }

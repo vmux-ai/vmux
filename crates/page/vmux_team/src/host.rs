@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 
 use vmux_agent::AgentRunState;
+use vmux_agent::events::AgentCommandRequest;
 use vmux_core::agent::SessionId;
 use vmux_core::event::team::{
     ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
@@ -16,7 +17,6 @@ use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
 use vmux_layout::space::{CurrentSpace, Space, space_of};
 use vmux_layout::stack::Stack;
-use vmux_service::agent_events::AgentCommandRequest;
 use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 
