@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_command::{CommandCatalog, CommandInvocation};
+use vmux_command::{CommandDefinition, CommandInvocation};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
@@ -151,7 +151,7 @@ fn remote_agents(
 
 fn handle_command_invocations(
     mut reader: MessageReader<AgentCommandRequest>,
-    command_catalog: Res<CommandCatalog>,
+    command_definitions: Query<&CommandDefinition>,
     mut command_invocations: MessageWriter<CommandInvocation>,
     agents: Query<(
         Entity,
@@ -191,10 +191,19 @@ fn handle_command_invocations(
                     _ => None,
                 }
                 .unwrap_or(Entity::PLACEHOLDER);
+                let Some(definition) = command_definitions
+                    .iter()
+                    .find(|definition| definition.matches(id))
+                else {
+                    service_requests.write(ServiceRequest(request.response(
+                        AgentCommandResult::Error(format!("unknown app command: {id}")),
+                    )));
+                    continue;
+                };
                 let invocation = if request.origin.is_agent() {
-                    command_catalog.resolve_agent(caller, id, args)
+                    definition.agent_invocation(caller, args)
                 } else {
-                    command_catalog.resolve(caller, id, args)
+                    definition.user_invocation(caller, args)
                 };
                 match invocation {
                     Ok(invocation) => {

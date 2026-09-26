@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
@@ -153,6 +153,42 @@ impl CommandDefinition {
             description: mcp.description.clone(),
             input_schema: vmux_api::json::JsonValue::from(mcp.input_schema.to_json()),
         })
+    }
+
+    pub fn matches(&self, id: &str) -> bool {
+        self.id == id || self.aliases.iter().any(|alias| alias == id)
+    }
+
+    pub fn user_invocation(
+        &self,
+        caller: Entity,
+        arguments: serde_json::Value,
+    ) -> Result<CommandInvocation, String> {
+        self.validated_invocation(caller, arguments, false)
+    }
+
+    pub fn agent_invocation(
+        &self,
+        caller: Entity,
+        arguments: serde_json::Value,
+    ) -> Result<CommandInvocation, String> {
+        self.validated_invocation(caller, arguments, true)
+    }
+
+    fn validated_invocation(
+        &self,
+        caller: Entity,
+        arguments: serde_json::Value,
+        require_agent_access: bool,
+    ) -> Result<CommandInvocation, String> {
+        let Some(mcp) = &self.mcp else {
+            return Err(format!("unknown app command: {}", self.id));
+        };
+        if require_agent_access && mcp.agent_access != AgentAccess::Allowed {
+            return Err("focus-changing app command is disabled for agents".to_string());
+        }
+        self.validate_arguments(&arguments)?;
+        Ok(CommandInvocation::new(caller, &self.id).with_arguments(arguments))
     }
 
     pub fn mcp(mut self, definition: CommandMcp) -> Self {
@@ -476,8 +512,7 @@ pub struct CommandRuntimePlugin;
 
 impl Plugin for CommandRuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CommandCatalog>()
-            .init_resource::<crate::shortcut::Keymap>()
+        app.init_resource::<crate::shortcut::Keymap>()
             .add_message::<CommandInvocation>()
             .configure_sets(
                 Update,
@@ -492,7 +527,7 @@ impl Plugin for CommandRuntimePlugin {
             .add_systems(
                 Update,
                 (
-                    index_command_definitions,
+                    validate_command_definitions,
                     dispatch_command_invocations,
                     bevy::ecs::schedule::ApplyDeferred,
                 )
@@ -502,42 +537,25 @@ impl Plugin for CommandRuntimePlugin {
     }
 }
 
-#[derive(Clone)]
-struct RegisteredCommand {
-    definition: CommandDefinition,
-}
-
-#[derive(Resource, Default)]
-pub struct CommandCatalog {
-    ids: HashMap<String, Entity>,
-    commands: HashMap<Entity, RegisteredCommand>,
-}
-
-fn index_command_definitions(
-    definitions: Query<(Entity, &CommandDefinition), Added<CommandDefinition>>,
-    mut catalog: ResMut<CommandCatalog>,
+fn validate_command_definitions(
+    added: Query<(Entity, &CommandDefinition), Added<CommandDefinition>>,
+    definitions: Query<(Entity, &CommandDefinition)>,
     mut commands: Commands,
 ) {
-    for (entity, definition) in &definitions {
+    for (entity, definition) in &added {
         let mut ids = Vec::with_capacity(definition.aliases.len() + 1);
         ids.push(definition.id.clone());
         ids.extend(definition.aliases.iter().cloned());
         let mut unique_ids = HashSet::with_capacity(ids.len());
         for id in &ids {
-            assert!(
-                unique_ids.insert(id.as_str()) && !catalog.ids.contains_key(id),
-                "duplicate command id: {id}"
-            );
+            assert!(unique_ids.insert(id.as_str()), "duplicate command id: {id}");
+            for (other_entity, other) in &definitions {
+                assert!(
+                    other_entity == entity || !other.matches(id),
+                    "duplicate command id: {id}"
+                );
+            }
         }
-        for id in ids {
-            catalog.ids.insert(id, entity);
-        }
-        catalog.commands.insert(
-            entity,
-            RegisteredCommand {
-                definition: definition.clone(),
-            },
-        );
         commands
             .entity(entity)
             .insert(Name::new(definition.id.clone()));
@@ -561,74 +579,18 @@ impl CommandDispatch {
     }
 }
 
-impl CommandCatalog {
-    pub fn tools(&self) -> Vec<vmux_api::protocol::AgentCommandTool> {
-        let mut tools = Vec::new();
-        for command in self.commands.values() {
-            tools.extend(command.definition.agent_tool());
-        }
-        tools.sort_by(|left, right| left.name.cmp(&right.name));
-        tools
-    }
-
-    pub fn resolve(
-        &self,
-        caller: Entity,
-        id: &str,
-        arguments: serde_json::Value,
-    ) -> Result<CommandInvocation, String> {
-        self.resolve_with_access(caller, id, arguments, false)
-    }
-
-    pub fn resolve_agent(
-        &self,
-        caller: Entity,
-        id: &str,
-        arguments: serde_json::Value,
-    ) -> Result<CommandInvocation, String> {
-        self.resolve_with_access(caller, id, arguments, true)
-    }
-
-    fn resolve_with_access(
-        &self,
-        caller: Entity,
-        id: &str,
-        arguments: serde_json::Value,
-        require_agent_access: bool,
-    ) -> Result<CommandInvocation, String> {
-        let Some(entity) = self.ids.get(id) else {
-            return Err(format!("unknown app command: {id}"));
-        };
-        let command = self
-            .commands
-            .get(entity)
-            .expect("indexed command entity must have a catalog entry");
-        let definition = &command.definition;
-        let Some(mcp) = &definition.mcp else {
-            return Err(format!("unknown app command: {id}"));
-        };
-        if require_agent_access && mcp.agent_access != AgentAccess::Allowed {
-            return Err("focus-changing app command is disabled for agents".to_string());
-        }
-        definition.validate_arguments(&arguments)?;
-        Ok(CommandInvocation::new(caller, &definition.id).with_arguments(arguments))
-    }
-}
-
 fn dispatch_command_invocations(
     mut invocations: MessageReader<CommandInvocation>,
-    catalog: Res<CommandCatalog>,
+    definitions: Query<(Entity, &CommandDefinition)>,
     mut commands: Commands,
 ) {
     for invocation in invocations.read() {
-        let Some(&command) = catalog.ids.get(&invocation.id) else {
+        let Some((command, definition)) = definitions
+            .iter()
+            .find(|(_, definition)| definition.matches(&invocation.id))
+        else {
             continue;
         };
-        let definition = &catalog
-            .commands
-            .get(&command)
-            .expect("indexed command entity must have a catalog entry")
-            .definition;
         let mut invocation = invocation.clone();
         invocation.id.clone_from(&definition.id);
         if let Some(mcp) = &definition.mcp
@@ -854,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn command_catalog_exposes_and_dispatches_the_registered_request_definition() {
+    fn command_entities_expose_and_dispatch_the_registered_request_definition() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins((
@@ -863,7 +825,15 @@ mod tests {
         ));
         app.update();
 
-        let tools = app.world().resource::<CommandCatalog>().tools();
+        let definitions = {
+            let mut query = app.world_mut().query::<&CommandDefinition>();
+            query.iter(app.world()).cloned().collect::<Vec<_>>()
+        };
+        let mut tools = definitions
+            .iter()
+            .filter_map(CommandDefinition::agent_tool)
+            .collect::<Vec<_>>();
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
         assert_eq!(
             tools
                 .iter()
@@ -873,10 +843,11 @@ mod tests {
         );
 
         let caller = app.world_mut().spawn_empty().id();
-        let invocation = app
-            .world()
-            .resource::<CommandCatalog>()
-            .resolve_agent(caller, "agent_visible", serde_json::json!({}))
+        let invocation = definitions
+            .iter()
+            .find(|definition| definition.matches("agent_visible"))
+            .unwrap()
+            .agent_invocation(caller, serde_json::json!({}))
             .unwrap();
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
@@ -892,7 +863,7 @@ mod tests {
     }
 
     #[test]
-    fn command_catalog_rejects_unlisted_access_and_malformed_arguments() {
+    fn command_entities_reject_unlisted_access_and_malformed_arguments() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins((
@@ -901,25 +872,27 @@ mod tests {
         ));
         app.update();
         let caller = app.world_mut().spawn_empty().id();
+        let definitions = {
+            let mut query = app.world_mut().query::<&CommandDefinition>();
+            query.iter(app.world()).cloned().collect::<Vec<_>>()
+        };
 
-        let denied = app
-            .world()
-            .resource::<CommandCatalog>()
-            .resolve_agent(caller, "user_only", serde_json::json!({}))
+        let denied = definitions
+            .iter()
+            .find(|definition| definition.matches("user_only"))
+            .unwrap()
+            .agent_invocation(caller, serde_json::json!({}))
             .unwrap_err();
         assert_eq!(
             denied,
             "focus-changing app command is disabled for agents".to_string(),
         );
 
-        let malformed = app
-            .world()
-            .resource::<CommandCatalog>()
-            .resolve_agent(
-                caller,
-                "agent_visible",
-                serde_json::json!({"unexpected": true}),
-            )
+        let malformed = definitions
+            .iter()
+            .find(|definition| definition.matches("agent_visible"))
+            .unwrap()
+            .agent_invocation(caller, serde_json::json!({"unexpected": true}))
             .unwrap_err();
         assert_eq!(
             malformed,

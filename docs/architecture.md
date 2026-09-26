@@ -671,8 +671,9 @@ world and submit tool-call entities there; they do not maintain a nested or thre
 Application commands follow the same ownership rule. Feature plugins spawn command-definition
 entities beside the parser for their typed Bevy request. Optional MCP metadata lives on that same
 definition. The MCP process asks the running application for its command tools and forwards calls
-back to the runtime catalog, which validates authorization and arguments before emitting the typed
-request. There is no second command enum or MCP-only command catalog.
+back to the command-definition entities. Systems query those entities directly to resolve aliases,
+validate authorization and arguments, and emit the typed request. There is no command-catalog
+resource, second command enum, or MCP-only command catalog.
 
 Every agent is launched **anchored to its own Space**. Tool calls resolve relative to that
 anchor, so a background agent cannot read or disrupt the space you are looking at.
