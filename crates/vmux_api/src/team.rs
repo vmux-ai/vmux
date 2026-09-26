@@ -54,47 +54,6 @@ pub struct TeamMemberRow {
     pub is_done_unseen: bool,
 }
 
-impl TeamEvent {
-    pub fn project(members: Vec<TeamMemberRow>, profiles: Vec<ProfileRow>) -> Self {
-        let active_profile = profiles.iter().find(|profile| profile.is_active).cloned();
-        let mut agents = Vec::new();
-        for member in &members {
-            if let Some(agent) = TeamAgentPresentation::project(member) {
-                agents.push(agent);
-            }
-        }
-        Self {
-            members,
-            profiles,
-            active_profile,
-            agents,
-        }
-    }
-}
-
-impl TeamAgentPresentation {
-    fn project(member: &TeamMemberRow) -> Option<Self> {
-        if member.is_user {
-            return None;
-        }
-        let default_title = format!("{} (", member.name);
-        let subtitle = if !member.title.is_empty()
-            && member.title != member.name
-            && !member.title.starts_with(&default_title)
-        {
-            TeamAgentSubtitle::Title(member.title.clone())
-        } else if member.sid.is_empty() {
-            TeamAgentSubtitle::Role
-        } else {
-            TeamAgentSubtitle::None
-        };
-        Some(Self {
-            member: member.clone(),
-            subtitle,
-        })
-    }
-}
-
 #[vmux_api::ui_event(Copy, Default, Eq, targets = ["team", "layout", "spaces"])]
 pub struct TeamOpenRequest;
 
@@ -117,17 +76,6 @@ pub struct TeamProfileSwitchRequest {
 pub struct TeamProfileUpdateRequest {
     pub profile_id: String,
     pub name: String,
-}
-
-#[vmux_api::ui_event(Default, Eq, targets = ["team", "layout", "spaces"])]
-pub struct TeamRequest {
-    pub command: String,
-    #[serde(default)]
-    pub member_id: Option<String>,
-    #[serde(default)]
-    pub profile_id: Option<String>,
-    #[serde(default)]
-    pub profile_name: Option<String>,
 }
 
 #[cfg(test)]
@@ -198,44 +146,5 @@ mod tests {
         let recovered = rkyv::from_bytes::<TeamProfileUpdateRequest, rkyv::rancor::Error>(&bytes)
             .expect("deserialize");
         assert_eq!(original, recovered);
-    }
-
-    #[test]
-    fn projection_selects_the_active_profile_and_agent_subtitle() {
-        let state = TeamEvent::project(
-            vec![
-                TeamMemberRow {
-                    name: "You".to_string(),
-                    is_user: true,
-                    ..TeamMemberRow::default()
-                },
-                TeamMemberRow {
-                    name: "Codex".to_string(),
-                    title: "Reviewing the diff".to_string(),
-                    ..TeamMemberRow::default()
-                },
-            ],
-            vec![
-                ProfileRow {
-                    id: "work".to_string(),
-                    name: "Work".to_string(),
-                    color: "#3b82f6".to_string(),
-                    is_active: true,
-                },
-                ProfileRow {
-                    id: "personal".to_string(),
-                    name: "Personal".to_string(),
-                    color: "#8b5cf6".to_string(),
-                    is_active: false,
-                },
-            ],
-        );
-
-        assert_eq!(state.active_profile.as_ref().unwrap().id, "work");
-        assert_eq!(state.agents.len(), 1);
-        assert_eq!(
-            state.agents[0].subtitle,
-            TeamAgentSubtitle::Title("Reviewing the diff".to_string())
-        );
     }
 }

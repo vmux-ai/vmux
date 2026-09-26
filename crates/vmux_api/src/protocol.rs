@@ -29,19 +29,6 @@ mod tests {
     use crate::room::ClientOpId;
 
     #[test]
-    fn deny_is_the_last_answer_offered_though_it_is_declared_second() {
-        assert_eq!(
-            ApprovalDecision::OFFERED,
-            [
-                ApprovalDecision::Allow,
-                ApprovalDecision::AllowAlways,
-                ApprovalDecision::Deny,
-            ],
-        );
-        assert_eq!(ApprovalDecision::for_index(3), None);
-    }
-
-    #[test]
     fn composed_agent_prompt_preserves_marker_literals_in_display_text() {
         let display = format!("before{PRIVATE_CONTEXT_PROMPT_MARKER}after");
         let wire = compose_agent_prompt(&display, Some("context"));

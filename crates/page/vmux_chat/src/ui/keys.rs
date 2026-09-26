@@ -1,6 +1,6 @@
 use super::composer::options::ChatMenuSet;
 use super::state::Chat;
-use crate::event::{ApprovalDecision, ChatItem, ChatKey};
+use crate::event::{ChatItem, ChatKey};
 use crate::format::{
     PromptEdit, PromptHistoryDirection, edit_prompt, move_prompt_history, prompt_history_direction,
 };
@@ -331,7 +331,7 @@ impl ChatList {
                 let Some(approval) = chat.run.approval.peek().clone() else {
                     return;
                 };
-                let Some(decision) = ApprovalDecision::for_index(index) else {
+                let Some(decision) = super::approval::APPROVAL_DECISIONS.get(index).copied() else {
                     return;
                 };
                 chat.answer_approval(approval.call_id, decision);

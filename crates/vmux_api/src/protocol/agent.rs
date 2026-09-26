@@ -316,14 +316,6 @@ pub enum ApprovalDecision {
     AllowAlways,
 }
 
-impl ApprovalDecision {
-    pub const OFFERED: [Self; 3] = [Self::Allow, Self::AllowAlways, Self::Deny];
-
-    pub fn for_index(index: usize) -> Option<Self> {
-        Self::OFFERED.get(index).copied()
-    }
-}
-
 #[vmux_api::contract]
 pub enum AgentRunStatus {
     Streaming,

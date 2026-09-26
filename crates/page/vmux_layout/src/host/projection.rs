@@ -4,7 +4,7 @@ use vmux_core::event::team::{TeamEvent, TeamMemberRow};
 
 use crate::cef::LayoutCef;
 use crate::event::{
-    ActiveSession, ActiveSessionState, ActiveWorkspaceProject, HeaderPageState, PaneTreeState,
+    ActiveSession, ActiveSessionState, ActiveWorkspaceProject, HeaderState, PaneTreeState,
     SideSheetState, StackNavigationState, StackNode, StackRevealTarget, TabBoundaryState,
 };
 
@@ -14,11 +14,7 @@ impl Plugin for LayoutUiProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (
-                publish_active_session,
-                publish_header_page,
-                publish_side_sheet,
-            ),
+            (publish_active_session, publish_header, publish_side_sheet),
         );
     }
 }
@@ -106,16 +102,35 @@ impl ActiveSession {
     }
 }
 
-impl HeaderPageState {
-    fn from_projections(stacks: &StackNavigationState, bookmarks: &BookmarkStateEvent) -> Self {
+impl HeaderState {
+    fn from_projections(
+        stacks: &StackNavigationState,
+        bookmarks: &BookmarkStateEvent,
+        team: &TeamEvent,
+    ) -> Self {
         let active = stacks.stacks.iter().find(|stack| stack.is_active).cloned();
+        let user = team.members.iter().find(|member| member.is_user).cloned();
+        let agents = team
+            .members
+            .iter()
+            .filter(|member| !member.is_user)
+            .cloned()
+            .collect();
         let Some(url) = active
             .as_ref()
             .map(|stack| stack.url.as_str())
             .filter(|url| !url.is_empty())
         else {
             return Self {
+                metadata: active.as_ref().map(|row| vmux_core::PageMetadata {
+                    title: row.title.clone(),
+                    url: row.url.clone(),
+                    icon: row.icon.clone(),
+                    bg_color: row.bg_color.clone(),
+                }),
                 active,
+                user,
+                agents,
                 ..Default::default()
             };
         };
@@ -135,9 +150,17 @@ impl HeaderPageState {
             .find(|pin| pin.metadata.url == url)
             .map(|pin| pin.uuid.clone());
         Self {
+            metadata: active.as_ref().map(|row| vmux_core::PageMetadata {
+                title: row.title.clone(),
+                url: row.url.clone(),
+                icon: row.icon.clone(),
+                bg_color: row.bg_color.clone(),
+            }),
             active,
             bookmarked,
             pinned_uuid,
+            user,
+            agents,
         }
     }
 }
@@ -230,28 +253,31 @@ fn publish_active_session(
     }
 }
 
-fn publish_header_page(
+fn publish_header(
     layouts: Query<
         (
             Entity,
             Option<&StackProjection>,
             Option<&BookmarkProjection>,
+            Option<&TeamProjection>,
         ),
         With<LayoutCef>,
     >,
-    mut last: Local<std::collections::HashMap<Entity, HeaderPageState>>,
+    mut last: Local<std::collections::HashMap<Entity, HeaderState>>,
     mut commands: Commands,
 ) {
     let empty_stacks = StackNavigationState::default();
     let empty_bookmarks = BookmarkStateEvent::default();
-    for (entity, stacks, bookmarks) in &layouts {
+    let empty_team = TeamEvent::default();
+    for (entity, stacks, bookmarks, team) in &layouts {
         let stacks = stacks
             .map(|projection| &projection.0)
             .unwrap_or(&empty_stacks);
         let bookmarks = bookmarks
             .map(|projection| &projection.0)
             .unwrap_or(&empty_bookmarks);
-        let event = HeaderPageState::from_projections(stacks, bookmarks);
+        let team = team.map(|projection| &projection.0).unwrap_or(&empty_team);
+        let event = HeaderState::from_projections(stacks, bookmarks, team);
         if last.get(&entity) == Some(&event) {
             continue;
         }
@@ -335,6 +361,32 @@ mod tests {
         let agent = ActiveSession::agent_for(&page, &team).unwrap();
 
         assert_eq!(agent.id, "second");
+    }
+
+    #[test]
+    fn header_projection_contains_render_ready_team_rows() {
+        let user = TeamMemberRow {
+            id: "user".into(),
+            name: "You".into(),
+            is_user: true,
+            ..Default::default()
+        };
+        let agent = TeamMemberRow {
+            id: "agent".into(),
+            name: "Codex".into(),
+            ..Default::default()
+        };
+        let state = HeaderState::from_projections(
+            &StackNavigationState::default(),
+            &BookmarkStateEvent::default(),
+            &TeamEvent {
+                members: vec![user.clone(), agent.clone()],
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(state.user, Some(user));
+        assert_eq!(state.agents, vec![agent]);
     }
 
     #[test]

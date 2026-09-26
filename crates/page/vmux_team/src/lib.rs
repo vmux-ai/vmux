@@ -8,4 +8,5 @@ mod host;
 #[cfg(host)]
 pub use host::*;
 
+mod projection;
 pub mod roster;

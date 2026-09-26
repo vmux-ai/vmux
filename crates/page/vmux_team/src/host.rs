@@ -5,13 +5,12 @@ use vmux_agent::AgentRunState;
 use vmux_core::agent::SessionId;
 use vmux_core::event::team::{
     ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
-    TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest, TeamRequest,
+    TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
 };
 use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::profile::{ProfileId, ProfileLabel};
 use vmux_core::team::{Agent, Profile, User};
 use vmux_core::{PageMetadata, focus_pane_entity};
-use vmux_layout::LayoutUiStateUpdates;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
@@ -20,6 +19,8 @@ use vmux_layout::stack::Stack;
 use vmux_service::agent_events::AgentCommandRequest;
 use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
+
+use crate::projection::TeamStateProjection;
 
 pub struct TeamPlugin;
 
@@ -58,18 +59,12 @@ impl Plugin for TeamIntentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ProfileSwitchRequested>()
             .add_plugins(UiEventPlugin::<(
-                TeamRequest,
                 TeamOpenRequest,
                 TeamMemberFocusRequest,
                 TeamProfileCreateRequest,
                 TeamProfileSwitchRequest,
                 TeamProfileUpdateRequest,
             )>::default())
-            .add_observer(forward_legacy_team_open_request)
-            .add_observer(forward_legacy_team_member_focus_request)
-            .add_observer(forward_legacy_team_profile_create_request)
-            .add_observer(forward_legacy_team_profile_switch_request)
-            .add_observer(forward_legacy_team_profile_update_request)
             .add_observer(on_team_open_request)
             .add_observer(on_team_member_focus_request)
             .add_observer(on_team_profile_create_request)
@@ -357,7 +352,7 @@ fn project_team(
                     == Some(window)
             })
         });
-        let presentation = TeamPresentation(TeamEvent::project(
+        let presentation = TeamPresentation(TeamStateProjection::build(
             build_team_members(
                 target_space.or_else(|| current_space.iter().next()),
                 &user_q,
@@ -383,7 +378,6 @@ fn publish_team(
     presentations: Query<(Entity, &TeamPresentation), Changed<TeamPresentation>>,
     direct_views: Query<(), Or<(With<Team>, With<vmux_space::Spaces>)>>,
     layout_cefs: Query<(), With<LayoutCef>>,
-    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     mut commands: Commands,
 ) {
     for (entity, presentation) in &presentations {
@@ -394,14 +388,6 @@ fn publish_team(
             ));
         }
         if layout_cefs.contains(entity) {
-            if layout_ui.contains(entity) {
-                commands.trigger(
-                    UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
-                        entity,
-                        &presentation.0,
-                    ),
-                );
-            }
             commands
                 .entity(entity)
                 .insert(LayoutTeamProjection(presentation.0.clone()));
@@ -414,7 +400,6 @@ fn replay_team(
     presentations: Query<&TeamPresentation>,
     direct_views: Query<(), Or<(With<Team>, With<vmux_space::Spaces>)>>,
     layout_cefs: Query<(), With<LayoutCef>>,
-    layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -428,14 +413,6 @@ fn replay_team(
         ));
     }
     if layout_cefs.contains(entity) {
-        if layout_ui.contains(entity) {
-            commands.trigger(
-                UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
-                    entity,
-                    &presentation.0,
-                ),
-            );
-        }
         commands
             .entity(entity)
             .insert(LayoutTeamProjection(presentation.0.clone()));
@@ -457,93 +434,6 @@ fn open_team_stack_in_space(
 fn parse_member_entity(member_id: &str) -> Option<Entity> {
     let bits = member_id.parse::<u64>().ok()?;
     Entity::try_from_bits(bits)
-}
-
-fn forward_legacy_team_open_request(trigger: On<UiInput<TeamRequest>>, mut commands: Commands) {
-    let request = &trigger.event().payload;
-    if request.command == "create_profile"
-        || request.command == "switch_profile"
-        || request.command == "update_profile"
-        || request.member_id.is_some()
-    {
-        return;
-    }
-    commands.trigger(UiInput {
-        webview: trigger.event().webview,
-        payload: TeamOpenRequest,
-    });
-}
-
-fn forward_legacy_team_member_focus_request(
-    trigger: On<UiInput<TeamRequest>>,
-    mut commands: Commands,
-) {
-    let request = &trigger.event().payload;
-    if request.command == "create_profile"
-        || request.command == "switch_profile"
-        || request.command == "update_profile"
-    {
-        return;
-    }
-    let Some(member_id) = request.member_id.clone() else {
-        return;
-    };
-    commands.trigger(UiInput {
-        webview: trigger.event().webview,
-        payload: TeamMemberFocusRequest { member_id },
-    });
-}
-
-fn forward_legacy_team_profile_create_request(
-    trigger: On<UiInput<TeamRequest>>,
-    mut commands: Commands,
-) {
-    let request = &trigger.event().payload;
-    if request.command != "create_profile" {
-        return;
-    }
-    let Some(name) = request.profile_name.clone() else {
-        return;
-    };
-    commands.trigger(UiInput {
-        webview: trigger.event().webview,
-        payload: TeamProfileCreateRequest { name },
-    });
-}
-
-fn forward_legacy_team_profile_switch_request(
-    trigger: On<UiInput<TeamRequest>>,
-    mut commands: Commands,
-) {
-    let request = &trigger.event().payload;
-    if request.command != "switch_profile" {
-        return;
-    }
-    let Some(profile_id) = request.profile_id.clone() else {
-        return;
-    };
-    commands.trigger(UiInput {
-        webview: trigger.event().webview,
-        payload: TeamProfileSwitchRequest { profile_id },
-    });
-}
-
-fn forward_legacy_team_profile_update_request(
-    trigger: On<UiInput<TeamRequest>>,
-    mut commands: Commands,
-) {
-    let request = &trigger.event().payload;
-    if request.command != "update_profile" {
-        return;
-    }
-    let (Some(profile_id), Some(name)) = (request.profile_id.clone(), request.profile_name.clone())
-    else {
-        return;
-    };
-    commands.trigger(UiInput {
-        webview: trigger.event().webview,
-        payload: TeamProfileUpdateRequest { profile_id, name },
-    });
 }
 
 fn on_team_open_request(

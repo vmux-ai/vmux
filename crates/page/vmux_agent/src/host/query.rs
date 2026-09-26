@@ -195,7 +195,8 @@ impl AgentQueryRoutes<'_> {
 
 impl Plugin for AgentQueryPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<WorkingDirectoryRequest>()
+        app.add_message::<ServiceInbound>()
+            .add_message::<WorkingDirectoryRequest>()
             .add_message::<SettingsReadRequest>()
             .add_message::<SpaceListRequest>()
             .add_message::<CommandListRequest>()
