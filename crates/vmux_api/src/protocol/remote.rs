@@ -1,7 +1,8 @@
 use super::{
-    AgentAttachment, AgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequest,
-    AgentRequestId, CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo,
-    SharedEvent, SharedMessage,
+    AgentAttachment, AgentBookmarks, AgentCommand, AgentCommandExit, AgentCommandResult,
+    AgentCommandTool, AgentImage, AgentQuery, AgentRecording, AgentRequest, AgentRequestId,
+    AgentRunCompletion, AgentSpace, CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer,
+    ProcessInfo, SharedEvent, SharedMessage,
 };
 use crate::{ProcessId, TermCursor, TermLine, TermSelectionRange};
 
@@ -92,9 +93,77 @@ pub enum ClientMessage {
         request_id: AgentRequestId,
         query: AgentQuery,
     },
-    AgentQueryResponse {
+    AgentLayoutResult {
         request_id: AgentRequestId,
-        result: AgentQueryResult,
+        result: Result<crate::protocol::layout::LayoutSnapshot, String>,
+    },
+    AgentTerminalReadResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentTerminalReadFullResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentCommandExitResult {
+        request_id: AgentRequestId,
+        result: Result<AgentCommandExit, String>,
+    },
+    AgentRunCompletionResult {
+        request_id: AgentRequestId,
+        result: Result<AgentRunCompletion, String>,
+    },
+    AgentSettingsResult {
+        request_id: AgentRequestId,
+        result: Result<JsonValue, String>,
+    },
+    AgentSpacesResult {
+        request_id: AgentRequestId,
+        result: Result<Vec<AgentSpace>, String>,
+    },
+    AgentScreenshotResult {
+        request_id: AgentRequestId,
+        result: Result<AgentImage, String>,
+    },
+    AgentBrowserSnapshotResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentBrowserScrollResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentRecordStartResult {
+        request_id: AgentRequestId,
+        result: Result<u32, String>,
+    },
+    AgentRecordStopResult {
+        request_id: AgentRequestId,
+        result: Result<AgentRecording, String>,
+    },
+    AgentBookmarksResult {
+        request_id: AgentRequestId,
+        result: Result<AgentBookmarks, String>,
+    },
+    AgentSimulatorScreenshotResult {
+        request_id: AgentRequestId,
+        result: Result<AgentImage, String>,
+    },
+    AgentSimulatorControlResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentWorkingDirectoryResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentVaultStatusResult {
+        request_id: AgentRequestId,
+        result: Result<crate::vault::VaultStatusSnapshot, String>,
+    },
+    AgentCommandsResult {
+        request_id: AgentRequestId,
+        result: Result<Vec<AgentCommandTool>, String>,
     },
     AgentCommandResponse {
         request_id: AgentRequestId,
@@ -266,9 +335,77 @@ pub enum ServiceMessage {
         request_id: AgentRequestId,
         query: AgentQuery,
     },
-    AgentQueryResult {
+    AgentLayoutResult {
         request_id: AgentRequestId,
-        result: AgentQueryResult,
+        result: Result<crate::protocol::layout::LayoutSnapshot, String>,
+    },
+    AgentTerminalReadResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentTerminalReadFullResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentCommandExitResult {
+        request_id: AgentRequestId,
+        result: Result<AgentCommandExit, String>,
+    },
+    AgentRunCompletionResult {
+        request_id: AgentRequestId,
+        result: Result<AgentRunCompletion, String>,
+    },
+    AgentSettingsResult {
+        request_id: AgentRequestId,
+        result: Result<JsonValue, String>,
+    },
+    AgentSpacesResult {
+        request_id: AgentRequestId,
+        result: Result<Vec<AgentSpace>, String>,
+    },
+    AgentScreenshotResult {
+        request_id: AgentRequestId,
+        result: Result<AgentImage, String>,
+    },
+    AgentBrowserSnapshotResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentBrowserScrollResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentRecordStartResult {
+        request_id: AgentRequestId,
+        result: Result<u32, String>,
+    },
+    AgentRecordStopResult {
+        request_id: AgentRequestId,
+        result: Result<AgentRecording, String>,
+    },
+    AgentBookmarksResult {
+        request_id: AgentRequestId,
+        result: Result<AgentBookmarks, String>,
+    },
+    AgentSimulatorScreenshotResult {
+        request_id: AgentRequestId,
+        result: Result<AgentImage, String>,
+    },
+    AgentSimulatorControlResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentWorkingDirectoryResult {
+        request_id: AgentRequestId,
+        result: Result<String, String>,
+    },
+    AgentVaultStatusResult {
+        request_id: AgentRequestId,
+        result: Result<crate::vault::VaultStatusSnapshot, String>,
+    },
+    AgentCommandsResult {
+        request_id: AgentRequestId,
+        result: Result<Vec<AgentCommandTool>, String>,
     },
     AgentCommandResult {
         request_id: AgentRequestId,

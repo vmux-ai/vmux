@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use vmux_api::protocol::{
-    AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, FileTouchKind,
-    ProcessId, ServiceMessage,
+    AgentCommand, AgentQuery, AgentRequestId, ClientMessage, FileTouchKind, ProcessId,
+    ServiceMessage,
 };
 use vmux_core::{JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::McpExecution;
@@ -128,12 +128,34 @@ async fn agent_working_directory(anchor: Option<ProcessId>) -> Result<PathBuf, S
     let connection = ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
-    match agent_query(&connection, AgentQuery::WorkingDirectory { anchor }).await? {
-        AgentQueryResult::Text(path) => PathBuf::from(path)
-            .canonicalize()
-            .map_err(|error| format!("cannot resolve agent working directory: {error}")),
-        AgentQueryResult::Error(message) => Err(message),
-        _ => Err("unexpected agent working directory response".to_string()),
+    let request_id = AgentRequestId::new();
+    connection
+        .send(&ClientMessage::AgentQuery {
+            request_id,
+            query: AgentQuery::WorkingDirectory { anchor },
+        })
+        .await
+        .map_err(|error| format!("cannot send query: {error}"))?;
+    loop {
+        let Some(message) = connection
+            .recv()
+            .await
+            .map_err(|error| format!("cannot read query response: {error}"))?
+        else {
+            return Err("vmux_service disconnected".to_string());
+        };
+        match message {
+            ServiceMessage::AgentWorkingDirectoryResult {
+                request_id: received,
+                result,
+            } if received == request_id => {
+                return PathBuf::from(result?)
+                    .canonicalize()
+                    .map_err(|error| format!("cannot resolve agent working directory: {error}"));
+            }
+            ServiceMessage::Error { message } => return Err(message),
+            _ => {}
+        }
     }
 }
 
@@ -400,34 +422,6 @@ fn byte_to_utf16(line: &str, byte: usize) -> u32 {
         index -= 1;
     }
     line[..index].encode_utf16().count() as u32
-}
-
-async fn agent_query(
-    connection: &ServiceConnection,
-    query: AgentQuery,
-) -> Result<AgentQueryResult, String> {
-    let request_id = AgentRequestId::new();
-    connection
-        .send(&ClientMessage::AgentQuery { request_id, query })
-        .await
-        .map_err(|error| format!("cannot send query: {error}"))?;
-    loop {
-        let Some(message) = connection
-            .recv()
-            .await
-            .map_err(|error| format!("cannot read query response: {error}"))?
-        else {
-            return Err("vmux_service disconnected".to_string());
-        };
-        match message {
-            ServiceMessage::AgentQueryResult {
-                request_id: received,
-                result,
-            } if received == request_id => return Ok(result),
-            ServiceMessage::Error { message } => return Err(message),
-            _ => {}
-        }
-    }
 }
 
 async fn run_agent_command(command: AgentCommand, anchor: Option<ProcessId>) -> Result<(), String> {

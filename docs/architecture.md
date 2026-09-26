@@ -111,6 +111,11 @@ rkyv with a 64 MiB cap. A remote client opens one bidirectional QUIC stream per 
 carrying an rkyv `SharedMessage` and `SharedResponse`. The relay's control connection is
 the odd one: a JSON hello, then opaque DATAGRAM frames it cannot read.
 
+`AgentQuery` is the serialized request discriminant. Replies use operation-specific
+`ServiceMessage` variants with typed `Result<T, String>` payloads; there is no shared
+`AgentQueryResult` bag passed through host ECS. Browser snapshot and scroll replies remain
+separate typed messages before crossing that transport boundary.
+
 The hellos are JSON and everything after is rkyv, deliberately. rkyv encodes enum variants
 **positionally** — a peer one release behind does not fail to decode a reordered variant,
 it decodes the *wrong* one. Fine on the unix socket, where both sides ship together. Not

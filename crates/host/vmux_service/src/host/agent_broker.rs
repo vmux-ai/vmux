@@ -5,12 +5,12 @@ use tokio::sync::{Mutex, broadcast, oneshot};
 
 use crate::protocol::{
     AGENT_COMMAND_TIMEOUT, AGENT_QUERY_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentCommand,
-    AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, BROWSER_NAVIGATE_TIMEOUT,
-    JsonValue, ProcessId, ServiceMessage,
+    AgentCommandResult, AgentQuery, AgentRequestId, BROWSER_NAVIGATE_TIMEOUT, JsonValue, ProcessId,
+    ServiceMessage,
 };
 
 pub type PendingCommands = Arc<Mutex<HashMap<AgentRequestId, oneshot::Sender<AgentCommandResult>>>>;
-pub type PendingQueries = Arc<Mutex<HashMap<AgentRequestId, oneshot::Sender<AgentQueryResult>>>>;
+pub type PendingQueries = Arc<Mutex<HashMap<AgentRequestId, oneshot::Sender<ServiceMessage>>>>;
 pub type PendingToolCalls = Arc<Mutex<HashMap<AgentRequestId, oneshot::Sender<(String, bool)>>>>;
 
 const NO_SUBSCRIBER: &str = "no desktop subscribed to agent commands";
@@ -91,11 +91,11 @@ impl AgentBroker {
         &self,
         request_id: AgentRequestId,
         query: AgentQuery,
-    ) -> Result<AgentQueryResult, String> {
+    ) -> Result<ServiceMessage, String> {
         if self.agent_tx.receiver_count() == 0 {
             return Err(NO_SUBSCRIBER.to_string());
         }
-        let (tx, rx) = oneshot::channel::<AgentQueryResult>();
+        let (tx, rx) = oneshot::channel::<ServiceMessage>();
         self.pending_queries.lock().await.insert(request_id, tx);
         let timeout = query_timeout(&query);
 

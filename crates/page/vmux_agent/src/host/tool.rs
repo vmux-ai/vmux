@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use vmux_api::protocol::{
-    AgentCommand, AgentPaneDirection, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage,
-    PlacementMode, ProcessId, ServiceMessage,
+    AgentCommand, AgentPaneDirection, AgentQuery, AgentRequestId, AgentRunCompletion,
+    ClientMessage, PlacementMode, ProcessId, ServiceMessage,
 };
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
@@ -497,12 +497,34 @@ async fn agent_working_directory(anchor: Option<ProcessId>) -> Result<PathBuf, S
     let connection = ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
-    match agent_query(&connection, AgentQuery::WorkingDirectory { anchor }).await? {
-        AgentQueryResult::Text(path) => PathBuf::from(path)
-            .canonicalize()
-            .map_err(|error| format!("cannot resolve agent working directory: {error}")),
-        AgentQueryResult::Error(message) => Err(message),
-        _ => Err("unexpected agent working directory response".to_string()),
+    let request_id = AgentRequestId::new();
+    connection
+        .send(&ClientMessage::AgentQuery {
+            request_id,
+            query: AgentQuery::WorkingDirectory { anchor },
+        })
+        .await
+        .map_err(|error| format!("cannot send query: {error}"))?;
+    loop {
+        let Some(message) = connection
+            .recv()
+            .await
+            .map_err(|error| format!("cannot read query response: {error}"))?
+        else {
+            return Err("vmux_service disconnected".to_string());
+        };
+        match message {
+            ServiceMessage::AgentWorkingDirectoryResult {
+                request_id: received,
+                result,
+            } if received == request_id => {
+                return PathBuf::from(result?)
+                    .canonicalize()
+                    .map_err(|error| format!("cannot resolve agent working directory: {error}"));
+            }
+            ServiceMessage::Error { message } => return Err(message),
+            _ => {}
+        }
     }
 }
 
@@ -580,26 +602,23 @@ fn run_result(
 }
 
 fn run_completion_exit(
-    result: AgentQueryResult,
+    result: Result<AgentRunCompletion, String>,
     token: &str,
     process_id: ProcessId,
     allow_missing_process: bool,
 ) -> Result<Option<i32>, String> {
     match result {
-        AgentQueryResult::RunCompletion {
+        Ok(AgentRunCompletion {
             token: Some(done_token),
             exit: Some(exit),
-        } if done_token == token => Ok(Some(exit)),
-        AgentQueryResult::RunCompletion { .. } => Ok(None),
-        AgentQueryResult::Error(message)
+        }) if done_token == token => Ok(Some(exit)),
+        Ok(_) => Ok(None),
+        Err(message)
             if allow_missing_process && message == format!("process not found: {process_id}") =>
         {
             Ok(None)
         }
-        AgentQueryResult::Error(message) => Err(message),
-        other => Err(format!(
-            "run: unexpected run-completion result for {process_id}: {other:?}"
-        )),
+        Err(message) => Err(message),
     }
 }
 
@@ -650,8 +669,8 @@ async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<
     let materialize_deadline = start + RUN_PROCESS_MATERIALIZE_TIMEOUT;
     let mut process_materialized = false;
     loop {
-        let result = agent_query(&connection, AgentQuery::RunCompletion { process_id }).await?;
-        let materialized_now = matches!(&result, AgentQueryResult::RunCompletion { .. });
+        let result = run_completion(&connection, process_id).await?;
+        let materialized_now = result.is_ok();
         let allow_missing_process = !process_materialized && Instant::now() < materialize_deadline;
         let exit = run_completion_exit(result, &token, process_id, allow_missing_process)?;
         process_materialized |= materialized_now;
@@ -681,13 +700,16 @@ async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<
     }
 }
 
-async fn agent_query(
+async fn run_completion(
     connection: &ServiceConnection,
-    query: AgentQuery,
-) -> Result<AgentQueryResult, String> {
+    process_id: ProcessId,
+) -> Result<Result<AgentRunCompletion, String>, String> {
     let request_id = AgentRequestId::new();
     connection
-        .send(&ClientMessage::AgentQuery { request_id, query })
+        .send(&ClientMessage::AgentQuery {
+            request_id,
+            query: AgentQuery::RunCompletion { process_id },
+        })
         .await
         .map_err(|error| format!("cannot send query: {error}"))?;
     loop {
@@ -699,7 +721,7 @@ async fn agent_query(
             return Err("vmux_service disconnected".to_string());
         };
         match message {
-            ServiceMessage::AgentQueryResult {
+            ServiceMessage::AgentRunCompletionResult {
                 request_id: received,
                 result,
             } if received == request_id => return Ok(result),
@@ -710,9 +732,29 @@ async fn agent_query(
 }
 
 async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -> String {
-    match agent_query(connection, AgentQuery::ReadTerminalFull { process_id }).await {
-        Ok(AgentQueryResult::Text(text)) => text,
-        _ => String::new(),
+    let request_id = AgentRequestId::new();
+    if connection
+        .send(&ClientMessage::AgentQuery {
+            request_id,
+            query: AgentQuery::ReadTerminalFull { process_id },
+        })
+        .await
+        .is_err()
+    {
+        return String::new();
+    }
+    loop {
+        let Ok(Some(message)) = connection.recv().await else {
+            return String::new();
+        };
+        match message {
+            ServiceMessage::AgentTerminalReadFullResult {
+                request_id: received,
+                result,
+            } if received == request_id => return result.unwrap_or_default(),
+            ServiceMessage::Error { .. } => return String::new(),
+            _ => {}
+        }
     }
 }
 
