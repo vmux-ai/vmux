@@ -85,8 +85,7 @@ impl Plugin for ToolRuntimePlugin {
                 route_external_tool_operation::<ToolImportRequest>,
             )
                 .after(ToolOperationRouteFlush),
-        )
-        .add_systems(Update, complete_failed_store_operation);
+        );
     }
 }
 
@@ -97,17 +96,7 @@ pub struct ToolOperationRouteSet;
 struct ToolOperationRouteFlush;
 
 #[derive(Component, Clone)]
-pub struct ToolOperationRequest<R: Send + Sync + 'static>(R);
-
-impl<R: Send + Sync + 'static> ToolOperationRequest<R> {
-    pub fn new(request: R) -> Self {
-        Self(request)
-    }
-
-    pub fn request(&self) -> &R {
-        &self.0
-    }
-}
+pub struct ToolOperationRequest<R: Send + Sync + 'static>(pub R);
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ExternalToolOperation;
@@ -115,61 +104,17 @@ pub struct ExternalToolOperation;
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ToolStoreOperation;
 
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ToolOperationFinished;
+
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct ToolOperationCompletion {
-    success: bool,
-    message: String,
-}
-
-impl ToolOperationCompletion {
-    pub fn success(&self) -> bool {
-        self.success
-    }
-
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-
-    pub fn succeeded(message: impl Into<String>) -> Self {
-        Self {
-            success: true,
-            message: message.into(),
-        }
-    }
-
-    pub fn failed(message: impl Into<String>) -> Self {
-        Self {
-            success: false,
-            message: message.into(),
-        }
-    }
-}
+pub struct ToolOperationSucceeded(pub String);
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ToolStoreTarget(Entity);
-
-impl ToolStoreTarget {
-    pub const fn new(entity: Entity) -> Self {
-        Self(entity)
-    }
-
-    pub const fn entity(self) -> Entity {
-        self.0
-    }
-}
+pub struct ToolStoreTarget(pub Entity);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-pub struct ToolOperationFailure(String);
-
-impl ToolOperationFailure {
-    pub(crate) fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
-    }
-
-    pub fn message(&self) -> &str {
-        &self.0
-    }
-}
+pub struct ToolOperationFailed(pub String);
 
 #[derive(Component)]
 pub(crate) struct ToolOperationTask<T: Component>(Task<Result<T, String>>);
@@ -189,7 +134,7 @@ pub(crate) fn finish_tool_operation<T: Component>(
                 entity.insert(output);
             }
             Err(error) => {
-                entity.insert(ToolOperationFailure(error));
+                entity.insert((ToolOperationFinished, ToolOperationFailed(error)));
             }
         }
     }
@@ -208,22 +153,6 @@ fn route_external_tool_operation<R: Clone + Send + Sync + 'static>(
 ) {
     for entity in &requests {
         commands.entity(entity).insert(ExternalToolOperation);
-    }
-}
-
-fn complete_failed_store_operation(
-    operations: Query<
-        (Entity, &ToolOperationFailure),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
-    >,
-    mut commands: Commands,
-) {
-    for (entity, failure) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::failed(
-                failure.message().to_string(),
-            ));
     }
 }
 
@@ -375,11 +304,11 @@ brew "ripgrep"
         let operation = app
             .world_mut()
             .spawn((
-                ToolOperationRequest::new(ToolImportRequest {
+                ToolOperationRequest(ToolImportRequest {
                     provider: vmux_core::tool::ToolProvider::Npm,
                     value: package_json.to_string_lossy().into_owned(),
                 }),
-                ToolStoreTarget::new(store_entity),
+                ToolStoreTarget(store_entity),
             ))
             .id();
 
@@ -387,7 +316,7 @@ brew "ripgrep"
             app.update();
             if app
                 .world()
-                .get::<ToolOperationCompletion>(operation)
+                .get::<ToolOperationSucceeded>(operation)
                 .is_some()
             {
                 break;
@@ -398,9 +327,9 @@ brew "ripgrep"
         let output = app.world().get::<ImportedNpmManifest>(operation).unwrap();
         assert_eq!(output, &ImportedNpmManifest { packages: 1 });
         assert_eq!(
-            app.world().get::<ToolOperationCompletion>(operation),
-            Some(&ToolOperationCompletion::succeeded(
-                "imported 1 NPM package(s)"
+            app.world().get::<ToolOperationSucceeded>(operation),
+            Some(&ToolOperationSucceeded(
+                "imported 1 NPM package(s)".to_string()
             )),
         );
         assert!(
@@ -429,11 +358,11 @@ brew "ripgrep"
         let operation = app
             .world_mut()
             .spawn((
-                ToolOperationRequest::new(ToolImportRequest {
+                ToolOperationRequest(ToolImportRequest {
                     provider: vmux_core::tool::ToolProvider::Mcp,
                     value: String::new(),
                 }),
-                ToolStoreTarget::new(store_entity),
+                ToolStoreTarget(store_entity),
             ))
             .id();
 
@@ -441,7 +370,7 @@ brew "ripgrep"
             app.update();
             if app
                 .world()
-                .get::<ToolOperationCompletion>(operation)
+                .get::<ToolOperationSucceeded>(operation)
                 .is_some()
             {
                 break;
@@ -450,9 +379,9 @@ brew "ripgrep"
         }
 
         assert_eq!(
-            app.world().get::<ToolOperationCompletion>(operation),
-            Some(&ToolOperationCompletion::succeeded(
-                "imported 1 MCP server(s)"
+            app.world().get::<ToolOperationSucceeded>(operation),
+            Some(&ToolOperationSucceeded(
+                "imported 1 MCP server(s)".to_string()
             )),
         );
         assert!(

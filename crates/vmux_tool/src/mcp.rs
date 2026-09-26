@@ -9,9 +9,9 @@ use vmux_core::tool::{ToolAdoptRequest, ToolForgetRequest, ToolImportRequest, To
 
 use crate::manifest::{ToolStore, expand_user_path, load_manifest_from, write_manifest_to};
 use crate::{
-    ToolOperationCompletion, ToolOperationFailure, ToolOperationRequest, ToolOperationRouteFlush,
-    ToolOperationRouteSet, ToolOperationTask, ToolStoreOperation, ToolStoreTarget,
-    finish_tool_operation,
+    ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
+    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
+    ToolStoreTarget, finish_tool_operation,
 };
 
 pub(crate) struct McpToolPlugin;
@@ -54,7 +54,7 @@ fn route_import(
     mut commands: Commands,
 ) {
     for (entity, operation) in &requests {
-        let request = operation.request();
+        let request = &operation.0;
         if request.provider != ToolProvider::Mcp {
             continue;
         }
@@ -82,7 +82,7 @@ fn route_adopt(
     mut commands: Commands,
 ) {
     for (entity, operation) in &requests {
-        let request = operation.request();
+        let request = &operation.0;
         if request.provider != ToolProvider::Mcp || request.id.trim().is_empty() {
             continue;
         }
@@ -101,7 +101,7 @@ fn route_forget(
     mut commands: Commands,
 ) {
     for (entity, operation) in &requests {
-        let request = operation.request();
+        let request = &operation.0;
         if request.provider != ToolProvider::Mcp || request.id.trim().is_empty() {
             continue;
         }
@@ -117,51 +117,45 @@ fn route_forget(
 fn complete_config_import(
     operations: Query<
         (Entity, &ImportedMcpConfig),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
     >,
     mut commands: Commands,
 ) {
     for (entity, output) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::succeeded(format!(
-                "imported {} MCP server(s)",
-                output.servers
-            )));
+        commands.entity(entity).insert((
+            ToolOperationFinished,
+            ToolOperationSucceeded(format!("imported {} MCP server(s)", output.servers)),
+        ));
     }
 }
 
 fn complete_server_import(
     operations: Query<
         (Entity, &ImportedMcpServer),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
     >,
     mut commands: Commands,
 ) {
     for (entity, output) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::succeeded(format!(
-                "{} is now managed",
-                output.name
-            )));
+        commands.entity(entity).insert((
+            ToolOperationFinished,
+            ToolOperationSucceeded(format!("{} is now managed", output.name)),
+        ));
     }
 }
 
 fn complete_server_forget(
     operations: Query<
         (Entity, &ForgottenMcpServer),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
     >,
     mut commands: Commands,
 ) {
     for (entity, output) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::succeeded(format!(
-                "{} removed from tools.toml",
-                output.name
-            )));
+        commands.entity(entity).insert((
+            ToolOperationFinished,
+            ToolOperationSucceeded(format!("{} removed from tools.toml", output.name)),
+        ));
     }
 }
 
@@ -183,9 +177,10 @@ fn locate_mcp_configs(
     mut commands: Commands,
 ) {
     for (entity, target) in &operations {
-        let Ok(store) = stores.get(target.entity()) else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0) else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -202,7 +197,7 @@ fn discover_mcp_servers_system(
             With<DiscoverMcpServers>,
             Without<ToolOperationTask<DiscoveredMcpServers>>,
             Without<DiscoveredMcpServers>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     mut commands: Commands,
@@ -237,16 +232,17 @@ fn import_mcp_config_system(
         (
             Without<ToolOperationTask<ImportedMcpConfig>>,
             Without<ImportedMcpConfig>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -267,16 +263,17 @@ fn import_default_mcp_configs_system(
             With<ImportDefaultMcpConfigs>,
             Without<ToolOperationTask<ImportedMcpConfig>>,
             Without<ImportedMcpConfig>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, discovered, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -311,16 +308,17 @@ fn import_mcp_server_system(
         (
             Without<ToolOperationTask<ImportedMcpServer>>,
             Without<ImportedMcpServer>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, discovered, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -351,16 +349,17 @@ fn forget_mcp_server_system(
         (
             Without<ToolOperationTask<ForgottenMcpServer>>,
             Without<ForgottenMcpServer>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFinished>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
@@ -407,23 +406,6 @@ pub struct McpServerManifest {
     pub header_env: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer_token_env_var: Option<String>,
-}
-
-impl McpServerManifest {
-    pub fn resolved_headers(&self) -> BTreeMap<String, String> {
-        let mut headers = self.headers.clone();
-        for (name, variable) in &self.header_env {
-            if let Ok(value) = std::env::var(variable) {
-                headers.insert(name.clone(), value);
-            }
-        }
-        if let Some(variable) = &self.bearer_token_env_var
-            && let Ok(value) = std::env::var(variable)
-        {
-            headers.insert("Authorization".to_string(), format!("Bearer {value}"));
-        }
-        headers
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

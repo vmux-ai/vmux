@@ -91,13 +91,22 @@ fn begin_mcp_snapshot(
     }
     let generation = match states.get_mut(target) {
         Ok(mut state) => {
-            let Some(generation) = state.begin_load() else {
+            if state.snapshot.loading || state.snapshot.pending.is_some() {
                 return;
-            };
-            generation
+            }
+            state.generation = state.generation.wrapping_add(1).max(1);
+            state.snapshot.loading = true;
+            state.snapshot.result = None;
+            state.generation
         }
         Err(_) => {
-            let state = McpPageState::loading();
+            let state = McpPageState {
+                generation: 1,
+                snapshot: McpServers {
+                    loading: true,
+                    ..Default::default()
+                },
+            };
             let generation = state.generation;
             commands.entity(target).insert(state);
             generation
@@ -121,9 +130,26 @@ fn request_mcp_server(
     let Ok(mut state) = states.get_mut(target) else {
         return;
     };
-    let Some((generation, operation)) = state.begin_server_request(&id) else {
+    if state.snapshot.loading || state.snapshot.pending.is_some() {
+        return;
+    }
+    let Some(server) = state.snapshot.servers.iter().find(|server| server.id == id) else {
         return;
     };
+    let operation = match server.status {
+        McpServerStatus::Available
+        | McpServerStatus::AuthenticationRequired
+        | McpServerStatus::Failed => McpServerOperation::Connect,
+        McpServerStatus::Connected => McpServerOperation::Disconnect,
+        McpServerStatus::Configured => return,
+    };
+    state.generation = state.generation.wrapping_add(1).max(1);
+    let generation = state.generation;
+    state.snapshot.pending = Some(McpServerPending {
+        id: id.clone(),
+        operation,
+    });
+    state.snapshot.result = None;
     commands.spawn((
         McpOperation { runtime: *runtime },
         PendingMcpOperation {
@@ -265,7 +291,9 @@ fn drain_mcp_snapshots(
         let Ok(mut state) = states.get_mut(task.target) else {
             continue;
         };
-        state.finish(task.generation, snapshot);
+        if task.generation == state.generation {
+            state.snapshot = snapshot;
+        }
     }
 }
 
@@ -300,59 +328,6 @@ struct RequestMcpSnapshot {
 struct McpPageState {
     generation: u64,
     snapshot: McpServers,
-}
-
-impl McpPageState {
-    fn loading() -> Self {
-        Self {
-            generation: 1,
-            snapshot: McpServers {
-                loading: true,
-                ..Default::default()
-            },
-        }
-    }
-
-    fn begin_load(&mut self) -> Option<u64> {
-        if self.snapshot.loading || self.snapshot.pending.is_some() {
-            return None;
-        }
-        self.generation = self.generation.wrapping_add(1).max(1);
-        self.snapshot.loading = true;
-        self.snapshot.result = None;
-        Some(self.generation)
-    }
-
-    fn begin_server_request(&mut self, id: &str) -> Option<(u64, McpServerOperation)> {
-        if self.snapshot.loading || self.snapshot.pending.is_some() {
-            return None;
-        }
-        let server = self
-            .snapshot
-            .servers
-            .iter()
-            .find(|server| server.id == id)?;
-        let operation = match server.status {
-            McpServerStatus::Available
-            | McpServerStatus::AuthenticationRequired
-            | McpServerStatus::Failed => McpServerOperation::Connect,
-            McpServerStatus::Connected => McpServerOperation::Disconnect,
-            McpServerStatus::Configured => return None,
-        };
-        self.generation = self.generation.wrapping_add(1).max(1);
-        self.snapshot.pending = Some(McpServerPending {
-            id: id.to_string(),
-            operation,
-        });
-        self.snapshot.result = None;
-        Some((self.generation, operation))
-    }
-
-    fn finish(&mut self, generation: u64, snapshot: McpServers) {
-        if generation == self.generation {
-            self.snapshot = snapshot;
-        }
-    }
 }
 
 #[derive(Component)]
@@ -889,10 +864,11 @@ fn base64_url(bytes: &[u8]) -> String {
 mod tests {
     use super::{
         McpCallback, McpConnection, McpOperation, McpOperations, McpPageState, McpRuntime,
-        base64_url,
+        PendingMcpOperation, base64_url, request_mcp_server,
     };
     use bevy::prelude::*;
-    use vmux_api::mcp::{McpServerOperation, McpServers};
+    use bevy_cef::prelude::UiInput;
+    use vmux_api::mcp::{McpServerOperation, McpServerPending, McpServerRequest, McpServers};
 
     #[test]
     fn pkce_uses_unpadded_url_safe_base64() {
@@ -929,37 +905,56 @@ mod tests {
     }
 
     #[test]
-    fn page_state_rejects_stale_snapshots_and_owns_pending_actions() {
-        let mut state = McpPageState::loading();
-        assert_eq!(state.generation, 1);
-        assert!(state.snapshot.loading);
-        assert_eq!(state.begin_load(), None);
+    fn server_request_queues_one_operation_on_the_page_entity() {
+        let mut app = App::new();
+        app.add_observer(request_mcp_server);
+        app.world_mut().spawn(McpRuntime);
+        let target = app
+            .world_mut()
+            .spawn(McpPageState {
+                generation: 1,
+                snapshot: McpServers {
+                    loaded: true,
+                    servers: vec![vmux_api::mcp::McpServerEntry {
+                        id: "linear".to_string(),
+                        name: "Linear".to_string(),
+                        description: String::new(),
+                        status: vmux_api::mcp::McpServerStatus::Available,
+                    }],
+                    ..Default::default()
+                },
+            })
+            .id();
 
-        let loaded = McpServers {
-            loaded: true,
-            ..Default::default()
-        };
-        state.finish(2, loaded.clone());
-        assert!(state.snapshot.loading);
-
-        state.finish(1, loaded);
-        assert!(state.snapshot.loaded);
-        assert!(!state.snapshot.loading);
-
-        state.snapshot.servers.push(vmux_api::mcp::McpServerEntry {
-            id: "linear".to_string(),
-            name: "Linear".to_string(),
-            description: String::new(),
-            status: vmux_api::mcp::McpServerStatus::Available,
+        app.world_mut().trigger(UiInput {
+            webview: target,
+            payload: McpServerRequest {
+                id: "linear".to_string(),
+            },
         });
+        app.world_mut().trigger(UiInput {
+            webview: target,
+            payload: McpServerRequest {
+                id: "linear".to_string(),
+            },
+        });
+        app.world_mut().flush();
+
+        let state = app.world().get::<McpPageState>(target).unwrap();
+        assert_eq!(state.generation, 2);
         assert_eq!(
-            state.begin_server_request("linear"),
-            Some((2, McpServerOperation::Connect))
+            state.snapshot.pending,
+            Some(McpServerPending {
+                id: "linear".to_string(),
+                operation: McpServerOperation::Connect,
+            })
         );
-        let pending = state.snapshot.pending.as_ref().unwrap();
-        assert_eq!(pending.id, "linear");
-        assert_eq!(pending.operation, McpServerOperation::Connect);
-        assert_eq!(state.begin_server_request("linear"), None);
+        let operations = app
+            .world_mut()
+            .query::<&PendingMcpOperation>()
+            .iter(app.world())
+            .count();
+        assert_eq!(operations, 1);
     }
 
     #[test]

@@ -230,7 +230,12 @@ impl McpAuthorization {
     }
 
     fn headers(name: &str, server: &McpServerManifest) -> BTreeMap<String, String> {
-        let mut headers = server.resolved_headers();
+        let mut headers = Self::vibe_headers(server);
+        if let Some(variable) = &server.bearer_token_env_var
+            && let Ok(value) = std::env::var(variable)
+        {
+            headers.insert("Authorization".to_string(), format!("Bearer {value}"));
+        }
         if Self::environment_variable(name, server).is_none() {
             return headers;
         }

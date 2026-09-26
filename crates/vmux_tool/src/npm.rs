@@ -10,9 +10,9 @@ use crate::manifest::{
     write_manifest_to,
 };
 use crate::{
-    ToolOperationCompletion, ToolOperationFailure, ToolOperationRequest, ToolOperationRouteFlush,
-    ToolOperationRouteSet, ToolOperationTask, ToolStoreOperation, ToolStoreTarget,
-    finish_tool_operation,
+    ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
+    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
+    ToolStoreTarget, finish_tool_operation,
 };
 
 pub(crate) struct NpmToolPlugin;
@@ -37,7 +37,7 @@ fn route(
     mut commands: Commands,
 ) {
     for (entity, operation) in &requests {
-        let request = operation.request();
+        let request = &operation.0;
         if request.provider != ToolProvider::Npm {
             continue;
         }
@@ -54,17 +54,15 @@ fn route(
 fn complete(
     operations: Query<
         (Entity, &ImportedNpmManifest),
-        (With<ToolStoreOperation>, Without<ToolOperationCompletion>),
+        (With<ToolStoreOperation>, Without<ToolOperationFinished>),
     >,
     mut commands: Commands,
 ) {
     for (entity, output) in &operations {
-        commands
-            .entity(entity)
-            .insert(ToolOperationCompletion::succeeded(format!(
-                "imported {} NPM package(s)",
-                output.packages
-            )));
+        commands.entity(entity).insert((
+            ToolOperationFinished,
+            ToolOperationSucceeded(format!("imported {} NPM package(s)", output.packages)),
+        ));
     }
 }
 
@@ -90,16 +88,17 @@ fn import_npm_manifest_system(
         (
             Without<ToolOperationTask<ImportedNpmManifest>>,
             Without<ImportedNpmManifest>,
-            Without<ToolOperationFailure>,
+            Without<ToolOperationFailed>,
         ),
     >,
     stores: Query<&ToolStore>,
     mut commands: Commands,
 ) {
     for (entity, operation, target) in &operations {
-        let Ok(store) = stores.get(target.entity()).cloned() else {
-            commands.entity(entity).insert(ToolOperationFailure::new(
-                "tool store entity is unavailable",
+        let Ok(store) = stores.get(target.0).cloned() else {
+            commands.entity(entity).insert((
+                ToolOperationFinished,
+                ToolOperationFailed("tool store entity is unavailable".to_string()),
             ));
             continue;
         };
