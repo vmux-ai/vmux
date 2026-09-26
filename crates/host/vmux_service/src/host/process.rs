@@ -172,6 +172,7 @@ fn run_pty_reader(
             }
         }
     }
+    let _ = wake_tx.send(process_id);
 }
 
 #[derive(Clone)]
@@ -552,6 +553,7 @@ impl Process {
                         Err(_) => break,
                     }
                 }
+                let _ = wake_tx.send(wake_process_id);
             })
             .map_err(|e| format!("failed to spawn PTY reader: {e}"))?;
 
@@ -1924,6 +1926,19 @@ impl ProcessManager {
             }
         }
         exited
+    }
+
+    pub fn reap_exited(&mut self) {
+        let exited = self.poll_all();
+        for id in exited {
+            let keep = self
+                .processes
+                .get(&id)
+                .is_some_and(|process| process.keep_after_exit());
+            if !keep {
+                self.remove_process(&id);
+            }
+        }
     }
 
     pub fn remove_process(&mut self, id: &ProcessId) {
