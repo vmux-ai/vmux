@@ -7,7 +7,7 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     let Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             name,
-            "#[derive(VariantNames)] applies to an enum",
+            "#[variant_names] applies to an enum",
         ));
     };
 
@@ -19,6 +19,8 @@ pub fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     Ok(quote! {
+        #input
+
         impl #impl_generics #name #ty_generics #where_clause {
             pub const VARIANT_NAMES: &'static [&'static str] = &[#(#variants),*];
         }

@@ -757,17 +757,64 @@ impl KeyCombo {
 mod tests {
     use super::*;
 
-    #[derive(vmux_macro::CommandBar)]
-    #[shortcut(direct = "Super+t")]
+    #[derive(Message)]
     struct TestToggleRequest;
 
-    #[derive(vmux_macro::CommandBar)]
-    #[mcp(agent)]
+    impl CommandRequest for TestToggleRequest {
+        fn definitions() -> Vec<CommandDefinition> {
+            vec![CommandDefinition::new("test_toggle", "Toggle", "Test").direct("Super+t")]
+        }
+    }
+
+    impl TryFrom<&CommandInvocation> for TestToggleRequest {
+        type Error = ();
+
+        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            (invocation.id == "test_toggle").then_some(Self).ok_or(())
+        }
+    }
+
+    #[derive(Message)]
     struct AgentVisibleRequest;
 
-    #[derive(vmux_macro::CommandBar)]
-    #[mcp(description = "User only")]
+    impl CommandRequest for AgentVisibleRequest {
+        fn definitions() -> Vec<CommandDefinition> {
+            vec![
+                CommandDefinition::new("agent_visible", "Visible", "Agent")
+                    .mcp(CommandMcp::new("Visible", vmux_api::InputSchema::object()).allow_agent()),
+            ]
+        }
+    }
+
+    impl TryFrom<&CommandInvocation> for AgentVisibleRequest {
+        type Error = ();
+
+        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            (invocation.id == "agent_visible").then_some(Self).ok_or(())
+        }
+    }
+
+    #[derive(Message)]
     struct UserOnlyRequest;
+
+    impl CommandRequest for UserOnlyRequest {
+        fn definitions() -> Vec<CommandDefinition> {
+            vec![
+                CommandDefinition::new("user_only", "Only", "User").mcp(CommandMcp::new(
+                    "User only",
+                    vmux_api::InputSchema::object(),
+                )),
+            ]
+        }
+    }
+
+    impl TryFrom<&CommandInvocation> for UserOnlyRequest {
+        type Error = ();
+
+        fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+            (invocation.id == "user_only").then_some(Self).ok_or(())
+        }
+    }
 
     #[derive(Message)]
     struct DuplicateCommandA;

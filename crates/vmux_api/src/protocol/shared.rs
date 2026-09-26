@@ -4,9 +4,8 @@ use super::{
 };
 use crate::json::JsonValue;
 use crate::room::{ClientOpId, Message, RemoteAgent, RemoteMediaEntry, RemoteSession};
-use vmux_macro::VariantNames;
-
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
+#[vmux_macro::variant_names]
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum SharedMessage {
     AgentAttach {
         sid: String,
@@ -40,6 +39,7 @@ impl From<SharedMessage> for ClientMessage {
     }
 }
 
+#[vmux_macro::variant_names]
 #[derive(
     Debug,
     Clone,
@@ -49,7 +49,6 @@ impl From<SharedMessage> for ClientMessage {
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
-    VariantNames,
 )]
 pub enum SharedAgentCommand {
     NewAgentChat {
@@ -78,7 +77,8 @@ impl From<SharedAgentCommand> for AgentCommand {
     }
 }
 
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
+#[vmux_macro::variant_names]
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum SharedEvent {
     AgentDelta {
         sid: String,

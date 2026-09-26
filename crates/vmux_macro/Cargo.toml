@@ -15,8 +15,5 @@ ron = { workspace = true }
 serde = { workspace = true }
 syn = { version = "2", features = ["full"] }
 
-[dev-dependencies]
-muda = "0.19"
-
 [lints]
 workspace = true

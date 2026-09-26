@@ -47,7 +47,7 @@ fn every_item_is_separated_from_the_body_above_it() {
 }
 
 #[test]
-fn vmux_owned_crates_do_not_define_declarative_macros() {
+fn vmux_owned_crates_only_define_attribute_macros() {
     let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("crates dir");
@@ -58,7 +58,11 @@ fn vmux_owned_crates_do_not_define_declarative_macros() {
             return;
         }
         for (index, line) in source.lines().enumerate() {
-            if line.trim_start().starts_with("macro_rules!") {
+            let line = line.trim_start();
+            if line.starts_with("macro_rules!")
+                || line == "#[proc_macro]"
+                || line.starts_with("#[proc_macro_derive")
+            {
                 violations.push(format!("{}:{}", path.display(), index + 1));
             }
         }
@@ -66,7 +70,7 @@ fn vmux_owned_crates_do_not_define_declarative_macros() {
 
     assert!(
         violations.is_empty(),
-        "vmux-owned crates must use functions, typed systems, derive macros, or attribute macros:\n{}",
+        "vmux-owned crates must use functions, typed systems, or attribute macros:\n{}",
         violations.join("\n")
     );
 }

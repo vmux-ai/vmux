@@ -30,7 +30,6 @@ bevy_ecs = { workspace = true }
 ignore = "0.4"
 muda = "0.19"
 vmux_flex = { path = "../../vmux_flex" }
-vmux_macro = { path = "../../vmux_macro" }
 vmux_tool = { path = "../../vmux_tool" }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 
