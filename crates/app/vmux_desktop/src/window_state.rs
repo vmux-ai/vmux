@@ -9,12 +9,12 @@ pub(crate) struct WindowStatePlugin;
 
 impl Plugin for WindowStatePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WindowFullscreen>().add_systems(
+        app.add_systems(PreUpdate, ensure_window_state).add_systems(
             Update,
             (
                 ensure_geometry_singleton,
                 apply_geometry_on_load,
-                capture_window_geometry.run_if(resource_exists::<WindowRestoreComplete>),
+                capture_window_geometry,
             )
                 .chain(),
         );
@@ -31,14 +31,23 @@ impl Plugin for WindowStatePlugin {
 
 const MIN_WINDOW_SIZE: f32 = 100.0;
 
-#[derive(Resource, Default, Debug)]
+#[derive(Component, Default, Debug)]
 pub struct WindowFullscreen(pub bool);
 
-#[derive(Resource, Debug)]
+#[derive(Component, Debug)]
 pub struct PendingFullscreenRestore(pub bool);
 
-#[derive(Resource, Default, Debug)]
+#[derive(Component, Default, Debug)]
 pub struct WindowRestoreComplete;
+
+fn ensure_window_state(
+    windows: Query<Entity, (With<Window>, Without<WindowFullscreen>)>,
+    mut commands: Commands,
+) {
+    for entity in &windows {
+        commands.entity(entity).insert(WindowFullscreen::default());
+    }
+}
 
 fn ensure_geometry_singleton(
     restore: Res<crate::boot_status::RestoreComplete>,
@@ -53,33 +62,40 @@ fn ensure_geometry_singleton(
 
 fn apply_geometry_on_load(
     geometry: Query<&WindowGeometry, Added<WindowGeometry>>,
-    mut window: Query<&mut Window, With<PrimaryWindow>>,
-    pending: Option<Res<PendingFullscreenRestore>>,
-    restore_done: Option<Res<WindowRestoreComplete>>,
+    mut window: Query<
+        (
+            Entity,
+            &mut Window,
+            Has<PendingFullscreenRestore>,
+            Has<WindowRestoreComplete>,
+        ),
+        With<PrimaryWindow>,
+    >,
     mut commands: Commands,
 ) {
     let Some(geom) = geometry.iter().next().copied() else {
         return;
     };
-    if let Ok(mut window) = window.single_mut() {
+    if let Ok((entity, mut window, pending, restore_done)) = window.single_mut() {
         if let Some(pos) = geom.position {
             window.position = WindowPosition::At(pos);
         }
         if let Some(size) = geom.size {
             window.resolution.set(size.x, size.y);
         }
-    }
-    if pending.is_none() && restore_done.is_none() {
-        commands.insert_resource(PendingFullscreenRestore(geom.fullscreen));
+        if !pending && !restore_done {
+            commands
+                .entity(entity)
+                .insert(PendingFullscreenRestore(geom.fullscreen));
+        }
     }
 }
 
 fn capture_window_geometry(
-    fullscreen: Res<WindowFullscreen>,
-    window: Query<&Window, With<PrimaryWindow>>,
+    window: Query<(&Window, &WindowFullscreen), (With<PrimaryWindow>, With<WindowRestoreComplete>)>,
     mut geometry: Query<&mut WindowGeometry>,
 ) {
-    let Ok(window) = window.single() else {
+    let Ok((window, fullscreen)) = window.single() else {
         return;
     };
     let Ok(mut geom) = geometry.single_mut() else {
@@ -103,38 +119,33 @@ fn capture_window_geometry(
 }
 
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
-fn sync_fullscreen_signal_from_mode(
-    window: Query<&Window, With<PrimaryWindow>>,
-    mut fullscreen: ResMut<WindowFullscreen>,
-) {
-    let Ok(window) = window.single() else {
-        return;
-    };
-    let is_fullscreen = matches!(
-        window.mode,
-        WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(..)
-    );
-    if fullscreen.0 != is_fullscreen {
-        fullscreen.0 = is_fullscreen;
+fn sync_fullscreen_signal_from_mode(mut windows: Query<(&Window, &mut WindowFullscreen)>) {
+    for (window, mut fullscreen) in &mut windows {
+        let is_fullscreen = matches!(
+            window.mode,
+            WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(..)
+        );
+        if fullscreen.0 != is_fullscreen {
+            fullscreen.0 = is_fullscreen;
+        }
     }
 }
 
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
 fn restore_fullscreen_from_window_mode(
-    pending: Option<Res<PendingFullscreenRestore>>,
-    mut window: Query<&mut Window, With<PrimaryWindow>>,
+    mut window: Query<(Entity, &mut Window, &PendingFullscreenRestore), With<PrimaryWindow>>,
     mut commands: Commands,
 ) {
-    let Some(pending) = pending else {
+    let Ok((entity, mut window, pending)) = window.single_mut() else {
         return;
     };
-    if pending.0
-        && let Ok(mut window) = window.single_mut()
-    {
+    if pending.0 {
         window.mode = WindowMode::BorderlessFullscreen(MonitorSelection::Primary);
     }
-    commands.remove_resource::<PendingFullscreenRestore>();
-    commands.insert_resource(WindowRestoreComplete);
+    commands
+        .entity(entity)
+        .remove::<PendingFullscreenRestore>()
+        .insert(WindowRestoreComplete);
 }
 
 #[cfg(test)]
@@ -143,8 +154,7 @@ mod tests {
 
     fn app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<WindowFullscreen>();
+        app.add_plugins(MinimalPlugins);
         app.world_mut().spawn((
             Window {
                 resolution: (1200, 800).into(),
@@ -152,6 +162,7 @@ mod tests {
                 ..default()
             },
             PrimaryWindow,
+            WindowFullscreen::default(),
         ));
         app
     }
@@ -188,13 +199,25 @@ mod tests {
         });
         app.update();
 
-        let pending = app.world().get_resource::<PendingFullscreenRestore>();
-        assert!(pending.is_some_and(|p| p.0));
+        let pending = app
+            .world_mut()
+            .query_filtered::<&PendingFullscreenRestore, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        assert!(pending.0);
     }
 
     #[test]
     fn capture_records_windowed_frame_when_not_fullscreen() {
         let mut app = app();
+        let primary = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(primary)
+            .insert(WindowRestoreComplete);
         app.world_mut().spawn(WindowGeometry::default());
         app.add_systems(Update, capture_window_geometry);
         app.update();
@@ -212,7 +235,14 @@ mod tests {
     #[test]
     fn capture_preserves_windowed_frame_while_fullscreen() {
         let mut app = app();
-        app.insert_resource(WindowFullscreen(true));
+        let primary = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(primary)
+            .insert((WindowFullscreen(true), WindowRestoreComplete));
         app.world_mut().spawn(WindowGeometry {
             fullscreen: false,
             position: Some(IVec2::new(7, 8)),
@@ -235,11 +265,26 @@ mod tests {
     #[test]
     fn window_mode_restore_marks_geometry_capture_ready() {
         let mut app = app();
-        app.insert_resource(PendingFullscreenRestore(false))
-            .add_systems(Update, restore_fullscreen_from_window_mode);
+        let primary = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(primary)
+            .insert(PendingFullscreenRestore(false));
+        app.add_systems(Update, restore_fullscreen_from_window_mode);
         app.update();
 
-        assert!(app.world().contains_resource::<WindowRestoreComplete>());
-        assert!(!app.world().contains_resource::<PendingFullscreenRestore>());
+        assert!(
+            app.world()
+                .entity(primary)
+                .contains::<WindowRestoreComplete>()
+        );
+        assert!(
+            !app.world()
+                .entity(primary)
+                .contains::<PendingFullscreenRestore>()
+        );
     }
 }
