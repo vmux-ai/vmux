@@ -582,7 +582,7 @@ fn handle_restart_agent_pty(
         (Option<&TerminalLaunch>, &AgentSession, Option<&SessionId>),
         Without<PendingAgentRestart>,
     >,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     strategies: Option<Res<AgentStrategies>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -639,7 +639,7 @@ fn drain_agent_restarts(
         Option<&TerminalGridSize>,
         &mut PendingAgentRestart,
     )>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut restart_requests: MessageWriter<RestartAgentPty>,
     mut commands: Commands,
 ) {

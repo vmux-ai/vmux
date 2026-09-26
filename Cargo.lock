@@ -10651,6 +10651,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "vmux_api",
+ "vmux_core",
  "vmux_service",
 ]
 
@@ -10753,6 +10754,7 @@ dependencies = [
  "agent-client-protocol",
  "alacritty_terminal",
  "base64 0.22.1",
+ "bevy",
  "bevy_app",
  "bevy_ecs",
  "chrono",

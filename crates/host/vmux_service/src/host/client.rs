@@ -1,6 +1,6 @@
 use crate::protocol::{ClientMessage, ServiceMessage};
 use crate::{DaemonBinary, DaemonIdentity, ServicePaths};
-use bevy_ecs::resource::Resource;
+use bevy_ecs::component::Component;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::BufReader;
@@ -33,7 +33,7 @@ impl ServiceConnection {
     }
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct ServiceClient(pub ServiceHandle);
 
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;

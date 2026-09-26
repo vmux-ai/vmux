@@ -20,7 +20,7 @@ use vmux_layout::Browser;
 use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest};
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_service::{
-    client::{ServiceHandle, ServiceWake},
+    plugin::ServiceUnavailable,
     protocol::{ClientMessage, ProcessId, ServiceMessage, SharedEvent},
 };
 use vmux_setting::AppSettings;
@@ -87,11 +87,7 @@ struct TerminalServicePlugin;
 
 impl Plugin for TerminalServicePlugin {
     fn build(&self, app: &mut App) {
-        let service_wake = service_wake_callback(app);
-        ensure_service_started();
-        app.world_mut().spawn(ServiceConnectRetry::new());
-        app.insert_resource(ServiceWakeCallback(service_wake))
-            .add_plugins(TerminalUpdatePlugin)
+        app.add_plugins(TerminalUpdatePlugin)
             .add_systems(
                 Update,
                 respond_terminal_stack_spawn
@@ -164,7 +160,7 @@ impl Plugin for TerminalUpdatePlugin {
             .add_systems(
                 Update,
                 (
-                    try_connect_service,
+                    publish_service_status,
                     resolve_pending_terminal_cwd,
                     poll_service_messages
                         .in_set(WriteCommandRequests)
@@ -197,9 +193,6 @@ pub fn has_live_terminal(
 }
 
 pub use vmux_service::client::ServiceClient;
-
-#[derive(Resource, Clone)]
-struct ServiceWakeCallback(Option<ServiceWake>);
 
 #[derive(Clone, Copy)]
 struct CopyModeKeyInput<'a> {
@@ -234,23 +227,6 @@ pub struct AgentFocusBlurred;
 #[derive(Event)]
 pub struct RestartPty {
     pub entity: Entity,
-}
-
-#[derive(Component)]
-struct ServiceConnectRetry {
-    timer: Timer,
-    next_delay_ms: u64,
-    remaining_attempts: u32,
-}
-
-impl ServiceConnectRetry {
-    fn new() -> Self {
-        Self {
-            timer: Timer::from_seconds(0.05, TimerMode::Once),
-            next_delay_ms: 50,
-            remaining_attempts: 6,
-        }
-    }
 }
 
 #[derive(Message, Clone)]
@@ -293,7 +269,7 @@ pub fn format_terminal_url(
 
 fn on_terminal_removed(
     trigger: On<Remove, ProcessId>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     pids: Query<&ProcessId>,
 ) {
     let Some(service) = service else { return };
@@ -465,17 +441,6 @@ fn respond_terminal_spawn(
             }
         }
     }
-}
-
-fn service_wake_callback(app: &App) -> Option<ServiceWake> {
-    app.world()
-        .get_resource::<bevy::winit::EventLoopProxyWrapper>()
-        .map(|wrapper| {
-            let proxy = (**wrapper).clone();
-            std::sync::Arc::new(move || {
-                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }) as ServiceWake
-        })
 }
 
 pub fn new_terminal_bundle(settings: &AppSettings) -> impl Bundle {
@@ -741,60 +706,6 @@ fn missing_process_id(message: &str) -> Option<ProcessId> {
         .and_then(|id| id.parse().ok())
 }
 
-fn ensure_service_started() {
-    if ServiceHandle::service_running() {
-        tracing::info!("service already running");
-        return;
-    }
-    let binary = match vmux_service::DaemonBinary::current() {
-        Ok(b) => b.into_path(),
-        Err(e) => {
-            tracing::error!(error = %e, "could not locate vmux_service binary");
-            return;
-        }
-    };
-    match vmux_service::registry::start_mode_for(&binary) {
-        vmux_service::registry::StartMode::Register => {
-            let profile = vmux_service::ServicePaths::build_profile();
-            if let Err(e) = vmux_service::registry::ensure_running(profile, &binary) {
-                tracing::error!(error = ?e, "service registration failed");
-            }
-        }
-        vmux_service::registry::StartMode::SpawnDetached => {
-            vmux_service::registry::prepare_spawn_detached(&binary);
-            spawn_detached_service(&binary);
-        }
-    }
-}
-
-#[cfg(unix)]
-fn spawn_detached_service(binary: &std::path::Path) {
-    use std::os::unix::process::CommandExt;
-    let log_dir = vmux_service::ServicePaths::log_dir();
-    let _ = std::fs::create_dir_all(&log_dir);
-    let stderr_cfg = match std::fs::File::create(vmux_service::ServicePaths::current().log()) {
-        Ok(f) => std::process::Stdio::from(f),
-        Err(e) => {
-            tracing::warn!(error = %e, "could not create service log; stderr will be discarded");
-            std::process::Stdio::null()
-        }
-    };
-    let spawn_result = unsafe {
-        std::process::Command::new(binary)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(stderr_cfg)
-            .pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            })
-            .spawn()
-    };
-    if let Err(e) = spawn_result {
-        tracing::error!(error = %e, "failed to spawn vmux_service");
-    }
-}
-
 fn broadcast_service_unavailable(
     terminals: &Query<Entity, With<Terminal>>,
     commands: &mut Commands,
@@ -808,74 +719,17 @@ fn broadcast_service_unavailable(
     }
 }
 
-fn try_connect_service(
-    mut retries: Query<(Entity, &mut ServiceConnectRetry)>,
-    time: Res<Time>,
-    mut commands: Commands,
-    wake: Res<ServiceWakeCallback>,
+fn publish_service_status(
+    connected: Query<(), Added<ServiceClient>>,
+    unavailable: Query<&ServiceUnavailable, Changed<ServiceUnavailable>>,
     terminal_webviews: Query<Entity, With<Terminal>>,
+    mut commands: Commands,
 ) {
-    for (entity, mut retry) in &mut retries {
-        retry.timer.tick(time.delta());
-        if !retry.timer.just_finished() {
-            continue;
-        }
-
-        retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
-
-        let sock = vmux_service::ServicePaths::current().socket();
-        if !sock.exists() {
-            if retry.remaining_attempts == 0 {
-                tracing::warn!("service socket never appeared — giving up");
-                commands.entity(entity).despawn();
-                broadcast_service_unavailable(
-                    &terminal_webviews,
-                    &mut commands,
-                    "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
-                );
-            } else {
-                retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
-                retry.timer = Timer::new(
-                    std::time::Duration::from_millis(retry.next_delay_ms),
-                    TimerMode::Once,
-                );
-            }
-            continue;
-        }
-
-        match ServiceHandle::connect_with_wake(wake.0.clone()) {
-            Some(handle) => {
-                tracing::info!("connected to service after retry");
-                handle.send(ClientMessage::SubscribeAgentCommands);
-                commands.insert_resource(ServiceClient(handle));
-                commands.entity(entity).despawn();
-                broadcast_service_unavailable(&terminal_webviews, &mut commands, String::new());
-            }
-            None => {
-                if retry.remaining_attempts == 0 {
-                    tracing::error!("failed to connect to service after all retries");
-                    let log_path = vmux_service::ServicePaths::current().log();
-                    if let Ok(log) = std::fs::read_to_string(&log_path)
-                        && !log.is_empty()
-                    {
-                        tracing::error!(service_log = %log, "service log contents");
-                    }
-                    commands.entity(entity).despawn();
-                    broadcast_service_unavailable(
-                        &terminal_webviews,
-                        &mut commands,
-                        "vmux service unavailable \u{2014} run `vmux service logs` for details."
-                            .into(),
-                    );
-                } else {
-                    retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
-                    retry.timer = Timer::new(
-                        std::time::Duration::from_millis(retry.next_delay_ms),
-                        TimerMode::Once,
-                    );
-                }
-            }
-        }
+    if !connected.is_empty() {
+        broadcast_service_unavailable(&terminal_webviews, &mut commands, String::new());
+    }
+    for unavailable in &unavailable {
+        broadcast_service_unavailable(&terminal_webviews, &mut commands, unavailable.0.clone());
     }
 }
 
@@ -947,7 +801,7 @@ fn sync_agent_focus(
     >,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
@@ -1029,7 +883,7 @@ fn poll_service_messages(
         ),
         With<Terminal>,
     >,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writers: PollServiceWriters,
@@ -2115,7 +1969,7 @@ fn on_term_key(
     >,
     agents: Query<&vmux_core::agent::AgentSession>,
     launches: Query<&crate::launch::TerminalLaunch>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     keymap: Res<Keymap>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
@@ -2228,7 +2082,7 @@ fn on_restart_pty(
         Option<&TerminalGridSize>,
         Has<crate::AgentRunTerminal>,
     )>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     settings: Res<AppSettings>,
     mut restart_agent: MessageWriter<vmux_core::agent::RestartAgentPty>,
     mut commands: Commands,
@@ -2300,7 +2154,7 @@ fn handle_terminal_copy_mode_command(
     keyboard_targets: Query<(), With<KeyboardOwner>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     process_index: Res<TerminalProcessIndex>,
     mut copy_modes: Query<&mut TerminalCopyMode, With<Terminal>>,
 ) {

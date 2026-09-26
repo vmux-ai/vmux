@@ -14,6 +14,46 @@ pub struct KeyboardOwner;
 #[derive(Component, Clone, Debug)]
 pub struct AgentWorkingDir(pub String);
 
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct JsonArguments(pub serde_json::Value);
+
+impl JsonArguments {
+    pub fn parse<T: serde::de::DeserializeOwned>(&self, name: &str) -> Result<T, String> {
+        serde_json::from_value(self.0.clone())
+            .map_err(|error| format!("{name}: invalid arguments: {error}"))
+    }
+}
+
+impl TryFrom<&vmux_api::json::JsonValue> for JsonArguments {
+    type Error = String;
+
+    fn try_from(input: &vmux_api::json::JsonValue) -> Result<Self, Self::Error> {
+        let value = serde_json::Value::try_from(input)
+            .map_err(|error| format!("invalid JSON arguments: {error}"))?;
+        if !value.is_object() {
+            return Err("command arguments must be a JSON object".to_string());
+        }
+        Ok(Self(value))
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessAnchor(pub crate::ProcessId);
+
+impl ProcessAnchor {
+    pub fn required(value: Option<&Self>, name: &str) -> Result<crate::ProcessId, String> {
+        value.map(|anchor| anchor.0).ok_or_else(|| {
+            format!("{name} requires an agent anchor (not available to this client)")
+        })
+    }
+}
+
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct HostShell(pub String);
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RegistrationOrder(pub u32);
+
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
 #[require(Save)]

@@ -7,6 +7,7 @@ use std::io::{self, BufRead, Write};
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
+use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_service::protocol::{
     AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, ServiceMessage,
 };
@@ -49,6 +50,7 @@ impl Plugin for McpPlugin {
             Update,
             (
                 McpSet::Route,
+                crate::tool::ToolResolveSet,
                 crate::tool::ToolRequestSet,
                 crate::tool::ToolDispatchSet,
                 crate::tool::ToolDispatchFlush,
@@ -248,11 +250,6 @@ impl McpExecution {
 }
 
 #[derive(Component)]
-struct ListToolsExecution {
-    definitions: Vec<crate::tool::ToolDefinition>,
-}
-
-#[derive(Component)]
 enum McpReply {
     Result(Result<Value, String>),
     ProtocolError { code: i64, message: String },
@@ -299,12 +296,7 @@ pub async fn run_stdio(mut server: McpServer) -> io::Result<()> {
     Ok(())
 }
 
-fn route_request(
-    mut commands: Commands,
-    requests: PendingRequests,
-    tools: crate::tool::ToolRegistry,
-    config: Single<&McpConfig>,
-) {
+fn route_request(mut commands: Commands, requests: PendingRequests, config: Single<&McpConfig>) {
     let Some((entity, method, params, _)) =
         requests.iter().min_by_key(|(_, _, _, sequence)| sequence.0)
     else {
@@ -319,11 +311,17 @@ fn route_request(
                 .insert(McpReply::Result(Ok(initialize_result(&params.0))));
         }
         "tools/list" => {
-            let definitions =
-                tools.definitions(config.acp_session, config.acp_terminals, &config.shell);
-            commands
-                .entity(entity)
-                .insert(ListToolsExecution { definitions });
+            let mut request = commands.entity(entity);
+            request.insert((
+                crate::tool::ToolCatalogRequest,
+                HostShell(config.shell.clone()),
+            ));
+            if config.acp_session {
+                request.insert(crate::tool::AcpSessionContext);
+            }
+            if config.acp_terminals {
+                request.insert(crate::tool::AcpTerminalContext);
+            }
         }
         "tools/call" => {
             let Some(name) = params.0.get("name").and_then(Value::as_str) else {
@@ -332,27 +330,27 @@ fn route_request(
                     .insert(McpReply::Result(Err("tools/call missing name".to_string())));
                 return;
             };
-            let normalized = crate::tool::canonical_tool_name(name);
             let arguments = params
                 .0
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            match tools.call(
-                normalized,
-                arguments,
-                config.anchor,
-                &config.shell,
-                crate::tool::ToolCallPolicy::mcp(config.acp_session, config.acp_terminals),
-            ) {
-                Ok(call) => {
-                    commands.entity(entity).insert(call);
-                }
-                Err(message) => {
-                    commands
-                        .entity(entity)
-                        .insert(McpReply::Result(Err(message)));
-                }
+            let mut request = commands.entity(entity);
+            request.insert((
+                Name::new(name.to_string()),
+                JsonArguments(arguments),
+                HostShell(config.shell.clone()),
+                crate::tool::ToolInvocation,
+                crate::tool::ToolCommandFallback,
+            ));
+            if let Some(anchor) = config.anchor {
+                request.insert(ProcessAnchor(anchor));
+            }
+            if config.acp_session {
+                request.insert(crate::tool::AcpSessionContext);
+            }
+            if config.acp_terminals {
+                request.insert(crate::tool::AcpTerminalContext);
             }
         }
         method => {
@@ -371,6 +369,7 @@ fn finish_tool_errors(
     for (entity, error) in &errors {
         commands
             .entity(entity)
+            .remove::<crate::tool::ToolInvocation>()
             .remove::<crate::tool::ToolCall>()
             .remove::<crate::tool::ToolDispatchError>()
             .insert(McpReply::Result(Err(error.message().to_string())));
@@ -379,13 +378,14 @@ fn finish_tool_errors(
 
 fn start_list_tools(
     mut commands: Commands,
-    requests: Query<(Entity, &ListToolsExecution), Added<ListToolsExecution>>,
+    requests: Query<(Entity, &crate::tool::ToolCatalog), Added<crate::tool::ToolCatalog>>,
 ) {
     for (entity, request) in &requests {
-        let mut definitions = request.definitions.clone();
+        let mut definitions = request.0.clone();
         commands
             .entity(entity)
-            .remove::<ListToolsExecution>()
+            .remove::<crate::tool::ToolCatalogRequest>()
+            .remove::<crate::tool::ToolCatalog>()
             .insert(McpExecution::new(async move {
                 if let Ok(connection) = vmux_service::client::ServiceConnection::connect().await
                     && let Ok(AgentQueryResult::Commands(commands)) =
@@ -402,13 +402,14 @@ fn start_list_tools(
 fn start_tool_commands(
     mut commands: Commands,
     requests: Query<
-        (Entity, &crate::tool::ToolCall, &crate::tool::ToolCommand),
+        (Entity, Option<&ProcessAnchor>, &crate::tool::ToolCommand),
         Added<crate::tool::ToolCommand>,
     >,
 ) {
-    for (entity, call, result) in &requests {
+    for (entity, anchor, result) in &requests {
         let mut request = commands.entity(entity);
         request
+            .remove::<crate::tool::ToolInvocation>()
             .remove::<crate::tool::ToolCall>()
             .remove::<crate::tool::ToolCommand>();
         let command = match result.0.clone() {
@@ -418,8 +419,10 @@ fn start_tool_commands(
                 continue;
             }
         };
-        let anchor = call.anchor;
-        request.insert(McpExecution::new(run_agent_command(command, anchor)));
+        request.insert(McpExecution::new(run_agent_command(
+            command,
+            anchor.map(|anchor| anchor.0),
+        )));
     }
 }
 
@@ -430,6 +433,7 @@ fn start_tool_queries(
     for (entity, result) in &requests {
         let mut request = commands.entity(entity);
         request
+            .remove::<crate::tool::ToolInvocation>()
             .remove::<crate::tool::ToolCall>()
             .remove::<crate::tool::ToolQuery>();
         let query = match result.0.clone() {

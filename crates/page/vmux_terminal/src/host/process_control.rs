@@ -42,7 +42,7 @@ pub(super) struct PendingTerminalSnapshot;
 fn on_term_ready(
     trigger: On<UiInput<PageReady>>,
     terminals: Query<&ProcessId, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -61,7 +61,7 @@ fn on_term_ready(
 fn request_pending_terminal_snapshot(
     pending: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingTerminalSnapshot>)>,
     browsers: NonSend<Browsers>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
@@ -81,7 +81,7 @@ fn on_term_resize(
     webviews: Query<&WebviewSize, With<Terminal>>,
     terminals: Query<&ProcessId, With<Terminal>>,
     mut grids: Query<&mut TerminalGridSize, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
@@ -124,7 +124,7 @@ fn on_term_resize(
 fn on_term_scroll(
     trigger: On<UiInput<TermScrollEvent>>,
     terminals: Query<&ProcessId, With<Terminal>>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;

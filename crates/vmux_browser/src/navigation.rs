@@ -293,7 +293,7 @@ pub(crate) fn handle_browser_navigate_requests(
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
-    service: Option<Res<vmux_service::client::ServiceClient>>,
+    service: Option<Single<&vmux_service::client::ServiceClient>>,
     mut commands: Commands,
     mut page_open_writer: MessageWriter<PageOpenRequest>,
     mut pending_navigation: MessageWriter<PendingNavigationUpdate>,

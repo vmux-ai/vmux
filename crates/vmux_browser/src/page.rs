@@ -93,7 +93,7 @@ fn handle_page_open_requests(
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_filter: Query<Entity, With<Stack>>,
-    service: Option<Res<vmux_service::client::ServiceClient>>,
+    service: Option<Single<&vmux_service::client::ServiceClient>>,
     time: Res<Time>,
     mut commands: Commands,
 ) {
@@ -315,7 +315,7 @@ fn respond_page_open_tasks(
         ),
         With<PageOpenHandled>,
     >,
-    service: Option<Res<vmux_service::client::ServiceClient>>,
+    service: Option<Single<&vmux_service::client::ServiceClient>>,
     time: Res<Time>,
     children: Query<&Children>,
     browsers: Query<(), With<Browser>>,

@@ -117,7 +117,7 @@ fn flush_terminal_input(
         ),
         With<Terminal>,
     >,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };

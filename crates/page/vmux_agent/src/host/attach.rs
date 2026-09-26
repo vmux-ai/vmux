@@ -288,7 +288,7 @@ fn handle_resume_in_acp(
     settings: Res<AppSettings>,
     catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     mut swap: MessageWriter<vmux_core::agent::SwapStackSession>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for request in reader.read() {
         let ServiceAgentCommand::ResumeInAcp { anchor } = &request.command else {

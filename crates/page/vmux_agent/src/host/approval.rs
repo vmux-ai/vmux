@@ -124,7 +124,7 @@ fn handle_approval_reply(
         Option<&AgentSession>,
         Option<&AcpSession>,
     )>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut store: Option<ResMut<AgentApprovalStore>>,
 ) {
     let reply = trigger.event();

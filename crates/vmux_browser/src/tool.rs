@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentCommand, AgentQuery};
+use vmux_core::{JsonArguments, ProcessAnchor};
 
 use vmux_mcp::tool::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
+    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
     ToolRequestSet,
 };
 
@@ -11,23 +12,21 @@ pub struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<BrowserTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(
-            Update,
-            (
-                navigate,
-                go_back,
-                go_forward,
-                history_search,
-                install_extension,
-                snapshot,
-                scroll,
-            )
-                .in_set(ToolDispatchSet),
-        );
+        app.add_plugins(McpToolPlugin::<BrowserTool>::new(include_str!("tool.ron")))
+            .add_systems(Update, parse.in_set(ToolRequestSet))
+            .add_systems(
+                Update,
+                (
+                    navigate,
+                    go_back,
+                    go_forward,
+                    history_search,
+                    install_extension,
+                    snapshot,
+                    scroll,
+                )
+                    .in_set(ToolDispatchSet),
+            );
     }
 }
 
@@ -142,52 +141,75 @@ impl From<BrowserPane> for Option<String> {
     }
 }
 
-fn parse(mut commands: Commands, calls: ToolCalls<BrowserTool>) {
-    for (request, call, tool) in calls.iter() {
+fn parse(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments, &BrowserTool), AddedTool<BrowserTool>>,
+) {
+    for (request, name, arguments, tool) in &calls {
         let parsed = match tool {
-            BrowserTool::Navigate => call.parse::<BrowserNavigateArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            BrowserTool::GoBack => call.parse::<BrowserBackArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            BrowserTool::GoForward => call.parse::<BrowserForwardArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            BrowserTool::HistorySearch => call.parse::<BrowserHistorySearchArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            BrowserTool::InstallExtension => {
-                call.parse::<BrowserInstallExtensionArgs>().map(|args| {
-                    commands.entity(request).insert(args);
-                })
+            BrowserTool::Navigate => {
+                arguments
+                    .parse::<BrowserNavigateArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    })
             }
+            BrowserTool::GoBack => arguments
+                .parse::<BrowserBackArgs>(name.as_str())
+                .map(|args| {
+                    commands.entity(request).insert(args);
+                }),
+            BrowserTool::GoForward => {
+                arguments
+                    .parse::<BrowserForwardArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    })
+            }
+            BrowserTool::HistorySearch => arguments
+                .parse::<BrowserHistorySearchArgs>(name.as_str())
+                .map(|args| {
+                    commands.entity(request).insert(args);
+                }),
+            BrowserTool::InstallExtension => arguments
+                .parse::<BrowserInstallExtensionArgs>(name.as_str())
+                .map(|args| {
+                    commands.entity(request).insert(args);
+                }),
             BrowserTool::Snapshot => {
-                if call
-                    .arguments()
+                if arguments
+                    .0
                     .get("target")
                     .is_some_and(|value| !value.is_null() && !value.is_string())
                 {
                     Err("browser_snapshot.target must be a string".to_string())
                 } else {
-                    call.parse::<BrowserSnapshotArgs>().map(|args| {
-                        commands.entity(request).insert(args);
-                    })
+                    arguments
+                        .parse::<BrowserSnapshotArgs>(name.as_str())
+                        .map(|args| {
+                            commands.entity(request).insert(args);
+                        })
                 }
             }
-            BrowserTool::Scroll => call.parse::<BrowserScrollArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
+            BrowserTool::Scroll => {
+                arguments
+                    .parse::<BrowserScrollArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    })
+            }
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError::new(message));
+            commands
+                .entity(request)
+                .insert(ToolDispatchError::new(message));
         }
     }
 }
 
 fn navigate(
     mut commands: Commands,
-    requests: Query<(Entity, &BrowserNavigateArgs), (With<ToolCall>, Added<BrowserNavigateArgs>)>,
+    requests: Query<(Entity, &BrowserNavigateArgs), AddedTool<BrowserNavigateArgs>>,
 ) {
     for (entity, args) in &requests {
         let command = if args.url.trim().is_empty() {
@@ -204,7 +226,7 @@ fn navigate(
 
 fn go_back(
     mut commands: Commands,
-    requests: Query<(Entity, &BrowserBackArgs), (With<ToolCall>, Added<BrowserBackArgs>)>,
+    requests: Query<(Entity, &BrowserBackArgs), AddedTool<BrowserBackArgs>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -217,7 +239,7 @@ fn go_back(
 
 fn go_forward(
     mut commands: Commands,
-    requests: Query<(Entity, &BrowserForwardArgs), (With<ToolCall>, Added<BrowserForwardArgs>)>,
+    requests: Query<(Entity, &BrowserForwardArgs), AddedTool<BrowserForwardArgs>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -230,10 +252,7 @@ fn go_forward(
 
 fn history_search(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &BrowserHistorySearchArgs),
-        (With<ToolCall>, Added<BrowserHistorySearchArgs>),
-    >,
+    requests: Query<(Entity, &BrowserHistorySearchArgs), AddedTool<BrowserHistorySearchArgs>>,
 ) {
     for (entity, args) in &requests {
         let command = if args.query.trim().is_empty() {
@@ -250,10 +269,7 @@ fn history_search(
 
 fn install_extension(
     mut commands: Commands,
-    requests: Query<
-        (Entity, &BrowserInstallExtensionArgs),
-        (With<ToolCall>, Added<BrowserInstallExtensionArgs>),
-    >,
+    requests: Query<(Entity, &BrowserInstallExtensionArgs), AddedTool<BrowserInstallExtensionArgs>>,
 ) {
     for (entity, args) in &requests {
         let source = &args.source;
@@ -270,23 +286,26 @@ fn install_extension(
 
 fn snapshot(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &BrowserSnapshotArgs), Added<BrowserSnapshotArgs>>,
+    requests: Query<
+        (Entity, Option<&ProcessAnchor>, &BrowserSnapshotArgs),
+        Added<BrowserSnapshotArgs>,
+    >,
 ) {
-    for (entity, call, args) in &requests {
+    for (entity, anchor, args) in &requests {
         commands
             .entity(entity)
             .insert(ToolQuery(Ok(AgentQuery::BrowserSnapshot {
                 pane: BrowserPane::from(args.target.clone()).into(),
-                anchor: call.anchor(),
+                anchor: anchor.map(|anchor| anchor.0),
             })));
     }
 }
 
 fn scroll(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &BrowserScrollArgs), Added<BrowserScrollArgs>>,
+    requests: Query<(Entity, Option<&ProcessAnchor>, &BrowserScrollArgs), Added<BrowserScrollArgs>>,
 ) {
-    for (entity, call, args) in &requests {
+    for (entity, anchor, args) in &requests {
         let (to, delta, target) = match args {
             BrowserScrollArgs::Position(args) => (Some(args.to.into()), None, args.target.clone()),
             BrowserScrollArgs::Delta(args) => (None, Some(args.delta), args.target.clone()),
@@ -297,7 +316,7 @@ fn scroll(
                 pane: BrowserPane::from(target).into(),
                 to,
                 delta,
-                anchor: call.anchor(),
+                anchor: anchor.map(|anchor| anchor.0),
             })));
     }
 }

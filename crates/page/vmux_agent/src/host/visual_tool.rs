@@ -1,32 +1,35 @@
-use vmux_mcp::tool::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolDispatchError, ToolDispatchSet, ToolQuery,
-    ToolRequestSet,
-};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentQuery, SimulatorButton, SimulatorInput};
+use vmux_core::JsonArguments;
+use vmux_mcp::tool::{
+    AddedTool, McpToolPlugin, ToolDispatchError, ToolDispatchSet, ToolQuery,
+    ToolRequestSet,
+};
 
 pub struct VisualToolPlugin;
 
 impl Plugin for VisualToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<VisualTool>::new(include_str!("visual_tool.ron")))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(
-                Update,
-                (
-                    screenshot,
-                    simulator_screenshot,
-                    simulator_tap,
-                    simulator_swipe,
-                    simulator_type,
-                    simulator_key,
-                    simulator_button,
-                    record_start,
-                    record_stop,
-                )
-                    .in_set(ToolDispatchSet),
-            );
+        app.add_plugins(McpToolPlugin::<VisualTool>::new(include_str!(
+            "visual_tool.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(
+            Update,
+            (
+                screenshot,
+                simulator_screenshot,
+                simulator_tap,
+                simulator_swipe,
+                simulator_type,
+                simulator_key,
+                simulator_button,
+                record_start,
+                record_stop,
+            )
+                .in_set(ToolDispatchSet),
+        );
     }
 }
 
@@ -119,44 +122,76 @@ struct RecordStopArgs {
     name: Option<String>,
 }
 
-fn parse(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, call, tool) in calls.iter() {
-        let parsed = match tool {
-            VisualTool::Screenshot => call.parse::<ScreenshotArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            VisualTool::SimulatorScreenshot => continue,
-            VisualTool::SimulatorTap => call.parse::<SimulatorTapArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            VisualTool::SimulatorSwipe => call.parse::<SimulatorSwipeArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            VisualTool::SimulatorType => call.parse::<SimulatorTypeArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            VisualTool::SimulatorKey => call.parse::<SimulatorKeyArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            VisualTool::SimulatorButton => call.parse::<SimulatorButtonArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            VisualTool::RecordStart => call.parse::<RecordStartArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            VisualTool::RecordStop => call.parse::<RecordStopArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-        };
+fn parse(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments, &VisualTool), AddedTool<VisualTool>>,
+) {
+    for (request, name, arguments, tool) in &calls {
+        let parsed =
+            match tool {
+                VisualTool::Screenshot => {
+                    arguments
+                        .parse::<ScreenshotArgs>(name.as_str())
+                        .map(|args| {
+                            commands.entity(request).insert(args);
+                        })
+                }
+                VisualTool::SimulatorScreenshot => continue,
+                VisualTool::SimulatorTap => {
+                    arguments
+                        .parse::<SimulatorTapArgs>(name.as_str())
+                        .map(|args| {
+                            commands.entity(request).insert(args);
+                        })
+                }
+                VisualTool::SimulatorSwipe => arguments
+                    .parse::<SimulatorSwipeArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    }),
+                VisualTool::SimulatorType => arguments
+                    .parse::<SimulatorTypeArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    }),
+                VisualTool::SimulatorKey => {
+                    arguments
+                        .parse::<SimulatorKeyArgs>(name.as_str())
+                        .map(|args| {
+                            commands.entity(request).insert(args);
+                        })
+                }
+                VisualTool::SimulatorButton => arguments
+                    .parse::<SimulatorButtonArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    }),
+                VisualTool::RecordStart => {
+                    arguments
+                        .parse::<RecordStartArgs>(name.as_str())
+                        .map(|args| {
+                            commands.entity(request).insert(args);
+                        })
+                }
+                VisualTool::RecordStop => {
+                    arguments
+                        .parse::<RecordStopArgs>(name.as_str())
+                        .map(|args| {
+                            commands.entity(request).insert(args);
+                        })
+                }
+            };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError::new(message));
+            commands
+                .entity(request)
+                .insert(ToolDispatchError::new(message));
         }
     }
 }
 
 fn screenshot(
     mut commands: Commands,
-    requests: Query<(Entity, &ScreenshotArgs), (With<ToolCall>, Added<ScreenshotArgs>)>,
+    requests: Query<(Entity, &ScreenshotArgs), AddedTool<ScreenshotArgs>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -167,8 +202,14 @@ fn screenshot(
     }
 }
 
-fn simulator_screenshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
-    for (request, _, _) in calls.matching(VisualTool::SimulatorScreenshot) {
+fn simulator_screenshot(
+    mut commands: Commands,
+    calls: Query<(Entity, &VisualTool), AddedTool<VisualTool>>,
+) {
+    for (request, tool) in &calls {
+        if *tool != VisualTool::SimulatorScreenshot {
+            continue;
+        }
         commands
             .entity(request)
             .insert(ToolQuery(Ok(AgentQuery::SimulatorScreenshot)));
@@ -177,7 +218,7 @@ fn simulator_screenshot(mut commands: Commands, calls: ToolCalls<VisualTool>) {
 
 fn simulator_tap(
     mut commands: Commands,
-    requests: Query<(Entity, &SimulatorTapArgs), (With<ToolCall>, Added<SimulatorTapArgs>)>,
+    requests: Query<(Entity, &SimulatorTapArgs), AddedTool<SimulatorTapArgs>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -193,7 +234,7 @@ fn simulator_tap(
 
 fn simulator_swipe(
     mut commands: Commands,
-    requests: Query<(Entity, &SimulatorSwipeArgs), (With<ToolCall>, Added<SimulatorSwipeArgs>)>,
+    requests: Query<(Entity, &SimulatorSwipeArgs), AddedTool<SimulatorSwipeArgs>>,
 ) {
     for (entity, args) in &requests {
         let duration_ms = args.duration_ms.unwrap_or(300);
@@ -216,7 +257,7 @@ fn simulator_swipe(
 
 fn simulator_type(
     mut commands: Commands,
-    requests: Query<(Entity, &SimulatorTypeArgs), (With<ToolCall>, Added<SimulatorTypeArgs>)>,
+    requests: Query<(Entity, &SimulatorTypeArgs), AddedTool<SimulatorTypeArgs>>,
 ) {
     for (entity, args) in &requests {
         let text = &args.text;
@@ -233,7 +274,7 @@ fn simulator_type(
 
 fn simulator_key(
     mut commands: Commands,
-    requests: Query<(Entity, &SimulatorKeyArgs), (With<ToolCall>, Added<SimulatorKeyArgs>)>,
+    requests: Query<(Entity, &SimulatorKeyArgs), AddedTool<SimulatorKeyArgs>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -246,7 +287,7 @@ fn simulator_key(
 
 fn simulator_button(
     mut commands: Commands,
-    requests: Query<(Entity, &SimulatorButtonArgs), (With<ToolCall>, Added<SimulatorButtonArgs>)>,
+    requests: Query<(Entity, &SimulatorButtonArgs), AddedTool<SimulatorButtonArgs>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -259,7 +300,7 @@ fn simulator_button(
 
 fn record_start(
     mut commands: Commands,
-    requests: Query<(Entity, &RecordStartArgs), (With<ToolCall>, Added<RecordStartArgs>)>,
+    requests: Query<(Entity, &RecordStartArgs), AddedTool<RecordStartArgs>>,
 ) {
     for (entity, args) in &requests {
         commands
@@ -274,7 +315,7 @@ fn record_start(
 
 fn record_stop(
     mut commands: Commands,
-    requests: Query<(Entity, &RecordStopArgs), (With<ToolCall>, Added<RecordStopArgs>)>,
+    requests: Query<(Entity, &RecordStopArgs), AddedTool<RecordStopArgs>>,
 ) {
     for (entity, args) in &requests {
         commands

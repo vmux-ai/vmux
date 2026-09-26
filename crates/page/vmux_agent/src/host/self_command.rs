@@ -211,7 +211,7 @@ fn handle_agent_self_commands(
     ctx: vmux_layout::pane::PlacementCtx,
     mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     active_space: Option<Res<ActiveSpace>>,
     settings: Res<AppSettings>,
     mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,

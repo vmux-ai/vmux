@@ -457,7 +457,7 @@ fn acp_auto_approval_message(
 fn auto_allow_acp_approval(
     trigger: On<AgentApprovalRequest>,
     sessions: Query<(&AcpSession, &AgentApprovalPolicy)>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let request = trigger.event();
     let Ok((session, policy)) = sessions.get(request.session) else {
@@ -572,7 +572,7 @@ fn send_acp_input(
     pending_projects: Query<(), With<crate::host::PendingAgentProject>>,
     repositories_needing_worktrees: Query<(), With<crate::host::RepositoryNeedsWorktree>>,
     modes: Option<Res<crate::chat::model::AgentModeSelections>>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
@@ -631,7 +631,7 @@ fn acp_prompt_dispatch_ready(
 fn close_acp_session_on_remove(
     trigger: On<Remove, AcpSession>,
     sessions: Query<&AcpSession>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;

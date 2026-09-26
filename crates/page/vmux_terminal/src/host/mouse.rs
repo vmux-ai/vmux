@@ -241,7 +241,7 @@ fn on_term_mouse(
         ),
         With<Terminal>,
     >,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;

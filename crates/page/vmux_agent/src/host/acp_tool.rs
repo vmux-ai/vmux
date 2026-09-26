@@ -170,7 +170,7 @@ fn start_acp_installs(
 
 fn poll_acp_installs(
     mut swaps: MessageReader<vmux_core::agent::SwapStackSession>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     settings: Option<Res<AppSettings>>,
     mut jobs: Query<(
         Entity,

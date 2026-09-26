@@ -20,7 +20,7 @@ use crate::events::{AgentCommandRequest, CommandOrigin};
 use crate::host::browser_pane::AgentBrowserResolve;
 use crate::host::valid_cwd;
 
-use super::{CommandArguments, CommandSet};
+use super::CommandSet;
 
 pub(super) struct DispatchPlugin;
 
@@ -158,7 +158,7 @@ fn handle_command_invocations(
         Option<&vmux_service::protocol::ProcessId>,
     )>,
     user: Query<Entity, With<vmux_core::team::User>>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -166,7 +166,7 @@ fn handle_command_invocations(
             | ServiceAgentCommand::FileSearch { .. }
             | ServiceAgentCommand::TurnEnded { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::InvokeCommand { id, args } => {
-                let args = match CommandArguments::try_from(args) {
+                let args = match vmux_core::JsonArguments::try_from(args) {
                     Ok(args) => args.0,
                     Err(message) => {
                         if let Some(service) = service.as_ref() {
@@ -223,7 +223,7 @@ fn handle_terminal_commands(
     mut run_shell: MessageWriter<vmux_terminal::RunShellRequest>,
     mut terminal_spawn: MessageWriter<TerminalStackSpawnRequest>,
     mut process_spawn: MessageWriter<ProcessStackSpawnRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -309,7 +309,7 @@ fn handle_browser_commands(
     mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
     browse: AgentBrowserResolve,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -412,7 +412,7 @@ fn handle_desktop_commands(
     mut focus_pane: MessageWriter<FocusPaneRequest>,
     mut rename_profile: MessageWriter<RenameProfileRequest>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -508,7 +508,7 @@ fn handle_space_commands(
     mut create_requests: MessageWriter<vmux_space::SpaceCreateRequest>,
     mut rename_requests: MessageWriter<vmux_space::SpaceRenameRequest>,
     mut delete_requests: MessageWriter<vmux_space::SpaceDeleteRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -550,7 +550,7 @@ fn handle_bookmark_commands(
     mut pin_url_requests: MessageWriter<vmux_layout::bookmark::PinUrlRequest>,
     mut unpin_requests: MessageWriter<vmux_layout::bookmark::UnpinRequest>,
     mut create_folder_requests: MessageWriter<vmux_layout::bookmark::CreateFolderRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for request in reader.read() {
         let ServiceAgentCommand::BookmarkCommand(command) = &request.command else {
@@ -608,7 +608,7 @@ fn handle_shared_commands(
     command_bar: Res<vmux_command::snapshot::CommandBarProjection>,
     contributed_pages: Query<&vmux_command::snapshot::ContributedPage>,
     mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -889,16 +889,19 @@ mod tests {
 
     #[test]
     fn command_arguments_reject_non_object_json() {
-        assert!(CommandArguments::try_from(&vmux_api::json::JsonValue::Null).is_err());
-        assert!(CommandArguments::try_from(&vmux_api::json::JsonValue::Array(Vec::new())).is_err());
+        assert!(vmux_core::JsonArguments::try_from(&vmux_api::json::JsonValue::Null).is_err());
         assert!(
-            CommandArguments::try_from(&vmux_api::json::JsonValue::Number("x".to_string()))
+            vmux_core::JsonArguments::try_from(&vmux_api::json::JsonValue::Array(Vec::new()))
+                .is_err()
+        );
+        assert!(
+            vmux_core::JsonArguments::try_from(&vmux_api::json::JsonValue::Number("x".to_string()))
                 .is_err()
         );
         assert_eq!(
-            CommandArguments::try_from(&vmux_api::json::JsonValue::from(serde_json::json!({
-                "url": "https://example.com"
-            })))
+            vmux_core::JsonArguments::try_from(&vmux_api::json::JsonValue::from(
+                serde_json::json!({ "url": "https://example.com" })
+            ))
             .unwrap()
             .0,
             serde_json::json!({ "url": "https://example.com" })

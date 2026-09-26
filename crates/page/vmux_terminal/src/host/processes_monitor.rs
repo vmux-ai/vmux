@@ -292,7 +292,7 @@ fn reconcile_service_processes(
 fn request_process_list(
     time: Res<Time>,
     mut runtime: Query<&mut ProcessMonitor>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     monitors: Query<(), With<ProcessesMonitor>>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
 ) {
@@ -413,7 +413,7 @@ fn broadcast_to_monitors(
         &Order,
     )>,
     local_processes: Query<(&ProcessPid, &LocalVmuxProcess, &Usage)>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
@@ -519,7 +519,7 @@ fn on_process_navigate(
 
 fn on_process_kill(
     trigger: On<UiInput<ProcessKillEvent>>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
     process_index: Res<TerminalProcessIndex>,
@@ -555,7 +555,7 @@ fn on_process_kill(
 
 fn on_process_kill_all(
     _trigger: On<UiInput<ProcessKillAllEvent>>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
     process_index: Res<TerminalProcessIndex>,

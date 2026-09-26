@@ -1,7 +1,3 @@
-use vmux_mcp::tool::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
-    ToolRequestSet,
-};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -11,7 +7,12 @@ use vmux_api::protocol::{
     AgentCommand, AgentPaneDirection, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage,
     PlacementMode, ProcessId, ServiceMessage,
 };
+use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
+use vmux_mcp::tool::{
+    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
+    ToolRequestSet,
+};
 use vmux_service::client::ServiceConnection;
 
 const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -153,53 +154,73 @@ struct ReadTerminalArgs {
     terminal: String,
 }
 
-fn resume_in_acp(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
-    for (request, call, _) in calls.matching(WorkspaceTool::ResumeInAcp) {
-        let result = call
-            .require_anchor()
+fn resume_in_acp(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, Option<&ProcessAnchor>, &WorkspaceTool), AddedTool<WorkspaceTool>>,
+) {
+    for (request, name, anchor, tool) in &calls {
+        if *tool != WorkspaceTool::ResumeInAcp {
+            continue;
+        }
+        let result = ProcessAnchor::required(anchor, name.as_str())
             .map(|anchor| AgentCommand::ResumeInAcp { anchor });
         commands.entity(request).insert(ToolCommand(result));
     }
 }
 
-fn parse(mut commands: Commands, calls: ToolCalls<WorkspaceTool>) {
-    for (request, call, tool) in calls.iter() {
+fn parse(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments, &WorkspaceTool), AddedTool<WorkspaceTool>>,
+) {
+    for (request, name, arguments, tool) in &calls {
         let parsed = match tool {
             WorkspaceTool::ResumeInAcp => continue,
-            WorkspaceTool::OpenPage => call.parse::<OpenPageArgs>().map(|args| {
+            WorkspaceTool::OpenPage => arguments.parse::<OpenPageArgs>(name.as_str()).map(|args| {
                 commands.entity(request).insert(args);
             }),
-            WorkspaceTool::OpenFile => call.parse::<OpenFileArgs>().map(|args| {
+            WorkspaceTool::OpenFile => arguments.parse::<OpenFileArgs>(name.as_str()).map(|args| {
                 commands.entity(request).insert(args);
             }),
-            WorkspaceTool::Run => call.parse::<RunArgs>().map(|args| {
+            WorkspaceTool::Run => arguments.parse::<RunArgs>(name.as_str()).map(|args| {
                 commands.entity(request).insert(args);
             }),
-            WorkspaceTool::RequestUserChoice => call.parse::<RequestUserChoiceArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            WorkspaceTool::SelectProject => call.parse::<SelectProjectArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            WorkspaceTool::CreateWorktree => call.parse::<CreateWorktreeArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            WorkspaceTool::ReadTerminal => call.parse::<ReadTerminalArgs>().map(|args| {
-                commands.entity(request).insert(args);
-            }),
+            WorkspaceTool::RequestUserChoice => arguments
+                .parse::<RequestUserChoiceArgs>(name.as_str())
+                .map(|args| {
+                    commands.entity(request).insert(args);
+                }),
+            WorkspaceTool::SelectProject => arguments
+                .parse::<SelectProjectArgs>(name.as_str())
+                .map(|args| {
+                    commands.entity(request).insert(args);
+                }),
+            WorkspaceTool::CreateWorktree => arguments
+                .parse::<CreateWorktreeArgs>(name.as_str())
+                .map(|args| {
+                    commands.entity(request).insert(args);
+                }),
+            WorkspaceTool::ReadTerminal => {
+                arguments
+                    .parse::<ReadTerminalArgs>(name.as_str())
+                    .map(|args| {
+                        commands.entity(request).insert(args);
+                    })
+            }
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError::new(message));
+            commands
+                .entity(request)
+                .insert(ToolDispatchError::new(message));
         }
     }
 }
 
 fn open_page(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &OpenPageArgs), Added<OpenPageArgs>>,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenPageArgs), Added<OpenPageArgs>>,
 ) {
-    for (entity, call, args) in &requests {
-        let command = call.require_anchor().and_then(|anchor| {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
             if args.url.trim().is_empty() {
                 return Err("open_page.url is empty".to_string());
             }
@@ -216,11 +237,11 @@ fn open_page(
 
 fn open_file(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &OpenFileArgs), Added<OpenFileArgs>>,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &OpenFileArgs), Added<OpenFileArgs>>,
     protocol_requests: Query<&McpRequest>,
 ) {
-    for (entity, call, args) in &requests {
-        let command = call.require_anchor().and_then(|anchor| {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
             let path = args.path.trim();
             if path.is_empty() {
                 return Err("open_file.path is empty".to_string());
@@ -240,14 +261,16 @@ fn open_file(
         match command {
             Ok(command) if protocol_requests.contains(entity) => {
                 let requested = args.path.clone();
-                let anchor = call.anchor();
-                commands.entity(entity).insert(McpExecution::new(async move {
-                    if !Path::new(&requested).is_absolute() {
-                        return Err("open_file.path must be an absolute path".to_string());
-                    }
-                    scoped_existing_path(anchor, Path::new(&requested), "open_file").await?;
-                    run_agent_command(command, anchor).await
-                }));
+                let anchor = anchor.map(|anchor| anchor.0);
+                commands
+                    .entity(entity)
+                    .insert(McpExecution::new(async move {
+                        if !Path::new(&requested).is_absolute() {
+                            return Err("open_file.path must be an absolute path".to_string());
+                        }
+                        scoped_existing_path(anchor, Path::new(&requested), "open_file").await?;
+                        run_agent_command(command, anchor).await
+                    }));
             }
             command => {
                 commands.entity(entity).insert(ToolCommand(command));
@@ -258,11 +281,20 @@ fn open_file(
 
 fn run(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &RunArgs), Added<RunArgs>>,
+    requests: Query<
+        (
+            Entity,
+            &Name,
+            Option<&ProcessAnchor>,
+            Option<&HostShell>,
+            &RunArgs,
+        ),
+        Added<RunArgs>,
+    >,
     protocol_requests: Query<&McpRequest>,
 ) {
-    for (entity, call, args) in &requests {
-        let command = call.require_anchor().and_then(|anchor| {
+    for (entity, name, anchor, host_shell, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
             let placement_override =
                 args.mode.is_some() || args.direction.is_some() || args.beside.is_some();
             let mut command = args.command.clone();
@@ -272,7 +304,7 @@ fn run(
             if let Some(interpreter) = args.shell.as_ref().filter(|value| !value.trim().is_empty())
             {
                 command = vmux_mcp::host_quote::HostQuote::handing_to(
-                    call.host_shell(),
+                    host_shell.map_or("", |shell| shell.0.as_str()),
                     interpreter,
                     &command,
                 )?;
@@ -316,18 +348,18 @@ fn run(
         match command {
             Ok(command) => {
                 if let Ok(request) = protocol_requests.get(entity) {
-                    commands.entity(entity).insert(McpExecution::new(run_blocking(
-                        command,
-                        request.run_block_timeout(),
-                    )));
+                    commands
+                        .entity(entity)
+                        .insert(McpExecution::new(run_blocking(
+                            command,
+                            request.run_block_timeout(),
+                        )));
                 } else {
                     commands.entity(entity).insert(ToolCommand(Ok(command)));
                 }
             }
             Err(message) => {
-                commands
-                    .entity(entity)
-                    .insert(ToolCommand(Err(message)));
+                commands.entity(entity).insert(ToolCommand(Err(message)));
             }
         }
     }
@@ -353,10 +385,13 @@ impl ProcessTarget {
 
 fn create_worktree(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &CreateWorktreeArgs), Added<CreateWorktreeArgs>>,
+    requests: Query<
+        (Entity, &Name, Option<&ProcessAnchor>, &CreateWorktreeArgs),
+        Added<CreateWorktreeArgs>,
+    >,
 ) {
-    for (entity, call, args) in &requests {
-        let command = call.require_anchor().map(|anchor| {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).map(|anchor| {
             if let Some(branch) = args.branch.clone().and_then(Trimmed::into_option) {
                 AgentCommand::CreateWorktreeOnBranch {
                     anchor,
@@ -387,10 +422,18 @@ impl Trimmed {
 
 fn request_user_choice(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &RequestUserChoiceArgs), Added<RequestUserChoiceArgs>>,
+    requests: Query<
+        (
+            Entity,
+            &Name,
+            Option<&ProcessAnchor>,
+            &RequestUserChoiceArgs,
+        ),
+        Added<RequestUserChoiceArgs>,
+    >,
 ) {
-    for (entity, call, args) in &requests {
-        let command = call.require_anchor().and_then(|anchor| {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
             let question = Trimmed::into_option(args.question.clone())
                 .ok_or("request_user_choice.question is empty")?;
             let options = args
@@ -415,10 +458,13 @@ fn request_user_choice(
 
 fn select_project(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &SelectProjectArgs), Added<SelectProjectArgs>>,
+    requests: Query<
+        (Entity, &Name, Option<&ProcessAnchor>, &SelectProjectArgs),
+        Added<SelectProjectArgs>,
+    >,
 ) {
-    for (entity, call, args) in &requests {
-        let command = call.require_anchor().map(|anchor| {
+    for (entity, name, anchor, args) in &requests {
+        let command = ProcessAnchor::required(anchor, name.as_str()).map(|anchor| {
             match args.path.clone().and_then(Trimmed::into_option) {
                 Some(path) => AgentCommand::ChooseWorkspaceAtPath { anchor, path },
                 None => AgentCommand::ChooseWorkspace { anchor },
@@ -430,7 +476,7 @@ fn select_project(
 
 fn read_terminal(
     mut commands: Commands,
-    requests: Query<(Entity, &ReadTerminalArgs), (With<ToolCall>, Added<ReadTerminalArgs>)>,
+    requests: Query<(Entity, &ReadTerminalArgs), AddedTool<ReadTerminalArgs>>,
 ) {
     for (entity, args) in &requests {
         let query = args
@@ -557,10 +603,7 @@ fn run_completion_exit(
     }
 }
 
-async fn run_blocking(
-    run: AgentCommand,
-    run_block_timeout: Duration,
-) -> Result<Value, String> {
+async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<Value, String> {
     let connection = ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;

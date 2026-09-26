@@ -1,6 +1,3 @@
-use vmux_mcp::tool::{
-    McpToolPlugin, ToolCall, ToolCalls, ToolDispatchError, ToolDispatchSet, ToolRequestSet,
-};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -9,7 +6,11 @@ use vmux_api::protocol::{
     AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, FileTouchKind,
     ProcessId, ServiceMessage,
 };
+use vmux_core::{JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::McpExecution;
+use vmux_mcp::tool::{
+    AddedTool, McpToolPlugin, ToolDispatchError, ToolDispatchSet, ToolRequestSet,
+};
 use vmux_service::client::ServiceConnection;
 
 pub struct FileToolPlugin;
@@ -44,61 +45,74 @@ struct GrepArgs {
     path: Option<String>,
 }
 
-fn parse(mut commands: Commands, calls: ToolCalls<FileTool>) {
-    for (request, call, tool) in calls.iter() {
+fn parse(
+    mut commands: Commands,
+    calls: Query<(Entity, &Name, &JsonArguments, &FileTool), AddedTool<FileTool>>,
+) {
+    for (request, name, arguments, tool) in &calls {
         let parsed = match tool {
-            FileTool::ReadFile => call.parse::<ReadFileArgs>().map(|args| {
+            FileTool::ReadFile => arguments.parse::<ReadFileArgs>(name.as_str()).map(|args| {
                 commands.entity(request).insert(args);
             }),
-            FileTool::Grep => call.parse::<GrepArgs>().map(|args| {
+            FileTool::Grep => arguments.parse::<GrepArgs>(name.as_str()).map(|args| {
                 commands.entity(request).insert(args);
             }),
         };
         if let Err(message) = parsed {
-            commands.entity(request).insert(ToolDispatchError::new(message));
+            commands
+                .entity(request)
+                .insert(ToolDispatchError::new(message));
         }
     }
 }
 
 fn read_file(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &ReadFileArgs), Added<ReadFileArgs>>,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &ReadFileArgs), Added<ReadFileArgs>>,
     protocol_requests: Query<(), With<vmux_mcp::protocol::McpRequest>>,
 ) {
-    for (entity, call, args) in &requests {
+    for (entity, name, anchor, args) in &requests {
         if protocol_requests.contains(entity) {
-            commands.entity(entity).insert(McpExecution::new(read_file_result(
-                args.path.clone(),
-                args.offset.map(std::num::NonZeroU32::get),
-                args.limit,
-                call.anchor(),
-            )));
+            commands
+                .entity(entity)
+                .insert(McpExecution::new(read_file_result(
+                    args.path.clone(),
+                    args.offset.map(std::num::NonZeroU32::get),
+                    args.limit,
+                    anchor.map(|anchor| anchor.0),
+                )));
         } else {
-            commands.entity(entity).insert(ToolDispatchError::new(format!(
-                "tool {} requires MCP protocol context",
-                call.name()
-            )));
+            commands
+                .entity(entity)
+                .insert(ToolDispatchError::new(format!(
+                    "tool {} requires MCP protocol context",
+                    name.as_str()
+                )));
         }
     }
 }
 
 fn grep(
     mut commands: Commands,
-    requests: Query<(Entity, &ToolCall, &GrepArgs), Added<GrepArgs>>,
+    requests: Query<(Entity, &Name, Option<&ProcessAnchor>, &GrepArgs), Added<GrepArgs>>,
     protocol_requests: Query<(), With<vmux_mcp::protocol::McpRequest>>,
 ) {
-    for (entity, call, args) in &requests {
+    for (entity, name, anchor, args) in &requests {
         if protocol_requests.contains(entity) {
-            commands.entity(entity).insert(McpExecution::new(grep_result(
-                args.query.clone(),
-                args.path.clone(),
-                call.anchor(),
-            )));
+            commands
+                .entity(entity)
+                .insert(McpExecution::new(grep_result(
+                    args.query.clone(),
+                    args.path.clone(),
+                    anchor.map(|anchor| anchor.0),
+                )));
         } else {
-            commands.entity(entity).insert(ToolDispatchError::new(format!(
-                "tool {} requires MCP protocol context",
-                call.name()
-            )));
+            commands
+                .entity(entity)
+                .insert(ToolDispatchError::new(format!(
+                    "tool {} requires MCP protocol context",
+                    name.as_str()
+                )));
         }
     }
 }
@@ -235,10 +249,7 @@ async fn grep_result(
         if path.is_empty() {
             continue;
         }
-        let line = data
-            .get("line_number")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as u32;
+        let line = data.get("line_number").and_then(Value::as_u64).unwrap_or(0) as u32;
         let raw = data
             .get("lines")
             .and_then(|lines| lines.get("text"))
@@ -368,7 +379,9 @@ fn read_lines_bounded(
 ) -> std::io::Result<String> {
     use std::io::BufRead;
     let reader = std::io::BufReader::new(std::fs::File::open(path)?);
-    let start = offset.map(|offset| offset.saturating_sub(1) as usize).unwrap_or(0);
+    let start = offset
+        .map(|offset| offset.saturating_sub(1) as usize)
+        .unwrap_or(0);
     let take = limit
         .map(|limit| limit.min(READ_FILE_MAX_LINES))
         .unwrap_or(READ_FILE_DEFAULT_LINES);
@@ -415,10 +428,7 @@ async fn agent_query(
     }
 }
 
-async fn run_agent_command(
-    command: AgentCommand,
-    anchor: Option<ProcessId>,
-) -> Result<(), String> {
+async fn run_agent_command(command: AgentCommand, anchor: Option<ProcessId>) -> Result<(), String> {
     let request_id = AgentRequestId::new();
     let connection = ServiceConnection::connect()
         .await

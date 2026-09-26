@@ -118,7 +118,7 @@ fn on_chat_stop(
         Option<&AcpSession>,
         Option<&AgentSession>,
     )>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
@@ -130,7 +130,7 @@ fn on_chat_stop(
         if queue.flush_pending() {
             queue.cancel_flush();
         }
-        cancel_session(service.as_deref(), acp, page);
+        cancel_session(service.as_ref().map(|service| **service), acp, page);
         return;
     }
     if queue.request_flush() && matches!(*state, AgentRunState::Errored(_)) {
@@ -140,7 +140,7 @@ fn on_chat_stop(
         *state,
         AgentRunState::Streaming | AgentRunState::AwaitingApproval { .. }
     ) {
-        cancel_session(service.as_deref(), acp, page);
+        cancel_session(service.as_ref().map(|service| **service), acp, page);
     }
 }
 
@@ -160,7 +160,7 @@ fn on_chat_cancel(
     trigger: On<UiInput<ChatCancel>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&mut PromptQueue, Option<&AcpSession>, Option<&AgentSession>)>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
@@ -171,7 +171,7 @@ fn on_chat_cancel(
     if queue.flush_pending() {
         queue.cancel_flush();
     }
-    cancel_session(service.as_deref(), acp, page);
+    cancel_session(service.as_ref().map(|service| **service), acp, page);
 }
 
 fn cancel_session(
@@ -204,7 +204,7 @@ fn on_chat_escape(
         Option<&AcpSession>,
         Option<&AgentSession>,
     )>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -230,7 +230,7 @@ fn on_chat_escape(
         *state = AgentRunState::Idle;
     }
     if running {
-        cancel_session(service.as_deref(), acp, page);
+        cancel_session(service.as_ref().map(|service| **service), acp, page);
     }
     let Ok(mut composer) = composers.get_mut(webview) else {
         return;

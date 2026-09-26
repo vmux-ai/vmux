@@ -84,7 +84,7 @@ pub(super) struct EffortSetRequest {
 
 fn answer_remote_model_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     sessions: Query<(&AcpSession, &AcpModelState)>,
     settings: Res<vmux_setting::AppSettings>,
     mut selects: MessageWriter<ModelSelectRequest>,
@@ -836,7 +836,7 @@ fn apply_last_used_acp_model(
 
 fn send_acp_model_requests(
     mut requests: MessageReader<AcpSetModelRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
@@ -853,7 +853,7 @@ fn send_acp_model_requests(
 
 fn send_acp_mode_requests(
     mut requests: MessageReader<AcpSetModeRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;

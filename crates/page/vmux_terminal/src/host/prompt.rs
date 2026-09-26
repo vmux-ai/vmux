@@ -77,7 +77,7 @@ fn flush_buffered_agent_prompt(
         (Entity, &ProcessId, &BufferedAgentPrompt),
         With<vmux_core::agent::AgentSession>,
     >,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };

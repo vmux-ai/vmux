@@ -283,7 +283,7 @@ fn build_profiles(
 
 fn answer_list_team(
     mut reader: MessageReader<AgentCommandRequest>,
-    service: Option<Res<ServiceClient>>,
+    service: Option<Single<&ServiceClient>>,
     current_space: Query<Entity, With<CurrentSpace>>,
     user_q: Query<(Entity, &Profile), With<User>>,
     agent_q: Query<(
