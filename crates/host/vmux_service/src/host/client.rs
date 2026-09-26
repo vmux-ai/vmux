@@ -44,9 +44,16 @@ pub struct ServiceInbound(pub ServiceMessage);
 
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
 
+pub(crate) struct ServiceDrain {
+    pub messages: Vec<ServiceMessage>,
+    pub disconnected: bool,
+    pub capped: bool,
+}
+
 pub(crate) struct ServiceHandle {
     cmd_tx: std::sync::mpsc::Sender<ClientMessage>,
     msg_rx: std::sync::Mutex<std::sync::mpsc::Receiver<ServiceMessage>>,
+    disconnected: Arc<AtomicBool>,
     wake_pending: Arc<AtomicBool>,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
@@ -67,6 +74,19 @@ fn forward_service_message(
         wake();
     }
     Ok(())
+}
+
+fn report_service_disconnected(
+    disconnected: &AtomicBool,
+    wake: Option<&ServiceWake>,
+    wake_pending: &AtomicBool,
+) {
+    disconnected.store(true, Ordering::Release);
+    if let Some(wake) = wake
+        && !wake_pending.swap(true, Ordering::AcqRel)
+    {
+        wake();
+    }
 }
 
 fn clean_service_files(sock: &std::path::Path) {
@@ -177,11 +197,14 @@ impl ServiceHandle {
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<ClientMessage>();
         let (msg_tx, msg_rx) = std::sync::mpsc::channel::<ServiceMessage>();
+        let disconnected = Arc::new(AtomicBool::new(false));
         let wake_pending = Arc::new(AtomicBool::new(false));
 
         let conn_r = Arc::clone(&conn);
         let rt2 = Arc::clone(&rt);
+        let reader_disconnected = Arc::clone(&disconnected);
         let reader_wake_pending = Arc::clone(&wake_pending);
+        let reader_wake = wake.clone();
         std::thread::Builder::new()
             .name("service-reader".into())
             .spawn(move || {
@@ -191,7 +214,7 @@ impl ServiceHandle {
                             Ok(Some(msg)) => {
                                 if forward_service_message(
                                     &msg_tx,
-                                    wake.as_ref(),
+                                    reader_wake.as_ref(),
                                     &reader_wake_pending,
                                     msg,
                                 )
@@ -204,17 +227,29 @@ impl ServiceHandle {
                             Err(_) => break,
                         }
                     }
+                    report_service_disconnected(
+                        &reader_disconnected,
+                        reader_wake.as_ref(),
+                        &reader_wake_pending,
+                    );
                 });
             })
             .ok()?;
 
         let rt3 = Arc::clone(&rt);
+        let writer_disconnected = Arc::clone(&disconnected);
+        let writer_wake_pending = Arc::clone(&wake_pending);
         std::thread::Builder::new()
             .name("service-writer".into())
             .spawn(move || {
                 rt3.block_on(async move {
                     while let Ok(msg) = cmd_rx.recv() {
                         if conn.send(&msg).await.is_err() {
+                            report_service_disconnected(
+                                &writer_disconnected,
+                                wake.as_ref(),
+                                &writer_wake_pending,
+                            );
                             break;
                         }
                     }
@@ -225,33 +260,62 @@ impl ServiceHandle {
         Some(Self {
             cmd_tx,
             msg_rx: std::sync::Mutex::new(msg_rx),
+            disconnected,
             wake_pending,
             _runtime: rt,
         })
     }
 
-    pub fn send(&self, msg: ClientMessage) {
-        let _ = self.cmd_tx.send(msg);
+    pub fn send(&self, msg: ClientMessage) -> bool {
+        self.cmd_tx.send(msg).is_ok()
     }
 
-    pub fn drain_with_status(&self) -> (Vec<ServiceMessage>, bool) {
+    pub fn drain_with_status(&self) -> ServiceDrain {
         self.wake_pending.store(false, Ordering::Release);
         let rx = self.msg_rx.lock().unwrap();
-        drain_service_messages_bounded(&rx)
+        drain_service_messages_bounded(&rx, self.disconnected.swap(false, Ordering::AcqRel))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn disconnected() -> Self {
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
+        drop(cmd_rx);
+        let (_msg_tx, msg_rx) = std::sync::mpsc::channel();
+        Self {
+            cmd_tx,
+            msg_rx: std::sync::Mutex::new(msg_rx),
+            disconnected: Arc::new(AtomicBool::new(true)),
+            wake_pending: Arc::new(AtomicBool::new(false)),
+            _runtime: Arc::new(
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime should build"),
+            ),
+        }
     }
 }
 
 fn drain_service_messages_bounded(
     rx: &std::sync::mpsc::Receiver<ServiceMessage>,
-) -> (Vec<ServiceMessage>, bool) {
-    let mut msgs = Vec::with_capacity(MAX_SERVICE_MESSAGES_PER_DRAIN);
+    disconnected: bool,
+) -> ServiceDrain {
+    let mut messages = Vec::with_capacity(MAX_SERVICE_MESSAGES_PER_DRAIN);
     for _ in 0..MAX_SERVICE_MESSAGES_PER_DRAIN {
         let Ok(msg) = rx.try_recv() else {
-            return (msgs, false);
+            return ServiceDrain {
+                messages,
+                disconnected,
+                capped: false,
+            };
         };
-        msgs.push(msg);
+        messages.push(msg);
     }
-    (msgs, true)
+    ServiceDrain {
+        messages,
+        disconnected,
+        capped: true,
+    }
 }
 
 #[cfg(test)]
@@ -322,11 +386,11 @@ mod tests {
             .expect("service message should queue");
         }
 
-        let (drained, capped) = drain_service_messages_bounded(&rx);
+        let drained = drain_service_messages_bounded(&rx, false);
 
-        assert_eq!(drained.len(), MAX_SERVICE_MESSAGES_PER_DRAIN);
+        assert_eq!(drained.messages.len(), MAX_SERVICE_MESSAGES_PER_DRAIN);
         assert!(
-            capped,
+            drained.capped,
             "hitting the cap must report capped so the caller re-wakes"
         );
         assert!(rx.try_recv().is_ok());
@@ -342,10 +406,22 @@ mod tests {
             .expect("service message should queue");
         }
 
-        let (drained, capped) = drain_service_messages_bounded(&rx);
+        let drained = drain_service_messages_bounded(&rx, false);
 
-        assert_eq!(drained.len(), 3);
-        assert!(!capped);
+        assert_eq!(drained.messages.len(), 3);
+        assert!(!drained.disconnected);
+        assert!(!drained.capped);
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn service_message_drain_reports_disconnect() {
+        let (_tx, rx) = std::sync::mpsc::channel();
+
+        let drained = drain_service_messages_bounded(&rx, true);
+
+        assert!(drained.messages.is_empty());
+        assert!(drained.disconnected);
+        assert!(!drained.capped);
     }
 }
