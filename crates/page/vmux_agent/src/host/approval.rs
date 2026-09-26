@@ -18,9 +18,10 @@ pub(crate) struct ApprovalSyncSet;
 impl Plugin for ApprovalPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>();
-        if app.world().get_resource::<AgentApprovalStore>().is_none() {
-            app.insert_resource(AgentApprovalStore::load());
-        }
+        app.world_mut().spawn((
+            Name::new("Agent approval store"),
+            AgentApprovalStore::load(),
+        ));
         app.add_observer(handle_approval_reply).add_systems(
             Update,
             sync_persisted_acp_approval_policy.in_set(ApprovalSyncSet),
@@ -33,7 +34,7 @@ struct SavedApprovalGrants {
     by_agent: BTreeMap<String, BTreeMap<String, BTreeSet<String>>>,
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 struct AgentApprovalStore {
     path: PathBuf,
     grants: SavedApprovalGrants,
@@ -108,7 +109,7 @@ fn canonical_agent_id(agent: &str) -> String {
 }
 
 fn sync_persisted_acp_approval_policy(
-    store: Res<AgentApprovalStore>,
+    store: Single<&AgentApprovalStore>,
     mut sessions: Query<(&AcpSession, &mut AgentApprovalPolicy), Changed<AcpSession>>,
 ) {
     for (session, mut policy) in &mut sessions {
@@ -126,7 +127,7 @@ fn handle_approval_reply(
         Option<&AcpSession>,
     )>,
     mut service_requests: MessageWriter<ServiceRequest>,
-    mut store: Option<ResMut<AgentApprovalStore>>,
+    mut store: Option<Single<&mut AgentApprovalStore>>,
 ) {
     let reply = trigger.event();
     let Ok((mut state, mut policy, page, acp)) = q.get_mut(reply.session) else {
@@ -184,11 +185,16 @@ mod tests {
     fn make_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .insert_resource(AgentApprovalStore::load_from(
-                std::env::temp_dir()
-                    .join(format!("vmux-agent-approval-{}.json", uuid::Uuid::new_v4())),
-            ))
             .add_plugins(ApprovalPlugin);
+        let path =
+            std::env::temp_dir().join(format!("vmux-agent-approval-{}.json", uuid::Uuid::new_v4()));
+        let store = AgentApprovalStore::load_from(path);
+        let entity = {
+            let world = app.world_mut();
+            let mut stores = world.query_filtered::<Entity, With<AgentApprovalStore>>();
+            stores.single(world).unwrap()
+        };
+        app.world_mut().entity_mut(entity).insert(store);
         app
     }
 
