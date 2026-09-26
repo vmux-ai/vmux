@@ -201,20 +201,18 @@ fn agent_prompt_target_sort_name(target: &AgentPromptTarget) -> String {
     }
 }
 
-use crate::session::AgentSessionToEntity;
-
 fn update_agent_sessions_snapshot(
-    sessions: Option<Res<AgentSessionToEntity>>,
+    sessions: Query<(
+        Entity,
+        &vmux_core::agent::AgentSession,
+        &vmux_core::agent::SessionId,
+    )>,
     mut state: ResMut<CommandBarProjection>,
 ) {
-    let changed = sessions
-        .as_ref()
-        .map(|r| r.is_changed() || r.is_added())
-        .unwrap_or(false);
-    if !changed && !state.terminals.agent_session_to_entity.is_empty() {
-        return;
+    let mut next = std::collections::HashMap::with_capacity(sessions.iter().len());
+    for (entity, session, id) in &sessions {
+        next.insert((session.kind, id.0.clone()), entity);
     }
-    let next = sessions.as_deref().map(|m| m.0.clone()).unwrap_or_default();
     if state.terminals.agent_session_to_entity != next {
         state.terminals.agent_session_to_entity = next;
     }
@@ -253,6 +251,44 @@ mod tests {
         app.update();
         let snap = &app.world().resource::<CommandBarProjection>().terminals;
         assert!(snap.agent_session_to_entity.is_empty());
+    }
+
+    #[test]
+    fn agent_sessions_snapshot_tracks_live_session_entities() {
+        let mut app = App::new();
+        app.add_plugins(SnapshotPlugin);
+        let entity = app
+            .world_mut()
+            .spawn((
+                vmux_core::agent::AgentSession {
+                    kind: vmux_core::agent::AgentKind::Codex,
+                },
+                vmux_core::agent::SessionId("session-1".to_string()),
+            ))
+            .id();
+
+        app.update();
+
+        let sessions = &app
+            .world()
+            .resource::<CommandBarProjection>()
+            .terminals
+            .agent_session_to_entity;
+        assert_eq!(
+            sessions.get(&(vmux_core::agent::AgentKind::Codex, "session-1".to_string())),
+            Some(&entity)
+        );
+
+        app.world_mut().despawn(entity);
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<CommandBarProjection>()
+                .terminals
+                .agent_session_to_entity
+                .is_empty()
+        );
     }
 
     #[test]

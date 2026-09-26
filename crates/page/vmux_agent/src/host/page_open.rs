@@ -11,8 +11,6 @@ use vmux_service::protocol::AgentAttachment;
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 
-use crate::session::AgentSessionToEntity;
-
 use super::attach::{
     acp_icon_for_id, acp_profile_name_for_id, acp_registry_agent_for_id, attach_acp_agent_to_stack,
     attach_acp_agent_to_stack_with_webview, attach_page_agent_to_stack_with_webview,
@@ -477,9 +475,13 @@ fn handle_agent_page_open(
     )>,
     children_q: Query<&Children>,
     agents: Query<&vmux_core::agent::AgentSession>,
+    cli_sessions: Query<(
+        Entity,
+        &vmux_core::agent::AgentSession,
+        &vmux_core::agent::SessionId,
+    )>,
     acp_sessions: Query<&vmux_session::AcpSession>,
     child_of_q: Query<&ChildOf>,
-    agent_to_entity: Option<Res<AgentSessionToEntity>>,
     idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
     kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
@@ -551,9 +553,9 @@ fn handle_agent_page_open(
             transition_webview,
             &children_q,
             &agents,
+            &cli_sessions,
             &acp_sessions,
             &child_of_q,
-            agent_to_entity.as_deref(),
             idx.as_deref(),
             &kind_q,
             &mut spawn_agent,
@@ -689,9 +691,13 @@ fn handle_agent_page_open_task(
     transition_webview: Option<Entity>,
     children_q: &Query<&Children>,
     agents: &Query<&vmux_core::agent::AgentSession>,
+    cli_sessions: &Query<(
+        Entity,
+        &vmux_core::agent::AgentSession,
+        &vmux_core::agent::SessionId,
+    )>,
     acp_sessions: &Query<&vmux_session::AcpSession>,
     child_of_q: &Query<&ChildOf>,
-    agent_to_entity: Option<&AgentSessionToEntity>,
     idx: Option<&crate::runtime::provider::index::ProviderStrategyIndex>,
     kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
@@ -774,8 +780,9 @@ fn handle_agent_page_open_task(
                 }
                 return Ok(());
             }
-            if let Some(map) = agent_to_entity
-                && let Some(&entity) = map.0.get(&(kind, sid.clone()))
+            if let Some((entity, _, _)) = cli_sessions
+                .iter()
+                .find(|(_, session, id)| session.kind == kind && id.0 == sid)
             {
                 vmux_terminal::pid::focus_pane_entity(entity, commands, child_of_q);
                 return Ok(());
