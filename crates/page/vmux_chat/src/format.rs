@@ -1,6 +1,7 @@
 use crate::event::ModelOptionEntry;
 #[cfg(test)]
 use crate::event::ResumableSessionEntry;
+pub(crate) use crate::selector::{SelectorMode, selector_mode};
 use unicode_segmentation::UnicodeSegmentation;
 #[cfg(ui)]
 pub(crate) use vmux_ui::prompt_recall::{
@@ -8,15 +9,6 @@ pub(crate) use vmux_ui::prompt_recall::{
 };
 
 const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SelectorMode<'a> {
-    None,
-    Commands(&'a str),
-    Mcp(&'a str),
-    Resume(&'a str),
-    Models(&'a str),
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PromptEdit<'a> {
     Insert(&'a str),
@@ -30,32 +22,6 @@ pub(crate) enum ResumeMenuState {
     Empty,
     NoMatch,
     Results,
-}
-
-pub fn selector_mode(draft: &str) -> SelectorMode<'_> {
-    let Some(token) = draft.strip_prefix('/') else {
-        return SelectorMode::None;
-    };
-    if let Some(rest) = token.strip_prefix("resume")
-        && rest.chars().next().is_some_and(char::is_whitespace)
-    {
-        return SelectorMode::Resume(rest.trim_start_matches(char::is_whitespace));
-    }
-    if let Some(rest) = token.strip_prefix("model")
-        && rest.chars().next().is_some_and(char::is_whitespace)
-    {
-        return SelectorMode::Models(rest.trim_start_matches(char::is_whitespace));
-    }
-    if let Some(rest) = token.strip_prefix("mcp")
-        && (rest.is_empty() || rest.chars().next().is_some_and(char::is_whitespace))
-    {
-        return SelectorMode::Mcp(rest.trim_start_matches(char::is_whitespace));
-    }
-    if token.chars().any(char::is_whitespace) {
-        SelectorMode::None
-    } else {
-        SelectorMode::Commands(token)
-    }
 }
 
 pub fn filter_models(models: &[ModelOptionEntry], query: &str) -> Vec<ModelOptionEntry> {

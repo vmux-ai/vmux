@@ -9,7 +9,9 @@ pub mod transcript;
 pub mod model;
 pub mod prompt;
 pub mod room;
+pub mod selector;
 
+#[cfg(any(test, ui))]
 pub mod format;
 
 #[cfg(ui)]

@@ -35,13 +35,7 @@ impl Plugin for WindowLayoutPlugin {
             )
             .add_systems(
                 Startup,
-                (
-                    request_default_layout,
-                    spawn_requested_tab_layouts,
-                    discard_startup_tab_layout_requests,
-                )
-                    .chain()
-                    .in_set(LayoutStartupSet::DefaultTab),
+                request_default_layout.in_set(LayoutStartupSet::DefaultTab),
             )
             .add_systems(
                 Startup,
@@ -470,10 +464,6 @@ fn request_default_layout(
         clear_pending_stack: false,
         focus: true,
     });
-}
-
-fn discard_startup_tab_layout_requests(mut requests: MessageReader<TabLayoutSpawnRequest>) {
-    requests.clear();
 }
 
 pub struct TabScaffold {
@@ -1171,15 +1161,7 @@ mod tests {
             .insert_resource(vmux_core::EffectiveStartupUrl(
                 "vmux://sessions/vibe/".to_string(),
             ))
-            .add_systems(
-                Startup,
-                (
-                    request_default_layout,
-                    spawn_requested_tab_layouts,
-                    discard_startup_tab_layout_requests,
-                )
-                    .chain(),
-            )
+            .add_systems(Startup, request_default_layout)
             .add_systems(Update, spawn_requested_tab_layouts);
 
         app.world_mut().spawn(PrimaryWindow);
