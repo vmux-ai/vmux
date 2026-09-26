@@ -8,7 +8,7 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use vmux_api::protocol::{ClientMessage, ProcessId, ServiceMessage};
+use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_core::input::KeyStroke;
@@ -21,7 +21,7 @@ use vmux_layout::Browser;
 use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest};
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_service::{
-    client::{ServiceInbound, ServiceRequest},
+    client::ServiceRequest,
     plugin::{ServiceConnected, ServiceUnavailable},
 };
 use vmux_setting::AppSettings;
@@ -35,6 +35,10 @@ use super::loading::AgentLoading;
 use super::mouse::TerminalMouseState;
 use super::process_control::{PendingTerminalSnapshot, ProcessControlPlugin, TerminalGridSize};
 use super::prompt::PromptCapture;
+use super::service::{
+    ServiceIngressPlugin, ServiceIngressSet, TerminalModeUpdate, TerminalProcessCreateFailed,
+    TerminalProcessCreated, TerminalSelectionText, TerminalServiceError, TerminalViewportUpdate,
+};
 use super::state::{
     CopyModeInputState, CopyModePendingKey, TerminalCopyMode, TerminalMode, TerminalShortcutState,
 };
@@ -141,36 +145,48 @@ struct TerminalUpdatePlugin;
 
 impl Plugin for TerminalUpdatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::contract::TerminalContractPlugin)
-            .add_message::<ProcessExitedEvent>()
-            .add_message::<CommandLifecycleEvent>()
-            .add_message::<OscTitleChanged>()
-            .add_message::<vmux_core::notify::BellReceived>()
-            .add_systems(Update, apply_osc_title.after(poll_service_messages))
-            .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
-            .add_systems(Update, sync_agent_focus.after(poll_service_messages))
-            .add_systems(
-                Update,
-                handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
-            )
-            .add_systems(
-                Update,
-                spawn_layout_requested_content.after(vmux_layout::stack::StackCommandSet),
-            )
-            .add_systems(
-                Update,
+        app.add_plugins((
+            crate::contract::TerminalContractPlugin,
+            ServiceIngressPlugin,
+        ))
+        .add_message::<ProcessExitedEvent>()
+        .add_message::<CommandLifecycleEvent>()
+        .add_message::<OscTitleChanged>()
+        .add_message::<vmux_core::notify::BellReceived>()
+        .add_systems(Update, apply_osc_title.after(ServiceMessageSet))
+        .add_systems(Update, clear_osc_title_on_exit.after(ServiceMessageSet))
+        .add_systems(Update, sync_agent_focus.after(ServiceMessageSet))
+        .add_systems(
+            Update,
+            handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
+        )
+        .add_systems(
+            Update,
+            spawn_layout_requested_content.after(vmux_layout::stack::StackCommandSet),
+        )
+        .add_systems(
+            Update,
+            (
+                publish_service_status,
+                resolve_pending_terminal_cwd,
                 (
-                    publish_service_status,
-                    resolve_pending_terminal_cwd,
-                    poll_service_messages
-                        .in_set(WriteCommandRequests)
-                        .in_set(ServiceMessageSet),
-                    handle_terminal_navigation_commands.in_set(vmux_command::ReadCommandRequests),
-                    handle_terminal_clear_command.in_set(vmux_command::ReadCommandRequests),
-                    handle_terminal_copy_mode_command.in_set(vmux_command::ReadCommandRequests),
+                    send_service_requests,
+                    apply_process_start,
+                    apply_viewport_updates,
+                    apply_process_exits,
+                    apply_service_errors,
+                    apply_terminal_modes,
+                    copy_service_selection,
                 )
-                    .chain(),
-            );
+                    .after(ServiceIngressSet)
+                    .in_set(WriteCommandRequests)
+                    .in_set(ServiceMessageSet),
+                handle_terminal_navigation_commands.in_set(vmux_command::ReadCommandRequests),
+                handle_terminal_clear_command.in_set(vmux_command::ReadCommandRequests),
+                handle_terminal_copy_mode_command.in_set(vmux_command::ReadCommandRequests),
+            )
+                .chain(),
+        );
     }
 }
 
@@ -730,17 +746,6 @@ fn publish_service_status(
     }
 }
 
-#[derive(bevy::ecs::system::SystemParam)]
-struct PollServiceWriters<'w> {
-    service_requests: MessageWriter<'w, ServiceRequest>,
-    stack_close_requests: MessageWriter<'w, StackCloseRequest>,
-    process_exited: MessageWriter<'w, ProcessExitedEvent>,
-    process_snapshot: MessageWriter<'w, crate::processes_monitor::ServiceProcessSnapshot>,
-    command_lifecycle: MessageWriter<'w, CommandLifecycleEvent>,
-    osc_title: MessageWriter<'w, OscTitleChanged>,
-    bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
-}
-
 fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
@@ -828,7 +833,7 @@ fn resolve_pending_terminal_cwd(
     }
 }
 
-fn poll_service_messages(
+fn send_service_requests(
     pending_create: Query<
         (
             Entity,
@@ -839,33 +844,12 @@ fn poll_service_messages(
         (With<Terminal>, With<PendingServiceCreate>),
     >,
     pending_attach: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingServiceAttach>)>,
-    awaiting_create: Query<
-        (Entity, &ProcessId, &ChildOf),
-        (With<Terminal>, With<AwaitingProcessCreated>),
-    >,
-    terminals: Query<
-        (Entity, &ProcessId, &ChildOf, Has<RetainOnProcessExit>),
-        ServiceTerminalFilter,
-    >,
-    mut terminal_states: Query<
-        (
-            &mut TerminalMode,
-            &mut TerminalCopyMode,
-            &mut TerminalShortcutState,
-            &mut TerminalMouseState,
-        ),
-        With<Terminal>,
-    >,
+    awaiting_create: Query<(), (With<Terminal>, With<AwaitingProcessCreated>)>,
     connected: Option<Single<(), With<ServiceConnected>>>,
-    mut inbound: MessageReader<ServiceInbound>,
-    browsers: NonSend<Browsers>,
     mut commands: Commands,
-    mut writers: PollServiceWriters,
-    process_index: Res<TerminalProcessIndex>,
+    mut service_requests: MessageWriter<ServiceRequest>,
     settings: Res<AppSettings>,
-    launches: Query<&crate::launch::TerminalLaunch>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
-    output_seen: Query<(), With<ShellOutputSeen>>,
 ) {
     if connected.is_none() {
         return;
@@ -880,17 +864,15 @@ fn poll_service_messages(
         if should_merge_login_shell_env(agent_sessions.contains(entity), agent_run) {
             crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
         }
-        writers
-            .service_requests
-            .write(ServiceRequest(ClientMessage::CreateProcess {
-                process_id: *process_id,
-                command: launch.command.clone(),
-                args: launch.args.clone(),
-                cwd: launch.cwd.clone(),
-                env,
-                cols: 80,
-                rows: 24,
-            }));
+        service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
+            process_id: *process_id,
+            command: launch.command.clone(),
+            args: launch.args.clone(),
+            cwd: launch.cwd.clone(),
+            env,
+            cols: 80,
+            rows: 24,
+        }));
         commands
             .entity(entity)
             .remove::<PendingServiceCreate>()
@@ -898,289 +880,233 @@ fn poll_service_messages(
     }
 
     for (entity, pid) in &pending_attach {
-        writers
-            .service_requests
-            .write(ServiceRequest(ClientMessage::AttachProcess {
-                process_id: *pid,
-            }));
-        writers
-            .service_requests
-            .write(ServiceRequest(ClientMessage::RequestSnapshot {
-                process_id: *pid,
-            }));
+        service_requests.write(ServiceRequest(ClientMessage::AttachProcess {
+            process_id: *pid,
+        }));
+        service_requests.write(ServiceRequest(ClientMessage::RequestSnapshot {
+            process_id: *pid,
+        }));
         commands.entity(entity).remove::<PendingServiceAttach>();
     }
+}
 
+fn apply_process_start(
+    mut created: MessageReader<TerminalProcessCreated>,
+    mut failed: MessageReader<TerminalProcessCreateFailed>,
+    awaiting_create: Query<(), (With<Terminal>, With<AwaitingProcessCreated>)>,
+    process_index: Res<TerminalProcessIndex>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
+) {
+    for created in created.read() {
+        let entity = process_index
+            .get(&created.process_id)
+            .filter(|entity| awaiting_create.contains(*entity));
+        if let Some(entity) = entity {
+            service_requests.write(ServiceRequest(ClientMessage::AttachProcess {
+                process_id: created.process_id,
+            }));
+            apply_process_created(&mut commands, entity, created.process_id, created.pid);
+        } else {
+            bevy::log::warn!(
+                "ProcessCreated for unknown process_id {}; dropping",
+                created.process_id
+            );
+        }
+    }
+
+    for failed in failed.read() {
+        bevy::log::warn!("service failed to create process: {}", failed.reason);
+        if let Some(entity) = process_index
+            .get(&failed.process_id)
+            .filter(|entity| awaiting_create.contains(*entity))
+        {
+            apply_process_create_failed(&mut commands, entity);
+        }
+    }
+}
+
+fn apply_viewport_updates(
+    mut updates: MessageReader<TerminalViewportUpdate>,
+    terminals: Query<(), ServiceTerminalFilter>,
+    process_index: Res<TerminalProcessIndex>,
+    output_seen: Query<(), With<ShellOutputSeen>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for update in updates.read() {
+        let Some(entity) = process_index.get(&update.process_id) else {
+            continue;
+        };
+        if !terminals.contains(entity) {
+            continue;
+        }
+        if !output_seen.contains(entity) {
+            let has_content = update
+                .patch
+                .changed_lines
+                .iter()
+                .any(|(_, line)| line_has_content(line));
+            if shell_prompt_ready(has_content, update.patch.cursor.col) {
+                commands.entity(entity).insert(ShellOutputSeen);
+            }
+        }
+        if !browsers.can_emit_to(&entity) {
+            if update.request_snapshot_if_hidden {
+                commands.entity(entity).insert(PendingTerminalSnapshot);
+            }
+            continue;
+        }
+        let mut patch = update.patch.clone();
+        for (_, line) in patch.changed_lines.iter_mut() {
+            crate::link::annotate_links(line, None);
+        }
+        commands.trigger(vmux_core::host::UiStateWrite::<
+            vmux_core::event::TerminalUiState,
+        >::from_event(entity, &patch));
+    }
+}
+
+fn apply_process_exits(
+    mut exited: MessageReader<ProcessExitedEvent>,
+    terminals: Query<
+        (Entity, &ProcessId, &ChildOf, Has<RetainOnProcessExit>),
+        ServiceTerminalFilter,
+    >,
+    mut terminal_states: Query<
+        (
+            &mut TerminalMode,
+            &mut TerminalCopyMode,
+            &mut TerminalShortcutState,
+            &mut TerminalMouseState,
+        ),
+        With<Terminal>,
+    >,
+    process_index: Res<TerminalProcessIndex>,
+    agent_sessions: Query<&vmux_core::agent::AgentSession>,
+    mut stack_close_requests: MessageWriter<StackCloseRequest>,
+    mut commands: Commands,
+) {
+    for exited in exited.read() {
+        let Some(entity) = process_index.get(&exited.process_id) else {
+            continue;
+        };
+        if let Ok((mut mode, mut copy_mode, mut shortcut, mut mouse)) =
+            terminal_states.get_mut(entity)
+        {
+            *mode = TerminalMode::default();
+            *copy_mode = TerminalCopyMode::default();
+            *shortcut = TerminalShortcutState::default();
+            *mouse = TerminalMouseState::default();
+        }
+        let Ok((_, _, child_of, retain_on_exit)) = terminals.get(entity) else {
+            continue;
+        };
+        commands
+            .entity(entity)
+            .insert(ProcessExited)
+            .remove::<CloseRequiresConfirmation>()
+            .remove::<AgentLoading>();
+        let is_agent = if let Ok(session) = agent_sessions.get(entity) {
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_core::event::TerminalUiState,
+            >::from_event(
+                entity,
+                &crate::event::TermLoadingEvent {
+                    loading: false,
+                    label: session.kind.display_name().to_string(),
+                    segment: session.kind.as_url_segment().to_string(),
+                },
+            ));
+            true
+        } else {
+            false
+        };
+        if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
+            let tab = child_of.get();
+            commands.entity(tab).insert(LastActivatedAt::now());
+            stack_close_requests.write(StackCloseRequest);
+        }
+    }
+}
+
+fn apply_service_errors(
+    mut errors: MessageReader<TerminalServiceError>,
+    terminals: Query<(), ServiceTerminalFilter>,
+    process_index: Res<TerminalProcessIndex>,
+    launches: Query<&crate::launch::TerminalLaunch>,
+    settings: Res<AppSettings>,
+    agent_sessions: Query<&vmux_core::agent::AgentSession>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+    mut commands: Commands,
+) {
     let mut restarted_missing_processes = Vec::new();
-    for inbound in inbound.read() {
-        let msg = inbound.0.clone();
-        match msg {
-            ServiceMessage::ProcessCreated { process_id, pid } => {
-                let entity = process_index
-                    .get(&process_id)
-                    .filter(|entity| awaiting_create.contains(*entity));
-                if let Some(entity) = entity {
-                    writers
-                        .service_requests
-                        .write(ServiceRequest(ClientMessage::AttachProcess { process_id }));
-                    apply_process_created(&mut commands, entity, process_id, pid);
-                } else {
-                    bevy::log::warn!(
-                        "ProcessCreated for unknown process_id {process_id}; dropping"
-                    );
-                }
-            }
-            ServiceMessage::ProcessCreateFailed { process_id, reason } => {
-                bevy::log::warn!("service failed to create process: {reason}");
-                if let Some(entity) = process_index
-                    .get(&process_id)
-                    .filter(|entity| awaiting_create.contains(*entity))
-                {
-                    apply_process_create_failed(&mut commands, entity);
-                }
-            }
-            ServiceMessage::ViewportPatch {
-                process_id,
-                changed_lines,
-                cursor,
-                cols,
-                rows,
-                selection,
-                copy_mode,
-                full,
-                first_row,
-                total_rows,
-                alt,
-                mouse,
-                evicted_total,
-            } => {
-                let Some(entity) = process_index.get(&process_id) else {
-                    continue;
-                };
-                if !terminals.contains(entity) {
-                    continue;
-                }
-                if !output_seen.contains(entity) {
-                    let has_content = changed_lines.iter().any(|(_, l)| line_has_content(l));
-                    if shell_prompt_ready(has_content, cursor.col) {
-                        commands.entity(entity).insert(ShellOutputSeen);
-                    }
-                }
-                if !browsers.can_emit_to(&entity) {
-                    commands.entity(entity).insert(PendingTerminalSnapshot);
-                    continue;
-                }
-                let mut changed_lines = changed_lines;
-                for (_, line) in changed_lines.iter_mut() {
-                    crate::link::annotate_links(line, None);
-                }
-                let patch = TermViewportPatch {
-                    changed_lines,
-                    cursor,
-                    cols,
-                    rows,
-                    selection,
-                    copy_mode,
-                    full,
-                    first_row,
-                    total_rows,
-                    alt,
-                    mouse,
-                    evicted_total,
-                };
-                commands.trigger(vmux_core::host::UiStateWrite::<
-                    vmux_core::event::TerminalUiState,
-                >::from_event(entity, &patch));
-            }
-            ServiceMessage::Bell { process_id } => {
-                writers
-                    .bell
-                    .write(vmux_core::notify::BellReceived { process_id });
-            }
-            ServiceMessage::ProcessTitle { process_id, title } => {
-                writers.osc_title.write(OscTitleChanged {
-                    process_id,
-                    title: title.clone(),
-                });
-                let Some(entity) = process_index.get(&process_id) else {
-                    continue;
-                };
-                if !terminals.contains(entity) || !browsers.can_emit_to(&entity) {
-                    continue;
-                }
-                let evt = TermTitleEvent { title };
-                commands.trigger(vmux_core::host::UiStateWrite::<
-                    vmux_core::event::TerminalUiState,
-                >::from_event(entity, &evt));
-            }
-            ServiceMessage::Snapshot {
-                process_id,
-                lines,
-                cursor,
-                cols,
-                rows,
-            } => {
-                let Some(entity) = process_index.get(&process_id) else {
-                    continue;
-                };
-                if !terminals.contains(entity) {
-                    continue;
-                }
-                if !output_seen.contains(entity) {
-                    let has_content = lines.iter().any(line_has_content);
-                    if shell_prompt_ready(has_content, cursor.col) {
-                        commands.entity(entity).insert(ShellOutputSeen);
-                    }
-                }
-                if !browsers.can_emit_to(&entity) {
-                    continue;
-                }
-                let mut changed_lines: Vec<(u32, TermLine)> = lines
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, l)| (i as u32, l))
-                    .collect();
-                for (_, line) in changed_lines.iter_mut() {
-                    crate::link::annotate_links(line, None);
-                }
-                let patch = TermViewportPatch {
-                    changed_lines,
-                    cursor,
-                    cols,
-                    rows,
-                    selection: None,
-                    copy_mode: false,
-                    full: true,
-                    first_row: 0,
-                    total_rows: rows as u32,
-                    alt: false,
-                    mouse: false,
-                    evicted_total: 0,
-                };
-                commands.trigger(vmux_core::host::UiStateWrite::<
-                    vmux_core::event::TerminalUiState,
-                >::from_event(entity, &patch));
-            }
-            ServiceMessage::ProcessExited { process_id, .. } => {
-                writers
-                    .process_exited
-                    .write(ProcessExitedEvent { process_id });
-                let Some(entity) = process_index.get(&process_id) else {
-                    continue;
-                };
-                if let Ok((mut mode, mut copy_mode, mut shortcut, mut mouse)) =
-                    terminal_states.get_mut(entity)
-                {
-                    *mode = TerminalMode::default();
-                    *copy_mode = TerminalCopyMode::default();
-                    *shortcut = TerminalShortcutState::default();
-                    *mouse = TerminalMouseState::default();
-                }
-                let Ok((_, _, child_of, retain_on_exit)) = terminals.get(entity) else {
-                    continue;
-                };
-                commands
-                    .entity(entity)
-                    .insert(ProcessExited)
-                    .remove::<CloseRequiresConfirmation>()
-                    .remove::<AgentLoading>();
-                let is_agent = if let Ok(session) = agent_sessions.get(entity) {
-                    commands.trigger(vmux_core::host::UiStateWrite::<
-                        vmux_core::event::TerminalUiState,
-                    >::from_event(
-                        entity,
-                        &crate::event::TermLoadingEvent {
-                            loading: false,
-                            label: session.kind.display_name().to_string(),
-                            segment: session.kind.as_url_segment().to_string(),
-                        },
-                    ));
-                    true
-                } else {
-                    false
-                };
-                if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
-                    let tab = child_of.get();
-                    commands.entity(tab).insert(LastActivatedAt::now());
-                    writers.stack_close_requests.write(StackCloseRequest);
-                }
-            }
-            ServiceMessage::ProcessList { processes } => {
-                writers
-                    .process_snapshot
-                    .write(crate::processes_monitor::ServiceProcessSnapshot(processes));
-            }
-            ServiceMessage::Error { message } => {
-                if let Some(stale_pid) = missing_process_id(&message)
-                    && !restarted_missing_processes.contains(&stale_pid)
-                    && let Some(entity) = process_index.get(&stale_pid)
-                    && terminals.contains(entity)
-                {
-                    let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
-                        crate::launch::TerminalLaunch {
-                            command: terminal_shell(&settings),
-                            args: vec![],
-                            cwd: String::new(),
-                            env: vec![],
-                            kind: crate::launch::TerminalKind::Plain,
-                        }
+    for error in errors.read() {
+        if let Some(stale_pid) = missing_process_id(&error.message)
+            && !restarted_missing_processes.contains(&stale_pid)
+            && let Some(entity) = process_index.get(&stale_pid)
+            && terminals.contains(entity)
+        {
+            let launch =
+                launches
+                    .get(entity)
+                    .cloned()
+                    .unwrap_or_else(|_| crate::launch::TerminalLaunch {
+                        command: terminal_shell(&settings),
+                        args: vec![],
+                        cwd: String::new(),
+                        env: vec![],
+                        kind: crate::launch::TerminalKind::Plain,
                     });
-                    let agent_kind = agent_sessions.get(entity).ok().map(|s| s.kind);
-                    let restart = MissingTerminalRestart::new(entity, launch, agent_kind);
-                    restarted_missing_processes.push(stale_pid);
-                    let cwd = restart.cwd.clone();
-                    let agent_kind = restart.agent_kind;
-                    let new_id = restart.new_id;
-                    let entity = restart.entity;
-                    writers
-                        .service_requests
-                        .write(ServiceRequest(restart.command));
-                    commands.entity(entity).insert(new_id);
-                    mark_terminal_restarting(&mut commands, entity);
-                    if let Some(kind) = agent_kind {
-                        commands
-                            .entity(entity)
-                            .insert(vmux_core::agent::PendingAgentSession {
-                                kind,
-                                spawn_time: std::time::SystemTime::now(),
-                                cwd: std::path::PathBuf::from(&cwd),
-                            });
-                    }
-                }
-                warn!("Service error: {message}");
+            let agent_kind = agent_sessions.get(entity).ok().map(|session| session.kind);
+            let restart = MissingTerminalRestart::new(entity, launch, agent_kind);
+            restarted_missing_processes.push(stale_pid);
+            service_requests.write(ServiceRequest(restart.command));
+            commands.entity(restart.entity).insert(restart.new_id);
+            mark_terminal_restarting(&mut commands, restart.entity);
+            if let Some(kind) = restart.agent_kind {
+                commands
+                    .entity(restart.entity)
+                    .insert(vmux_core::agent::PendingAgentSession {
+                        kind,
+                        spawn_time: std::time::SystemTime::now(),
+                        cwd: std::path::PathBuf::from(&restart.cwd),
+                    });
             }
-            ServiceMessage::TerminalMode {
-                process_id,
-                mouse_capture,
-                copy_mode,
-                alt_screen,
-                focus_reporting,
-            } => {
-                let Some(entity) = process_index.get(&process_id) else {
-                    continue;
-                };
-                if let Ok((mut mode, mut local_copy_mode, _, _)) = terminal_states.get_mut(entity) {
-                    *mode = TerminalMode {
-                        mouse_capture,
-                        copy_mode,
-                        alt_screen,
-                        focus_reporting,
-                    };
-                    local_copy_mode.set(copy_mode);
-                }
-            }
-            ServiceMessage::SelectionText {
-                process_id: _,
-                text,
-            } if !text.is_empty() => {
-                vmux_clipboard::write(text);
-            }
-            ServiceMessage::CommandLifecycle { process_id, kind } => {
-                writers
-                    .command_lifecycle
-                    .write(CommandLifecycleEvent { process_id, kind });
-            }
-            _ => {}
+        }
+        warn!("Service error: {}", error.message);
+    }
+}
+
+fn apply_terminal_modes(
+    mut updates: MessageReader<TerminalModeUpdate>,
+    process_index: Res<TerminalProcessIndex>,
+    mut terminal_states: Query<(&mut TerminalMode, &mut TerminalCopyMode), With<Terminal>>,
+) {
+    for update in updates.read() {
+        let Some(entity) = process_index.get(&update.process_id) else {
+            continue;
+        };
+        let Ok((mut mode, mut copy_mode)) = terminal_states.get_mut(entity) else {
+            continue;
+        };
+        *mode = TerminalMode {
+            mouse_capture: update.mouse_capture,
+            copy_mode: update.copy_mode,
+            alt_screen: update.alt_screen,
+            focus_reporting: update.focus_reporting,
+        };
+        copy_mode.set(update.copy_mode);
+    }
+}
+
+fn copy_service_selection(
+    mut selections: MessageReader<TerminalSelectionText>,
+    process_index: Res<TerminalProcessIndex>,
+) {
+    for selection in selections.read() {
+        if process_index.get(&selection.process_id).is_some() && !selection.text.is_empty() {
+            vmux_clipboard::write(selection.text.clone());
         }
     }
 }
@@ -2052,6 +1978,7 @@ fn apply_osc_title(
     mut commands: Commands,
     process_index: Res<TerminalProcessIndex>,
     terminals: Query<Option<&PageIdentity>, With<Terminal>>,
+    browsers: Option<NonSend<Browsers>>,
 ) {
     for ev in reader.read() {
         let Some(entity) = process_index.get(&ev.process_id) else {
@@ -2069,6 +1996,19 @@ fn apply_osc_title(
             commands
                 .entity(entity)
                 .insert(PageIdentity::from(ev.title.clone()));
+        }
+        if browsers
+            .as_ref()
+            .is_some_and(|browsers| browsers.can_emit_to(&entity))
+        {
+            commands.trigger(vmux_core::host::UiStateWrite::<
+                vmux_core::event::TerminalUiState,
+            >::from_event(
+                entity,
+                &TermTitleEvent {
+                    title: ev.title.clone(),
+                },
+            ));
         }
     }
 }

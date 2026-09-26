@@ -12,6 +12,7 @@ pub(crate) mod process_index;
 pub mod processes_monitor;
 mod prompt;
 mod request;
+mod service;
 pub mod shell_env;
 pub mod shell_input;
 pub mod snapshot_updater;
