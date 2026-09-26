@@ -1,8 +1,8 @@
 use bevy_ecs::prelude::*;
 
 use crate::protocol::{
-    AgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, AgentRunStatus,
-    JsonValue, ProcessId,
+    AgentCommand, AgentCommandResult, AgentQuery, AgentRequestId, AgentRunStatus, JsonValue,
+    ProcessId,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -53,18 +53,6 @@ pub struct AgentToolCallRequest {
     pub sid: String,
     pub name: String,
     pub args: JsonValue,
-}
-
-#[derive(Message)]
-pub struct AgentCommandResultEvent {
-    pub request_id: AgentRequestId,
-    pub result: AgentCommandResult,
-}
-
-#[derive(Message)]
-pub struct AgentQueryResultEvent {
-    pub request_id: AgentRequestId,
-    pub result: AgentQueryResult,
 }
 
 #[derive(Message)]

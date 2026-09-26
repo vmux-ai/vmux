@@ -22,7 +22,7 @@ use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_service::{
     client::{ServiceInbound, ServiceRequest},
     plugin::{ServiceConnected, ServiceUnavailable},
-    protocol::{ClientMessage, ProcessId, ServiceMessage, SharedEvent},
+    protocol::{ClientMessage, ProcessId, ServiceMessage},
 };
 use vmux_setting::AppSettings;
 
@@ -69,8 +69,6 @@ impl Plugin for TerminalPlugin {
             .register_type::<crate::launch::TerminalKind>()
             .add_message::<TerminalStackSpawnRequest>()
             .add_message::<TerminalSpawnRequest>()
-            .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
-            .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
             .add_plugins((
                 crate::pid::PidPlugin,
                 crate::host::request::TerminalRequestPlugin,
@@ -736,29 +734,6 @@ fn publish_service_status(
 struct PollServiceWriters<'w> {
     service_requests: MessageWriter<'w, ServiceRequest>,
     stack_close_requests: MessageWriter<'w, StackCloseRequest>,
-    agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
-    agent_tool_calls: MessageWriter<'w, vmux_service::agent_events::AgentToolCallRequest>,
-    page_agent_delta: MessageWriter<'w, vmux_service::agent_events::PageAgentDelta>,
-    page_agent_run_status: MessageWriter<'w, vmux_service::agent_events::PageAgentRunStatus>,
-    page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
-    page_agent_approval_resolved:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentApprovalResolved>,
-    page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
-    page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
-    page_agent_workspace_changed:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentWorkspaceChanged>,
-    page_agent_model_info: MessageWriter<'w, vmux_service::agent_events::PageAgentModelInfo>,
-    page_agent_model_selection_result:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentModelSelectionResult>,
-    page_agent_mode_info: MessageWriter<'w, vmux_service::agent_events::PageAgentModeInfo>,
-    page_agent_mode_selection_result:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentModeSelectionResult>,
-    page_agent_session_created:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentSessionCreated>,
-    page_agent_acp_terminal_created:
-        MessageWriter<'w, vmux_service::agent_events::PageAgentAcpTerminalCreated>,
-    agent_command_results: MessageWriter<'w, vmux_service::agent_events::AgentCommandResultEvent>,
-    agent_query_results: MessageWriter<'w, vmux_service::agent_events::AgentQueryResultEvent>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
     process_snapshot: MessageWriter<'w, crate::processes_monitor::ServiceProcessSnapshot>,
     command_lifecycle: MessageWriter<'w, CommandLifecycleEvent>,
@@ -1200,201 +1175,10 @@ fn poll_service_messages(
             } if !text.is_empty() => {
                 vmux_clipboard::write(text);
             }
-            ServiceMessage::AgentCommand {
-                request_id,
-                anchor,
-                command,
-            } => {
-                writers
-                    .agent_commands
-                    .write(vmux_service::agent_events::AgentCommandRequest {
-                        request_id,
-                        origin: vmux_service::agent_events::CommandOrigin::Agent {
-                            sid: None,
-                            anchor,
-                        },
-                        command,
-                    });
-            }
-            ServiceMessage::AgentToolCall {
-                request_id,
-                sid,
-                name,
-                args,
-            } => {
-                writers
-                    .agent_tool_calls
-                    .write(vmux_service::agent_events::AgentToolCallRequest {
-                        request_id,
-                        sid,
-                        name,
-                        args,
-                    });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentDelta { sid, text }) => {
-                writers
-                    .page_agent_delta
-                    .write(vmux_service::agent_events::PageAgentDelta { sid, text });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { sid, status }) => {
-                tracing::info!(%sid, ?status, "run status from the daemon");
-                writers
-                    .page_agent_run_status
-                    .write(vmux_service::agent_events::PageAgentRunStatus { sid, status });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
-                sid,
-                call_id,
-                name,
-                args,
-            }) => {
-                let args = serde_json::Value::try_from(&args)
-                    .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
-                writers.page_agent_awaiting.write(
-                    vmux_service::agent_events::PageAgentAwaitingApproval {
-                        sid,
-                        call_id,
-                        name,
-                        args,
-                    },
-                );
-            }
-            ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }) => {
-                writers
-                    .page_agent_approval_resolved
-                    .write(vmux_service::agent_events::PageAgentApprovalResolved { sid, call_id });
-            }
-            ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { sid, messages }) => {
-                writers
-                    .page_agent_snapshot
-                    .write(vmux_service::agent_events::PageAgentSnapshot { sid, messages });
-            }
-            ServiceMessage::Shared(SharedEvent::AcpAgentInfo { sid, name }) => {
-                writers
-                    .page_agent_info
-                    .write(vmux_service::agent_events::PageAgentInfo { sid, name });
-            }
-            ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged {
-                sid,
-                name,
-                branch,
-                cwd,
-                workspace_cwd,
-            }) => {
-                writers.page_agent_workspace_changed.write(
-                    vmux_service::agent_events::PageAgentWorkspaceChanged {
-                        sid,
-                        name,
-                        branch,
-                        cwd,
-                        workspace_cwd,
-                    },
-                );
-            }
-            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
-                sid,
-                config_id,
-                current_model_id,
-                models,
-            }) => {
-                writers.page_agent_model_info.write(
-                    vmux_service::agent_events::PageAgentModelInfo {
-                        sid,
-                        config_id,
-                        current_model_id,
-                        models,
-                    },
-                );
-            }
-            ServiceMessage::AcpModelSelectionResult {
-                sid,
-                request_id,
-                model_id,
-                succeeded,
-            } => {
-                writers.page_agent_model_selection_result.write(
-                    vmux_service::agent_events::PageAgentModelSelectionResult {
-                        sid,
-                        request_id,
-                        model_id,
-                        succeeded,
-                    },
-                );
-            }
-            ServiceMessage::AcpModeInfo {
-                sid,
-                config_id,
-                current_mode_id,
-                modes,
-            } => {
-                writers
-                    .page_agent_mode_info
-                    .write(vmux_service::agent_events::PageAgentModeInfo {
-                        sid,
-                        config_id,
-                        current_mode_id,
-                        modes,
-                    });
-            }
-            ServiceMessage::AcpModeSelectionResult {
-                sid,
-                request_id,
-                mode_id,
-                succeeded,
-            } => {
-                writers.page_agent_mode_selection_result.write(
-                    vmux_service::agent_events::PageAgentModeSelectionResult {
-                        sid,
-                        request_id,
-                        mode_id,
-                        succeeded,
-                    },
-                );
-            }
-            ServiceMessage::AgentCommandResult { request_id, result } => {
-                writers.agent_command_results.write(
-                    vmux_service::agent_events::AgentCommandResultEvent { request_id, result },
-                );
-            }
-            ServiceMessage::AgentQueryResult { request_id, result } => {
-                writers.agent_query_results.write(
-                    vmux_service::agent_events::AgentQueryResultEvent { request_id, result },
-                );
-            }
             ServiceMessage::CommandLifecycle { process_id, kind } => {
                 writers
                     .command_lifecycle
                     .write(CommandLifecycleEvent { process_id, kind });
-            }
-            ServiceMessage::AcpSessionCreated {
-                sid,
-                acp_session_id,
-            } => {
-                writers.page_agent_session_created.write(
-                    vmux_service::agent_events::PageAgentSessionCreated {
-                        sid,
-                        acp_session_id,
-                    },
-                );
-            }
-            ServiceMessage::AcpTerminalCreated {
-                sid,
-                terminal_id,
-                process_id,
-                command,
-                args,
-                cwd,
-            } => {
-                writers.page_agent_acp_terminal_created.write(
-                    vmux_service::agent_events::PageAgentAcpTerminalCreated {
-                        sid,
-                        terminal_id,
-                        process_id,
-                        command,
-                        args,
-                        cwd,
-                    },
-                );
             }
             _ => {}
         }

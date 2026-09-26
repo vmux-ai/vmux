@@ -19,6 +19,7 @@ pub mod events;
 pub mod exec;
 pub mod follow;
 pub mod handoff;
+mod ingress;
 pub mod launch;
 pub mod managed_mcp;
 pub mod mcp;
