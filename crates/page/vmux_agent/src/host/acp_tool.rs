@@ -6,7 +6,8 @@ use bevy::prelude::*;
 use vmux_core::event::InstallPhase;
 use vmux_editor::lsp::package_path::{PackageName, PackagePath};
 use vmux_editor::lsp::{archive, download, store};
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
+use vmux_service::plugin::ServiceConnected;
 use vmux_service::protocol::{ClientMessage, ManagedMcpServer};
 use vmux_session::AcpSession;
 use vmux_setting::{AcpAgentConfig, AppSettings};
@@ -18,7 +19,8 @@ pub(crate) struct AcpToolPlugin;
 
 impl Plugin for AcpToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AcpPackageChanged>()
+        app.add_message::<ServiceRequest>()
+            .add_message::<AcpPackageChanged>()
             .add_message::<vmux_core::agent::SwapStackSession>()
             .add_observer(cancel_acp_install_on_remove)
             .add_systems(Update, (start_acp_installs, poll_acp_installs).chain());
@@ -170,7 +172,7 @@ fn start_acp_installs(
 
 fn poll_acp_installs(
     mut swaps: MessageReader<vmux_core::agent::SwapStackSession>,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     settings: Option<Res<AppSettings>>,
     mut jobs: Query<(
         Entity,
@@ -181,6 +183,7 @@ fn poll_acp_installs(
     mut waiters: Query<(Entity, &AcpSession, &AcpInstallWaiter, &mut AgentRunState)>,
     mut package_changes: MessageWriter<AcpPackageChanged>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let swapping: std::collections::HashSet<Entity> =
         swaps.read().map(|request| request.stack).collect();
@@ -227,7 +230,7 @@ fn poll_acp_installs(
                 !invalid_waiters.contains(entity) && waiter.matches(session)
             })
         });
-        if has_waiters && launch_ready && service.is_none() {
+        if has_waiters && launch_ready && connected.is_none() {
             continue;
         }
         let outcome = job.outcome.take().unwrap();
@@ -240,13 +243,13 @@ fn poll_acp_installs(
             }
             match &outcome.launch {
                 Ok(launch) => {
-                    let service = service.as_ref().unwrap();
                     let message = launch.message_for(session, settings.as_deref());
                     match vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
                         launch.mcp_revision,
-                        || service.0.send(message),
+                        || (),
                     ) {
                         Ok(Some(())) => {
+                            service_requests.write(ServiceRequest(message));
                             AcpInstallProgress::ready(session.resume.as_deref()).apply(&mut state);
                             commands.entity(entity).remove::<AcpInstallWaiter>();
                         }

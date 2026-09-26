@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use vmux_core::input::KeyStroke;
 use vmux_service::{
-    client::ServiceClient,
+    client::ServiceRequest,
+    plugin::ServiceConnected,
     protocol::{ClientMessage, ProcessId},
 };
 
@@ -77,16 +78,19 @@ fn flush_buffered_agent_prompt(
         (Entity, &ProcessId, &BufferedAgentPrompt),
         With<vmux_core::agent::AgentSession>,
     >,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
+    if connected.is_none() {
+        return;
+    }
     for (entity, process_id, prompt) in &prompts {
         if let Some(data) = agent_prompt_flush_bytes(true, prompt) {
-            service.0.send(ClientMessage::ProcessInput {
+            service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
                 process_id: *process_id,
                 data,
-            });
+            }));
         }
         commands.entity(entity).remove::<BufferedAgentPrompt>();
     }

@@ -16,8 +16,8 @@ use vmux_chat::event::{
     ChatHistoryRequest, ChatItem, ChatSnapshot, PendingApproval, QueuedPromptSnapshot,
 };
 use vmux_core::PageMetadata;
+use vmux_core::chat::{group_turns_before, group_turns_tail, grouped_item_count};
 use vmux_core::team::{Profile, User};
-use vmux_service::chat::{group_turns_before, group_turns_tail, grouped_item_count};
 use vmux_session::AcpSession;
 use vmux_session::{AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue};
 
@@ -163,7 +163,7 @@ impl ChatTranscriptProjection {
     }
 
     fn refresh_activity(&mut self) {
-        let (subagents, tasks) = vmux_service::chat_projection::activity_counts(&self.state.items);
+        let (subagents, tasks) = vmux_core::chat_projection::activity_counts(&self.state.items);
         self.state.active_subagents = subagents;
         self.state.active_tasks = tasks;
     }

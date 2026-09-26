@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
-use crate::client::{ServiceClient, ServiceHandle, ServiceWake};
+use crate::client::{ServiceClient, ServiceHandle, ServiceInbound, ServiceRequest, ServiceWake};
 use crate::protocol::ClientMessage;
 
 #[derive(Component)]
@@ -17,6 +17,9 @@ struct ServiceConnectRetry {
 pub struct ServiceUnavailable(pub String);
 
 #[derive(Component)]
+pub struct ServiceConnected;
+
+#[derive(Component)]
 struct ServiceWakeCallback(Option<ServiceWake>);
 
 pub struct ServicePlugin;
@@ -26,30 +29,30 @@ impl Plugin for ServicePlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::ServicePage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        let wake = app
-            .world()
-            .get_resource::<EventLoopProxyWrapper>()
-            .map(|wrapper| {
-                let proxy = (**wrapper).clone();
-                Arc::new(move || {
-                    let _ = proxy.send_event(WinitUserEvent::WakeUp);
-                }) as ServiceWake
-            });
-        app.world_mut().spawn((
-            Name::new("vmux service"),
-            ServiceConnectRetry {
-                timer: Timer::from_seconds(0.05, TimerMode::Once),
-                next_delay_ms: 50,
-                remaining_attempts: 6,
-            },
-            ServiceWakeCallback(wake),
-        ));
-        app.add_systems(Startup, ensure_service_started)
-            .add_systems(Update, connect_service);
+        app.add_message::<ServiceRequest>()
+            .add_message::<ServiceInbound>()
+            .add_systems(Startup, start_service)
+            .add_systems(Update, (connect_service, receive_service_messages).chain())
+            .add_systems(Last, send_service_requests);
     }
 }
 
-fn ensure_service_started() {
+fn start_service(mut commands: Commands, proxy: Option<Res<EventLoopProxyWrapper>>) {
+    let wake = proxy.map(|wrapper| {
+        let proxy = (**wrapper).clone();
+        Arc::new(move || {
+            let _ = proxy.send_event(WinitUserEvent::WakeUp);
+        }) as ServiceWake
+    });
+    commands.spawn((
+        Name::new("vmux service"),
+        ServiceConnectRetry {
+            timer: Timer::from_seconds(0.05, TimerMode::Once),
+            next_delay_ms: 50,
+            remaining_attempts: 6,
+        },
+        ServiceWakeCallback(wake),
+    ));
     if ServiceHandle::service_running() {
         tracing::info!("service already running");
         return;
@@ -127,7 +130,7 @@ fn connect_service(
                 .entity(entity)
                 .remove::<ServiceConnectRetry>()
                 .remove::<ServiceUnavailable>()
-                .insert(ServiceClient(handle));
+                .insert((ServiceClient(handle), ServiceConnected));
             continue;
         }
         if retry.remaining_attempts == 0 {
@@ -147,25 +150,31 @@ fn connect_service(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn send_service_requests(
+    mut requests: MessageReader<ServiceRequest>,
+    client: Option<Single<&ServiceClient>>,
+) {
+    let Some(client) = client else {
+        requests.clear();
+        return;
+    };
+    for request in requests.read() {
+        client.0.send(request.0.clone());
+    }
+}
 
-    #[test]
-    fn plugin_owns_connection_lifecycle_entity() {
-        let mut app = App::new();
-        app.add_plugins(ServicePlugin);
-
-        let entity = app
-            .world_mut()
-            .query_filtered::<Entity, With<ServiceConnectRetry>>()
-            .single(app.world())
-            .unwrap();
-
-        assert!(app.world().get::<ServiceWakeCallback>(entity).is_some());
-        assert_eq!(
-            app.world().get::<Name>(entity).unwrap().as_str(),
-            "vmux service"
-        );
+fn receive_service_messages(
+    client: Option<Single<(&ServiceClient, &ServiceWakeCallback)>>,
+    mut inbound: MessageWriter<ServiceInbound>,
+) {
+    let Some(client) = client else {
+        return;
+    };
+    let (messages, capped) = client.0.0.drain_with_status();
+    for message in messages {
+        inbound.write(ServiceInbound(message));
+    }
+    if capped && let Some(wake) = &client.1.0 {
+        wake();
     }
 }

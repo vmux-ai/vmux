@@ -9,7 +9,7 @@ use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommands,
 };
 use vmux_command::event::{StartSelectMode, StartSelectModel};
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 use vmux_session::AcpSession;
 
@@ -17,7 +17,8 @@ pub(super) struct ChatModelPlugin;
 
 impl Plugin for ChatModelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AcpModelRequestCounter>()
+        app.add_message::<ServiceRequest>()
+            .init_resource::<AcpModelRequestCounter>()
             .init_resource::<AcpModeRequestCounter>()
             .init_resource::<AgentModelSelections>()
             .init_resource::<AgentModeSelections>()
@@ -84,11 +85,11 @@ pub(super) struct EffortSetRequest {
 
 fn answer_remote_model_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    service: Option<Single<&ServiceClient>>,
     sessions: Query<(&AcpSession, &AcpModelState)>,
     settings: Res<vmux_setting::AppSettings>,
     mut selects: MessageWriter<ModelSelectRequest>,
     mut efforts: MessageWriter<EffortSetRequest>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let AgentCommand::Shared(command) = &request.command else {
@@ -129,12 +130,10 @@ fn answer_remote_model_commands(
             }
             _ => continue,
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(ClientMessage::AgentCommandResponse {
-                request_id: request.request_id,
-                result,
-            });
-        }
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
+            request_id: request.request_id,
+            result,
+        }));
     }
 }
 
@@ -836,35 +835,29 @@ fn apply_last_used_acp_model(
 
 fn send_acp_model_requests(
     mut requests: MessageReader<AcpSetModelRequest>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     for request in requests.read() {
-        service.0.send(ClientMessage::AcpSetModel {
+        service_requests.write(ServiceRequest(ClientMessage::AcpSetModel {
             sid: request.sid.clone(),
             request_id: request.request_id,
             config_id: request.config_id.clone(),
             model_id: request.model_id.clone(),
-        });
+        }));
     }
 }
 
 fn send_acp_mode_requests(
     mut requests: MessageReader<AcpSetModeRequest>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     for request in requests.read() {
-        service.0.send(ClientMessage::AcpSetMode {
+        service_requests.write(ServiceRequest(ClientMessage::AcpSetMode {
             sid: request.sid.clone(),
             request_id: request.request_id,
             config_id: request.config_id.clone(),
             mode_id: request.mode_id.clone(),
-        });
+        }));
     }
 }
 
@@ -1148,12 +1141,12 @@ mod tests {
                     current_mode_id: "ask".into(),
                     pending: None,
                     modes: vec![
-                        vmux_service::protocol::AcpModeOption {
+                        vmux_api::protocol::AcpModeOption {
                             id: "ask".into(),
                             name: "Ask".into(),
                             description: None,
                         },
-                        vmux_service::protocol::AcpModeOption {
+                        vmux_api::protocol::AcpModeOption {
                             id: "auto".into(),
                             name: "Auto Allow".into(),
                             description: None,
@@ -1255,7 +1248,7 @@ mod tests {
                 config_id: "mode".into(),
                 current_mode_id: "agent".into(),
                 pending: None,
-                modes: vec![vmux_service::protocol::AcpModeOption {
+                modes: vec![vmux_api::protocol::AcpModeOption {
                     id: "agent".into(),
                     name: "Agent".into(),
                     description: None,

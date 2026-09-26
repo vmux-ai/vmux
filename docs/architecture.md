@@ -193,9 +193,9 @@ are not used because their ownership is ambiguous.
 
 `vmux_app::extension` exposes the stable integration pieces: page manifests and hosted-page
 plugins, command-bar contributions and their chosen message, and typed MCP tool plugins. A custom
-MCP binary builds a Bevy `App` with `McpPlugin` and its tool plugins, then passes the app to
-`McpServer::from`; tool handlers own their typed manifest variant and return a typed command or
-query dispatch target.
+MCP binary builds a Bevy `App` with `McpPlugin` and its tool plugins, then gives that app to the
+stdio transport adapter. The runtime entity carries the `McpServer` component; tool handlers own
+their typed manifest variant and return a typed command or query dispatch target.
 
 Names describe domain semantics before transport mechanics. Implementing Bevy `Message`
 does not add a `Message` suffix. An operation to perform is a `Request`. A validated,
@@ -656,8 +656,9 @@ The daemon owns the sessions, so work keeps running even if the agent process ex
 
 The MCP server is a headless Bevy app. Each decoded JSON-RPC request becomes an entity carrying
 its id, method, parameters, and FIFO sequence; systems route it, attach an asynchronous task when
-needed, build the response, and despawn it after stdout delivery. Stdio framing stays outside the
-world as the transport adapter.
+needed, build the response, and despawn it after stdout delivery. The runtime entity owns the
+`McpServer` component and request sequence. Stdio framing stays outside the world as the transport
+adapter.
 
 Tools are long-lived entities. Their name, aliases, schema, availability, and publication order
 are components seeded from feature-local RON manifests. Each handwritten feature exposes only its
@@ -760,6 +761,10 @@ Two traps. `host/` is **not** a layer above `page/` — `page/vmux_agent` depend
 `host/vmux_service`, because those crates cfg-split and a page links only the non-host half.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
+
+`vmux_agent` owns session, runtime, and orchestration ECS. `vmux_chat` owns reusable chat state
+and Dioxus UI. Shared transcript grouping and projection live in `vmux_core`; neither feature
+reaches through the other's internals or through `vmux_service` for reusable chat behavior.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a

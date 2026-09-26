@@ -25,6 +25,7 @@ pub(crate) struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
+        app.add_message::<vmux_service::client::ServiceRequest>();
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
@@ -293,7 +294,6 @@ pub(crate) fn handle_browser_navigate_requests(
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
-    service: Option<Single<&vmux_service::client::ServiceClient>>,
     mut commands: Commands,
     mut page_open_writer: MessageWriter<PageOpenRequest>,
     mut pending_navigation: MessageWriter<PendingNavigationUpdate>,
@@ -303,6 +303,7 @@ pub(crate) fn handle_browser_navigate_requests(
     stack_metadata: Query<&PageMetadata, With<Stack>>,
     recent_interactions: Query<&RecentBrowserInteraction>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
+    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
 ) {
     for request in reader.read() {
         let vmux_layout::BrowserNavigateRequest {
@@ -384,7 +385,7 @@ pub(crate) fn handle_browser_navigate_requests(
                     };
                     pending_navigation.write(update);
                     if request_id.is_none() {
-                        send_page_open_response(&service, None, Ok(()));
+                        send_page_open_response(&mut service_requests, None, Ok(()));
                     }
                 } else {
                     let target = active_stack
@@ -399,7 +400,7 @@ pub(crate) fn handle_browser_navigate_requests(
                 }
             } else {
                 send_page_open_response(
-                    &service,
+                    &mut service_requests,
                     request_id,
                     Err(format!("browser_navigate: invalid pane id '{s}'")),
                 );
@@ -424,7 +425,7 @@ pub(crate) fn handle_browser_navigate_requests(
             if is_vmux_route || url.starts_with("file:") {
                 let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) else {
                     send_page_open_response(
-                        &service,
+                        &mut service_requests,
                         request_id,
                         Err("browser_navigate: no focused pane for vmux URL".to_string()),
                     );
@@ -451,7 +452,7 @@ pub(crate) fn handle_browser_navigate_requests(
                 };
                 pending_navigation.write(update);
                 if request_id.is_none() {
-                    send_page_open_response(&service, None, Ok(()));
+                    send_page_open_response(&mut service_requests, None, Ok(()));
                 }
             }
         } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
@@ -462,7 +463,7 @@ pub(crate) fn handle_browser_navigate_requests(
             });
         } else {
             send_page_open_response(
-                &service,
+                &mut service_requests,
                 request_id,
                 Err("browser_navigate: no focused pane".to_string()),
             );

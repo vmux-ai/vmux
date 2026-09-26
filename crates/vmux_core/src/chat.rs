@@ -1,6 +1,10 @@
-use crate::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
 use vmux_api::chat::{ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn};
 use vmux_api::prompt_media::ChatAttachment;
+use vmux_api::protocol::{AgentAttachment, extract_display_prompt, split_private_context_prompt};
+use vmux_api::room::{AssistantBlock, Message, PlanStep, SubagentBlock};
+
+#[cfg(test)]
+use vmux_api::protocol::compose_agent_prompt;
 
 #[cfg(test)]
 pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Vec<ChatItem> {
@@ -23,7 +27,7 @@ pub fn grouped_item_count(imported: &[Message], live: &[Message]) -> usize {
                 if current_turn {
                     count += 1;
                 }
-                let text = crate::protocol::extract_display_prompt(text).unwrap_or(text);
+                let text = extract_display_prompt(text).unwrap_or(text);
                 if !text.trim().is_empty() || !attachments.is_empty() {
                     count += 1;
                 }
@@ -114,7 +118,7 @@ fn group_turns_page_with_total(
         match message {
             Message::User { text, attachments } => {
                 builder.flush_turn();
-                let (context, text) = crate::protocol::split_private_context_prompt(text)
+                let (context, text) = split_private_context_prompt(text)
                     .map(|(context, display)| (Some(context), display))
                     .unwrap_or((None, text));
                 if !text.trim().is_empty() || !attachments.is_empty() {
@@ -220,7 +224,7 @@ impl<'a> PageBuilder<'a> {
         &mut self,
         text: &str,
         context: Option<&str>,
-        attachments: &[crate::protocol::AgentAttachment],
+        attachments: &[AgentAttachment],
         created_at_ms: u64,
     ) {
         if self.captures() {
@@ -434,7 +438,7 @@ mod tests {
     fn user_attachments_are_projected_into_chat_items() {
         let messages = vec![Message::user_with_attachments(
             "inspect",
-            vec![crate::protocol::AgentAttachment {
+            vec![AgentAttachment {
                 path: "/tmp/image.png".into(),
                 name: "image.png".into(),
                 mime_type: "image/png".into(),
@@ -562,10 +566,8 @@ mod tests {
 
     #[test]
     fn private_continuation_starts_hidden_turn() {
-        let private = crate::protocol::compose_agent_prompt(
-            "",
-            Some("Project selected. Continue the original request."),
-        );
+        let private =
+            compose_agent_prompt("", Some("Project selected. Continue the original request."));
         let messages = vec![
             Message::user("fix it"),
             assistant(vec![AssistantBlock::Text("Choose a project.".into())]),
@@ -591,8 +593,7 @@ mod tests {
 
     #[test]
     fn private_context_is_collapsed_separately_from_display_prompt() {
-        let private =
-            crate::protocol::compose_agent_prompt("show me something fun", Some("project policy"));
+        let private = compose_agent_prompt("show me something fun", Some("project policy"));
         let messages = vec![Message::user(format!("show me something fun{private}"))];
 
         let items = group_turns(&messages, &[], false);

@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use vmux_command::WriteCommandRequests;
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
+use vmux_service::plugin::ServiceConnected;
 use vmux_service::protocol::ClientMessage;
 use vmux_terminal::ServiceMessageSet;
 
@@ -17,7 +18,8 @@ pub(super) struct WorkspacePlugin;
 
 impl Plugin for WorkspacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(resume_agent_choice)
+        app.add_message::<ServiceRequest>()
+            .add_observer(resume_agent_choice)
             .add_observer(initialize_git_agent_choice)
             .add_systems(
                 Update,
@@ -456,11 +458,12 @@ fn drain_workspace_picker_tasks(
     mut acp_sessions: Query<&mut vmux_session::AcpSession>,
     child_of: Query<&ChildOf>,
     mut commands: Commands,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
+    if connected.is_none() {
         return;
-    };
+    }
     for (picker_entity, mut picker) in &mut pickers {
         let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
             continue;
@@ -487,7 +490,7 @@ fn drain_workspace_picker_tasks(
                         ) {
                             Ok((execution_dir, rebind, kind)) => {
                                 if let Some(message) = rebind {
-                                    service.0.send(message);
+                                    service_requests.write(ServiceRequest(message));
                                 }
                                 match kind {
                                     SelectedWorkspaceKind::Git { .. } => {
@@ -553,8 +556,9 @@ pub(super) fn send_pending_agent_continuations(
         Option<&AgentSession>,
         Option<&mut crate::run_state::AgentRunState>,
     )>,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for (entity, continuation, acp, page, cli, state) in &mut sessions {
         if cli.is_some() {
@@ -567,9 +571,9 @@ pub(super) fn send_pending_agent_continuations(
                 .remove::<PendingAgentContinuation>();
             continue;
         }
-        let Some(service) = service.as_deref() else {
+        if connected.is_none() {
             continue;
-        };
+        }
         let sid = acp
             .map(|session| session.sid.as_str())
             .or_else(|| page.map(|session| session.sid.as_str()));
@@ -582,9 +586,10 @@ pub(super) fn send_pending_agent_continuations(
         ) {
             continue;
         }
-        service
-            .0
-            .send(chat_agent_continuation_message(sid, &continuation.0));
+        service_requests.write(ServiceRequest(chat_agent_continuation_message(
+            sid,
+            &continuation.0,
+        )));
         *state = crate::run_state::AgentRunState::Streaming;
         commands.entity(entity).remove::<PendingAgentContinuation>();
     }
@@ -696,6 +701,7 @@ mod tests {
     pub(crate) fn cli_workspace_continuation_queues_terminal_prompt_without_service_wait() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .add_message::<ServiceRequest>()
             .add_systems(Update, send_pending_agent_continuations);
         let entity = app
             .world_mut()

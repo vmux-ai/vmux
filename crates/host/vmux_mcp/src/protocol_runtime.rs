@@ -43,8 +43,8 @@ impl Plugin for McpPlugin {
         }
         app.world_mut().spawn((
             Name::new("MCP protocol runtime"),
+            McpServer::default(),
             self.config.clone(),
-            NextRequestSequence::default(),
         ));
         app.configure_sets(
             Update,
@@ -88,106 +88,9 @@ enum McpSet {
     BuildResponses,
 }
 
+#[derive(Component, Default)]
 pub struct McpServer {
-    app: App,
-    runtime: Entity,
-}
-
-impl From<App> for McpServer {
-    fn from(mut app: App) -> Self {
-        let runtime = app
-            .world_mut()
-            .query_filtered::<Entity, With<McpConfig>>()
-            .single(app.world())
-            .expect("MCP server requires exactly one protocol runtime");
-        Self { app, runtime }
-    }
-}
-
-impl McpServer {
-    pub fn new(
-        anchor: Option<vmux_service::protocol::ProcessId>,
-        acp_session: bool,
-        acp_terminals: bool,
-        run_block_timeout: Duration,
-        shell: String,
-    ) -> Self {
-        let mut app = App::new();
-        app.add_plugins(McpPlugin::new(
-            anchor,
-            acp_session,
-            acp_terminals,
-            run_block_timeout,
-            shell,
-        ));
-        Self::from(app)
-    }
-
-    pub async fn handle(&mut self, message: Value) -> Option<Value> {
-        self.app
-            .world_mut()
-            .entity_mut(self.runtime)
-            .insert(McpRuntime(tokio::runtime::Handle::current()));
-        let id = message.get("id").cloned()?;
-        let method = message
-            .get("method")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
-        let run_block_timeout = self
-            .app
-            .world()
-            .get::<McpConfig>(self.runtime)
-            .expect("MCP protocol runtime must own its config")
-            .run_block_timeout;
-        let sequence = {
-            let mut runtime = self.app.world_mut().entity_mut(self.runtime);
-            let mut next = runtime
-                .get_mut::<NextRequestSequence>()
-                .expect("MCP protocol runtime must own its request sequence");
-            let sequence = next.0;
-            next.0 += 1;
-            sequence
-        };
-        let request = self
-            .app
-            .world_mut()
-            .spawn((
-                McpRequest::new(run_block_timeout),
-                Name::new(format!("MCP request {sequence}")),
-                McpRequestId(id.clone()),
-                McpMethod(method),
-                McpParams(params),
-                McpRequestSequence(sequence),
-            ))
-            .id();
-
-        loop {
-            self.app.update();
-            if let Some(response) = self
-                .app
-                .world_mut()
-                .entity_mut(request)
-                .take::<McpResponse>()
-            {
-                self.app.world_mut().despawn(request);
-                return Some(response.0);
-            }
-            if !self.app.world().entity(request).contains::<McpTask>() {
-                self.app.world_mut().despawn(request);
-                return Some(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32603,
-                        "message": "request did not produce a response"
-                    }
-                }));
-            }
-            tokio::task::yield_now().await;
-        }
-    }
+    next_request_sequence: u64,
 }
 
 #[derive(Component, Clone)]
@@ -201,9 +104,6 @@ struct McpConfig {
 
 #[derive(Component, Clone)]
 struct McpRuntime(tokio::runtime::Handle);
-
-#[derive(Component, Default)]
-struct NextRequestSequence(u64);
 
 #[derive(Component)]
 pub struct McpRequest {
@@ -281,19 +181,82 @@ pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     Ok(Some(value))
 }
 
-pub async fn run_stdio(mut server: McpServer) -> io::Result<()> {
+pub async fn run_stdio(mut app: App) -> io::Result<()> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let stdout = io::stdout();
     let mut writer = stdout.lock();
     while let Some(message) = read_json_line(&mut reader)? {
-        if let Some(response) = server.handle(message).await {
+        if let Some(response) = handle_message(&mut app, message).await {
             serde_json::to_writer(&mut writer, &response)?;
             writer.write_all(b"\n")?;
             writer.flush()?;
         }
     }
     Ok(())
+}
+
+async fn handle_message(app: &mut App, message: Value) -> Option<Value> {
+    let server = app
+        .world_mut()
+        .query_filtered::<Entity, With<McpServer>>()
+        .single(app.world())
+        .expect("MCP server requires exactly one protocol runtime");
+    app.world_mut()
+        .entity_mut(server)
+        .insert(McpRuntime(tokio::runtime::Handle::current()));
+    let id = message.get("id").cloned()?;
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
+    let run_block_timeout = app
+        .world()
+        .get::<McpConfig>(server)
+        .expect("MCP protocol runtime must own its config")
+        .run_block_timeout;
+    let sequence = {
+        let mut server = app.world_mut().entity_mut(server);
+        let mut state = server
+            .get_mut::<McpServer>()
+            .expect("MCP protocol runtime must own its server state");
+        let sequence = state.next_request_sequence;
+        state.next_request_sequence += 1;
+        sequence
+    };
+    let request = app
+        .world_mut()
+        .spawn((
+            McpRequest::new(run_block_timeout),
+            Name::new(format!("MCP request {sequence}")),
+            McpRequestId(id.clone()),
+            McpMethod(method),
+            McpParams(params),
+            McpRequestSequence(sequence),
+        ))
+        .id();
+
+    loop {
+        app.update();
+        if let Some(response) = app.world_mut().entity_mut(request).take::<McpResponse>() {
+            app.world_mut().despawn(request);
+            return Some(response.0);
+        }
+        if !app.world().entity(request).contains::<McpTask>() {
+            app.world_mut().despawn(request);
+            return Some(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": -32603,
+                    "message": "request did not produce a response"
+                }
+            }));
+        }
+        tokio::task::yield_now().await;
+    }
 }
 
 fn route_request(mut commands: Commands, requests: PendingRequests, config: Single<&McpConfig>) {

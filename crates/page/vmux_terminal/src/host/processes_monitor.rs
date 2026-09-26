@@ -6,11 +6,13 @@ use vmux_command::{CommandDefinition, CommandInvocation, CommandRequest, Command
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
+use vmux_service::client::ServiceRequest;
 use vmux_service::event::*;
+use vmux_service::plugin::ServiceConnected;
 use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
-use crate::plugin::{ServiceClient, reattach_terminal_bundle};
+use crate::plugin::reattach_terminal_bundle;
 use crate::process_index::TerminalProcessIndex;
 use vmux_core::{KeyboardOwner, Order};
 use vmux_layout::{
@@ -292,9 +294,10 @@ fn reconcile_service_processes(
 fn request_process_list(
     time: Res<Time>,
     mut runtime: Query<&mut ProcessMonitor>,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     monitors: Query<(), With<ProcessesMonitor>>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     if monitors.is_empty() {
         return;
@@ -303,10 +306,8 @@ fn request_process_list(
         return;
     };
     runtime.process_poll.tick(time.delta());
-    if (!claimed.is_empty() || runtime.process_poll.just_finished())
-        && let Some(service) = service
-    {
-        service.0.send(ClientMessage::ListProcesses);
+    if (!claimed.is_empty() || runtime.process_poll.just_finished()) && connected.is_some() {
+        service_requests.write(ServiceRequest(ClientMessage::ListProcesses));
     }
 }
 
@@ -413,7 +414,7 @@ fn broadcast_to_monitors(
         &Order,
     )>,
     local_processes: Query<(&ProcessPid, &LocalVmuxProcess, &Usage)>,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
@@ -429,7 +430,7 @@ fn broadcast_to_monitors(
         return;
     }
 
-    let connected = service.is_some();
+    let connected = connected.is_some();
     let attached_ids: std::collections::HashSet<ProcessId> =
         terminal_pids.iter().copied().collect();
     let mut managed_pids = std::collections::HashSet::new();
@@ -519,19 +520,18 @@ fn on_process_navigate(
 
 fn on_process_kill(
     trigger: On<UiInput<ProcessKillEvent>>,
-    service: Option<Single<&ServiceClient>>,
     service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
     process_index: Res<TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     let pid = &trigger.event().payload.process_id;
 
     if let Ok(process_id) = pid.parse::<ProcessId>() {
-        service.0.send(ClientMessage::KillProcess { process_id });
+        service_requests.write(ServiceRequest(ClientMessage::KillProcess { process_id }));
         for (entity, id) in &service_processes {
             if id.0 == process_id {
                 commands.entity(entity).despawn();
@@ -540,7 +540,7 @@ fn on_process_kill(
         if let Ok(entity) = runtime.single() {
             commands.entity(entity).insert(ProcessMonitorDirty);
         }
-        service.0.send(ClientMessage::ListProcesses);
+        service_requests.write(ServiceRequest(ClientMessage::ListProcesses));
 
         if let Some(entity) = process_index.get(&process_id)
             && let Ok(content_child_of) = terminals.get(entity)
@@ -555,23 +555,22 @@ fn on_process_kill(
 
 fn on_process_kill_all(
     _trigger: On<UiInput<ProcessKillAllEvent>>,
-    service: Option<Single<&ServiceClient>>,
     service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
     process_index: Res<TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     let process_ids: Vec<(Entity, ProcessId)> = service_processes
         .iter()
         .map(|(entity, id)| (entity, id.0))
         .collect();
 
     for (process_entity, process_id) in &process_ids {
-        service.0.send(ClientMessage::KillProcess {
+        service_requests.write(ServiceRequest(ClientMessage::KillProcess {
             process_id: *process_id,
-        });
+        }));
         commands.entity(*process_entity).despawn();
 
         if let Some(entity) = process_index.get(process_id)
@@ -584,7 +583,7 @@ fn on_process_kill_all(
         if let Ok(entity) = runtime.single() {
             commands.entity(entity).insert(ProcessMonitorDirty);
         }
-        service.0.send(ClientMessage::ListProcesses);
+        service_requests.write(ServiceRequest(ClientMessage::ListProcesses));
     }
 }
 

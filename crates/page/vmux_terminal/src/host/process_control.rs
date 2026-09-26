@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput, WebviewSize};
 use vmux_core::page::PageReady;
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
+use vmux_service::plugin::ServiceConnected;
 use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
@@ -13,7 +14,8 @@ pub(super) struct ProcessControlPlugin;
 
 impl Plugin for ProcessControlPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(TermResizeEvent, TermScrollEvent)>::default())
+        app.add_message::<ServiceRequest>()
+            .add_plugins(UiEventPlugin::<(TermResizeEvent, TermScrollEvent)>::default())
             .add_systems(
                 Update,
                 request_pending_terminal_snapshot.after(ServiceMessageSet),
@@ -42,36 +44,40 @@ pub(super) struct PendingTerminalSnapshot;
 fn on_term_ready(
     trigger: On<UiInput<PageReady>>,
     terminals: Query<&ProcessId, With<Terminal>>,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event().webview;
     let Ok(process_id) = terminals.get(entity).copied() else {
         return;
     };
-    let Some(service) = service else {
+    if connected.is_none() {
         commands.entity(entity).insert(PendingTerminalSnapshot);
         return;
-    };
-    service
-        .0
-        .send(ClientMessage::RequestSnapshot { process_id });
+    }
+    service_requests.write(ServiceRequest(ClientMessage::RequestSnapshot {
+        process_id,
+    }));
 }
 
 fn request_pending_terminal_snapshot(
     pending: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingTerminalSnapshot>)>,
     browsers: NonSend<Browsers>,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
+    if connected.is_none() {
+        return;
+    }
     for (entity, process_id) in &pending {
         if !browsers.can_emit_to(&entity) {
             continue;
         }
-        service.0.send(ClientMessage::RequestSnapshot {
+        service_requests.write(ServiceRequest(ClientMessage::RequestSnapshot {
             process_id: *process_id,
-        });
+        }));
         commands.entity(entity).remove::<PendingTerminalSnapshot>();
     }
 }
@@ -81,7 +87,7 @@ fn on_term_resize(
     webviews: Query<&WebviewSize, With<Terminal>>,
     terminals: Query<&ProcessId, With<Terminal>>,
     mut grids: Query<&mut TerminalGridSize, With<Terminal>>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
@@ -110,33 +116,31 @@ fn on_term_resize(
         grid.rows = rows;
     }
 
-    let Some(service) = service else { return };
     let Ok(process_id) = terminals.get(entity).copied() else {
         return;
     };
-    service.0.send(ClientMessage::ResizeProcess {
+    service_requests.write(ServiceRequest(ClientMessage::ResizeProcess {
         process_id,
         cols,
         rows,
-    });
+    }));
 }
 
 fn on_term_scroll(
     trigger: On<UiInput<TermScrollEvent>>,
     terminals: Query<&ProcessId, With<Terminal>>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
-    let Some(service) = service else { return };
     let Ok(process_id) = terminals.get(entity).copied() else {
         return;
     };
-    service.0.send(ClientMessage::ScrollWindow {
+    service_requests.write(ServiceRequest(ClientMessage::ScrollWindow {
         process_id,
         top_row: event.top_row,
         follow: event.follow,
-    });
+    }));
 }
 
 #[cfg(test)]
@@ -146,7 +150,9 @@ mod tests {
     #[test]
     fn page_ready_without_service_owes_a_snapshot() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_observer(on_term_ready);
+        app.add_plugins(MinimalPlugins)
+            .add_message::<ServiceRequest>()
+            .add_observer(on_term_ready);
         let webview = app.world_mut().spawn((Terminal, ProcessId::new())).id();
 
         app.world_mut().trigger(UiInput::<PageReady> {

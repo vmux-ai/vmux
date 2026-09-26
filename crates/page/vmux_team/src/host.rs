@@ -18,7 +18,7 @@ use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
 use vmux_layout::space::{CurrentSpace, Space, space_of};
 use vmux_layout::stack::Stack;
 use vmux_service::agent_events::AgentCommandRequest;
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 
 pub struct TeamPlugin;
@@ -41,7 +41,8 @@ struct TeamProjectionPlugin;
 
 impl Plugin for TeamProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiStatePlugin::<TeamEvent>::default())
+        app.add_message::<ServiceRequest>()
+            .add_plugins(UiStatePlugin::<TeamEvent>::default())
             .add_observer(replay_team)
             .add_systems(
                 Update,
@@ -283,7 +284,6 @@ fn build_profiles(
 
 fn answer_list_team(
     mut reader: MessageReader<AgentCommandRequest>,
-    service: Option<Single<&ServiceClient>>,
     current_space: Query<Entity, With<CurrentSpace>>,
     user_q: Query<(Entity, &Profile), With<User>>,
     agent_q: Query<(
@@ -298,6 +298,7 @@ fn answer_list_team(
     space_marker: Query<(), With<Space>>,
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         if !matches!(
@@ -306,9 +307,6 @@ fn answer_list_team(
         ) {
             continue;
         }
-        let Some(service) = service.as_ref() else {
-            continue;
-        };
         let members = build_team_members(
             current_space.iter().next(),
             &user_q,
@@ -322,10 +320,10 @@ fn answer_list_team(
             Ok(json) => AgentCommandResult::Text(json),
             Err(error) => AgentCommandResult::Error(format!("list_team: {error}")),
         };
-        service.0.send(ClientMessage::AgentCommandResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
             request_id: request.request_id,
             result,
-        });
+        }));
     }
 }
 

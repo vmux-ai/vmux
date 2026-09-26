@@ -695,22 +695,23 @@ struct PageOpenAwaitSnapshot {
 }
 
 fn send_page_open_response(
-    service: &Option<Single<&vmux_service::client::ServiceClient>>,
+    service_requests: &mut MessageWriter<vmux_service::client::ServiceRequest>,
     request_id: Option<[u8; 16]>,
     result: Result<(), String>,
 ) {
+    use vmux_service::client::ServiceRequest;
     use vmux_service::protocol::{AgentCommandResult, AgentRequestId, ClientMessage};
-    let (Some(service), Some(request_id)) = (service.as_ref(), request_id) else {
+    let Some(request_id) = request_id else {
         return;
     };
     let result = match result {
         Ok(()) => AgentCommandResult::Ok,
         Err(message) => AgentCommandResult::Error(message),
     };
-    service.0.send(ClientMessage::AgentCommandResponse {
+    service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
         request_id: AgentRequestId(request_id),
         result,
-    });
+    }));
 }
 
 #[derive(Component, Clone)]
@@ -758,8 +759,8 @@ impl PendingNavigationUpdate {
 fn apply_pending_navigation_updates(
     mut updates: MessageReader<PendingNavigationUpdate>,
     existing: Query<(Entity, &PendingNavigationSnapshot)>,
-    service: Option<Single<&vmux_service::client::ServiceClient>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
 ) {
     let mut pending = existing
         .iter()
@@ -768,7 +769,7 @@ fn apply_pending_navigation_updates(
     for update in updates.read() {
         if let Some((entity, displaced)) = pending.remove(&update.webview) {
             commands.entity(entity).despawn();
-            send_page_open_response(&service, Some(displaced.request_id), Ok(()));
+            send_page_open_response(&mut service_requests, Some(displaced.request_id), Ok(()));
         }
         if let Some(next) = update.pending.clone() {
             let entity = commands.spawn(next.clone()).id();
@@ -790,7 +791,8 @@ mod tests {
     #[test]
     fn pending_navigation_updates_keep_only_the_latest_request() {
         let mut app = App::new();
-        app.add_message::<PendingNavigationUpdate>()
+        app.add_message::<vmux_service::client::ServiceRequest>()
+            .add_message::<PendingNavigationUpdate>()
             .add_systems(Update, apply_pending_navigation_updates);
         let webview = app.world_mut().spawn_empty().id();
         app.world_mut()

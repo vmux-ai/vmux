@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
-use vmux_service::client::{ServiceClient, ServiceHandle};
+use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
@@ -173,36 +173,32 @@ impl TerminalMouseState {
     }
 }
 
-fn send_mouse_effect(effect: MouseTerminalEffect, service: &ServiceHandle, process_id: ProcessId) {
-    match effect {
-        MouseTerminalEffect::ForwardInput(data) => {
-            service.send(ClientMessage::ProcessInput { process_id, data });
-        }
-        MouseTerminalEffect::EnterCopyMode => {
-            service.send(ClientMessage::EnterCopyMode { process_id });
-        }
-        MouseTerminalEffect::ExitCopyMode => {
-            service.send(ClientMessage::ExitCopyMode { process_id });
-        }
-        MouseTerminalEffect::SetSelection(range) => {
-            service.send(ClientMessage::SetSelection { process_id, range });
-        }
-        MouseTerminalEffect::ExtendSelectionTo { col, row } => {
-            service.send(ClientMessage::ExtendSelectionTo {
+impl MouseTerminalEffect {
+    fn message(self, process_id: ProcessId) -> ClientMessage {
+        match self {
+            MouseTerminalEffect::ForwardInput(data) => {
+                ClientMessage::ProcessInput { process_id, data }
+            }
+            MouseTerminalEffect::EnterCopyMode => ClientMessage::EnterCopyMode { process_id },
+            MouseTerminalEffect::ExitCopyMode => ClientMessage::ExitCopyMode { process_id },
+            MouseTerminalEffect::SetSelection(range) => {
+                ClientMessage::SetSelection { process_id, range }
+            }
+            MouseTerminalEffect::ExtendSelectionTo { col, row } => {
+                ClientMessage::ExtendSelectionTo {
+                    process_id,
+                    col,
+                    row,
+                }
+            }
+            MouseTerminalEffect::SelectWordAt { col, row } => ClientMessage::SelectWordAt {
                 process_id,
                 col,
                 row,
-            });
-        }
-        MouseTerminalEffect::SelectWordAt { col, row } => {
-            service.send(ClientMessage::SelectWordAt {
-                process_id,
-                col,
-                row,
-            });
-        }
-        MouseTerminalEffect::SelectLineAt { row } => {
-            service.send(ClientMessage::SelectLineAt { process_id, row });
+            },
+            MouseTerminalEffect::SelectLineAt { row } => {
+                ClientMessage::SelectLineAt { process_id, row }
+            }
         }
     }
 }
@@ -241,30 +237,29 @@ fn on_term_mouse(
         ),
         With<Terminal>,
     >,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
-    let Some(service) = service else { return };
     let Ok((process_id, mode, mut selection, mut copy_mode)) = terminals.get_mut(entity) else {
         return;
     };
     let process_id = *process_id;
 
     if event.button == 64 || event.button == 65 {
-        service.0.send(ClientMessage::MouseWheel {
+        service_requests.write(ServiceRequest(ClientMessage::MouseWheel {
             process_id,
             up: event.button == 64,
             col: event.col,
             row: event.row,
             modifiers: event.modifiers,
-        });
+        }));
         return;
     }
 
     for effect in selection.apply(event, mode.mouse_capture, Instant::now()) {
         update_copy_mode(&effect, &mut copy_mode);
-        send_mouse_effect(effect, &service.0, process_id);
+        service_requests.write(ServiceRequest(effect.message(process_id)));
     }
 }
 
