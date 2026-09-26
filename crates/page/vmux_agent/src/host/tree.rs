@@ -71,6 +71,7 @@ impl Plugin for AgentSessionPlugin {
                 super::attention::AttentionPlugin,
                 super::command::CommandPlugin,
                 super::follow::FollowPlugin,
+                super::ingress::AgentIngressPlugin,
                 super::page_open::PageOpenPlugin,
                 super::provider::ProviderPlugin,
                 super::query::AgentQueryPlugin,
