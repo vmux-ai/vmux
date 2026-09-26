@@ -1,0 +1,9 @@
+[
+    (
+        id: "toggle_fullscreen",
+        label: "Toggle Fullscreen",
+        group: "Layout > Window",
+        accelerator: Some("ctrl+super+f"),
+        hidden: true,
+    ),
+]

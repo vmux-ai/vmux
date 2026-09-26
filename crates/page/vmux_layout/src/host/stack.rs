@@ -9,10 +9,9 @@ use bevy::{
     window::{ClosingWindow, PrimaryWindow},
 };
 use moonshine_save::prelude::*;
-use vmux_command::{
-    CommandDefinition, CommandInvocation, CommandMcp, CommandRequest, CommandTypePlugin,
-    InputSchema,
-};
+#[cfg(test)]
+use vmux_command::CommandDefinition;
+use vmux_command::{CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin};
 pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
@@ -72,20 +71,8 @@ pub struct OpenRequest {
 }
 
 impl CommandRequest for OpenRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("open_in_new_stack", "Open in New Stack", "Browser > Open")
-                .accelerator("super+n")
-                .mcp(CommandMcp::new(
-                    "Open the URL as a new stack inside the currently focused pane. Stacks are the in-pane tab strip: the current stack stays alive and a new one is added next to it, becoming active. Use when the user wants to preserve the current page and view a new one alongside, in the same pane.",
-                    InputSchema::object().optional(
-                        "url",
-                        InputSchema::string().description(
-                            "Absolute URL to open in the new stack. If omitted, opens the startup URL.",
-                        ),
-                    ),
-                )),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("stack.ron")).select(&["open_in_new_stack"])
     }
 }
 
@@ -106,12 +93,8 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 pub struct CloseRequest;
 
 impl CommandRequest for CloseRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("stack_close", "Close Stack", "Layout > Stack")
-                .accelerator("super+w")
-                .chord("Ctrl+b, Shift+x"),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("stack.ron")).select(&["stack_close"])
     }
 }
 
@@ -127,15 +110,9 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
 pub struct FocusRequest(pub SiblingDirection);
 
 impl CommandRequest for FocusRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("stack_next", "Next Stack", "Layout > Stack")
-                .accelerator("super+shift+n")
-                .direct("Super+Shift+J"),
-            CommandDefinition::new("stack_previous", "Previous Stack", "Layout > Stack")
-                .accelerator("super+shift+p")
-                .direct("Super+Shift+K"),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("stack.ron"))
+            .select(&["stack_next", "stack_previous"])
     }
 }
 
@@ -155,13 +132,9 @@ impl TryFrom<&CommandInvocation> for FocusRequest {
 pub struct MoveRequest(pub SiblingDirection);
 
 impl CommandRequest for MoveRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("stack_swap_prev", "Move Stack Left", "Layout > Stack")
-                .chord("Ctrl+b, <"),
-            CommandDefinition::new("stack_swap_next", "Move Stack Right", "Layout > Stack")
-                .chord("Ctrl+b, >"),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("stack.ron"))
+            .select(&["stack_swap_prev", "stack_swap_next"])
     }
 }
 

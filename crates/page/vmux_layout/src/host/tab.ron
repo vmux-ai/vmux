@@ -1,0 +1,63 @@
+[
+    (
+        id: "open_in_new_tab",
+        label: "Open in New Tab",
+        group: "Browser > Open",
+        accelerator: Some("super+t"),
+        shortcuts: [(shortcut: Chord("Ctrl+b, c"), when: None)],
+        mcp: Some((
+            description: "Open a page in a brand-new Tab within the current Space. Tabs are the workspace-tab strip (one level above panes); creating one gives the user a fresh layout container.",
+            input_schema: Some((
+                type: Object,
+                properties: {
+                    "url": (
+                        type: String,
+                        description: Some("Absolute URL to open in the new Tab. If omitted, opens the startup URL."),
+                    ),
+                },
+            )),
+        )),
+    ),
+    (id: "new_task", label: "New Task…", group: "Layout > Tab"),
+    (
+        id: "close_tab",
+        label: "Close Tab",
+        group: "Layout > Tab",
+        shortcuts: [(shortcut: Chord("Ctrl+b, &"), when: None)],
+    ),
+    (
+        id: "next_tab",
+        label: "Next Tab",
+        group: "Layout > Tab",
+        accelerator: Some("super+shift+]"),
+        shortcuts: [
+            (shortcut: Direct("Super+Shift+L"), when: None),
+            (shortcut: Direct("Super+Alt+ArrowRight"), when: None),
+            (shortcut: Direct("Super+Shift+BracketRight"), when: None),
+            (shortcut: Chord("Ctrl+b, n"), when: None),
+        ],
+    ),
+    (
+        id: "prev_tab",
+        label: "Previous Tab",
+        group: "Layout > Tab",
+        accelerator: Some("super+shift+["),
+        shortcuts: [
+            (shortcut: Direct("Super+Shift+H"), when: None),
+            (shortcut: Direct("Super+Alt+ArrowLeft"), when: None),
+            (shortcut: Direct("Super+Shift+BracketLeft"), when: None),
+            (shortcut: Chord("Ctrl+b, p"), when: None),
+        ],
+    ),
+    (id: "tab_select_1", label: "Select Tab 1", group: "Layout > Tab", accelerator: Some("super+1")),
+    (id: "tab_select_2", label: "Select Tab 2", group: "Layout > Tab", accelerator: Some("super+2")),
+    (id: "tab_select_3", label: "Select Tab 3", group: "Layout > Tab", accelerator: Some("super+3")),
+    (id: "tab_select_4", label: "Select Tab 4", group: "Layout > Tab", accelerator: Some("super+4")),
+    (id: "tab_select_5", label: "Select Tab 5", group: "Layout > Tab", accelerator: Some("super+5")),
+    (id: "tab_select_6", label: "Select Tab 6", group: "Layout > Tab", accelerator: Some("super+6")),
+    (id: "tab_select_7", label: "Select Tab 7", group: "Layout > Tab", accelerator: Some("super+7")),
+    (id: "tab_select_8", label: "Select Tab 8", group: "Layout > Tab", accelerator: Some("super+8")),
+    (id: "tab_select_last", label: "Select Last Tab", group: "Layout > Tab", accelerator: Some("super+9")),
+    (id: "swap_tab_prev", label: "Move Tab Left", group: "Layout > Tab", hidden: true),
+    (id: "swap_tab_next", label: "Move Tab Right", group: "Layout > Tab", hidden: true),
+]

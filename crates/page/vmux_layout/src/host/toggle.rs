@@ -25,10 +25,23 @@ impl Plugin for TogglePlugin {
     }
 }
 
-#[derive(vmux_macro::CommandBar)]
-#[menu(group = "Layout > Layout")]
-#[shortcut(direct = "Super+Shift+S")]
+#[derive(Message)]
 struct ToggleLayoutRequest;
+
+impl vmux_command::CommandRequest for ToggleLayoutRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("toggle.ron"))
+            .select(&["toggle_layout"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "toggle_layout").then_some(Self).ok_or(())
+    }
+}
 
 #[derive(Component, Default, Debug)]
 pub struct LayoutHidden;

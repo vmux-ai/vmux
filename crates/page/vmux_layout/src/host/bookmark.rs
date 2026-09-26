@@ -114,12 +114,45 @@ impl Plugin for BookmarkPlugin {
     }
 }
 
-#[derive(vmux_macro::CommandBar)]
-#[shortcut(direct = "Super+d")]
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct BookmarkToggleActiveRequest;
 
-#[derive(vmux_macro::CommandBar)]
+impl vmux_command::CommandRequest for BookmarkToggleActiveRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("bookmark.ron"))
+            .select(&["bookmark_toggle_active"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for BookmarkToggleActiveRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "bookmark_toggle_active")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct BookmarkPinActiveRequest;
+
+impl vmux_command::CommandRequest for BookmarkPinActiveRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("bookmark.ron"))
+            .select(&["bookmark_pin_active"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for BookmarkPinActiveRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "bookmark_pin_active")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct CreateFolderRequest {
@@ -145,10 +178,8 @@ impl CreateFolderRequest {
 
 impl vmux_command::CommandRequest for CreateFolderRequest {
     fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vec![
-            vmux_command::CommandDefinition::new("bookmark_new_folder", "New Folder", "Bookmark")
-                .hidden(),
-        ]
+        vmux_command::CommandDefinitions::from_ron(include_str!("bookmark.ron"))
+            .select(&["bookmark_new_folder"])
     }
 }
 

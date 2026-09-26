@@ -48,16 +48,12 @@ struct ToggleFullscreenRequest;
 struct ToggleFullscreenBinding;
 
 fn spawn_toggle_fullscreen_command(mut commands: Commands) {
+    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("glass.ron"));
     commands.spawn((
-        vmux_command::CommandDefinition::new(
-            "toggle_fullscreen",
-            "Toggle Fullscreen",
-            "Layout > Window",
-        )
-        .accelerator("ctrl+super+f")
-        .hidden(),
+        definitions.take("toggle_fullscreen"),
         ToggleFullscreenBinding,
     ));
+    definitions.assert_all_registered();
 }
 
 fn issue_toggle_fullscreen(

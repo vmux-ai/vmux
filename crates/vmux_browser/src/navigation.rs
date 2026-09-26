@@ -1,9 +1,10 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
+#[cfg(test)]
+use vmux_command::CommandDefinition;
 use vmux_command::{
-    CommandDefinition, CommandDispatch, CommandRuntimePlugin, ReadCommandRequests,
-    RegisterCommandDefinitions,
+    CommandDispatch, CommandRuntimePlugin, ReadCommandRequests, RegisterCommandDefinitions,
 };
 use vmux_core::page::{HostHistory, HostHistoryDelta, HostHistoryStep};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
@@ -62,12 +63,9 @@ pub struct OpenHistoryRequest;
 struct OpenHistoryBinding;
 
 fn spawn_history_command(mut commands: Commands) {
-    commands.spawn((
-        CommandDefinition::new("browser_open_history", "History", "Browser > Bar")
-            .accelerator("super+y")
-            .expose_to_mcp(),
-        OpenHistoryBinding,
-    ));
+    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("history.ron"));
+    commands.spawn((definitions.take("browser_open_history"), OpenHistoryBinding));
+    definitions.assert_all_registered();
 }
 
 fn issue_open_history(

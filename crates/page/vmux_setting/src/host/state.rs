@@ -63,12 +63,9 @@ struct OpenSettingsRequest;
 struct OpenSettingsBinding;
 
 fn spawn_open_settings_command(mut commands: Commands) {
-    commands.spawn((
-        vmux_command::CommandDefinition::new("open_settings", "Settings", "Layout > Window")
-            .hidden()
-            .direct("Super+,"),
-        OpenSettingsBinding,
-    ));
+    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("state.ron"));
+    commands.spawn((definitions.take("open_settings"), OpenSettingsBinding));
+    definitions.assert_all_registered();
 }
 
 fn issue_open_settings(

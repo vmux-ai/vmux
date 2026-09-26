@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
-use vmux_command::{CommandDefinition, CommandInvocation, CommandRequest, CommandTypePlugin};
+use vmux_command::{CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
@@ -74,11 +74,9 @@ impl HostedPage for ProcessesMonitor {
 struct OpenServicesRequest;
 
 impl CommandRequest for OpenServicesRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("service_open", "Open Service Monitor", "Service")
-                .expose_to_mcp(),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("processes_monitor.ron"))
+            .select(&["service_open"])
     }
 }
 

@@ -1,0 +1,17 @@
+[
+    (
+        id: "new_window",
+        label: "New Window",
+        group: "Layout > Window",
+        accelerator: Some("super+n"),
+        hidden: true,
+        shortcuts: [(shortcut: Direct("Super+N"), when: None)],
+    ),
+    (
+        id: "close_window",
+        label: "Close Window",
+        group: "Layout > Window",
+        accelerator: Some("super+shift+w"),
+        hidden: true,
+    ),
+]

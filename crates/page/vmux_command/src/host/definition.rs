@@ -158,6 +158,36 @@ impl CommandDefinitions {
             .map(CommandDefinitionManifest::into_definition)
             .collect()
     }
+
+    pub fn select(self, ids: &[&str]) -> Vec<CommandDefinition> {
+        let mut definitions = self;
+        let mut selected = Vec::with_capacity(ids.len());
+        for id in ids {
+            selected.push(definitions.take(id));
+        }
+        selected
+    }
+
+    pub fn take(&mut self, id: &str) -> CommandDefinition {
+        let index = self
+            .0
+            .iter()
+            .position(|definition| definition.id == id)
+            .unwrap_or_else(|| panic!("embedded command manifest does not define {id}"));
+        self.0.remove(index).into_definition()
+    }
+
+    pub fn assert_all_registered(self) {
+        assert!(
+            self.0.is_empty(),
+            "embedded command manifest contains unregistered definitions: {}",
+            self.0
+                .iter()
+                .map(|definition| definition.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

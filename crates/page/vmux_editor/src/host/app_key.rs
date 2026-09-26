@@ -3,7 +3,7 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{CommandBarPick, CommandBarPicker};
 use vmux_command::host::FileStatusPicked;
 use vmux_command::{
-    CommandDefinition, CommandDispatch, CommandInvocation, CommandRuntimePlugin,
+    CommandDefinitions, CommandDispatch, CommandInvocation, CommandRuntimePlugin,
     RegisterCommandDefinitions,
 };
 use vmux_core::event::{
@@ -38,65 +38,40 @@ struct FileKeyBinding(FileKey);
 struct FilePanelKeyBinding(FilePanelOperation);
 
 fn spawn_commands(mut commands: Commands) {
-    for (definition, key) in [
-        (
-            CommandDefinition::new("file_toggle_explorer", "Toggle Explorer", "Editor")
-                .hidden()
-                .direct_when("Super+b", Some("files")),
-            FileKey::ToggleExplorer,
-        ),
-        (
-            CommandDefinition::new("file_reveal_in_explorer", "Reveal In Explorer", "Editor")
-                .hidden()
-                .direct_when("Super+Shift+e", Some("files"))
-                .direct_when("Ctrl+Shift+e", Some("files")),
-            FileKey::RevealInExplorer,
-        ),
-        (
-            CommandDefinition::new("file_find", "Find In File", "Editor")
-                .direct_when("Super+f", Some("files")),
-            FileKey::Find { forward: true },
-        ),
-        (
-            CommandDefinition::new("file_find_in_files", "Find In Files", "Editor")
-                .direct_when("Super+Shift+f", Some("files"))
-                .direct_when("Ctrl+Shift+f", Some("files")),
-            FileKey::FindInFiles,
-        ),
-    ] {
-        commands.spawn((definition, FileKeyBinding(key)));
-    }
-    for (definition, operation) in [
-        (
-            CommandDefinition::new("file_panel_next", "Next Panel Row", "Editor")
-                .hidden()
-                .direct_when("ArrowDown", Some("files.panel"))
-                .direct_when("j", Some("files.panel")),
-            FilePanelOperation::Move(FilePanelMovement::Next),
-        ),
-        (
-            CommandDefinition::new("file_panel_previous", "Previous Panel Row", "Editor")
-                .hidden()
-                .direct_when("ArrowUp", Some("files.panel"))
-                .direct_when("k", Some("files.panel")),
-            FilePanelOperation::Move(FilePanelMovement::Previous),
-        ),
-        (
-            CommandDefinition::new("file_panel_choose", "Choose Panel Row", "Editor")
-                .hidden()
-                .direct_when("Enter", Some("files.panel"))
-                .direct_when("Tab", Some("files.panel")),
-            FilePanelOperation::Choose,
-        ),
-        (
-            CommandDefinition::new("file_panel_dismiss", "Close Panel", "Editor")
-                .hidden()
-                .direct_when("Escape", Some("files.panel")),
-            FilePanelOperation::Dismiss,
-        ),
-    ] {
-        commands.spawn((definition, FilePanelKeyBinding(operation)));
-    }
+    let mut definitions = CommandDefinitions::from_ron(include_str!("app_key.ron"));
+    commands.spawn((
+        definitions.take("file_toggle_explorer"),
+        FileKeyBinding(FileKey::ToggleExplorer),
+    ));
+    commands.spawn((
+        definitions.take("file_reveal_in_explorer"),
+        FileKeyBinding(FileKey::RevealInExplorer),
+    ));
+    commands.spawn((
+        definitions.take("file_find"),
+        FileKeyBinding(FileKey::Find { forward: true }),
+    ));
+    commands.spawn((
+        definitions.take("file_find_in_files"),
+        FileKeyBinding(FileKey::FindInFiles),
+    ));
+    commands.spawn((
+        definitions.take("file_panel_next"),
+        FilePanelKeyBinding(FilePanelOperation::Move(FilePanelMovement::Next)),
+    ));
+    commands.spawn((
+        definitions.take("file_panel_previous"),
+        FilePanelKeyBinding(FilePanelOperation::Move(FilePanelMovement::Previous)),
+    ));
+    commands.spawn((
+        definitions.take("file_panel_choose"),
+        FilePanelKeyBinding(FilePanelOperation::Choose),
+    ));
+    commands.spawn((
+        definitions.take("file_panel_dismiss"),
+        FilePanelKeyBinding(FilePanelOperation::Dismiss),
+    ));
+    definitions.assert_all_registered();
 }
 
 fn echo_key_command(

@@ -15,7 +15,9 @@ use vmux_ui::launcher::palette::{PaletteDecision, PaletteState};
 use vmux_ui::launcher::palette::{PaletteDraft, PaletteRows, PaletteSurface};
 use vmux_ui::launcher::results::active_space_index;
 
-use crate::{CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions};
+use crate::{
+    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
+};
 
 use super::CloseCommandBar;
 
@@ -113,39 +115,24 @@ struct PaletteDecisionReady {
 }
 
 fn spawn_palette_commands(mut commands: Commands) {
-    for (definition, key) in [
-        (
-            CommandDefinition::new("command_bar_next", "Next Result", "Command Bar")
-                .hidden()
-                .direct_when("ArrowDown", Some("command-bar"))
-                .direct_when("Ctrl+n", Some("command-bar"))
-                .direct_when("Ctrl+j", Some("command-bar")),
-            PaletteKey::Next,
-        ),
-        (
-            CommandDefinition::new("command_bar_previous", "Previous Result", "Command Bar")
-                .hidden()
-                .direct_when("ArrowUp", Some("command-bar"))
-                .direct_when("Ctrl+p", Some("command-bar"))
-                .direct_when("Ctrl+k", Some("command-bar")),
-            PaletteKey::Previous,
-        ),
-        (
-            CommandDefinition::new("command_bar_complete", "Accept Completion", "Command Bar")
-                .hidden()
-                .direct_when("Tab", Some("command-bar")),
-            PaletteKey::Complete,
-        ),
-        (
-            CommandDefinition::new("command_bar_dismiss", "Dismiss Command Bar", "Command Bar")
-                .hidden()
-                .direct_when("Escape", Some("command-bar"))
-                .direct_when("Ctrl+c", Some("command-bar")),
-            PaletteKey::Dismiss,
-        ),
-    ] {
-        commands.spawn((definition, PaletteKeyBinding(key)));
-    }
+    let mut definitions = CommandDefinitions::from_ron(include_str!("palette.ron"));
+    commands.spawn((
+        definitions.take("command_bar_next"),
+        PaletteKeyBinding(PaletteKey::Next),
+    ));
+    commands.spawn((
+        definitions.take("command_bar_previous"),
+        PaletteKeyBinding(PaletteKey::Previous),
+    ));
+    commands.spawn((
+        definitions.take("command_bar_complete"),
+        PaletteKeyBinding(PaletteKey::Complete),
+    ));
+    commands.spawn((
+        definitions.take("command_bar_dismiss"),
+        PaletteKeyBinding(PaletteKey::Dismiss),
+    ));
+    definitions.assert_all_registered();
 }
 
 fn attach_palette_snapshot(

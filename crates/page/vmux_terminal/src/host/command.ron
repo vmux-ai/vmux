@@ -1,0 +1,34 @@
+[
+    (
+        id: "terminal_close",
+        label: "Close Terminal",
+        group: "Terminal",
+        mcp: Some((description: "Close Terminal", allow_agent: true)),
+    ),
+    (
+        id: "terminal_next",
+        label: "Next Terminal",
+        group: "Terminal",
+        mcp: Some((description: "Next Terminal")),
+    ),
+    (
+        id: "terminal_prev",
+        label: "Previous Terminal",
+        group: "Terminal",
+        mcp: Some((description: "Previous Terminal")),
+    ),
+    (
+        id: "terminal_clear",
+        label: "Clear Terminal",
+        group: "Terminal",
+        mcp: Some((description: "Clear Terminal", allow_agent: true)),
+    ),
+    (
+        id: "terminal_copy_mode",
+        label: "Visual Mode",
+        group: "Terminal",
+        hidden: true,
+        shortcuts: [(shortcut: Chord("Ctrl+b, ["), when: None)],
+        mcp: Some((description: "Visual Mode", allow_agent: true)),
+    ),
+]
