@@ -1,4 +1,4 @@
-use crate::event::{PaneNode, PaneTreeState};
+use crate::event::{PaneNode, PaneTreeState, StackRevealTarget};
 use dioxus::prelude::*;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
@@ -45,49 +45,19 @@ pub(super) fn SideSheetGrab(mut resizing: Signal<bool>) -> Element {
     }
 }
 
-pub(super) struct ActiveStack;
-
-impl ActiveStack {
-    pub(super) fn find(panes: &[PaneNode]) -> Option<(u64, u64)> {
-        let mut fallback = None;
-        for pane in panes {
-            for stack in &pane.stacks {
-                if !stack.is_active {
-                    continue;
-                }
-                if pane.is_active {
-                    return Some((pane.id, stack.id));
-                }
-                if fallback.is_none() {
-                    fallback = Some((pane.id, stack.id));
-                }
-            }
-        }
-        fallback
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct StackReveal {
-    settled: Signal<Option<(u64, u64)>>,
-    prefix: &'static str,
+    settled: Signal<Option<StackRevealTarget>>,
 }
 
 impl StackReveal {
-    pub(super) fn side_sheet(settled: Signal<Option<(u64, u64)>>) -> Self {
-        Self {
-            settled,
-            prefix: "sidesheet-stack",
-        }
-    }
-
     pub(super) fn forget(mut self) {
         if (self.settled)().is_some() {
             self.settled.set(None);
         }
     }
 
-    pub(super) fn follow(mut self, target: (u64, u64)) {
+    pub(super) fn follow(mut self, target: StackRevealTarget) {
         let Some(settled) = (self.settled)() else {
             self.settled.set(Some(target));
             return;
@@ -95,8 +65,10 @@ impl StackReveal {
         if settled == target {
             return;
         }
-        let (pane_id, stack_id) = target;
-        if ScrollIntoView::nearest(&format!("{}-{pane_id}-{stack_id}", self.prefix)) {
+        if ScrollIntoView::nearest(&format!(
+            "sidesheet-stack-{}-{}",
+            target.pane_id, target.stack_id
+        )) {
             self.settled.set(Some(target));
         }
     }
@@ -120,25 +92,22 @@ fn SideSheetContent() -> Element {
     let ui = layout.value();
     let state = ui.layout.unwrap_or_default();
     let PaneTreeState { panes } = ui.pane_tree.unwrap_or_default();
-    let active_space = ui
-        .spaces
-        .unwrap_or_default()
-        .spaces
-        .into_iter()
-        .find(|space| space.is_active);
+    let side_sheet = ui.side_sheet.unwrap_or_default();
+    let active_space = side_sheet.active_space;
     let bookmarks = ui.bookmarks;
     let active_session = ui.active_session;
     let pane_tree_error = layout.error();
     let update_phase = ui.update;
-    let reveal = StackReveal::side_sheet(use_signal(|| None::<(u64, u64)>));
+    let reveal = StackReveal {
+        settled: use_signal(|| None::<StackRevealTarget>),
+    };
     use_effect(move || {
         let ui = layout.value();
         if !ui.layout.unwrap_or_default().side_sheet_open {
             reveal.forget();
             return;
         }
-        let PaneTreeState { panes } = ui.pane_tree.unwrap_or_default();
-        let Some(target) = ActiveStack::find(&panes) else {
+        let Some(target) = ui.side_sheet.unwrap_or_default().reveal else {
             return;
         };
         reveal.follow(target);
@@ -160,12 +129,8 @@ fn SideSheetContent() -> Element {
         state.window_pad_bottom,
         crate::event::url_bar_top(),
     );
-    let active_pane = panes
-        .iter()
-        .find(|pane| pane.is_active)
-        .or_else(|| panes.first())
-        .cloned();
-    let active_page = active_session.as_ref().map(|session| session.page.clone());
+    let active_pane = side_sheet.active_pane;
+    let active_page = side_sheet.active_page;
     let folders = bookmarks.folders.clone();
     let initial_folders = folders.clone();
     let mut folder_context = use_signal(|| initial_folders);

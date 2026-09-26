@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use vmux_ui::hooks::send;
 use vmux_ui::platform::sleep_ms;
 
-use crate::event::{TabActivateRequest, TabDropPlacement, TabReorderRequest, TabRow};
+use crate::event::{TabActivateRequest, TabDropPlacement, TabReorderRequest};
 
 #[derive(Clone, PartialEq)]
 struct TabDragState {
@@ -107,21 +107,15 @@ impl TabDragVisual {
 pub(crate) struct TabDrag {
     state: Signal<Option<Rc<TabDragState>>>,
     click_block: Signal<Option<TabClickBlock>>,
-    host_active: Signal<Option<String>>,
-    host_order: Signal<Vec<String>>,
-    optimistic_order: Signal<Option<Vec<String>>>,
-    optimistic_active: Signal<Option<String>>,
+    order: Memo<Vec<String>>,
 }
 
 impl TabDrag {
-    pub(crate) fn use_state() -> Self {
+    pub(crate) fn use_state(order: Memo<Vec<String>>) -> Self {
         Self {
             state: use_signal(|| None::<Rc<TabDragState>>),
             click_block: use_signal(|| None),
-            host_active: use_signal(|| None),
-            host_order: use_signal(Vec::new),
-            optimistic_order: use_signal(|| None),
-            optimistic_active: use_signal(|| None),
+            order,
         }
     }
 
@@ -155,7 +149,7 @@ impl TabDrag {
         event.prevent_default();
         self.click_block.set(None);
         let point = event.client_coordinates();
-        let order = (self.optimistic_order)().unwrap_or_else(|| (self.host_order)());
+        let order = (self.order)();
         let source_index = order
             .iter()
             .position(|id| id == &source_id)
@@ -215,21 +209,6 @@ impl TabDrag {
                     TabDropPlacement::After
                 },
             });
-            let mut order = state.order.clone();
-            if let Some(source_index) = order.iter().position(|id| id == &state.source_id)
-                && state.target_index < order.len()
-            {
-                let moved = order.remove(source_index);
-                order.insert(state.target_index, moved);
-                self.optimistic_order.set(Some(order.clone()));
-                let mut optimistic_order = self.optimistic_order;
-                spawn(async move {
-                    sleep_ms(500).await;
-                    if optimistic_order() == Some(order) {
-                        optimistic_order.set(None);
-                    }
-                });
-            }
         }
         let block = TabClickBlock {
             source_id: state.source_id.clone(),
@@ -267,57 +246,7 @@ impl TabDrag {
     }
 
     pub(crate) fn activate(&mut self, tab_id: String) {
-        if (self.host_active)().as_deref() != Some(tab_id.as_str()) {
-            self.optimistic_active.set(Some(tab_id.clone()));
-            let expected = tab_id.clone();
-            let mut optimistic_active = self.optimistic_active;
-            spawn(async move {
-                sleep_ms(500).await;
-                if optimistic_active().as_deref() == Some(expected.as_str()) {
-                    optimistic_active.set(None);
-                }
-            });
-        }
         let _ = send(&TabActivateRequest { tab_id });
-    }
-
-    pub(crate) fn acknowledge_host(
-        &mut self,
-        host_active_tab_id: Option<String>,
-        host_order: Vec<String>,
-    ) {
-        let had_optimistic_active = self.optimistic_active.peek().is_some();
-        self.host_active.set(host_active_tab_id);
-        if (self.optimistic_order)().as_ref() == Some(&host_order) {
-            self.optimistic_order.set(None);
-        }
-        self.host_order.set(host_order);
-        if had_optimistic_active {
-            self.optimistic_active.set(None);
-        }
-    }
-
-    pub(crate) fn ordered(self, tabs: Vec<TabRow>) -> Vec<TabRow> {
-        let Some(order) = (self.optimistic_order)() else {
-            return tabs;
-        };
-        let mut remaining = tabs;
-        let mut ordered = Vec::with_capacity(remaining.len());
-        for id in order {
-            let Some(index) = remaining.iter().position(|tab| tab.id == id) else {
-                continue;
-            };
-            ordered.push(remaining.remove(index));
-        }
-        ordered.extend(remaining);
-        ordered
-    }
-
-    pub(crate) fn is_active(self, tab_id: &str, host_active: bool) -> bool {
-        match (self.optimistic_active)() {
-            Some(active_id) => active_id == tab_id,
-            None => host_active,
-        }
     }
 }
 

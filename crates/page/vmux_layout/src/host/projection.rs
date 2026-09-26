@@ -5,14 +5,21 @@ use vmux_core::event::team::{TeamEvent, TeamMemberRow};
 use crate::cef::LayoutCef;
 use crate::event::{
     ActiveSession, ActiveSessionState, ActiveWorkspaceProject, HeaderPageState, PaneTreeState,
-    StackNavigationState, StackNode, TabBoundaryState,
+    SideSheetState, StackNavigationState, StackNode, StackRevealTarget, TabBoundaryState,
 };
 
 pub struct LayoutUiProjectionPlugin;
 
 impl Plugin for LayoutUiProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (publish_active_session, publish_header_page));
+        app.add_systems(
+            Update,
+            (
+                publish_active_session,
+                publish_header_page,
+                publish_side_sheet,
+            ),
+        );
     }
 }
 
@@ -30,6 +37,9 @@ pub struct StackProjection(pub StackNavigationState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct BookmarkProjection(pub BookmarkStateEvent);
+
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct SpacesProjection(pub vmux_core::event::space::SpacesListEvent);
 
 impl ActiveWorkspaceProject {
     fn active(projects: &[vmux_core::event::ProjectRow]) -> Option<Self> {
@@ -132,6 +142,55 @@ impl HeaderPageState {
     }
 }
 
+impl SideSheetState {
+    fn from_projections(
+        panes: &PaneTreeState,
+        spaces: &vmux_core::event::space::SpacesListEvent,
+    ) -> Self {
+        let active_space = spaces.spaces.iter().find(|space| space.is_active).cloned();
+        let active_pane = panes
+            .panes
+            .iter()
+            .find(|pane| pane.is_active)
+            .or_else(|| panes.panes.first())
+            .cloned();
+        let active_page = active_pane.as_ref().and_then(|pane| {
+            pane.stacks
+                .iter()
+                .find(|stack| stack.is_active && !stack.url.is_empty())
+                .cloned()
+        });
+        let reveal = active_pane
+            .as_ref()
+            .and_then(|pane| {
+                pane.stacks
+                    .iter()
+                    .find(|stack| stack.is_active)
+                    .map(|stack| StackRevealTarget {
+                        pane_id: pane.id,
+                        stack_id: stack.id,
+                    })
+            })
+            .or_else(|| {
+                panes.panes.iter().find_map(|pane| {
+                    pane.stacks
+                        .iter()
+                        .find(|stack| stack.is_active)
+                        .map(|stack| StackRevealTarget {
+                            pane_id: pane.id,
+                            stack_id: stack.id,
+                        })
+                })
+            });
+        Self {
+            active_space,
+            active_pane,
+            active_page,
+            reveal,
+        }
+    }
+}
+
 fn publish_active_session(
     layouts: Query<
         (
@@ -205,6 +264,40 @@ fn publish_header_page(
     }
 }
 
+fn publish_side_sheet(
+    layouts: Query<
+        (
+            Entity,
+            Option<&PaneTreeProjection>,
+            Option<&SpacesProjection>,
+        ),
+        With<LayoutCef>,
+    >,
+    mut last: Local<std::collections::HashMap<Entity, SideSheetState>>,
+    mut commands: Commands,
+) {
+    let empty_panes = PaneTreeState::default();
+    let empty_spaces = vmux_core::event::space::SpacesListEvent::default();
+    for (entity, panes, spaces) in &layouts {
+        let panes = panes
+            .map(|projection| &projection.0)
+            .unwrap_or(&empty_panes);
+        let spaces = spaces
+            .map(|projection| &projection.0)
+            .unwrap_or(&empty_spaces);
+        let state = SideSheetState::from_projections(panes, spaces);
+        if last.get(&entity) == Some(&state) {
+            continue;
+        }
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
+                entity, &state,
+            ),
+        );
+        last.insert(entity, state);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +335,77 @@ mod tests {
         let agent = ActiveSession::agent_for(&page, &team).unwrap();
 
         assert_eq!(agent.id, "second");
+    }
+
+    #[test]
+    fn side_sheet_projection_resolves_active_rows_before_ui_delivery() {
+        let panes = PaneTreeState {
+            panes: vec![
+                crate::event::PaneNode {
+                    id: 1,
+                    is_active: false,
+                    collapsed: false,
+                    bookmarks_expanded: false,
+                    stacks: vec![StackNode {
+                        id: 11,
+                        agent_id: None,
+                        title: "Fallback".into(),
+                        url: "vmux://fallback/".into(),
+                        icon: Default::default(),
+                        is_active: true,
+                        is_loading: false,
+                        is_dirty: false,
+                        bg_color: None,
+                    }],
+                },
+                crate::event::PaneNode {
+                    id: 2,
+                    is_active: true,
+                    collapsed: false,
+                    bookmarks_expanded: true,
+                    stacks: vec![StackNode {
+                        id: 22,
+                        agent_id: None,
+                        title: "Active".into(),
+                        url: "vmux://active/".into(),
+                        icon: Default::default(),
+                        is_active: true,
+                        is_loading: false,
+                        is_dirty: false,
+                        bg_color: None,
+                    }],
+                },
+            ],
+        };
+        let spaces = vmux_core::event::space::SpacesListEvent {
+            spaces: vec![
+                vmux_core::event::space::SpaceRow {
+                    id: "inactive".into(),
+                    ..Default::default()
+                },
+                vmux_core::event::space::SpaceRow {
+                    id: "active".into(),
+                    is_active: true,
+                    ..Default::default()
+                },
+            ],
+            selected: 1,
+        };
+
+        let state = SideSheetState::from_projections(&panes, &spaces);
+
+        assert_eq!(
+            state.active_space.as_ref().map(|space| space.id.as_str()),
+            Some("active")
+        );
+        assert_eq!(state.active_pane.as_ref().map(|pane| pane.id), Some(2));
+        assert_eq!(state.active_page.as_ref().map(|page| page.id), Some(22));
+        assert_eq!(
+            state.reveal,
+            Some(StackRevealTarget {
+                pane_id: 2,
+                stack_id: 22,
+            })
+        );
     }
 }

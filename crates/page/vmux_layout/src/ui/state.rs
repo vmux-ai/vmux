@@ -9,7 +9,7 @@ use vmux_ui::hooks::{send, use_ui_state_root};
 
 use super::update::UpdatePhase;
 use crate::event::{
-    ActiveSession, HeaderPageState, LayoutGeometry, PaneTreeState, RemoteUiState,
+    ActiveSession, HeaderPageState, LayoutGeometry, PaneTreeState, RemoteUiState, SideSheetState,
     StackNavigationState, TabBoundaryState, TabListState,
 };
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
@@ -21,6 +21,7 @@ pub(crate) struct LayoutPageState {
     pub tabs: Option<TabListState>,
     pub bookmarks: BookmarkStateEvent,
     pub pane_tree: Option<PaneTreeState>,
+    pub side_sheet: Option<SideSheetState>,
     pub spaces: Option<SpacesListEvent>,
     pub projects: TabBoundaryState,
     pub active_session: Option<ActiveSession>,
@@ -68,6 +69,7 @@ impl LayoutPageState {
             LayoutUiStatePatch::Tabs(event) => self.tabs = Some(event.clone()),
             LayoutUiStatePatch::Bookmarks(event) => self.bookmarks = event.clone(),
             LayoutUiStatePatch::PaneTree(event) => self.pane_tree = Some(event.clone()),
+            LayoutUiStatePatch::SideSheet(event) => self.side_sheet = Some(event.clone()),
             LayoutUiStatePatch::Spaces(event) => self.spaces = Some(event.clone()),
             LayoutUiStatePatch::Projects(event) => self.projects = event.clone(),
             LayoutUiStatePatch::ActiveSession(event) => self.active_session = event.session.clone(),
@@ -97,12 +99,13 @@ impl LayoutPageState {
         let stacks_ready = received(self.stacks.is_some());
         let tabs_ready = received(self.tabs.is_some());
         let pane_tree_ready = received(self.pane_tree.is_some());
+        let side_sheet_ready = received(self.side_sheet.is_some());
         let spaces_ready = received(self.spaces.is_some());
         let layout = self.layout.unwrap_or_default();
 
         layout_ready
             && (!layout.header_visible() || (stacks_ready && tabs_ready))
-            && (!layout.side_sheet_open || (pane_tree_ready && spaces_ready))
+            && (!layout.side_sheet_open || (pane_tree_ready && side_sheet_ready && spaces_ready))
     }
 }
 
@@ -201,6 +204,8 @@ mod tests {
 
         assert!(!state.overlay_ready(&None));
         state.pane_tree = Some(Default::default());
+        assert!(!state.overlay_ready(&None));
+        state.side_sheet = Some(Default::default());
         assert!(!state.overlay_ready(&None));
         state.spaces = Some(Default::default());
         assert!(state.overlay_ready(&None));

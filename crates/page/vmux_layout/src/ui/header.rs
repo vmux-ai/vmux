@@ -4,15 +4,14 @@ use dioxus::prelude::*;
 use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
+use vmux_core::PageMetadata;
 use vmux_core::event::team::{TeamMemberRow, TeamRequest};
-use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::platform::sleep_ms;
 use vmux_ui::util::cn;
 
 use super::bookmark::LayoutContextMenu;
@@ -66,7 +65,17 @@ fn HeaderContent() -> Element {
     let reload_key = ui.reload_revision;
     let stacks_error = layout.error();
     let tabs_error = stacks_error.clone();
-    let tab_drag = TabDrag::use_state();
+    let tab_order = use_memo(move || {
+        layout
+            .value()
+            .tabs
+            .unwrap_or_default()
+            .tabs
+            .into_iter()
+            .map(|tab| tab.id)
+            .collect()
+    });
+    let tab_drag = TabDrag::use_state(tab_order);
     let StackNavigationState {
         stacks: _,
         can_go_back,
@@ -74,25 +83,11 @@ fn HeaderContent() -> Element {
         is_zoomed: _,
     } = stacks_state;
     let TabListState { tabs } = tabs_state;
-    let host_tab_order = tabs.iter().map(|tab| tab.id.clone()).collect::<Vec<_>>();
-    let host_tab_activation = tabs
-        .iter()
-        .map(|tab| (tab.id.clone(), tab.is_active))
-        .collect::<Vec<_>>();
     let tab_drag_region_revision = tabs
         .iter()
         .map(|tab| tab.id.as_str())
         .collect::<Vec<_>>()
         .join(":");
-    let mut active_sync = tab_drag;
-    use_effect(use_reactive!(|(host_tab_activation, host_tab_order)| {
-        let host_active_tab_id = host_tab_activation
-            .iter()
-            .find(|(_, is_active)| *is_active)
-            .map(|(id, _)| id.clone());
-        active_sync.acknowledge_host(host_active_tab_id, host_tab_order);
-    }));
-    let tabs = tab_drag.ordered(tabs);
     let tab_metrics_style = TabDrag::metrics_style();
     let active_row = header_page.active;
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
@@ -132,21 +127,18 @@ fn HeaderContent() -> Element {
                         class: "flex min-w-0 flex-1 items-center gap-[var(--tab-gap)] overflow-x-auto overflow-y-hidden pl-2",
                         style: "{tab_metrics_style}",
                         for (tab_index, tab) in tabs.iter().enumerate() {
-                            {
-                                let mut tab = tab.clone();
-                                tab.is_active = tab_drag.is_active(&tab.id, tab.is_active);
-                                if tab.is_active {
-                                    tab.bg_color = active_bg_color.clone();
-                                }
-                                rsx! {
-                                    Tab {
-                                        key: "{tab.id}",
-                                        tab,
-                                        index: tab_index,
-                                        drag: tab_drag,
+                            Tab {
+                                key: "{tab.id}",
+                                tab: {
+                                    let mut tab = tab.clone();
+                                    if tab.is_active {
+                                        tab.bg_color = active_bg_color.clone();
                                     }
+                                    tab
+                                },
+                                index: tab_index,
+                                drag: tab_drag,
                                 }
-                            }
                         }
                         NewTabButton {}
                         WindowDragRegion {
@@ -365,7 +357,7 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
                 div {
                     title: "{tooltip}",
                     class: "flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden",
-                    HeaderTabIcon {
+                    StackIcon {
                         icon: tab.icon.clone(),
                         url: tab.url.clone(),
                         title: display_title.clone(),
@@ -419,50 +411,6 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
                     {translate("layout-pin")}
                 }
             }
-        }
-    }
-}
-
-#[component]
-fn HeaderTabIcon(icon: PageIcon, url: String, title: String) -> Element {
-    if title == "New Stack" && url.is_empty() {
-        return rsx! { StackIcon { icon, url, title } };
-    }
-    let initial_ready = !icon.is_none();
-    let mut displayed_icon = use_signal(|| icon.clone());
-    let mut displayed_url = use_signal(|| url.clone());
-    let mut fallback_ready = use_signal(|| initial_ready);
-    let mut generation = use_signal(|| 0_u32);
-    use_effect(use_reactive!(|(icon, url)| {
-        let next = generation.peek().wrapping_add(1);
-        generation.set(next);
-        if !icon.is_none() {
-            displayed_icon.set(icon);
-            displayed_url.set(url);
-            fallback_ready.set(true);
-            return;
-        }
-        fallback_ready.set(false);
-        let url = url.clone();
-        spawn(async move {
-            sleep_ms(500).await;
-            if generation() != next {
-                return;
-            }
-            displayed_icon.set(PageIcon::None);
-            displayed_url.set(url);
-            fallback_ready.set(true);
-        });
-    }));
-    let shown_icon = displayed_icon();
-    if shown_icon.is_none() && !fallback_ready() {
-        return rsx! { span { class: "h-4 w-4 shrink-0" } };
-    }
-    rsx! {
-        StackIcon {
-            icon: shown_icon,
-            url: displayed_url(),
-            title,
         }
     }
 }

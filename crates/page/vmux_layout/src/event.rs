@@ -483,6 +483,20 @@ pub struct PaneTreeState {
     pub panes: Vec<PaneNode>,
 }
 
+#[vmux_api::contract(Copy, Eq)]
+pub struct StackRevealTarget {
+    pub pane_id: u64,
+    pub stack_id: u64,
+}
+
+#[vmux_api::contract(Default)]
+pub struct SideSheetState {
+    pub active_space: Option<vmux_core::event::space::SpaceRow>,
+    pub active_pane: Option<PaneNode>,
+    pub active_page: Option<StackNode>,
+    pub reveal: Option<StackRevealTarget>,
+}
+
 #[vmux_api::contract]
 pub struct PaneNode {
     pub id: u64,
