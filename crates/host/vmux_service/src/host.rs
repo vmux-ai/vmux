@@ -1,7 +1,7 @@
-pub use vmux_client::{
-    AuthorizedDevice, RelayToken, RemoteAuthorizationStore, pairing, read_message,
-    read_message_blocking, write_message, write_message_blocking,
+pub use crate::remote::authorization::{
+    AuthorizationOutcome, AuthorizedDevice, RelayToken, RemoteAuthorizationStore,
 };
+pub use crate::remote::pairing;
 pub use vmux_transport::DeviceId;
 
 pub mod acp;

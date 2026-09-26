@@ -23,7 +23,7 @@ pub enum ServiceCommand {
 impl ServiceArgs {
     #[cfg(target_os = "macos")]
     fn run(self) -> std::io::Result<i32> {
-        use vmux_client::{DaemonBinary, cli};
+        use vmux_service::{DaemonBinary, cli};
 
         match self.command {
             ServiceCommand::Status => cli::cmd_status(),
@@ -38,7 +38,7 @@ impl ServiceArgs {
 
     #[cfg(not(target_os = "macos"))]
     fn run(self) -> std::io::Result<i32> {
-        use vmux_client::cli;
+        use vmux_service::cli;
 
         match self.command {
             ServiceCommand::Status => cli::cmd_status(),

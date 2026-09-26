@@ -14,7 +14,7 @@ pub async fn run(
     {
         unsafe { std::env::set_var("VMUX_PROFILE", p) };
     }
-    let anchor = anchor.and_then(|s| s.parse::<vmux_client::protocol::ProcessId>().ok());
+    let anchor = anchor.and_then(|s| s.parse::<vmux_service::protocol::ProcessId>().ok());
     let server = vmux_app::ToolPlugin::server(
         anchor,
         acp_session,

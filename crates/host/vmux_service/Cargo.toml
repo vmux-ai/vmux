@@ -45,10 +45,11 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 crossbeam-channel = "0.5"
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+ring = { workspace = true }
 vmux_core = { path = "../../vmux_core" }
 vmux_git = { path = "../../vmux_git" }
 vmux_path = { path = "../../vmux_path" }
-vmux_client = { path = "../vmux_client" }
+vmux_profile = { path = "../../vmux_profile" }
 agent-client-protocol = "1.0.1"
 tokio-util = { version = "0.7", features = ["compat"] }
 tempfile = "3.27.0"

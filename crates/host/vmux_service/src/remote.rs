@@ -4,6 +4,10 @@ pub use vmux_api::room::{
 };
 
 #[cfg(host)]
+pub mod authorization;
+#[cfg(host)]
+pub mod pairing;
+#[cfg(host)]
 pub mod quic;
 #[cfg(host)]
 pub mod server;

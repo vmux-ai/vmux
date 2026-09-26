@@ -13,7 +13,7 @@ use vmux_transport::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
 
 use vmux_api::protocol::{ServiceMessage, SharedMessage};
 
-use vmux_client::AuthorizationOutcome;
+use crate::AuthorizationOutcome;
 use vmux_transport::DeviceId;
 use vmux_transport::framing::{Frame, FrameError, FrameStream};
 use vmux_transport::quic::{
@@ -503,7 +503,7 @@ mod live {
     use std::sync::Arc;
     use tokio::sync::{Mutex, broadcast};
     use vmux_api::protocol::SharedResponse;
-    use vmux_client::RemoteAuthorizationStore;
+    use crate::RemoteAuthorizationStore;
     use vmux_transport::DeviceId;
     use vmux_transport::quic::endpoint::{SelfSignedIdentity, Trust};
 
