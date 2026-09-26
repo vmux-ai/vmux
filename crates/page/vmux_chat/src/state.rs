@@ -17,20 +17,20 @@ impl Plugin for ChatUiStatePlugin {
     }
 }
 
-#[vmux_api::ui_state_patch]
-pub enum ChatUiStatePatch {
-    Snapshot(Box<ChatSnapshot>),
-    Composer(ComposerContext),
-    Mode(ModeState),
-    Model(ModelState),
-    SlashCommands(SlashCommands),
-    Key(ChatKey),
-    Transcript(Box<ChatTranscriptState>),
-    Attachments(Box<ChatAttachments>),
-    Media(Box<ChatMediaState>),
-    Branches(Box<ChatBranchesState>),
-    Resume(Box<ChatResumeState>),
-    ComposerEffect(ChatComposerEffect),
+#[vmux_api::ui_state_patch(Default)]
+pub struct ChatUiStatePatch {
+    pub snapshot: Option<Box<ChatSnapshot>>,
+    pub composer: Option<ComposerContext>,
+    pub mode: Option<ModeState>,
+    pub model: Option<ModelState>,
+    pub slash_commands: Option<SlashCommands>,
+    pub key: Option<ChatKey>,
+    pub transcript: Option<Box<ChatTranscriptState>>,
+    pub attachments: Option<Box<ChatAttachments>>,
+    pub media: Option<Box<ChatMediaState>>,
+    pub branches: Option<Box<ChatBranchesState>>,
+    pub resume: Option<Box<ChatResumeState>>,
+    pub composer_effect: Option<ChatComposerEffect>,
 }
 
 #[vmux_api::ui_state(Default, targets = ["sessions", "agent", "start"])]
@@ -85,7 +85,7 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let decoded = rkyv::from_bytes::<ChatUiState, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded.sequence, 3);
-        assert!(matches!(decoded.patches[0], ChatUiStatePatch::Snapshot(_)));
-        assert!(matches!(decoded.patches[1], ChatUiStatePatch::Model(_)));
+        assert!(decoded.patches[0].snapshot.is_some());
+        assert!(decoded.patches[1].model.is_some());
     }
 }

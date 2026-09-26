@@ -83,13 +83,18 @@ pub(crate) fn derive_state(input: &DeriveInput) -> syn::Result<TokenStream> {
 }
 
 pub(crate) fn derive_patch(input: &DeriveInput) -> syn::Result<TokenStream> {
+    match &input.data {
+        Data::Enum(data) => derive_enum_patch(input, data),
+        Data::Struct(data) => derive_struct_patch(input, data),
+        _ => Err(syn::Error::new_spanned(
+            &input.ident,
+            "UiStatePatch requires an enum or struct",
+        )),
+    }
+}
+
+fn derive_enum_patch(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<TokenStream> {
     let ident = &input.ident;
-    let Data::Enum(data) = &input.data else {
-        return Err(syn::Error::new_spanned(
-            ident,
-            "UiStatePatch requires an enum",
-        ));
-    };
     let generics = &input.generics;
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let mut implementations = Vec::new();
@@ -145,6 +150,61 @@ pub(crate) fn derive_patch(input: &DeriveInput) -> syn::Result<TokenStream> {
     Ok(quote! { #(#implementations)* })
 }
 
+fn derive_struct_patch(input: &DeriveInput, data: &syn::DataStruct) -> syn::Result<TokenStream> {
+    let ident = &input.ident;
+    let Fields::Named(fields) = &data.fields else {
+        return Err(syn::Error::new_spanned(
+            &data.fields,
+            "UiStatePatch structs require named optional fields",
+        ));
+    };
+    let generics = &input.generics;
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let mut implementations = Vec::new();
+    for field in &fields.named {
+        let field_name = field.ident.as_ref().unwrap();
+        let stored = option_inner(&field.ty).ok_or_else(|| {
+            syn::Error::new_spanned(&field.ty, "UiStatePatch fields require type Option<T>")
+        })?;
+        let payload = boxed_inner(stored).unwrap_or(stored);
+        let value = if boxed_inner(stored).is_some() {
+            quote! { ::std::boxed::Box::new(payload) }
+        } else {
+            quote! { payload }
+        };
+        let payload_ref = if boxed_inner(stored).is_some() {
+            quote! { self.#field_name.as_deref() }
+        } else {
+            quote! { self.#field_name.as_ref() }
+        };
+        let empty_fields = fields.named.iter().filter_map(|candidate| {
+            let candidate = candidate.ident.as_ref()?;
+            (candidate != field_name).then(|| quote! { #candidate: ::core::option::Option::None })
+        });
+        implementations.push(quote! {
+            impl #impl_generics ::core::convert::From<#payload>
+                for #ident #type_generics #where_clause
+            {
+                fn from(payload: #payload) -> Self {
+                    Self {
+                        #field_name: ::core::option::Option::Some(#value),
+                        #(#empty_fields),*
+                    }
+                }
+            }
+
+            impl #impl_generics ::vmux_api::UiStatePatch<#payload>
+                for #ident #type_generics #where_clause
+            {
+                fn payload(&self) -> ::core::option::Option<&#payload> {
+                    #payload_ref
+                }
+            }
+        });
+    }
+    Ok(quote! { #(#implementations)* })
+}
+
 fn vec_element(ty: &Type) -> Option<&Type> {
     let Type::Path(path) = ty else {
         return None;
@@ -168,6 +228,23 @@ fn boxed_inner(ty: &Type) -> Option<&Type> {
     };
     let segment = path.path.segments.last()?;
     if segment.ident != "Box" {
+        return None;
+    }
+    let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return None;
+    };
+    let Some(GenericArgument::Type(inner)) = arguments.args.first() else {
+        return None;
+    };
+    Some(inner)
+}
+
+fn option_inner(ty: &Type) -> Option<&Type> {
+    let Type::Path(path) = ty else {
+        return None;
+    };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Option" {
         return None;
     }
     let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
@@ -241,5 +318,20 @@ mod tests {
         assert!(rendered.contains("UiStatePatch < Snapshot >"));
         assert!(rendered.contains("Box :: new (payload)"));
         assert!(rendered.contains("payload . as_ref ()"));
+    }
+
+    #[test]
+    fn struct_patch_maps_each_optional_field() {
+        let input = parse_quote! {
+            pub struct EditorPatch {
+                pub meta: Option<MetaEvent>,
+                pub snapshot: Option<Box<Snapshot>>,
+            }
+        };
+        let output = derive_patch(&input).unwrap();
+        let file = parse2::<syn::File>(output).unwrap();
+
+        assert_eq!(file.items.len(), 4);
+        assert!(file.items.iter().all(|item| matches!(item, Item::Impl(_))));
     }
 }

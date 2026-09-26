@@ -95,53 +95,64 @@ impl Chat {
     }
 
     fn apply_ui_state(&self, patch: &ChatUiStatePatch) {
-        match patch {
-            ChatUiStatePatch::Snapshot(snapshot) => self.apply_snapshot(*snapshot.clone()),
-            ChatUiStatePatch::Composer(context) => {
-                let mut composer_context = self.slash.composer_context;
-                let mut loaded = self.projects.loaded;
-                composer_context.set(context.clone());
-                loaded.set(true);
-            }
-            ChatUiStatePatch::Mode(state) => {
-                let mut modes = self.permissions.modes;
-                let mut current_mode_id = self.permissions.current_mode_id;
-                modes.set(state.modes.clone());
-                current_mode_id.set(state.current_mode_id.clone());
-            }
-            ChatUiStatePatch::Model(state) => {
-                let mut models = self.models.models;
-                let mut current_model_id = self.models.current_model_id;
-                let mut default_model_id = self.models.default_model_id;
-                let mut current_model = self.models.current_model;
-                let mut loaded = self.models.loaded;
-                let mut levels = self.effort.levels;
-                let mut current = self.effort.current;
-                let mut default_level = self.effort.default_level;
-                let mut agent_key = self.effort.agent_key;
-                let mut menu_sel = self.slash.menu_sel;
-                models.set(state.models.clone());
-                current_model_id.set(state.current_model_id.clone());
-                default_model_id.set(state.default_model_id.clone());
-                current_model.set(state.current_model_name.clone());
-                levels.set(state.effort_levels.clone());
-                current.set(state.effort_current.clone());
-                default_level.set(state.effort_default.clone());
-                agent_key.set(state.agent_key.clone());
-                menu_sel.set(0);
-                loaded.set(true);
-            }
-            ChatUiStatePatch::SlashCommands(incoming) => {
-                let mut commands = self.slash.commands;
-                commands.set(incoming.commands.clone());
-            }
-            ChatUiStatePatch::Key(_) => {}
-            ChatUiStatePatch::Transcript(state) => self.apply_transcript(state),
-            ChatUiStatePatch::Attachments(selected) => self.apply_attachments(selected),
-            ChatUiStatePatch::Media(state) => self.apply_media(state),
-            ChatUiStatePatch::Branches(incoming) => self.apply_branches(incoming),
-            ChatUiStatePatch::Resume(state) => self.apply_sessions(state),
-            ChatUiStatePatch::ComposerEffect(effect) => self.apply_composer_effect(effect),
+        if let Some(snapshot) = &patch.snapshot {
+            self.apply_snapshot(*snapshot.clone());
+        }
+        if let Some(context) = &patch.composer {
+            let mut composer_context = self.slash.composer_context;
+            let mut loaded = self.projects.loaded;
+            composer_context.set(context.clone());
+            loaded.set(true);
+        }
+        if let Some(state) = &patch.mode {
+            let mut modes = self.permissions.modes;
+            let mut current_mode_id = self.permissions.current_mode_id;
+            modes.set(state.modes.clone());
+            current_mode_id.set(state.current_mode_id.clone());
+        }
+        if let Some(state) = &patch.model {
+            let mut models = self.models.models;
+            let mut current_model_id = self.models.current_model_id;
+            let mut default_model_id = self.models.default_model_id;
+            let mut current_model = self.models.current_model;
+            let mut loaded = self.models.loaded;
+            let mut levels = self.effort.levels;
+            let mut current = self.effort.current;
+            let mut default_level = self.effort.default_level;
+            let mut agent_key = self.effort.agent_key;
+            let mut menu_sel = self.slash.menu_sel;
+            models.set(state.models.clone());
+            current_model_id.set(state.current_model_id.clone());
+            default_model_id.set(state.default_model_id.clone());
+            current_model.set(state.current_model_name.clone());
+            levels.set(state.effort_levels.clone());
+            current.set(state.effort_current.clone());
+            default_level.set(state.effort_default.clone());
+            agent_key.set(state.agent_key.clone());
+            menu_sel.set(0);
+            loaded.set(true);
+        }
+        if let Some(incoming) = &patch.slash_commands {
+            let mut commands = self.slash.commands;
+            commands.set(incoming.commands.clone());
+        }
+        if let Some(state) = &patch.transcript {
+            self.apply_transcript(state);
+        }
+        if let Some(selected) = &patch.attachments {
+            self.apply_attachments(selected);
+        }
+        if let Some(state) = &patch.media {
+            self.apply_media(state);
+        }
+        if let Some(incoming) = &patch.branches {
+            self.apply_branches(incoming);
+        }
+        if let Some(state) = &patch.resume {
+            self.apply_sessions(state);
+        }
+        if let Some(effect) = &patch.composer_effect {
+            self.apply_composer_effect(effect);
         }
     }
 
