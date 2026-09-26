@@ -3,8 +3,8 @@ use bevy_cef::prelude::HostWindow;
 use vmux_command::WriteCommandRequests;
 use vmux_service::client::{ServiceInbound, ServiceRequest};
 use vmux_service::protocol::{
-    AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentCommandResult, AgentQuery,
-    AgentQueryResult, AgentRequestId, AgentSpace, ClientMessage, JsonValue, ProcessId,
+    AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentCommandResult, AgentImage, AgentQuery,
+    AgentRecording, AgentRequestId, AgentSpace, ClientMessage, JsonValue, ProcessId,
     ServiceMessage,
 };
 use vmux_setting::AppSettings;
@@ -13,11 +13,10 @@ use vmux_terminal::ServiceMessageSet;
 use crate::events::{
     AgentQueryRequest, RecordStartRequest, RecordStartResponse, RecordStopRequest,
     RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
-    snapshot_response_to_query_result,
 };
 use vmux_core::browser::{
-    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserSnapshotRequest,
-    BrowserSnapshotResponse,
+    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
+    BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
 
 use super::browser_pane::AgentBrowserResolve;
@@ -233,6 +232,7 @@ impl Plugin for AgentQueryPlugin {
                     forward_layout_snapshot_responses,
                     forward_screenshot_responses,
                     forward_snapshot_responses,
+                    forward_browser_scroll_responses,
                     forward_navigation_snapshot_responses,
                     forward_record_start_responses,
                     forward_record_stop_responses,
@@ -318,16 +318,16 @@ fn answer_working_directory_queries(
 ) {
     for request in reader.read() {
         let result = if browse.agent_pane(request.anchor).is_none() {
-            AgentQueryResult::Error("agent pane not found".to_string())
+            Err("agent pane not found".to_string())
         } else if let Some(path) = browse.working_directory(request.anchor, &tabs) {
-            AgentQueryResult::Text(path.to_string_lossy().into_owned())
+            Ok(path.to_string_lossy().into_owned())
         } else {
             match super::run_terminal::AgentCwd::projects() {
-                Ok(path) => AgentQueryResult::Text(path.to_string_lossy().into_owned()),
-                Err(message) => AgentQueryResult::Error(message),
+                Ok(path) => Ok(path.to_string_lossy().into_owned()),
+                Err(message) => Err(message),
             }
         };
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentWorkingDirectoryResult {
             request_id: request.request_id,
             result,
         }));
@@ -341,10 +341,10 @@ fn answer_settings_queries(
 ) {
     for request in reader.read() {
         let result = match serde_json::to_value(&*settings) {
-            Ok(settings) => AgentQueryResult::Settings(JsonValue::from(settings)),
-            Err(error) => AgentQueryResult::Error(format!("failed to serialize settings: {error}")),
+            Ok(settings) => Ok(JsonValue::from(settings)),
+            Err(error) => Err(format!("failed to serialize settings: {error}")),
         };
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentSettingsResult {
             request_id: request.request_id,
             result,
         }));
@@ -375,9 +375,9 @@ fn answer_space_queries(
             &child_of,
             &host_windows,
         );
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentSpacesResult {
             request_id: request.request_id,
-            result: AgentQueryResult::Spaces(rows.0),
+            result: Ok(rows.0),
         }));
     }
 }
@@ -393,9 +393,9 @@ fn answer_command_queries(
             .filter_map(vmux_command::CommandDefinition::agent_tool)
             .collect::<Vec<_>>();
         tools.sort_by(|left, right| left.name.cmp(&right.name));
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandsResult {
             request_id: request.request_id,
-            result: AgentQueryResult::Commands(tools),
+            result: Ok(tools),
         }));
     }
 }
@@ -405,9 +405,9 @@ fn answer_vault_queries(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentVaultStatusResult {
             request_id: request.request_id,
-            result: AgentQueryResult::VaultStatus(vmux_core::profile::vault::status().snapshot()),
+            result: Ok(vmux_core::profile::vault::status().snapshot()),
         }));
     }
 }
@@ -515,9 +515,9 @@ fn answer_bookmark_queries(
         }
         roots.sort_by_key(|(order, _)| *order);
         let roots = roots.into_iter().map(|(_, node)| node).collect();
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentBookmarksResult {
             request_id: request.request_id,
-            result: AgentQueryResult::Bookmarks(AgentBookmarks { pins, roots }),
+            result: Ok(AgentBookmarks { pins, roots }),
         }));
     }
 }
@@ -577,24 +577,22 @@ fn forward_layout_snapshot_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentLayoutResult {
             request_id: AgentRequestId(response.request_id),
-            result: AgentQueryResult::Layout(response.snapshot.clone()),
+            result: Ok(response.snapshot.clone()),
         }));
     }
 }
 
-fn screenshot_response_to_query_result(
-    result: &Result<ScreenshotImage, String>,
-) -> AgentQueryResult {
+fn screenshot_result(result: &Result<ScreenshotImage, String>) -> Result<AgentImage, String> {
     match result {
-        Ok(img) => AgentQueryResult::Image {
+        Ok(img) => Ok(AgentImage {
             path: img.path.clone(),
             png: img.png.clone(),
             width: img.width,
             height: img.height,
-        },
-        Err(message) => AgentQueryResult::Error(message.clone()),
+        }),
+        Err(message) => Err(message.clone()),
     }
 }
 
@@ -603,9 +601,9 @@ fn forward_screenshot_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentScreenshotResult {
             request_id: AgentRequestId(response.request_id),
-            result: screenshot_response_to_query_result(&response.result),
+            result: screenshot_result(&response.result),
         }));
     }
 }
@@ -615,9 +613,21 @@ fn forward_snapshot_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserSnapshotResult {
             request_id: AgentRequestId(response.request_id),
-            result: snapshot_response_to_query_result(&response.result),
+            result: response.result.clone(),
+        }));
+    }
+}
+
+fn forward_browser_scroll_responses(
+    mut reader: MessageReader<BrowserScrollResponse>,
+    mut service_requests: MessageWriter<ServiceRequest>,
+) {
+    for response in reader.read() {
+        service_requests.write(ServiceRequest(ClientMessage::AgentBrowserScrollResult {
+            request_id: AgentRequestId(response.request_id),
+            result: response.result.clone(),
         }));
     }
 }
@@ -638,37 +648,28 @@ fn forward_navigation_snapshot_responses(
     }
 }
 
-fn record_start_response_to_query_result(result: &Result<u32, String>) -> AgentQueryResult {
-    match result {
-        Ok(max_secs) => AgentQueryResult::Text(format!("recording started, max {max_secs}s")),
-        Err(message) => AgentQueryResult::Error(message.clone()),
-    }
-}
-
 fn forward_record_start_responses(
     mut reader: MessageReader<RecordStartResponse>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentRecordStartResult {
             request_id: AgentRequestId(response.request_id),
-            result: record_start_response_to_query_result(&response.result),
+            result: response.result.clone(),
         }));
     }
 }
 
-fn record_stop_response_to_query_result(
-    result: &Result<RecordingInfo, String>,
-) -> AgentQueryResult {
+fn recording_result(result: &Result<RecordingInfo, String>) -> Result<AgentRecording, String> {
     match result {
-        Ok(info) => AgentQueryResult::Recording {
+        Ok(info) => Ok(AgentRecording {
             mp4_path: info.mp4_path.clone(),
             gif_path: info.gif_path.clone(),
             duration_ms: info.duration_ms,
             bytes: info.bytes,
             auto_stopped: info.auto_stopped,
-        },
-        Err(message) => AgentQueryResult::Error(message.clone()),
+        }),
+        Err(message) => Err(message.clone()),
     }
 }
 
@@ -677,9 +678,9 @@ fn forward_record_stop_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentRecordStopResult {
             request_id: AgentRequestId(response.request_id),
-            result: record_stop_response_to_query_result(&response.result),
+            result: recording_result(&response.result),
         }));
     }
 }
@@ -689,13 +690,9 @@ fn forward_simulator_control_responses(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for response in reader.read() {
-        let result = match &response.result {
-            Ok(message) => AgentQueryResult::Text(message.clone()),
-            Err(message) => AgentQueryResult::Error(message.clone()),
-        };
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentSimulatorControlResult {
             request_id: AgentRequestId(response.request_id),
-            result,
+            result: response.result.clone(),
         }));
     }
 }
@@ -706,18 +703,20 @@ fn forward_simulator_screenshot_responses(
 ) {
     for response in reader.read() {
         let result = match &response.result {
-            Ok(image) => AgentQueryResult::Image {
+            Ok(image) => Ok(AgentImage {
                 path: image.path.clone(),
                 png: image.png.clone(),
                 width: image.width,
                 height: image.height,
-            },
-            Err(message) => AgentQueryResult::Error(message.clone()),
+            }),
+            Err(message) => Err(message.clone()),
         };
-        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
-            request_id: AgentRequestId(response.request_id),
-            result,
-        }));
+        service_requests.write(ServiceRequest(
+            ClientMessage::AgentSimulatorScreenshotResult {
+                request_id: AgentRequestId(response.request_id),
+                result,
+            },
+        ));
     }
 }
 
@@ -850,43 +849,38 @@ mod tests {
 
     #[test]
     pub(crate) fn screenshot_response_maps_ok_and_err() {
-        let ok = screenshot_response_to_query_result(&Ok(ScreenshotImage {
+        let ok = screenshot_result(&Ok(ScreenshotImage {
             path: "/tmp/a.png".into(),
             png: vec![9, 8, 7],
             width: 10,
             height: 20,
-        }));
-        assert!(matches!(
-            ok,
-            AgentQueryResult::Image { path, png, width, height }
-                if path == "/tmp/a.png" && png == vec![9, 8, 7] && width == 10 && height == 20
-        ));
+        }))
+        .unwrap();
+        assert_eq!(ok.path, "/tmp/a.png");
+        assert_eq!(ok.png, vec![9, 8, 7]);
+        assert_eq!(ok.width, 10);
+        assert_eq!(ok.height, 20);
 
-        let err = screenshot_response_to_query_result(&Err("nope".to_string()));
-        assert!(matches!(err, AgentQueryResult::Error(m) if m == "nope"));
-    }
-
-    #[test]
-    pub(crate) fn record_start_response_maps_ok_and_err() {
-        let ok = record_start_response_to_query_result(&Ok(120));
-        assert!(matches!(ok, AgentQueryResult::Text(t) if t.contains("120")));
-        let err = record_start_response_to_query_result(&Err("nope".to_string()));
-        assert!(matches!(err, AgentQueryResult::Error(m) if m == "nope"));
+        assert_eq!(
+            screenshot_result(&Err("nope".to_string())),
+            Err("nope".to_string())
+        );
     }
 
     #[test]
     pub(crate) fn record_stop_response_maps_ok_and_err() {
-        let ok = record_stop_response_to_query_result(&Ok(RecordingInfo {
+        let ok = recording_result(&Ok(RecordingInfo {
             mp4_path: "/tmp/x.mp4".into(),
             gif_path: None,
             duration_ms: 1000,
             bytes: 42,
             auto_stopped: false,
-        }));
-        assert!(
-            matches!(ok, AgentQueryResult::Recording { mp4_path, .. } if mp4_path == "/tmp/x.mp4")
+        }))
+        .unwrap();
+        assert_eq!(ok.mp4_path, "/tmp/x.mp4");
+        assert_eq!(
+            recording_result(&Err("boom".to_string())),
+            Err("boom".to_string())
         );
-        let err = record_stop_response_to_query_result(&Err("boom".to_string()));
-        assert!(matches!(err, AgentQueryResult::Error(m) if m == "boom"));
     }
 }

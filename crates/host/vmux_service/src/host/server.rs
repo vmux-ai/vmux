@@ -22,12 +22,7 @@ pub(crate) fn init_started_at() {
 }
 
 type PendingQueries = Arc<
-    Mutex<
-        HashMap<
-            crate::protocol::AgentRequestId,
-            tokio::sync::oneshot::Sender<crate::protocol::AgentQueryResult>,
-        >,
-    >,
+    Mutex<HashMap<crate::protocol::AgentRequestId, tokio::sync::oneshot::Sender<ServiceMessage>>>,
 >;
 
 pub(crate) struct ServiceDaemonPlugin {
@@ -302,61 +297,124 @@ fn command_result_to_content(result: crate::protocol::AgentCommandResult) -> (St
     }
 }
 
-fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String, bool) {
-    use crate::protocol::AgentQueryResult;
-    match result {
-        AgentQueryResult::Layout(snapshot) => {
-            (serde_json::to_string(&snapshot).unwrap_or_default(), false)
-        }
-        AgentQueryResult::VaultStatus(snapshot) => (
-            serde_json::to_string_pretty(&snapshot).unwrap_or_default(),
-            false,
-        ),
-        AgentQueryResult::Text(text) => (text, false),
-        AgentQueryResult::Settings(settings) => {
-            let value = serde_json::Value::try_from(&settings).unwrap_or(serde_json::Value::Null);
-            (serde_json::to_string(&value).unwrap_or_default(), false)
-        }
-        AgentQueryResult::Spaces(spaces) => {
-            (serde_json::to_string(&spaces).unwrap_or_default(), false)
-        }
-        AgentQueryResult::Bookmarks(bookmarks) => {
-            (serde_json::to_string(&bookmarks).unwrap_or_default(), false)
-        }
-        AgentQueryResult::Commands(commands) => {
-            (serde_json::to_string(&commands).unwrap_or_default(), false)
-        }
-        AgentQueryResult::CommandExit { seq, exit } => {
-            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
-            (format!("{{\"seq\":{seq},\"exit\":{exit}}}"), false)
-        }
-        AgentQueryResult::RunCompletion { token, exit } => {
-            let token = token.map_or_else(|| "null".to_string(), |t| format!("\"{t}\""));
-            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
-            (format!("{{\"token\":{token},\"exit\":{exit}}}"), false)
-        }
-        AgentQueryResult::Image {
-            path,
-            width,
-            height,
-            ..
-        } => (format!("saved {path} ({width}×{height})"), false),
-        AgentQueryResult::Recording {
-            mp4_path,
-            gif_path,
-            duration_ms,
-            bytes,
-            auto_stopped,
-        } => {
-            let secs = duration_ms as f64 / 1000.0;
-            let gif = gif_path.map(|g| format!(" + {g}")).unwrap_or_default();
-            let auto = if auto_stopped { " (auto-stopped)" } else { "" };
-            (
-                format!("recorded {secs:.1}s -> {mp4_path} ({bytes} bytes){gif}{auto}"),
+fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)> {
+    let content = match response {
+        ServiceMessage::AgentLayoutResult { result, .. } => match result {
+            Ok(snapshot) => (serde_json::to_string(&snapshot).unwrap_or_default(), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentVaultStatusResult { result, .. } => match result {
+            Ok(snapshot) => (
+                serde_json::to_string_pretty(&snapshot).unwrap_or_default(),
                 false,
-            )
-        }
-        AgentQueryResult::Error(message) => (message, true),
+            ),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentTerminalReadResult { result, .. }
+        | ServiceMessage::AgentTerminalReadFullResult { result, .. }
+        | ServiceMessage::AgentBrowserSnapshotResult { result, .. }
+        | ServiceMessage::AgentBrowserScrollResult { result, .. }
+        | ServiceMessage::AgentSimulatorControlResult { result, .. }
+        | ServiceMessage::AgentWorkingDirectoryResult { result, .. } => match result {
+            Ok(text) => (text, false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentSettingsResult { result, .. } => match result {
+            Ok(settings) => {
+                let value =
+                    serde_json::Value::try_from(&settings).unwrap_or(serde_json::Value::Null);
+                (serde_json::to_string(&value).unwrap_or_default(), false)
+            }
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentSpacesResult { result, .. } => match result {
+            Ok(spaces) => (serde_json::to_string(&spaces).unwrap_or_default(), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentBookmarksResult { result, .. } => match result {
+            Ok(bookmarks) => (serde_json::to_string(&bookmarks).unwrap_or_default(), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentCommandsResult { result, .. } => match result {
+            Ok(commands) => (serde_json::to_string(&commands).unwrap_or_default(), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentCommandExitResult { result, .. } => match result {
+            Ok(result) => {
+                let exit = result
+                    .exit
+                    .map_or_else(|| "null".to_string(), |code| code.to_string());
+                (
+                    format!("{{\"seq\":{},\"exit\":{exit}}}", result.sequence),
+                    false,
+                )
+            }
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentRunCompletionResult { result, .. } => match result {
+            Ok(result) => {
+                let token = result
+                    .token
+                    .map_or_else(|| "null".to_string(), |token| format!("\"{token}\""));
+                let exit = result
+                    .exit
+                    .map_or_else(|| "null".to_string(), |code| code.to_string());
+                (format!("{{\"token\":{token},\"exit\":{exit}}}"), false)
+            }
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentScreenshotResult { result, .. }
+        | ServiceMessage::AgentSimulatorScreenshotResult { result, .. } => match result {
+            Ok(image) => (
+                format!("saved {} ({}×{})", image.path, image.width, image.height),
+                false,
+            ),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentRecordStartResult { result, .. } => match result {
+            Ok(max_secs) => (format!("recording started, max {max_secs}s"), false),
+            Err(message) => (message, true),
+        },
+        ServiceMessage::AgentRecordStopResult { result, .. } => match result {
+            Ok(recording) => {
+                let secs = recording.duration_ms as f64 / 1000.0;
+                let gif = recording
+                    .gif_path
+                    .map(|path| format!(" + {path}"))
+                    .unwrap_or_default();
+                let auto = if recording.auto_stopped {
+                    " (auto-stopped)"
+                } else {
+                    ""
+                };
+                (
+                    format!(
+                        "recorded {secs:.1}s -> {} ({} bytes){gif}{auto}",
+                        recording.mp4_path, recording.bytes
+                    ),
+                    false,
+                )
+            }
+            Err(message) => (message, true),
+        },
+        _ => return None,
+    };
+    Some(content)
+}
+
+async fn route_agent_query_response(
+    request_id: crate::protocol::AgentRequestId,
+    response: ServiceMessage,
+    pending_queries: &PendingQueries,
+    broker: &crate::agent_broker::AgentBroker,
+) {
+    let pending = pending_queries.lock().await.remove(&request_id);
+    if let Some(tx) = pending {
+        let _ = tx.send(response);
+        return;
+    }
+    if let Some((content, is_error)) = query_response_to_content(response) {
+        broker.resolve_tool(request_id, content, is_error).await;
     }
 }
 
@@ -719,71 +777,218 @@ async fn handle_client(
             }
 
             ClientMessage::AgentQuery { request_id, query } => {
-                let result = match query {
+                let response = match query {
                     crate::protocol::AgentQuery::ReadTerminal { process_id } => {
-                        match terminal_queries.visible_text(process_id).await {
-                            Ok(text) => crate::protocol::AgentQueryResult::Text(text),
-                            Err(message) => crate::protocol::AgentQueryResult::Error(message),
+                        ServiceMessage::AgentTerminalReadResult {
+                            request_id,
+                            result: terminal_queries.visible_text(process_id).await,
                         }
                     }
                     crate::protocol::AgentQuery::ReadTerminalFull { process_id } => {
-                        match terminal_queries.full_text(process_id).await {
-                            Ok(text) => crate::protocol::AgentQueryResult::Text(text),
-                            Err(message) => crate::protocol::AgentQueryResult::Error(message),
+                        ServiceMessage::AgentTerminalReadFullResult {
+                            request_id,
+                            result: terminal_queries.full_text(process_id).await,
                         }
                     }
                     crate::protocol::AgentQuery::CommandExit { process_id } => {
-                        match terminal_queries.command_exit(process_id).await {
-                            Ok(CommandExitState { sequence, exit }) => {
-                                crate::protocol::AgentQueryResult::CommandExit {
-                                    seq: sequence,
-                                    exit,
-                                }
-                            }
-                            Err(message) => crate::protocol::AgentQueryResult::Error(message),
-                        }
+                        let result = terminal_queries.command_exit(process_id).await.map(
+                            |CommandExitState { sequence, exit }| {
+                                crate::protocol::AgentCommandExit { sequence, exit }
+                            },
+                        );
+                        ServiceMessage::AgentCommandExitResult { request_id, result }
                     }
                     crate::protocol::AgentQuery::RunCompletion { process_id } => {
-                        match terminal_queries.run_completion(process_id).await {
-                            Ok(RunCompletionState { token, exit }) => {
-                                crate::protocol::AgentQueryResult::RunCompletion { token, exit }
-                            }
-                            Err(message) => crate::protocol::AgentQueryResult::Error(message),
-                        }
+                        let result = terminal_queries.run_completion(process_id).await.map(
+                            |RunCompletionState { token, exit }| {
+                                crate::protocol::AgentRunCompletion { token, exit }
+                            },
+                        );
+                        ServiceMessage::AgentRunCompletionResult { request_id, result }
                     }
                     query => {
                         let broker = broker.clone();
                         let writer = writer.clone();
                         tokio::spawn(async move {
-                            let resp = match broker.query(request_id, query).await {
-                                Ok(result) => {
-                                    ServiceMessage::AgentQueryResult { request_id, result }
-                                }
+                            let response = match broker.query(request_id, query).await {
+                                Ok(response) => response,
                                 Err(message) => ServiceMessage::Error { message },
                             };
-                            let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&resp) {
-                                Ok(b) => b,
+                            let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&response) {
+                                Ok(bytes) => bytes,
                                 Err(_) => return,
                             };
-                            let mut w = writer.lock().await;
-                            let _ = crate::framing::write_raw_frame(&mut *w, &bytes).await;
+                            let mut writer = writer.lock().await;
+                            let _ = crate::framing::write_raw_frame(&mut *writer, &bytes).await;
                         });
                         continue;
                     }
                 };
-                let response = ServiceMessage::AgentQueryResult { request_id, result };
                 let mut writer = writer.lock().await;
                 write_message!(&mut *writer, &response)?;
             }
 
-            ClientMessage::AgentQueryResponse { request_id, result } => {
-                let pending = pending_queries.lock().await.remove(&request_id);
-                if let Some(tx) = pending {
-                    let _ = tx.send(result);
-                } else {
-                    let (content, is_error) = query_result_to_content(result);
-                    broker.resolve_tool(request_id, content, is_error).await;
-                }
+            ClientMessage::AgentLayoutResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentLayoutResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentTerminalReadResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentTerminalReadResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentTerminalReadFullResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentTerminalReadFullResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentCommandExitResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentCommandExitResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentRunCompletionResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentRunCompletionResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentSettingsResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentSettingsResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentSpacesResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentSpacesResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentScreenshotResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentScreenshotResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentBrowserSnapshotResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentBrowserSnapshotResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentBrowserScrollResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentBrowserScrollResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentRecordStartResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentRecordStartResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentRecordStopResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentRecordStopResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentBookmarksResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentBookmarksResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentSimulatorScreenshotResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentSimulatorScreenshotResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentSimulatorControlResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentSimulatorControlResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentWorkingDirectoryResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentWorkingDirectoryResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentVaultStatusResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentVaultStatusResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
+            }
+            ClientMessage::AgentCommandsResult { request_id, result } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentCommandsResult { request_id, result },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
             }
 
             ClientMessage::AgentCommandResponse { request_id, result } => {
@@ -1125,7 +1330,7 @@ async fn handle_client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId};
+    use crate::protocol::{AgentCommandResult, AgentQuery, AgentRequestId};
     use tokio::sync::oneshot;
 
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<ProcessId>) {
@@ -1189,15 +1394,24 @@ mod tests {
     async fn pending_queries_roundtrips_oneshot() {
         let pending: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
         let request_id = AgentRequestId::new();
-        let (tx, rx) = oneshot::channel::<AgentQueryResult>();
+        let (tx, rx) = oneshot::channel::<ServiceMessage>();
         pending.lock().await.insert(request_id, tx);
 
-        let result = AgentQueryResult::Settings(crate::protocol::JsonValue::Object(Vec::new()));
+        let response = ServiceMessage::AgentSettingsResult {
+            request_id,
+            result: Ok(crate::protocol::JsonValue::Object(Vec::new())),
+        };
         let resp_tx = pending.lock().await.remove(&request_id).expect("entry");
-        resp_tx.send(result.clone()).expect("send");
+        resp_tx.send(response).expect("send");
 
         let received = rx.await.expect("recv");
-        assert_eq!(received, result);
+        assert!(matches!(
+            received,
+            ServiceMessage::AgentSettingsResult {
+                request_id: received_id,
+                result: Ok(_),
+            } if received_id == request_id
+        ));
     }
 
     #[tokio::test]

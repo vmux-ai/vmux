@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, SnapshotResult};
 use vmux_core::LastActivatedAt;
 use vmux_core::browser::{
-    BrowserNavigationSnapshotResponse, BrowserSnapshotRequest, BrowserSnapshotResponse,
+    BrowserNavigationSnapshotResponse, BrowserScrollResponse, BrowserSnapshotRequest,
+    BrowserSnapshotResponse,
 };
 use vmux_core::dom_snapshot::{RawSnapshot, shape_snapshot};
 use vmux_core::terminal::{ProcessExited, Terminal};
@@ -23,19 +24,23 @@ struct NavigationSnapshotResponseRoute {
 
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            drive_pending_nav_snapshots
-                .after(crate::apply_pending_navigation_updates)
-                .after(vmux_command::WriteCommandRequests),
-        )
-        .add_systems(
-            Update,
-            (start_snapshots, shape_snapshot_results)
-                .chain()
-                .after(crate::scroll::run_scrolls)
-                .after(vmux_command::WriteCommandRequests),
-        );
+        app.add_message::<BrowserSnapshotRequest>()
+            .add_message::<BrowserSnapshotResponse>()
+            .add_message::<BrowserScrollResponse>()
+            .add_message::<BrowserNavigationSnapshotResponse>()
+            .add_systems(
+                Update,
+                drive_pending_nav_snapshots
+                    .after(crate::apply_pending_navigation_updates)
+                    .after(vmux_command::WriteCommandRequests),
+            )
+            .add_systems(
+                Update,
+                (start_snapshots, shape_snapshot_results)
+                    .chain()
+                    .after(crate::scroll::run_scrolls)
+                    .after(vmux_command::WriteCommandRequests),
+            );
     }
 }
 
@@ -70,8 +75,10 @@ fn start_snapshots(
     stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     navigation_routes: Query<(Entity, &NavigationSnapshotResponseRoute)>,
+    scroll_routes: Query<(Entity, &crate::scroll::ScrollSnapshotResponseRoute)>,
     mut writer: MessageWriter<BrowserSnapshotResponse>,
     mut navigation_writer: MessageWriter<BrowserNavigationSnapshotResponse>,
+    mut scroll_writer: MessageWriter<BrowserScrollResponse>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -113,6 +120,17 @@ fn start_snapshots(
                 .find(|(_, route)| route.request_id == request.request_id);
             if let Some((entity, _)) = navigation {
                 navigation_writer.write(BrowserNavigationSnapshotResponse {
+                    request_id: request.request_id,
+                    result,
+                });
+                commands.entity(entity).despawn();
+                continue;
+            }
+            let scroll = scroll_routes
+                .iter()
+                .find(|(_, route)| route.request_id == request.request_id);
+            if let Some((entity, _)) = scroll {
+                scroll_writer.write(BrowserScrollResponse {
                     request_id: request.request_id,
                     result,
                 });
@@ -210,8 +228,10 @@ pub(crate) fn drive_pending_nav_snapshots(
 fn shape_snapshot_results(
     mut reader: MessageReader<SnapshotResult>,
     navigation_routes: Query<(Entity, &NavigationSnapshotResponseRoute)>,
+    scroll_routes: Query<(Entity, &crate::scroll::ScrollSnapshotResponseRoute)>,
     mut writer: MessageWriter<BrowserSnapshotResponse>,
     mut navigation_writer: MessageWriter<BrowserNavigationSnapshotResponse>,
+    mut scroll_writer: MessageWriter<BrowserScrollResponse>,
     mut commands: Commands,
 ) {
     for result in reader.read() {
@@ -226,6 +246,17 @@ fn shape_snapshot_results(
             .find(|(_, route)| route.request_id == request_id);
         if let Some((entity, _)) = navigation {
             navigation_writer.write(BrowserNavigationSnapshotResponse {
+                request_id,
+                result: mapped,
+            });
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let scroll = scroll_routes
+            .iter()
+            .find(|(_, route)| route.request_id == request_id);
+        if let Some((entity, _)) = scroll {
+            scroll_writer.write(BrowserScrollResponse {
                 request_id,
                 result: mapped,
             });
@@ -250,18 +281,26 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SnapshotResult>()
             .add_message::<BrowserSnapshotResponse>()
+            .add_message::<BrowserScrollResponse>()
             .add_message::<BrowserNavigationSnapshotResponse>()
             .add_systems(Update, shape_snapshot_results);
 
         let navigation_id = [1; 16];
         let query_id = [2; 16];
-        let route = app
+        let scroll_id = [3; 16];
+        let navigation_route = app
             .world_mut()
             .spawn(NavigationSnapshotResponseRoute {
                 request_id: navigation_id,
             })
             .id();
-        for request_id in [navigation_id, query_id] {
+        let scroll_route = app
+            .world_mut()
+            .spawn(crate::scroll::ScrollSnapshotResponseRoute {
+                request_id: scroll_id,
+            })
+            .id();
+        for request_id in [navigation_id, query_id, scroll_id] {
             app.world_mut()
                 .resource_mut::<Messages<SnapshotResult>>()
                 .write(SnapshotResult {
@@ -283,10 +322,18 @@ mod tests {
             .resource_mut::<Messages<BrowserSnapshotResponse>>()
             .drain()
             .collect::<Vec<_>>();
+        let scroll = app
+            .world_mut()
+            .resource_mut::<Messages<BrowserScrollResponse>>()
+            .drain()
+            .collect::<Vec<_>>();
         assert_eq!(navigation.len(), 1);
         assert_eq!(navigation[0].request_id, navigation_id);
         assert_eq!(query.len(), 1);
         assert_eq!(query[0].request_id, query_id);
-        assert!(app.world().get_entity(route).is_err());
+        assert_eq!(scroll.len(), 1);
+        assert_eq!(scroll[0].request_id, scroll_id);
+        assert!(app.world().get_entity(navigation_route).is_err());
+        assert!(app.world().get_entity(scroll_route).is_err());
     }
 }

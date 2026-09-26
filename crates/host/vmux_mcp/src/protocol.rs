@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_service::protocol::{
-    AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, ServiceMessage,
+    AgentCommand, AgentQuery, AgentRequestId, ClientMessage, ServiceMessage,
 };
 
 pub struct McpPlugin {
@@ -351,8 +351,10 @@ fn start_list_tools(
             .remove::<vmux_tool::ToolCatalog>()
             .insert(McpExecution::new(async move {
                 if let Ok(connection) = vmux_service::client::ServiceConnection::connect().await
-                    && let Ok(AgentQueryResult::Commands(commands)) =
-                        agent_query(&connection, AgentQuery::ListCommands).await
+                    && let Ok(ServiceMessage::AgentCommandsResult {
+                        result: Ok(commands),
+                        ..
+                    }) = agent_query(&connection, AgentQuery::ListCommands).await
                 {
                     definitions = vmux_tool::ToolDefinition::merge_commands(definitions, commands)?;
                 }
@@ -556,7 +558,7 @@ pub fn command_result_to_mcp_response(
 async fn agent_query(
     connection: &vmux_service::client::ServiceConnection,
     query: AgentQuery,
-) -> Result<AgentQueryResult, String> {
+) -> Result<ServiceMessage, String> {
     let request_id = AgentRequestId::new();
     connection
         .send(&ClientMessage::AgentQuery { request_id, query })
@@ -570,146 +572,261 @@ async fn agent_query(
         else {
             return Err("vmux_service disconnected".to_string());
         };
-        match message {
-            ServiceMessage::AgentQueryResult {
-                request_id: received,
-                result,
-            } if received == request_id => return Ok(result),
-            ServiceMessage::Error { message } => return Err(message),
-            _ => {}
+        if query_response_request_id(&message) == Some(request_id) {
+            return Ok(message);
         }
+        if let ServiceMessage::Error { message } = message {
+            return Err(message);
+        }
+    }
+}
+
+fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId> {
+    match message {
+        ServiceMessage::AgentLayoutResult { request_id, .. }
+        | ServiceMessage::AgentTerminalReadResult { request_id, .. }
+        | ServiceMessage::AgentTerminalReadFullResult { request_id, .. }
+        | ServiceMessage::AgentCommandExitResult { request_id, .. }
+        | ServiceMessage::AgentRunCompletionResult { request_id, .. }
+        | ServiceMessage::AgentSettingsResult { request_id, .. }
+        | ServiceMessage::AgentSpacesResult { request_id, .. }
+        | ServiceMessage::AgentScreenshotResult { request_id, .. }
+        | ServiceMessage::AgentBrowserSnapshotResult { request_id, .. }
+        | ServiceMessage::AgentBrowserScrollResult { request_id, .. }
+        | ServiceMessage::AgentRecordStartResult { request_id, .. }
+        | ServiceMessage::AgentRecordStopResult { request_id, .. }
+        | ServiceMessage::AgentBookmarksResult { request_id, .. }
+        | ServiceMessage::AgentSimulatorScreenshotResult { request_id, .. }
+        | ServiceMessage::AgentSimulatorControlResult { request_id, .. }
+        | ServiceMessage::AgentWorkingDirectoryResult { request_id, .. }
+        | ServiceMessage::AgentVaultStatusResult { request_id, .. }
+        | ServiceMessage::AgentCommandsResult { request_id, .. } => Some(*request_id),
+        _ => None,
     }
 }
 
 async fn run_agent_query(query: vmux_service::protocol::AgentQuery) -> Result<Value, String> {
-    let request_id = vmux_service::protocol::AgentRequestId::new();
     let connection = vmux_service::client::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
-    connection
-        .send(&ClientMessage::AgentQuery { request_id, query })
-        .await
-        .map_err(|error| format!("cannot send agent query: {error}"))?;
-
-    loop {
-        let Some(message) = connection
-            .recv()
-            .await
-            .map_err(|error| format!("cannot read service response: {error}"))?
-        else {
-            return Err("vmux_service disconnected".to_string());
-        };
-        match message {
-            ServiceMessage::AgentQueryResult {
-                request_id: received,
-                result,
-            } if received == request_id => {
-                return Ok(query_result_to_mcp_response(result));
-            }
-            ServiceMessage::Error { message } => return Err(message),
-            _ => {}
-        }
-    }
+    let response = agent_query(&connection, query).await?;
+    Ok(query_response_to_mcp_response(response))
 }
 
-pub fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult) -> Value {
-    use vmux_service::protocol::AgentQueryResult;
-    match result {
-        AgentQueryResult::Layout(snapshot) => {
+pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
+    match response {
+        ServiceMessage::AgentLayoutResult {
+            result: Ok(snapshot),
+            ..
+        } => {
             let text = serde_json::to_string(&snapshot).unwrap_or_default();
             json!({
                 "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::VaultStatus(snapshot) => {
+        ServiceMessage::AgentVaultStatusResult {
+            result: Ok(snapshot),
+            ..
+        } => {
             let text = serde_json::to_string_pretty(&snapshot).unwrap_or_default();
             json!({
                 "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::Text(text) => {
+        ServiceMessage::AgentTerminalReadResult {
+            result: Ok(text), ..
+        }
+        | ServiceMessage::AgentTerminalReadFullResult {
+            result: Ok(text), ..
+        }
+        | ServiceMessage::AgentBrowserSnapshotResult {
+            result: Ok(text), ..
+        }
+        | ServiceMessage::AgentBrowserScrollResult {
+            result: Ok(text), ..
+        }
+        | ServiceMessage::AgentSimulatorControlResult {
+            result: Ok(text), ..
+        }
+        | ServiceMessage::AgentWorkingDirectoryResult {
+            result: Ok(text), ..
+        } => {
             json!({
                 "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::Settings(settings) => {
+        ServiceMessage::AgentSettingsResult {
+            result: Ok(settings),
+            ..
+        } => {
             let value = serde_json::Value::try_from(&settings).unwrap_or(serde_json::Value::Null);
             let text = serde_json::to_string(&value).unwrap_or_default();
             json!({
                 "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::Spaces(spaces) => {
+        ServiceMessage::AgentSpacesResult {
+            result: Ok(spaces), ..
+        } => {
             let text = serde_json::to_string(&spaces).unwrap_or_default();
             json!({
                 "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::Bookmarks(bookmarks) => {
+        ServiceMessage::AgentBookmarksResult {
+            result: Ok(bookmarks),
+            ..
+        } => {
             let text = serde_json::to_string(&bookmarks).unwrap_or_default();
             json!({
                 "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::Commands(commands) => {
+        ServiceMessage::AgentCommandsResult {
+            result: Ok(commands),
+            ..
+        } => {
             let text = serde_json::to_string(&commands).unwrap_or_default();
             json!({
                 "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::CommandExit { seq, exit } => {
-            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
+        ServiceMessage::AgentCommandExitResult {
+            result: Ok(result), ..
+        } => {
+            let exit = result
+                .exit
+                .map_or_else(|| "null".to_string(), |code| code.to_string());
             json!({
-                "content": [{"type": "text", "text": format!("{{\"seq\":{seq},\"exit\":{exit}}}")}]
+                "content": [{"type": "text", "text": format!("{{\"seq\":{},\"exit\":{exit}}}", result.sequence)}]
             })
         }
-        AgentQueryResult::RunCompletion { token, exit } => {
-            let token = token.map_or_else(|| "null".to_string(), |t| format!("\"{t}\""));
-            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
+        ServiceMessage::AgentRunCompletionResult {
+            result: Ok(result), ..
+        } => {
+            let token = result
+                .token
+                .map_or_else(|| "null".to_string(), |token| format!("\"{token}\""));
+            let exit = result
+                .exit
+                .map_or_else(|| "null".to_string(), |code| code.to_string());
             json!({
                 "content": [{"type": "text", "text": format!("{{\"token\":{token},\"exit\":{exit}}}")}]
             })
         }
-        AgentQueryResult::Image {
-            path,
-            png,
-            width,
-            height,
+        ServiceMessage::AgentScreenshotResult {
+            result: Ok(image), ..
+        }
+        | ServiceMessage::AgentSimulatorScreenshotResult {
+            result: Ok(image), ..
         } => {
             use base64::Engine;
-            let data = base64::engine::general_purpose::STANDARD.encode(&png);
+            let data = base64::engine::general_purpose::STANDARD.encode(&image.png);
             json!({
                 "content": [
-                    {"type": "text", "text": format!("saved {path} ({width}×{height})")},
+                    {"type": "text", "text": format!("saved {} ({}×{})", image.path, image.width, image.height)},
                     {"type": "image", "data": data, "mimeType": "image/png"}
                 ]
             })
         }
-        AgentQueryResult::Recording {
-            mp4_path,
-            gif_path,
-            duration_ms,
-            bytes,
-            auto_stopped,
+        ServiceMessage::AgentRecordStartResult {
+            result: Ok(max_secs),
+            ..
+        } => json!({
+            "content": [{"type": "text", "text": format!("recording started, max {max_secs}s")}]
+        }),
+        ServiceMessage::AgentRecordStopResult {
+            result: Ok(recording),
+            ..
         } => {
-            let secs = duration_ms as f64 / 1000.0;
-            let mut text = format!("recorded {secs:.1}s → {mp4_path} ({bytes} bytes)");
-            if let Some(g) = gif_path {
-                text.push_str(&format!(" + {g}"));
+            let secs = recording.duration_ms as f64 / 1000.0;
+            let mut text = format!(
+                "recorded {secs:.1}s → {} ({} bytes)",
+                recording.mp4_path, recording.bytes
+            );
+            if let Some(gif) = recording.gif_path {
+                text.push_str(&format!(" + {gif}"));
             }
-            if auto_stopped {
+            if recording.auto_stopped {
                 text.push_str(" (auto-stopped)");
             }
             json!({
                 "content": [{"type": "text", "text": text}]
             })
         }
-        AgentQueryResult::Error(message) => {
-            json!({
-                "isError": true,
-                "content": [{"type": "text", "text": message}]
-            })
+        ServiceMessage::AgentLayoutResult {
+            result: Err(message),
+            ..
         }
+        | ServiceMessage::AgentTerminalReadResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentTerminalReadFullResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentCommandExitResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentRunCompletionResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentSettingsResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentSpacesResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentScreenshotResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentBrowserSnapshotResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentBrowserScrollResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentRecordStartResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentRecordStopResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentBookmarksResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentSimulatorScreenshotResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentSimulatorControlResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentWorkingDirectoryResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentVaultStatusResult {
+            result: Err(message),
+            ..
+        }
+        | ServiceMessage::AgentCommandsResult {
+            result: Err(message),
+            ..
+        } => tool_error(&message),
+        _ => tool_error("unexpected agent query response"),
     }
 }
 
@@ -739,12 +856,14 @@ mod tests {
 
     #[test]
     fn image_query_result_maps_to_text_and_image_blocks() {
-        use vmux_service::protocol::AgentQueryResult;
-        let resp = query_result_to_mcp_response(AgentQueryResult::Image {
-            path: "/tmp/shot.png".into(),
-            png: vec![137, 80, 78, 71],
-            width: 800,
-            height: 600,
+        let resp = query_response_to_mcp_response(ServiceMessage::AgentScreenshotResult {
+            request_id: AgentRequestId::new(),
+            result: Ok(vmux_service::protocol::AgentImage {
+                path: "/tmp/shot.png".into(),
+                png: vec![137, 80, 78, 71],
+                width: 800,
+                height: 600,
+            }),
         });
         let content = resp["content"].as_array().unwrap();
         assert_eq!(content.len(), 2);
@@ -763,13 +882,15 @@ mod tests {
 
     #[test]
     fn recording_maps_to_text_block() {
-        use vmux_service::protocol::AgentQueryResult;
-        let v = query_result_to_mcp_response(AgentQueryResult::Recording {
-            mp4_path: "/tmp/x.mp4".into(),
-            gif_path: Some("/tmp/x.gif".into()),
-            duration_ms: 7400,
-            bytes: 1_000_000,
-            auto_stopped: true,
+        let v = query_response_to_mcp_response(ServiceMessage::AgentRecordStopResult {
+            request_id: AgentRequestId::new(),
+            result: Ok(vmux_service::protocol::AgentRecording {
+                mp4_path: "/tmp/x.mp4".into(),
+                gif_path: Some("/tmp/x.gif".into()),
+                duration_ms: 7400,
+                bytes: 1_000_000,
+                auto_stopped: true,
+            }),
         });
         let text = v["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("/tmp/x.mp4"));

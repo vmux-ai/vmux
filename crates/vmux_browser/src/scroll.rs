@@ -10,9 +10,14 @@ use vmux_layout::stack::Stack;
 
 pub(crate) struct ScrollPlugin;
 
+#[derive(Component)]
+pub(crate) struct ScrollSnapshotResponseRoute {
+    pub request_id: [u8; 16],
+}
+
 impl Plugin for ScrollPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_message::<BrowserScrollRequest>().add_systems(
             Update,
             run_scrolls
                 .after(crate::snapshot::drive_pending_nav_snapshots)
@@ -33,6 +38,7 @@ pub(crate) fn run_scrolls(
     stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     mut snap_writer: MessageWriter<BrowserSnapshotRequest>,
+    mut commands: Commands,
 ) {
     for request in reader.read() {
         let webview = if let Some(target) = request.pane.as_deref() {
@@ -66,6 +72,9 @@ pub(crate) fn run_scrolls(
             };
             cef_browsers.execute_js(&webview, &js);
         }
+        commands.spawn(ScrollSnapshotResponseRoute {
+            request_id: request.request_id,
+        });
         snap_writer.write(BrowserSnapshotRequest {
             request_id: request.request_id,
             pane: request.pane.clone(),

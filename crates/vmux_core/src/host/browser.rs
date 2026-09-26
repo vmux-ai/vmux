@@ -26,3 +26,9 @@ pub struct BrowserScrollRequest {
     pub to: Option<String>,
     pub delta: Option<i32>,
 }
+
+#[derive(Message, Clone)]
+pub struct BrowserScrollResponse {
+    pub request_id: [u8; 16],
+    pub result: Result<String, String>,
+}

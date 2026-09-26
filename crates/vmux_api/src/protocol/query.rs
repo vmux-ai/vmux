@@ -114,35 +114,31 @@ pub enum AgentQuery {
     ListCommands,
 }
 
-#[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum AgentQueryResult {
-    Layout(crate::protocol::layout::LayoutSnapshot),
-    VaultStatus(crate::vault::VaultStatusSnapshot),
-    Text(String),
-    Settings(JsonValue),
-    Spaces(Vec<AgentSpace>),
-    CommandExit {
-        seq: u64,
-        exit: Option<i32>,
-    },
-    RunCompletion {
-        token: Option<String>,
-        exit: Option<i32>,
-    },
-    Image {
-        path: String,
-        png: Vec<u8>,
-        width: u32,
-        height: u32,
-    },
-    Recording {
-        mp4_path: String,
-        gif_path: Option<String>,
-        duration_ms: u64,
-        bytes: u64,
-        auto_stopped: bool,
-    },
-    Error(String),
-    Bookmarks(AgentBookmarks),
-    Commands(Vec<AgentCommandTool>),
+#[vmux_api::contract(Eq)]
+pub struct AgentCommandExit {
+    pub sequence: u64,
+    pub exit: Option<i32>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AgentRunCompletion {
+    pub token: Option<String>,
+    pub exit: Option<i32>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AgentImage {
+    pub path: String,
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct AgentRecording {
+    pub mp4_path: String,
+    pub gif_path: Option<String>,
+    pub duration_ms: u64,
+    pub bytes: u64,
+    pub auto_stopped: bool,
 }

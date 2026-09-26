@@ -4,8 +4,8 @@ use vmux_core::agent::{
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
 };
 use vmux_core::browser::{
-    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserSnapshotRequest,
-    BrowserSnapshotResponse,
+    BrowserNavigationSnapshotResponse, BrowserScrollRequest, BrowserScrollResponse,
+    BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
 use vmux_terminal::TerminalStackSpawnRequest;
 
@@ -91,6 +91,7 @@ impl Plugin for AgentSessionPlugin {
             .add_message::<BrowserSnapshotResponse>()
             .add_message::<BrowserNavigationSnapshotResponse>()
             .add_message::<BrowserScrollRequest>()
+            .add_message::<BrowserScrollResponse>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStartResponse>()
             .add_message::<RecordStopRequest>()
