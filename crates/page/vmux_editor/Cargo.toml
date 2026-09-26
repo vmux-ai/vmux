@@ -20,6 +20,7 @@ unicode-width = "0.2"
 vmux_core = { path = "../../vmux_core" }
 vmux_native = { path = "../../vmux_native" }
 vmux_git = { path = "../../vmux_git" }
+vmux_api = { path = "../../vmux_api" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 arboard = "3"
@@ -57,7 +58,6 @@ vmux_path = { path = "../../vmux_path" }
 vmux_service = { path = "../../host/vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
-vmux_api = { path = "../../vmux_api" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_os = "ios"))'.dev-dependencies]

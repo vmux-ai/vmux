@@ -11,6 +11,8 @@ use vmux_api::bookmark::{
     BookmarkTextInputRequest, BookmarkUnpinRequest,
 };
 use vmux_core::PageMetadata;
+#[cfg(not(target_os = "macos"))]
+use vmux_ui::components::context_menu::ContextMenuTrigger;
 use vmux_ui::components::context_menu::{ContextMenu, ContextMenuContent, ContextMenuItem};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::inline_edit::InlineEdit;

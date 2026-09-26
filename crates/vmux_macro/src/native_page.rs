@@ -302,6 +302,7 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
         };
         let command_bar = args.command_bar;
         quote! {
+            #[cfg(host)]
             pub const MANIFEST: ::vmux_core::page::PageManifest =
                 ::vmux_core::page::PageManifest {
                     host: #host,
@@ -340,6 +341,7 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
 
             #manifest
 
+            #[cfg(host)]
             pub fn plugin() -> ::vmux_native::NativePagePlugin {
                 #plugin
             }

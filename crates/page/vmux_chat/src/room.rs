@@ -18,7 +18,7 @@ impl Plugin for ChatRoomPlugin {
         if !app.is_plugin_added::<ChatUiStatePlugin>() {
             app.add_plugins(ChatUiStatePlugin);
         }
-        #[cfg(ui)]
+        #[cfg(all(ui, host))]
         app.add_plugins(crate::ui::ChatPage::plugin());
         app.add_message::<Reported>()
             .add_message::<Submitted>()
