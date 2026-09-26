@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_command::{
-    CommandDefinition, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
+    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
 use vmux_core::host::UiStateWrite;
 
@@ -36,35 +36,12 @@ struct AttachSelectedSpace;
 struct DeleteSelectedSpace;
 
 fn spawn_commands(mut commands: Commands) {
-    commands.spawn((
-        CommandDefinition::new("space_next", "Next Space", "Layout > Space")
-            .hidden()
-            .direct_when("ArrowDown", Some("spaces"))
-            .direct_when("Ctrl+n", Some("spaces"))
-            .direct_when("Ctrl+j", Some("spaces")),
-        SelectNextSpace,
-    ));
-    commands.spawn((
-        CommandDefinition::new("space_previous", "Previous Space", "Layout > Space")
-            .hidden()
-            .direct_when("ArrowUp", Some("spaces"))
-            .direct_when("Ctrl+p", Some("spaces"))
-            .direct_when("Ctrl+k", Some("spaces")),
-        SelectPreviousSpace,
-    ));
-    commands.spawn((
-        CommandDefinition::new("space_attach", "Open Selected Space", "Layout > Space")
-            .hidden()
-            .direct_when("Enter", Some("spaces")),
-        AttachSelectedSpace,
-    ));
-    commands.spawn((
-        CommandDefinition::new("space_delete", "Delete Selected Space", "Layout > Space")
-            .hidden()
-            .direct_when("Delete", Some("spaces"))
-            .direct_when("Backspace", Some("spaces")),
-        DeleteSelectedSpace,
-    ));
+    let mut definitions = CommandDefinitions::from_ron(include_str!("key.ron"));
+    commands.spawn((definitions.take("space_next"), SelectNextSpace));
+    commands.spawn((definitions.take("space_previous"), SelectPreviousSpace));
+    commands.spawn((definitions.take("space_attach"), AttachSelectedSpace));
+    commands.spawn((definitions.take("space_delete"), DeleteSelectedSpace));
+    definitions.assert_all_registered();
 }
 
 fn select_next_space(

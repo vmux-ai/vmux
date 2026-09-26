@@ -10,10 +10,9 @@ use bevy::window::PrimaryWindow;
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::{
-    CommandDefinition, CommandInvocation, CommandMcp, CommandRequest, CommandTypePlugin,
-    InputSchema,
-};
+#[cfg(test)]
+use vmux_command::CommandDefinition;
+use vmux_command::{CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin};
 use vmux_core::Order;
 pub use vmux_core::workspace::TabCommandSet;
 use vmux_flex::prelude::*;
@@ -106,21 +105,8 @@ pub struct OpenRequest {
 }
 
 impl CommandRequest for OpenRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("open_in_new_tab", "Open in New Tab", "Browser > Open")
-                .accelerator("super+t")
-                .chord("Ctrl+b, c")
-                .mcp(CommandMcp::new(
-                    "Open a page in a brand-new Tab within the current Space. Tabs are the workspace-tab strip (one level above panes); creating one gives the user a fresh layout container.",
-                    InputSchema::object().optional(
-                        "url",
-                        InputSchema::string().description(
-                            "Absolute URL to open in the new Tab. If omitted, opens the startup URL.",
-                        ),
-                    ),
-                )),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("tab.ron")).select(&["open_in_new_tab"])
     }
 }
 
@@ -141,12 +127,8 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 pub struct CreateRequest;
 
 impl CommandRequest for CreateRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![CommandDefinition::new(
-            "new_task",
-            "New Task…",
-            "Layout > Tab",
-        )]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("tab.ron")).select(&["new_task"])
     }
 }
 
@@ -162,8 +144,8 @@ impl TryFrom<&CommandInvocation> for CreateRequest {
 pub struct CloseRequest;
 
 impl CommandRequest for CloseRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![CommandDefinition::new("close_tab", "Close Tab", "Layout > Tab").chord("Ctrl+b, &")]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("tab.ron")).select(&["close_tab"])
     }
 }
 
@@ -179,39 +161,20 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
 pub struct FocusRequest(pub TabFocus);
 
 impl CommandRequest for FocusRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("next_tab", "Next Tab", "Layout > Tab")
-                .accelerator("super+shift+]")
-                .direct("Super+Shift+L")
-                .direct("Super+Alt+ArrowRight")
-                .direct("Super+Shift+BracketRight")
-                .chord("Ctrl+b, n"),
-            CommandDefinition::new("prev_tab", "Previous Tab", "Layout > Tab")
-                .accelerator("super+shift+[")
-                .direct("Super+Shift+H")
-                .direct("Super+Alt+ArrowLeft")
-                .direct("Super+Shift+BracketLeft")
-                .chord("Ctrl+b, p"),
-            CommandDefinition::new("tab_select_1", "Select Tab 1", "Layout > Tab")
-                .accelerator("super+1"),
-            CommandDefinition::new("tab_select_2", "Select Tab 2", "Layout > Tab")
-                .accelerator("super+2"),
-            CommandDefinition::new("tab_select_3", "Select Tab 3", "Layout > Tab")
-                .accelerator("super+3"),
-            CommandDefinition::new("tab_select_4", "Select Tab 4", "Layout > Tab")
-                .accelerator("super+4"),
-            CommandDefinition::new("tab_select_5", "Select Tab 5", "Layout > Tab")
-                .accelerator("super+5"),
-            CommandDefinition::new("tab_select_6", "Select Tab 6", "Layout > Tab")
-                .accelerator("super+6"),
-            CommandDefinition::new("tab_select_7", "Select Tab 7", "Layout > Tab")
-                .accelerator("super+7"),
-            CommandDefinition::new("tab_select_8", "Select Tab 8", "Layout > Tab")
-                .accelerator("super+8"),
-            CommandDefinition::new("tab_select_last", "Select Last Tab", "Layout > Tab")
-                .accelerator("super+9"),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("tab.ron")).select(&[
+            "next_tab",
+            "prev_tab",
+            "tab_select_1",
+            "tab_select_2",
+            "tab_select_3",
+            "tab_select_4",
+            "tab_select_5",
+            "tab_select_6",
+            "tab_select_7",
+            "tab_select_8",
+            "tab_select_last",
+        ])
     }
 }
 
@@ -240,11 +203,9 @@ impl TryFrom<&CommandInvocation> for FocusRequest {
 pub struct MoveRequest(pub SiblingDirection);
 
 impl CommandRequest for MoveRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("swap_tab_prev", "Move Tab Left", "Layout > Tab").hidden(),
-            CommandDefinition::new("swap_tab_next", "Move Tab Right", "Layout > Tab").hidden(),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("tab.ron"))
+            .select(&["swap_tab_prev", "swap_tab_next"])
     }
 }
 

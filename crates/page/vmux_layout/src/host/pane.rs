@@ -19,7 +19,7 @@ use bevy::{
 };
 use moonshine_save::prelude::*;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-use vmux_command::{CommandDefinition, CommandInvocation, CommandRequest, CommandTypePlugin};
+use vmux_command::{CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin};
 #[cfg(test)]
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 #[cfg(test)]
@@ -81,25 +81,13 @@ pub struct OpenRequest {
 }
 
 impl CommandRequest for OpenRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("open_in_pane_top", "Open in Pane Top", "Browser > Open")
-                .direct("Super+Shift+K"),
-            CommandDefinition::new("open_in_pane_right", "Open in Pane Right", "Browser > Open")
-                .alias("split_v")
-                .direct("Super+Shift+L")
-                .chord("Ctrl+b, %"),
-            CommandDefinition::new(
-                "open_in_pane_bottom",
-                "Open in Pane Bottom",
-                "Browser > Open",
-            )
-            .alias("split_h")
-            .direct("Super+Shift+J")
-            .chord("Ctrl+b, \""),
-            CommandDefinition::new("open_in_pane_left", "Open in Pane Left", "Browser > Open")
-                .direct("Super+Shift+H"),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&[
+            "open_in_pane_top",
+            "open_in_pane_right",
+            "open_in_pane_bottom",
+            "open_in_pane_left",
+        ])
     }
 }
 
@@ -157,8 +145,8 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 pub struct CloseRequest;
 
 impl CommandRequest for CloseRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![CommandDefinition::new("close_pane", "Close Pane", "Layout > Pane").chord("Ctrl+b, x")]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&["close_pane"])
     }
 }
 
@@ -174,24 +162,14 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
 pub struct FocusRequest(pub PaneFocus);
 
 impl CommandRequest for FocusRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("toggle_pane", "Next Pane", "Layout > Pane")
-                .hidden()
-                .chord("Ctrl+b, o"),
-            CommandDefinition::new("select_pane_left", "Select Left Pane", "Layout > Pane")
-                .chord("Ctrl+b, h")
-                .chord("Ctrl+b, ArrowLeft"),
-            CommandDefinition::new("select_pane_right", "Select Right Pane", "Layout > Pane")
-                .chord("Ctrl+b, l")
-                .chord("Ctrl+b, ArrowRight"),
-            CommandDefinition::new("select_pane_up", "Select Up Pane", "Layout > Pane")
-                .chord("Ctrl+b, k")
-                .chord("Ctrl+b, ArrowUp"),
-            CommandDefinition::new("select_pane_down", "Select Down Pane", "Layout > Pane")
-                .chord("Ctrl+b, j")
-                .chord("Ctrl+b, ArrowDown"),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&[
+            "toggle_pane",
+            "select_pane_left",
+            "select_pane_right",
+            "select_pane_up",
+            "select_pane_down",
+        ])
     }
 }
 
@@ -214,35 +192,16 @@ impl TryFrom<&CommandInvocation> for FocusRequest {
 pub struct ArrangeRequest(pub PaneArrangement);
 
 impl CommandRequest for ArrangeRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("swap_pane_prev", "Swap Pane Previous", "Layout > Pane")
-                .chord("Ctrl+b, {"),
-            CommandDefinition::new("swap_pane_next", "Swap Pane Next", "Layout > Pane")
-                .chord("Ctrl+b, }"),
-            CommandDefinition::new("rotate_forward", "Rotate Forward", "Layout > Pane")
-                .hidden()
-                .chord("Ctrl+b, r")
-                .chord("Ctrl+b, Ctrl+o"),
-            CommandDefinition::new("rotate_backward", "Rotate Backward", "Layout > Pane")
-                .hidden()
-                .chord("Ctrl+b, Shift+r")
-                .chord("Ctrl+b, Alt+o"),
-            CommandDefinition::new("mirror_panes", "Mirror Panes", "Layout > Pane")
-                .chord("Ctrl+b, m"),
-            CommandDefinition::new(
-                "mirror_panes_horizontal",
-                "Mirror Panes Horizontally",
-                "Layout > Pane",
-            )
-            .chord("Ctrl+b, Alt+h"),
-            CommandDefinition::new(
-                "mirror_panes_vertical",
-                "Mirror Panes Vertically",
-                "Layout > Pane",
-            )
-            .chord("Ctrl+b, Alt+v"),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&[
+            "swap_pane_prev",
+            "swap_pane_next",
+            "rotate_forward",
+            "rotate_backward",
+            "mirror_panes",
+            "mirror_panes_horizontal",
+            "mirror_panes_vertical",
+        ])
     }
 }
 
@@ -271,24 +230,14 @@ impl TryFrom<&CommandInvocation> for ArrangeRequest {
 pub struct ResizeRequest(pub PaneResize);
 
 impl CommandRequest for ResizeRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("equalize_pane_size", "Equalize Pane Size", "Layout > Pane")
-                .chord("Ctrl+b, Shift+e")
-                .chord("Ctrl+b, ="),
-            CommandDefinition::new("resize_pane_left", "Resize Pane Left", "Layout > Pane")
-                .chord("Ctrl+b, Ctrl+ArrowLeft")
-                .chord("Ctrl+b, Alt+ArrowLeft"),
-            CommandDefinition::new("resize_pane_right", "Resize Pane Right", "Layout > Pane")
-                .chord("Ctrl+b, Ctrl+ArrowRight")
-                .chord("Ctrl+b, Alt+ArrowRight"),
-            CommandDefinition::new("resize_pane_up", "Resize Pane Up", "Layout > Pane")
-                .chord("Ctrl+b, Ctrl+ArrowUp")
-                .chord("Ctrl+b, Alt+ArrowUp"),
-            CommandDefinition::new("resize_pane_down", "Resize Pane Down", "Layout > Pane")
-                .chord("Ctrl+b, Ctrl+ArrowDown")
-                .chord("Ctrl+b, Alt+ArrowDown"),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&[
+            "equalize_pane_size",
+            "resize_pane_left",
+            "resize_pane_right",
+            "resize_pane_up",
+            "resize_pane_down",
+        ])
     }
 }
 
@@ -311,12 +260,8 @@ impl TryFrom<&CommandInvocation> for ResizeRequest {
 pub struct ToggleZoomRequest;
 
 impl CommandRequest for ToggleZoomRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("zoom_pane", "Zoom Pane", "Layout > Pane")
-                .hidden()
-                .chord("Ctrl+b, z"),
-        ]
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&["zoom_pane"])
     }
 }
 

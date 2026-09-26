@@ -1,0 +1,8 @@
+[
+    (
+        id: "service_open",
+        label: "Open Service Monitor",
+        group: "Service",
+        mcp: Some((description: "Open Service Monitor")),
+    ),
+]

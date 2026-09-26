@@ -1,0 +1,9 @@
+[
+    (
+        id: "browser_open_history",
+        label: "History",
+        group: "Browser > Bar",
+        accelerator: Some("super+y"),
+        mcp: Some((description: "History")),
+    ),
+]

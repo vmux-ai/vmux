@@ -80,10 +80,25 @@ impl Plugin for WindowLayoutPlugin {
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusedWindow(pub Option<Entity>);
 
-#[derive(vmux_macro::CommandBar)]
-#[menu(group = "Layout > Window")]
-#[shortcut(direct = "Super+m")]
+#[derive(Message)]
 struct MinimizeWindowRequest;
+
+impl vmux_command::CommandRequest for MinimizeWindowRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("window.ron"))
+            .select(&["minimize_window"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for MinimizeWindowRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "minimize_window")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WindowFocusSet;

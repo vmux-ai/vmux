@@ -1,0 +1,41 @@
+[
+    (
+        id: "space_next",
+        label: "Next Space",
+        group: "Layout > Space",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("ArrowDown"), when: Some("spaces")),
+            (shortcut: Direct("Ctrl+n"), when: Some("spaces")),
+            (shortcut: Direct("Ctrl+j"), when: Some("spaces")),
+        ],
+    ),
+    (
+        id: "space_previous",
+        label: "Previous Space",
+        group: "Layout > Space",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("ArrowUp"), when: Some("spaces")),
+            (shortcut: Direct("Ctrl+p"), when: Some("spaces")),
+            (shortcut: Direct("Ctrl+k"), when: Some("spaces")),
+        ],
+    ),
+    (
+        id: "space_attach",
+        label: "Open Selected Space",
+        group: "Layout > Space",
+        hidden: true,
+        shortcuts: [(shortcut: Direct("Enter"), when: Some("spaces"))],
+    ),
+    (
+        id: "space_delete",
+        label: "Delete Selected Space",
+        group: "Layout > Space",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("Delete"), when: Some("spaces")),
+            (shortcut: Direct("Backspace"), when: Some("spaces")),
+        ],
+    ),
+]

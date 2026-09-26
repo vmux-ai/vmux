@@ -34,12 +34,8 @@ struct NewWindowRequest;
 
 impl vmux_command::CommandRequest for NewWindowRequest {
     fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vec![
-            vmux_command::CommandDefinition::new("new_window", "New Window", "Layout > Window")
-                .accelerator("super+n")
-                .hidden()
-                .direct("Super+N"),
-        ]
+        vmux_command::CommandDefinitions::from_ron(include_str!("window_manager.ron"))
+            .select(&["new_window"])
     }
 }
 
@@ -56,11 +52,8 @@ struct CloseFocusedWindowRequest;
 
 impl vmux_command::CommandRequest for CloseFocusedWindowRequest {
     fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vec![
-            vmux_command::CommandDefinition::new("close_window", "Close Window", "Layout > Window")
-                .accelerator("super+shift+w")
-                .hidden(),
-        ]
+        vmux_command::CommandDefinitions::from_ron(include_str!("window_manager.ron"))
+            .select(&["close_window"])
     }
 }
 

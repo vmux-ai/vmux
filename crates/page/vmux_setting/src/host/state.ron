@@ -1,0 +1,9 @@
+[
+    (
+        id: "open_settings",
+        label: "Settings",
+        group: "Layout > Window",
+        hidden: true,
+        shortcuts: [(shortcut: Direct("Super+,"), when: None)],
+    ),
+]

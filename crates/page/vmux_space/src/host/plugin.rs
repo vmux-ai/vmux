@@ -120,23 +120,8 @@ pub struct OpenRequest {
 
 impl vmux_command::CommandRequest for OpenRequest {
     fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vec![
-            vmux_command::CommandDefinition::new(
-                "open_in_new_space",
-                "Open in New Space",
-                "Browser > Open",
-            )
-            .accelerator("super+shift+n")
-            .mcp(vmux_command::CommandMcp::new(
-                "Open a page in a brand-new Space (top-level profile). Spaces are the highest-level container and each carries its own profile (cookies, identity, theme). Use only when the user explicitly asks for a new profile, a separate identity, or a top-level workspace switch.",
-                vmux_command::InputSchema::object().optional(
-                    "url",
-                    vmux_command::InputSchema::string().description(
-                        "Absolute URL to open in the new Space. If omitted, opens the startup URL.",
-                    ),
-                ),
-            )),
-        ]
+        vmux_command::CommandDefinitions::from_ron(include_str!("plugin.ron"))
+            .select(&["open_in_new_space"])
     }
 }
 

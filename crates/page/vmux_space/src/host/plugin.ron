@@ -1,0 +1,20 @@
+[
+    (
+        id: "open_in_new_space",
+        label: "Open in New Space",
+        group: "Browser > Open",
+        accelerator: Some("super+shift+n"),
+        mcp: Some((
+            description: "Open a page in a brand-new Space (top-level profile). Spaces are the highest-level container and each carries its own profile (cookies, identity, theme). Use only when the user explicitly asks for a new profile, a separate identity, or a top-level workspace switch.",
+            input_schema: Some((
+                type: Object,
+                properties: {
+                    "url": (
+                        type: String,
+                        description: Some("Absolute URL to open in the new Space. If omitted, opens the startup URL."),
+                    ),
+                },
+            )),
+        )),
+    ),
+]

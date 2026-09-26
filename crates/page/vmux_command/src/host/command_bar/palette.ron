@@ -1,0 +1,41 @@
+[
+    (
+        id: "command_bar_next",
+        label: "Next Result",
+        group: "Command Bar",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("ArrowDown"), when: Some("command-bar")),
+            (shortcut: Direct("Ctrl+n"), when: Some("command-bar")),
+            (shortcut: Direct("Ctrl+j"), when: Some("command-bar")),
+        ],
+    ),
+    (
+        id: "command_bar_previous",
+        label: "Previous Result",
+        group: "Command Bar",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("ArrowUp"), when: Some("command-bar")),
+            (shortcut: Direct("Ctrl+p"), when: Some("command-bar")),
+            (shortcut: Direct("Ctrl+k"), when: Some("command-bar")),
+        ],
+    ),
+    (
+        id: "command_bar_complete",
+        label: "Accept Completion",
+        group: "Command Bar",
+        hidden: true,
+        shortcuts: [(shortcut: Direct("Tab"), when: Some("command-bar"))],
+    ),
+    (
+        id: "command_bar_dismiss",
+        label: "Dismiss Command Bar",
+        group: "Command Bar",
+        hidden: true,
+        shortcuts: [
+            (shortcut: Direct("Escape"), when: Some("command-bar")),
+            (shortcut: Direct("Ctrl+c"), when: Some("command-bar")),
+        ],
+    ),
+]

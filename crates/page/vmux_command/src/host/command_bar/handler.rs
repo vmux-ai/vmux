@@ -127,10 +127,22 @@ impl Plugin for InputPlugin {
     }
 }
 
-#[derive(vmux_macro::CommandBar)]
-#[menu(group = "Layout > Space")]
-#[shortcut(chord = "Ctrl+b, s")]
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 struct SpaceOpenRequest;
+
+impl CommandRequest for SpaceOpenRequest {
+    fn definitions() -> Vec<CommandDefinition> {
+        crate::CommandDefinitions::from_ron(include_str!("handler.ron")).select(&["space_open"])
+    }
+}
+
+impl TryFrom<&CommandInvocation> for SpaceOpenRequest {
+    type Error = ();
+
+    fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "space_open").then_some(Self).ok_or(())
+    }
+}
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandBarOpenRequest {
@@ -144,58 +156,19 @@ enum CommandBarOpenRequest {
 
 impl CommandRequest for CommandBarOpenRequest {
     fn definitions() -> Vec<CommandDefinition> {
-        vec![
-            CommandDefinition::new("browser_open_command_bar", "Command Bar", "Browser > Bar")
-                .accelerator("super+k")
-                .direct("Super+k")
-                .direct("Super+p")
-                .expose_to_mcp(),
-            CommandDefinition::new(
-                "browser_open_page_in_command_bar",
-                "Edit Page",
-                "Browser > Bar",
-            )
-            .accelerator("super+l")
-            .direct("Super+l")
-            .expose_to_mcp(),
-            CommandDefinition::new("browser_open_path_bar", "Path Navigator", "Browser > Bar")
-                .accelerator("super+/")
-                .direct("Super+/")
-                .expose_to_mcp(),
-            CommandDefinition::new("browser_open_commands", "Commands", "Browser > Bar")
-                .direct(">")
-                .expose_to_mcp(),
-            CommandDefinition::new("browser_open_ex_bar", "Vim Command Line", "Browser > Bar")
-                .expose_to_mcp(),
-            CommandDefinition::new("browser_open_goto_line", "Go to Line", "Browser > Bar")
-                .expose_to_mcp(),
-            CommandDefinition::new(
-                "browser_open_indentation",
-                "Select Indentation",
-                "Browser > Bar",
-            )
-            .expose_to_mcp(),
-            CommandDefinition::new(
-                "browser_open_line_ending",
-                "Select End of Line Sequence",
-                "Browser > Bar",
-            )
-            .expose_to_mcp(),
-            CommandDefinition::new("browser_open_encoding", "Select Encoding", "Browser > Bar")
-                .expose_to_mcp(),
-            CommandDefinition::new(
-                "browser_open_reopen_with_encoding",
-                "Reopen with Encoding",
-                "Browser > Bar",
-            )
-            .expose_to_mcp(),
-            CommandDefinition::new(
-                "browser_open_save_with_encoding",
-                "Save with Encoding",
-                "Browser > Bar",
-            )
-            .expose_to_mcp(),
-        ]
+        crate::CommandDefinitions::from_ron(include_str!("handler.ron")).select(&[
+            "browser_open_command_bar",
+            "browser_open_page_in_command_bar",
+            "browser_open_path_bar",
+            "browser_open_commands",
+            "browser_open_ex_bar",
+            "browser_open_goto_line",
+            "browser_open_indentation",
+            "browser_open_line_ending",
+            "browser_open_encoding",
+            "browser_open_reopen_with_encoding",
+            "browser_open_save_with_encoding",
+        ])
     }
 }
 

@@ -1,40 +1,88 @@
-#[derive(vmux_macro::CommandBar)]
-#[menu(label = "Close Terminal")]
-#[mcp(agent)]
+use vmux_command::CommandRequest;
+
+#[derive(bevy::prelude::Message)]
 pub(super) struct TerminalCloseRequest;
 
-#[derive(vmux_macro::CommandBar)]
-#[menu(label = "Next Terminal")]
-#[mcp]
+impl CommandRequest for TerminalCloseRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("command.ron"))
+            .select(&["terminal_close"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for TerminalCloseRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "terminal_close")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
+
+#[derive(bevy::prelude::Message)]
 pub(super) struct TerminalNextRequest;
 
-#[derive(vmux_macro::CommandBar)]
-#[menu(label = "Previous Terminal")]
-#[mcp]
+impl CommandRequest for TerminalNextRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("command.ron"))
+            .select(&["terminal_next"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for TerminalNextRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "terminal_next").then_some(Self).ok_or(())
+    }
+}
+
+#[derive(bevy::prelude::Message)]
 pub(super) struct TerminalPrevRequest;
 
-#[derive(vmux_macro::CommandBar)]
-#[menu(label = "Clear Terminal")]
-#[mcp(agent)]
+impl CommandRequest for TerminalPrevRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("command.ron"))
+            .select(&["terminal_prev"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for TerminalPrevRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "terminal_prev").then_some(Self).ok_or(())
+    }
+}
+
+#[derive(bevy::prelude::Message)]
 pub(super) struct TerminalClearRequest;
+
+impl CommandRequest for TerminalClearRequest {
+    fn definitions() -> Vec<vmux_command::CommandDefinition> {
+        vmux_command::CommandDefinitions::from_ron(include_str!("command.ron"))
+            .select(&["terminal_clear"])
+    }
+}
+
+impl TryFrom<&vmux_command::CommandInvocation> for TerminalClearRequest {
+    type Error = ();
+
+    fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
+        (invocation.id == "terminal_clear")
+            .then_some(Self)
+            .ok_or(())
+    }
+}
 
 #[derive(bevy::prelude::Message)]
 pub(super) struct CopyModeRequest;
 
 impl vmux_command::CommandRequest for CopyModeRequest {
     fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vec![
-            vmux_command::CommandDefinition::new("terminal_copy_mode", "Visual Mode", "Terminal")
-                .hidden()
-                .chord("Ctrl+b, [")
-                .mcp(
-                    vmux_command::CommandMcp::new(
-                        "Visual Mode",
-                        vmux_command::InputSchema::object(),
-                    )
-                    .allow_agent(),
-                ),
-        ]
+        vmux_command::CommandDefinitions::from_ron(include_str!("command.ron"))
+            .select(&["terminal_copy_mode"])
     }
 }
 
