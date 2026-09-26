@@ -10,7 +10,6 @@ pub mod model;
 pub mod prompt;
 pub mod room;
 
-#[cfg(any(test, ui))]
 pub mod format;
 
 #[cfg(ui)]
