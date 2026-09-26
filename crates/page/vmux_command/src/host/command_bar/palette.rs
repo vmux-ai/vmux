@@ -11,6 +11,7 @@ use vmux_api::command_bar::{
 use vmux_api::mcp::{McpServerRequest, McpServers};
 use vmux_core::host::{UiState, UiStateWrite};
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
+use vmux_tool::McpSnapshotRequest;
 use vmux_ui::launcher::palette::{PaletteDecision, PaletteState};
 use vmux_ui::launcher::palette::{PaletteDraft, PaletteRows, PaletteSurface};
 use vmux_ui::launcher::results::active_space_index;
@@ -95,6 +96,9 @@ struct PaletteDraftInput {
 
 #[derive(Component, Default)]
 struct PaletteMcp(McpServers);
+
+#[derive(Component)]
+struct PaletteMcpActive;
 
 #[derive(Clone, Copy)]
 enum PaletteKey {
@@ -207,8 +211,11 @@ fn receive_palette_open(
 fn update_palette_draft(
     trigger: On<bevy_cef::prelude::UiInput<CommandPaletteDraftRequest>>,
     mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput)>,
+    active: Query<(), With<PaletteMcpActive>>,
+    mut commands: Commands,
 ) {
-    let Ok((opened, mut draft)) = palettes.get_mut(trigger.event().webview) else {
+    let target = trigger.event().webview;
+    let Ok((opened, mut draft)) = palettes.get_mut(target) else {
         return;
     };
     let request = &trigger.event().payload;
@@ -221,6 +228,17 @@ fn update_palette_draft(
     draft.target_url.clone_from(&request.target_url);
     draft.selected = request.selected as usize;
     draft.navigating = request.navigating;
+    let wants_mcp = CommandBarQuery(&request.query).mcp_filter().is_some();
+    match (wants_mcp, active.contains(target)) {
+        (true, false) => {
+            commands.entity(target).insert(PaletteMcpActive);
+            commands.trigger(McpSnapshotRequest { target });
+        }
+        (false, true) => {
+            commands.entity(target).remove::<PaletteMcpActive>();
+        }
+        _ => {}
+    }
 }
 
 fn update_palette_selection(
@@ -667,6 +685,9 @@ mod tests {
     #[derive(Component, Default)]
     struct CapturedInvocations(Vec<InvokeRequest>);
 
+    #[derive(Component, Default)]
+    struct CapturedMcpSnapshots(u32);
+
     fn capture_invocation(
         trigger: On<UiInput<InvokeRequest>>,
         mut captured: Query<&mut CapturedInvocations>,
@@ -675,6 +696,16 @@ mod tests {
             return;
         };
         captured.0.push(trigger.event().payload.clone());
+    }
+
+    fn capture_mcp_snapshot(
+        trigger: On<McpSnapshotRequest>,
+        mut captured: Query<&mut CapturedMcpSnapshots>,
+    ) {
+        let Ok(mut captured) = captured.get_mut(trigger.event().target) else {
+            return;
+        };
+        captured.0 += 1;
     }
 
     #[test]
@@ -846,6 +877,46 @@ mod tests {
         let input = app.world().get::<PaletteDraftInput>(page).unwrap();
         assert!(input.query.is_empty());
         assert_eq!(input.input_revision, 1);
+    }
+
+    #[test]
+    fn entering_mcp_mode_requests_one_tool_snapshot() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_plugins(PalettePlugin)
+            .add_observer(capture_mcp_snapshot);
+        let page = app
+            .world_mut()
+            .spawn((HostsLauncher, CapturedMcpSnapshots::default()))
+            .id();
+        app.update();
+
+        let open_id = OpenId(10);
+        app.world_mut().entity_mut(page).insert((
+            PaletteOpen(CommandBarOpenEvent {
+                open_id,
+                ..Default::default()
+            }),
+            PaletteDraftInput {
+                open_id,
+                ..Default::default()
+            },
+        ));
+        for query in ["/mcp", "/mcp linear"] {
+            app.world_mut().trigger(UiInput {
+                webview: page,
+                payload: CommandPaletteDraftRequest {
+                    open_id,
+                    query: query.to_string(),
+                    ..Default::default()
+                },
+            });
+            app.update();
+        }
+
+        assert_eq!(app.world().get::<CapturedMcpSnapshots>(page).unwrap().0, 1);
+        assert!(app.world().get::<PaletteMcpActive>(page).is_some());
     }
 
     #[test]

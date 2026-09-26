@@ -26,7 +26,7 @@ use vmux_core::tool::{
 };
 
 #[cfg(not(target_os = "ios"))]
-pub use connection::McpConnectionPlugin;
+pub use connection::{McpConnectionPlugin, McpSnapshotRequest};
 pub use dotfiles::*;
 pub use homebrew::*;
 pub use manifest::*;

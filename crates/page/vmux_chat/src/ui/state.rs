@@ -14,7 +14,6 @@ use crate::format::{
 use crate::state::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
 use dioxus::prelude::*;
-use vmux_api::command_bar::CommandBarQuery;
 use vmux_api::prompt_media::{inline_media_query, replace_inline_media_query};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::composer::{
@@ -397,8 +396,7 @@ impl Chat {
 
     pub fn filtered_mcp_servers(&self) -> Vec<vmux_api::mcp::McpServerEntry> {
         let draft = self.draft();
-        let command_bar_query = CommandBarQuery(&draft);
-        let Some(query) = command_bar_query.mcp_filter() else {
+        let SelectorMode::Mcp(query) = selector_mode(&draft) else {
             return Vec::new();
         };
         self.mcp.filtered(query)
@@ -419,7 +417,7 @@ impl Chat {
     pub fn mcp_menu_open(&self) -> bool {
         #[cfg(host)]
         {
-            CommandBarQuery(&self.draft()).mcp_filter().is_some()
+            matches!(selector_mode(&self.draft()), SelectorMode::Mcp(_))
         }
         #[cfg(not(host))]
         {

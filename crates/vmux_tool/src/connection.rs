@@ -13,7 +13,6 @@ use reqwest::blocking::{Client, Response};
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use url::Url;
-use vmux_api::command_bar::{CommandBarQuery, CommandPaletteDraftRequest};
 use vmux_api::mcp::{
     McpServerEntry, McpServerOperation, McpServerPending, McpServerRequest, McpServerResult,
     McpServerStatus, McpServers, McpServersRequest,
@@ -33,10 +32,9 @@ impl Plugin for McpConnectionPlugin {
             UiStatePlugin::<McpServers>::default(),
         ))
         .add_message::<PageOpenRequest>()
-        .add_message::<McpSnapshotRequest>()
+        .add_message::<McpSnapshotWork>()
         .add_systems(Startup, spawn_mcp_runtime)
         .add_observer(request_mcp_connections)
-        .add_observer(request_palette_mcp_connections)
         .add_observer(begin_mcp_snapshot)
         .add_observer(request_mcp_server)
         .add_systems(
@@ -58,37 +56,16 @@ fn spawn_mcp_runtime(mut commands: Commands) {
 }
 
 fn request_mcp_connections(trigger: On<UiInput<McpServersRequest>>, mut commands: Commands) {
-    commands.trigger(RequestMcpSnapshot {
+    commands.trigger(McpSnapshotRequest {
         target: trigger.event().webview,
     });
 }
 
-fn request_palette_mcp_connections(
-    trigger: On<UiInput<CommandPaletteDraftRequest>>,
-    active: Query<(), With<McpPaletteActive>>,
-    mut commands: Commands,
-) {
-    let target = trigger.event().webview;
-    let wants_mcp = CommandBarQuery(&trigger.event().payload.query)
-        .mcp_filter()
-        .is_some();
-    match (wants_mcp, active.contains(target)) {
-        (true, false) => {
-            commands.entity(target).insert(McpPaletteActive);
-            commands.trigger(RequestMcpSnapshot { target });
-        }
-        (false, true) => {
-            commands.entity(target).remove::<McpPaletteActive>();
-        }
-        _ => {}
-    }
-}
-
 fn begin_mcp_snapshot(
-    trigger: On<RequestMcpSnapshot>,
+    trigger: On<McpSnapshotRequest>,
     browsers: NonSend<Browsers>,
     mut states: Query<&mut McpPageState>,
-    mut requests: MessageWriter<McpSnapshotRequest>,
+    mut requests: MessageWriter<McpSnapshotWork>,
     mut commands: Commands,
 ) {
     let target = trigger.event().target;
@@ -118,7 +95,7 @@ fn begin_mcp_snapshot(
             generation
         }
     };
-    requests.write(McpSnapshotRequest {
+    requests.write(McpSnapshotWork {
         target,
         generation,
         result: None,
@@ -227,7 +204,7 @@ fn drain_mcp_operations(
     mut tasks: Query<(Entity, &mut McpOperationTask)>,
     browsers: NonSend<Browsers>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut snapshot_requests: MessageWriter<McpSnapshotRequest>,
+    mut snapshot_requests: MessageWriter<McpSnapshotWork>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -251,7 +228,7 @@ fn drain_mcp_operations(
         if !browsers.can_emit_to(&task.target) {
             continue;
         }
-        snapshot_requests.write(McpSnapshotRequest {
+        snapshot_requests.write(McpSnapshotWork {
             target: task.target,
             generation: task.generation,
             result: Some(McpServerResult {
@@ -265,7 +242,7 @@ fn drain_mcp_operations(
 }
 
 fn start_mcp_snapshots(
-    mut requests: MessageReader<McpSnapshotRequest>,
+    mut requests: MessageReader<McpSnapshotWork>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -325,13 +302,10 @@ fn publish_mcp_connections(
 #[derive(Component)]
 struct McpRuntime;
 
-#[derive(Component)]
-struct McpPaletteActive;
-
 #[derive(EntityEvent)]
-struct RequestMcpSnapshot {
+pub struct McpSnapshotRequest {
     #[event_target]
-    target: Entity,
+    pub target: Entity,
 }
 
 #[derive(Component, Default)]
@@ -360,7 +334,7 @@ struct PendingMcpOperation {
 }
 
 #[derive(Clone, Message)]
-struct McpSnapshotRequest {
+struct McpSnapshotWork {
     target: Entity,
     generation: u64,
     result: Option<McpServerResult>,
