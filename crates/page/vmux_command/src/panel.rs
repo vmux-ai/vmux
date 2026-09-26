@@ -1,9 +1,9 @@
 use crate::event::{CommandBarPanelRequest, PanelPlacement, clamp_panel_placement};
+use crate::palette::PaletteSurface;
 use crate::ui::{CommandPalette, use_command_bar_ui};
 use dioxus::prelude::InteractionLocation;
 use dioxus::prelude::*;
 use vmux_ui::hooks::send;
-use vmux_ui::launcher::palette::PaletteSurface;
 
 fn set_command_bar_panel_active(active: bool) {
     let _ = send(&CommandBarPanelRequest { active });

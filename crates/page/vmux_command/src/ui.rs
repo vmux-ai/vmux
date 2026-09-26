@@ -4,6 +4,12 @@ use crate::event::{
     CommandPalettePromptHistoryRequest, CommandPaletteSelectionRequest, CommandPaletteState,
     CommandPaletteSubmitRequest,
 };
+use crate::palette::row::ResultRow;
+use crate::palette::style::{
+    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
+    command_bar_row_overlay_class, result_list_class,
+};
+use crate::palette::{PaletteGlyph, PaletteRows, PaletteState, PaletteSurface};
 use crate::prompt_media::{ChatPasteMedia, ChatPickFiles, inline_media_query};
 use crate::ui::composer::{ComposerChips, ComposerMenuSet, use_prompt_recall};
 use crate::ui::media::{PromptMedia, use_prompt_media};
@@ -23,12 +29,6 @@ use vmux_ui::components::prompt_media_options::PromptMediaOptions;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
-use vmux_ui::launcher::palette::{PaletteGlyph, PaletteRows, PaletteState, PaletteSurface};
-use vmux_ui::launcher::row::ResultRow;
-use vmux_ui::launcher::style::{
-    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
-    command_bar_row_overlay_class, result_list_class,
-};
 use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
 use vmux_ui::scroll::ScrollIntoView;
 
@@ -239,8 +239,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     let composer = palette.composer.clone();
     {
-        let agent = vmux_ui::launcher::palette::AgentSegment::in_url(&composer.agent_url)
-            .unwrap_or_default();
+        let agent = crate::palette::AgentSegment::in_url(&composer.agent_url).unwrap_or_default();
         let cwd = composer.cwd.clone();
         let open_id = state_val.open_id;
         use_effect(move || {

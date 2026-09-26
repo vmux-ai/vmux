@@ -1,9 +1,9 @@
 use crate::event::{CommandBarOpenEvent, OpenId};
+use crate::palette::keyboard::{CtrlKeyCapture, TextEditCommand, ctrl_key_capture_for_code};
+use crate::palette::{PaletteDraft, PaletteRows, PaletteState};
 use dioxus::prelude::*;
 use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::focus::FocusClaim;
-use vmux_ui::launcher::keyboard::{CtrlKeyCapture, TextEditCommand, ctrl_key_capture_for_code};
-use vmux_ui::launcher::palette::{PaletteDraft, PaletteMode, PaletteState};
 
 pub const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 
@@ -125,7 +125,7 @@ pub struct CommandBarField;
 
 impl CommandBarField {
     pub fn focus(opened: &CommandBarOpenEvent) {
-        if PaletteMode::infer(&opened.url, opened.picker).opens_at_end(&opened.url) {
+        if PaletteRows::infer_mode(&opened.url, opened.picker).opens_at_end(&opened.url) {
             FocusClaim::new(COMMAND_BAR_INPUT_ID)
                 .caret_at_end()
                 .request();

@@ -5,8 +5,8 @@ use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, Start
 use vmux_ui::hooks::{send, use_theme};
 
 use crate::event::StartDataRequest;
+use vmux_command::palette::PaletteSurface;
 use vmux_command::ui::{CommandPalette, focus_prompt_input, use_command_bar_ui};
-use vmux_ui::launcher::palette::PaletteSurface;
 
 #[vmux_native::page(
     component = Page,

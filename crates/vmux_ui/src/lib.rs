@@ -23,7 +23,6 @@ mod i18n_catalogs {
 
 pub mod i18n;
 pub mod ime;
-pub mod launcher;
 pub mod matrix_rain;
 
 pub mod prompt_ghost;

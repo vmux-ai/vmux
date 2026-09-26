@@ -3,158 +3,22 @@ pub use crate::history::{HistoryEntry, HistorySuggestionsRequest, HistorySuggest
 mod input;
 mod open;
 mod palette;
+mod path;
 mod picker;
-mod query;
 mod request;
 mod state;
 
 pub use input::*;
 pub use open::*;
 pub use palette::*;
+pub use path::*;
 pub use picker::*;
-pub use query::*;
 pub use request::*;
 pub use state::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn looks_like_path_absolute() {
-        assert!(looks_like_path("/usr/bin"));
-        assert!(looks_like_path("/"));
-    }
-
-    #[test]
-    fn looks_like_path_home() {
-        assert!(looks_like_path("~/projects"));
-        assert!(looks_like_path("~/"));
-    }
-
-    #[test]
-    fn looks_like_path_relative() {
-        assert!(looks_like_path("./src"));
-        assert!(looks_like_path("../parent"));
-    }
-
-    #[test]
-    fn looks_like_path_with_slash() {
-        assert!(looks_like_path("src/main.rs"));
-        assert!(looks_like_path("foo/bar"));
-    }
-
-    #[test]
-    fn looks_like_path_rejects_urls() {
-        assert!(!looks_like_path("http://example.com/path"));
-        assert!(!looks_like_path("https://example.com/path"));
-        assert!(!looks_like_path("google.com/maps"));
-        assert!(!looks_like_path("example.com"));
-    }
-
-    #[test]
-    fn looks_like_url_protocols() {
-        assert!(looks_like_url("http://example.com"));
-        assert!(looks_like_url("https://example.com/path"));
-        assert!(looks_like_url("file:///Users/me/main.rs"));
-    }
-
-    #[test]
-    fn looks_like_url_domain_like() {
-        assert!(looks_like_url("google.com"));
-        assert!(looks_like_url("google.com/maps"));
-        assert!(looks_like_url("example.co.uk/page"));
-    }
-
-    #[test]
-    fn looks_like_url_data_scheme() {
-        assert!(looks_like_url("data:text/html,<h1>hi</h1>"));
-        assert!(looks_like_url(
-            "data:text/html,<style>body{background:white}</style>"
-        ));
-        assert!(looks_like_url("DATA:text/html,<h1>hi</h1>"));
-        assert!(looks_like_url("Data:text/html,<h1>hi</h1>"));
-        assert!(!looks_like_path("data:text/html,<h1>hi</h1>"));
-        assert!(!looks_like_path("DATA:text/html,<h1>hi</h1>"));
-    }
-
-    #[test]
-    fn looks_like_url_rejects_file_paths() {
-        assert!(!looks_like_url("src/main.rs"));
-        assert!(!looks_like_url("/usr/bin"));
-        assert!(!looks_like_url("foo/bar"));
-    }
-
-    #[test]
-    fn looks_like_url_rejects_spaces() {
-        assert!(!looks_like_url("search query"));
-        assert!(!looks_like_url("hello world.txt"));
-    }
-
-    #[test]
-    fn a_slash_token_is_a_bare_name_and_never_a_path() {
-        assert_eq!(
-            CommandBarQuery("/resume").slash_token(),
-            Some(("resume", ""))
-        );
-        assert_eq!(
-            CommandBarQuery("/resume yesterday").slash_token(),
-            Some(("resume", "yesterday"))
-        );
-        assert_eq!(
-            CommandBarQuery("  /model").slash_token(),
-            Some(("model", ""))
-        );
-        assert_eq!(
-            CommandBarQuery("/Users/jun/notes.md").slash_token(),
-            None,
-            "a path keeps its slashes, so it can never be read as a command"
-        );
-        assert_eq!(CommandBarQuery("/").slash_token(), None);
-        assert_eq!(CommandBarQuery("resume").slash_token(), None);
-    }
-
-    #[test]
-    fn multiline_prompt_with_embedded_url_is_not_a_url() {
-        let prompt = "Continue DSK-627 in:\n\nWorktree:\n  /tmp/dashboard\n\nPR:\n  https://github.com/mistralai/dashboard/pull/39364";
-
-        assert!(!looks_like_url(prompt));
-        assert!(CommandBarQuery(prompt).is_start_prompt());
-    }
-
-    #[test]
-    fn looks_like_path_rejects_bare_words() {
-        assert!(!looks_like_path("mistral"));
-        assert!(!looks_like_path("hello world"));
-        assert!(!looks_like_path("google.com"));
-    }
-
-    #[test]
-    fn looks_like_path_rejects_spaces_with_slash() {
-        assert!(!looks_like_path("some query / thing"));
-    }
-
-    #[test]
-    fn explicit_path_only_prefixed() {
-        assert!(looks_like_explicit_path("/usr"));
-        assert!(looks_like_explicit_path("~/foo"));
-        assert!(looks_like_explicit_path("./bar"));
-        assert!(looks_like_explicit_path("../baz"));
-    }
-
-    #[test]
-    fn explicit_path_rejects_bare_words() {
-        assert!(!looks_like_explicit_path("mistral"));
-        assert!(!looks_like_explicit_path("foo/bar"));
-        assert!(!looks_like_explicit_path("google.com"));
-        assert!(!looks_like_explicit_path("search query"));
-    }
-
-    #[test]
-    fn explicit_path_rejects_urls() {
-        assert!(!looks_like_explicit_path("http://example.com"));
-        assert!(!looks_like_explicit_path("https://example.com"));
-    }
 
     #[test]
     fn command_bar_open_event_carries_space_name() {
@@ -219,51 +83,6 @@ mod tests {
     }
 
     #[test]
-    fn in_place_enter_opens_typed_query_without_nav_selection() {
-        assert!(
-            CommandBarQuery("https://example.com")
-                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), false)
-        );
-    }
-
-    #[test]
-    fn in_place_enter_keeps_explicit_nav_selection() {
-        assert!(
-            !CommandBarQuery("https://example.com")
-                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), true)
-        );
-    }
-
-    #[test]
-    fn command_query_enter_keeps_command_selection() {
-        assert!(
-            !CommandBarQuery("> close")
-                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), false)
-        );
-    }
-
-    #[test]
-    fn in_place_enter_keeps_highlighted_suggestion_for_plain_text_query() {
-        assert!(
-            !CommandBarQuery("terminal")
-                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), false)
-        );
-    }
-
-    #[test]
-    fn in_place_enter_opens_typed_domain_query() {
-        assert!(
-            CommandBarQuery("google.com")
-                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), false)
-        );
-    }
-
-    #[test]
-    fn start_plain_text_is_prompt_query() {
-        assert!(CommandBarQuery("fix the failing test").is_start_prompt());
-    }
-
-    #[test]
     fn search_engines_build_encoded_urls() {
         assert_eq!(
             SearchEngine::Google.search_url("hello world"),
@@ -285,27 +104,6 @@ mod tests {
             SearchEngine::Kagi.search_url("hello world"),
             "https://kagi.com/search?q=hello+world"
         );
-    }
-
-    #[test]
-    fn start_agent_name_is_still_prompt_query() {
-        assert!(CommandBarQuery("codex").is_start_prompt());
-    }
-
-    #[test]
-    fn start_explicit_navigation_inputs_are_not_prompts() {
-        for query in [
-            "https://example.com",
-            "example.com",
-            "vmux://settings/",
-            "/tmp/file",
-            "~/project",
-            "./src",
-            "../repo",
-            "> close tab",
-        ] {
-            assert!(!CommandBarQuery(query).is_start_prompt(), "{query}");
-        }
     }
 
     #[test]

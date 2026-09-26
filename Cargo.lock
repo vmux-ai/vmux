@@ -10305,6 +10305,7 @@ dependencies = [
  "serde_json",
  "unicode-segmentation",
  "vmux_api",
+ "vmux_command",
  "vmux_core",
  "vmux_native",
  "vmux_ui",

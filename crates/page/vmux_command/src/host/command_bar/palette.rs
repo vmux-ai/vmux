@@ -1,20 +1,21 @@
 use std::time::Duration;
 
+use crate::palette::results::active_space_index;
+use crate::palette::{
+    PaletteDecision, PaletteDraft, PaletteQuery, PaletteRows, PaletteState, PaletteSurface,
+};
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
-    CommandBarOpenEvent, CommandBarQuery, CommandBarUiState, CommandBarUiStatePatch,
-    CommandPaletteActivateRequest, CommandPaletteBranchesRequest, CommandPaletteDraftRequest,
-    CommandPalettePromptHistoryRequest, CommandPaletteRemoveAttachmentRequest,
-    CommandPaletteSelectionRequest, CommandPaletteState, CommandPaletteSubmitRequest, OpenId,
+    CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
+    CommandPaletteBranchesRequest, CommandPaletteDraftRequest, CommandPalettePromptHistoryRequest,
+    CommandPaletteRemoveAttachmentRequest, CommandPaletteSelectionRequest, CommandPaletteState,
+    CommandPaletteSubmitRequest, OpenId,
 };
 use vmux_api::mcp::{McpServerRequest, McpServers};
 use vmux_core::host::{UiState, UiStateWrite};
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
 use vmux_tool::McpSnapshotRequest;
-use vmux_ui::launcher::palette::{PaletteDecision, PaletteState};
-use vmux_ui::launcher::palette::{PaletteDraft, PaletteRows, PaletteSurface};
-use vmux_ui::launcher::results::active_space_index;
 
 use crate::{
     CommandDefinitions, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
@@ -228,7 +229,7 @@ fn update_palette_draft(
     draft.target_url.clone_from(&request.target_url);
     draft.selected = request.selected as usize;
     draft.navigating = request.navigating;
-    let wants_mcp = CommandBarQuery(&request.query).mcp_filter().is_some();
+    let wants_mcp = PaletteQuery(&request.query).mcp_filter().is_some();
     match (wants_mcp, active.contains(target)) {
         (true, false) => {
             commands.entity(target).insert(PaletteMcpActive);
@@ -521,7 +522,7 @@ fn project_palette(
         let rows = PaletteRows::build(&opened.0, &draft, surface);
         let mut projection = rows.projection();
         projection.query.clone_from(&input.query);
-        if let Some(filter) = CommandBarQuery(&input.query).mcp_filter() {
+        if let Some(filter) = PaletteQuery(&input.query).mcp_filter() {
             let filter = filter.trim().to_ascii_lowercase();
             projection.mcp_open = true;
             for server in &mcp.0.servers {

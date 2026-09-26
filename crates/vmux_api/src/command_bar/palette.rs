@@ -1,6 +1,6 @@
-use super::{CommandBarPick, CommandBarPicker, CommandBarQuery, SearchEngine};
+use super::{CommandBarPick, CommandBarPicker, SearchEngine};
 use crate::PageIcon;
-use crate::chat::{ResumableSessionEntry, SlashCommandEntry};
+use crate::chat::ResumableSessionEntry;
 use crate::mcp::McpServerEntry;
 
 #[vmux_api::contract(Copy, Default, Eq)]
@@ -16,51 +16,6 @@ pub enum PaletteMode {
 }
 
 impl PaletteMode {
-    pub fn infer(query: &str, asserted: Option<CommandBarPicker>) -> Self {
-        Self::read(query, asserted, &[])
-    }
-
-    pub fn read(
-        query: &str,
-        asserted: Option<CommandBarPicker>,
-        slash_commands: &[SlashCommandEntry],
-    ) -> Self {
-        if let Some(picker) = asserted {
-            return Self::Picking(picker);
-        }
-        if query.starts_with(':') {
-            return Self::Ex;
-        }
-        let trimmed = query.trim();
-        if trimmed.starts_with('>') {
-            return Self::Command;
-        }
-        if Self::names_a_command(query, slash_commands) {
-            return Self::Slash;
-        }
-        if trimmed.starts_with('/') || trimmed.starts_with('~') {
-            return Self::Path;
-        }
-        if trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')) {
-            return Self::Url;
-        }
-        Self::Search
-    }
-
-    fn names_a_command(query: &str, slash_commands: &[SlashCommandEntry]) -> bool {
-        if query.trim() == "/" {
-            return !slash_commands.is_empty();
-        }
-        let held = CommandBarQuery(query);
-        let Some((name, _)) = held.slash_token() else {
-            return false;
-        };
-        let lowered = name.to_lowercase();
-        slash_commands
-            .iter()
-            .any(|command| command.name().starts_with(&lowered))
-    }
-
     pub const fn is_ex(self) -> bool {
         matches!(self, Self::Ex)
     }

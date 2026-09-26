@@ -156,15 +156,3 @@ impl McpServerText {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use vmux_api::command_bar::CommandBarQuery;
-
-    #[test]
-    fn query_opens_on_the_complete_command() {
-        assert_eq!(CommandBarQuery("/mcp").mcp_filter(), Some(""));
-        assert_eq!(CommandBarQuery("/mcp linear").mcp_filter(), Some("linear"));
-        assert_eq!(CommandBarQuery("/mcpx").mcp_filter(), None);
-    }
-}

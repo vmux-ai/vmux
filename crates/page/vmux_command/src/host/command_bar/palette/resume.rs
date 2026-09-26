@@ -2,11 +2,13 @@ use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{ResumableSessions, ResumeListRequest};
 use vmux_api::command_bar::{
-    CommandBarQuery, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
+    CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
     CommandPaletteSelectionRequest,
 };
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
+
+use crate::palette::PaletteQuery;
 
 use super::{OpenVersion, PaletteSnapshot, RequestGeneration};
 
@@ -213,7 +215,7 @@ struct ResumeQuery;
 
 impl ResumeQuery {
     fn matches(query: &str) -> bool {
-        CommandBarQuery(query)
+        PaletteQuery(query)
             .slash_token()
             .is_some_and(|(name, _)| "resume".starts_with(&name.to_lowercase()))
     }

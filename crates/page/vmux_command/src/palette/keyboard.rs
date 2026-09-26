@@ -1,4 +1,4 @@
-use crate::caret::floor_char_boundary;
+use vmux_ui::caret::floor_char_boundary;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextEditCommand {

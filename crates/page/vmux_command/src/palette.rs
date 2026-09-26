@@ -1,8 +1,8 @@
 use vmux_api::command_bar::{
     AgentModels, AgentModes, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
-    CommandBarPromptContext, CommandBarQuery, CommandPaletteProjection, ExCommandName, ExRequest,
-    HistoryEntry, InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest,
-    SwitchSpaceRequest, SwitchTabRequest, TerminalRequest, is_data_uri,
+    CommandBarPromptContext, CommandPaletteProjection, ExCommandName, ExRequest, HistoryEntry,
+    InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest, SwitchSpaceRequest,
+    SwitchTabRequest, TerminalRequest,
 };
 use vmux_api::open_target::OpenTarget;
 use vmux_api::prompt_media::ChatAttachment;
@@ -10,15 +10,26 @@ use vmux_api::protocol::AcpModeOption;
 use vmux_api::room::ModelOptionEntry;
 use vmux_api::space::ProjectRow;
 
-use crate::components::agent_menu::ComposerAgentOption;
-use crate::i18n::translate;
-use crate::launcher::results::{
+use vmux_ui::components::agent_menu::ComposerAgentOption;
+use vmux_ui::i18n::translate;
+use vmux_ui::list_nav::MenuDirection;
+
+use self::results::{
     CommandBarResultItem, PickerRows, SlashRows, active_space_index, filter_results,
     open_session_results, prepend_prompt_targets, prompt_target_matches_query,
     prompt_target_results, prompt_target_url, space_switch_results, start_page_results,
     terminal_matches_query,
 };
-use crate::list_nav::MenuDirection;
+
+pub mod keyboard;
+mod query;
+pub mod results;
+#[cfg(ui)]
+pub mod row;
+pub mod style;
+
+pub(crate) use query::PaletteQuery;
+pub use query::{is_data_uri, looks_like_path, looks_like_url};
 
 pub use vmux_api::command_bar::PaletteMode;
 
@@ -132,7 +143,7 @@ impl PaletteRows {
         let query = draft.query.as_str();
         let is_start = surface.is_start();
         let slash_commands = state.prompt_context.slash_commands.as_slice();
-        let mode = PaletteMode::read(query, state.picker, slash_commands);
+        let mode = Self::mode(query, state.picker, slash_commands);
         let prompt_targets = if is_start {
             prompt_target_results(&state.pages, "")
         } else {
@@ -143,7 +154,7 @@ impl PaletteRows {
             .find(|item| prompt_target_url(item) == Some(draft.target_url.as_str()))
             .cloned()
             .or_else(|| prompt_targets.first().cloned());
-        let start_prompt_mode = is_start && CommandBarQuery(query).is_start_prompt();
+        let start_prompt_mode = is_start && PaletteQuery(query).is_start_prompt();
 
         let mut items = FileRows::under_projects(
             Self::listed(state, draft, surface, mode, start_prompt_mode),
@@ -161,6 +172,51 @@ impl PaletteRows {
             start_prompt_mode,
             mode,
         }
+    }
+
+    pub fn infer_mode(query: &str, asserted: Option<CommandBarPicker>) -> PaletteMode {
+        Self::mode(query, asserted, &[])
+    }
+
+    fn mode(
+        query: &str,
+        asserted: Option<CommandBarPicker>,
+        slash_commands: &[vmux_api::chat::SlashCommandEntry],
+    ) -> PaletteMode {
+        if let Some(picker) = asserted {
+            return PaletteMode::Picking(picker);
+        }
+        if query.starts_with(':') {
+            return PaletteMode::Ex;
+        }
+        let trimmed = query.trim();
+        if trimmed.starts_with('>') {
+            return PaletteMode::Command;
+        }
+        if Self::names_a_command(query, slash_commands) {
+            return PaletteMode::Slash;
+        }
+        if trimmed.starts_with('/') || trimmed.starts_with('~') {
+            return PaletteMode::Path;
+        }
+        if trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')) {
+            return PaletteMode::Url;
+        }
+        PaletteMode::Search
+    }
+
+    fn names_a_command(query: &str, slash_commands: &[vmux_api::chat::SlashCommandEntry]) -> bool {
+        if query.trim() == "/" {
+            return !slash_commands.is_empty();
+        }
+        let held = PaletteQuery(query);
+        let Some((name, _)) = held.slash_token() else {
+            return false;
+        };
+        let lowered = name.to_lowercase();
+        slash_commands
+            .iter()
+            .any(|command| command.name().starts_with(&lowered))
     }
 
     fn with_completions(
@@ -682,7 +738,7 @@ impl PaletteState {
         attachments: &[ChatAttachment],
     ) -> PaletteDecision {
         if self.surface.is_start()
-            && (CommandBarQuery(&self.query).is_start_prompt() || !attachments.is_empty())
+            && (PaletteQuery(&self.query).is_start_prompt() || !attachments.is_empty())
             && let Some(target_url) = prompt_target_url(item)
         {
             return if prompt_target_matches_query(item, &self.query) && attachments.is_empty() {
@@ -817,8 +873,7 @@ impl PaletteState {
 
     fn submit_typed(&self, attachments: &[ChatAttachment]) -> PaletteDecision {
         if !TypedRow::beats_a_guessed_url(self.row(self.selected), &self.query)
-            && CommandBarQuery(&self.query)
-                .opens_typed_url_on_enter(self.open_target, self.nav_mode)
+            && PaletteQuery(&self.query).opens_typed_url_on_enter(self.open_target, self.nav_mode)
         {
             return PaletteDecision::open(true, &self.query, self.open_target);
         }
@@ -1856,17 +1911,26 @@ mod tests {
         let asserted = CommandBarPicker::EncodingReopen;
         for typed in [">", ":", "~/etc", "example.com", "how do i", ""] {
             assert_eq!(
-                PaletteMode::infer(typed, Some(asserted)),
+                PaletteRows::infer_mode(typed, Some(asserted)),
                 PaletteMode::Picking(asserted),
                 "`{typed}` must not steal the picker the caller asked for"
             );
         }
 
-        assert_eq!(PaletteMode::infer("> close", None), PaletteMode::Command);
-        assert_eq!(PaletteMode::infer(":w", None), PaletteMode::Ex);
-        assert_eq!(PaletteMode::infer("~/src", None), PaletteMode::Path);
-        assert_eq!(PaletteMode::infer("example.com", None), PaletteMode::Url);
-        assert_eq!(PaletteMode::infer("how do i", None), PaletteMode::Search);
+        assert_eq!(
+            PaletteRows::infer_mode("> close", None),
+            PaletteMode::Command
+        );
+        assert_eq!(PaletteRows::infer_mode(":w", None), PaletteMode::Ex);
+        assert_eq!(PaletteRows::infer_mode("~/src", None), PaletteMode::Path);
+        assert_eq!(
+            PaletteRows::infer_mode("example.com", None),
+            PaletteMode::Url
+        );
+        assert_eq!(
+            PaletteRows::infer_mode("how do i", None),
+            PaletteMode::Search
+        );
     }
 
     #[test]
@@ -1923,13 +1987,13 @@ mod tests {
     fn a_seeded_prefix_is_typed_past_but_a_seeded_url_is_replaced() {
         for seed in [":", ">", "/"] {
             assert!(
-                PaletteMode::infer(seed, None).opens_at_end(seed),
+                PaletteRows::infer_mode(seed, None).opens_at_end(seed),
                 "`{seed}` opens a mode, so the next keystroke must append to it"
             );
         }
         for seed in ["https://example.com", "", ":w"] {
             assert!(
-                !PaletteMode::infer(seed, None).opens_at_end(seed),
+                !PaletteRows::infer_mode(seed, None).opens_at_end(seed),
                 "`{seed}` is a value, so the next keystroke must replace it"
             );
         }

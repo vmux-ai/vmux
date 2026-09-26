@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use unicode_width::UnicodeWidthChar;
-use vmux_command::event::{is_data_uri, looks_like_path};
+use vmux_command::palette::{is_data_uri, looks_like_path};
 use vmux_core::event::{LinkRange, TermLine};
 use vmux_layout::stack::OpenRequest;
 

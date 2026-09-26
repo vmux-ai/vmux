@@ -1,22 +1,22 @@
-use crate::components::composer_bar::{ComposerChipIcon, ComposerMenuKind};
-use crate::components::icon::Icon;
-use crate::components::skeleton::Skeleton;
-use crate::favicon::Favicon;
-use crate::file_icon::FilePath;
-use crate::i18n::{TranslationValue, translate, translate_with};
-use crate::icon::PageIconView;
 use dioxus::prelude::*;
-use vmux_api::command_bar::looks_like_url;
+use vmux_ui::components::composer_bar::{ComposerChipIcon, ComposerMenuKind};
+use vmux_ui::components::icon::Icon;
+use vmux_ui::components::skeleton::Skeleton;
+use vmux_ui::favicon::Favicon;
+use vmux_ui::file_icon::FilePath;
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::PageIconView;
+use vmux_ui::util::cn;
 
-use crate::launcher::results::CommandBarResultItem as ResultItem;
-use crate::launcher::results::{prompt_target_matches_query, prompt_target_url};
-use crate::launcher::style::{
+use super::query::looks_like_url;
+use super::results::CommandBarResultItem as ResultItem;
+use super::results::{prompt_target_matches_query, prompt_target_url};
+use super::style::{
     result_content_row_class, result_favicon_class, result_history_url_class, result_item_class,
     result_leading_icon_class, result_location_class, result_primary_text_class,
     result_secondary_text_class, result_shortcut_badge_class, result_terminal_path_class,
     result_trailing_slot_class,
 };
-use crate::util::cn;
 
 #[component]
 pub fn ResultRow(
@@ -377,7 +377,7 @@ impl ResumePreview {
 }
 
 #[component]
-fn ResumeSectionRow(section: crate::launcher::results::ResumeSection) -> Element {
+fn ResumeSectionRow(section: super::results::ResumeSection) -> Element {
     if section.agent.is_empty() && section.project.is_empty() && section.branch.is_empty() {
         return rsx! {};
     }

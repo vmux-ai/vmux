@@ -724,11 +724,11 @@ impl Home {
 
 fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     let value = value.trim();
-    if crate::event::is_data_uri(value)
-        || (value.contains("://") && crate::event::looks_like_url(value))
+    if crate::palette::is_data_uri(value)
+        || (value.contains("://") && crate::palette::looks_like_url(value))
     {
         value.to_string()
-    } else if crate::event::looks_like_url(value) {
+    } else if crate::palette::looks_like_url(value) {
         format!("https://{}", value)
     } else {
         search_engine.search_url(value)

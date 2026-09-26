@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::palette::CompletionQuery;
 use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_api::command_bar::{
@@ -9,7 +10,6 @@ use vmux_api::command_bar::{
 };
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
-use vmux_ui::launcher::palette::CompletionQuery;
 
 use super::{OpenVersion, PaletteSnapshot, PendingPaletteRequest, RequestDelay, RequestGeneration};
 

@@ -1,6 +1,7 @@
 use crate::event::{
     CommandPaletteState, StartGoToBranch, StartSelectMode, StartSelectModel, StartSelectWorkspace,
 };
+use crate::palette::ComposerState;
 use crate::ui::signals::PaletteSignals;
 use dioxus::prelude::*;
 use vmux_api::room::ModelOptionEntry;
@@ -12,7 +13,6 @@ use vmux_ui::components::composer_bar::{
 use vmux_ui::components::project_picker::ProjectPick;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
-use vmux_ui::launcher::palette::ComposerState;
 use vmux_ui::prompt_recall::{PromptHistoryDirection, move_prompt_history};
 
 pub struct ComposerChips {
