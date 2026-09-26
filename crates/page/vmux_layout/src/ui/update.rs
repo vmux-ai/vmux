@@ -76,7 +76,7 @@ pub(crate) fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
                         r#type: "button",
                         class: "w-full cursor-pointer rounded-md bg-primary px-2.5 py-1.5 text-ui font-medium text-primary-foreground hover:opacity-90",
                         onclick: move |_| {
-                            let _ = send(&crate::event::RestartRequestEvent);
+                            let _ = send(&vmux_api::service::RelaunchRequest);
                         },
                         {translate("layout-restart-update")}
                     }

@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentCommand, AgentQuery, JsonValue, layout};
 use vmux_core::{JsonArguments, ProcessAnchor};
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
+use vmux_tool::{
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
 
@@ -11,12 +11,14 @@ pub struct LayoutToolPlugin;
 
 impl Plugin for LayoutToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<LayoutTool>::new(include_str!("tool.ron")))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(
-                Update,
-                (read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::<LayoutTool>::new(include_str!(
+            "tool.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(
+            Update,
+            (read_layout, update_layout, select_tab).in_set(ToolDispatchSet),
+        );
     }
 }
 

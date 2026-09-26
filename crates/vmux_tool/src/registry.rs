@@ -9,12 +9,12 @@ use vmux_service::protocol::{AgentCommand, AgentQuery, JsonValue};
 
 use vmux_api::InputSchema;
 
-pub struct ToolRuntimePlugin;
+pub struct ToolRegistryPlugin;
 
-impl Plugin for ToolRuntimePlugin {
+impl Plugin for ToolRegistryPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut()
-            .spawn((Name::new("MCP tool registry"), NextToolOrder::default()));
+            .spawn((Name::new("Tool registry"), NextToolOrder::default()));
         app.configure_sets(
             Update,
             (
@@ -43,12 +43,12 @@ impl Plugin for ToolRuntimePlugin {
     }
 }
 
-pub struct McpToolPlugin<T> {
+pub struct ToolManifestPlugin<T> {
     manifest: &'static str,
     marker: PhantomData<fn() -> T>,
 }
 
-impl<T> McpToolPlugin<T> {
+impl<T> ToolManifestPlugin<T> {
     pub const fn new(manifest: &'static str) -> Self {
         Self {
             manifest,
@@ -57,28 +57,28 @@ impl<T> McpToolPlugin<T> {
     }
 }
 
-impl<T> Plugin for McpToolPlugin<T>
+impl<T> Plugin for ToolManifestPlugin<T>
 where
     T: Component + Clone + serde::de::DeserializeOwned + Serialize,
 {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ToolRuntimePlugin>() {
-            app.add_plugins(ToolRuntimePlugin);
+        if !app.is_plugin_added::<ToolRegistryPlugin>() {
+            app.add_plugins(ToolRegistryPlugin);
         }
         app.world_mut()
-            .spawn(McpToolManifest::<T>::new(self.manifest));
-        app.add_systems(Startup, register_mcp_tools::<T>.in_set(RegisterTools))
-            .add_systems(Update, route_mcp_tools::<T>.in_set(ToolRouteSet));
+            .spawn(ToolManifestSource::<T>::new(self.manifest));
+        app.add_systems(Startup, register_tools::<T>.in_set(RegisterTools))
+            .add_systems(Update, route_tools::<T>.in_set(ToolRouteSet));
     }
 }
 
 #[derive(Component)]
-struct McpToolManifest<T> {
+struct ToolManifestSource<T> {
     source: &'static str,
     marker: PhantomData<fn() -> T>,
 }
 
-impl<T> McpToolManifest<T> {
+impl<T> ToolManifestSource<T> {
     fn new(source: &'static str) -> Self {
         Self {
             source,
@@ -87,8 +87,8 @@ impl<T> McpToolManifest<T> {
     }
 }
 
-fn register_mcp_tools<T>(
-    manifests: Query<(Entity, &McpToolManifest<T>)>,
+fn register_tools<T>(
+    manifests: Query<(Entity, &ToolManifestSource<T>)>,
     mut commands: Commands,
     mut next_order: Single<&mut NextToolOrder>,
 ) where
@@ -101,7 +101,7 @@ fn register_mcp_tools<T>(
             let order = next_order.0;
             next_order.0 += 1;
             let mut entity = commands.spawn((
-                McpTool,
+                RegisteredTool,
                 Name::new(seed.name),
                 ToolAliases(seed.aliases),
                 ToolDescription(seed.description),
@@ -118,7 +118,7 @@ fn register_mcp_tools<T>(
     }
 }
 
-fn route_mcp_tools<T>(
+fn route_tools<T>(
     mut commands: Commands,
     calls: Query<(Entity, &ToolTarget), Added<ToolCall>>,
     tools: Query<&T>,
@@ -201,7 +201,7 @@ fn resolve_tool_catalogs(
         ),
         Added<ToolCatalogRequest>,
     >,
-    tools: Query<ToolEntity<'static>, With<McpTool>>,
+    tools: Query<ToolEntity<'static>, With<RegisteredTool>>,
     mut commands: Commands,
 ) {
     for (request_entity, shell, acp_session, acp_terminals) in &requests {
@@ -248,7 +248,7 @@ fn resolve_tool_invocations(
         ),
         Added<ToolInvocation>,
     >,
-    tools: Query<ToolEntity<'static>, With<McpTool>>,
+    tools: Query<ToolEntity<'static>, With<RegisteredTool>>,
     mut commands: Commands,
 ) {
     for (request_entity, requested_name, _, acp_session, acp_terminals, command_fallback) in
@@ -344,7 +344,7 @@ impl ToolAvailability {
 }
 
 #[derive(Component)]
-pub(crate) struct McpTool;
+pub(crate) struct RegisteredTool;
 
 #[derive(Component)]
 pub(crate) struct ToolAliases(pub(crate) Vec<String>);
@@ -429,9 +429,9 @@ struct ToolEntry<K> {
 impl<K: Component + Serialize> ToolEntry<K> {
     fn into_seed(self) -> (ToolSeed, K) {
         let Value::String(name) =
-            serde_json::to_value(&self.kind).expect("MCP tool kind must serialize")
+            serde_json::to_value(&self.kind).expect("tool kind must serialize")
         else {
-            panic!("MCP tool kind must serialize as a string")
+            panic!("tool kind must serialize as a string")
         };
         (
             ToolSeed {
@@ -455,12 +455,12 @@ where
 {
     fn from_ron(source: &str) -> Self {
         let entries: Vec<ToolEntry<K>> =
-            ron::from_str(source).expect("embedded MCP tool definitions must be valid RON");
+            ron::from_str(source).expect("embedded tool definitions must be valid RON");
         for entry in &entries {
             entry
                 .input_schema
                 .validate()
-                .expect("embedded MCP tool input schemas must be valid");
+                .expect("embedded tool input schemas must be valid");
         }
         Self(entries)
     }

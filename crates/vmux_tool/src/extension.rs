@@ -97,7 +97,7 @@ pub(crate) fn ExtensionsManager(active_route: Signal<crate::ui::ToolsRoute>) -> 
                         ManagerButton {
                             variant: ManagerButtonVariant::Primary,
                             onclick: move |_| {
-                                let _ = send(&vmux_layout::event::RestartRequestEvent);
+                                let _ = send(&vmux_api::service::RelaunchRequest);
                             },
                             {translate("extensions-relaunch")}
                         }

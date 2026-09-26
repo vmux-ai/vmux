@@ -235,7 +235,6 @@ fn apply_status_picks(
 mod tests {
     use super::*;
     use vmux_command::CommandInvocation;
-    use vmux_core::event::FileUiStatePatch;
     use vmux_core::host::FileUiStateWrite;
 
     #[derive(Resource, Default)]

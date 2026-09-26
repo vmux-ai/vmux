@@ -18,6 +18,7 @@ impl PageOpenId {
 #[derive(Clone, Debug)]
 pub enum PageOpenTarget {
     ActiveStack,
+    NewStack,
     Stack(Entity),
     ActiveStackInPane(Entity),
     NewStackInPane(Entity),

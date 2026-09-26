@@ -42,7 +42,7 @@ pub enum VmuxPlugin {
     Start(vmux_start::StartPlugin),
     #[plugin(feature = "browser", desktop, requires(layout))]
     Browser(vmux_browser::BrowserPlugin),
-    #[plugin(feature = "mcp", option = tool, desktop, requires(layout))]
+    #[plugin(feature = "tool", desktop, requires(layout))]
     Tool(vmux_tool::ToolPlugin),
     #[plugin(feature = "mobile", mobile)]
     MobilePages(crate::VmuxMobilePlugin),

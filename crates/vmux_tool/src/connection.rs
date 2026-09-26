@@ -22,6 +22,7 @@ use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::profile::mcp_credentials::{
     McpCredentialAccess, McpCredentialStorage, McpOauthCredentials,
 };
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 
 pub struct McpConnectionPlugin;
 
@@ -32,6 +33,7 @@ impl Plugin for McpConnectionPlugin {
             UiEventPlugin::<(McpServersRequest, McpServerRequest)>::default(),
             UiStatePlugin::<McpServers>::default(),
         ))
+        .add_message::<PageOpenRequest>()
         .add_message::<McpSnapshotRequest>()
         .add_observer(request_mcp_connections)
         .add_observer(request_palette_mcp_connections)
@@ -220,14 +222,18 @@ fn start_mcp_operation(
 fn drain_mcp_operations(
     mut tasks: Query<(Entity, &mut McpOperationTask)>,
     browsers: NonSend<Browsers>,
-    mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut snapshot_requests: MessageWriter<McpSnapshotRequest>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
         while let Ok(url) = task.progress.get_mut().try_recv() {
             if browsers.can_emit_to(&task.target) {
-                stack_requests.write(vmux_layout::stack::OpenRequest { url: Some(url) });
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::NewStack,
+                    url,
+                    request_id: None,
+                });
             }
         }
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {

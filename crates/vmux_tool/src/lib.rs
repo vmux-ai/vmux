@@ -9,6 +9,7 @@ mod homebrew;
 mod manifest;
 mod mcp;
 mod npm;
+mod registry;
 #[cfg(ui)]
 mod ui;
 
@@ -27,6 +28,7 @@ pub use homebrew::*;
 pub use manifest::*;
 pub use mcp::*;
 pub use npm::*;
+pub use registry::*;
 
 pub struct ToolPlugin;
 

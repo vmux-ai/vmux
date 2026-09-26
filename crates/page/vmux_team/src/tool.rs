@@ -2,17 +2,19 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::AgentCommand;
 use vmux_core::JsonArguments;
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolRequestSet,
+use vmux_tool::{
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolRequestSet,
 };
 
 pub struct TeamToolPlugin;
 
 impl Plugin for TeamToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<TeamTool>::new(include_str!("tool.ron")))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(Update, rename_profile.in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::<TeamTool>::new(include_str!(
+            "tool.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(Update, rename_profile.in_set(ToolDispatchSet));
     }
 }
 
@@ -66,7 +68,7 @@ fn rename_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_mcp::tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
+    use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
 
     impl TeamTool {
         fn app() -> App {

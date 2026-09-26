@@ -26,8 +26,8 @@ use vmux_session::{
 impl Plugin for ProviderAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>();
-        if !app.is_plugin_added::<vmux_mcp::tool::ToolRuntimePlugin>() {
-            app.add_plugins(vmux_mcp::tool::ToolRuntimePlugin);
+        if !app.is_plugin_added::<vmux_tool::ToolRegistryPlugin>() {
+            app.add_plugins(vmux_tool::ToolRegistryPlugin);
         }
         app.register_type::<AgentSession>()
             .register_type::<AgentApprovalPolicy>()
@@ -45,8 +45,8 @@ impl Plugin for ProviderAgentPlugin {
                 Update,
                 (
                     ensure_prompt_queue,
-                    request_provider_session_spawn.before(vmux_mcp::tool::ToolResolveSet),
-                    spawn_provider_session.after(vmux_mcp::tool::ToolResolveSet),
+                    request_provider_session_spawn.before(vmux_tool::ToolResolveSet),
+                    spawn_provider_session.after(vmux_tool::ToolResolveSet),
                     send_provider_agent_input,
                     consume_provider_agent_stream.after(approval::ApprovalSyncSet),
                     attach_last_run_state_kind,
@@ -90,7 +90,7 @@ fn request_provider_session_spawn(q: Query<Entity, Added<AgentSession>>, mut com
     for entity in &q {
         commands
             .entity(entity)
-            .insert(vmux_mcp::tool::ToolCatalogRequest);
+            .insert(vmux_tool::ToolCatalogRequest);
     }
 }
 
@@ -100,9 +100,9 @@ fn spawn_provider_session(
             Entity,
             &AgentSession,
             Option<&AgentApprovalPolicy>,
-            &vmux_mcp::tool::ToolCatalog,
+            &vmux_tool::ToolCatalog,
         ),
-        Added<vmux_mcp::tool::ToolCatalog>,
+        Added<vmux_tool::ToolCatalog>,
     >,
     commands: Query<&vmux_command::CommandDefinition>,
     mut ecs: Commands,
@@ -119,16 +119,14 @@ fn spawn_provider_session(
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)
             .collect();
-        let definitions = match vmux_mcp::tool::ToolDefinition::merge_commands(
-            catalog.0.clone(),
-            command_tools,
-        ) {
-            Ok(definitions) => definitions,
-            Err(error) => {
-                bevy::log::error!("provider agent tool catalog is invalid: {error}");
-                continue;
-            }
-        };
+        let definitions =
+            match vmux_tool::ToolDefinition::merge_commands(catalog.0.clone(), command_tools) {
+                Ok(definitions) => definitions,
+                Err(error) => {
+                    bevy::log::error!("provider agent tool catalog is invalid: {error}");
+                    continue;
+                }
+            };
         let definitions = definitions
             .into_iter()
             .map(|definition| crate::stream::ToolDef {
@@ -152,8 +150,8 @@ fn spawn_provider_session(
             vmux_api::protocol::AgentRequest::Attach,
         ))));
         ecs.entity(entity)
-            .remove::<vmux_mcp::tool::ToolCatalogRequest>()
-            .remove::<vmux_mcp::tool::ToolCatalog>();
+            .remove::<vmux_tool::ToolCatalogRequest>()
+            .remove::<vmux_tool::ToolCatalog>();
     }
 }
 

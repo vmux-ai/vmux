@@ -10228,7 +10228,6 @@ dependencies = [
  "vmux_knowledge",
  "vmux_layout",
  "vmux_macro",
- "vmux_mcp",
  "vmux_service",
  "vmux_setting",
  "vmux_shortcut",
@@ -10279,13 +10278,13 @@ dependencies = [
  "vmux_git",
  "vmux_history",
  "vmux_layout",
- "vmux_mcp",
  "vmux_native",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
  "vmux_start",
  "vmux_terminal",
+ "vmux_tool",
  "vmux_ui",
  "wry",
  "zip",
@@ -10391,7 +10390,7 @@ dependencies = [
  "vmux_flex",
  "vmux_history",
  "vmux_macro",
- "vmux_mcp",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -10554,6 +10553,7 @@ dependencies = [
  "vmux_service",
  "vmux_setting",
  "vmux_space",
+ "vmux_tool",
  "vmux_ui",
  "zip",
 ]
@@ -10626,7 +10626,7 @@ dependencies = [
  "vmux_api",
  "vmux_core",
  "vmux_git",
- "vmux_mcp",
+ "vmux_tool",
 ]
 
 [[package]]
@@ -10661,8 +10661,8 @@ dependencies = [
  "vmux_git",
  "vmux_history",
  "vmux_macro",
- "vmux_mcp",
  "vmux_native",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -10684,14 +10684,13 @@ dependencies = [
  "base64 0.22.1",
  "bevy_app",
  "bevy_ecs",
- "ron 0.8.1",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "vmux_api",
  "vmux_core",
  "vmux_service",
+ "vmux_tool",
 ]
 
 [[package]]
@@ -10882,9 +10881,9 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
- "vmux_mcp",
  "vmux_native",
  "vmux_path",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -10925,8 +10924,8 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_core",
- "vmux_mcp",
  "vmux_native",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -10953,9 +10952,9 @@ dependencies = [
  "vmux_git",
  "vmux_history",
  "vmux_layout",
- "vmux_mcp",
  "vmux_native",
  "vmux_setting",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -11002,10 +11001,10 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_layout",
- "vmux_mcp",
  "vmux_native",
  "vmux_service",
  "vmux_space",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -11034,11 +11033,11 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
- "vmux_mcp",
  "vmux_native",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
+ "vmux_tool",
  "vmux_ui",
 ]
 
@@ -11055,6 +11054,7 @@ dependencies = [
  "parking_lot",
  "reqwest",
  "ring",
+ "ron 0.8.1",
  "serde",
  "serde_json",
  "tempfile",
@@ -11063,10 +11063,10 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_core",
- "vmux_layout",
  "vmux_native",
  "vmux_path",
  "vmux_profile",
+ "vmux_service",
  "vmux_ui",
 ]
 

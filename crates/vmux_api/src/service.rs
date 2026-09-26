@@ -57,6 +57,9 @@ pub struct ProcessKillAllEvent {
     pub kill_all: bool,
 }
 
+#[vmux_api::ui_event(Copy, Default, Eq, targets = ["debug", "extensions", "layout"])]
+pub struct RelaunchRequest;
+
 #[cfg(test)]
 mod tests {
     use super::*;

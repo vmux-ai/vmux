@@ -2,15 +2,15 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::AgentQuery;
 use vmux_core::JsonArguments;
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolDispatchError, ToolDispatchSet, ToolQuery, ToolRequestSet,
+use vmux_tool::{
+    AddedTool, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery, ToolRequestSet,
 };
 
 pub struct CaptureToolPlugin;
 
 impl Plugin for CaptureToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<CaptureTool>::new(include_str!(
+        app.add_plugins(ToolManifestPlugin::<CaptureTool>::new(include_str!(
             "capture_tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -143,7 +143,7 @@ impl OptionalText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_mcp::tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
+    use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
 
     impl CaptureTool {
         fn app() -> App {

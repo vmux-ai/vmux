@@ -21,7 +21,7 @@ bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
 notify = { workspace = true }
 vmux_git = { path = "../../vmux_git" }
-vmux_mcp = { path = "../../host/vmux_mcp" }
+vmux_tool = { path = "../../vmux_tool" }
 
 [dev-dependencies]
 tempfile = "3"

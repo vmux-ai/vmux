@@ -10,6 +10,7 @@ publish = false
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_tasks = { workspace = true }
+ron = "0.8"
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
@@ -17,7 +18,7 @@ vmux_path = { path = "../vmux_path" }
 vmux_profile = { path = "../vmux_profile" }
 vmux_core = { path = "../vmux_core" }
 vmux_api = { path = "../vmux_api" }
-vmux_layout = { path = "../page/vmux_layout" }
+vmux_service = { path = "../host/vmux_service" }
 vmux_native = { path = "../vmux_native" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 
