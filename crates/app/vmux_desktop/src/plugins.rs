@@ -1,6 +1,6 @@
 use crate::{
     display::DisplayPlugin, os_menu::OsMenuPlugin, permission::PermissionsPlugin,
-    remote::RemotePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin, tool::ToolPlugin,
+    remote::RemotePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin, tool::ToolUiPlugin,
     window_state::WindowStatePlugin,
 };
 use bevy::app::PluginGroupBuilder;
@@ -20,7 +20,7 @@ impl PluginGroup for DesktopPlugins {
             .add(MediaPlugin)
             .add(RemotePlugin)
             .add(UpdaterPlugin)
-            .add(ToolPlugin);
+            .add(ToolUiPlugin);
 
         #[cfg(feature = "native-notifications")]
         {

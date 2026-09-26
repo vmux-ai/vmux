@@ -40,16 +40,12 @@ use vmux_tool::{
     ToolStoreOperation, ToolStoreTarget, ToolsManifest,
 };
 
-pub struct ToolPlugin;
+pub(crate) struct ToolUiPlugin;
 
-impl Plugin for ToolPlugin {
+impl Plugin for ToolUiPlugin {
     fn build(&self, app: &mut App) {
         let vault_root = vmux_core::profile::vault::root_dir();
         let _ = std::fs::create_dir_all(&vault_root);
-        let knowledge_root = vault_root.join("knowledge");
-        let tools_root = vault_root.join("tools");
-        let _ = std::fs::create_dir_all(&knowledge_root);
-        let _ = std::fs::create_dir_all(&tools_root);
         let (watch_tx, watch_rx) = mpsc::channel();
         let watch_wake = app
             .world()
@@ -65,14 +61,7 @@ impl Plugin for ToolPlugin {
             }
         }) {
             Ok(mut watcher) => {
-                if watcher
-                    .watch(&vault_root, RecursiveMode::NonRecursive)
-                    .is_ok()
-                    && watcher
-                        .watch(&knowledge_root, RecursiveMode::Recursive)
-                        .is_ok()
-                    && watcher.watch(&tools_root, RecursiveMode::Recursive).is_ok()
-                {
+                if watcher.watch(&vault_root, RecursiveMode::Recursive).is_ok() {
                     let (debounce_tx, debounce_rx) = mpsc::channel();
                     let (ready_tx, ready_rx) = mpsc::channel();
                     let (remote_tx, remote_rx) = mpsc::channel();
@@ -156,7 +145,6 @@ impl Plugin for ToolPlugin {
         ));
         app.add_plugins((
             vmux_app::extension::McpConnectionPlugin,
-            vmux_tool::ToolPlugin,
             UiStatePlugin::<ToolsUiState>::default(),
             UiStatePlugin::<VaultUiState>::default(),
         ))
