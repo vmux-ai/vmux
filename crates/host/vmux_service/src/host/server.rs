@@ -13,6 +13,8 @@ use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
 
+use super::query::{CommandExitState, DaemonQueryPlugin, RunCompletionState, TerminalQueryBridge};
+
 static SERVICE_STARTED: OnceLock<Instant> = OnceLock::new();
 
 pub(crate) fn init_started_at() {
@@ -33,6 +35,8 @@ pub(crate) struct ServiceDaemonPlugin {
     manager: Arc<Mutex<ProcessManager>>,
     runtime: tokio::runtime::Handle,
     exit: mpsc::Sender<()>,
+    queries: TerminalQueryBridge,
+    query_plugin: std::sync::Mutex<Option<DaemonQueryPlugin>>,
 }
 
 impl ServiceDaemonPlugin {
@@ -42,11 +46,15 @@ impl ServiceDaemonPlugin {
         runtime: tokio::runtime::Handle,
         exit: mpsc::Sender<()>,
     ) -> Self {
+        let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
+        let (query_plugin, queries) = DaemonQueryPlugin::new(Arc::clone(&manager), wake);
         Self {
             listener: std::sync::Mutex::new(Some(listener)),
-            manager: Arc::new(Mutex::new(ProcessManager::new(wake))),
+            manager,
             runtime,
             exit,
+            queries,
+            query_plugin: std::sync::Mutex::new(Some(query_plugin)),
         }
     }
 }
@@ -61,26 +69,29 @@ impl Plugin for ServiceDaemonPlugin {
             .expect("service daemon plugin can only be built once");
         let manager = Arc::clone(&self.manager);
         let server_manager = Arc::clone(&manager);
+        let queries = self.queries.clone();
         let exit = self.exit.clone();
+        let query_plugin = self
+            .query_plugin
+            .lock()
+            .unwrap()
+            .take()
+            .expect("service daemon plugin can only be built once");
+        app.add_plugins(query_plugin);
         let task = self.runtime.spawn(async move {
-            run_server(listener, server_manager).await;
+            run_server(listener, server_manager, queries).await;
             let _ = exit.send(()).await;
         });
         app.world_mut().spawn((
             Name::new("vmux service daemon"),
             ServiceDaemon,
-            ServiceProcesses(manager),
             ServiceServerTask(task),
         ));
-        app.add_systems(Update, poll_service_processes);
     }
 }
 
 #[derive(Component)]
 struct ServiceDaemon;
-
-#[derive(Component)]
-struct ServiceProcesses(Arc<Mutex<ProcessManager>>);
 
 #[derive(Component)]
 struct ServiceServerTask(tokio::task::JoinHandle<()>);
@@ -91,12 +102,6 @@ impl Drop for ServiceServerTask {
     }
 }
 
-fn poll_service_processes(processes: Single<&ServiceProcesses>) {
-    let Ok(mut manager) = processes.0.try_lock() else {
-        return;
-    };
-    manager.reap_exited();
-}
 type PendingCommands = Arc<
     Mutex<
         HashMap<
@@ -208,7 +213,11 @@ where
     mgr.processes.get_mut(&id).map(f)
 }
 
-async fn run_server(listener: UnixListener, manager: Arc<Mutex<ProcessManager>>) {
+async fn run_server(
+    listener: UnixListener,
+    manager: Arc<Mutex<ProcessManager>>,
+    terminal_queries: TerminalQueryBridge,
+) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
     let pending_commands: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
@@ -248,6 +257,7 @@ async fn run_server(listener: UnixListener, manager: Arc<Mutex<ProcessManager>>)
                 let pending_tool_calls = Arc::clone(&pending_tool_calls);
                 let agent_manager = Arc::clone(&agent_manager);
                 let acp_manager = Arc::clone(&acp_manager);
+                let terminal_queries = terminal_queries.clone();
                 let shutdown_tx = shutdown_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_client(
@@ -259,6 +269,7 @@ async fn run_server(listener: UnixListener, manager: Arc<Mutex<ProcessManager>>)
                         pending_tool_calls,
                         agent_manager,
                         acp_manager,
+                        terminal_queries,
                         shutdown_tx,
                     )
                     .await
@@ -359,6 +370,7 @@ async fn handle_client(
     pending_tool_calls: crate::agent_broker::PendingToolCalls,
     agent_manager: Arc<Mutex<crate::agent::AgentSessionManager>>,
     acp_manager: Arc<Mutex<crate::acp::AcpSessionManager>>,
+    terminal_queries: TerminalQueryBridge,
     shutdown_tx: mpsc::Sender<()>,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
@@ -707,110 +719,61 @@ async fn handle_client(
             }
 
             ClientMessage::AgentQuery { request_id, query } => {
-                let query = match query {
+                let result = match query {
                     crate::protocol::AgentQuery::ReadTerminal { process_id } => {
-                        let result = {
-                            let mgr = manager.lock().await;
-                            match mgr.processes.get(&process_id) {
-                                Some(process) => {
-                                    let text = match process.snapshot() {
-                                        ServiceMessage::Snapshot { lines, .. } => lines
-                                            .iter()
-                                            .map(|line| {
-                                                line.spans
-                                                    .iter()
-                                                    .map(|span| span.text.as_str())
-                                                    .collect::<String>()
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("\n"),
-                                        _ => String::new(),
-                                    };
-                                    crate::protocol::AgentQueryResult::Text(text)
-                                }
-                                None => crate::protocol::AgentQueryResult::Error(format!(
-                                    "process not found: {process_id}"
-                                )),
-                            }
-                        };
-                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
-                        let mut w = writer.lock().await;
-                        write_message!(&mut *w, &resp)?;
-                        continue;
+                        match terminal_queries.visible_text(process_id).await {
+                            Ok(text) => crate::protocol::AgentQueryResult::Text(text),
+                            Err(message) => crate::protocol::AgentQueryResult::Error(message),
+                        }
                     }
                     crate::protocol::AgentQuery::ReadTerminalFull { process_id } => {
-                        let result = {
-                            let mgr = manager.lock().await;
-                            match mgr.processes.get(&process_id) {
-                                Some(process) => {
-                                    crate::protocol::AgentQueryResult::Text(process.full_text())
-                                }
-                                None => crate::protocol::AgentQueryResult::Error(format!(
-                                    "process not found: {process_id}"
-                                )),
-                            }
-                        };
-                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
-                        let mut w = writer.lock().await;
-                        write_message!(&mut *w, &resp)?;
-                        continue;
+                        match terminal_queries.full_text(process_id).await {
+                            Ok(text) => crate::protocol::AgentQueryResult::Text(text),
+                            Err(message) => crate::protocol::AgentQueryResult::Error(message),
+                        }
                     }
                     crate::protocol::AgentQuery::CommandExit { process_id } => {
-                        let result = {
-                            let mgr = manager.lock().await;
-                            match mgr.processes.get(&process_id) {
-                                Some(process) => {
-                                    let (seq, exit) = process.command_status();
-                                    crate::protocol::AgentQueryResult::CommandExit { seq, exit }
+                        match terminal_queries.command_exit(process_id).await {
+                            Ok(CommandExitState { sequence, exit }) => {
+                                crate::protocol::AgentQueryResult::CommandExit {
+                                    seq: sequence,
+                                    exit,
                                 }
-                                None => crate::protocol::AgentQueryResult::Error(format!(
-                                    "process not found: {process_id}"
-                                )),
                             }
-                        };
-                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
-                        let mut w = writer.lock().await;
-                        write_message!(&mut *w, &resp)?;
-                        continue;
+                            Err(message) => crate::protocol::AgentQueryResult::Error(message),
+                        }
                     }
                     crate::protocol::AgentQuery::RunCompletion { process_id } => {
-                        let result = {
-                            let mgr = manager.lock().await;
-                            match mgr.processes.get(&process_id) {
-                                Some(process) => {
-                                    let (token, exit) = match process.run_completion() {
-                                        Some((token, exit)) => (Some(token), Some(exit)),
-                                        None => (None, None),
-                                    };
-                                    crate::protocol::AgentQueryResult::RunCompletion { token, exit }
-                                }
-                                None => crate::protocol::AgentQueryResult::Error(format!(
-                                    "process not found: {process_id}"
-                                )),
+                        match terminal_queries.run_completion(process_id).await {
+                            Ok(RunCompletionState { token, exit }) => {
+                                crate::protocol::AgentQueryResult::RunCompletion { token, exit }
                             }
-                        };
-                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
-                        let mut w = writer.lock().await;
-                        write_message!(&mut *w, &resp)?;
+                            Err(message) => crate::protocol::AgentQueryResult::Error(message),
+                        }
+                    }
+                    query => {
+                        let broker = broker.clone();
+                        let writer = writer.clone();
+                        tokio::spawn(async move {
+                            let resp = match broker.query(request_id, query).await {
+                                Ok(result) => {
+                                    ServiceMessage::AgentQueryResult { request_id, result }
+                                }
+                                Err(message) => ServiceMessage::Error { message },
+                            };
+                            let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&resp) {
+                                Ok(b) => b,
+                                Err(_) => return,
+                            };
+                            let mut w = writer.lock().await;
+                            let _ = crate::framing::write_raw_frame(&mut *w, &bytes).await;
+                        });
                         continue;
                     }
-                    other => other,
                 };
-
-                let broker = broker.clone();
-                let writer = writer.clone();
-                tokio::spawn(async move {
-                    let resp = match broker.query(request_id, query).await {
-                        Ok(result) => ServiceMessage::AgentQueryResult { request_id, result },
-                        Err(message) => ServiceMessage::Error { message },
-                    };
-                    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&resp) {
-                        Ok(b) => b,
-                        Err(_) => return,
-                    };
-                    let mut w = writer.lock().await;
-                    let _ = crate::framing::write_raw_frame(&mut *w, &bytes).await;
-                });
+                let response = ServiceMessage::AgentQueryResult { request_id, result };
+                let mut writer = writer.lock().await;
+                write_message!(&mut *writer, &response)?;
             }
 
             ClientMessage::AgentQueryResponse { request_id, result } => {
@@ -1166,8 +1129,13 @@ mod tests {
     use tokio::sync::oneshot;
 
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<ProcessId>) {
-        let manager = Arc::new(Mutex::new(ProcessManager::new(wake)));
-        let mut server = Box::pin(super::run_server(listener, Arc::clone(&manager)));
+        let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
+        let (_query_plugin, terminal_queries) = DaemonQueryPlugin::new(Arc::clone(&manager), wake);
+        let mut server = Box::pin(super::run_server(
+            listener,
+            Arc::clone(&manager),
+            terminal_queries,
+        ));
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
