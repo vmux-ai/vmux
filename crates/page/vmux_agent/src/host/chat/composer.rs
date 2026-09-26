@@ -9,7 +9,7 @@ use vmux_api::prompt_media::inline_media_query;
 use vmux_chat::event::{
     ChatComposerEffect, ChatDraftChanged, ChatPickFiles, ChatSlashCommandRequest,
 };
-use vmux_chat::format::{SelectorMode, selector_mode};
+use vmux_chat::selector::{SelectorMode, selector_mode};
 use vmux_core::agent::SwapStackSession;
 use vmux_session::AcpSession;
 

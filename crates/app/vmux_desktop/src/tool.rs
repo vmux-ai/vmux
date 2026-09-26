@@ -121,20 +121,6 @@ impl Plugin for ToolUiPlugin {
             Err(error) => bevy::log::warn!("Vault watcher init failed: {error}"),
         }
         app.world_mut().spawn((
-            vmux_layout::tool_page::ToolsPage::MANIFEST,
-            vmux_core::host::page::NativelyHosted::subtree(
-                vmux_layout::tool_page::ToolsPage::URL,
-                vmux_layout::tool_page::ToolsPage::NATIVE.title,
-            ),
-        ));
-        app.world_mut().spawn((
-            vmux_layout::vault_page::VaultPage::MANIFEST,
-            vmux_core::host::page::NativelyHosted::page(
-                vmux_layout::vault_page::VaultPage::URL,
-                vmux_layout::vault_page::VaultPage::NATIVE.title,
-            ),
-        ));
-        app.world_mut().spawn((
             Name::new("Tool registry"),
             ToolRegistry::default(),
             ToolStore::current(),
@@ -3224,17 +3210,6 @@ mod tests {
                 .map(|operation| operation.target)
                 .collect()
         }
-    }
-
-    #[test]
-    fn tools_page_owns_provider_routes() {
-        let hosted = vmux_core::host::page::NativelyHosted::subtree(
-            vmux_layout::tool_page::ToolsPage::URL,
-            vmux_layout::tool_page::ToolsPage::NATIVE.title,
-        );
-        assert!(hosted.answers_for("vmux://tools/extensions"));
-        assert!(hosted.answers_for("vmux://tools/homebrew"));
-        assert!(!hosted.answers_for("vmux://toolbox/"));
     }
 
     #[test]
