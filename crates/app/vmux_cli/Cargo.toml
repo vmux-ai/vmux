@@ -10,11 +10,22 @@ name = "vmux"
 path = "src/main.rs"
 
 [dependencies]
+bevy_app = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+vmux_agent = { path = "../../page/vmux_agent" }
+vmux_browser = { path = "../../vmux_browser" }
+vmux_command = { path = "../../page/vmux_command" }
+vmux_editor = { path = "../../page/vmux_editor" }
+vmux_knowledge = { path = "../../page/vmux_knowledge" }
+vmux_layout = { path = "../../page/vmux_layout" }
 vmux_mcp = { path = "../../host/vmux_mcp" }
-vmux_app = { path = "../../vmux_app", features = ["tools"] }
+vmux_setting = { path = "../../page/vmux_setting" }
+vmux_simulator = { path = "../../page/vmux_simulator" }
+vmux_space = { path = "../../page/vmux_space" }
+vmux_team = { path = "../../page/vmux_team" }
+vmux_terminal = { path = "../../page/vmux_terminal" }
 vmux_transport = { path = "../../host/vmux_transport" }
 vmux_tool = { path = "../../vmux_tool" }
 vmux_service = { path = "../../host/vmux_service" }
