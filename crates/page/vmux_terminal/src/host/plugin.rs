@@ -737,7 +737,6 @@ struct PollServiceWriters<'w> {
     service_requests: MessageWriter<'w, ServiceRequest>,
     stack_close_requests: MessageWriter<'w, StackCloseRequest>,
     agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
-    agent_queries: MessageWriter<'w, vmux_service::agent_events::AgentQueryRequest>,
     agent_tool_calls: MessageWriter<'w, vmux_service::agent_events::AgentToolCallRequest>,
     page_agent_delta: MessageWriter<'w, vmux_service::agent_events::PageAgentDelta>,
     page_agent_run_status: MessageWriter<'w, vmux_service::agent_events::PageAgentRunStatus>,
@@ -1216,11 +1215,6 @@ fn poll_service_messages(
                         },
                         command,
                     });
-            }
-            ServiceMessage::AgentQuery { request_id, query } => {
-                writers
-                    .agent_queries
-                    .write(vmux_service::agent_events::AgentQueryRequest { request_id, query });
             }
             ServiceMessage::AgentToolCall {
                 request_id,
