@@ -40,7 +40,6 @@ impl AgentContribution {
                 id: agent.id.clone(),
                 rank: 0,
                 page: CommandBarPage {
-                    host: "sessions".to_string(),
                     url: agent.url.clone(),
                     title: agent.name.clone(),
                     keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
@@ -59,7 +58,6 @@ impl AgentContribution {
                 id: agent.id.clone(),
                 rank: 0,
                 page: CommandBarPage {
-                    host: "sessions".to_string(),
                     url: agent.url.clone(),
                     title: format!("{} (CLI)", agent.name),
                     keywords: vec![agent.id.clone(), "cli".to_string(), "agent".to_string()],
@@ -229,7 +227,6 @@ mod tests {
         assert_eq!(pages[0].rank, 0);
         assert_eq!(pages[0].page.url, "vmux://sessions/codex/cli");
         assert_eq!(pages[0].page.title, "Codex (CLI)");
-        assert_eq!(pages[0].page.host, "sessions");
         assert_eq!(pages[1].rank, 1);
         assert_eq!(pages[1].page.title, "Claude Agent");
         assert!(matches!(

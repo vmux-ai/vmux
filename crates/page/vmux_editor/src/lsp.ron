@@ -1,0 +1,13 @@
+(
+    url: "vmux://tools/lsp",
+    title: "Language Servers",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "LspManagerUiState",
+        "LspCatalogRequest",
+        "LspInstallRequest",
+        "LspUninstallRequest",
+        "LspUpdateRequest",
+    ],
+)

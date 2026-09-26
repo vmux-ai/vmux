@@ -17,8 +17,6 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::translate;
 
 #[vmux_native::page(
-    url = vmux_api::team::TEAM_PAGE_URL,
-    title = "Team",
     component = Page
 )]
 pub(crate) struct TeamPage;

@@ -325,14 +325,22 @@ fn host_window_for(world: &World, entity: Entity) -> Option<Entity> {
     }
 }
 
-fn forward_host_emit(host_emit: On<BinHostEmitEvent>, hosted: Option<NonSend<HostedPages>>) {
+fn forward_host_emit(
+    host_emit: On<BinHostEmitEvent>,
+    hosted: Option<NonSend<HostedPages>>,
+    permissions: Query<&vmux_api::PageEventPermissions>,
+) {
     let Some(hosted) = hosted else {
         return;
     };
     let Some(page) = hosted.get(host_emit.webview()) else {
         return;
     };
-    if !host_emit.target().accepts(page.page.url) {
+    if !vmux_api::PageEventPermissions::allows_page(
+        permissions.iter(),
+        page.page.url,
+        host_emit.permission(),
+    ) {
         warn!(
             "blocked binary host event {} for unexpected native page URL {}",
             host_emit.id(),

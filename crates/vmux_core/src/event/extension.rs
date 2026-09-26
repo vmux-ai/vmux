@@ -1,4 +1,4 @@
-pub const EXTENSIONS_PAGE_URL: &str = "vmux://extensions/";
+pub const EXTENSIONS_PAGE_URL: &str = "vmux://tools/extensions";
 
 #[vmux_api::contract(Copy, Eq)]
 pub enum ExtStatus {
@@ -33,7 +33,7 @@ pub struct ExtRow {
     pub status: ExtStatus,
 }
 
-#[vmux_api::ui_state(Eq, Default, version = 2, urls = ["vmux://extensions/", "vmux://layout/", "vmux://tools/"])]
+#[vmux_api::ui_state(Eq, Default, version = 2)]
 pub struct ExtensionsEvent {
     pub loaded: bool,
     pub extensions: Vec<ExtRow>,
@@ -49,19 +49,19 @@ pub struct ExtInstallProgress {
     pub message: String,
 }
 
-#[vmux_api::ui_event(Eq, urls = ["vmux://extensions/", "vmux://tools/"])]
+#[vmux_api::ui_event(Eq)]
 pub struct ExtToggleRequest {
     pub id: String,
     pub enabled: bool,
     pub approve_permissions: bool,
 }
 
-#[vmux_api::ui_event(Eq, urls = ["vmux://extensions/", "vmux://tools/"])]
+#[vmux_api::ui_event(Eq)]
 pub struct ExtUninstallRequest {
     pub id: String,
 }
 
-#[vmux_api::ui_event(Eq, urls = ["vmux://extensions/", "vmux://layout/", "vmux://tools/"])]
+#[vmux_api::ui_event(Eq)]
 pub struct ExtensionPopupOpenRequest {
     pub id: String,
     pub anchor: ExtensionPopupAnchor,
@@ -81,7 +81,7 @@ pub struct ExtensionPopupEvent {
     pub anchor: ExtensionPopupAnchor,
 }
 
-#[vmux_api::ui_event(Copy, Default, urls = ["vmux://extensions/", "vmux://layout/", "vmux://tools/"])]
+#[vmux_api::ui_event(Copy, Default)]
 pub struct ExtensionPopupBoundsRequest {
     pub left: f32,
     pub top: f32,
@@ -96,22 +96,22 @@ pub struct ExtensionPopupSizeEvent {
     pub height: f32,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq, urls = ["vmux://extensions/", "vmux://layout/", "vmux://tools/"])]
+#[vmux_api::ui_event(Copy, Default, Eq)]
 pub struct ExtensionPopupCloseRequest;
 
-#[vmux_api::ui_event(Eq, urls = ["vmux://extensions/", "vmux://layout/", "vmux://tools/"])]
+#[vmux_api::ui_event(Eq)]
 pub struct ExtPinRequest {
     pub id: String,
     pub pinned: bool,
 }
 
-#[vmux_api::ui_event(Eq, urls = ["vmux://extensions/", "vmux://layout/", "vmux://tools/"])]
+#[vmux_api::ui_event(Eq)]
 pub struct ExtOpenManagerRequest;
 
-#[vmux_api::ui_event(Eq, urls = ["vmux://extensions/", "vmux://layout/", "vmux://tools/"])]
+#[vmux_api::ui_event(Eq)]
 pub struct ExtListRequest;
 
-#[vmux_api::ui_event(Eq, urls = ["vmux://extensions/", "vmux://tools/"])]
+#[vmux_api::ui_event(Eq)]
 pub struct ExtBrowseStoreRequest {
     pub query: String,
 }

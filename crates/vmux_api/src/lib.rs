@@ -31,9 +31,11 @@ mod ui_state;
 pub mod vault;
 
 pub use agent::AgentKind;
-pub use bin_event::{BinEvent, BinEventFamily, BinEventTarget, HostEvent, PageReady, UiEvent};
+pub use bin_event::{BinEvent, HostEvent, PageReady, UiEvent};
 pub use icon::{BuiltinIcon, PageIcon};
 pub use input_schema::{InputSchema, InputSchemaType};
+#[cfg(feature = "bevy")]
+pub use page::PageEventPermissions;
 pub use page_metadata::{PageIdentity, PageMetadata};
 pub use process_id::ProcessId;
 pub use route::{InvalidVmuxRoute, VmuxRoute};

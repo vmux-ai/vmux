@@ -9,7 +9,9 @@ mod tool;
 type SpacesUiStateUpdates = vmux_core::host::UiState<vmux_api::space::SpacesUiState>;
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "spaces",
+    url: vmux_api::space::SPACES_PAGE_URL,
+    asset_host: "spaces",
+    owns_subtree: false,
     title: "Spaces",
     title_message_id: Some("spaces-title"),
     replaces_command: None,

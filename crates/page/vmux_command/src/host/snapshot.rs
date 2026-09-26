@@ -210,7 +210,6 @@ fn update_pages_snapshot(manifests: Query<&PageManifest>, mut state: ResMut<Comm
         }
         pages.push(RegisteredPage {
             page: CommandBarPage {
-                host: manifest.host.to_string(),
                 url: manifest.url(),
                 title: manifest.title.to_string(),
                 keywords: manifest.keywords.iter().map(|k| k.to_string()).collect(),
@@ -257,7 +256,6 @@ mod tests {
                 id: url.to_string(),
                 rank,
                 page: CommandBarPage {
-                    host: "test".to_string(),
                     url: url.to_string(),
                     prompt_target: true,
                     ..Default::default()
@@ -375,7 +373,9 @@ mod tests {
         app.init_resource::<CommandBarProjection>()
             .add_systems(Update, update_pages_snapshot);
         app.world_mut().spawn(PageManifest {
-            host: "services",
+            url: "vmux://services/",
+            asset_host: "services",
+            owns_subtree: false,
             title: "Services",
             title_message_id: Some("services-title"),
             replaces_command: Some("service_open"),
@@ -384,7 +384,9 @@ mod tests {
             command_bar: true,
         });
         app.world_mut().spawn(PageManifest {
-            host: "layout",
+            url: "vmux://layout/",
+            asset_host: "layout",
+            owns_subtree: false,
             title: "Layout",
             title_message_id: None,
             replaces_command: None,
@@ -397,7 +399,7 @@ mod tests {
 
         let snap = &app.world().resource::<CommandBarProjection>().pages;
         assert_eq!(snap.pages.len(), 1);
-        assert_eq!(snap.pages[0].page.host, "services");
+        assert_eq!(snap.pages[0].page.url, "vmux://services/");
         assert_eq!(snap.pages[0].page.url, "vmux://services/");
         assert_eq!(
             snap.pages[0].title_message_id.as_deref(),

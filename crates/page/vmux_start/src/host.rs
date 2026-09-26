@@ -782,7 +782,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(StartPlugin);
         let mut q = app.world_mut().query::<&PageManifest>();
-        assert!(q.iter(app.world()).any(|m| m.host == "start"));
+        assert!(q.iter(app.world()).any(|m| m.url == START_PAGE_URL));
     }
 
     #[test]

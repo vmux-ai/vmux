@@ -1,0 +1,5 @@
+(
+    url: "vmux://error/",
+    title: "Error",
+    permissions: ["PageReady", "ThemeEvent"],
+)

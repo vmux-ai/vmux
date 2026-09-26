@@ -55,7 +55,9 @@ impl Plugin for ManagerPlugin {
 }
 
 const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "lsp",
+    url: "vmux://tools/lsp",
+    asset_host: "lsp",
+    owns_subtree: false,
     title: "Language Servers",
     title_message_id: Some("lsp-title"),
     replaces_command: None,
@@ -69,8 +71,8 @@ const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManife
 struct LspManagerPage;
 
 impl HostedPage for LspManagerPage {
-    const HOST: &'static str = "lsp";
-    const URL: &'static str = "vmux://lsp/";
+    const HOST: &'static str = "tools";
+    const URL: &'static str = "vmux://tools/lsp";
     const TITLE: &'static str = "Language Servers";
 }
 

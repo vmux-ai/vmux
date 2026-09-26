@@ -85,7 +85,9 @@ enum GitUpdateSet {
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "git",
+    url: crate::GIT_DOCUMENT_URL,
+    asset_host: "git",
+    owns_subtree: false,
     title: "Git",
     title_message_id: Some("git-title"),
     replaces_command: None,

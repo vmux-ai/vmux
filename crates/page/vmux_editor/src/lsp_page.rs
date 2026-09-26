@@ -12,7 +12,7 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::page_model::{PackageOperation, package_operation, pkg_status_class};
 
-#[vmux_native::page(url = "vmux://lsp/", title = "Language Servers", component = Page)]
+#[vmux_native::page(file = "src/lsp.ron", component = Page)]
 pub(crate) struct LspPage;
 
 #[component]

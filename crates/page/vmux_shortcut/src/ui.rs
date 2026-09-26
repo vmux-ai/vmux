@@ -7,8 +7,6 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::BuiltinIconView;
 
 #[vmux_native::page(
-    url = crate::PAGE_URL,
-    title = "Keyboard Shortcuts",
     component = Page
 )]
 pub(crate) struct ShortcutPage;

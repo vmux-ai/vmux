@@ -15,7 +15,7 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state_root};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::now_millis;
 
-#[vmux_native::page(url = crate::PAGE_URL, title = "History", component = Page)]
+#[vmux_native::page(component = Page)]
 pub(crate) struct HistoryPage;
 
 fn emit_query(query: &str, offset: u32, request_id: u64) {

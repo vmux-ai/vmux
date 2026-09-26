@@ -26,32 +26,12 @@ impl bevy::prelude::Plugin for KeyStrokePlugin {
     }
 }
 
-#[vmux_api::ui_event(Default, Eq, urls = [
-        "vmux://terminal/",
-        "file://",
-        "projects",
-        "knowledge",
-        "vmux://command-bar/",
-        "vmux://layout/",
-        "vmux://agent/",
-        "vmux://start/",
-        "vmux://spaces/",
-    ])]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct PageKeyContext {
     pub keys: Vec<String>,
 }
 
-#[vmux_api::ui_state(Default, Eq, urls = [
-    "vmux://terminal/",
-    "file://",
-    "projects",
-    "knowledge",
-    "vmux://command-bar/",
-    "vmux://layout/",
-    "vmux://agent/",
-    "vmux://start/",
-    "vmux://spaces/",
-])]
+#[vmux_api::ui_state(Default, Eq)]
 pub struct KeyClaims {
     pub keys: Vec<ClaimedKey>,
 }
@@ -116,17 +96,7 @@ impl KeyModifiers {
     }
 }
 
-#[vmux_api::ui_event(Default, Eq, urls = [
-        "vmux://terminal/",
-        "file://",
-        "projects",
-        "knowledge",
-        "vmux://command-bar/",
-        "vmux://layout/",
-        "vmux://agent/",
-        "vmux://start/",
-        "vmux://spaces/",
-    ])]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct KeyStroke {
     pub key: String,
     #[serde(default)]

@@ -19,8 +19,6 @@ pub use root::Page;
 pub use shared::{DiffView, GitFooter};
 
 #[vmux_native::page(
-    url = crate::GIT_PAGE_URL,
-    title = "Git",
     component = Page,
     document_url = crate::GIT_DOCUMENT_URL,
     subtree
@@ -28,8 +26,7 @@ pub use shared::{DiffView, GitFooter};
 pub(crate) struct GitPage;
 
 #[vmux_native::page(
-    url = crate::GIT_DOCUMENT_URL,
-    title = "Git",
+    file = "src/document.ron",
     component = Page
 )]
 pub(crate) struct LegacyGitPage;

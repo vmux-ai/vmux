@@ -3,27 +3,16 @@ use std::collections::HashSet;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{Data, DeriveInput, Field, Fields, Ident, LitInt, LitStr, Path, Token, parenthesized};
+use syn::{Data, DeriveInput, Field, Fields, Ident, LitInt, Path, Token, parenthesized};
 
 mod keyword {
-    syn::custom_keyword!(any);
     syn::custom_keyword!(shared);
-    syn::custom_keyword!(target);
-    syn::custom_keyword!(url);
-    syn::custom_keyword!(urls);
     syn::custom_keyword!(version);
-}
-
-enum Target {
-    Any,
-    Url(LitStr),
-    Urls(Vec<LitStr>),
 }
 
 struct Args {
     derives: Vec<Path>,
     shared: Vec<Field>,
-    target: Option<Target>,
     version: Option<LitInt>,
 }
 
@@ -31,7 +20,6 @@ impl Parse for Args {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut derives = Vec::new();
         let mut shared = None;
-        let mut target = None;
         let mut version = None;
 
         while !input.is_empty() {
@@ -51,34 +39,6 @@ impl Parse for Args {
                     return Err(syn::Error::new_spanned(key, "duplicate version"));
                 }
                 version = Some(input.parse()?);
-            } else if input.peek(keyword::target) {
-                let key: keyword::target = input.parse()?;
-                input.parse::<Token![=]>()?;
-                if target.is_some() {
-                    return Err(syn::Error::new_spanned(key, "duplicate target"));
-                }
-                input.parse::<keyword::any>()?;
-                target = Some(Target::Any);
-            } else if input.peek(keyword::url) {
-                let key: keyword::url = input.parse()?;
-                input.parse::<Token![=]>()?;
-                if target.is_some() {
-                    return Err(syn::Error::new_spanned(key, "duplicate target"));
-                }
-                target = Some(Target::Url(input.parse()?));
-            } else if input.peek(keyword::urls) {
-                let key: keyword::urls = input.parse()?;
-                input.parse::<Token![=]>()?;
-                if target.is_some() {
-                    return Err(syn::Error::new_spanned(key, "duplicate target"));
-                }
-                let content;
-                syn::bracketed!(content in input);
-                let values = content
-                    .parse_terminated(|input| input.parse::<LitStr>(), Token![,])?
-                    .into_iter()
-                    .collect();
-                target = Some(Target::Urls(values));
             } else {
                 derives.push(input.parse()?);
             }
@@ -90,7 +50,6 @@ impl Parse for Args {
         Ok(Self {
             derives,
             shared: shared.unwrap_or_default(),
-            target,
             version,
         })
     }
@@ -105,12 +64,6 @@ impl Args {
             .collect::<Vec<_>>();
         if let Some(version) = &self.version {
             args.push(quote!(version = #version));
-        }
-        match &self.target {
-            Some(Target::Any) => args.push(quote!(target = any)),
-            Some(Target::Url(url)) => args.push(quote!(url = #url)),
-            Some(Target::Urls(urls)) => args.push(quote!(urls = [#(#urls),*])),
-            None => {}
         }
         quote!(#(#args),*)
     }
@@ -266,7 +219,7 @@ mod tests {
                 CheckoutCommit { commit: String },
             }
         };
-        let output = expand(quote!(Eq, url = "git://", shared(repo_root: String)), input).unwrap();
+        let output = expand(quote!(Eq, shared(repo_root: String)), input).unwrap();
         let file = parse2::<syn::File>(output).unwrap();
         let names = file
             .items

@@ -1,0 +1,12 @@
+(
+    url: "vmux://services/",
+    title: "Services",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "ProcessesUiState",
+        "ProcessNavigateEvent",
+        "ProcessKillEvent",
+        "ProcessKillAllEvent",
+    ],
+)

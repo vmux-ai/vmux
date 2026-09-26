@@ -22,6 +22,10 @@ struct PageManifestFile {
     icon: String,
     #[serde(default)]
     command_bar: bool,
+    #[serde(default)]
+    manifest: bool,
+    #[serde(default)]
+    permissions: Vec<String>,
 }
 
 impl PageManifestFile {
@@ -83,6 +87,7 @@ struct Args {
     keywords: Option<ExprArray>,
     icon: Option<Expr>,
     command_bar: bool,
+    permissions: Vec<LitStr>,
 }
 
 #[derive(Clone, Copy)]
@@ -118,6 +123,7 @@ impl Parse for Args {
         let mut keywords = None;
         let mut icon = None;
         let mut command_bar = false;
+        let mut permissions = Vec::new();
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -218,6 +224,10 @@ impl Parse for Args {
             }
         }
 
+        if file.is_none() && url.is_none() {
+            file = Some(LitStr::new("src/page.ron", proc_macro2::Span::call_site()));
+        }
+
         if let Some(manifest_file) = file.as_ref() {
             let page = PageManifestFile::read(manifest_file)?;
             if url.is_none() {
@@ -245,7 +255,12 @@ impl Parse for Args {
                 icon = page.icon(manifest_file)?;
             }
             command_bar |= page.command_bar;
-            manifest = true;
+            manifest |= page.manifest;
+            permissions = page
+                .permissions
+                .iter()
+                .map(|permission| LitStr::new(permission, manifest_file.span()))
+                .collect();
         }
 
         Ok(Self {
@@ -294,6 +309,7 @@ impl Parse for Args {
             keywords,
             icon,
             command_bar,
+            permissions,
         })
     }
 }
@@ -367,6 +383,7 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
     let favicon = args.favicon;
     let transparent = args.transparent;
     let owns_subtree = args.owns_subtree;
+    let permissions = args.permissions;
     let plugin = match args.placement {
         Placement::Layout => quote! { ::vmux_native::NativePagePlugin::as_layout(&Self::NATIVE) },
         Placement::Pane => quote! { ::vmux_native::NativePagePlugin::in_pane(&Self::NATIVE) },
@@ -402,7 +419,9 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
             #[cfg(host)]
             pub const MANIFEST: ::vmux_core::page::PageManifest =
                 ::vmux_core::page::PageManifest {
-                    host: #host,
+                    url: #url,
+                    asset_host: #host,
+                    owns_subtree: #owns_subtree,
                     title: #title,
                     title_message_id: #title_message_id,
                     replaces_command: #replaces_command,
@@ -436,6 +455,7 @@ pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<Token
                 body_class: #body_class,
                 transparent: #transparent,
                 owns_subtree: #owns_subtree,
+                permissions: &[#(#permissions),*],
             };
 
             #manifest
@@ -462,6 +482,8 @@ mod tests {
                 keywords: ["tools", "mcp"],
                 icon: "Hammer",
                 command_bar: true,
+                manifest: true,
+                permissions: ["ToolsUiState", "ToolsRefreshRequest"],
             )"#,
         )
         .unwrap();
@@ -472,6 +494,11 @@ mod tests {
         assert_eq!(manifest.keywords, ["tools", "mcp"]);
         assert_eq!(manifest.icon, "Hammer");
         assert!(manifest.command_bar);
+        assert!(manifest.manifest);
+        assert_eq!(
+            manifest.permissions,
+            ["ToolsUiState", "ToolsRefreshRequest"]
+        );
     }
 
     #[test]

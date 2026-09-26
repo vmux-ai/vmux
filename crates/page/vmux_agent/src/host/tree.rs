@@ -51,9 +51,7 @@ pub struct AgentSessionPlugin;
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut()
-            .spawn(vmux_core::HostSpawnRoute::host("sessions"));
-        app.world_mut()
-            .spawn(vmux_core::HostSpawnRoute::host("agent"));
+            .spawn(vmux_core::HostSpawnRoute::subtree("vmux://sessions/"));
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
         strategies.register_cli(Box::new(ClaudeStrategy));

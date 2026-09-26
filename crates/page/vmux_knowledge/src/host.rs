@@ -53,7 +53,9 @@ impl Plugin for KnowledgePlugin {
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "knowledge",
+    url: vmux_core::knowledge::KNOWLEDGE_PAGE_URL,
+    asset_host: "knowledge",
+    owns_subtree: true,
     title: "Knowledge",
     title_message_id: Some("layout-knowledge"),
     replaces_command: None,

@@ -14,8 +14,7 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_native::page(
-    url = vmux_core::event::EXTENSIONS_PAGE_URL,
-    title = "Extensions",
+    file = "src/extension.ron",
     component = Page
 )]
 pub struct ExtensionsPage;

@@ -1,0 +1,19 @@
+(
+    url: "vmux://simulator/",
+    title: "Simulator",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "SimulatorReady",
+        "SimulatorTouch",
+        "SimulatorSoftwareKeyboard",
+        "SimulatorInputTextRequest",
+        "SimulatorInputKeyRequest",
+        "SimulatorInputModifiedKeyRequest",
+        "SimulatorInputHardwareButtonRequest",
+        "SimulatorClipboardCopyRequest",
+        "SimulatorClipboardCutRequest",
+        "SimulatorClipboardPasteRequest",
+        "SimulatorClipboardSelectAllRequest",
+    ],
+)

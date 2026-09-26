@@ -175,7 +175,7 @@ mod tests {
         writes: Vec<Entity>,
     }
 
-    #[vmux_api::ui_state(Default, Eq, target = any)]
+    #[vmux_api::ui_state(Default, Eq)]
     struct SnapshotState {
         value: u32,
     }

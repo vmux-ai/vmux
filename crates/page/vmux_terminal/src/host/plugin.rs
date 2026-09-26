@@ -53,7 +53,7 @@ impl Plugin for TerminalPlugin {
         app.add_plugins(crate::ui::TerminalPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.world_mut()
-            .spawn(vmux_core::HostSpawnRoute::host("terminal"));
+            .spawn(vmux_core::HostSpawnRoute::page("vmux://terminal/"));
         app.add_message::<ServiceRequest>()
             .add_plugins((
                 vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),

@@ -18,6 +18,7 @@ use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
 
 use crate::runtime::{PageListeners, RuntimeHandle};
+use vmux_api::BinEvent;
 use vmux_api::command_bar::{
     CommandBarUiState, DismissRequest as CommandBarDismissRequest,
     ExRequest as CommandBarExRequest, InvokeRequest as CommandBarInvokeRequest,
@@ -31,7 +32,6 @@ use vmux_api::room::{
     RemoteStatus,
 };
 use vmux_api::team::TeamEvent;
-use vmux_api::{BinEvent, BinEventTarget};
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
 use vmux_ui::platform::sleep_ms;
@@ -45,8 +45,6 @@ const TEAM_POLL_INTERVAL_MS: u32 = 3_000;
 const MODEL_FETCH_ATTEMPTS: u8 = 5;
 
 const MODEL_RETRY_INTERVAL_MS: u32 = 1_000;
-
-const MOBILE_PAGE_URLS: &[&str] = &["vmux://sessions/", "vmux://agent/", "vmux://start/"];
 
 pub(crate) struct MobileHost {
     epoch: u64,
@@ -145,15 +143,7 @@ impl ComposerExchange {
 }
 
 impl PageHost for MobileHost {
-    fn send(
-        &self,
-        target: BinEventTarget,
-        id: &str,
-        bytes: &[u8],
-    ) -> Result<(), EventListenerError> {
-        if !target.accepts_any(MOBILE_PAGE_URLS) {
-            return Err(EventListenerError::Unsupported);
-        }
+    fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         match id {
             ChatSubmit::ID => submit(self, decode(bytes)?),
             ChatDraftChanged::ID => {
@@ -196,15 +186,7 @@ impl PageHost for MobileHost {
         }
     }
 
-    fn listen(
-        &self,
-        target: BinEventTarget,
-        id: &str,
-        on_bytes: BytesListener,
-    ) -> Result<(), EventListenerError> {
-        if !target.accepts_any(MOBILE_PAGE_URLS) {
-            return Err(EventListenerError::Unsupported);
-        }
+    fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
         match id {
             ChatUiState::ID => {
                 poll_models(self);

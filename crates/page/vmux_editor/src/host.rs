@@ -44,7 +44,9 @@ impl Plugin for EditorPlugin {
 }
 
 const FILES_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "files",
+    url: "vmux://files/",
+    asset_host: "files",
+    owns_subtree: false,
     title: "Files",
     title_message_id: None,
     replaces_command: None,
@@ -54,7 +56,9 @@ const FILES_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::Page
 };
 
 const PROJECTS_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "projects",
+    url: vmux_api::space::PROJECTS_PAGE_URL,
+    asset_host: "projects",
+    owns_subtree: true,
     title: "Projects",
     title_message_id: Some("layout-projects"),
     replaces_command: None,

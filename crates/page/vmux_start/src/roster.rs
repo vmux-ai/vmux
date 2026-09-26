@@ -86,7 +86,6 @@ impl Launcher {
         let mut pages = Vec::with_capacity(roster.agents.len());
         for agent in &roster.agents {
             pages.push(CommandBarPage {
-                host: agent.id.clone(),
                 url: agent.url.clone(),
                 title: agent.name.clone(),
                 keywords: Vec::new(),

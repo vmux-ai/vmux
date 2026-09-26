@@ -10754,6 +10754,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "vmux_api",
  "vmux_clipboard",
  "vmux_macro",
  "vmux_ui",

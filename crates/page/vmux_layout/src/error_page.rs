@@ -6,8 +6,7 @@ use vmux_ui::hooks::use_theme;
 use vmux_ui::i18n::translate;
 
 #[vmux_native::page(
-    url = vmux_api::error::ERROR_PAGE_URL,
-    title = "Error",
+    file = "src/error.ron",
     component = Page,
     takes = vmux_api::error::ErrorPageData
 )]

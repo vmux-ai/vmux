@@ -354,7 +354,6 @@ mod tests {
     fn command_bar_open_event_carries_pages() {
         let event = CommandBarOpenEvent {
             pages: vec![CommandBarPage {
-                host: "settings".to_string(),
                 url: "vmux://settings/".to_string(),
                 title: "Settings".to_string(),
                 keywords: vec!["preferences".to_string()],

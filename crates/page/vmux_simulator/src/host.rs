@@ -155,7 +155,9 @@ pub struct SimulatorFocusSet;
 pub struct SimulatorInputSet;
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: PAGE_HOST,
+    url: crate::url::PAGE_URL,
+    asset_host: PAGE_HOST,
+    owns_subtree: true,
     title: "Simulator",
     title_message_id: Some("simulator-title"),
     replaces_command: None,

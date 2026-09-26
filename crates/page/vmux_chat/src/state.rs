@@ -33,7 +33,7 @@ pub struct ChatUiStatePatch {
     pub composer_effect: Option<ChatComposerEffect>,
 }
 
-#[vmux_api::ui_state(Default, urls = ["vmux://sessions/", "vmux://agent/", "vmux://start/"])]
+#[vmux_api::ui_state(Default)]
 pub struct ChatUiState {
     pub sequence: u64,
     pub patches: Vec<ChatUiStatePatch>,

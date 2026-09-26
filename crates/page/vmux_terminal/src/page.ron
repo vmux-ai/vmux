@@ -1,0 +1,16 @@
+(
+    url: "vmux://terminal/",
+    title: "Terminal",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "TerminalUiState",
+        "TermScrollEvent",
+        "TermMouseEvent",
+        "TermLinkOpenRequest",
+        "TermResizeEvent",
+        "PageKeyContext",
+        "KeyStroke",
+        "KeyClaims",
+    ],
+)

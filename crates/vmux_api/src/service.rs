@@ -1,4 +1,4 @@
-#[vmux_api::ui_state(Default, url = "vmux://services/")]
+#[vmux_api::ui_state(Default)]
 pub struct ProcessesUiState {
     pub connected: bool,
     pub processes: Vec<ProcessEntry>,
@@ -40,24 +40,24 @@ pub fn format_mem(bytes: u64) -> String {
     }
 }
 
-#[vmux_api::ui_event(url = "vmux://services/")]
+#[vmux_api::ui_event]
 pub struct ProcessNavigateEvent {
     pub process_id: String,
     pub navigate: bool,
 }
 
-#[vmux_api::ui_event(url = "vmux://services/")]
+#[vmux_api::ui_event]
 pub struct ProcessKillEvent {
     pub process_id: String,
     pub kill: bool,
 }
 
-#[vmux_api::ui_event(url = "vmux://services/")]
+#[vmux_api::ui_event]
 pub struct ProcessKillAllEvent {
     pub kill_all: bool,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq, urls = ["vmux://debug/", "vmux://extensions/", "vmux://layout/"])]
+#[vmux_api::ui_event(Copy, Default, Eq)]
 pub struct RelaunchRequest;
 
 #[cfg(test)]

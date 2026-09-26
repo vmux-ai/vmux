@@ -1,0 +1,10 @@
+(
+    url: "vmux://shortcuts/",
+    title: "Keyboard Shortcuts",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "ShortcutUiState",
+        "ShortcutProbeRequest",
+    ],
+)

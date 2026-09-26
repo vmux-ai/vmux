@@ -47,7 +47,7 @@ pub struct FileUiStatePatch {
     pub key: Option<FileKey>,
 }
 
-#[vmux_api::ui_state(Default, url = "file://")]
+#[vmux_api::ui_state(Default)]
 pub struct FileUiState {
     pub sequence: u64,
     pub patches: Vec<FileUiStatePatch>,

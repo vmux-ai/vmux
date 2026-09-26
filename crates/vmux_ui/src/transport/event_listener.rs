@@ -46,7 +46,7 @@ where
 {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload)
         .map_err(|_| EventListenerError::SerializePayload)?;
-    Host::emit(T::TARGET, T::id(), &bytes)
+    Host::emit(T::id(), &bytes)
 }
 
 pub(crate) fn listen_ui_state<T, F>(on_event: F) -> Result<(), EventListenerError>
@@ -58,7 +58,6 @@ where
 {
     let mut on_event = on_event;
     Host::listen(
-        T::TARGET,
         T::id(),
         Box::new(move |bytes| {
             if let Some(msg) = HostPayload::new(bytes).decode::<T>() {

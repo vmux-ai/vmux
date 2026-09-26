@@ -1,0 +1,20 @@
+(
+    url: "vmux://tools/extensions",
+    title: "Extensions",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "ToolsNavigateRequest",
+        "ExtensionsEvent",
+        "ExtToggleRequest",
+        "ExtUninstallRequest",
+        "ExtensionPopupOpenRequest",
+        "ExtensionPopupBoundsRequest",
+        "ExtensionPopupCloseRequest",
+        "ExtPinRequest",
+        "ExtOpenManagerRequest",
+        "ExtListRequest",
+        "ExtBrowseStoreRequest",
+        "RelaunchRequest",
+    ],
+)

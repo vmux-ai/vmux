@@ -26,8 +26,6 @@ const MEASURE_COLS: usize = 80;
 const MEASURE_ROWS: usize = 8;
 
 #[vmux_native::page(
-    url = crate::event::TERMINAL_PAGE_URL,
-    title = "Terminal",
     component = Page,
     claims = crate::Terminal
 )]

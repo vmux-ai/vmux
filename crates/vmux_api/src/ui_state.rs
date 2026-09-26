@@ -21,7 +21,7 @@ pub trait UiStatePatch<T>: 'static {
 mod tests {
     use super::*;
 
-    #[vmux_api::ui_state(target = any)]
+    #[vmux_api::ui_state]
     struct TestState {
         sequence: u64,
         patches: Vec<TestPatch>,
@@ -50,7 +50,7 @@ mod tests {
         assert_eq!(text.map(String::as_str), Some("ready"));
     }
 
-    #[vmux_api::ui_state(Default, target = any)]
+    #[vmux_api::ui_state(Default)]
     struct TestSnapshot {
         value: u32,
     }

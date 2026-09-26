@@ -1904,9 +1904,10 @@ mod tests {
                     captured.0.push(trigger.url.clone());
                 },
             );
-            for host in ["terminal", "sessions"] {
-                app.world_mut().spawn(vmux_core::HostSpawnRoute::host(host));
-            }
+            app.world_mut()
+                .spawn(vmux_core::HostSpawnRoute::page("vmux://terminal/"));
+            app.world_mut()
+                .spawn(vmux_core::HostSpawnRoute::subtree("vmux://sessions/"));
             for (url, title) in [
                 ("vmux://services/", "Services"),
                 ("vmux://settings/", "Settings"),

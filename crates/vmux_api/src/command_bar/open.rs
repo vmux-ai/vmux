@@ -136,7 +136,6 @@ impl CommandBarPromptContext {
 
 #[vmux_api::contract(Default, Eq)]
 pub struct CommandBarPage {
-    pub host: String,
     pub url: String,
     pub title: String,
     pub keywords: Vec<String>,

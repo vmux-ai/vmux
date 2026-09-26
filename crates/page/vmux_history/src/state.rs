@@ -5,7 +5,7 @@ pub struct HistoryUiStatePatch {
     pub query: Option<HistoryQueryResponse>,
 }
 
-#[vmux_api::ui_state(Default, url = "vmux://history/")]
+#[vmux_api::ui_state(Default)]
 pub struct HistoryUiState {
     pub sequence: u64,
     pub patches: Vec<HistoryUiStatePatch>,

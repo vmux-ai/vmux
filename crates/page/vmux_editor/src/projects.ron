@@ -1,0 +1,11 @@
+(
+    url: "vmux://projects/",
+    title: "Projects",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "PageKeyContext",
+        "KeyStroke",
+        "KeyClaims",
+    ],
+)

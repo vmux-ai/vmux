@@ -3,7 +3,7 @@ use bevy_cef_core::prelude::*;
 use rkyv::api::high::HighSerializer;
 use rkyv::ser::allocator::ArenaHandle;
 use rkyv::util::AlignedVec;
-use vmux_api::{BinEventTarget, HostEvent};
+use vmux_api::{HostEvent, PageEventPermissions};
 
 #[derive(Reflect, Debug, Clone, EntityEvent)]
 #[reflect(opaque)]
@@ -11,7 +11,7 @@ pub struct BinHostEmitEvent {
     #[event_target]
     webview: Entity,
     id: &'static str,
-    target: BinEventTarget,
+    permission: &'static str,
     payload: Vec<u8>,
 }
 
@@ -23,7 +23,7 @@ impl BinHostEmitEvent {
         Self {
             webview,
             id: T::id(),
-            target: T::TARGET,
+            permission: T::PERMISSION,
             payload,
         }
     }
@@ -54,8 +54,8 @@ impl BinHostEmitEvent {
         self.id
     }
 
-    pub const fn target(&self) -> BinEventTarget {
-        self.target
+    pub const fn permission(&self) -> &'static str {
+        self.permission
     }
 
     pub fn payload(&self) -> &[u8] {
@@ -72,11 +72,15 @@ impl Plugin for BinHostEmitPlugin {
     }
 }
 
-fn bin_host_emit(trigger: On<BinHostEmitEvent>, browsers: NonSend<Browsers>) {
+fn bin_host_emit(
+    trigger: On<BinHostEmitEvent>,
+    browsers: NonSend<Browsers>,
+    permissions: Query<&PageEventPermissions>,
+) {
     let Some(page_url) = browsers.page_url(&trigger.webview()) else {
         return;
     };
-    if !trigger.target().accepts(&page_url) {
+    if !PageEventPermissions::allows_page(permissions.iter(), &page_url, trigger.permission()) {
         warn!(
             "blocked binary host event {} for unexpected page URL {page_url}",
             trigger.id()
@@ -91,7 +95,7 @@ mod tests {
     use super::*;
     use bevy::prelude::Entity;
 
-    #[vmux_api::host_event(url = "vmux://test-host/")]
+    #[vmux_api::host_event]
     struct TestPayload {
         value: u32,
     }
@@ -101,7 +105,7 @@ mod tests {
         let original = TestPayload { value: 42 };
         let event = BinHostEmitEvent::from_event(Entity::PLACEHOLDER, &original);
         assert_eq!(event.id(), "test_payload@1");
-        assert_eq!(event.target(), BinEventTarget::Url("vmux://test-host/"));
+        assert_eq!(event.permission(), "TestPayload");
         let recovered =
             rkyv::from_bytes::<TestPayload, rkyv::rancor::Error>(event.payload()).expect("decode");
         assert_eq!(original, recovered);

@@ -17,7 +17,6 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_native::page(
-    file = "src/ui.ron",
     component = Page,
     subtree,
     takes = vmux_core::PageMetadata

@@ -32,7 +32,9 @@ pub mod stream;
 pub mod supervisor;
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "services",
+    url: crate::PAGE_URL,
+    asset_host: "services",
+    owns_subtree: false,
     title: "Services",
     title_message_id: Some("services-title"),
     replaces_command: Some("service_open"),

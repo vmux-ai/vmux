@@ -97,19 +97,19 @@ pub struct ChatMediaEntries {
     pub entries: Vec<ChatMediaEntry>,
 }
 
-#[vmux_api::ui_event(Default, urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/", "vmux://sessions/", "vmux://agent/"])]
+#[vmux_api::ui_event(Default)]
 pub struct ChatPickFiles;
 
-#[vmux_api::ui_event(Default, urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/", "vmux://sessions/", "vmux://agent/"])]
+#[vmux_api::ui_event(Default)]
 pub struct ChatPasteMedia;
 
-#[vmux_api::ui_event(Default, urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/", "vmux://sessions/", "vmux://agent/"])]
+#[vmux_api::ui_event(Default)]
 pub struct ChatMediaListRequest {
     pub request_id: u64,
     pub query: String,
 }
 
-#[vmux_api::ui_event(Default, urls = ["vmux://command-bar/", "vmux://start/", "vmux://layout/", "vmux://sessions/", "vmux://agent/"])]
+#[vmux_api::ui_event(Default)]
 pub struct ChatAttachPaths {
     pub paths: Vec<String>,
 }

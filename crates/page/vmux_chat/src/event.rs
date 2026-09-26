@@ -13,13 +13,6 @@ pub use vmux_api::prompt_media::{
 pub use vmux_api::protocol::ApprovalDecision;
 pub use vmux_api::room::ModelOptionEntry;
 
-enum Events {}
-
-impl vmux_api::BinEventFamily for Events {
-    const TARGET: vmux_api::BinEventTarget =
-        vmux_api::BinEventTarget::Urls(&["vmux://sessions/", "vmux://agent/", "vmux://start/"]);
-}
-
 #[vmux_api::contract(Default, Eq)]
 pub struct QueuedPromptSnapshot {
     pub id: u64,

@@ -52,7 +52,9 @@ impl Plugin for ShortcutPlugin {
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "shortcuts",
+    url: crate::PAGE_URL,
+    asset_host: "shortcuts",
+    owns_subtree: false,
     title: "Keyboard Shortcuts",
     title_message_id: Some("shortcuts-title"),
     replaces_command: None,

@@ -80,7 +80,9 @@ pub struct ProfileSwitchRequested {
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "team",
+    url: vmux_api::team::TEAM_PAGE_URL,
+    asset_host: "team",
+    owns_subtree: false,
     title: "Team",
     title_message_id: Some("team-title"),
     replaces_command: None,

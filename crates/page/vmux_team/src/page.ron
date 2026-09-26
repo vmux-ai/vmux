@@ -1,0 +1,14 @@
+(
+    url: "vmux://team/",
+    title: "Team",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "TeamEvent",
+        "TeamOpenRequest",
+        "TeamMemberFocusRequest",
+        "TeamProfileCreateRequest",
+        "TeamProfileSwitchRequest",
+        "TeamProfileUpdateRequest",
+    ],
+)

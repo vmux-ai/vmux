@@ -1,0 +1,11 @@
+(
+    url: "vmux://settings/",
+    title: "Settings",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "SettingsUiState",
+        "CheckForUpdatesEvent",
+        "SettingsRequest",
+    ],
+)

@@ -29,7 +29,9 @@ impl Plugin for HistoryPlugin {
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "history",
+    url: crate::PAGE_URL,
+    asset_host: "history",
+    owns_subtree: false,
     title: "History",
     title_message_id: Some("history-title"),
     replaces_command: Some("browser_open_history"),

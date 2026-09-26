@@ -42,7 +42,9 @@ impl Plugin for SettingsPlugin {
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "settings",
+    url: crate::event::SETTINGS_PAGE_URL,
+    asset_host: "settings",
+    owns_subtree: false,
     title: "Settings",
     title_message_id: Some("settings-title"),
     replaces_command: None,

@@ -30,7 +30,9 @@ impl Plugin for ExtensionsPlugin {
 }
 
 const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "extensions",
+    url: vmux_core::event::EXTENSIONS_PAGE_URL,
+    asset_host: "extensions",
+    owns_subtree: false,
     title: "Extensions",
     title_message_id: Some("extensions-title"),
     replaces_command: None,

@@ -1,0 +1,11 @@
+(
+    url: "vmux://knowledge/",
+    title: "Knowledge",
+    permissions: [
+        "PageReady",
+        "ThemeEvent",
+        "PageKeyContext",
+        "KeyStroke",
+        "KeyClaims",
+    ],
+)

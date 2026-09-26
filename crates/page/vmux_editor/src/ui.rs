@@ -53,8 +53,6 @@ use vmux_ui::ime::use_ime_guard;
 use vmux_ui::platform::sleep_ms;
 
 #[vmux_native::page(
-    url = "file://",
-    title = "Files",
     component = Page,
     dom_group = "editor",
     subtree
@@ -62,8 +60,7 @@ use vmux_ui::platform::sleep_ms;
 pub(crate) struct FilePage;
 
 #[vmux_native::page(
-    url = vmux_api::space::PROJECTS_PAGE_URL,
-    title = "Projects",
+    file = "src/projects.ron",
     component = Page,
     dom_group = "editor",
     subtree
@@ -71,8 +68,7 @@ pub(crate) struct FilePage;
 pub(crate) struct ProjectsPage;
 
 #[vmux_native::page(
-    url = vmux_core::knowledge::KNOWLEDGE_PAGE_URL,
-    title = "Knowledge",
+    file = "src/knowledge.ron",
     component = Page,
     dom_group = "editor",
     subtree

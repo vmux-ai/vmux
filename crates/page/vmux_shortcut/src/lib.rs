@@ -46,7 +46,7 @@ impl ShortcutProbePress {
     }
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://shortcuts/")]
+#[vmux_api::ui_event(Eq)]
 pub enum ShortcutProbeRequest {
     Press(ShortcutStroke),
     Clear,
@@ -91,7 +91,7 @@ pub enum ShortcutProbeStatus {
     Miss,
 }
 
-#[vmux_api::ui_state(Default, url = "vmux://shortcuts/")]
+#[vmux_api::ui_state(Default)]
 pub struct ShortcutUiState {
     pub groups: Vec<ShortcutGroup>,
     pub probe: ShortcutProbeView,

@@ -51,7 +51,8 @@ pub struct NativePagePlugin {
 
 impl Plugin for NativePagePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(self.registration);
+        app.world_mut()
+            .spawn((self.registration, self.registration.page.page_permissions()));
     }
 
     fn is_unique(&self) -> bool {

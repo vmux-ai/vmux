@@ -363,7 +363,7 @@ mod tests {
     use super::*;
     use vmux_api::command_bar::CommandBarOpenEvent;
 
-    #[vmux_api::host_event(target = any)]
+    #[vmux_api::host_event]
     struct OtherEvent;
 
     #[test]

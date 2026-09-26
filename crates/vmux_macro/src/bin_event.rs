@@ -2,13 +2,9 @@ use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{DeriveInput, Ident, LitInt, LitStr, Path, Token, bracketed};
+use syn::{DeriveInput, Ident, LitInt, LitStr, Path, Token};
 
 mod keyword {
-    syn::custom_keyword!(any);
-    syn::custom_keyword!(target);
-    syn::custom_keyword!(url);
-    syn::custom_keyword!(urls);
     syn::custom_keyword!(version);
 }
 
@@ -18,22 +14,14 @@ pub(crate) enum Direction {
     Both,
 }
 
-enum Target {
-    Any,
-    Url(LitStr),
-    Urls(Vec<LitStr>),
-}
-
 struct Args {
     derives: Vec<Path>,
     version: Option<LitInt>,
-    target: Option<Target>,
 }
 
 impl Parse for Args {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut version: Option<LitInt> = None;
-        let mut target: Option<Target> = None;
         let mut derives = Vec::new();
 
         while !input.is_empty() {
@@ -44,34 +32,6 @@ impl Parse for Args {
                     return Err(syn::Error::new_spanned(key, "duplicate version"));
                 }
                 version = Some(input.parse()?);
-            } else if input.peek(keyword::target) {
-                let key: keyword::target = input.parse()?;
-                input.parse::<Token![=]>()?;
-                if target.is_some() {
-                    return Err(syn::Error::new_spanned(key, "duplicate target"));
-                }
-                input.parse::<keyword::any>()?;
-                target = Some(Target::Any);
-            } else if input.peek(keyword::url) {
-                let key: keyword::url = input.parse()?;
-                input.parse::<Token![=]>()?;
-                if target.is_some() {
-                    return Err(syn::Error::new_spanned(key, "duplicate target"));
-                }
-                target = Some(Target::Url(input.parse()?));
-            } else if input.peek(keyword::urls) {
-                let key: keyword::urls = input.parse()?;
-                input.parse::<Token![=]>()?;
-                if target.is_some() {
-                    return Err(syn::Error::new_spanned(key, "duplicate target"));
-                }
-                let content;
-                bracketed!(content in input);
-                let values = content
-                    .parse_terminated(|input| input.parse::<LitStr>(), Token![,])?
-                    .into_iter()
-                    .collect();
-                target = Some(Target::Urls(values));
             } else {
                 derives.push(input.parse()?);
             }
@@ -80,11 +40,7 @@ impl Parse for Args {
             }
         }
 
-        Ok(Self {
-            derives,
-            version,
-            target,
-        })
+        Ok(Self { derives, version })
     }
 }
 
@@ -102,12 +58,8 @@ pub(crate) fn expand(
     input: DeriveInput,
     direction: Direction,
 ) -> syn::Result<TokenStream> {
-    let Args {
-        derives,
-        version,
-        target,
-    } = syn::parse2(args)?;
-    let implementation = implementation(&input, direction, version, target)?;
+    let Args { derives, version } = syn::parse2(args)?;
+    let implementation = implementation(&input, direction, version)?;
     let input = crate::contract::expand_with_derives(input, derives.iter());
 
     Ok(quote! {
@@ -120,7 +72,6 @@ fn implementation(
     input: &DeriveInput,
     direction: Direction,
     version: Option<LitInt>,
-    target: Option<Target>,
 ) -> syn::Result<TokenStream> {
     let ident = &input.ident;
     let name = inferred_event_name(ident);
@@ -136,14 +87,6 @@ fn implementation(
     let version = version
         .map(|version| quote! { const VERSION: u16 = #version; })
         .unwrap_or_default();
-    let target = match target {
-        Some(Target::Any) => quote! { ::vmux_api::BinEventTarget::Any },
-        Some(Target::Url(url)) => quote! { ::vmux_api::BinEventTarget::Url(#url) },
-        Some(Target::Urls(urls)) => {
-            quote! { ::vmux_api::BinEventTarget::Urls(&[#(#urls),*]) }
-        }
-        None => quote! { <Events as ::vmux_api::BinEventFamily>::TARGET },
-    };
     let direction_impl = match direction {
         Direction::Host => quote! {
             impl #impl_generics ::vmux_api::HostEvent for #ident #type_generics #where_clause {}
@@ -161,8 +104,8 @@ fn implementation(
         impl #impl_generics ::vmux_api::BinEvent for #ident #type_generics #where_clause {
             const ID: &'static str = #id;
             const NAME: &'static str = #name;
+            const PERMISSION: &'static str = stringify!(#ident);
             #version
-            const TARGET: ::vmux_api::BinEventTarget = #target;
         }
 
         #direction_impl

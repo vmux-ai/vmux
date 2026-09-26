@@ -1594,7 +1594,9 @@ mod tests {
             ))
             .id();
         app.world_mut().spawn(PageManifest {
-            host: "simulator",
+            url: "vmux://simulator/",
+            asset_host: "simulator",
+            owns_subtree: true,
             title: "Simulator",
             title_message_id: None,
             replaces_command: None,

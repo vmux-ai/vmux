@@ -18,16 +18,9 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[vmux_native::page(
-    url = "vmux://vault/",
-    title = "Vault",
     component = Page,
     subtree,
-    takes = vmux_core::PageMetadata,
-    manifest,
-    title_message_id = "vault-title",
-    keywords = ["vault", "sync", "git", "backup", "dotfiles", "knowledge"],
-    icon = vmux_core::BuiltinIcon::Vault,
-    command_bar
+    takes = vmux_core::PageMetadata
 )]
 pub struct VaultPage;
 

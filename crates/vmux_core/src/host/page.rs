@@ -23,7 +23,9 @@ impl Plugin for PagePlugin {
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageManifest {
-    pub host: &'static str,
+    pub url: &'static str,
+    pub asset_host: &'static str,
+    pub owns_subtree: bool,
     pub title: &'static str,
     pub title_message_id: Option<&'static str>,
     pub replaces_command: Option<&'static str>,
@@ -236,10 +238,12 @@ fn step_host_history(
 
 impl PageManifest {
     pub fn answers_for(&self, url: &str) -> bool {
-        let Some(route) = vmux_api::VmuxRoute::parse(url) else {
-            return false;
-        };
-        route.is_host(self.host.trim().trim_matches('/'))
+        vmux_api::PageEventPermissions {
+            url: self.url,
+            owns_subtree: self.owns_subtree,
+            permissions: &[],
+        }
+        .answers_for(url)
     }
 
     pub fn metadata_for(&self, url: impl Into<String>) -> crate::PageMetadata {
@@ -253,18 +257,17 @@ impl PageManifest {
 
     pub fn embedded_host(&self) -> CefEmbeddedHost {
         CefEmbeddedHost {
-            host: self.host.to_string(),
-            default_document: embedded_default_document(self.host, "index.html"),
+            host: self.asset_host.to_string(),
+            default_document: embedded_default_document(self.asset_host, "index.html"),
         }
     }
 
     pub fn url(&self) -> String {
-        let host = self.host.trim().trim_matches('/');
-        format!("vmux://{host}/")
+        vmux_api::VmuxRoute::canonical(self.url).unwrap_or_else(|| self.url.to_string())
     }
 
     fn bundle_root(&self, resources_dir: Option<&Path>) -> PathBuf {
-        packaged_page_root(resources_dir, self.host)
+        packaged_page_root(resources_dir, self.asset_host)
             .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_ui/dist"))
     }
 }
@@ -329,7 +332,7 @@ fn embed_page_static_assets(
             bevy::log::warn!("PagePlugin: skip {:?}: not a directory", bundle_root);
             continue;
         }
-        let host_trim = manifest.host.trim().trim_matches('/');
+        let host_trim = manifest.asset_host.trim().trim_matches('/');
         let prefix = if host_trim.is_empty() {
             None
         } else {
@@ -526,9 +529,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn page_manifest_url_derives_from_host() {
+    fn page_manifest_canonicalizes_its_url() {
         let manifest = PageManifest {
-            host: "settings",
+            url: "vmux://settings/",
+            asset_host: "settings",
+            owns_subtree: false,
             title: "Settings",
             title_message_id: Some("settings-title"),
             replaces_command: None,
@@ -542,7 +547,9 @@ mod tests {
     #[test]
     fn page_manifest_answers_for_its_url_subtree() {
         let manifest = PageManifest {
-            host: "simulator",
+            url: "vmux://simulator/",
+            asset_host: "simulator",
+            owns_subtree: true,
             title: "Simulator",
             title_message_id: None,
             replaces_command: None,
@@ -602,7 +609,9 @@ mod tests {
     fn page_manifest_registers_host() {
         let mut app = App::new();
         app.world_mut().spawn(PageManifest {
-            host: "history",
+            url: "vmux://history/",
+            asset_host: "history",
+            owns_subtree: false,
             title: "History",
             title_message_id: Some("history-title"),
             replaces_command: Some("browser_open_history"),
@@ -625,7 +634,9 @@ mod tests {
     #[test]
     fn registered_hosts_fall_back_to_the_stylesheet_bundle() {
         let manifest = PageManifest {
-            host: "history",
+            url: "vmux://history/",
+            asset_host: "history",
+            owns_subtree: false,
             title: "History",
             title_message_id: Some("history-title"),
             replaces_command: Some("browser_open_history"),

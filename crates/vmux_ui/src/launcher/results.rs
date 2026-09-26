@@ -361,7 +361,9 @@ pub fn start_page_results(
     }
     let mut app_pages: Vec<_> = pages
         .iter()
-        .filter(|page| !page.prompt_target && page.host != "start" && page.host != "terminal")
+        .filter(|page| {
+            !page.prompt_target && page.url != "vmux://start/" && page.url != "vmux://terminal/"
+        })
         .filter(|page| page_matches(page, &search_lower))
         .collect();
     app_pages.sort_by_cached_key(|page| page.url.to_lowercase());
@@ -429,7 +431,7 @@ pub fn space_switch_results(
 ) -> Vec<CommandBarResultItem> {
     let search_lower = query.trim().to_lowercase();
     let mut items = space_list_items(spaces, &search_lower);
-    if let Some(page) = pages.iter().find(|p| p.host == "spaces") {
+    if let Some(page) = pages.iter().find(|page| page.url == "vmux://spaces/") {
         items.push(CommandBarResultItem::Page {
             url: page.url.clone(),
             title: translate("command-manage-spaces"),
@@ -448,7 +450,7 @@ pub fn active_space_index(spaces: &[CommandBarSpace]) -> usize {
 fn query_targets_spaces_page(q: &str, pages: &[CommandBarPage]) -> bool {
     let Some(url) = pages
         .iter()
-        .find(|p| p.host == "spaces")
+        .find(|page| page.url == "vmux://spaces/")
         .map(|p| p.url.as_str())
     else {
         return false;
@@ -706,7 +708,6 @@ mod tests {
     fn sample_pages() -> Vec<CommandBarPage> {
         vec![
             CommandBarPage {
-                host: "settings".into(),
                 url: "vmux://settings/".into(),
                 title: "Settings".into(),
                 keywords: vec!["preferences".into()],
@@ -715,7 +716,6 @@ mod tests {
                 prompt_target: false,
             },
             CommandBarPage {
-                host: "spaces".into(),
                 url: "vmux://spaces/".into(),
                 title: "Spaces".into(),
                 keywords: vec!["space".into()],
@@ -724,7 +724,6 @@ mod tests {
                 prompt_target: false,
             },
             CommandBarPage {
-                host: "history".into(),
                 url: "vmux://history/".into(),
                 title: "History".into(),
                 keywords: vec!["recent".into()],
@@ -733,7 +732,6 @@ mod tests {
                 prompt_target: false,
             },
             CommandBarPage {
-                host: "agent".into(),
                 url: "vmux://sessions/vibe/".into(),
                 title: "Vibe".into(),
                 keywords: vec!["vibe".into(), "agent".into()],
@@ -971,7 +969,6 @@ mod tests {
     fn start_agent_pages_preserve_input_order_and_exclude_other_pages() {
         let mut pages = sample_pages();
         pages.push(CommandBarPage {
-            host: "agent".into(),
             url: "vmux://sessions/codex/cli".into(),
             title: "Codex (CLI)".into(),
             keywords: vec!["codex".into(), "agent".into()],
@@ -999,7 +996,6 @@ mod tests {
     fn start_agent_pages_filter_by_query() {
         let mut pages = sample_pages();
         pages.push(CommandBarPage {
-            host: "agent".into(),
             url: "vmux://sessions/codex/cli".into(),
             title: "Codex (CLI)".into(),
             keywords: vec!["codex".into(), "agent".into()],
@@ -1021,7 +1017,6 @@ mod tests {
     fn start_agent_name_match_is_not_a_prompt() {
         let mut pages = sample_pages();
         pages.push(CommandBarPage {
-            host: "agent".into(),
             url: "vmux://sessions/codex-acp".into(),
             title: "Codex".into(),
             keywords: vec!["codex-acp".into(), "acp".into(), "agent".into()],
@@ -1041,7 +1036,6 @@ mod tests {
     fn start_prompt_text_keeps_all_agent_choices_visible() {
         let mut pages = sample_pages();
         pages.push(CommandBarPage {
-            host: "agent".into(),
             url: "vmux://sessions/codex/cli".into(),
             title: "Codex (CLI)".into(),
             keywords: vec!["codex".into(), "agent".into()],
@@ -1133,7 +1127,6 @@ mod tests {
         let mut pages = sample_pages();
         pages.extend([
             CommandBarPage {
-                host: "agent".into(),
                 url: "vmux://sessions/codex/cli".into(),
                 title: "Codex".into(),
                 keywords: vec!["codex".into(), "agent".into()],
@@ -1142,7 +1135,6 @@ mod tests {
                 prompt_target: true,
             },
             CommandBarPage {
-                host: "agent".into(),
                 url: "vmux://sessions/claude".into(),
                 title: "Claude".into(),
                 keywords: vec!["claude".into(), "agent".into()],
@@ -1232,7 +1224,6 @@ mod tests {
     fn start_page_suggests_terminal_by_name() {
         let mut pages = sample_pages();
         pages.push(CommandBarPage {
-            host: "terminal".into(),
             url: "vmux://terminal/".into(),
             title: "Terminal".into(),
             keywords: vec!["shell".into()],

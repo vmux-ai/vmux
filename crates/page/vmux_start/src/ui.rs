@@ -9,8 +9,6 @@ use vmux_command::ui::{CommandPalette, focus_prompt_input, use_command_bar_ui};
 use vmux_ui::launcher::palette::PaletteSurface;
 
 #[vmux_native::page(
-    url = crate::START_PAGE_URL,
-    title = "Start",
     component = Page,
     document_url = crate::START_PAGE_URL
 )]

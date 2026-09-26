@@ -19,8 +19,7 @@ use vmux_command::panel::CommandBarPanel;
 use vmux_ui::hooks::use_theme;
 
 #[vmux_native::page(
-    url = crate::event::LAYOUT_PAGE_URL,
-    title = "vmux",
+    file = "src/layout.ron",
     component = Page,
     placement = layout,
     document_url = crate::event::LAYOUT_PAGE_URL,

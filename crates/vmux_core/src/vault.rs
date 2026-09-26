@@ -74,7 +74,7 @@ impl VaultOperation {
     }
 }
 
-#[vmux_api::ui_state(Default, Eq, version = 4, url = "vmux://vault/")]
+#[vmux_api::ui_state(Default, Eq, version = 4)]
 pub struct VaultUiState {
     pub vault: VaultSnapshot,
     pub operation: Option<VaultOperation>,
@@ -214,7 +214,7 @@ impl Default for VaultWorkflowState {
     }
 }
 
-#[vmux_api::ui_event(Default, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct VaultRefreshRequest {
     #[serde(default)]
     pub load_repositories: bool,
@@ -235,95 +235,95 @@ pub enum VaultOperationKind {
     ChooseCloudFolder,
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultCreateRequest {
     pub repository: String,
     pub private: bool,
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultConnectRequest {
     pub repository: String,
 }
 
-#[vmux_api::ui_event(Default, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct VaultSyncRequest;
 
-#[vmux_api::ui_event(Default, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct VaultConnectGithubRequest;
 
-#[vmux_api::ui_event(Default, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct VaultConnectFolderRequest;
 
-#[vmux_api::ui_event(Default, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct VaultGenerateRecoveryKeyRequest;
 
-#[vmux_api::ui_event(Default, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct VaultCreateRecoveryKeyRequest;
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultUnlockRecoveryKeyRequest {
     pub recovery_key: String,
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultConnectCloudRequest {
     pub provider: String,
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultCreateCloudFolderRequest {
     pub root: String,
     pub folder_name: String,
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultChooseCloudFolderRequest {
     pub root: String,
 }
 
-#[vmux_api::ui_event(Copy, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Copy, Eq)]
 pub struct VaultProviderSelectRequest {
     pub provider: VaultConnectionProvider,
 }
 
-#[vmux_api::ui_event(Copy, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Copy, Eq)]
 pub struct VaultDestinationSelectRequest {
     pub destination: VaultDestination,
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultOwnerSelectRequest {
     pub owner: String,
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultRepositoryNameRequest {
     pub name: String,
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultRepositorySelectRequest {
     pub repository: String,
 }
 
-#[vmux_api::ui_event(Copy, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Copy, Eq)]
 pub struct VaultPrivacyRequest {
     pub private: bool,
 }
 
-#[vmux_api::ui_event(Default, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct VaultWorkflowCreateRequest;
 
-#[vmux_api::ui_event(Default, Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Default, Eq)]
 pub struct VaultWorkflowConnectRequest;
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultRecoveryConfirmationRequest {
     pub value: String,
 }
 
-#[vmux_api::ui_event(Eq, url = "vmux://vault/")]
+#[vmux_api::ui_event(Eq)]
 pub struct VaultRecoveryInputRequest {
     pub value: String,
 }

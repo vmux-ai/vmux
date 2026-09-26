@@ -13,6 +13,7 @@ pub struct NativePage {
     pub body_class: &'static str,
     pub transparent: bool,
     pub owns_subtree: bool,
+    pub permissions: &'static [&'static str],
 }
 
 impl NativePage {
@@ -32,6 +33,15 @@ impl NativePage {
             None => self.url,
         }
     }
+
+    pub const fn page_permissions(&self) -> vmux_api::PageEventPermissions {
+        vmux_api::PageEventPermissions {
+            url: self.url,
+            owns_subtree: self.owns_subtree,
+            permissions: self.permissions,
+        }
+    }
+
     pub const fn served_from(mut self, url: &'static str) -> Self {
         self.document_url = Some(url);
         self
@@ -56,6 +66,7 @@ impl NativePage {
             body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
             transparent: false,
             owns_subtree: false,
+            permissions: &[],
             document_url: Some("vmux://start/"),
         }
     }

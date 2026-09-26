@@ -30,7 +30,7 @@ pub struct LayoutUiStatePatch {
     pub header: Option<HeaderState>,
 }
 
-#[vmux_api::ui_state(Default, url = "vmux://layout/")]
+#[vmux_api::ui_state(Default)]
 pub struct LayoutUiState {
     pub sequence: u64,
     pub patches: Vec<LayoutUiStatePatch>,

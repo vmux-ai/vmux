@@ -1280,7 +1280,6 @@ mod tests {
             CommandBarOpenEvent {
                 pages: vec![
                     CommandBarPage {
-                        host: "settings".into(),
                         url: "vmux://settings/".into(),
                         title: "Settings".into(),
                         keywords: vec!["preferences".into()],
@@ -1289,7 +1288,6 @@ mod tests {
                         prompt_target: false,
                     },
                     CommandBarPage {
-                        host: "agent".into(),
                         url: "vmux://sessions/vibe/".into(),
                         title: "Vibe".into(),
                         keywords: vec!["vibe".into()],
@@ -1298,7 +1296,6 @@ mod tests {
                         prompt_target: true,
                     },
                     CommandBarPage {
-                        host: "agent".into(),
                         url: "vmux://sessions/codex/cli".into(),
                         title: "Codex".into(),
                         keywords: vec!["codex".into()],

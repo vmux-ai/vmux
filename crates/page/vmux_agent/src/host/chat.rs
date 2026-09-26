@@ -39,7 +39,9 @@ impl Plugin for AgentChatPagePlugin {
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "sessions",
+    url: "vmux://sessions/",
+    asset_host: "sessions",
+    owns_subtree: true,
     title: "Sessions",
     title_message_id: None,
     replaces_command: None,
