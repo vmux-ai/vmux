@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn agent_tools_dispatch_through_the_owning_world() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, crate::VisualToolPlugin, ToolCallPlugin))
+        app.add_plugins((MinimalPlugins, crate::CaptureToolPlugin, ToolCallPlugin))
             .add_message::<AgentToolCallRequest>()
             .add_message::<AgentCommandRequest>()
             .add_message::<AgentQueryRequest>()

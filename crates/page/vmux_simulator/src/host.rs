@@ -4,6 +4,7 @@ mod device;
 mod hid;
 mod input;
 mod stream;
+mod tool;
 
 use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorReady};
 use crate::url::{PAGE_HOST, PAGE_URL, SimulatorRoute};
@@ -18,6 +19,7 @@ use vmux_core::host::page::{NativelyHosted, PageReady};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 
 pub use device::{Axe, SimulatorDevice};
+pub use tool::SimulatorToolPlugin;
 
 pub struct SimulatorPlugin;
 
@@ -30,6 +32,7 @@ impl Plugin for SimulatorPlugin {
             NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title),
         ));
         app.add_plugins(UiStatePlugin::<SimulatorReady>::default())
+            .add_plugins(SimulatorToolPlugin)
             .configure_sets(Update, (SimulatorFocusSet, SimulatorInputSet).chain())
             .add_message::<HardwareButtonRequest>()
             .add_message::<SimulatorClipboardRequest>()

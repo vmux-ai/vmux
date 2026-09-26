@@ -28,6 +28,7 @@ bevy_ecs = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 libc = "0.2"
 serde_json = { workspace = true }
+vmux_mcp = { path = "../../host/vmux_mcp" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

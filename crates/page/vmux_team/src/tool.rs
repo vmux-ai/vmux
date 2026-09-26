@@ -62,3 +62,70 @@ fn rename_profile(
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_mcp::tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
+
+    impl TeamTool {
+        fn app() -> App {
+            let mut app = App::new();
+            app.add_plugins(TeamToolPlugin);
+            app.update();
+            app
+        }
+
+        fn definitions() -> Vec<String> {
+            let mut app = Self::app();
+            let request = app.world_mut().spawn(ToolCatalogRequest).id();
+            app.update();
+            app.world_mut()
+                .entity_mut(request)
+                .take::<ToolCatalog>()
+                .unwrap()
+                .0
+                .into_iter()
+                .map(|definition| definition.name)
+                .collect()
+        }
+
+        fn dispatch(arguments: serde_json::Value) -> Result<AgentCommand, String> {
+            let mut app = Self::app();
+            let request = app
+                .world_mut()
+                .spawn((
+                    Name::new("rename_profile"),
+                    JsonArguments(arguments),
+                    ToolInvocation,
+                ))
+                .id();
+            app.update();
+            if let Some(command) = app.world_mut().entity_mut(request).take::<ToolCommand>() {
+                return command.0;
+            }
+            let error = app
+                .world_mut()
+                .entity_mut(request)
+                .take::<ToolDispatchError>()
+                .unwrap();
+            Err(error.message().to_string())
+        }
+    }
+
+    #[test]
+    fn manifest_registers_team_tools() {
+        assert_eq!(TeamTool::definitions(), ["rename_profile"]);
+    }
+
+    #[test]
+    fn rename_profile_dispatches_trimmed_name() {
+        assert_eq!(
+            TeamTool::dispatch(serde_json::json!({"name": "  Junichi  "})),
+            Ok(AgentCommand::RenameProfile {
+                name: "Junichi".to_string(),
+            })
+        );
+        assert!(TeamTool::dispatch(serde_json::json!({"name": "  "})).is_err());
+    }
+}

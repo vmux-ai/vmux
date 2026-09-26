@@ -25,8 +25,10 @@ impl Plugin for ToolPlugin {
         #[cfg(feature = "agent")]
         app.add_plugins((
             vmux_agent::WorkspaceToolPlugin,
-            vmux_agent::VisualToolPlugin,
+            vmux_agent::CaptureToolPlugin,
         ));
+        #[cfg(feature = "simulator")]
+        app.add_plugins(vmux_simulator::SimulatorToolPlugin);
     }
 }
 
