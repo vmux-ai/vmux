@@ -244,20 +244,18 @@ fn reveal_window_after_layout_ready(
 
 fn restore_fullscreen_after_reveal(
     state: NonSend<GlassState>,
-    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
-    pending: Option<Res<crate::window_state::PendingFullscreenRestore>>,
+    primary_window: Query<
+        (Entity, &crate::window_state::PendingFullscreenRestore),
+        With<bevy::window::PrimaryWindow>,
+    >,
     mut commands: Commands,
 ) {
     use objc2_app_kit::NSWindowStyleMask;
 
-    let Some(pending) = pending else {
+    let Ok((window, pending)) = primary_window.single() else {
         return;
     };
-    let Some(glass) = primary_window
-        .single()
-        .ok()
-        .and_then(|window| state.0.get(&window))
-    else {
+    let Some(glass) = state.0.get(&window) else {
         return;
     };
     if !glass.revealed {
@@ -271,8 +269,10 @@ fn restore_fullscreen_after_reveal(
     {
         parent_window.toggleFullScreen(None);
     }
-    commands.remove_resource::<crate::window_state::PendingFullscreenRestore>();
-    commands.insert_resource(crate::window_state::WindowRestoreComplete);
+    commands
+        .entity(window)
+        .remove::<crate::window_state::PendingFullscreenRestore>()
+        .insert(crate::window_state::WindowRestoreComplete);
 }
 
 fn should_attempt_activation(
@@ -329,9 +329,12 @@ fn handle_toggle_fullscreen_command(
 fn sync_window_glass_visibility(
     mut state: NonSendMut<GlassState>,
     mut clear_color: ResMut<vmux_layout::window::WindowBackground>,
-    mut window_q: Query<(Entity, &mut bevy::window::Window)>,
+    mut window_q: Query<(
+        Entity,
+        &mut bevy::window::Window,
+        &mut crate::window_state::WindowFullscreen,
+    )>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
-    mut window_fullscreen: ResMut<crate::window_state::WindowFullscreen>,
     keyboard: Single<&crate::keyboard::KeyboardRuntime>,
     mut exit_fullscreen: MessageReader<crate::keyboard::ExitFullscreenRequest>,
 ) {
@@ -341,7 +344,7 @@ fn sync_window_glass_visibility(
     let mut focused_fullscreen = false;
     let exit_fullscreen = exit_fullscreen.read().next().is_some();
     state.0.retain(|entity, _| window_q.contains(*entity));
-    for (entity, mut window) in &mut window_q {
+    for (entity, mut window, mut window_fullscreen) in &mut window_q {
         let Some(glass) = state.0.get_mut(&entity) else {
             continue;
         };
@@ -367,6 +370,9 @@ fn sync_window_glass_visibility(
                 }
             }
         }
+        if window_fullscreen.0 != fullscreen {
+            window_fullscreen.0 = fullscreen;
+        }
 
         let visible = !fullscreen;
         if let (Some(backdrop_window), Some(parent_window)) =
@@ -390,10 +396,6 @@ fn sync_window_glass_visibility(
             glass_view.setHidden(!visible);
         }
         glass.visible = visible;
-    }
-
-    if window_fullscreen.0 != focused_fullscreen {
-        window_fullscreen.0 = focused_fullscreen;
     }
 
     let [r, g, b] = vmux_layout::window::WINDOW_BACKGROUND_SRGB;
