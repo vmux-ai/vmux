@@ -472,7 +472,7 @@ fn request_default_layout(
     });
 }
 
-fn discard_startup_tab_layout_requests(mut requests: ResMut<Messages<TabLayoutSpawnRequest>>) {
+fn discard_startup_tab_layout_requests(mut requests: MessageReader<TabLayoutSpawnRequest>) {
     requests.clear();
 }
 

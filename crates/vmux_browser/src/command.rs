@@ -1,5 +1,5 @@
 use bevy::{
-    ecs::{message::Messages, relationship::Relationship, system::SystemParam},
+    ecs::{relationship::Relationship, system::SystemParam},
     prelude::*,
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
@@ -544,7 +544,7 @@ fn on_side_sheet_resize(
     mut width: ResMut<SideSheetWidth>,
     mut sheets: Query<(&SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
-    saves: Option<ResMut<Messages<vmux_setting::SettingsSaveRequest>>>,
+    saves: Option<MessageWriter<vmux_setting::SettingsSaveRequest>>,
 ) {
     let resize = trigger.event().payload;
     let next = resize.clamped();

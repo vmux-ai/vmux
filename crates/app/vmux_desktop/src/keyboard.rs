@@ -516,7 +516,7 @@ fn sync_keyboard_context(
     focus: Option<Res<vmux_layout::stack::FocusedStack>>,
     children: Query<&Children>,
     pages: Query<&vmux_core::PageMetadata>,
-    mut requests: Option<ResMut<Messages<vmux_simulator::SimulatorFocusRequest>>>,
+    mut requests: Option<MessageWriter<vmux_simulator::SimulatorFocusRequest>>,
 ) {
     let active = focus
         .as_deref()
@@ -551,11 +551,9 @@ fn sync_keyboard_context(
 fn dispatch_keyboard_input(
     runtime: Single<&KeyboardRuntime>,
     mut invocations: MessageWriter<vmux_command::CommandInvocation>,
-    mut simulator_buttons: Option<ResMut<Messages<vmux_simulator::HardwareButtonRequest>>>,
-    mut simulator_clipboard: Option<ResMut<Messages<vmux_simulator::SimulatorClipboardRequest>>>,
-    mut simulator_keyboard: Option<
-        ResMut<Messages<vmux_simulator::SimulatorSoftwareKeyboardRequest>>,
-    >,
+    mut simulator_buttons: Option<MessageWriter<vmux_simulator::HardwareButtonRequest>>,
+    mut simulator_clipboard: Option<MessageWriter<vmux_simulator::SimulatorClipboardRequest>>,
+    mut simulator_keyboard: Option<MessageWriter<vmux_simulator::SimulatorSoftwareKeyboardRequest>>,
     mut fullscreen: MessageWriter<ExitFullscreenRequest>,
     mut hide_windows: Option<MessageWriter<crate::runtime::HideAllWindowsRequest>>,
     user: Query<Entity, With<vmux_core::team::User>>,

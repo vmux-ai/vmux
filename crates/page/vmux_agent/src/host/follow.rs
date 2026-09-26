@@ -266,7 +266,7 @@ fn handle_agent_file_touch(
     mut reader: MessageReader<AgentCommandRequest>,
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
-    mut file_view_mode: Option<ResMut<Messages<vmux_editor::FileViewModeRequest>>>,
+    mut file_view_mode: Option<MessageWriter<vmux_editor::FileViewModeRequest>>,
 ) {
     let mut previews: std::collections::HashMap<Entity, Vec<PendingFilePreview>> =
         std::collections::HashMap::new();
