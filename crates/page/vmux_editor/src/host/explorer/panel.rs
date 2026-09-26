@@ -4,7 +4,8 @@ use vmux_core::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPane
 
 use super::tree::{emit_explorer_focus, reveal_current_in_tree};
 use super::{
-    ExplorerPanelDefaults, ExplorerPanelSent, ExplorerState, ExplorerTrees, StackExplorerRevision,
+    ExplorerPanelDefaults, ExplorerPanelSent, ExplorerState, ExplorerTree, StackExplorerRevision,
+    UsesExplorerTree,
 };
 use crate::host::editor::FileView;
 
@@ -141,8 +142,9 @@ fn on_explorer_panel_set_visible(
     child_of: Query<&ChildOf>,
     mut visibility: Query<&mut StackExplorerVisibility>,
     mut revisions: Query<&mut StackExplorerRevision>,
-    mut editors: Query<(Entity, &FileView, &mut ExplorerState, Option<&ChildOf>)>,
-    mut trees: ResMut<ExplorerTrees>,
+    editors: Query<(Entity, Option<&ChildOf>), With<FileView>>,
+    mut active_editor: Query<(&FileView, &mut ExplorerState, Option<&UsesExplorerTree>)>,
+    mut trees: Query<&mut ExplorerTree>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
@@ -163,7 +165,7 @@ fn on_explorer_panel_set_visible(
         &mut revisions,
         &mut commands,
     );
-    for (view, _, _, parent) in &mut editors {
+    for (view, parent) in &editors {
         let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
         if view_scope != scope {
             continue;
@@ -175,13 +177,15 @@ fn on_explorer_panel_set_visible(
         }
     }
     if next_visibility.visible
-        && let Ok((_, file_view, mut state, _)) = editors.get_mut(entity)
+        && let Ok((file_view, mut state, Some(tree_of))) = active_editor.get_mut(entity)
+        && let Ok(mut tree) = trees.get_mut(tree_of.0)
     {
         reveal_current_in_tree(
             entity,
             &file_view.path,
             &mut state,
-            &mut trees,
+            tree_of.0,
+            &mut tree,
             &mut commands,
         );
         if let Some(browsers) = browsers {

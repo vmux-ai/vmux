@@ -276,7 +276,6 @@ mod tests {
 
     use crate::host::edit::{EditCommand, EditMode};
     use crate::host::editing::{ClipboardHandle, EditExecutionPlugin};
-    use crate::host::explorer::ExplorerTrees;
     use crate::host::file_lifecycle::{FileBuffer, FileLifecyclePlugin, FileLoadTask, LoadFailure};
     use crate::host::navigation::NavigationPlugin;
 
@@ -325,7 +324,6 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_plugins(NavigationPlugin)
-                .init_resource::<ExplorerTrees>()
                 .add_plugins(FileLifecyclePlugin)
                 .add_plugins((EditExecutionPlugin, crate::encoding::EncodingPlugin))
                 .init_resource::<BinIpcEventRawBuffer>();

@@ -10,7 +10,9 @@ use vmux_core::event::*;
 
 use super::editor::{Editor, FileView, ParkedEdits};
 use super::explorer::OutlineDirty;
-use super::explorer::{ExplorerPanelSent, ExplorerTreeDirty, ExplorerTrees, OpenEditorsDirty};
+use super::explorer::{
+    ExplorerPanelSent, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
+};
 use super::keymap::KeymapConfig;
 use super::note::NoteSent;
 use super::status::{FileInitialMetaSent, FileKeymapSent, FileThemeSent, FileViewModeSent};
@@ -458,7 +460,7 @@ fn ensure_file_watch(watch: &mut FileWatch, dir: PathBuf) {
 
 fn reconcile_file_watches(
     views: Query<&FileView>,
-    trees: Res<ExplorerTrees>,
+    trees: Query<&ExplorerTree>,
     watch: Option<NonSendMut<FileWatch>>,
 ) {
     let Some(mut watch) = watch else {
@@ -469,8 +471,10 @@ fn reconcile_file_watches(
             ensure_file_watch(&mut watch, dir);
         }
     }
-    for dir in trees.expanded_dirs() {
-        ensure_file_watch(&mut watch, dir.clone());
+    for tree in &trees {
+        for dir in tree.expanded_dirs() {
+            ensure_file_watch(&mut watch, dir.clone());
+        }
     }
 }
 
@@ -478,7 +482,7 @@ fn drain_file_changes(
     watch: Option<NonSend<FileWatch>>,
     self_writes: Option<NonSendMut<SelfWrites>>,
     views: Query<(Entity, &FileView, Has<MissingFileView>)>,
-    mut trees: ResMut<ExplorerTrees>,
+    mut trees: Query<(Entity, &mut ExplorerTree)>,
     mut commands: Commands,
 ) {
     let Some(watch) = watch else {
@@ -517,8 +521,15 @@ fn drain_file_changes(
             changed_dirs.insert(canon(parent));
         }
     }
-    for task in trees.refresh_changed(&changed_dirs) {
-        commands.spawn(task);
+    for (tree_entity, mut tree) in &mut trees {
+        let requests = tree.refresh_changed(tree_entity, &changed_dirs);
+        if requests.is_empty() {
+            continue;
+        }
+        for request in requests {
+            commands.spawn(request);
+        }
+        commands.trigger(ExplorerTreeChanged(tree_entity));
     }
 }
 
@@ -601,7 +612,6 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<ExplorerTrees>()
             .add_plugins(FileLifecyclePlugin);
         app.world_mut().insert_non_send(Browsers::default());
         app.world_mut()

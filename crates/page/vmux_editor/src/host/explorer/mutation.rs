@@ -5,7 +5,10 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use vmux_core::event::{ExplorerCreate, ExplorerDelete, ExplorerFsResult, ExplorerRename};
 
-use super::{ExplorerState, ExplorerTreeDirty, ExplorerTrees, OpenEditorsDirty};
+use super::{
+    ExplorerState, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty, OpenEditorsDirty,
+    UsesExplorerTree,
+};
 use crate::host::editor::FileView;
 
 pub(super) struct MutationPlugin;
@@ -70,15 +73,19 @@ struct ExplorerDeleteTask {
 
 fn on_explorer_create(
     trigger: On<UiInput<ExplorerCreate>>,
-    query: Query<&ExplorerState>,
+    views: Query<&UsesExplorerTree>,
+    trees: Query<&ExplorerTree>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok(state) = query.get(entity) else {
+    let Ok(tree_of) = views.get(entity) else {
+        return;
+    };
+    let Ok(tree) = trees.get(tree_of.0) else {
         return;
     };
     let payload = &trigger.event().payload;
-    let root = state.root.clone();
+    let root = tree.root.clone();
     let parent = PathBuf::from(&payload.parent);
     let name = payload.name.clone();
     let is_dir = payload.is_dir;
@@ -98,15 +105,19 @@ fn on_explorer_create(
 
 fn on_explorer_rename(
     trigger: On<UiInput<ExplorerRename>>,
-    query: Query<&ExplorerState>,
+    views: Query<&UsesExplorerTree>,
+    trees: Query<&ExplorerTree>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok(state) = query.get(entity) else {
+    let Ok(tree_of) = views.get(entity) else {
+        return;
+    };
+    let Ok(tree) = trees.get(tree_of.0) else {
         return;
     };
     let payload = &trigger.event().payload;
-    let root = state.root.clone();
+    let root = tree.root.clone();
     let old_path = PathBuf::from(&payload.path);
     let name = payload.name.clone();
     let task = IoTaskPool::get().spawn(async move {
@@ -148,14 +159,18 @@ fn on_explorer_rename(
 
 fn on_explorer_delete(
     trigger: On<UiInput<ExplorerDelete>>,
-    query: Query<&ExplorerState>,
+    views: Query<&UsesExplorerTree>,
+    trees: Query<&ExplorerTree>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok(state) = query.get(entity) else {
+    let Ok(tree_of) = views.get(entity) else {
         return;
     };
-    let root = state.root.clone();
+    let Ok(tree) = trees.get(tree_of.0) else {
+        return;
+    };
+    let root = tree.root.clone();
     let path = PathBuf::from(&trigger.event().payload.path);
     let task = IoTaskPool::get().spawn(async move {
         let (parent, was_dir) = super::fs::delete_entry(&root, &path)?;
@@ -173,8 +188,8 @@ fn on_explorer_delete(
 
 fn drain_explorer_creates(
     mut tasks: Query<(Entity, &mut ExplorerCreateTask)>,
-    views: Query<&ExplorerState>,
-    mut trees: ResMut<ExplorerTrees>,
+    views: Query<&UsesExplorerTree>,
+    mut trees: Query<&mut ExplorerTree>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -184,10 +199,9 @@ fn drain_explorer_creates(
         };
         let webview = pending.webview;
         commands.entity(task_entity).despawn();
-        let Ok(state) = views.get(webview) else {
+        let Ok(tree_of) = views.get(webview) else {
             continue;
         };
-        let root = state.root.clone();
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(error) => {
@@ -204,11 +218,14 @@ fn drain_explorer_creates(
                 continue;
             }
         };
-        if trees.begin_dir_load(&root, &outcome.parent, true) {
+        if let Ok(mut tree) = trees.get_mut(tree_of.0)
+            && tree.begin_dir_load(&outcome.parent, true)
+        {
             commands.spawn(super::tree::ExplorerDirLoadRequest::new(
-                root.clone(),
+                tree_of.0,
                 outcome.parent,
             ));
+            commands.trigger(ExplorerTreeChanged(tree_of.0));
         }
         commands
             .entity(webview)
@@ -241,8 +258,8 @@ fn drain_explorer_creates(
 
 fn drain_explorer_renames(
     mut tasks: Query<(Entity, &mut ExplorerRenameTask)>,
-    mut views: Query<(&FileView, &mut ExplorerState)>,
-    mut trees: ResMut<ExplorerTrees>,
+    mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
+    mut trees: Query<&mut ExplorerTree>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -252,10 +269,9 @@ fn drain_explorer_renames(
         };
         let webview = pending.webview;
         commands.entity(task_entity).despawn();
-        let Ok((file_view, mut state)) = views.get_mut(webview) else {
+        let Ok((file_view, mut state, tree_of)) = views.get_mut(webview) else {
             continue;
         };
-        let root = state.root.clone();
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(error) => {
@@ -282,15 +298,17 @@ fn drain_explorer_renames(
         } else {
             String::new()
         };
-        if outcome.was_dir {
-            trees.at(&root).evict_subtree(&outcome.old_path);
-            trees.touch(&root);
-        }
-        if trees.begin_dir_load(&root, &outcome.parent, true) {
-            commands.spawn(super::tree::ExplorerDirLoadRequest::new(
-                root.clone(),
-                outcome.parent,
-            ));
+        if let Ok(mut tree) = trees.get_mut(tree_of.0) {
+            if outcome.was_dir {
+                tree.evict_subtree(&outcome.old_path);
+            }
+            if tree.begin_dir_load(&outcome.parent, true) {
+                commands.spawn(super::tree::ExplorerDirLoadRequest::new(
+                    tree_of.0,
+                    outcome.parent,
+                ));
+            }
+            commands.trigger(ExplorerTreeChanged(tree_of.0));
         }
         commands
             .entity(webview)
@@ -317,8 +335,8 @@ fn drain_explorer_renames(
 
 fn drain_explorer_deletes(
     mut tasks: Query<(Entity, &mut ExplorerDeleteTask)>,
-    mut views: Query<(&FileView, &mut ExplorerState)>,
-    mut trees: ResMut<ExplorerTrees>,
+    mut views: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
+    mut trees: Query<&mut ExplorerTree>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -328,10 +346,9 @@ fn drain_explorer_deletes(
         };
         let webview = pending.webview;
         commands.entity(task_entity).despawn();
-        let Ok((file_view, mut state)) = views.get_mut(webview) else {
+        let Ok((file_view, mut state, tree_of)) = views.get_mut(webview) else {
             continue;
         };
-        let root = state.root.clone();
         let outcome = match result {
             Ok(outcome) => outcome,
             Err(error) => {
@@ -356,15 +373,17 @@ fn drain_explorer_deletes(
         } else {
             String::new()
         };
-        if outcome.was_dir {
-            trees.at(&root).evict_subtree(&outcome.path);
-            trees.touch(&root);
-        }
-        if trees.begin_dir_load(&root, &outcome.parent, true) {
-            commands.spawn(super::tree::ExplorerDirLoadRequest::new(
-                root.clone(),
-                outcome.parent,
-            ));
+        if let Ok(mut tree) = trees.get_mut(tree_of.0) {
+            if outcome.was_dir {
+                tree.evict_subtree(&outcome.path);
+            }
+            if tree.begin_dir_load(&outcome.parent, true) {
+                commands.spawn(super::tree::ExplorerDirLoadRequest::new(
+                    tree_of.0,
+                    outcome.parent,
+                ));
+            }
+            commands.trigger(ExplorerTreeChanged(tree_of.0));
         }
         commands
             .entity(webview)

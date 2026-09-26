@@ -52,46 +52,95 @@ struct ExplorerPanelDefaults {
     width: u32,
 }
 
-#[derive(Default)]
-struct ExplorerTree {
+#[derive(Component)]
+pub(super) struct ExplorerTree {
+    root: PathBuf,
     expanded: HashSet<PathBuf>,
     loading: HashSet<PathBuf>,
     children: HashMap<PathBuf, Vec<FileDirEntry>>,
-    used: u64,
+    used: std::time::Instant,
 }
 
-const IDLE_TREE_CAPACITY: usize = 4;
+impl ExplorerTree {
+    fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            expanded: HashSet::new(),
+            loading: HashSet::new(),
+            children: HashMap::new(),
+            used: std::time::Instant::now(),
+        }
+    }
 
-#[derive(Resource, Default)]
-pub(super) struct ExplorerTrees {
-    by_root: HashMap<PathBuf, ExplorerTree>,
-    dirty: HashSet<PathBuf>,
-    clock: u64,
-}
+    fn answers_for(&self, root: &Path) -> bool {
+        self.root == root
+    }
 
-impl ExplorerTrees {
+    fn allows(&self, path: &Path) -> bool {
+        path.starts_with(&self.root)
+    }
+
     pub(super) fn expanded_dirs(&self) -> impl Iterator<Item = &PathBuf> {
-        self.by_root.values().flat_map(|tree| tree.expanded.iter())
+        self.expanded.iter()
+    }
+
+    fn use_now(&mut self) {
+        self.used = std::time::Instant::now();
+    }
+
+    fn rows(&self, root: &Path) -> Vec<vmux_core::event::TreeRow> {
+        crate::explorer_model::flatten_tree(root, &self.expanded, &self.loading, &self.children)
+    }
+
+    fn is_loading(&self, path: &Path) -> bool {
+        self.loading.contains(path)
+    }
+
+    fn begin_dir_load(&mut self, path: &Path, force: bool) -> bool {
+        self.use_now();
+        if self.loading.contains(path) || !force && self.children.contains_key(path) {
+            return false;
+        }
+        self.loading.insert(path.to_path_buf());
+        true
     }
 
     pub(super) fn refresh_changed(
         &mut self,
+        tree: Entity,
         changed_dirs: &HashSet<PathBuf>,
     ) -> Vec<ExplorerDirLoadRequest> {
         let mut requests = Vec::new();
-        let roots: Vec<PathBuf> = self.by_root.keys().cloned().collect();
-        for root in roots {
-            let cached: Vec<PathBuf> = self.by_root[&root].children.keys().cloned().collect();
-            for dir in cached {
-                let canonical = vmux_path::PathIdentity::resolve(&dir).into_path_buf();
-                if changed_dirs.contains(&canonical) && self.begin_dir_load(&root, &dir, true) {
-                    requests.push(ExplorerDirLoadRequest::new(root.clone(), dir));
-                }
+        let cached: Vec<PathBuf> = self.children.keys().cloned().collect();
+        for dir in cached {
+            let canonical = vmux_path::PathIdentity::resolve(&dir).into_path_buf();
+            if changed_dirs.contains(&canonical) && self.begin_dir_load(&dir, true) {
+                requests.push(ExplorerDirLoadRequest::new(tree, dir));
             }
         }
         requests
     }
+
+    fn evict_subtree(&mut self, path: &Path) {
+        self.use_now();
+        self.expanded.retain(|entry| !entry.starts_with(path));
+        self.loading.retain(|entry| !entry.starts_with(path));
+        self.children.retain(|entry, _| !entry.starts_with(path));
+    }
 }
+
+#[derive(Event, Clone, Copy)]
+pub(super) struct ExplorerTreeChanged(pub(super) Entity);
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = ExplorerTreeUsers)]
+struct UsesExplorerTree(Entity);
+
+#[derive(Component, Debug)]
+#[relationship_target(relationship = UsesExplorerTree)]
+struct ExplorerTreeUsers(Vec<Entity>);
+
+const IDLE_TREE_CAPACITY: usize = 4;
 
 pub(super) struct TabsPlugin;
 
@@ -122,7 +171,6 @@ impl Plugin for ExplorerPlugin {
 
 #[derive(Component, Default)]
 pub(super) struct ExplorerState {
-    root: PathBuf,
     open_editors: Vec<PathBuf>,
     focus_path: Option<PathBuf>,
     focus_revision: u64,
@@ -147,10 +195,6 @@ impl ExplorerState {
     #[cfg(test)]
     pub(super) fn open_editors(&self) -> &[PathBuf] {
         &self.open_editors
-    }
-
-    pub(super) fn allows(&self, path: &Path) -> bool {
-        path.starts_with(&self.root)
     }
 
     pub(super) fn close_editor(&mut self, path: &Path) -> Option<PathBuf> {
