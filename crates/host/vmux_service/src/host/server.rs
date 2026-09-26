@@ -4,14 +4,14 @@ use crate::protocol::{
     ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
 };
 use crate::{read_message, write_message};
+use bevy::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
-use tokio::time::MissedTickBehavior;
 
 static SERVICE_STARTED: OnceLock<Instant> = OnceLock::new();
 
@@ -19,7 +19,6 @@ pub(crate) fn init_started_at() {
     SERVICE_STARTED.get_or_init(Instant::now);
 }
 
-const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(16);
 type PendingQueries = Arc<
     Mutex<
         HashMap<
@@ -28,6 +27,76 @@ type PendingQueries = Arc<
         >,
     >,
 >;
+
+pub(crate) struct ServiceDaemonPlugin {
+    listener: std::sync::Mutex<Option<UnixListener>>,
+    manager: Arc<Mutex<ProcessManager>>,
+    runtime: tokio::runtime::Handle,
+    exit: mpsc::Sender<()>,
+}
+
+impl ServiceDaemonPlugin {
+    pub(crate) fn new(
+        listener: UnixListener,
+        wake: mpsc::UnboundedSender<ProcessId>,
+        runtime: tokio::runtime::Handle,
+        exit: mpsc::Sender<()>,
+    ) -> Self {
+        Self {
+            listener: std::sync::Mutex::new(Some(listener)),
+            manager: Arc::new(Mutex::new(ProcessManager::new(wake))),
+            runtime,
+            exit,
+        }
+    }
+}
+
+impl Plugin for ServiceDaemonPlugin {
+    fn build(&self, app: &mut App) {
+        let listener = self
+            .listener
+            .lock()
+            .unwrap()
+            .take()
+            .expect("service daemon plugin can only be built once");
+        let manager = Arc::clone(&self.manager);
+        let server_manager = Arc::clone(&manager);
+        let exit = self.exit.clone();
+        let task = self.runtime.spawn(async move {
+            run_server(listener, server_manager).await;
+            let _ = exit.send(()).await;
+        });
+        app.world_mut().spawn((
+            Name::new("vmux service daemon"),
+            ServiceDaemon,
+            ServiceProcesses(manager),
+            ServiceServerTask(task),
+        ));
+        app.add_systems(Update, poll_service_processes);
+    }
+}
+
+#[derive(Component)]
+struct ServiceDaemon;
+
+#[derive(Component)]
+struct ServiceProcesses(Arc<Mutex<ProcessManager>>);
+
+#[derive(Component)]
+struct ServiceServerTask(tokio::task::JoinHandle<()>);
+
+impl Drop for ServiceServerTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+fn poll_service_processes(processes: Single<&ServiceProcesses>) {
+    let Ok(mut manager) = processes.0.try_lock() else {
+        return;
+    };
+    manager.reap_exited();
+}
 type PendingCommands = Arc<
     Mutex<
         HashMap<
@@ -139,8 +208,7 @@ where
     mgr.processes.get_mut(&id).map(f)
 }
 
-pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<ProcessId>) {
-    let manager = Arc::new(Mutex::new(ProcessManager::new(wake_tx)));
+async fn run_server(listener: UnixListener, manager: Arc<Mutex<ProcessManager>>) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
     let pending_commands: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
@@ -162,28 +230,6 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
     init_started_at();
-
-    let poll_mgr = Arc::clone(&manager);
-    let poll_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(PROCESS_POLL_INTERVAL);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        loop {
-            interval.tick().await;
-
-            let mut mgr = poll_mgr.lock().await;
-            let exited = mgr.poll_all();
-            for id in exited {
-                let keep = mgr
-                    .processes
-                    .get(&id)
-                    .is_some_and(|process| process.keep_after_exit());
-                if !keep {
-                    mgr.remove_process(&id);
-                }
-            }
-        }
-    });
 
     loop {
         tokio::select! {
@@ -229,7 +275,6 @@ pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<P
     }
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    poll_handle.abort();
     remote_handle.abort();
     tracing::info!("server: drain complete, exiting");
 }
@@ -1120,6 +1165,19 @@ mod tests {
     use crate::protocol::{AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId};
     use tokio::sync::oneshot;
 
+    async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<ProcessId>) {
+        let manager = Arc::new(Mutex::new(ProcessManager::new(wake)));
+        let mut server = Box::pin(super::run_server(listener, Arc::clone(&manager)));
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = &mut server => return,
+                _ = interval.tick() => manager.lock().await.reap_exited(),
+            }
+        }
+    }
+
     #[test]
     fn page_agent_prompt_appends_attachment_paths() {
         let attachments = vec![AgentAttachment {
@@ -1209,7 +1267,7 @@ mod tests {
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
 
         let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
-        let server = tokio::spawn(super::run_server(listener, wake_tx));
+        let server = tokio::spawn(run_test_server(listener, wake_tx));
 
         let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
         let (_r, mut w) = stream.into_split();
@@ -1309,7 +1367,7 @@ mod tests {
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
 
         let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
-        let server = tokio::spawn(super::run_server(listener, wake_tx));
+        let server = tokio::spawn(run_test_server(listener, wake_tx));
 
         let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
         let (r, mut w) = stream.into_split();
@@ -1376,7 +1434,7 @@ mod tests {
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
 
         let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
-        let server = tokio::spawn(super::run_server(listener, wake_tx));
+        let server = tokio::spawn(run_test_server(listener, wake_tx));
 
         let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
         let (r, mut w) = stream.into_split();

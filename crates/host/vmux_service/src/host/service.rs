@@ -14,11 +14,16 @@ pub fn run() {
     let (wake_tx, wake_rx) = mpsc::unbounded_channel();
     let (signal_tx, signal_rx) = mpsc::channel(1);
 
-    let listener = rt.block_on(bootstrap(signal_tx));
-    rt.spawn(crate::server::run_server(listener, wake_tx));
+    let listener = rt.block_on(bootstrap(signal_tx.clone()));
 
     let handle = rt.handle().clone();
     App::new()
+        .add_plugins(crate::server::ServiceDaemonPlugin::new(
+            listener,
+            wake_tx,
+            handle.clone(),
+            signal_tx,
+        ))
         .set_runner(wake_driven_runner(handle, wake_rx, signal_rx))
         .run();
 }
