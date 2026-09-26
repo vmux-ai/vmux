@@ -3,6 +3,12 @@ use crate::event::{ApprovalDecision, ApprovalDetail};
 use dioxus::prelude::*;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
+pub(super) const APPROVAL_DECISIONS: [ApprovalDecision; 3] = [
+    ApprovalDecision::Allow,
+    ApprovalDecision::AllowAlways,
+    ApprovalDecision::Deny,
+];
+
 #[component]
 pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
     if chat.installing() {
@@ -52,7 +58,7 @@ pub fn ApprovalPanel(
                     }
                 }
                 div { class: "flex flex-col gap-1.5",
-                    for (index , decision) in ApprovalDecision::OFFERED.into_iter().enumerate() {
+                    for (index , decision) in APPROVAL_DECISIONS.into_iter().enumerate() {
                         button {
                             key: "approval-option-{index}",
                             class: if selected == Some(index) { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
@@ -85,6 +91,23 @@ fn approval_detail_label(label: &str) -> String {
         "Tool" => translate("agent-tool"),
         "Server" => translate("agent-server"),
         _ => label.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deny_is_the_last_approval_choice() {
+        assert_eq!(
+            APPROVAL_DECISIONS,
+            [
+                ApprovalDecision::Allow,
+                ApprovalDecision::AllowAlways,
+                ApprovalDecision::Deny,
+            ]
+        );
     }
 }
 

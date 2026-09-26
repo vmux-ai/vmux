@@ -5,7 +5,7 @@ use crate::event::{
     SpacesListEvent, SpacesUiState, SpacesUiStatePatch,
 };
 use dioxus::prelude::*;
-use vmux_core::event::team::{TeamEvent, TeamRequest};
+use vmux_core::event::team::{TeamEvent, TeamProfileSwitchRequest};
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
@@ -98,12 +98,7 @@ pub fn Page() -> Element {
                             value: active_profile,
                             placeholder: translate("team-profile-name"),
                             onselect: move |profile_id| {
-                                let _ = send(&TeamRequest {
-                                    command: "switch_profile".to_string(),
-                                    member_id: None,
-                                    profile_id: Some(profile_id),
-                                    profile_name: None,
-                                });
+                                let _ = send(&TeamProfileSwitchRequest { profile_id });
                             },
                         }
                     }

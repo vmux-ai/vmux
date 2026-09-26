@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
 use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkStateEvent};
 use vmux_core::event::space::SpacesListEvent;
-use vmux_core::event::team::TeamEvent;
 use vmux_core::event::{
     ExtListRequest, ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
 };
@@ -9,7 +8,7 @@ use vmux_ui::hooks::{send, use_ui_state_root};
 
 use super::update::UpdatePhase;
 use crate::event::{
-    ActiveSession, HeaderPageState, LayoutGeometry, PaneTreeState, RemoteUiState, SideSheetState,
+    ActiveSession, HeaderState, LayoutGeometry, PaneTreeState, RemoteUiState, SideSheetState,
     StackNavigationState, TabBoundaryState, TabListState,
 };
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
@@ -25,8 +24,7 @@ pub(crate) struct LayoutPageState {
     pub spaces: Option<SpacesListEvent>,
     pub projects: TabBoundaryState,
     pub active_session: Option<ActiveSession>,
-    pub header_page: HeaderPageState,
-    pub team: TeamEvent,
+    pub header: HeaderState,
     pub remote: RemoteUiState,
     pub extensions: ExtensionsEvent,
     pub extension_popup: ExtensionPopupEvent,
@@ -73,8 +71,7 @@ impl LayoutPageState {
             LayoutUiStatePatch::Spaces(event) => self.spaces = Some(event.clone()),
             LayoutUiStatePatch::Projects(event) => self.projects = event.clone(),
             LayoutUiStatePatch::ActiveSession(event) => self.active_session = event.session.clone(),
-            LayoutUiStatePatch::HeaderPage(event) => self.header_page = event.clone(),
-            LayoutUiStatePatch::Team(event) => self.team = event.clone(),
+            LayoutUiStatePatch::Header(event) => self.header = event.clone(),
             LayoutUiStatePatch::Remote(event) => self.remote = event.clone(),
             LayoutUiStatePatch::Extensions(event) => self.extensions = event.clone(),
             LayoutUiStatePatch::ExtensionPopup(event) => self.extension_popup = event.clone(),

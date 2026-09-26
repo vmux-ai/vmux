@@ -431,11 +431,15 @@ fn apply_rename_requests(
     mut commands: Commands,
 ) {
     for request in reader.read() {
+        let name = request.name.trim();
+        if name.is_empty() {
+            continue;
+        }
         if let Some(entity) = find_by_uuid(&request.uuid, &ids)
             && let Ok(metadata) = bookmarks.get(entity)
         {
             let mut metadata = metadata.clone();
-            metadata.title = request.name.clone();
+            metadata.title = name.to_string();
             commands.entity(entity).insert(metadata);
         }
     }
@@ -533,6 +537,10 @@ fn apply_create_folder_requests(
     mut commands: Commands,
 ) {
     for request in reader.read() {
+        let name = request.name.trim();
+        if name.is_empty() {
+            continue;
+        }
         let parent_entity = if let Some(parent) = &request.parent {
             let Some(parent_entity) = find_by_uuid(parent, &ids) else {
                 continue;
@@ -545,8 +553,7 @@ fn apply_create_folder_requests(
             None
         };
         let order = next_top_order(orders.iter().map(|order| order.0));
-        let mut entity =
-            commands.spawn((Folder, new_uuid(), Name::new(request.name.clone()), order));
+        let mut entity = commands.spawn((Folder, new_uuid(), Name::new(name.to_string()), order));
         if let Some(parent_entity) = parent_entity {
             entity.insert(ChildOf(parent_entity));
         }
@@ -618,12 +625,16 @@ fn apply_rename_folder_requests(
     mut commands: Commands,
 ) {
     for request in reader.read() {
+        let name = request.name.trim();
+        if name.is_empty() {
+            continue;
+        }
         if let Some(folder_entity) = find_by_uuid(&request.uuid, &ids)
             && folders.get(folder_entity).is_ok()
         {
             commands
                 .entity(folder_entity)
-                .insert(Name::new(request.name.clone()));
+                .insert(Name::new(name.to_string()));
         }
     }
 }
@@ -840,9 +851,13 @@ fn on_bookmark_rename_request(
     trigger: On<UiInput<BookmarkRenameUiRequest>>,
     mut requests: MessageWriter<RenameRequest>,
 ) {
+    let name = trigger.event().payload.name.trim();
+    if name.is_empty() {
+        return;
+    }
     requests.write(RenameRequest {
         uuid: trigger.event().payload.uuid.clone(),
-        name: trigger.event().payload.name.clone(),
+        name: name.to_string(),
     });
 }
 
@@ -959,8 +974,12 @@ fn on_bookmark_folder_create_request(
     trigger: On<UiInput<BookmarkFolderCreateUiRequest>>,
     mut requests: MessageWriter<CreateFolderRequest>,
 ) {
+    let name = trigger.event().payload.name.trim();
+    if name.is_empty() {
+        return;
+    }
     requests.write(CreateFolderRequest {
-        name: trigger.event().payload.name.clone(),
+        name: name.to_string(),
         parent: trigger.event().payload.parent.clone(),
     });
 }
@@ -977,11 +996,20 @@ fn on_bookmark_folder_move_request(
 
 fn on_bookmark_folder_rename_request(
     trigger: On<UiInput<BookmarkFolderRenameUiRequest>>,
-    mut requests: MessageWriter<RenameFolderRequest>,
+    mut rename_requests: MessageWriter<RenameFolderRequest>,
+    mut remove_requests: MessageWriter<RemoveFolderRequest>,
 ) {
-    requests.write(RenameFolderRequest {
-        uuid: trigger.event().payload.uuid.clone(),
-        name: trigger.event().payload.name.clone(),
+    let request = &trigger.event().payload;
+    let name = request.name.trim();
+    if name.is_empty() {
+        remove_requests.write(RemoveFolderRequest {
+            uuid: request.uuid.clone(),
+        });
+        return;
+    }
+    rename_requests.write(RenameFolderRequest {
+        uuid: request.uuid.clone(),
+        name: name.to_string(),
     });
 }
 
@@ -1810,7 +1838,7 @@ mod tests {
             &mut app,
             RenameRequest {
                 uuid,
-                name: "Renamed".into(),
+                name: "  Renamed  ".into(),
             },
         );
         let title = app

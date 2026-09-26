@@ -19,6 +19,7 @@ impl Plugin for InputQueuePlugin {
             app.add_plugins(super::process_index::TerminalProcessIndexPlugin);
         }
         app.init_resource::<NextTerminalInputSequence>()
+            .add_message::<ServiceRequest>()
             .add_message::<TerminalReinputRequest>()
             .add_systems(
                 Update,

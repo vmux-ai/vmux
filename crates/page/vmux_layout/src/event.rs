@@ -664,10 +664,13 @@ pub struct ActiveWorkspaceProject {
 }
 
 #[vmux_api::contract(Default)]
-pub struct HeaderPageState {
+pub struct HeaderState {
     pub active: Option<StackRow>,
+    pub metadata: Option<vmux_core::PageMetadata>,
     pub bookmarked: bool,
     pub pinned_uuid: Option<String>,
+    pub user: Option<vmux_core::event::team::TeamMemberRow>,
+    pub agents: Vec<vmux_core::event::team::TeamMemberRow>,
 }
 
 #[vmux_api::contract(Copy, Eq)]

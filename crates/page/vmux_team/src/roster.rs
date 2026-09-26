@@ -3,6 +3,8 @@ use bevy_ecs::prelude::*;
 use vmux_api::page::PageEmit;
 use vmux_api::team::{TeamEvent, TeamMemberRow};
 
+use crate::projection::TeamStateProjection;
+
 pub struct TeamRosterPlugin;
 
 impl Plugin for TeamRosterPlugin {
@@ -34,7 +36,7 @@ pub struct Members(pub Vec<TeamMemberRow>);
 pub struct Team(pub TeamEvent);
 
 fn project_team(members: Res<Members>, mut team: ResMut<Team>) {
-    team.0 = TeamEvent::project(members.0.clone(), Vec::new());
+    team.0 = TeamStateProjection::build(members.0.clone(), Vec::new());
 }
 
 fn emit_team(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {

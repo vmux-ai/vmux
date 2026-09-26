@@ -180,7 +180,10 @@ pub(super) fn BookmarksSection(
                                     on_active_change: set_bookmark_text_input_active,
                                     on_commit: move |name| {
                                         creating_folder.set(false);
-                                        create_bookmark_folder(name, None);
+                                        let _ = send(&BookmarkFolderCreateRequest {
+                                            name,
+                                            parent: None,
+                                        });
                                     },
                                     on_cancel: move |_| creating_folder.set(false),
                                 }
@@ -537,22 +540,6 @@ fn PinTile(row: BookmarkRow, index: usize, active: bool) -> Element {
     }
 }
 
-fn commit_bookmark_rename(uuid: String, name: String) {
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return;
-    }
-    let _ = send(&BookmarkRenameRequest { uuid, name });
-}
-
-fn create_bookmark_folder(name: String, parent: Option<String>) {
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return;
-    }
-    let _ = send(&BookmarkFolderCreateRequest { name, parent });
-}
-
 fn begin_bookmark_drag(
     mut state: Signal<Option<BookmarkDragState>>,
     event: &Event<PointerData>,
@@ -803,7 +790,10 @@ fn BookmarkFolder(
                             let id = uuid.clone();
                             move |name| {
                                 editing.set(false);
-                                commit_folder_rename(id.clone(), name);
+                                let _ = send(&BookmarkFolderRenameRequest {
+                                    uuid: id.clone(),
+                                    name,
+                                });
                             }
                         },
                         on_cancel: move |_| editing.set(false),
@@ -961,7 +951,10 @@ fn BookmarkFolder(
                             let parent = uuid.clone();
                             move |name| {
                                 creating_child.set(false);
-                                create_bookmark_folder(name, Some(parent.clone()));
+                                let _ = send(&BookmarkFolderCreateRequest {
+                                    name,
+                                    parent: Some(parent.clone()),
+                                });
                             }
                         },
                         on_cancel: move |_| creating_child.set(false),
@@ -1082,7 +1075,10 @@ fn BookmarkEntry(
                         let id = uuid_rename.clone();
                         move |name| {
                             editing.set(false);
-                            commit_bookmark_rename(id.clone(), name);
+                            let _ = send(&BookmarkRenameRequest {
+                                uuid: id.clone(),
+                                name,
+                            });
                         }
                     },
                     on_cancel: move |_| editing.set(false),
@@ -1196,15 +1192,6 @@ fn BookmarkEntry(
                 },
             }
         }
-    }
-}
-
-fn commit_folder_rename(uuid: String, name: String) {
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        let _ = send(&BookmarkFolderRemoveRequest { uuid });
-    } else {
-        let _ = send(&BookmarkFolderRenameRequest { uuid, name });
     }
 }
 

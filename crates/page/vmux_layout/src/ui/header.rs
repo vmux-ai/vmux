@@ -5,7 +5,7 @@ use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
 use vmux_core::PageMetadata;
-use vmux_core::event::team::{TeamMemberRow, TeamRequest};
+use vmux_core::event::team::{TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
@@ -58,8 +58,14 @@ fn HeaderContent() -> Element {
     let ui = layout.value();
     let stacks_state = ui.stacks.unwrap_or_default();
     let tabs_state = ui.tabs.unwrap_or_default();
-    let header_page = ui.header_page;
-    let team = ui.team.members;
+    let crate::event::HeaderState {
+        active: active_row,
+        metadata: active_metadata,
+        bookmarked: is_bookmarked,
+        pinned_uuid,
+        user,
+        agents,
+    } = ui.header;
     let extensions = ui.extensions.extensions;
     let remote = ui.remote;
     let reload_key = ui.reload_revision;
@@ -89,22 +95,13 @@ fn HeaderContent() -> Element {
         .collect::<Vec<_>>()
         .join(":");
     let tab_metrics_style = TabDrag::metrics_style();
-    let active_row = header_page.active;
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
     let active_url = active_row
         .as_ref()
         .map(|r| r.url.clone())
         .unwrap_or_default();
     let show_bookmark = !active_url.is_empty();
-    let is_bookmarked = header_page.bookmarked;
-    let pinned_uuid = header_page.pinned_uuid;
     let is_pinned = pinned_uuid.is_some();
-    let active_metadata = active_row.as_ref().map(|row| PageMetadata {
-        title: row.title.clone(),
-        url: row.url.clone(),
-        icon: row.icon.clone(),
-        bg_color: row.bg_color.clone(),
-    });
 
     let (url_row_style, url_row_class) = url_row_cef(active_bg_color.as_deref());
 
@@ -229,7 +226,10 @@ fn HeaderContent() -> Element {
                             }
                         }
                     }
-                    TeamFacepile { members: team }
+                    TeamFacepile {
+                        user,
+                        agents,
+                    }
                     ExtensionBar { extensions }
                     RemoteControl { remote }
                 }
@@ -504,12 +504,10 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
 }
 
 #[component]
-fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
-    if members.is_empty() {
+fn TeamFacepile(user: Option<TeamMemberRow>, agents: Vec<TeamMemberRow>) -> Element {
+    if user.is_none() && agents.is_empty() {
         return rsx! {};
     }
-    let user = members.iter().find(|m| m.is_user).cloned();
-    let agents: Vec<TeamMemberRow> = members.iter().filter(|m| !m.is_user).cloned().collect();
     let max = 5usize;
     let overflow = agents.len().saturating_sub(max);
     rsx! {
@@ -520,12 +518,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
                     title: translate("team-profiles"),
                     onclick: move |_| {
-                        let _ = send(&TeamRequest {
-                            command: "open".to_string(),
-                            member_id: None,
-                            profile_id: None,
-                            profile_name: None,
-                        });
+                        let _ = send(&TeamOpenRequest);
                     },
                     Avatar {
                         src: None,
@@ -549,11 +542,8 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                                     title: "{m.name}",
                                     class: "relative inline-flex size-5 shrink-0 cursor-pointer transition-opacity hover:opacity-80",
                                     onclick: move |_| {
-                                        let _ = send(&TeamRequest {
-                                            command: "focus".to_string(),
-                                            member_id: Some(id.clone()),
-                                            profile_id: None,
-                                            profile_name: None,
+                                        let _ = send(&TeamMemberFocusRequest {
+                                            member_id: id.clone(),
                                         });
                                     },
                                     Avatar {
@@ -577,12 +567,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                             class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground cursor-pointer transition-opacity hover:opacity-80",
                             title: translate("team-profiles"),
                             onclick: move |_| {
-                                let _ = send(&TeamRequest {
-                                    command: "open".to_string(),
-                                    member_id: None,
-                                    profile_id: None,
-                                    profile_name: None,
-                                });
+                                let _ = send(&TeamOpenRequest);
                             },
                             "+{overflow}"
                         }
