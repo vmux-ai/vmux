@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentCommand, AgentQuery};
 use vmux_core::{JsonArguments, ProcessAnchor};
 
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
+use vmux_tool::{
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
 
@@ -12,21 +12,23 @@ pub struct BrowserToolPlugin;
 
 impl Plugin for BrowserToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<BrowserTool>::new(include_str!("tool.ron")))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(
-                Update,
-                (
-                    navigate,
-                    go_back,
-                    go_forward,
-                    history_search,
-                    install_extension,
-                    snapshot,
-                    scroll,
-                )
-                    .in_set(ToolDispatchSet),
-            );
+        app.add_plugins(ToolManifestPlugin::<BrowserTool>::new(include_str!(
+            "tool.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(
+            Update,
+            (
+                navigate,
+                go_back,
+                go_forward,
+                history_search,
+                install_extension,
+                snapshot,
+                scroll,
+            )
+                .in_set(ToolDispatchSet),
+        );
     }
 }
 

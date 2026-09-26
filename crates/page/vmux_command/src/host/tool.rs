@@ -2,17 +2,19 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentCommand, JsonValue};
 use vmux_core::JsonArguments;
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolRequestSet,
+use vmux_tool::{
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolRequestSet,
 };
 
 pub struct CommandToolPlugin;
 
 impl Plugin for CommandToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<CommandTool>::new(include_str!("tool.ron")))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(Update, (open_command_bar, notify).in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::<CommandTool>::new(include_str!(
+            "tool.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(Update, (open_command_bar, notify).in_set(ToolDispatchSet));
     }
 }
 
@@ -101,7 +103,7 @@ fn notify(mut commands: Commands, requests: Query<(Entity, &NotifyArgs), AddedTo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_mcp::tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
+    use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
 
     impl CommandTool {
         fn app() -> App {

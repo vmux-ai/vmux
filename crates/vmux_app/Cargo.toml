@@ -17,7 +17,7 @@ desktop = [
     "history",
     "knowledge",
     "layout",
-    "mcp",
+    "tool",
     "service",
     "shortcut",
     "simulator",
@@ -28,7 +28,7 @@ desktop = [
     "vault",
 ]
 mobile = ["dep:vmux_chat", "dep:vmux_start", "dep:vmux_team"]
-mcp = ["dep:vmux_mcp", "dep:vmux_tool"]
+tool = ["dep:vmux_tool"]
 core = [
     "dep:vmux_command",
     "dep:vmux_core",
@@ -72,7 +72,6 @@ vmux_git = { path = "../vmux_git", optional = true }
 vmux_history = { path = "../page/vmux_history", optional = true }
 vmux_knowledge = { path = "../page/vmux_knowledge", optional = true }
 vmux_layout = { path = "../page/vmux_layout", optional = true }
-vmux_mcp = { path = "../host/vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
 vmux_service = { path = "../host/vmux_service", optional = true }
 vmux_setting = { path = "../page/vmux_setting", optional = true }

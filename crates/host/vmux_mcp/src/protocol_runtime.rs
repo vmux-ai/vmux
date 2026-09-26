@@ -38,8 +38,8 @@ impl McpPlugin {
 
 impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<crate::tool::ToolRuntimePlugin>() {
-            app.add_plugins(crate::tool::ToolRuntimePlugin);
+        if !app.is_plugin_added::<vmux_tool::ToolRegistryPlugin>() {
+            app.add_plugins(vmux_tool::ToolRegistryPlugin);
         }
         app.world_mut().spawn((
             Name::new("MCP protocol runtime"),
@@ -50,10 +50,10 @@ impl Plugin for McpPlugin {
             Update,
             (
                 McpSet::Route,
-                crate::tool::ToolResolveSet,
-                crate::tool::ToolRequestSet,
-                crate::tool::ToolDispatchSet,
-                crate::tool::ToolDispatchFlush,
+                vmux_tool::ToolResolveSet,
+                vmux_tool::ToolRequestSet,
+                vmux_tool::ToolDispatchSet,
+                vmux_tool::ToolDispatchFlush,
                 McpSet::StartTasks,
                 McpSet::BuildResponses,
             )
@@ -276,14 +276,14 @@ fn route_request(mut commands: Commands, requests: PendingRequests, config: Sing
         "tools/list" => {
             let mut request = commands.entity(entity);
             request.insert((
-                crate::tool::ToolCatalogRequest,
+                vmux_tool::ToolCatalogRequest,
                 HostShell(config.shell.clone()),
             ));
             if config.acp_session {
-                request.insert(crate::tool::AcpSessionContext);
+                request.insert(vmux_tool::AcpSessionContext);
             }
             if config.acp_terminals {
-                request.insert(crate::tool::AcpTerminalContext);
+                request.insert(vmux_tool::AcpTerminalContext);
             }
         }
         "tools/call" => {
@@ -303,17 +303,17 @@ fn route_request(mut commands: Commands, requests: PendingRequests, config: Sing
                 Name::new(name.to_string()),
                 JsonArguments(arguments),
                 HostShell(config.shell.clone()),
-                crate::tool::ToolInvocation,
-                crate::tool::ToolCommandFallback,
+                vmux_tool::ToolInvocation,
+                vmux_tool::ToolCommandFallback,
             ));
             if let Some(anchor) = config.anchor {
                 request.insert(ProcessAnchor(anchor));
             }
             if config.acp_session {
-                request.insert(crate::tool::AcpSessionContext);
+                request.insert(vmux_tool::AcpSessionContext);
             }
             if config.acp_terminals {
-                request.insert(crate::tool::AcpTerminalContext);
+                request.insert(vmux_tool::AcpTerminalContext);
             }
         }
         method => {
@@ -327,35 +327,34 @@ fn route_request(mut commands: Commands, requests: PendingRequests, config: Sing
 
 fn finish_tool_errors(
     mut commands: Commands,
-    errors: Query<(Entity, &crate::tool::ToolDispatchError), Added<crate::tool::ToolDispatchError>>,
+    errors: Query<(Entity, &vmux_tool::ToolDispatchError), Added<vmux_tool::ToolDispatchError>>,
 ) {
     for (entity, error) in &errors {
         commands
             .entity(entity)
-            .remove::<crate::tool::ToolInvocation>()
-            .remove::<crate::tool::ToolCall>()
-            .remove::<crate::tool::ToolDispatchError>()
+            .remove::<vmux_tool::ToolInvocation>()
+            .remove::<vmux_tool::ToolCall>()
+            .remove::<vmux_tool::ToolDispatchError>()
             .insert(McpReply::Result(Err(error.message().to_string())));
     }
 }
 
 fn start_list_tools(
     mut commands: Commands,
-    requests: Query<(Entity, &crate::tool::ToolCatalog), Added<crate::tool::ToolCatalog>>,
+    requests: Query<(Entity, &vmux_tool::ToolCatalog), Added<vmux_tool::ToolCatalog>>,
 ) {
     for (entity, request) in &requests {
         let mut definitions = request.0.clone();
         commands
             .entity(entity)
-            .remove::<crate::tool::ToolCatalogRequest>()
-            .remove::<crate::tool::ToolCatalog>()
+            .remove::<vmux_tool::ToolCatalogRequest>()
+            .remove::<vmux_tool::ToolCatalog>()
             .insert(McpExecution::new(async move {
                 if let Ok(connection) = vmux_service::client::ServiceConnection::connect().await
                     && let Ok(AgentQueryResult::Commands(commands)) =
                         agent_query(&connection, AgentQuery::ListCommands).await
                 {
-                    definitions =
-                        crate::tool::ToolDefinition::merge_commands(definitions, commands)?;
+                    definitions = vmux_tool::ToolDefinition::merge_commands(definitions, commands)?;
                 }
                 Ok(json!({ "tools": definitions }))
             }));
@@ -365,16 +364,16 @@ fn start_list_tools(
 fn start_tool_commands(
     mut commands: Commands,
     requests: Query<
-        (Entity, Option<&ProcessAnchor>, &crate::tool::ToolCommand),
-        Added<crate::tool::ToolCommand>,
+        (Entity, Option<&ProcessAnchor>, &vmux_tool::ToolCommand),
+        Added<vmux_tool::ToolCommand>,
     >,
 ) {
     for (entity, anchor, result) in &requests {
         let mut request = commands.entity(entity);
         request
-            .remove::<crate::tool::ToolInvocation>()
-            .remove::<crate::tool::ToolCall>()
-            .remove::<crate::tool::ToolCommand>();
+            .remove::<vmux_tool::ToolInvocation>()
+            .remove::<vmux_tool::ToolCall>()
+            .remove::<vmux_tool::ToolCommand>();
         let command = match result.0.clone() {
             Ok(command) => command,
             Err(message) => {
@@ -391,14 +390,14 @@ fn start_tool_commands(
 
 fn start_tool_queries(
     mut commands: Commands,
-    requests: Query<(Entity, &crate::tool::ToolQuery), Added<crate::tool::ToolQuery>>,
+    requests: Query<(Entity, &vmux_tool::ToolQuery), Added<vmux_tool::ToolQuery>>,
 ) {
     for (entity, result) in &requests {
         let mut request = commands.entity(entity);
         request
-            .remove::<crate::tool::ToolInvocation>()
-            .remove::<crate::tool::ToolCall>()
-            .remove::<crate::tool::ToolQuery>();
+            .remove::<vmux_tool::ToolInvocation>()
+            .remove::<vmux_tool::ToolCall>()
+            .remove::<vmux_tool::ToolQuery>();
         let query = match result.0.clone() {
             Ok(query) => query,
             Err(message) => {

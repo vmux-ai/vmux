@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentCommand, AgentQuery};
 use vmux_core::{JsonArguments, ProcessAnchor};
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
+use vmux_tool::{
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
 
@@ -11,7 +11,7 @@ pub struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<KnowledgeTool>::new(include_str!(
+        app.add_plugins(ToolManifestPlugin::<KnowledgeTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))

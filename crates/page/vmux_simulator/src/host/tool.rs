@@ -2,15 +2,15 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use vmux_api::protocol::{AgentQuery, SimulatorButton, SimulatorInput};
 use vmux_core::JsonArguments;
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolDispatchError, ToolDispatchSet, ToolQuery, ToolRequestSet,
+use vmux_tool::{
+    AddedTool, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery, ToolRequestSet,
 };
 
 pub struct SimulatorToolPlugin;
 
 impl Plugin for SimulatorToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<SimulatorTool>::new(include_str!(
+        app.add_plugins(ToolManifestPlugin::<SimulatorTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))
@@ -203,7 +203,7 @@ fn button(mut commands: Commands, requests: Query<(Entity, &ButtonArgs), AddedTo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_mcp::tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
+    use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
 
     impl SimulatorTool {
         fn app() -> App {

@@ -23,7 +23,7 @@ pub(crate) struct ToolUiPlugin;
 impl Plugin for ToolUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            vmux_app::extension::McpConnectionPlugin,
+            vmux_tool::McpConnectionPlugin,
             UiStatePlugin::<ToolsUiState>::default(),
         ))
         .add_plugins(UiEventPlugin::<(

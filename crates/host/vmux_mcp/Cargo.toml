@@ -13,13 +13,12 @@ path = "src/lib.rs"
 base64 = "0.22"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
-ron = "0.8"
-serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 vmux_api = { path = "../../vmux_api" }
 vmux_core = { path = "../../vmux_core" }
 vmux_service = { path = "../vmux_service" }
+vmux_tool = { path = "../../vmux_tool" }
 
 [dev-dependencies]
 tempfile = "3"

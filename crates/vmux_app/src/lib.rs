@@ -1,4 +1,3 @@
-pub mod extension;
 #[cfg(feature = "mobile")]
 mod mobile;
 mod plugin;

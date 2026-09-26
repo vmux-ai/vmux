@@ -9,11 +9,11 @@ use vmux_api::protocol::{
 };
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolQuery,
+use vmux_service::client::ServiceConnection;
+use vmux_tool::{
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
     ToolRequestSet,
 };
-use vmux_service::client::ServiceConnection;
 
 const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -22,7 +22,7 @@ pub struct WorkspaceToolPlugin;
 
 impl Plugin for WorkspaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<WorkspaceTool>::new(include_str!(
+        app.add_plugins(ToolManifestPlugin::<WorkspaceTool>::new(include_str!(
             "tool.ron"
         )))
         .add_systems(Update, parse.in_set(ToolRequestSet))

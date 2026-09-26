@@ -15,7 +15,7 @@ impl Plugin for ToolCallPlugin {
                 Update,
                 handle_agent_tool_calls
                     .in_set(CommandSet::ToolCalls)
-                    .before(vmux_mcp::tool::ToolResolveSet),
+                    .before(vmux_tool::ToolResolveSet),
             )
             .add_systems(
                 Update,
@@ -24,7 +24,7 @@ impl Plugin for ToolCallPlugin {
                     finish_agent_tool_queries,
                     fail_agent_tool_calls,
                 )
-                    .after(vmux_mcp::tool::ToolDispatchFlush)
+                    .after(vmux_tool::ToolDispatchFlush)
                     .before(CommandSet::Commands),
             );
     }
@@ -56,8 +56,8 @@ fn handle_agent_tool_calls(
         commands.spawn((
             Name::new(request.name.clone()),
             arguments,
-            vmux_mcp::tool::ToolInvocation,
-            vmux_mcp::tool::ToolCommandFallback,
+            vmux_tool::ToolInvocation,
+            vmux_tool::ToolCommandFallback,
             PendingAgentToolCall {
                 request_id: request.request_id,
                 sid: request.sid.clone(),
@@ -69,8 +69,8 @@ fn handle_agent_tool_calls(
 fn finish_agent_tool_commands(
     mut commands: Commands,
     calls: Query<
-        (Entity, &PendingAgentToolCall, &vmux_mcp::tool::ToolCommand),
-        Added<vmux_mcp::tool::ToolCommand>,
+        (Entity, &PendingAgentToolCall, &vmux_tool::ToolCommand),
+        Added<vmux_tool::ToolCommand>,
     >,
     mut command_writer: MessageWriter<AgentCommandRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -102,8 +102,8 @@ fn finish_agent_tool_commands(
 fn finish_agent_tool_queries(
     mut commands: Commands,
     calls: Query<
-        (Entity, &PendingAgentToolCall, &vmux_mcp::tool::ToolQuery),
-        Added<vmux_mcp::tool::ToolQuery>,
+        (Entity, &PendingAgentToolCall, &vmux_tool::ToolQuery),
+        Added<vmux_tool::ToolQuery>,
     >,
     mut query_writer: MessageWriter<AgentQueryRequest>,
     mut service_requests: MessageWriter<ServiceRequest>,
@@ -131,12 +131,8 @@ fn finish_agent_tool_queries(
 fn fail_agent_tool_calls(
     mut commands: Commands,
     calls: Query<
-        (
-            Entity,
-            &PendingAgentToolCall,
-            &vmux_mcp::tool::ToolDispatchError,
-        ),
-        Added<vmux_mcp::tool::ToolDispatchError>,
+        (Entity, &PendingAgentToolCall, &vmux_tool::ToolDispatchError),
+        Added<vmux_tool::ToolDispatchError>,
     >,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {

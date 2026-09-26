@@ -3,17 +3,19 @@ use serde::{Deserialize, Serialize};
 use vmux_core::JsonArguments;
 use vmux_service::protocol::AgentCommand;
 
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolRequestSet,
+use vmux_tool::{
+    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolRequestSet,
 };
 
 pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<TerminalTool>::new(include_str!("tool.ron")))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(Update, dispatch.in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::<TerminalTool>::new(include_str!(
+            "tool.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(Update, dispatch.in_set(ToolDispatchSet));
     }
 }
 

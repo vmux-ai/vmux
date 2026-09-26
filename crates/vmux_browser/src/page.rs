@@ -154,6 +154,15 @@ fn resolve_page_open_target(
                 })
             })
             .ok_or_else(|| "page_open: no focused stack or pane".to_string()),
+        PageOpenTarget::NewStack => focus
+            .pane
+            .filter(|pane| panes.contains(*pane))
+            .map(|pane| {
+                commands
+                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                    .id()
+            })
+            .ok_or_else(|| "page_open: no focused pane".to_string()),
         PageOpenTarget::Stack(stack) => {
             if stack_filter.contains(stack) {
                 Ok(stack)

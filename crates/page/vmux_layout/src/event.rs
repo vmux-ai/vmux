@@ -710,9 +710,6 @@ pub struct UpdateProgress {
 #[vmux_api::contract(Copy, Default, Eq)]
 pub struct UpdateCleared;
 
-#[vmux_api::ui_event(Copy, Default, Eq, targets = ["debug", "extensions", "layout"])]
-pub struct RestartRequestEvent;
-
 #[cfg(test)]
 mod update_event_tests {
     use super::*;

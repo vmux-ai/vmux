@@ -8,18 +8,20 @@ use vmux_api::protocol::{
 };
 use vmux_core::{JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::McpExecution;
-use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolDispatchError, ToolDispatchSet, ToolRequestSet,
-};
 use vmux_service::client::ServiceConnection;
+use vmux_tool::{
+    AddedTool, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin, ToolRequestSet,
+};
 
 pub struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(McpToolPlugin::<FileTool>::new(include_str!("tool.ron")))
-            .add_systems(Update, parse.in_set(ToolRequestSet))
-            .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::<FileTool>::new(include_str!(
+            "tool.ron"
+        )))
+        .add_systems(Update, parse.in_set(ToolRequestSet))
+        .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
     }
 }
 
