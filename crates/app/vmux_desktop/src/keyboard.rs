@@ -14,11 +14,12 @@ pub(crate) struct KeyboardPlugin;
 
 impl Plugin for KeyboardPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(KeyboardRuntime::default());
         app.add_message::<ExitFullscreenRequest>()
             .add_systems(
                 Startup,
-                install_monitor.after(crate::shortcut::ShortcutInit),
+                (spawn_keyboard_state, install_monitor)
+                    .chain()
+                    .after(crate::shortcut::ShortcutInit),
             )
             .add_systems(
                 Update,
@@ -26,6 +27,7 @@ impl Plugin for KeyboardPlugin {
                     .after(vmux_layout::stack::ComputeFocusSet)
                     .after(vmux_browser::KeyboardContextSet)
                     .after(vmux_shortcut::ShortcutCaptureSet)
+                    .after(crate::window_state::SyncWindowFullscreen)
                     .before(vmux_simulator::SimulatorFocusSet),
             )
             .add_systems(
@@ -42,10 +44,10 @@ impl Plugin for KeyboardPlugin {
 pub(crate) struct ExitFullscreenRequest;
 
 #[derive(Component, Clone, Default)]
-pub(crate) struct KeyboardRuntime(Arc<Mutex<KeyboardState>>);
+struct KeyboardState(Arc<Mutex<NativeKeyboardState>>);
 
 #[derive(Default)]
-struct KeyboardState {
+struct NativeKeyboardState {
     keymap: Option<Keymap>,
     pending_prefix: Option<(KeyCombo, Instant)>,
     capture_target: Option<vmux_shortcut::ShortcutCaptureToken>,
@@ -74,14 +76,62 @@ struct PendingShortcutCapture {
     pressed_at_ms: i64,
 }
 
-impl KeyboardRuntime {
-    #[cfg(feature = "native-glass")]
-    pub(crate) fn set_window_fullscreen(&self, value: bool) {
-        self.0.lock().window_fullscreen = value;
-    }
+fn spawn_keyboard_state(mut commands: Commands) {
+    commands.spawn((Name::new("Keyboard"), KeyboardState::default()));
+}
 
+impl KeyboardState {
     fn drain(&self) -> PendingKeyboardInput {
         std::mem::take(&mut self.0.lock().pending)
+    }
+
+    fn install(&self, wake: impl Fn() + Send + Sync + 'static) {
+        let state = self.0.clone();
+        let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+            let ev = unsafe { event.as_ref() };
+            wake();
+            if ev.r#type() != NSEventType::KeyDown {
+                return event.as_ptr();
+            }
+            let key_code = ev.keyCode();
+            let flags = ev.modifierFlags();
+            let mut state = state.lock();
+            if let Some(token) = state.capture_target {
+                if ev.isARepeat() {
+                    return std::ptr::null_mut();
+                }
+                let stroke = capture_stroke(ev, key_code, flags);
+                if releases_shortcut_capture(&stroke) {
+                    state.capture_target = None;
+                    state.pending.shortcut_releases.push(token);
+                    return event.as_ptr();
+                }
+                state.pending_prefix = None;
+                state
+                    .pending
+                    .shortcut_captures
+                    .push(PendingShortcutCapture {
+                        token,
+                        stroke,
+                        pressed_at_ms: vmux_core::now_millis(),
+                    });
+                return std::ptr::null_mut();
+            }
+            let Some(combo) = translate(key_code, flags) else {
+                return event.as_ptr();
+            };
+            let decision = state.classify(combo);
+            if state.consume(decision) {
+                std::ptr::null_mut()
+            } else {
+                event.as_ptr()
+            }
+        });
+        let mask = NSEventMask::KeyDown | NSEventMask::KeyUp | NSEventMask::FlagsChanged;
+        let token = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
+        if let Some(token) = token {
+            std::mem::forget(token);
+        }
     }
 }
 
@@ -212,7 +262,7 @@ fn decide(
     KeyDisposition::PassThrough
 }
 
-impl KeyboardState {
+impl NativeKeyboardState {
     fn classify(&mut self, combo: KeyCombo) -> KeyDisposition {
         if self.simulator_active && toggles_simulator_software_keyboard(&combo) {
             self.pending.simulator_keyboard += 1;
@@ -444,78 +494,31 @@ fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
     Some(key)
 }
 
-fn install(state: Arc<Mutex<KeyboardState>>, wake: impl Fn() + Send + Sync + 'static) {
-    let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
-        let ev = unsafe { event.as_ref() };
-        wake();
-        if ev.r#type() != NSEventType::KeyDown {
-            return event.as_ptr();
-        }
-        let key_code = ev.keyCode();
-        let flags = ev.modifierFlags();
-        let mut state = state.lock();
-        if let Some(token) = state.capture_target {
-            if ev.isARepeat() {
-                return std::ptr::null_mut();
-            }
-            let stroke = capture_stroke(ev, key_code, flags);
-            if releases_shortcut_capture(&stroke) {
-                state.capture_target = None;
-                state.pending.shortcut_releases.push(token);
-                return event.as_ptr();
-            }
-            state.pending_prefix = None;
-            state
-                .pending
-                .shortcut_captures
-                .push(PendingShortcutCapture {
-                    token,
-                    stroke,
-                    pressed_at_ms: vmux_core::now_millis(),
-                });
-            return std::ptr::null_mut();
-        }
-        let Some(combo) = translate(key_code, flags) else {
-            return event.as_ptr();
-        };
-        let decision = state.classify(combo);
-        if state.consume(decision) {
-            std::ptr::null_mut()
-        } else {
-            event.as_ptr()
-        }
-    });
-    let mask = NSEventMask::KeyDown | NSEventMask::KeyUp | NSEventMask::FlagsChanged;
-    let token = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
-    if let Some(token) = token {
-        std::mem::forget(token);
-    }
-}
-
 fn install_monitor(
-    runtime: Single<&KeyboardRuntime>,
+    keyboard: Single<&KeyboardState>,
     keymap: Res<Keymap>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let Some(proxy) = proxy else {
         return;
     };
-    runtime.0.lock().keymap = Some(keymap.clone());
-    let state = runtime.0.clone();
+    keyboard.0.lock().keymap = Some(keymap.clone());
     let proxy = (**proxy).clone();
-    install(state, move || {
+    keyboard.install(move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
 }
 
 fn sync_keyboard_context(
-    runtime: Single<&KeyboardRuntime>,
+    keyboard: Single<&KeyboardState>,
     keymap: Res<Keymap>,
     browser: Option<Res<vmux_browser::KeyboardContext>>,
     capture: Option<Res<vmux_shortcut::ShortcutCaptureTarget>>,
     focus: Option<Res<vmux_layout::stack::FocusedStack>>,
+    focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
     children: Query<&Children>,
     pages: Query<&vmux_core::PageMetadata>,
+    fullscreen: Query<&crate::window_state::WindowFullscreen>,
     mut requests: Option<MessageWriter<vmux_simulator::SimulatorFocusRequest>>,
 ) {
     let active = focus
@@ -530,12 +533,17 @@ fn sync_keyboard_context(
             })
         });
     {
-        let mut state = runtime.0.lock();
+        let mut state = keyboard.0.lock();
         if keymap.is_changed() || state.keymap.is_none() {
             state.keymap = Some(keymap.clone());
         }
         state.capture_target = capture.as_deref().and_then(|capture| capture.token());
         state.simulator_active = active.is_some();
+        state.window_fullscreen = focused_window
+            .as_deref()
+            .and_then(|focused_window| focused_window.0)
+            .and_then(|window| fullscreen.get(window).ok())
+            .is_some_and(|fullscreen| fullscreen.0);
         state.page_owns_escape = browser
             .as_deref()
             .is_some_and(|context| context.page_owns_escape);
@@ -549,7 +557,7 @@ fn sync_keyboard_context(
 }
 
 fn dispatch_keyboard_input(
-    runtime: Single<&KeyboardRuntime>,
+    keyboard: Single<&KeyboardState>,
     mut invocations: MessageWriter<vmux_command::CommandInvocation>,
     mut simulator_buttons: Option<MessageWriter<vmux_simulator::HardwareButtonRequest>>,
     mut simulator_clipboard: Option<MessageWriter<vmux_simulator::SimulatorClipboardRequest>>,
@@ -560,7 +568,7 @@ fn dispatch_keyboard_input(
     mut shortcut_capture: Option<ResMut<vmux_shortcut::ShortcutCaptureTarget>>,
     mut commands: Commands,
 ) {
-    let pending = runtime.drain();
+    let pending = keyboard.drain();
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     for command in pending.commands {
         invocations.write(vmux_command::CommandInvocation::new(caller, command));
@@ -706,7 +714,7 @@ mod tests {
 
     #[test]
     fn fullscreen_escape_becomes_an_ecs_request_unless_the_page_owns_it() {
-        let mut state = KeyboardState {
+        let mut state = NativeKeyboardState {
             window_fullscreen: true,
             ..Default::default()
         };
@@ -726,7 +734,7 @@ mod tests {
 
     #[test]
     fn consumed_shortcut_queues_command() {
-        let mut state = KeyboardState::default();
+        let mut state = NativeKeyboardState::default();
         let consumed = state.consume(KeyDisposition::Consume(Some(
             "select_pane_left".to_string(),
         )));

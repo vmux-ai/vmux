@@ -10,9 +10,6 @@ pub mod reconcile;
 pub mod state;
 
 #[cfg(ui)]
-pub mod tool_page;
-
-#[cfg(ui)]
 pub mod ui;
 
 #[cfg(ui)]
@@ -23,12 +20,6 @@ mod remote;
 
 #[cfg(ui)]
 pub mod error_page;
-#[cfg(ui)]
-pub mod extensions_page;
-
-#[cfg(ui)]
-pub mod vault_page;
-
 #[cfg(host)]
 pub mod host;
 #[cfg(host)]

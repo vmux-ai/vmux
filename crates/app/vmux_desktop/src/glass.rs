@@ -21,7 +21,7 @@ impl Plugin for GlassPlugin {
             .add_systems(
                 Update,
                 (
-                    sync_window_glass_visibility,
+                    sync_window_glass_visibility.in_set(crate::window_state::SyncWindowFullscreen),
                     keep_window_surface_layer_transparent,
                 ),
             )
@@ -335,7 +335,6 @@ fn sync_window_glass_visibility(
         &mut crate::window_state::WindowFullscreen,
     )>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
-    keyboard: Single<&crate::keyboard::KeyboardRuntime>,
     mut exit_fullscreen: MessageReader<crate::keyboard::ExitFullscreenRequest>,
 ) {
     use objc2::ClassType;
@@ -407,8 +406,6 @@ fn sync_window_glass_visibility(
     if clear_color.0 != want_clear {
         clear_color.0 = want_clear;
     }
-
-    keyboard.set_window_fullscreen(focused_fullscreen);
 }
 
 fn focus_shadow_visible(focused: bool, visible: bool, fullscreen: bool) -> bool {

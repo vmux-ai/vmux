@@ -46,7 +46,7 @@ pub fn Page() -> Element {
     let active_route = use_signal(|| initial_route);
     let route = active_route();
     if route == ToolsRoute::Extensions {
-        return rsx! { crate::extensions_page::ExtensionsManager { active_route } };
+        return rsx! { crate::extension::ExtensionsManager { active_route } };
     }
     rsx! { ToolManager { route, active_route } }
 }

@@ -10242,6 +10242,7 @@ dependencies = [
  "vmux_team",
  "vmux_terminal",
  "vmux_tool",
+ "vmux_vault",
 ]
 
 [[package]]
@@ -11040,6 +11041,7 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "bevy_tasks",
+ "dioxus",
  "parking_lot",
  "reqwest",
  "ring",
@@ -11052,8 +11054,10 @@ dependencies = [
  "vmux_api",
  "vmux_core",
  "vmux_layout",
+ "vmux_native",
  "vmux_path",
  "vmux_profile",
+ "vmux_ui",
 ]
 
 [[package]]
@@ -11105,6 +11109,23 @@ dependencies = [
  "url",
  "uuid",
  "vmux_macro",
+]
+
+[[package]]
+name = "vmux_vault"
+version = "0.0.34"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "dioxus",
+ "notify",
+ "parking_lot",
+ "rfd 0.15.4",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_native",
+ "vmux_ui",
 ]
 
 [[package]]

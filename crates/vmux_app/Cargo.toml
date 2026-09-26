@@ -25,6 +25,7 @@ desktop = [
     "start",
     "team",
     "terminal",
+    "vault",
 ]
 mobile = ["dep:vmux_chat", "dep:vmux_start", "dep:vmux_team"]
 mcp = ["dep:bevy_ecs", "dep:serde", "dep:vmux_mcp", "dep:vmux_tool"]
@@ -57,6 +58,7 @@ team = ["core", "dep:vmux_team"]
 space = ["layout", "dep:vmux_space"]
 service = ["core", "dep:vmux_service"]
 start = ["core", "dep:vmux_start"]
+vault = ["layout", "dep:vmux_vault"]
 
 [dependencies]
 bevy_app = { workspace = true }
@@ -85,6 +87,7 @@ vmux_start = { path = "../page/vmux_start", optional = true }
 vmux_team = { path = "../page/vmux_team", optional = true }
 vmux_terminal = { path = "../page/vmux_terminal", optional = true }
 vmux_tool = { path = "../vmux_tool", optional = true }
+vmux_vault = { path = "../page/vmux_vault", optional = true }
 
 [lints]
 workspace = true
