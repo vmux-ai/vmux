@@ -1,6 +1,6 @@
 use crate::process::{Process, ProcessManager};
 use crate::protocol::{
-    AgentAttachment, AgentRequest, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
+    AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
     ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
 };
 use crate::{read_message, write_message};
@@ -13,7 +13,7 @@ use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
 
-use super::query::{CommandExitState, DaemonQueryPlugin, RunCompletionState, TerminalQueryBridge};
+use super::query::{ProcessQueries, ProcessQueryPlugin};
 
 static SERVICE_STARTED: OnceLock<Instant> = OnceLock::new();
 
@@ -30,8 +30,8 @@ pub(crate) struct ServiceDaemonPlugin {
     manager: Arc<Mutex<ProcessManager>>,
     runtime: tokio::runtime::Handle,
     exit: mpsc::Sender<()>,
-    queries: TerminalQueryBridge,
-    query_plugin: std::sync::Mutex<Option<DaemonQueryPlugin>>,
+    queries: ProcessQueries,
+    query_plugin: std::sync::Mutex<Option<ProcessQueryPlugin>>,
 }
 
 impl ServiceDaemonPlugin {
@@ -42,7 +42,7 @@ impl ServiceDaemonPlugin {
         exit: mpsc::Sender<()>,
     ) -> Self {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
-        let (query_plugin, queries) = DaemonQueryPlugin::new(Arc::clone(&manager), wake);
+        let (query_plugin, queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake);
         Self {
             listener: std::sync::Mutex::new(Some(listener)),
             manager,
@@ -211,7 +211,7 @@ where
 async fn run_server(
     listener: UnixListener,
     manager: Arc<Mutex<ProcessManager>>,
-    terminal_queries: TerminalQueryBridge,
+    process_queries: ProcessQueries,
 ) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
@@ -252,7 +252,7 @@ async fn run_server(
                 let pending_tool_calls = Arc::clone(&pending_tool_calls);
                 let agent_manager = Arc::clone(&agent_manager);
                 let acp_manager = Arc::clone(&acp_manager);
-                let terminal_queries = terminal_queries.clone();
+                let process_queries = process_queries.clone();
                 let shutdown_tx = shutdown_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_client(
@@ -264,7 +264,7 @@ async fn run_server(
                         pending_tool_calls,
                         agent_manager,
                         acp_manager,
-                        terminal_queries,
+                        process_queries,
                         shutdown_tx,
                     )
                     .await
@@ -310,8 +310,8 @@ fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)>
             ),
             Err(message) => (message, true),
         },
-        ServiceMessage::AgentTerminalReadResult { result, .. }
-        | ServiceMessage::AgentTerminalReadFullResult { result, .. }
+        ServiceMessage::ProcessOutputResult { result, .. }
+        | ServiceMessage::ProcessTranscriptResult { result, .. }
         | ServiceMessage::AgentBrowserSnapshotResult { result, .. }
         | ServiceMessage::AgentBrowserScrollResult { result, .. }
         | ServiceMessage::AgentSimulatorControlResult { result, .. }
@@ -339,7 +339,7 @@ fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)>
             Ok(commands) => (serde_json::to_string(&commands).unwrap_or_default(), false),
             Err(message) => (message, true),
         },
-        ServiceMessage::AgentCommandExitResult { result, .. } => match result {
+        ServiceMessage::ProcessCommandExitResult { result, .. } => match result {
             Ok(result) => {
                 let exit = result
                     .exit
@@ -351,7 +351,7 @@ fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)>
             }
             Err(message) => (message, true),
         },
-        ServiceMessage::AgentRunCompletionResult { result, .. } => match result {
+        ServiceMessage::ProcessRunCompletionResult { result, .. } => match result {
             Ok(result) => {
                 let token = result
                     .token
@@ -428,7 +428,7 @@ async fn handle_client(
     pending_tool_calls: crate::agent_broker::PendingToolCalls,
     agent_manager: Arc<Mutex<crate::agent::AgentSessionManager>>,
     acp_manager: Arc<Mutex<crate::acp::AcpSessionManager>>,
-    terminal_queries: TerminalQueryBridge,
+    process_queries: ProcessQueries,
     shutdown_tx: mpsc::Sender<()>,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
@@ -778,33 +778,25 @@ async fn handle_client(
 
             ClientMessage::AgentQuery { request_id, query } => {
                 let response = match query {
-                    crate::protocol::AgentQuery::ReadTerminal { process_id } => {
-                        ServiceMessage::AgentTerminalReadResult {
+                    crate::protocol::AgentQuery::ReadProcessOutput { process_id } => {
+                        ServiceMessage::ProcessOutputResult {
                             request_id,
-                            result: terminal_queries.visible_text(process_id).await,
+                            result: process_queries.output(process_id).await,
                         }
                     }
-                    crate::protocol::AgentQuery::ReadTerminalFull { process_id } => {
-                        ServiceMessage::AgentTerminalReadFullResult {
+                    crate::protocol::AgentQuery::ReadProcessTranscript { process_id } => {
+                        ServiceMessage::ProcessTranscriptResult {
                             request_id,
-                            result: terminal_queries.full_text(process_id).await,
+                            result: process_queries.transcript(process_id).await,
                         }
                     }
-                    crate::protocol::AgentQuery::CommandExit { process_id } => {
-                        let result = terminal_queries.command_exit(process_id).await.map(
-                            |CommandExitState { sequence, exit }| {
-                                crate::protocol::AgentCommandExit { sequence, exit }
-                            },
-                        );
-                        ServiceMessage::AgentCommandExitResult { request_id, result }
+                    crate::protocol::AgentQuery::ProcessCommandExit { process_id } => {
+                        let result = process_queries.command_exit(process_id).await;
+                        ServiceMessage::ProcessCommandExitResult { request_id, result }
                     }
-                    crate::protocol::AgentQuery::RunCompletion { process_id } => {
-                        let result = terminal_queries.run_completion(process_id).await.map(
-                            |RunCompletionState { token, exit }| {
-                                crate::protocol::AgentRunCompletion { token, exit }
-                            },
-                        );
-                        ServiceMessage::AgentRunCompletionResult { request_id, result }
+                    crate::protocol::AgentQuery::ProcessRunCompletion { process_id } => {
+                        let result = process_queries.run_completion(process_id).await;
+                        ServiceMessage::ProcessRunCompletionResult { request_id, result }
                     }
                     query => {
                         let broker = broker.clone();
@@ -837,37 +829,37 @@ async fn handle_client(
                 )
                 .await;
             }
-            ClientMessage::AgentTerminalReadResult { request_id, result } => {
+            ClientMessage::ProcessOutputResult { request_id, result } => {
                 route_agent_query_response(
                     request_id,
-                    ServiceMessage::AgentTerminalReadResult { request_id, result },
+                    ServiceMessage::ProcessOutputResult { request_id, result },
                     &pending_queries,
                     &broker,
                 )
                 .await;
             }
-            ClientMessage::AgentTerminalReadFullResult { request_id, result } => {
+            ClientMessage::ProcessTranscriptResult { request_id, result } => {
                 route_agent_query_response(
                     request_id,
-                    ServiceMessage::AgentTerminalReadFullResult { request_id, result },
+                    ServiceMessage::ProcessTranscriptResult { request_id, result },
                     &pending_queries,
                     &broker,
                 )
                 .await;
             }
-            ClientMessage::AgentCommandExitResult { request_id, result } => {
+            ClientMessage::ProcessCommandExitResult { request_id, result } => {
                 route_agent_query_response(
                     request_id,
-                    ServiceMessage::AgentCommandExitResult { request_id, result },
+                    ServiceMessage::ProcessCommandExitResult { request_id, result },
                     &pending_queries,
                     &broker,
                 )
                 .await;
             }
-            ClientMessage::AgentRunCompletionResult { request_id, result } => {
+            ClientMessage::ProcessRunCompletionResult { request_id, result } => {
                 route_agent_query_response(
                     request_id,
-                    ServiceMessage::AgentRunCompletionResult { request_id, result },
+                    ServiceMessage::ProcessRunCompletionResult { request_id, result },
                     &pending_queries,
                     &broker,
                 )
@@ -1031,18 +1023,12 @@ async fn handle_client(
             ClientMessage::Shared(
                 SharedMessage::ListSessions
                 | SharedMessage::AgentCommand(_)
-                | SharedMessage::Agent {
-                    request: AgentRequest::ListMedia { .. },
-                    ..
-                },
+                | SharedMessage::AgentListMedia { .. },
             ) => {
                 tracing::warn!("local socket: ignoring a remote-only request");
             }
 
-            ClientMessage::Shared(SharedMessage::Agent {
-                sid,
-                request: AgentRequest::Attach,
-            }) => {
+            ClientMessage::Shared(SharedMessage::AgentAttach { sid }) => {
                 let rx = agent_manager.lock().await.subscribe(&sid);
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = agent_manager.lock().await.snapshot(&sid).await {
@@ -1090,15 +1076,12 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::Shared(SharedMessage::Agent {
+            ClientMessage::Shared(SharedMessage::AgentInput {
                 sid,
-                request:
-                    AgentRequest::Input {
-                        text,
-                        context,
-                        attachments,
-                        preferred_mode,
-                    },
+                text,
+                context,
+                attachments,
+                preferred_mode,
             }) => {
                 route_agent_input(
                     &acp_manager,
@@ -1156,10 +1139,7 @@ async fn handle_client(
                 );
             }
 
-            ClientMessage::Shared(SharedMessage::Agent {
-                sid,
-                request: AgentRequest::Cancel,
-            }) => {
+            ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
                         .lock()
@@ -1173,9 +1153,10 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::Shared(SharedMessage::Agent {
+            ClientMessage::Shared(SharedMessage::AgentApprove {
                 sid,
-                request: AgentRequest::Approve { call_id, decision },
+                call_id,
+                decision,
             }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
@@ -1335,11 +1316,11 @@ mod tests {
 
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<ProcessId>) {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
-        let (_query_plugin, terminal_queries) = DaemonQueryPlugin::new(Arc::clone(&manager), wake);
+        let (_query_plugin, process_queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake);
         let mut server = Box::pin(super::run_server(
             listener,
             Arc::clone(&manager),
-            terminal_queries,
+            process_queries,
         ));
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

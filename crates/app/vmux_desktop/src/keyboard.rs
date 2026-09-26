@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use crossbeam_channel::{Receiver, Sender};
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use parking_lot::Mutex;
 
@@ -17,7 +18,7 @@ impl Plugin for KeyboardPlugin {
         app.add_message::<ExitFullscreenRequest>()
             .add_systems(
                 Startup,
-                (spawn_keyboard_state, install_monitor)
+                (spawn_keyboard_bridge, install_monitor)
                     .chain()
                     .after(crate::shortcut::ShortcutInit),
             )
@@ -43,11 +44,14 @@ impl Plugin for KeyboardPlugin {
 #[derive(Message, Clone, Copy)]
 pub(crate) struct ExitFullscreenRequest;
 
-#[derive(Component, Clone, Default)]
-struct KeyboardState(Arc<Mutex<NativeKeyboardState>>);
+#[derive(Component, Clone)]
+struct KeyboardBridge {
+    context: Arc<Mutex<NativeKeyboardContext>>,
+    output: NativeKeyboardOutput,
+}
 
 #[derive(Default)]
-struct NativeKeyboardState {
+struct NativeKeyboardContext {
     keymap: Option<Keymap>,
     pending_prefix: Option<(KeyCombo, Instant)>,
     capture_target: Option<vmux_shortcut::ShortcutCaptureToken>,
@@ -55,38 +59,83 @@ struct NativeKeyboardState {
     window_fullscreen: bool,
     page_owns_escape: bool,
     text_entry_owns_keys: bool,
-    pending: PendingKeyboardInput,
 }
 
-#[derive(Default)]
-struct PendingKeyboardInput {
-    commands: Vec<String>,
-    simulator_buttons: Vec<vmux_simulator::event::HardwareButton>,
-    simulator_clipboard: Vec<vmux_simulator::event::SimulatorClipboardOperation>,
-    simulator_keyboard: usize,
-    shortcut_captures: Vec<PendingShortcutCapture>,
-    shortcut_releases: Vec<vmux_shortcut::ShortcutCaptureToken>,
-    exit_fullscreen: bool,
-    quit: bool,
+#[derive(Clone)]
+struct NativeKeyboardOutput {
+    commands: Sender<String>,
+    simulator_buttons: Sender<vmux_simulator::event::HardwareButton>,
+    simulator_clipboard: Sender<vmux_simulator::event::SimulatorClipboardOperation>,
+    simulator_keyboard: Sender<()>,
+    shortcut_captures: Sender<ShortcutCaptureInput>,
+    shortcut_releases: Sender<vmux_shortcut::ShortcutCaptureToken>,
+    exit_fullscreen: Sender<()>,
+    quit: Sender<()>,
 }
 
-struct PendingShortcutCapture {
+#[derive(Component)]
+struct KeyboardInbox {
+    commands: Receiver<String>,
+    simulator_buttons: Receiver<vmux_simulator::event::HardwareButton>,
+    simulator_clipboard: Receiver<vmux_simulator::event::SimulatorClipboardOperation>,
+    simulator_keyboard: Receiver<()>,
+    shortcut_captures: Receiver<ShortcutCaptureInput>,
+    shortcut_releases: Receiver<vmux_shortcut::ShortcutCaptureToken>,
+    exit_fullscreen: Receiver<()>,
+    quit: Receiver<()>,
+}
+
+struct ShortcutCaptureInput {
     token: vmux_shortcut::ShortcutCaptureToken,
     stroke: vmux_shortcut::ShortcutStroke,
     pressed_at_ms: i64,
 }
 
-fn spawn_keyboard_state(mut commands: Commands) {
-    commands.spawn((Name::new("Keyboard"), KeyboardState::default()));
+fn spawn_keyboard_bridge(mut commands: Commands) {
+    let (bridge, inbox) = KeyboardBridge::channel();
+    commands.spawn((Name::new("Keyboard"), bridge, inbox));
 }
 
-impl KeyboardState {
-    fn drain(&self) -> PendingKeyboardInput {
-        std::mem::take(&mut self.0.lock().pending)
+impl KeyboardBridge {
+    fn channel() -> (Self, KeyboardInbox) {
+        let (commands, command_inbox) = crossbeam_channel::unbounded();
+        let (simulator_buttons, simulator_button_inbox) = crossbeam_channel::unbounded();
+        let (simulator_clipboard, simulator_clipboard_inbox) = crossbeam_channel::unbounded();
+        let (simulator_keyboard, simulator_keyboard_inbox) = crossbeam_channel::unbounded();
+        let (shortcut_captures, shortcut_capture_inbox) = crossbeam_channel::unbounded();
+        let (shortcut_releases, shortcut_release_inbox) = crossbeam_channel::unbounded();
+        let (exit_fullscreen, exit_fullscreen_inbox) = crossbeam_channel::unbounded();
+        let (quit, quit_inbox) = crossbeam_channel::unbounded();
+        (
+            Self {
+                context: Arc::new(Mutex::new(NativeKeyboardContext::default())),
+                output: NativeKeyboardOutput {
+                    commands,
+                    simulator_buttons,
+                    simulator_clipboard,
+                    simulator_keyboard,
+                    shortcut_captures,
+                    shortcut_releases,
+                    exit_fullscreen,
+                    quit,
+                },
+            },
+            KeyboardInbox {
+                commands: command_inbox,
+                simulator_buttons: simulator_button_inbox,
+                simulator_clipboard: simulator_clipboard_inbox,
+                simulator_keyboard: simulator_keyboard_inbox,
+                shortcut_captures: shortcut_capture_inbox,
+                shortcut_releases: shortcut_release_inbox,
+                exit_fullscreen: exit_fullscreen_inbox,
+                quit: quit_inbox,
+            },
+        )
     }
 
     fn install(&self, wake: impl Fn() + Send + Sync + 'static) {
-        let state = self.0.clone();
+        let context = self.context.clone();
+        let output = self.output.clone();
         let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             let ev = unsafe { event.as_ref() };
             wake();
@@ -95,33 +144,30 @@ impl KeyboardState {
             }
             let key_code = ev.keyCode();
             let flags = ev.modifierFlags();
-            let mut state = state.lock();
-            if let Some(token) = state.capture_target {
+            let mut context = context.lock();
+            if let Some(token) = context.capture_target {
                 if ev.isARepeat() {
                     return std::ptr::null_mut();
                 }
                 let stroke = capture_stroke(ev, key_code, flags);
                 if releases_shortcut_capture(&stroke) {
-                    state.capture_target = None;
-                    state.pending.shortcut_releases.push(token);
+                    context.capture_target = None;
+                    let _ = output.shortcut_releases.send(token);
                     return event.as_ptr();
                 }
-                state.pending_prefix = None;
-                state
-                    .pending
-                    .shortcut_captures
-                    .push(PendingShortcutCapture {
-                        token,
-                        stroke,
-                        pressed_at_ms: vmux_core::now_millis(),
-                    });
+                context.pending_prefix = None;
+                let _ = output.shortcut_captures.send(ShortcutCaptureInput {
+                    token,
+                    stroke,
+                    pressed_at_ms: vmux_core::now_millis(),
+                });
                 return std::ptr::null_mut();
             }
             let Some(combo) = translate(key_code, flags) else {
                 return event.as_ptr();
             };
-            let decision = state.classify(combo);
-            if state.consume(decision) {
+            let disposition = context.classify(combo);
+            if output.publish(disposition) {
                 std::ptr::null_mut()
             } else {
                 event.as_ptr()
@@ -223,6 +269,11 @@ fn simulator_text_shortcut(combo: &KeyCombo) -> bool {
 
 enum KeyDisposition {
     Consume(Option<String>),
+    SimulatorButton(vmux_simulator::event::HardwareButton),
+    SimulatorClipboard(vmux_simulator::event::SimulatorClipboardOperation),
+    SimulatorKeyboard,
+    ExitFullscreen,
+    Quit,
     PassThrough,
 }
 
@@ -262,34 +313,29 @@ fn decide(
     KeyDisposition::PassThrough
 }
 
-impl NativeKeyboardState {
+impl NativeKeyboardContext {
     fn classify(&mut self, combo: KeyCombo) -> KeyDisposition {
         if self.simulator_active && toggles_simulator_software_keyboard(&combo) {
-            self.pending.simulator_keyboard += 1;
-            return KeyDisposition::Consume(None);
+            return KeyDisposition::SimulatorKeyboard;
         }
         if self.simulator_active
             && let Some(operation) = simulator_clipboard(&combo)
         {
-            self.pending.simulator_clipboard.push(operation);
-            return KeyDisposition::Consume(None);
+            return KeyDisposition::SimulatorClipboard(operation);
         }
         if self.simulator_active
             && let Some(button) = simulator_button(&combo)
         {
-            self.pending.simulator_buttons.push(button);
-            return KeyDisposition::Consume(None);
+            return KeyDisposition::SimulatorButton(button);
         }
         if self.simulator_active && simulator_text_shortcut(&combo) {
             return KeyDisposition::PassThrough;
         }
         if escape_exits_fullscreen(&combo, self.window_fullscreen, self.page_owns_escape) {
-            self.pending.exit_fullscreen = true;
-            return KeyDisposition::Consume(None);
+            return KeyDisposition::ExitFullscreen;
         }
         if quits_the_app(&combo) {
-            self.pending.quit = true;
-            return KeyDisposition::Consume(None);
+            return KeyDisposition::Quit;
         }
         let Some(map) = self.keymap.as_ref() else {
             return KeyDisposition::PassThrough;
@@ -302,13 +348,35 @@ impl NativeKeyboardState {
             self.text_entry_owns_keys,
         )
     }
+}
 
-    fn consume(&mut self, disposition: KeyDisposition) -> bool {
+impl NativeKeyboardOutput {
+    fn publish(&self, disposition: KeyDisposition) -> bool {
         match disposition {
             KeyDisposition::Consume(command) => {
                 if let Some(command) = command {
-                    self.pending.commands.push(command);
+                    let _ = self.commands.send(command);
                 }
+                true
+            }
+            KeyDisposition::SimulatorButton(button) => {
+                let _ = self.simulator_buttons.send(button);
+                true
+            }
+            KeyDisposition::SimulatorClipboard(operation) => {
+                let _ = self.simulator_clipboard.send(operation);
+                true
+            }
+            KeyDisposition::SimulatorKeyboard => {
+                let _ = self.simulator_keyboard.send(());
+                true
+            }
+            KeyDisposition::ExitFullscreen => {
+                let _ = self.exit_fullscreen.send(());
+                true
+            }
+            KeyDisposition::Quit => {
+                let _ = self.quit.send(());
                 true
             }
             KeyDisposition::PassThrough => false,
@@ -495,14 +563,14 @@ fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
 }
 
 fn install_monitor(
-    keyboard: Single<&KeyboardState>,
+    keyboard: Single<&KeyboardBridge>,
     keymap: Res<Keymap>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let Some(proxy) = proxy else {
         return;
     };
-    keyboard.0.lock().keymap = Some(keymap.clone());
+    keyboard.context.lock().keymap = Some(keymap.clone());
     let proxy = (**proxy).clone();
     keyboard.install(move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
@@ -510,7 +578,7 @@ fn install_monitor(
 }
 
 fn sync_keyboard_context(
-    keyboard: Single<&KeyboardState>,
+    keyboard: Single<&KeyboardBridge>,
     keymap: Res<Keymap>,
     browser: Option<Res<vmux_browser::KeyboardContext>>,
     capture: Option<Res<vmux_shortcut::ShortcutCaptureTarget>>,
@@ -533,21 +601,21 @@ fn sync_keyboard_context(
             })
         });
     {
-        let mut state = keyboard.0.lock();
-        if keymap.is_changed() || state.keymap.is_none() {
-            state.keymap = Some(keymap.clone());
+        let mut context = keyboard.context.lock();
+        if keymap.is_changed() || context.keymap.is_none() {
+            context.keymap = Some(keymap.clone());
         }
-        state.capture_target = capture.as_deref().and_then(|capture| capture.token());
-        state.simulator_active = active.is_some();
-        state.window_fullscreen = focused_window
+        context.capture_target = capture.as_deref().and_then(|capture| capture.token());
+        context.simulator_active = active.is_some();
+        context.window_fullscreen = focused_window
             .as_deref()
             .and_then(|focused_window| focused_window.0)
             .and_then(|window| fullscreen.get(window).ok())
             .is_some_and(|fullscreen| fullscreen.0);
-        state.page_owns_escape = browser
+        context.page_owns_escape = browser
             .as_deref()
             .is_some_and(|context| context.page_owns_escape);
-        state.text_entry_owns_keys = browser
+        context.text_entry_owns_keys = browser
             .as_deref()
             .is_some_and(|context| context.text_entry_owns_keys);
     }
@@ -557,7 +625,7 @@ fn sync_keyboard_context(
 }
 
 fn dispatch_keyboard_input(
-    keyboard: Single<&KeyboardState>,
+    inbox: Single<&KeyboardInbox>,
     mut invocations: MessageWriter<vmux_command::CommandInvocation>,
     mut simulator_buttons: Option<MessageWriter<vmux_simulator::HardwareButtonRequest>>,
     mut simulator_clipboard: Option<MessageWriter<vmux_simulator::SimulatorClipboardRequest>>,
@@ -568,13 +636,12 @@ fn dispatch_keyboard_input(
     mut shortcut_capture: Option<ResMut<vmux_shortcut::ShortcutCaptureTarget>>,
     mut commands: Commands,
 ) {
-    let pending = keyboard.drain();
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
-    for command in pending.commands {
+    for command in inbox.commands.try_iter() {
         invocations.write(vmux_command::CommandInvocation::new(caller, command));
     }
     if let Some(target) = shortcut_capture.as_deref_mut() {
-        for token in pending.shortcut_releases {
+        for token in inbox.shortcut_releases.try_iter() {
             target.release(token);
         }
     }
@@ -582,7 +649,7 @@ fn dispatch_keyboard_input(
         .as_deref()
         .and_then(|target| target.token())
     {
-        for capture in pending.shortcut_captures {
+        for capture in inbox.shortcut_captures.try_iter() {
             if capture.token == token {
                 commands.trigger(vmux_shortcut::ShortcutProbePress::new(
                     token.target,
@@ -593,12 +660,12 @@ fn dispatch_keyboard_input(
         }
     }
     if let Some(simulator_buttons) = simulator_buttons.as_mut() {
-        for button in pending.simulator_buttons {
+        for button in inbox.simulator_buttons.try_iter() {
             simulator_buttons.write(vmux_simulator::HardwareButtonRequest { view: None, button });
         }
     }
     if let Some(simulator_clipboard) = simulator_clipboard.as_mut() {
-        for operation in pending.simulator_clipboard {
+        for operation in inbox.simulator_clipboard.try_iter() {
             simulator_clipboard.write(vmux_simulator::SimulatorClipboardRequest {
                 view: None,
                 operation,
@@ -606,15 +673,15 @@ fn dispatch_keyboard_input(
         }
     }
     if let Some(simulator_keyboard) = simulator_keyboard.as_mut() {
-        for _ in 0..pending.simulator_keyboard {
+        for () in inbox.simulator_keyboard.try_iter() {
             simulator_keyboard
                 .write(vmux_simulator::SimulatorSoftwareKeyboardRequest { view: None });
         }
     }
-    if pending.exit_fullscreen {
+    if inbox.exit_fullscreen.try_iter().next().is_some() {
         fullscreen.write(ExitFullscreenRequest);
     }
-    if pending.quit
+    if inbox.quit.try_iter().next().is_some()
         && let Some(hide_windows) = hide_windows.as_mut()
     {
         hide_windows.write(crate::runtime::HideAllWindowsRequest);
@@ -714,32 +781,29 @@ mod tests {
 
     #[test]
     fn fullscreen_escape_becomes_an_ecs_request_unless_the_page_owns_it() {
-        let mut state = NativeKeyboardState {
+        let mut context = NativeKeyboardContext {
             window_fullscreen: true,
             ..Default::default()
         };
 
-        let disposition = state.classify(combo(KeyCode::Escape, false));
+        let disposition = context.classify(combo(KeyCode::Escape, false));
 
-        assert!(state.consume(disposition));
-        assert!(state.pending.exit_fullscreen);
+        assert!(matches!(disposition, KeyDisposition::ExitFullscreen));
 
-        state.pending.exit_fullscreen = false;
-        state.page_owns_escape = true;
-        let disposition = state.classify(combo(KeyCode::Escape, false));
+        context.page_owns_escape = true;
+        let disposition = context.classify(combo(KeyCode::Escape, false));
 
         assert!(matches!(disposition, KeyDisposition::PassThrough));
-        assert!(!state.pending.exit_fullscreen);
     }
 
     #[test]
     fn consumed_shortcut_queues_command() {
-        let mut state = NativeKeyboardState::default();
-        let consumed = state.consume(KeyDisposition::Consume(Some(
+        let (bridge, inbox) = KeyboardBridge::channel();
+        let consumed = bridge.output.publish(KeyDisposition::Consume(Some(
             "select_pane_left".to_string(),
         )));
         assert!(consumed);
-        assert_eq!(state.pending.commands, ["select_pane_left"]);
+        assert_eq!(inbox.commands.try_recv().unwrap(), "select_pane_left");
     }
 
     #[test]

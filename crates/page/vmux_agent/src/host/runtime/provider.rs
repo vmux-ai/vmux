@@ -145,10 +145,11 @@ fn spawn_provider_session(
             auto_tools,
             tools_json,
         }));
-        service_requests.write(ServiceRequest(ClientMessage::Shared(SharedMessage::agent(
-            session.sid.clone(),
-            vmux_api::protocol::AgentRequest::Attach,
-        ))));
+        service_requests.write(ServiceRequest(ClientMessage::Shared(
+            SharedMessage::AgentAttach {
+                sid: session.sid.clone(),
+            },
+        )));
         ecs.entity(entity)
             .remove::<vmux_tool::ToolCatalogRequest>()
             .remove::<vmux_tool::ToolCatalog>();

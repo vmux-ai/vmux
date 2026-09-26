@@ -10316,6 +10316,8 @@ version = "0.0.34"
 dependencies = [
  "assert_cmd",
  "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
  "clap",
  "predicates",
  "serde_json",

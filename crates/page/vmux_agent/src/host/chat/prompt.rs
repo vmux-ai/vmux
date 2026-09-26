@@ -186,10 +186,9 @@ fn cancel_session(
     else {
         return;
     };
-    service_requests.write(ServiceRequest(ClientMessage::Shared(SharedMessage::agent(
-        sid,
-        vmux_api::protocol::AgentRequest::Cancel,
-    ))));
+    service_requests.write(ServiceRequest(ClientMessage::Shared(
+        SharedMessage::AgentCancel { sid },
+    )));
 }
 
 fn on_chat_escape(

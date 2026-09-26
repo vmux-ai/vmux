@@ -1,16 +1,17 @@
 use std::io;
 use std::path::PathBuf;
 
+use bevy_ecs::prelude::Component;
 use clap::{Args, Subcommand, ValueEnum};
 use vmux_tool::DotfileLinkState;
 
-#[derive(Debug, Args)]
+#[derive(Args, Clone, Component, Debug)]
 pub struct ToolArgs {
     #[command(subcommand)]
     command: ToolCommand,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 enum ToolCommand {
     Status,
     Apply,
@@ -36,29 +37,32 @@ enum ToolImportProvider {
     Dotfiles,
 }
 
-pub fn run(args: ToolArgs) -> io::Result<()> {
-    match args.command {
-        ToolCommand::Status => status(),
-        ToolCommand::Apply => {
-            let manifest = vmux_tool::ToolStore::current()
-                .load()
-                .map_err(io::Error::other)?;
-            let linked = vmux_tool::apply_enabled_dotfiles(&manifest).map_err(io::Error::other)?;
-            println!("linked {linked} file(s)");
-            Ok(())
-        }
-        ToolCommand::Import { provider, path } => import(provider, path),
-        ToolCommand::Adopt { path, package } => {
-            let destination =
-                vmux_tool::adopt_dotfile(&path, &package).map_err(io::Error::other)?;
-            println!("{}", destination.display());
-            Ok(())
-        }
-        ToolCommand::Unlink { package } => {
-            let removed = vmux_tool::disable_and_unlink_dotfile_package(&package)
-                .map_err(io::Error::other)?;
-            println!("unlinked {removed} file(s)");
-            Ok(())
+impl ToolArgs {
+    pub(crate) fn execute(&self) -> io::Result<()> {
+        match &self.command {
+            ToolCommand::Status => status(),
+            ToolCommand::Apply => {
+                let manifest = vmux_tool::ToolStore::current()
+                    .load()
+                    .map_err(io::Error::other)?;
+                let linked =
+                    vmux_tool::apply_enabled_dotfiles(&manifest).map_err(io::Error::other)?;
+                println!("linked {linked} file(s)");
+                Ok(())
+            }
+            ToolCommand::Import { provider, path } => import(*provider, path.clone()),
+            ToolCommand::Adopt { path, package } => {
+                let destination =
+                    vmux_tool::adopt_dotfile(path, package).map_err(io::Error::other)?;
+                println!("{}", destination.display());
+                Ok(())
+            }
+            ToolCommand::Unlink { package } => {
+                let removed = vmux_tool::disable_and_unlink_dotfile_package(package)
+                    .map_err(io::Error::other)?;
+                println!("unlinked {removed} file(s)");
+                Ok(())
+            }
         }
     }
 }

@@ -1,12 +1,13 @@
+use bevy_ecs::prelude::Component;
 use clap::{Args, Subcommand};
 
-#[derive(Debug, Args)]
+#[derive(Args, Clone, Component, Debug)]
 pub struct ServiceArgs {
     #[command(subcommand)]
     pub command: ServiceCommand,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 pub enum ServiceCommand {
     Status,
     Start,
@@ -22,27 +23,36 @@ pub enum ServiceCommand {
 
 impl ServiceArgs {
     #[cfg(target_os = "macos")]
-    fn run(self) -> std::io::Result<i32> {
+    pub(crate) fn execute(&self) -> std::io::Result<i32> {
         use vmux_service::{DaemonBinary, cli};
 
-        match self.command {
+        match &self.command {
             ServiceCommand::Status => cli::cmd_status(),
-            ServiceCommand::Start => cli::cmd_start(DaemonBinary::current()?.path()),
+            ServiceCommand::Start => match DaemonBinary::current() {
+                Ok(binary) => cli::cmd_start(binary.path()),
+                Err(error) => Err(error),
+            },
             ServiceCommand::Stop => cli::cmd_stop(),
-            ServiceCommand::Restart => cli::cmd_restart(DaemonBinary::current()?.path()),
-            ServiceCommand::Logs { follow } => cli::cmd_logs(follow),
-            ServiceCommand::Install => cli::cmd_install(DaemonBinary::current()?.path()),
+            ServiceCommand::Restart => match DaemonBinary::current() {
+                Ok(binary) => cli::cmd_restart(binary.path()),
+                Err(error) => Err(error),
+            },
+            ServiceCommand::Logs { follow } => cli::cmd_logs(*follow),
+            ServiceCommand::Install => match DaemonBinary::current() {
+                Ok(binary) => cli::cmd_install(binary.path()),
+                Err(error) => Err(error),
+            },
             ServiceCommand::Uninstall => cli::cmd_uninstall(),
         }
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn run(self) -> std::io::Result<i32> {
+    pub(crate) fn execute(&self) -> std::io::Result<i32> {
         use vmux_service::cli;
 
-        match self.command {
+        match &self.command {
             ServiceCommand::Status => cli::cmd_status(),
-            ServiceCommand::Logs { follow } => cli::cmd_logs(follow),
+            ServiceCommand::Logs { follow } => cli::cmd_logs(*follow),
             ServiceCommand::Start
             | ServiceCommand::Stop
             | ServiceCommand::Restart
@@ -53,8 +63,4 @@ impl ServiceArgs {
             }
         }
     }
-}
-
-pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
-    args.run()
 }

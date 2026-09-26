@@ -8,37 +8,30 @@ use vmux_macro::VariantNames;
 
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
 pub enum SharedMessage {
-    Agent { sid: String, request: AgentRequest },
-    ListSessions,
-    AgentCommand(SharedAgentCommand),
-}
-
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
-pub enum AgentRequest {
-    Attach,
-    Input {
+    AgentAttach {
+        sid: String,
+    },
+    AgentInput {
+        sid: String,
         text: String,
         context: Option<String>,
         attachments: Vec<AgentAttachment>,
         preferred_mode: Option<String>,
     },
-    Cancel,
-    Approve {
+    AgentCancel {
+        sid: String,
+    },
+    AgentApprove {
+        sid: String,
         call_id: String,
         decision: ApprovalDecision,
     },
-    ListMedia {
+    AgentListMedia {
+        sid: String,
         query: String,
     },
-}
-
-impl SharedMessage {
-    pub fn agent(sid: impl Into<String>, request: AgentRequest) -> Self {
-        Self::Agent {
-            sid: sid.into(),
-            request,
-        }
-    }
+    ListSessions,
+    AgentCommand(SharedAgentCommand),
 }
 
 impl From<SharedMessage> for ClientMessage {

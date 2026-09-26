@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_tasks = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true }
