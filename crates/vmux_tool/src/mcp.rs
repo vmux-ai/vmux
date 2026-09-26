@@ -1,52 +1,153 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::IoTaskPool;
 use serde::{Deserialize, Serialize};
-use vmux_core::tool::{ToolAdoptRequest, ToolForgetRequest, ToolImportRequest, ToolProvider};
+use vmux_core::tool::{
+    ToolAdoptRequest, ToolCategory, ToolForgetRequest, ToolImportRequest, ToolItem,
+    ToolOperationKind, ToolProvider, ToolStatus,
+};
 
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
     ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
-    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
-    ToolStoreTarget, finish_tool_operation,
+    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolProviderId,
+    ToolProviderSnapshot, ToolScanner, ToolStoreOperation, ToolStoreTarget, finish_tool_operation,
 };
 
 pub(crate) struct McpToolPlugin;
 
 impl Plugin for McpToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (route_import, route_adopt, route_forget).in_set(ToolOperationRouteSet),
-        )
-        .add_systems(
-            Update,
-            (
-                locate_mcp_configs,
-                discover_mcp_servers_system,
-                import_mcp_config_system,
-                import_default_mcp_configs_system,
-                import_mcp_server_system,
-                forget_mcp_server_system,
-                finish_tool_operation::<DiscoveredMcpServers>,
-                finish_tool_operation::<ImportedMcpConfig>,
-                finish_tool_operation::<ImportedMcpServer>,
-                finish_tool_operation::<ForgottenMcpServer>,
+        app.add_systems(Startup, spawn_provider)
+            .add_systems(
+                Update,
+                (route_import, route_adopt, route_forget).in_set(ToolOperationRouteSet),
             )
-                .after(ToolOperationRouteFlush),
-        )
-        .add_systems(
-            Update,
-            (
-                complete_config_import,
-                complete_server_import,
-                complete_server_forget,
-            ),
-        );
+            .add_systems(
+                Update,
+                (
+                    locate_mcp_configs,
+                    discover_mcp_servers_system,
+                    import_mcp_config_system,
+                    import_default_mcp_configs_system,
+                    import_mcp_server_system,
+                    forget_mcp_server_system,
+                    finish_tool_operation::<DiscoveredMcpServers>,
+                    finish_tool_operation::<ImportedMcpConfig>,
+                    finish_tool_operation::<ImportedMcpServer>,
+                    finish_tool_operation::<ForgottenMcpServer>,
+                )
+                    .after(ToolOperationRouteFlush),
+            )
+            .add_systems(
+                Update,
+                (
+                    complete_config_import,
+                    complete_server_import,
+                    complete_server_forget,
+                ),
+            );
     }
+}
+
+fn spawn_provider(mut commands: Commands) {
+    commands.spawn((
+        Name::new("MCP tool provider"),
+        ToolProviderId(ToolProvider::Mcp),
+        ToolScanner::new(scan),
+    ));
+}
+
+fn scan(
+    store: &ToolStore,
+    manifest: &mut ToolsManifest,
+    _refresh: bool,
+) -> Result<ToolProviderSnapshot, String> {
+    let (discovered, errors) = discover_mcp_servers_at(store.home());
+    let errors = errors
+        .into_iter()
+        .map(|error| format!("MCP Servers: {error}"))
+        .collect();
+    for (name, server) in &discovered {
+        if name != "vmux" && name != "linear" && !server.conflict {
+            manifest
+                .mcp
+                .servers
+                .entry(name.clone())
+                .or_insert_with(|| server.definition.clone());
+        }
+    }
+    let mut names = discovered.keys().cloned().collect::<BTreeSet<_>>();
+    names.extend(manifest.mcp.servers.keys().cloned());
+    let items = names
+        .into_iter()
+        .map(|name| {
+            let managed = manifest.mcp.servers.contains_key(&name);
+            let external = discovered.get(&name);
+            let status = if managed {
+                ToolStatus::Installed
+            } else if external.is_some_and(|server| server.conflict) {
+                ToolStatus::Conflict
+            } else {
+                ToolStatus::Available
+            };
+            let definition = manifest
+                .mcp
+                .servers
+                .get(&name)
+                .or_else(|| external.map(|server| &server.definition));
+            let transport = definition
+                .map(|server| format!("{:?}", server.transport).to_ascii_lowercase())
+                .unwrap_or_else(|| "unknown".to_string());
+            let sources = external
+                .map(|server| {
+                    server
+                        .sources
+                        .iter()
+                        .map(|path| path.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            let detail = if external.is_some_and(|server| server.conflict) && !managed {
+                format!("Conflicting definitions in {sources}")
+            } else if managed && sources.is_empty() {
+                format!("{transport} · Tools managed")
+            } else if managed {
+                format!("{transport} · Tools managed · imported from {sources}")
+            } else {
+                format!("{transport} · configured in {sources}")
+            };
+            let operations = if managed {
+                vec![ToolOperationKind::Forget]
+            } else if status == ToolStatus::Available {
+                vec![ToolOperationKind::Adopt]
+            } else {
+                Vec::new()
+            };
+            ToolItem {
+                provider: ToolProvider::Mcp,
+                id: name.clone(),
+                name,
+                icon: None,
+                version: None,
+                detail,
+                status,
+                managed,
+                operations,
+            }
+        })
+        .collect();
+    Ok(ToolProviderSnapshot {
+        category: ToolCategory {
+            provider: ToolProvider::Mcp,
+            items,
+        },
+        errors,
+    })
 }
 
 fn route_import(

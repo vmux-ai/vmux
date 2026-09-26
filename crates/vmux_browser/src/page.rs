@@ -90,6 +90,7 @@ struct ErrorPageAttachment {
 fn handle_page_open_requests(
     mut reader: MessageReader<PageOpenRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
+    parents: Query<&ChildOf>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -102,6 +103,7 @@ fn handle_page_open_requests(
         let stack = match resolve_page_open_target(
             &request.target,
             &focus,
+            &parents,
             &panes,
             &pane_children,
             &stack_ts,
@@ -137,6 +139,7 @@ fn handle_page_open_requests(
 fn resolve_page_open_target(
     target: &PageOpenTarget,
     focus: &vmux_layout::stack::FocusedStack,
+    parents: &Query<&ChildOf>,
     panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: &Query<&Children, With<Pane>>,
     stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -168,6 +171,18 @@ fn resolve_page_open_target(
                 Ok(stack)
             } else {
                 Err("page_open: target stack does not exist".to_string())
+            }
+        }
+        PageOpenTarget::ContainingStack(entity) => {
+            let mut current = entity;
+            loop {
+                if stack_filter.contains(current) {
+                    break Ok(current);
+                }
+                let Ok(parent) = parents.get(current) else {
+                    break Err("page_open: target has no containing stack".to_string());
+                };
+                current = parent.parent();
             }
         }
         PageOpenTarget::ActiveStackInPane(pane) => {

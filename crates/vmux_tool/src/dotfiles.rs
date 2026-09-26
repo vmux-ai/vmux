@@ -1,81 +1,169 @@
+use std::collections::BTreeSet;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::{Added, Commands, Component as EcsComponent, Entity, Query, With, Without};
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_tasks::IoTaskPool;
 use serde::{Deserialize, Serialize};
 use vmux_core::tool::{
-    ToolAdoptRequest, ToolImportRequest, ToolInstallRequest, ToolLinkRequest, ToolProvider,
-    ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
+    ToolAdoptRequest, ToolCategory, ToolImportRequest, ToolInstallRequest, ToolItem,
+    ToolLinkRequest, ToolOperationKind, ToolProvider, ToolStatus, ToolUninstallRequest,
+    ToolUnlinkRequest, ToolUpdateRequest,
 };
 
 use crate::manifest::{ToolStore, ToolsManifest};
 use crate::{
-    ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
-    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
-    ToolStoreTarget, finish_tool_operation,
+    ToolApplier, ToolOperationFailed, ToolOperationFinished, ToolOperationRequest,
+    ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask,
+    ToolProviderId, ToolProviderSnapshot, ToolScanner, ToolStoreOperation, ToolStoreTarget,
+    finish_tool_operation,
 };
 
 pub(crate) struct DotfileToolPlugin;
 
 impl Plugin for DotfileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                route_import,
-                route_adopt,
-                route_install,
-                route_update,
-                route_link,
-                route_uninstall,
-                route_unlink,
+        app.add_systems(Startup, spawn_provider)
+            .add_systems(
+                Update,
+                (
+                    route_import,
+                    route_adopt,
+                    route_install,
+                    route_update,
+                    route_link,
+                    route_uninstall,
+                    route_unlink,
+                )
+                    .in_set(ToolOperationRouteSet),
             )
-                .in_set(ToolOperationRouteSet),
-        )
-        .add_systems(
-            Update,
-            (
-                discover_dotfile_packages_system,
-                plan_dotfile_package_system,
-                import_dotfiles_system,
-                import_available_dotfiles_system,
-                link_dotfile_package_system,
-                disable_dotfile_package_system,
-                unlink_dotfile_package_system,
-                apply_enabled_dotfiles_system,
-                adopt_dotfile_system,
+            .add_systems(
+                Update,
+                (
+                    discover_dotfile_packages_system,
+                    plan_dotfile_package_system,
+                    import_dotfiles_system,
+                    import_available_dotfiles_system,
+                    link_dotfile_package_system,
+                    disable_dotfile_package_system,
+                    unlink_dotfile_package_system,
+                    apply_enabled_dotfiles_system,
+                    adopt_dotfile_system,
+                )
+                    .after(ToolOperationRouteFlush),
             )
-                .after(ToolOperationRouteFlush),
-        )
-        .add_systems(
-            Update,
-            (
-                finish_tool_operation::<DiscoveredDotfilePackages>,
-                finish_tool_operation::<DotfilePlan>,
-                finish_tool_operation::<ImportedDotfiles>,
-                finish_tool_operation::<ImportedAvailableDotfiles>,
-                finish_tool_operation::<LinkedDotfilePackage>,
-                finish_tool_operation::<DisabledDotfilePackage>,
-                finish_tool_operation::<UnlinkedDotfilePackage>,
-                finish_tool_operation::<AppliedEnabledDotfiles>,
-                finish_tool_operation::<AdoptedDotfile>,
+            .add_systems(
+                Update,
+                (
+                    finish_tool_operation::<DiscoveredDotfilePackages>,
+                    finish_tool_operation::<DotfilePlan>,
+                    finish_tool_operation::<ImportedDotfiles>,
+                    finish_tool_operation::<ImportedAvailableDotfiles>,
+                    finish_tool_operation::<LinkedDotfilePackage>,
+                    finish_tool_operation::<DisabledDotfilePackage>,
+                    finish_tool_operation::<UnlinkedDotfilePackage>,
+                    finish_tool_operation::<AppliedEnabledDotfiles>,
+                    finish_tool_operation::<AdoptedDotfile>,
+                )
+                    .after(ToolOperationRouteFlush),
             )
-                .after(ToolOperationRouteFlush),
-        )
-        .add_systems(
-            Update,
-            (
-                complete_import,
-                complete_available_import,
-                complete_link,
-                complete_disable,
-                complete_adoption,
-            ),
-        );
+            .add_systems(
+                Update,
+                (
+                    complete_import,
+                    complete_available_import,
+                    complete_link,
+                    complete_disable,
+                    complete_adoption,
+                ),
+            );
     }
+}
+
+fn spawn_provider(mut commands: Commands) {
+    commands.spawn((
+        bevy_ecs::name::Name::new("Dotfile tool provider"),
+        ToolProviderId(ToolProvider::Dotfiles),
+        ToolScanner::new(scan),
+        ToolApplier::new(apply),
+    ));
+}
+
+fn apply(store: &ToolStore) -> Result<usize, String> {
+    let manifest = store.load()?;
+    apply_enabled_dotfiles_in(&manifest, &store.dotfiles_dir(), store.home())
+}
+
+fn scan(
+    store: &ToolStore,
+    manifest: &mut ToolsManifest,
+    _refresh: bool,
+) -> Result<ToolProviderSnapshot, String> {
+    let discovered = dotfile_packages_in(&store.dotfiles_dir());
+    for package in &discovered {
+        manifest.set_dotfile_package(package, true);
+    }
+    let mut package_names = discovered.into_iter().collect::<BTreeSet<_>>();
+    package_names.extend(manifest.dotfiles.packages.iter().cloned());
+    let mut items = Vec::new();
+    for package in package_names {
+        let managed = manifest.dotfiles.packages.contains(&package);
+        let (status, detail, operations) =
+            match plan_dotfile_package_in(&store.dotfiles_dir(), store.home(), &package) {
+                Ok(plan) => {
+                    let detail = format!(
+                        "{} linked · {} missing · {} conflicts",
+                        plan.linked(),
+                        plan.missing(),
+                        plan.conflicts()
+                    );
+                    let status = if plan.conflicts() > 0 {
+                        ToolStatus::Conflict
+                    } else if plan.missing() > 0 {
+                        if managed {
+                            ToolStatus::Missing
+                        } else {
+                            ToolStatus::Available
+                        }
+                    } else {
+                        ToolStatus::Installed
+                    };
+                    let operations = if managed {
+                        vec![ToolOperationKind::Link, ToolOperationKind::Unlink]
+                    } else {
+                        vec![ToolOperationKind::Link]
+                    };
+                    (status, detail, operations)
+                }
+                Err(error) => (
+                    ToolStatus::Missing,
+                    error,
+                    if managed {
+                        vec![ToolOperationKind::Unlink]
+                    } else {
+                        Vec::new()
+                    },
+                ),
+            };
+        items.push(ToolItem {
+            provider: ToolProvider::Dotfiles,
+            id: package.clone(),
+            name: package,
+            icon: None,
+            version: None,
+            detail,
+            status,
+            managed,
+            operations,
+        });
+    }
+    Ok(ToolCategory {
+        provider: ToolProvider::Dotfiles,
+        items,
+    }
+    .into())
 }
 
 fn route_import(

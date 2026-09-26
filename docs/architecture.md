@@ -765,11 +765,16 @@ staying flat.
 `vmux_agent` owns session, runtime, and orchestration ECS. `vmux_chat` owns reusable chat state
 and Dioxus UI. Shared transcript grouping and projection live in `vmux_core`; neither feature
 reaches through the other's internals or through `vmux_service` for reusable chat behavior.
+The service carries serialized agent protocol messages and runs persistent daemon sessions;
+`vmux_agent` owns the client-host Bevy messages produced when those wire messages enter ECS.
 
 `vmux_profile` owns profile identity and filesystem locations. Tool inventory is a separate
 capability in `vmux_tool`; consumers depend on it directly instead of reaching through a
-`vmux_core` re-export. `vmux_path` gives filesystem boundaries one shared identity rule and
-rejects scoped paths that traverse or resolve outside their root.
+`vmux_core` re-export. `vmux_tool` also owns the tool page, manifest, inventory lifecycle,
+operation sequencing, and built-in Homebrew, NPM, MCP, and dotfile providers. Feature crates
+register their own provider entities, such as ACP in `vmux_agent` and LSP in `vmux_editor`;
+application crates only compose plugins. `vmux_path` gives filesystem boundaries one shared
+identity rule and rejects scoped paths that traverse or resolve outside their root.
 
 Repository tool versions live in `tool-versions.env`; CI loads the same values used by local
 scripts and the Makefile. Release asset names and URLs come from

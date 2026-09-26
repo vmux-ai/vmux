@@ -1,23 +1,28 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use bevy_tasks::IoTaskPool;
-use vmux_core::tool::{ToolImportRequest, ToolProvider};
+use vmux_core::tool::{
+    ToolImportRequest, ToolOperationKey, ToolOperationKind, ToolProvider, ToolStatus,
+};
 
 use crate::manifest::{ToolStore, ToolsManifest, normalize_names};
+use crate::process::ToolProcess;
 use crate::{
-    ToolOperationFailed, ToolOperationFinished, ToolOperationRequest, ToolOperationRouteFlush,
-    ToolOperationRouteSet, ToolOperationSucceeded, ToolOperationTask, ToolStoreOperation,
-    ToolStoreTarget, finish_tool_operation,
+    ToolInventory, ToolInventoryItem, ToolOperationFailed, ToolOperationFinished,
+    ToolOperationRequest, ToolOperationRouteFlush, ToolOperationRouteSet, ToolOperationSucceeded,
+    ToolOperationTask, ToolOperator, ToolProviderId, ToolProviderSnapshot, ToolScanner,
+    ToolStoreOperation, ToolStoreTarget, finish_tool_operation,
 };
 
 pub(crate) struct HomebrewToolPlugin;
 
 impl Plugin for HomebrewToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, route.in_set(ToolOperationRouteSet))
+        app.add_systems(Startup, spawn_providers)
+            .add_systems(Update, route.in_set(ToolOperationRouteSet))
             .add_systems(
                 Update,
                 (
@@ -28,6 +33,200 @@ impl Plugin for HomebrewToolPlugin {
             )
             .add_systems(Update, complete);
     }
+}
+
+fn spawn_providers(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Homebrew formula tool provider"),
+        ToolProviderId(ToolProvider::HomebrewFormula),
+        ToolScanner::new(scan_formulae),
+        ToolOperator::new(operate_formula),
+    ));
+    commands.spawn((
+        Name::new("Homebrew cask tool provider"),
+        ToolProviderId(ToolProvider::HomebrewCask),
+        ToolScanner::new(scan_casks),
+        ToolOperator::new(operate_cask),
+    ));
+}
+
+fn scan_formulae(
+    _store: &ToolStore,
+    manifest: &mut ToolsManifest,
+    refresh: bool,
+) -> Result<ToolProviderSnapshot, String> {
+    Ok(ToolInventory::new(
+        ToolProvider::HomebrewFormula,
+        scan_homebrew(false, refresh)?,
+    )
+    .reconcile(manifest)
+    .into())
+}
+
+fn scan_casks(
+    _store: &ToolStore,
+    manifest: &mut ToolsManifest,
+    refresh: bool,
+) -> Result<ToolProviderSnapshot, String> {
+    Ok(
+        ToolInventory::new(ToolProvider::HomebrewCask, scan_homebrew(true, refresh)?)
+            .reconcile(manifest)
+            .into(),
+    )
+}
+
+fn scan_homebrew(cask: bool, refresh: bool) -> Result<Vec<ToolInventoryItem>, String> {
+    let Some(brew) = ToolProcess::find("brew") else {
+        return Ok(Vec::new());
+    };
+    let mut args = vec!["list"];
+    args.push(if cask { "--cask" } else { "--formula" });
+    args.push("--versions");
+    let output = brew.output(&args, true)?;
+    let outdated = if refresh {
+        let mut outdated_args = vec!["outdated"];
+        outdated_args.push(if cask { "--cask" } else { "--formula" });
+        brew.output(&outdated_args, false)
+            .map(|output| parse_name_lines(&output.stdout))
+            .unwrap_or_default()
+    } else {
+        BTreeSet::new()
+    };
+    Ok(parse_brew_versions(&output.stdout)
+        .into_iter()
+        .map(|(name, version)| {
+            let status = if outdated.contains(&name) {
+                ToolStatus::Outdated
+            } else {
+                ToolStatus::Installed
+            };
+            let removable = !cask || name != "vmux";
+            ToolInventoryItem {
+                id: name.clone(),
+                name,
+                icon: None,
+                version,
+                detail: if cask {
+                    "Homebrew cask".to_string()
+                } else {
+                    "Homebrew formula".to_string()
+                },
+                status,
+                removable,
+            }
+        })
+        .collect())
+}
+
+fn parse_brew_versions(bytes: &[u8]) -> Vec<(String, Option<String>)> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let name = fields.next()?.to_string();
+            let version = fields.collect::<Vec<_>>().join(" ");
+            Some((name, (!version.is_empty()).then_some(version)))
+        })
+        .collect()
+}
+
+fn parse_name_lines(bytes: &[u8]) -> BTreeSet<String> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .filter_map(|line| line.split_whitespace().next().map(str::to_string))
+        .collect()
+}
+
+fn operate_formula(
+    store: &ToolStore,
+    operation: &ToolOperationKey,
+    value: &str,
+) -> Result<String, String> {
+    operate_homebrew(store, operation, value, false)
+}
+
+fn operate_cask(
+    store: &ToolStore,
+    operation: &ToolOperationKey,
+    value: &str,
+) -> Result<String, String> {
+    operate_homebrew(store, operation, value, true)
+}
+
+fn operate_homebrew(
+    store: &ToolStore,
+    operation: &ToolOperationKey,
+    value: &str,
+    cask: bool,
+) -> Result<String, String> {
+    let id = operation.item_id.trim();
+    match operation.kind {
+        ToolOperationKind::Install => {
+            package_command("install", cask, id)?;
+            store.set_managed_package(operation.provider, id, true)?;
+            Ok(format!("{id} installed"))
+        }
+        ToolOperationKind::Update => {
+            package_command("upgrade", cask, id)?;
+            store.set_managed_package(operation.provider, id, true)?;
+            Ok(format!("{id} updated"))
+        }
+        ToolOperationKind::Uninstall => {
+            package_command("uninstall", cask, id)?;
+            store.set_managed_package(operation.provider, id, false)?;
+            Ok(format!("{id} removed"))
+        }
+        ToolOperationKind::Forget => {
+            store.set_managed_package(operation.provider, id, false)?;
+            Ok(format!("{id} removed from tools.toml"))
+        }
+        ToolOperationKind::Adopt => {
+            store.set_managed_package(operation.provider, id, true)?;
+            Ok(format!("{id} is now managed"))
+        }
+        ToolOperationKind::Import if value.trim().is_empty() => import_installed(store),
+        _ => Err(format!(
+            "{} does not support {:?}",
+            operation.provider.title(),
+            operation.kind
+        )),
+    }
+}
+
+fn package_command(operation: &str, cask: bool, id: &str) -> Result<(), String> {
+    if id.is_empty() {
+        return Err("package name is required".to_string());
+    }
+    let brew = ToolProcess::find("brew").ok_or_else(|| "brew is not installed".to_string())?;
+    let args = if cask {
+        vec![operation, "--cask", id]
+    } else {
+        vec![operation, id]
+    };
+    brew.output(&args, true)?;
+    Ok(())
+}
+
+fn import_installed(store: &ToolStore) -> Result<String, String> {
+    let mut manifest = store.load()?;
+    let before_formulae = manifest
+        .managed_packages(ToolProvider::HomebrewFormula.id())
+        .len();
+    let before_casks = manifest
+        .managed_packages(ToolProvider::HomebrewCask.id())
+        .len();
+    let _ = scan_formulae(store, &mut manifest, false)?;
+    let _ = scan_casks(store, &mut manifest, false)?;
+    let formulae = manifest
+        .managed_packages(ToolProvider::HomebrewFormula.id())
+        .len()
+        .saturating_sub(before_formulae);
+    let casks = manifest
+        .managed_packages(ToolProvider::HomebrewCask.id())
+        .len()
+        .saturating_sub(before_casks);
+    store.save(&manifest)?;
+    Ok(format!("imported {formulae} formulae and {casks} casks"))
 }
 
 fn route(
@@ -281,4 +480,20 @@ fn parse_quoted_call(line: &str, call: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_inventory_versions() {
+        assert_eq!(
+            parse_brew_versions(b"ripgrep 14.1.1\nopenssl@3 3.5.0 3.5.1\n"),
+            vec![
+                ("ripgrep".to_string(), Some("14.1.1".to_string())),
+                ("openssl@3".to_string(), Some("3.5.0 3.5.1".to_string())),
+            ]
+        );
+    }
 }

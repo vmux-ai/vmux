@@ -11066,7 +11066,6 @@ dependencies = [
  "vmux_native",
  "vmux_path",
  "vmux_profile",
- "vmux_service",
  "vmux_ui",
 ]
 

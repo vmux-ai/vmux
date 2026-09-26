@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use bevy_ecs::prelude::Component;
 use serde::{Deserialize, Serialize};
+use vmux_core::tool::ToolProvider;
 
 use crate::dotfiles::DotfilesManifest;
 use crate::homebrew::{sync_manifest_from_brewfile, write_managed_brewfile};
@@ -195,6 +196,17 @@ impl ToolStore {
         self.migrate_legacy_storage()?;
         manifest.write_to(&self.manifest_path())?;
         write_managed_brewfile(self, manifest)
+    }
+
+    pub fn set_managed_package(
+        &self,
+        provider: ToolProvider,
+        name: &str,
+        managed: bool,
+    ) -> Result<(), String> {
+        let mut manifest = self.load()?;
+        manifest.set_package(provider.id(), name, managed);
+        self.save(&manifest)
     }
 
     pub(crate) fn migrate_legacy_storage(&self) -> Result<(), String> {
