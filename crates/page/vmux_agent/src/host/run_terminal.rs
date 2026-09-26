@@ -12,29 +12,28 @@ use crate::session::AgentSession;
 
 use super::valid_cwd;
 
-#[derive(Resource, Default)]
-pub struct AgentTerminalRegions {
-    pub run_terminals: std::collections::HashMap<ProcessId, ProcessId>,
-    pub run_panes: std::collections::HashMap<ProcessId, Entity>,
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AgentTerminalRegion {
+    pub(crate) run_terminal: Option<ProcessId>,
+    pub(crate) run_pane: Option<Entity>,
 }
 
-impl AgentTerminalRegions {
+impl AgentTerminalRegion {
     pub(crate) fn choose_reusable_terminal(
         &self,
-        anchor: ProcessId,
         agent_pane: Entity,
         candidates: &[RunTerminalCandidate],
     ) -> Option<RunTerminalCandidate> {
-        if let Some(pid) = self.run_terminals.get(&anchor)
-            && let Some(candidate) = candidates.iter().find(|c| c.pid == *pid)
+        if let Some(pid) = self.run_terminal
+            && let Some(candidate) = candidates.iter().find(|candidate| candidate.pid == pid)
         {
             return Some(*candidate);
         }
-        if let Some(pane) = self.run_panes.get(&anchor)
+        if let Some(pane) = self.run_pane
             && let Some(candidate) = candidates
                 .iter()
-                .filter(|c| c.pane == *pane)
-                .max_by_key(|c| c.pane_spawn_seq)
+                .filter(|candidate| candidate.pane == pane)
+                .max_by_key(|candidate| candidate.pane_spawn_seq)
         {
             return Some(*candidate);
         }
@@ -47,18 +46,12 @@ impl AgentTerminalRegions {
 
     pub(crate) fn choose_bucket_pane(
         &self,
-        anchor: ProcessId,
         agent_pane: Entity,
         candidates: &[RunTerminalCandidate],
     ) -> Option<Entity> {
-        self.choose_reusable_terminal(anchor, agent_pane, candidates)
+        self.choose_reusable_terminal(agent_pane, candidates)
             .map(|c| c.pane)
-            .or_else(|| {
-                self.run_panes
-                    .get(&anchor)
-                    .copied()
-                    .filter(|pane| *pane != agent_pane)
-            })
+            .or_else(|| self.run_pane.filter(|pane| *pane != agent_pane))
     }
 }
 
@@ -1409,11 +1402,10 @@ mod tests {
 
     #[test]
     pub(crate) fn run_reuses_existing_terminal_when_region_cache_is_empty() {
-        let anchor = ProcessId::new();
         let terminal = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let terminal_pane = Entity::from_bits(20);
-        let regions = AgentTerminalRegions::default();
+        let region = AgentTerminalRegion::default();
         let candidates = [RunTerminalCandidate {
             terminal: Entity::from_bits(19),
             pid: terminal,
@@ -1422,8 +1414,8 @@ mod tests {
             pane_spawn_seq: 7,
         }];
 
-        let picked = regions
-            .choose_reusable_terminal(anchor, agent_pane, &candidates)
+        let picked = region
+            .choose_reusable_terminal(agent_pane, &candidates)
             .unwrap();
 
         assert_eq!(picked.pid, terminal);
@@ -1454,15 +1446,15 @@ mod tests {
 
     #[test]
     pub(crate) fn run_reuses_cached_terminal_before_newer_terminal_candidates() {
-        let anchor = ProcessId::new();
         let cached = ProcessId::new();
         let newer = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let cached_pane = Entity::from_bits(20);
         let newer_pane = Entity::from_bits(30);
-        let mut regions = AgentTerminalRegions::default();
-        regions.run_terminals.insert(anchor, cached);
-        regions.run_panes.insert(anchor, cached_pane);
+        let region = AgentTerminalRegion {
+            run_terminal: Some(cached),
+            run_pane: Some(cached_pane),
+        };
         let candidates = [
             RunTerminalCandidate {
                 terminal: Entity::from_bits(19),
@@ -1480,8 +1472,8 @@ mod tests {
             },
         ];
 
-        let picked = regions
-            .choose_reusable_terminal(anchor, agent_pane, &candidates)
+        let picked = region
+            .choose_reusable_terminal(agent_pane, &candidates)
             .unwrap();
 
         assert_eq!(picked.pid, cached);
@@ -1549,12 +1541,13 @@ mod tests {
 
     #[test]
     pub(crate) fn split_run_stacks_into_cached_terminal_bucket_pane() {
-        let anchor = ProcessId::new();
         let terminal = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let terminal_pane = Entity::from_bits(20);
-        let mut regions = AgentTerminalRegions::default();
-        regions.run_panes.insert(anchor, terminal_pane);
+        let region = AgentTerminalRegion {
+            run_pane: Some(terminal_pane),
+            ..default()
+        };
         let candidates = [RunTerminalCandidate {
             terminal: Entity::from_bits(19),
             pid: terminal,
@@ -1564,22 +1557,23 @@ mod tests {
         }];
 
         assert_eq!(
-            regions.choose_bucket_pane(anchor, agent_pane, &candidates),
+            region.choose_bucket_pane(agent_pane, &candidates),
             Some(terminal_pane)
         );
     }
 
     #[test]
     pub(crate) fn split_run_keeps_cached_terminal_bucket_after_process_exits() {
-        let anchor = ProcessId::new();
         let agent_pane = Entity::from_bits(10);
         let terminal_pane = Entity::from_bits(20);
-        let mut regions = AgentTerminalRegions::default();
-        regions.run_panes.insert(anchor, terminal_pane);
+        let region = AgentTerminalRegion {
+            run_pane: Some(terminal_pane),
+            ..default()
+        };
         let candidates = [];
 
         assert_eq!(
-            regions.choose_bucket_pane(anchor, agent_pane, &candidates),
+            region.choose_bucket_pane(agent_pane, &candidates),
             Some(terminal_pane)
         );
     }
