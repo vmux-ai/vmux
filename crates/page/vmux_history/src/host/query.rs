@@ -1,5 +1,4 @@
 use crate::ranking::score;
-use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 
 use crate::event::{
@@ -184,7 +183,7 @@ pub struct HistoryOpenIntent {
 
 fn on_history_open_request(
     trigger: On<UiInput<HistoryOpenRequest>>,
-    mut messages: ResMut<Messages<HistoryOpenIntent>>,
+    mut messages: MessageWriter<HistoryOpenIntent>,
 ) {
     let req = &trigger.event().payload;
     messages.write(HistoryOpenIntent {
