@@ -10,3 +10,7 @@ pub use host::*;
 
 mod projection;
 pub mod roster;
+#[cfg(host)]
+mod tool;
+#[cfg(host)]
+pub use tool::TeamToolPlugin;

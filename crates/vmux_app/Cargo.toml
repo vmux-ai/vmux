@@ -29,7 +29,7 @@ desktop = [
 ]
 mobile = ["dep:vmux_chat", "dep:vmux_start", "dep:vmux_team"]
 mcp = ["dep:bevy_ecs", "dep:serde", "dep:vmux_mcp", "dep:vmux_tool"]
-tools = ["agent", "browser", "mcp", "simulator"]
+tools = ["agent", "browser", "mcp", "simulator", "team"]
 core = [
     "dep:vmux_command",
     "dep:vmux_core",

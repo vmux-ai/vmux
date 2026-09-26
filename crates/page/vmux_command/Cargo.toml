@@ -31,6 +31,7 @@ ignore = "0.4"
 muda = "0.19"
 vmux_flex = { path = "../../vmux_flex" }
 vmux_macro = { path = "../../vmux_macro" }
+vmux_mcp = { path = "../../host/vmux_mcp" }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]

@@ -33,6 +33,7 @@ impl Plugin for TeamPlugin {
             HostedPagePlugin::<Team>::default(),
             TeamProjectionPlugin,
             TeamIntentPlugin,
+            crate::TeamToolPlugin,
         ))
         .add_systems(Startup, (spawn_user_profile, spawn_profile_labels));
     }
