@@ -1,11 +1,11 @@
 [
     (
-        kind: read_layout,
+        name: "read_layout",
         description: r#"Returns the full vmux layout (tabs, recursive pane tree, focused). Call this FIRST before update_layout - you need the current tree (with ids) to construct a valid update. Useful for: answering questions about what's open; finding the focused tab/pane/stack; reading a stack's url/kind so you can duplicate it elsewhere. Terminal stacks appear as stacks with kind="terminal"; browser stacks use kind="browser"."#,
         input_schema: (type: Object),
     ),
     (
-        kind: update_layout,
+        name: "update_layout",
         description: r#"Submit the desired layout tree; vmux diffs against current state and reconciles by id (React-style). Use this for compound or structural changes that the per-action tools can't express.
 
 Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back here.
@@ -123,7 +123,7 @@ Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to 
         ),
     ),
     (
-        kind: select_tab,
+        name: "select_tab",
         description: "Select a tab by index from 1 through 8.",
         input_schema: (
             type: Object,

@@ -24,12 +24,12 @@ impl ServiceConnection {
 
     pub async fn send(&self, message: &ClientMessage) -> std::io::Result<()> {
         let mut writer = self.writer.lock().await;
-        crate::write_message!(&mut *writer, message)
+        crate::framing::write_client_message(&mut *writer, message).await
     }
 
     pub async fn recv(&self) -> std::io::Result<Option<ServiceMessage>> {
         let mut reader = self.reader.lock().await;
-        crate::read_message!(&mut *reader, ServiceMessage)
+        crate::framing::read_service_message(&mut *reader).await
     }
 }
 
@@ -148,9 +148,9 @@ impl ServiceHandle {
                 let stream = std::os::unix::net::UnixStream::connect(&sock)?;
                 stream.set_write_timeout(Some(std::time::Duration::from_millis(500)))?;
                 let mut stream = stream;
-                crate::write_message_blocking!(
+                crate::framing::write_client_message_blocking(
                     &mut stream,
-                    &vmux_api::protocol::ClientMessage::Shutdown
+                    &vmux_api::protocol::ClientMessage::Shutdown,
                 )
             });
             tracing::info!(?outcome, "replaced running daemon");

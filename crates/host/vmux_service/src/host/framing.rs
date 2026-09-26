@@ -1,4 +1,5 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use vmux_api::protocol::{ClientMessage, ServiceMessage};
 use vmux_transport::framing::LengthPrefixed;
 
 const CODEC: LengthPrefixed = LengthPrefixed::new(64 * 1024 * 1024);
@@ -30,46 +31,67 @@ pub fn read_raw_frame_blocking<R: std::io::Read>(
     CODEC.read_blocking(reader)
 }
 
-#[macro_export]
-macro_rules! write_message_blocking {
-    ($writer:expr, $msg:expr) => {{
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>($msg)
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-        $crate::framing::write_raw_frame_blocking($writer, &bytes)
-    }};
+pub async fn write_client_message<W>(writer: &mut W, message: &ClientMessage) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(message)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    write_raw_frame(writer, &bytes).await
 }
 
-#[macro_export]
-macro_rules! write_message {
-    ($writer:expr, $msg:expr) => {{
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>($msg)
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-        $crate::framing::write_raw_frame($writer, &bytes).await
-    }};
+pub async fn write_service_message<W>(
+    writer: &mut W,
+    message: &ServiceMessage,
+) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(message)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    write_raw_frame(writer, &bytes).await
 }
 
-#[macro_export]
-macro_rules! read_message {
-    ($reader:expr, $ty:ty) => {{
-        match $crate::framing::read_raw_frame($reader).await {
-            Ok(Some(bytes)) => rkyv::from_bytes::<$ty, rkyv::rancor::Error>(&bytes)
-                .map(Some)
-                .map_err(|e| std::io::Error::other(e.to_string())),
-            Ok(None) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }};
+pub async fn read_client_message<R>(reader: &mut R) -> std::io::Result<Option<ClientMessage>>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let Some(bytes) = read_raw_frame(reader).await? else {
+        return Ok(None);
+    };
+    rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes)
+        .map(Some)
+        .map_err(|error| std::io::Error::other(error.to_string()))
 }
 
-#[macro_export]
-macro_rules! read_message_blocking {
-    ($reader:expr, $ty:ty) => {{
-        match $crate::framing::read_raw_frame_blocking($reader) {
-            Ok(Some(bytes)) => rkyv::from_bytes::<$ty, rkyv::rancor::Error>(&bytes)
-                .map(Some)
-                .map_err(|e| std::io::Error::other(e.to_string())),
-            Ok(None) => Ok::<Option<$ty>, std::io::Error>(None),
-            Err(error) => Err(error),
-        }
-    }};
+pub async fn read_service_message<R>(reader: &mut R) -> std::io::Result<Option<ServiceMessage>>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let Some(bytes) = read_raw_frame(reader).await? else {
+        return Ok(None);
+    };
+    rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes)
+        .map(Some)
+        .map_err(|error| std::io::Error::other(error.to_string()))
+}
+
+pub fn write_client_message_blocking<W: std::io::Write>(
+    writer: &mut W,
+    message: &ClientMessage,
+) -> std::io::Result<()> {
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(message)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    write_raw_frame_blocking(writer, &bytes)
+}
+
+pub fn read_service_message_blocking<R: std::io::Read>(
+    reader: &mut R,
+) -> std::io::Result<Option<ServiceMessage>> {
+    let Some(bytes) = read_raw_frame_blocking(reader)? else {
+        return Ok(None);
+    };
+    rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes)
+        .map(Some)
+        .map_err(|error| std::io::Error::other(error.to_string()))
 }

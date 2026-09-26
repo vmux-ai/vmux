@@ -1,29 +1,17 @@
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use vmux_api::protocol::{AgentCommand, AgentTerminalSend};
-use vmux_core::JsonArguments;
 
-use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin,
-    ToolRequestSet,
-};
+use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
 
 pub struct TerminalToolPlugin;
 
 impl Plugin for TerminalToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolKindManifestPlugin::<TerminalTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(Update, dispatch.in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
+            .register_tool::<TerminalSendArgs>("terminal_send")
+            .add_systems(Update, dispatch.in_set(ToolDispatchSet));
     }
-}
-
-#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum TerminalTool {
-    TerminalSend,
 }
 
 #[derive(Component, Deserialize)]
@@ -32,27 +20,6 @@ struct TerminalSendArgs {
     text: String,
     terminal: Option<String>,
     enter: Option<bool>,
-}
-
-fn parse(
-    mut commands: Commands,
-    calls: Query<(Entity, &Name, &JsonArguments, &TerminalTool), AddedTool<TerminalTool>>,
-) {
-    for (request, name, arguments, tool) in &calls {
-        if *tool != TerminalTool::TerminalSend {
-            continue;
-        }
-        match arguments.parse::<TerminalSendArgs>(name.as_str()) {
-            Ok(args) => {
-                commands.entity(request).insert(args);
-            }
-            Err(message) => {
-                commands
-                    .entity(request)
-                    .insert(ToolDispatchError::new(message));
-            }
-        }
-    }
 }
 
 fn dispatch(

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -9,12 +9,11 @@ use vmux_api::protocol::{
     AgentRequestUserChoice, AgentResumeInAcp, AgentRun, AgentRunCompletion, ClientMessage,
     PlacementMode, ProcessId, ServiceMessage,
 };
-use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
+use vmux_core::{HostShell, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_service::client::ServiceConnection;
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
-    ToolRequestSet,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
 };
 
 const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -24,39 +23,35 @@ pub struct WorkspaceToolPlugin;
 
 impl Plugin for WorkspaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolKindManifestPlugin::<WorkspaceTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(
-            Update,
-            (
-                open_page,
-                open_file,
-                resume_in_acp,
-                run,
-                request_user_choice,
-                select_project,
-                create_worktree,
-                read_terminal,
-            )
-                .in_set(ToolDispatchSet),
-        );
+        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
+            .register_tool::<OpenPageArgs>("open_page")
+            .register_tool::<OpenFileArgs>("open_file")
+            .register_tool::<ResumeInAcpArgs>("resume_in_acp")
+            .register_tool::<RunArgs>("run")
+            .register_tool::<RequestUserChoiceArgs>("request_user_choice")
+            .register_tool::<SelectProjectArgs>("select_project")
+            .register_tool::<CreateWorktreeArgs>("create_worktree")
+            .register_tool::<ReadTerminalArgs>("read_terminal")
+            .add_systems(
+                Update,
+                (
+                    open_page,
+                    open_file,
+                    resume_in_acp,
+                    run,
+                    request_user_choice,
+                    select_project,
+                    create_worktree,
+                    read_terminal,
+                )
+                    .in_set(ToolDispatchSet),
+            );
     }
 }
 
-#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum WorkspaceTool {
-    OpenPage,
-    OpenFile,
-    ResumeInAcp,
-    Run,
-    RequestUserChoice,
-    SelectProject,
-    CreateWorktree,
-    ReadTerminal,
-}
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResumeInAcpArgs {}
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -158,62 +153,12 @@ struct ReadTerminalArgs {
 
 fn resume_in_acp(
     mut commands: Commands,
-    calls: Query<(Entity, &Name, Option<&ProcessAnchor>, &WorkspaceTool), AddedTool<WorkspaceTool>>,
+    calls: Query<(Entity, &Name, Option<&ProcessAnchor>), AddedTool<ResumeInAcpArgs>>,
 ) {
-    for (request, name, anchor, tool) in &calls {
-        if *tool != WorkspaceTool::ResumeInAcp {
-            continue;
-        }
+    for (request, name, anchor) in &calls {
         let result = ProcessAnchor::required(anchor, name.as_str())
             .map(|anchor| AgentCommand::ResumeInAcp(AgentResumeInAcp { anchor }));
         commands.entity(request).insert(ToolCommand(result));
-    }
-}
-
-fn parse(
-    mut commands: Commands,
-    calls: Query<(Entity, &Name, &JsonArguments, &WorkspaceTool), AddedTool<WorkspaceTool>>,
-) {
-    for (request, name, arguments, tool) in &calls {
-        let parsed = match tool {
-            WorkspaceTool::ResumeInAcp => continue,
-            WorkspaceTool::OpenPage => arguments.parse::<OpenPageArgs>(name.as_str()).map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            WorkspaceTool::OpenFile => arguments.parse::<OpenFileArgs>(name.as_str()).map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            WorkspaceTool::Run => arguments.parse::<RunArgs>(name.as_str()).map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            WorkspaceTool::RequestUserChoice => arguments
-                .parse::<RequestUserChoiceArgs>(name.as_str())
-                .map(|args| {
-                    commands.entity(request).insert(args);
-                }),
-            WorkspaceTool::SelectProject => arguments
-                .parse::<SelectProjectArgs>(name.as_str())
-                .map(|args| {
-                    commands.entity(request).insert(args);
-                }),
-            WorkspaceTool::CreateWorktree => arguments
-                .parse::<CreateWorktreeArgs>(name.as_str())
-                .map(|args| {
-                    commands.entity(request).insert(args);
-                }),
-            WorkspaceTool::ReadTerminal => {
-                arguments
-                    .parse::<ReadTerminalArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    })
-            }
-        };
-        if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchError::new(message));
-        }
     }
 }
 

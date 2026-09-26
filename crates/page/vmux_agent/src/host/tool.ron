@@ -1,6 +1,6 @@
 [
     (
-        kind: open_page,
+        name: "open_page",
         description: r#"Open a page using vmux auto placement. Omit `direction` so vmux reuses the existing matching bucket first (terminal pages with terminals, browser pages with browsers) and otherwise spirals off the latest non-agent pane. url uses the same rules as browser_navigate (vmux://terminal/ opens a terminal; anything else loads as a browser). direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false."#,
         input_schema: (
             type: Object,
@@ -13,7 +13,7 @@
         ),
     ),
     (
-        kind: open_file,
+        name: "open_file",
         description: r#"Open a local file (or directory) in the vmux editor using vmux auto placement. Omit `direction` so vmux focuses an already-open matching file first, then reuses the file pane bucket, and otherwise spirals off the latest non-agent pane. path is an absolute filesystem path, e.g. /Users/me/project/src/main.rs. Files render with syntax highlighting; directories show a listing. direction is an override for a forced adjacent open: right|left|top|bottom. focus defaults false. The path must be inside the selected project; call select_project first to request access elsewhere."#,
         input_schema: (
             type: Object,
@@ -26,13 +26,13 @@
         ),
     ),
     (
-        kind: resume_in_acp,
+        name: "resume_in_acp",
         description: r#"Continue the current CLI conversation in its ACP chat runtime. Replaces this CLI page in place while preserving the session id and working directory. Call only when the user asks to switch or continue in ACP."#,
         input_schema: (type: Object),
         availability: outside_acp_session,
     ),
     (
-        kind: run,
+        name: "run",
         description: r#"Run a shell command in a visible terminal pane the user can watch live and take over. Blocks until the command finishes and returns its full output plus the exit code (`terminal: <id>`, `exit: <code>`, `output: ...`). If it reaches the configured wait limit, returns the output so far with a note to call read_terminal for the rest.
 
 PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses ONE persistent terminal beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` into your project on every run; the shell stays where it was. The first `run` opens it; later ones run in that same shell. Rule of thumb: don't open a new pane unless you actually need one. Placement overrides are disabled by default: omit `mode`, `direction`, and `beside`. If vmux rejects them, retry the bare run. Users can enable overrides with `agent.allow_run_placement_override`. When enabled, override only when you mean to:
@@ -61,7 +61,7 @@ PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses
         shell_aware: true,
     ),
     (
-        kind: request_user_choice,
+        name: "request_user_choice",
         description: r#"Show a native multiple-choice question in the agent conversation. For a new project without a selected project, use it to offer the concrete suggested ~/.vmux/projects path or Choose existing project. Also use it for other user-requested options and ambiguous worktree selection. Keep options concise and actionable. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."#,
         input_schema: (
             type: Object,
@@ -78,7 +78,7 @@ PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses
         ),
     ),
     (
-        kind: select_project,
+        name: "select_project",
         aliases: ["select_workspace", "choose_workspace"],
         description: r#"Select a project before accessing its files or running project commands. Pass a known path or omit it to open the native project picker rooted at ~/.vmux/projects. Paths inside ~/.vmux/projects are selected immediately. Paths outside it require explicit user approval in the native picker. For a new project, first use request_user_choice to offer a concrete suggested location and Choose existing project; do not ask the user to invent a folder. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/projects/local/<project> otherwise. When creation is selected, use run only to create the empty directory, then call this tool with that path. vmux offers Git initialization and uses the new project root directly without a linked worktree. For a previously existing Git project, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory. Do not call for general questions or self-contained terminal demonstrations."#,
         input_schema: (
@@ -87,7 +87,7 @@ PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses
         ),
     ),
     (
-        kind: create_worktree,
+        name: "create_worktree",
         description: r#"Call immediately before the first edit, write, test, build, or other project mutation, after a Git project is selected. Never call for requests that only read, show, search, or explain existing files. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."#,
         input_schema: (
             type: Object,
@@ -100,7 +100,7 @@ PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses
         ),
     ),
     (
-        kind: read_terminal,
+        name: "read_terminal",
         description: r#"Return the current visible scrollback text of a terminal (the same text the user sees). Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."#,
         input_schema: (
             type: Object,

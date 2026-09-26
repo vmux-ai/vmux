@@ -1,5 +1,4 @@
 use crate::process::{Process, ProcessManager};
-use crate::{read_message, write_message};
 use bevy::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -451,13 +450,14 @@ async fn handle_client(
     let mut created_processes: Vec<ProcessId> = Vec::new();
 
     loop {
-        let msg: Option<ClientMessage> = match read_message!(&mut reader, ClientMessage) {
-            Ok(msg) => msg,
-            Err(error) => {
-                tracing::warn!(%error, "client stream ended mid-frame");
-                break;
-            }
-        };
+        let msg: Option<ClientMessage> =
+            match crate::framing::read_client_message(&mut reader).await {
+                Ok(msg) => msg,
+                Err(error) => {
+                    tracing::warn!(%error, "client stream ended mid-frame");
+                    break;
+                }
+            };
         let Some(msg) = msg else {
             break;
         };
@@ -485,13 +485,13 @@ async fn handle_client(
                         };
                         let w = writer.clone();
                         let mut w = w.lock().await;
-                        write_message!(&mut *w, &resp)?;
+                        crate::framing::write_service_message(&mut *w, &resp).await?;
                     }
                     Err(reason) => {
                         let resp = ServiceMessage::ProcessCreateFailed { process_id, reason };
                         let w = writer.clone();
                         let mut w = w.lock().await;
-                        write_message!(&mut *w, &resp)?;
+                        crate::framing::write_service_message(&mut *w, &resp).await?;
                     }
                 }
             }
@@ -534,7 +534,7 @@ async fn handle_client(
                         message: format!("process not found: {process_id}"),
                     };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -597,7 +597,7 @@ async fn handle_client(
                 let processes = mgr.processes.values().map(|p| p.info()).collect::<Vec<_>>();
                 let resp = ServiceMessage::ProcessList { processes };
                 let mut w = writer.lock().await;
-                write_message!(&mut *w, &resp)?;
+                crate::framing::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::KillProcess { process_id } => {
@@ -613,13 +613,13 @@ async fn handle_client(
                 if let Some(process) = mgr.processes.get(&process_id) {
                     let snap = process.snapshot();
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &snap)?;
+                    crate::framing::write_service_message(&mut *w, &snap).await?;
                 } else {
                     let resp = ServiceMessage::Error {
                         message: format!("process not found: {process_id}"),
                     };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -662,7 +662,7 @@ async fn handle_client(
                         .unwrap_or_default();
                 let resp = ServiceMessage::SelectionText { process_id, text };
                 let mut w = writer.lock().await;
-                write_message!(&mut *w, &resp)?;
+                crate::framing::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::EnterCopyMode { process_id } => {
@@ -680,7 +680,7 @@ async fn handle_client(
                 {
                     let resp = ServiceMessage::SelectionText { process_id, text };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -726,7 +726,7 @@ async fn handle_client(
                         message: message.to_string(),
                     };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                     continue;
                 }
 
@@ -756,7 +756,7 @@ async fn handle_client(
                     processes: Vec::new(),
                 };
                 let mut w = writer.lock().await;
-                write_message!(&mut *w, &resp)?;
+                crate::framing::write_service_message(&mut *w, &resp).await?;
                 shutdown_tx.send(()).await.ok();
                 break;
             }
@@ -775,7 +775,7 @@ async fn handle_client(
                     process_count,
                 };
                 let mut w = writer.lock().await;
-                write_message!(&mut *w, &resp)?;
+                crate::framing::write_service_message(&mut *w, &resp).await?;
             }
 
             ClientMessage::AgentQuery { request_id, query } => {
@@ -819,7 +819,7 @@ async fn handle_client(
                     }
                 };
                 let mut writer = writer.lock().await;
-                write_message!(&mut *writer, &response)?;
+                crate::framing::write_service_message(&mut *writer, &response).await?;
             }
 
             ClientMessage::AgentLayoutResult { request_id, result } => {
@@ -1018,7 +1018,7 @@ async fn handle_client(
                 if let Err(message) = result {
                     let resp = ServiceMessage::Error { message };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -1035,7 +1035,7 @@ async fn handle_client(
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = agent_manager.lock().await.snapshot(&sid).await {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &snapshot)?;
+                        crate::framing::write_service_message(&mut *w, &snapshot).await?;
                     }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();
@@ -1105,7 +1105,7 @@ async fn handle_client(
                 {
                     let resp = ServiceMessage::Error { message };
                     let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
+                    crate::framing::write_service_message(&mut *w, &resp).await?;
                 }
             }
 
@@ -1239,19 +1239,19 @@ async fn handle_client(
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = acp_manager.lock().await.snapshot(&sid) {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &snapshot)?;
+                        crate::framing::write_service_message(&mut *w, &snapshot).await?;
                     }
                     if let Some(agent_info) = acp_manager.lock().await.agent_info(&sid) {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &agent_info)?;
+                        crate::framing::write_service_message(&mut *w, &agent_info).await?;
                     }
                     if let Some(model_info) = acp_manager.lock().await.model_info(&sid) {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &model_info)?;
+                        crate::framing::write_service_message(&mut *w, &model_info).await?;
                     }
                     if let Some(mode_info) = acp_manager.lock().await.mode_info(&sid) {
                         let mut w = writer.lock().await;
-                        write_message!(&mut *w, &mode_info)?;
+                        crate::framing::write_service_message(&mut *w, &mode_info).await?;
                     }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();

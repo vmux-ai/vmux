@@ -1,11 +1,11 @@
 [
     (
-        kind: simulator_screenshot,
+        name: "simulator_screenshot",
         description: "Capture the attached iOS Simulator screen and return it inline. Use the returned pixel dimensions and image coordinates with simulator_tap and simulator_swipe.",
         input_schema: (type: Object),
     ),
     (
-        kind: simulator_tap,
+        name: "simulator_tap",
         description: "Tap the attached iOS Simulator at x,y pixel coordinates from simulator_screenshot.",
         input_schema: (
             type: Object,
@@ -17,7 +17,7 @@
         ),
     ),
     (
-        kind: simulator_swipe,
+        name: "simulator_swipe",
         description: "Swipe the attached iOS Simulator between pixel coordinates from simulator_screenshot. duration_ms defaults to 300.",
         input_schema: (
             type: Object,
@@ -32,7 +32,7 @@
         ),
     ),
     (
-        kind: simulator_type,
+        name: "simulator_type",
         description: "Type text into the focused control in the attached iOS Simulator.",
         input_schema: (
             type: Object,
@@ -41,7 +41,7 @@
         ),
     ),
     (
-        kind: simulator_key,
+        name: "simulator_key",
         description: "Press one HID keycode in the attached iOS Simulator. Common codes: Enter 40, Backspace 42, Tab 43, Space 44.",
         input_schema: (
             type: Object,
@@ -52,7 +52,7 @@
         ),
     ),
     (
-        kind: simulator_button,
+        name: "simulator_button",
         description: "Press a hardware button on the attached iOS Simulator.",
         input_schema: (
             type: Object,

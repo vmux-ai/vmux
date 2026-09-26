@@ -1,45 +1,32 @@
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use vmux_api::protocol::{
     AgentQuery, SimulatorButton, SimulatorButtonPress, SimulatorKeyPress, SimulatorSwipe,
     SimulatorTap, SimulatorTypeText,
 };
-use vmux_core::JsonArguments;
-use vmux_tool::{
-    AddedTool, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
-    ToolRequestSet,
-};
+use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery};
 
 pub struct SimulatorToolPlugin;
 
 impl Plugin for SimulatorToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolKindManifestPlugin::<SimulatorTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(
-            Update,
-            (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
-        );
+        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
+            .register_tool::<SimulatorScreenshotArgs>("simulator_screenshot")
+            .register_tool::<TapArgs>("simulator_tap")
+            .register_tool::<SwipeArgs>("simulator_swipe")
+            .register_tool::<TypeArgs>("simulator_type")
+            .register_tool::<KeyArgs>("simulator_key")
+            .register_tool::<ButtonArgs>("simulator_button")
+            .add_systems(
+                Update,
+                (screenshot, tap, swipe, type_text, key, button).in_set(ToolDispatchSet),
+            );
     }
 }
 
-#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
-enum SimulatorTool {
-    #[serde(rename = "simulator_screenshot")]
-    Screenshot,
-    #[serde(rename = "simulator_tap")]
-    Tap,
-    #[serde(rename = "simulator_swipe")]
-    Swipe,
-    #[serde(rename = "simulator_type")]
-    Type,
-    #[serde(rename = "simulator_key")]
-    Key,
-    #[serde(rename = "simulator_button")]
-    Button,
-}
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SimulatorScreenshotArgs {}
 
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,47 +81,11 @@ struct ButtonArgs {
     button: ButtonArg,
 }
 
-fn parse(
-    mut commands: Commands,
-    calls: Query<(Entity, &Name, &JsonArguments, &SimulatorTool), AddedTool<SimulatorTool>>,
-) {
-    for (entity, name, arguments, tool) in &calls {
-        let parsed = match tool {
-            SimulatorTool::Screenshot => continue,
-            SimulatorTool::Tap => arguments.parse::<TapArgs>(name.as_str()).map(|args| {
-                commands.entity(entity).insert(args);
-            }),
-            SimulatorTool::Swipe => arguments.parse::<SwipeArgs>(name.as_str()).map(|args| {
-                commands.entity(entity).insert(args);
-            }),
-            SimulatorTool::Type => arguments.parse::<TypeArgs>(name.as_str()).map(|args| {
-                commands.entity(entity).insert(args);
-            }),
-            SimulatorTool::Key => arguments.parse::<KeyArgs>(name.as_str()).map(|args| {
-                commands.entity(entity).insert(args);
-            }),
-            SimulatorTool::Button => arguments.parse::<ButtonArgs>(name.as_str()).map(|args| {
-                commands.entity(entity).insert(args);
-            }),
-        };
-        if let Err(message) = parsed {
-            commands
-                .entity(entity)
-                .insert(ToolDispatchError::new(message));
-        }
-    }
-}
-
-fn screenshot(
-    mut commands: Commands,
-    calls: Query<(Entity, &SimulatorTool), AddedTool<SimulatorTool>>,
-) {
-    for (entity, tool) in &calls {
-        if *tool == SimulatorTool::Screenshot {
-            commands
-                .entity(entity)
-                .insert(ToolQuery(Ok(AgentQuery::SimulatorScreenshot)));
-        }
+fn screenshot(mut commands: Commands, calls: Query<Entity, AddedTool<SimulatorScreenshotArgs>>) {
+    for entity in &calls {
+        commands
+            .entity(entity)
+            .insert(ToolQuery(Ok(AgentQuery::SimulatorScreenshot)));
     }
 }
 
@@ -207,9 +158,12 @@ fn button(mut commands: Commands, requests: Query<(Entity, &ButtonArgs), AddedTo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_core::JsonArguments;
     use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
 
-    impl SimulatorTool {
+    struct SimulatorToolFixture;
+
+    impl SimulatorToolFixture {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(SimulatorToolPlugin);
@@ -257,7 +211,7 @@ mod tests {
     #[test]
     fn manifest_registers_simulator_tools() {
         assert_eq!(
-            SimulatorTool::definitions(),
+            SimulatorToolFixture::definitions(),
             [
                 "simulator_screenshot",
                 "simulator_tap",
@@ -272,15 +226,18 @@ mod tests {
     #[test]
     fn simulator_controls_dispatch_typed_queries() {
         assert_eq!(
-            SimulatorTool::dispatch("simulator_screenshot", serde_json::json!({})),
+            SimulatorToolFixture::dispatch("simulator_screenshot", serde_json::json!({})),
             Ok(AgentQuery::SimulatorScreenshot)
         );
         assert_eq!(
-            SimulatorTool::dispatch("simulator_tap", serde_json::json!({"x": 120, "y": 240}),),
+            SimulatorToolFixture::dispatch(
+                "simulator_tap",
+                serde_json::json!({"x": 120, "y": 240}),
+            ),
             Ok(AgentQuery::SimulatorTap(SimulatorTap { x: 120, y: 240 }))
         );
         assert_eq!(
-            SimulatorTool::dispatch(
+            SimulatorToolFixture::dispatch(
                 "simulator_swipe",
                 serde_json::json!({
                     "start_x": 100,
@@ -298,19 +255,22 @@ mod tests {
             }))
         );
         assert_eq!(
-            SimulatorTool::dispatch("simulator_type", serde_json::json!({"text": "hello"})),
+            SimulatorToolFixture::dispatch("simulator_type", serde_json::json!({"text": "hello"})),
             Ok(AgentQuery::SimulatorTypeText(SimulatorTypeText {
                 text: "hello".to_string(),
             }))
         );
         assert_eq!(
-            SimulatorTool::dispatch("simulator_key", serde_json::json!({"keycode": 40})),
+            SimulatorToolFixture::dispatch("simulator_key", serde_json::json!({"keycode": 40})),
             Ok(AgentQuery::SimulatorKeyPress(SimulatorKeyPress {
                 keycode: 40,
             }))
         );
         assert_eq!(
-            SimulatorTool::dispatch("simulator_button", serde_json::json!({"button": "home"}),),
+            SimulatorToolFixture::dispatch(
+                "simulator_button",
+                serde_json::json!({"button": "home"}),
+            ),
             Ok(AgentQuery::SimulatorButtonPress(SimulatorButtonPress {
                 button: SimulatorButton::Home,
             }))
@@ -320,10 +280,11 @@ mod tests {
     #[test]
     fn simulator_controls_reject_invalid_values() {
         assert!(
-            SimulatorTool::dispatch("simulator_type", serde_json::json!({"text": ""})).is_err()
+            SimulatorToolFixture::dispatch("simulator_type", serde_json::json!({"text": ""}))
+                .is_err()
         );
         assert!(
-            SimulatorTool::dispatch(
+            SimulatorToolFixture::dispatch(
                 "simulator_swipe",
                 serde_json::json!({
                     "start_x": 0,

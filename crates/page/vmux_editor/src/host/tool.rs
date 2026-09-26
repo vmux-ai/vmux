@@ -6,30 +6,20 @@ use vmux_api::protocol::{
     AgentCommand, AgentFileSearch, AgentFileTouched, AgentQuery, AgentRequestId, ClientMessage,
     FileTouchKind, ProcessId, ServiceMessage,
 };
-use vmux_core::{JsonArguments, ProcessAnchor};
+use vmux_core::ProcessAnchor;
 use vmux_mcp::protocol::McpExecution;
 use vmux_service::client::ServiceConnection;
-use vmux_tool::{
-    AddedTool, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolRequestSet,
-};
+use vmux_tool::{ToolAppExt, ToolDispatchError, ToolDispatchSet, ToolManifestPlugin};
 
 pub struct FileToolPlugin;
 
 impl Plugin for FileToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolKindManifestPlugin::<FileTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
+            .register_tool::<ReadFileArgs>("read_file")
+            .register_tool::<GrepArgs>("grep")
+            .add_systems(Update, (read_file, grep).in_set(ToolDispatchSet));
     }
-}
-
-#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum FileTool {
-    ReadFile,
-    Grep,
 }
 
 #[derive(Component, Deserialize, Serialize)]
@@ -45,27 +35,6 @@ struct ReadFileArgs {
 struct GrepArgs {
     query: String,
     path: Option<String>,
-}
-
-fn parse(
-    mut commands: Commands,
-    calls: Query<(Entity, &Name, &JsonArguments, &FileTool), AddedTool<FileTool>>,
-) {
-    for (request, name, arguments, tool) in &calls {
-        let parsed = match tool {
-            FileTool::ReadFile => arguments.parse::<ReadFileArgs>(name.as_str()).map(|args| {
-                commands.entity(request).insert(args);
-            }),
-            FileTool::Grep => arguments.parse::<GrepArgs>(name.as_str()).map(|args| {
-                commands.entity(request).insert(args);
-            }),
-        };
-        if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchError::new(message));
-        }
-    }
 }
 
 fn read_file(

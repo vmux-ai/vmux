@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -853,13 +854,13 @@ fn choose_vault_cloud_folder(
     })
 }
 
-fn queue_vault_operation<R: Clone + Send + Sync + 'static>(
-    target: Entity,
-    request: R,
-    kind: VaultOperationKind,
-    mut registries: Query<&mut VaultOperationSequence, With<VaultRegistry>>,
-    pending: Query<Entity, With<PendingVaultOperation>>,
+#[derive(SystemParam)]
+struct VaultOperationQueue<'w, 's> {
+    sequences: Query<'w, 's, &'static mut VaultOperationSequence, With<VaultRegistry>>,
+    pending: Query<'w, 's, Entity, With<PendingVaultOperation>>,
     pending_github: Query<
+        'w,
+        's,
         Entity,
         (
             With<PendingVaultOperation>,
@@ -867,148 +868,183 @@ fn queue_vault_operation<R: Clone + Send + Sync + 'static>(
         ),
     >,
     active_github: Query<
-        (Entity, Option<&VaultOperationTask>),
+        'w,
+        's,
+        (Entity, Option<&'static VaultOperationTask>),
         (
             With<VaultOperationRequest<VaultConnectGithubRequest>>,
             Without<PendingVaultOperation>,
         ),
     >,
-    mut subscribers: Query<&mut VaultSubscriber>,
-    mut commands: Commands,
-) {
-    let Ok(mut sequence) = registries.single_mut() else {
-        return;
-    };
-    let operation_id = sequence.next();
-    if let Ok(mut subscriber) = subscribers.get_mut(target) {
-        subscriber.begin_operation(operation_id, kind);
-    } else {
-        commands
-            .entity(target)
-            .insert(VaultSubscriber::pending(operation_id, kind));
-    }
-    let mut connecting = false;
-    for (entity, task) in &active_github {
-        connecting = true;
-        if let Some(task) = task {
-            task.canceled.store(true, Ordering::Relaxed);
+    subscribers: Query<'w, 's, &'static mut VaultSubscriber>,
+    commands: Commands<'w, 's>,
+}
+
+impl VaultOperationQueue<'_, '_> {
+    fn push<R: Send + Sync + 'static>(
+        &mut self,
+        target: Entity,
+        request: R,
+        kind: VaultOperationKind,
+    ) {
+        let Ok(mut sequence) = self.sequences.single_mut() else {
+            return;
+        };
+        let operation_id = sequence.next();
+        if let Ok(mut subscriber) = self.subscribers.get_mut(target) {
+            subscriber.begin_operation(operation_id, kind);
         } else {
-            commands.entity(entity).despawn();
+            self.commands
+                .entity(target)
+                .insert(VaultSubscriber::pending(operation_id, kind));
         }
+        let mut connecting = false;
+        for (entity, task) in &self.active_github {
+            connecting = true;
+            if let Some(task) = task {
+                task.canceled.store(true, Ordering::Relaxed);
+            } else {
+                self.commands.entity(entity).despawn();
+            }
+        }
+        if connecting {
+            for entity in &self.pending {
+                self.commands.entity(entity).despawn();
+            }
+        } else if kind == VaultOperationKind::ConnectGithub {
+            for entity in &self.pending_github {
+                self.commands.entity(entity).despawn();
+            }
+        }
+        self.commands.spawn((
+            PendingVaultOperation,
+            VaultOperationContext {
+                operation_id,
+                target: VaultOperationTarget::Webview(target),
+                kind,
+            },
+            VaultOperationRequest::new(request),
+        ));
     }
-    if connecting {
-        for entity in &pending {
-            commands.entity(entity).despawn();
-        }
-    } else if kind == VaultOperationKind::ConnectGithub {
-        for entity in &pending_github {
-            commands.entity(entity).despawn();
-        }
-    }
-    commands.spawn((
-        PendingVaultOperation,
-        VaultOperationContext {
-            operation_id,
-            target: VaultOperationTarget::Webview(target),
-            kind,
-        },
-        VaultOperationRequest::new(request),
-    ));
 }
 
-macro_rules! vault_operation_observer {
-    ($name:ident, $request:ty, $kind:expr) => {
-        fn $name(
-            trigger: On<UiInput<$request>>,
-            registries: Query<&mut VaultOperationSequence, With<VaultRegistry>>,
-            pending: Query<Entity, With<PendingVaultOperation>>,
-            pending_github: Query<
-                Entity,
-                (
-                    With<PendingVaultOperation>,
-                    With<VaultOperationRequest<VaultConnectGithubRequest>>,
-                ),
-            >,
-            active_github: Query<
-                (Entity, Option<&VaultOperationTask>),
-                (
-                    With<VaultOperationRequest<VaultConnectGithubRequest>>,
-                    Without<PendingVaultOperation>,
-                ),
-            >,
-            subscribers: Query<&mut VaultSubscriber>,
-            commands: Commands,
-        ) {
-            queue_vault_operation(
-                trigger.event().webview,
-                trigger.event().payload.clone(),
-                $kind,
-                registries,
-                pending,
-                pending_github,
-                active_github,
-                subscribers,
-                commands,
-            );
-        }
-    };
+fn on_vault_create_request(
+    trigger: On<UiInput<VaultCreateRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::Create,
+    );
 }
 
-vault_operation_observer!(
-    on_vault_create_request,
-    VaultCreateRequest,
-    VaultOperationKind::Create
-);
-vault_operation_observer!(
-    on_vault_connect_request,
-    VaultConnectRequest,
-    VaultOperationKind::Connect
-);
-vault_operation_observer!(
-    on_vault_sync_request,
-    VaultSyncRequest,
-    VaultOperationKind::Sync
-);
-vault_operation_observer!(
-    on_vault_connect_github_request,
-    VaultConnectGithubRequest,
-    VaultOperationKind::ConnectGithub
-);
-vault_operation_observer!(
-    on_vault_connect_folder_request,
-    VaultConnectFolderRequest,
-    VaultOperationKind::ConnectFolder
-);
-vault_operation_observer!(
-    on_vault_generate_recovery_key_request,
-    VaultGenerateRecoveryKeyRequest,
-    VaultOperationKind::GenerateRecoveryKey
-);
-vault_operation_observer!(
-    on_vault_create_recovery_key_request,
-    VaultCreateRecoveryKeyRequest,
-    VaultOperationKind::CreateRecoveryKey
-);
-vault_operation_observer!(
-    on_vault_unlock_recovery_key_request,
-    VaultUnlockRecoveryKeyRequest,
-    VaultOperationKind::UnlockRecoveryKey
-);
-vault_operation_observer!(
-    on_vault_connect_cloud_request,
-    VaultConnectCloudRequest,
-    VaultOperationKind::ConnectCloud
-);
-vault_operation_observer!(
-    on_vault_create_cloud_folder_request,
-    VaultCreateCloudFolderRequest,
-    VaultOperationKind::CreateCloudFolder
-);
-vault_operation_observer!(
-    on_vault_choose_cloud_folder_request,
-    VaultChooseCloudFolderRequest,
-    VaultOperationKind::ChooseCloudFolder
-);
+fn on_vault_connect_request(
+    trigger: On<UiInput<VaultConnectRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::Connect,
+    );
+}
+
+fn on_vault_sync_request(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQueue) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::Sync,
+    );
+}
+
+fn on_vault_connect_github_request(
+    trigger: On<UiInput<VaultConnectGithubRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::ConnectGithub,
+    );
+}
+
+fn on_vault_connect_folder_request(
+    trigger: On<UiInput<VaultConnectFolderRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::ConnectFolder,
+    );
+}
+
+fn on_vault_generate_recovery_key_request(
+    trigger: On<UiInput<VaultGenerateRecoveryKeyRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::GenerateRecoveryKey,
+    );
+}
+
+fn on_vault_create_recovery_key_request(
+    trigger: On<UiInput<VaultCreateRecoveryKeyRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::CreateRecoveryKey,
+    );
+}
+
+fn on_vault_unlock_recovery_key_request(
+    trigger: On<UiInput<VaultUnlockRecoveryKeyRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::UnlockRecoveryKey,
+    );
+}
+
+fn on_vault_connect_cloud_request(
+    trigger: On<UiInput<VaultConnectCloudRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::ConnectCloud,
+    );
+}
+
+fn on_vault_create_cloud_folder_request(
+    trigger: On<UiInput<VaultCreateCloudFolderRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::CreateCloudFolder,
+    );
+}
+
+fn on_vault_choose_cloud_folder_request(
+    trigger: On<UiInput<VaultChooseCloudFolderRequest>>,
+    mut queue: VaultOperationQueue,
+) {
+    queue.push(
+        trigger.event().webview,
+        trigger.event().payload.clone(),
+        VaultOperationKind::ChooseCloudFolder,
+    );
+}
 
 fn on_vault_refresh_request(
     trigger: On<UiInput<VaultRefreshRequest>>,
@@ -1496,124 +1532,202 @@ fn start_vault_operation(
         .insert(ReadyVaultOperation);
 }
 
-macro_rules! vault_launch_system {
-    ($name:ident, $request:ty, $execute:ident, $take_key:expr) => {
-        fn $name(
-            operations: Query<
-                (Entity, &VaultOperationRequest<$request>),
-                Added<ReadyVaultOperation>,
-            >,
-            mut registries: Query<&mut VaultRecoveryState, With<VaultRegistry>>,
-            proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-            mut commands: Commands,
-        ) {
-            let Ok(mut recovery) = registries.single_mut() else {
-                return;
-            };
-            for (entity, operation) in &operations {
-                let request = operation.0.clone();
-                let service = recovery.service();
-                let generated_recovery_key = if $take_key {
-                    recovery.take_pending_key()
-                } else {
-                    None
-                };
-                let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-                let progress_wake = completion_wake.clone();
-                let (progress_sender, progress_receiver) = mpsc::channel();
-                let canceled = Arc::new(AtomicBool::new(false));
-                let task_canceled = canceled.clone();
-                let progress = Box::new(move |authorization| {
-                    if progress_sender.send(authorization).is_ok()
-                        && let Some(wake) = &progress_wake
-                    {
-                        let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                    }
-                });
-                let cancellation = Box::new(move || task_canceled.load(Ordering::Relaxed));
-                let operation = $execute(
-                    request,
-                    service,
-                    generated_recovery_key,
-                    progress,
-                    cancellation,
-                );
-                let task = IoTaskPool::get().spawn(async move {
-                    let result = operation.await;
-                    if let Some(wake) = completion_wake {
-                        let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                    }
-                    result
-                });
-                commands
-                    .entity(entity)
-                    .remove::<ReadyVaultOperation>()
-                    .insert(VaultOperationTask {
-                        task,
-                        progress: Mutex::new(progress_receiver),
-                        canceled,
-                    });
-            }
-        }
-    };
+type VaultOperationExecutor<R> = fn(
+    R,
+    VaultRecovery,
+    Option<GeneratedRecoveryKey>,
+    VaultProgress,
+    VaultCancellation,
+) -> VaultOperationFuture;
+
+#[derive(SystemParam)]
+struct VaultOperationLauncher<'w, 's> {
+    recoveries: Query<'w, 's, &'static mut VaultRecoveryState, With<VaultRegistry>>,
+    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+    commands: Commands<'w, 's>,
 }
 
-vault_launch_system!(launch_vault_create, VaultCreateRequest, create_vault, false);
-vault_launch_system!(
-    launch_vault_connect,
-    VaultConnectRequest,
-    connect_vault,
-    false
-);
-vault_launch_system!(launch_vault_sync, VaultSyncRequest, sync_vault, false);
-vault_launch_system!(
-    launch_vault_connect_github,
-    VaultConnectGithubRequest,
-    connect_vault_github,
-    false
-);
-vault_launch_system!(
-    launch_vault_connect_folder,
-    VaultConnectFolderRequest,
-    connect_vault_folder,
-    false
-);
-vault_launch_system!(
-    launch_vault_generate_recovery_key,
-    VaultGenerateRecoveryKeyRequest,
-    generate_vault_recovery_key,
-    false
-);
-vault_launch_system!(
-    launch_vault_create_recovery_key,
-    VaultCreateRecoveryKeyRequest,
-    create_vault_recovery_key,
-    true
-);
-vault_launch_system!(
-    launch_vault_unlock_recovery_key,
-    VaultUnlockRecoveryKeyRequest,
-    unlock_vault_recovery_key,
-    false
-);
-vault_launch_system!(
-    launch_vault_connect_cloud,
-    VaultConnectCloudRequest,
-    connect_vault_cloud,
-    false
-);
-vault_launch_system!(
-    launch_vault_create_cloud_folder,
-    VaultCreateCloudFolderRequest,
-    create_vault_cloud_folder,
-    false
-);
-vault_launch_system!(
-    launch_vault_choose_cloud_folder,
-    VaultChooseCloudFolderRequest,
-    choose_vault_cloud_folder,
-    false
-);
+impl VaultOperationLauncher<'_, '_> {
+    fn launch<R: Clone + Send + Sync + 'static>(
+        &mut self,
+        operations: &Query<(Entity, &VaultOperationRequest<R>), Added<ReadyVaultOperation>>,
+        execute: VaultOperationExecutor<R>,
+        take_pending_key: bool,
+    ) {
+        let Ok(mut recovery) = self.recoveries.single_mut() else {
+            return;
+        };
+        for (entity, operation) in operations {
+            let request = operation.0.clone();
+            let service = recovery.service();
+            let generated_recovery_key = if take_pending_key {
+                recovery.take_pending_key()
+            } else {
+                None
+            };
+            let completion_wake = self.proxy.as_deref().map(|proxy| (**proxy).clone());
+            let progress_wake = completion_wake.clone();
+            let (progress_sender, progress_receiver) = mpsc::channel();
+            let canceled = Arc::new(AtomicBool::new(false));
+            let task_canceled = canceled.clone();
+            let progress = Box::new(move |authorization| {
+                if progress_sender.send(authorization).is_ok()
+                    && let Some(wake) = &progress_wake
+                {
+                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                }
+            });
+            let cancellation = Box::new(move || task_canceled.load(Ordering::Relaxed));
+            let operation = execute(
+                request,
+                service,
+                generated_recovery_key,
+                progress,
+                cancellation,
+            );
+            let task = IoTaskPool::get().spawn(async move {
+                let result = operation.await;
+                if let Some(wake) = completion_wake {
+                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                }
+                result
+            });
+            self.commands
+                .entity(entity)
+                .remove::<ReadyVaultOperation>()
+                .insert(VaultOperationTask {
+                    task,
+                    progress: Mutex::new(progress_receiver),
+                    canceled,
+                });
+        }
+    }
+}
+
+fn launch_vault_create(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultCreateRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, create_vault, false);
+}
+
+fn launch_vault_connect(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultConnectRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, connect_vault, false);
+}
+
+fn launch_vault_sync(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultSyncRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, sync_vault, false);
+}
+
+fn launch_vault_connect_github(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultConnectGithubRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, connect_vault_github, false);
+}
+
+fn launch_vault_connect_folder(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultConnectFolderRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, connect_vault_folder, false);
+}
+
+fn launch_vault_generate_recovery_key(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultGenerateRecoveryKeyRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, generate_vault_recovery_key, false);
+}
+
+fn launch_vault_create_recovery_key(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultCreateRecoveryKeyRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, create_vault_recovery_key, true);
+}
+
+fn launch_vault_unlock_recovery_key(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultUnlockRecoveryKeyRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, unlock_vault_recovery_key, false);
+}
+
+fn launch_vault_connect_cloud(
+    operations: Query<
+        (Entity, &VaultOperationRequest<VaultConnectCloudRequest>),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, connect_vault_cloud, false);
+}
+
+fn launch_vault_create_cloud_folder(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultCreateCloudFolderRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, create_vault_cloud_folder, false);
+}
+
+fn launch_vault_choose_cloud_folder(
+    operations: Query<
+        (
+            Entity,
+            &VaultOperationRequest<VaultChooseCloudFolderRequest>,
+        ),
+        Added<ReadyVaultOperation>,
+    >,
+    mut launcher: VaultOperationLauncher,
+) {
+    launcher.launch(&operations, choose_vault_cloud_folder, false);
+}
 
 fn drain_vault_operations(
     mut operations: Query<(Entity, &VaultOperationContext, &mut VaultOperationTask)>,
