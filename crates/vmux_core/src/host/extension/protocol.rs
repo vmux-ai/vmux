@@ -115,12 +115,12 @@ pub enum BridgeClientMessage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChromeError {
+pub struct ExtensionApiError {
     pub code: String,
     pub message: String,
 }
 
-impl ChromeError {
+impl ExtensionApiError {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
@@ -133,7 +133,7 @@ impl ChromeError {
 pub struct ApiResponse {
     pub request_id: String,
     pub result: Option<serde_json::Value>,
-    pub error: Option<ChromeError>,
+    pub error: Option<ExtensionApiError>,
 }
 
 impl ApiResponse {
@@ -145,7 +145,7 @@ impl ApiResponse {
         }
     }
 
-    pub fn failure(request_id: impl Into<String>, error: ChromeError) -> Self {
+    pub fn failure(request_id: impl Into<String>, error: ExtensionApiError) -> Self {
         Self {
             request_id: request_id.into(),
             result: None,
@@ -179,7 +179,7 @@ pub enum BridgeServerMessage {
     Heartbeat,
     Response(ApiResponse),
     Event(ApiEvent),
-    Fatal(ChromeError),
+    Fatal(ExtensionApiError),
 }
 
 #[cfg(test)]
@@ -212,7 +212,7 @@ mod tests {
             ApiResponse {
                 request_id: "r2".into(),
                 result: Some(serde_json::Value::Null),
-                error: Some(ChromeError::new("invalid", "bad")),
+                error: Some(ExtensionApiError::new("invalid", "bad")),
             }
             .validate()
             .is_err()

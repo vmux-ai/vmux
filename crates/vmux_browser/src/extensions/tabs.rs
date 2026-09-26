@@ -1,31 +1,31 @@
 use serde_json::Value;
 use vmux_core::extension::match_pattern::ChromeMatchPattern;
-use vmux_core::extension::protocol::{ApiRequest, ChromeError};
+use vmux_core::extension::protocol::{ApiRequest, ExtensionApiError};
 
 use super::bridge::BridgeAuthorization;
-use super::model::{ChromeModel, ChromeTab};
+use super::model::{ExtensionModel, ExtensionTabSnapshot};
 use super::windows::WINDOW_ID_CURRENT;
 
-pub(crate) struct ChromeTabs<'a> {
-    model: &'a ChromeModel,
+pub(crate) struct ExtensionTabs<'a> {
+    model: &'a ExtensionModel,
 }
 
-impl<'a> From<&'a ChromeModel> for ChromeTabs<'a> {
-    fn from(model: &'a ChromeModel) -> Self {
+impl<'a> From<&'a ExtensionModel> for ExtensionTabs<'a> {
+    fn from(model: &'a ExtensionModel) -> Self {
         Self { model }
     }
 }
 
-impl ChromeTabs<'_> {
+impl ExtensionTabs<'_> {
     pub(crate) fn dispatch(
         &self,
         request: &ApiRequest,
         authorization: &BridgeAuthorization,
-    ) -> Result<Value, ChromeError> {
+    ) -> Result<Value, ExtensionApiError> {
         match request.method.as_str() {
             "query" => Ok(self.query(request, authorization)),
             "get" => self.get(request, authorization),
-            method => Err(ChromeError::new(
+            method => Err(ExtensionApiError::new(
                 "unsupported_api",
                 format!("tabs.{method} is not supported"),
             )),
@@ -52,18 +52,18 @@ impl ChromeTabs<'_> {
         &self,
         request: &ApiRequest,
         authorization: &BridgeAuthorization,
-    ) -> Result<Value, ChromeError> {
+    ) -> Result<Value, ExtensionApiError> {
         let id = Self::argument(request)
             .and_then(Value::as_i64)
             .and_then(|id| i32::try_from(id).ok());
         let Some(id) = id else {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "invalid_argument",
                 "tabs.get needs a tab id",
             ));
         };
         let Some(tab) = self.model.tabs.iter().find(|tab| tab.id == id) else {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "no_such_tab",
                 format!("No tab with id: {id}."),
             ));
@@ -212,7 +212,7 @@ impl TabFilter {
         }
     }
 
-    fn matches(&self, tab: &ChromeTab, focused_window: Option<i32>) -> bool {
+    fn matches(&self, tab: &ExtensionTabSnapshot, focused_window: Option<i32>) -> bool {
         if self.active.is_some_and(|active| active != tab.active) {
             return false;
         }
@@ -250,29 +250,35 @@ impl TabFilter {
 
 #[cfg(test)]
 mod tests {
-    use super::super::model::ChromeWindow;
+    use super::super::model::ExtensionWindowSnapshot;
     use super::*;
     use serde_json::json;
     use std::collections::HashSet;
     use vmux_core::extension::protocol::ExtensionCallerContext;
 
-    impl ChromeModel {
+    impl ExtensionModel {
         fn fixture() -> Self {
             Self {
                 windows: vec![
-                    ChromeWindow::fixture(1, false),
-                    ChromeWindow::fixture(2, true),
+                    ExtensionWindowSnapshot::fixture(1, false),
+                    ExtensionWindowSnapshot::fixture(2, true),
                 ],
                 tabs: vec![
-                    ChromeTab::fixture(10, 1, 0, false, "https://example.test/one"),
-                    ChromeTab::fixture(11, 2, 0, false, "https://example.test/two"),
-                    ChromeTab::fixture(12, 2, 1, true, "https://accounts.google.com/signin"),
+                    ExtensionTabSnapshot::fixture(10, 1, 0, false, "https://example.test/one"),
+                    ExtensionTabSnapshot::fixture(11, 2, 0, false, "https://example.test/two"),
+                    ExtensionTabSnapshot::fixture(
+                        12,
+                        2,
+                        1,
+                        true,
+                        "https://accounts.google.com/signin",
+                    ),
                 ],
             }
         }
     }
 
-    impl ChromeWindow {
+    impl ExtensionWindowSnapshot {
         fn fixture(id: i32, focused: bool) -> Self {
             Self {
                 id,
@@ -289,7 +295,7 @@ mod tests {
         }
     }
 
-    impl ChromeTab {
+    impl ExtensionTabSnapshot {
         fn fixture(id: i32, window_id: i32, index: u32, active: bool, url: &str) -> Self {
             Self {
                 id,
@@ -344,13 +350,13 @@ mod tests {
 
     #[test]
     fn the_active_tab_of_the_focused_window_is_the_one_a_content_script_sits_in() {
-        let model = ChromeModel::fixture();
+        let model = ExtensionModel::fixture();
         let request = WorkerCall::to(
             "query",
             vec![json!({ "active": true, "currentWindow": true })],
         );
 
-        let result = ChromeTabs::from(&model)
+        let result = ExtensionTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
@@ -359,13 +365,13 @@ mod tests {
 
     #[test]
     fn a_url_pattern_narrows_the_query_to_the_pages_it_matches() {
-        let model = ChromeModel::fixture();
+        let model = ExtensionModel::fixture();
         let request = WorkerCall::to(
             "query",
             vec![json!({ "url": ["https://accounts.google.com/*"] })],
         );
 
-        let result = ChromeTabs::from(&model)
+        let result = ExtensionTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
@@ -374,13 +380,13 @@ mod tests {
 
     #[test]
     fn a_scheme_chrome_patterns_cannot_express_still_narrows_the_query() {
-        let model = ChromeModel::fixture();
+        let model = ExtensionModel::fixture();
         let request = WorkerCall::to(
             "query",
             vec![json!({ "url": "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/popup/*" })],
         );
 
-        let result = ChromeTabs::from(&model)
+        let result = ExtensionTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
@@ -389,10 +395,10 @@ mod tests {
 
     #[test]
     fn getting_a_tab_the_model_does_not_hold_fails_the_way_chrome_fails() {
-        let model = ChromeModel::fixture();
+        let model = ExtensionModel::fixture();
         let request = WorkerCall::to("get", vec![json!(1)]);
 
-        let error = ChromeTabs::from(&model)
+        let error = ExtensionTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect_err("no such tab");
 
@@ -401,10 +407,10 @@ mod tests {
 
     #[test]
     fn the_current_window_sentinel_is_not_a_window_id() {
-        let model = ChromeModel::fixture();
+        let model = ExtensionModel::fixture();
         let request = WorkerCall::to("query", vec![json!({ "active": true, "windowId": -2 })]);
 
-        let result = ChromeTabs::from(&model)
+        let result = ExtensionTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect("query answers");
 
@@ -413,10 +419,10 @@ mod tests {
 
     #[test]
     fn an_id_too_large_for_a_tab_is_refused_rather_than_truncated() {
-        let model = ChromeModel::fixture();
+        let model = ExtensionModel::fixture();
         let request = WorkerCall::to("get", vec![json!(4294967306i64)]);
 
-        let error = ChromeTabs::from(&model)
+        let error = ExtensionTabs::from(&model)
             .dispatch(&request, &BridgeAuthorization::fixture())
             .expect_err("out of range");
 
@@ -425,14 +431,14 @@ mod tests {
 
     #[test]
     fn an_extension_without_the_tabs_permission_is_told_no_url() {
-        let model = ChromeModel::fixture();
+        let model = ExtensionModel::fixture();
         let request = WorkerCall::to("get", vec![json!(12)]);
         let authorization = BridgeAuthorization {
             permissions: HashSet::new(),
             ..BridgeAuthorization::fixture()
         };
 
-        let result = ChromeTabs::from(&model)
+        let result = ExtensionTabs::from(&model)
             .dispatch(&request, &authorization)
             .expect("get answers");
 

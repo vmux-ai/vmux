@@ -13,7 +13,7 @@ use tungstenite::{Message, WebSocket, protocol::WebSocketConfig};
 use vmux_core::extension::match_pattern::ChromeMatchPattern;
 use vmux_core::extension::protocol::{
     BRIDGE_CONTEXT_ID, BRIDGE_MAX_FRAME_SIZE, BRIDGE_MAX_MESSAGE_SIZE, BRIDGE_PROTOCOL_VERSION,
-    BridgeClientMessage, BridgeServerMessage, ChromeError, ExtensionContextKind,
+    BridgeClientMessage, BridgeServerMessage, ExtensionApiError, ExtensionContextKind,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
@@ -641,7 +641,7 @@ fn authenticate(
 fn reject_authentication(socket: &mut WebSocket<TcpStream>) -> Result<(), String> {
     write_server_message(
         socket,
-        &BridgeServerMessage::Fatal(ChromeError::new(
+        &BridgeServerMessage::Fatal(ExtensionApiError::new(
             "authentication_failed",
             "bridge authentication failed",
         )),
@@ -767,7 +767,7 @@ fn read_available_messages(
         if let Err(error) = result {
             let _ = write_server_message(
                 socket,
-                &BridgeServerMessage::Fatal(ChromeError::new("protocol_error", &error)),
+                &BridgeServerMessage::Fatal(ExtensionApiError::new("protocol_error", &error)),
             );
             let _ = socket.close(None);
             break Err(error);
@@ -803,7 +803,7 @@ mod tests {
     };
     use vmux_core::extension::protocol::{
         ApiRequest, ApiResponse, BRIDGE_PROTOCOL_VERSION, BridgeClientMessage, BridgeHello,
-        BridgeServerMessage, ChromeError, ExtensionContextKind,
+        BridgeServerMessage, ExtensionApiError, ExtensionContextKind,
     };
 
     const EXTENSION_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -969,7 +969,7 @@ mod tests {
         let fatal: BridgeServerMessage = read_json(&mut socket);
         assert_eq!(
             fatal,
-            BridgeServerMessage::Fatal(ChromeError::new(
+            BridgeServerMessage::Fatal(ExtensionApiError::new(
                 "authentication_failed",
                 "bridge authentication failed"
             ))
@@ -1012,7 +1012,7 @@ mod tests {
 
         assert_eq!(
             fatal,
-            BridgeServerMessage::Fatal(ChromeError::new(
+            BridgeServerMessage::Fatal(ExtensionApiError::new(
                 "authentication_failed",
                 "bridge authentication failed"
             ))

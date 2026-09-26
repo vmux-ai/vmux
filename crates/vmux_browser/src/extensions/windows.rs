@@ -5,13 +5,16 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 use vmux_core::PageMetadata;
-use vmux_core::extension::protocol::{ApiRequest, ChromeError, ExtensionCallerContext};
+use vmux_core::extension::protocol::{ApiRequest, ExtensionApiError, ExtensionCallerContext};
 use vmux_history::LastActivatedAt;
 use vmux_layout::stack::{CloseStackRequest, Stack};
 
 use super::ExtensionPopup;
 use super::bridge::BridgeAuthorization;
-use super::model::{ChromeModel, ChromeModelEvent, ChromeStableIds, ChromeTab, ChromeWindow};
+use super::model::{
+    ExtensionModel, ExtensionModelEvent, ExtensionStableIds, ExtensionTabSnapshot,
+    ExtensionWindowSnapshot,
+};
 
 pub(crate) struct ExtensionWindowsPlugin;
 
@@ -23,7 +26,7 @@ impl Plugin for ExtensionWindowsPlugin {
             .add_message::<UpdateHostWindowRequest>()
             .add_systems(
                 Update,
-                sync_extension_windows.after(super::project::rebuild_chrome_model),
+                sync_extension_windows.after(super::project::ExtensionProjectionSet),
             )
             .add_systems(
                 Update,
@@ -44,7 +47,7 @@ const FALLBACK_HOST_WINDOW_ID: i32 = 1;
 
 #[derive(Clone, Debug)]
 struct ExtensionWindow {
-    window: ChromeWindow,
+    window: ExtensionWindowSnapshot,
     urls: Vec<String>,
     tab_ids: Vec<i32>,
 }
@@ -84,7 +87,7 @@ pub struct WindowDispatch {
     pub open_window: Option<OpenExtensionWindowRequest>,
     pub close_window: Option<CloseExtensionWindowRequest>,
     pub update_host_window: Option<UpdateHostWindowRequest>,
-    pub events: Vec<ChromeModelEvent>,
+    pub events: Vec<ExtensionModelEvent>,
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
@@ -137,10 +140,10 @@ fn open_extension_windows(
 
 pub fn dispatch(
     request: &ApiRequest,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
-) -> Result<WindowDispatch, ChromeError> {
+) -> Result<WindowDispatch, ExtensionApiError> {
     match request.method.as_str() {
         "get" => get(request, model, windows, authorization),
         "getCurrent" => get_current(request, model, windows, authorization),
@@ -149,7 +152,7 @@ pub fn dispatch(
         "create" => create(request, model, windows, authorization),
         "update" => update(request, model, windows, authorization),
         "remove" => remove(request, model, windows),
-        _ => Err(ChromeError::new(
+        _ => Err(ExtensionApiError::new(
             "unsupported_api",
             format!("windows.{} is not supported", request.method),
         )),
@@ -158,7 +161,7 @@ pub fn dispatch(
 
 fn route_close_extension_windows(
     mut requests: MessageReader<CloseExtensionWindowRequest>,
-    stable_ids: Res<ChromeStableIds>,
+    stable_ids: Single<&ExtensionStableIds>,
     stacks: Query<(Entity, &PageMetadata, Option<&LastActivatedAt>), With<Stack>>,
     mut close_requests: MessageWriter<CloseStackRequest>,
 ) {
@@ -202,7 +205,10 @@ fn route_close_extension_windows(
     }
 }
 
-pub fn sync_extension_windows(model: Res<ChromeModel>, mut windows: ResMut<ExtensionWindows>) {
+pub fn sync_extension_windows(
+    model: Single<Ref<ExtensionModel>>,
+    mut windows: ResMut<ExtensionWindows>,
+) {
     if !model.is_changed() {
         return;
     }
@@ -214,7 +220,7 @@ pub fn sync_extension_windows(model: Res<ChromeModel>, mut windows: ResMut<Exten
 
 fn apply_host_window_updates(
     mut requests: MessageReader<UpdateHostWindowRequest>,
-    stable_ids: Res<ChromeStableIds>,
+    stable_ids: Single<&ExtensionStableIds>,
     mut native_windows: Query<&mut Window>,
 ) {
     for request in requests.read() {
@@ -257,14 +263,14 @@ fn apply_host_window_updates(
 
 fn get(
     request: &ApiRequest,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
-) -> Result<WindowDispatch, ChromeError> {
+) -> Result<WindowDispatch, ExtensionApiError> {
     let id = argument(request, 0)
         .and_then(Value::as_i64)
         .and_then(|id| i32::try_from(id).ok())
-        .ok_or_else(|| ChromeError::new("invalid_arguments", "windowId is required"))?;
+        .ok_or_else(|| ExtensionApiError::new("invalid_arguments", "windowId is required"))?;
     let options = argument(request, 1);
     let id = resolve_window_id(id, &request.caller_context, model, windows)?;
     let id = resolve_native_window_alias(id, model, windows)?;
@@ -274,12 +280,13 @@ fn get(
 
 fn get_current(
     request: &ApiRequest,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
-) -> Result<WindowDispatch, ChromeError> {
-    let id = current_window_id(&request.caller_context, model, windows)
-        .ok_or_else(|| ChromeError::new("window_not_found", "current window is unavailable"))?;
+) -> Result<WindowDispatch, ExtensionApiError> {
+    let id = current_window_id(&request.caller_context, model, windows).ok_or_else(|| {
+        ExtensionApiError::new("window_not_found", "current window is unavailable")
+    })?;
     let result = window_by_id(
         id,
         argument(request, 0),
@@ -293,10 +300,10 @@ fn get_current(
 
 fn get_last_focused(
     request: &ApiRequest,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
-) -> Result<WindowDispatch, ChromeError> {
+) -> Result<WindowDispatch, ExtensionApiError> {
     let id = windows
         .last_focused
         .filter(|id| window_exists(*id, model, windows))
@@ -316,10 +323,10 @@ fn get_last_focused(
 
 fn get_all(
     request: &ApiRequest,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
-) -> Result<WindowDispatch, ChromeError> {
+) -> Result<WindowDispatch, ExtensionApiError> {
     let options = argument(request, 0);
     let populate = populate(options);
     let mut claimed = HashSet::new();
@@ -366,17 +373,17 @@ fn get_all(
 
 fn create(
     request: &ApiRequest,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
-) -> Result<WindowDispatch, ChromeError> {
+) -> Result<WindowDispatch, ExtensionApiError> {
     let data = argument(request, 0).and_then(Value::as_object);
     if data
         .and_then(|data| data.get("incognito"))
         .and_then(Value::as_bool)
         == Some(true)
     {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "unsupported_option",
             "incognito extension windows are unavailable",
         ));
@@ -397,7 +404,7 @@ fn create(
         .and_then(Value::as_str)
         .unwrap_or("normal");
     if !matches!(window_type, "normal" | "popup" | "panel") {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "invalid_arguments",
             "extension window type is invalid",
         ));
@@ -418,7 +425,7 @@ fn create(
         }
         windows.last_focused = Some(id);
     }
-    let window = ChromeWindow {
+    let window = ExtensionWindowSnapshot {
         id,
         focused,
         left: integer(data, "left")
@@ -447,9 +454,9 @@ fn create(
     };
     let result = window_value(&window, Vec::new(), true, request, authorization);
     windows.windows.insert(id, extension_window);
-    let mut events = vec![ChromeModelEvent::WindowCreated(window)];
+    let mut events = vec![ExtensionModelEvent::WindowCreated(window)];
     if focused {
-        events.push(ChromeModelEvent::WindowFocusChanged { window_id: id });
+        events.push(ExtensionModelEvent::WindowFocusChanged { window_id: id });
     }
     let open = if urls.is_empty() {
         vec![None]
@@ -471,19 +478,19 @@ fn create(
 
 fn update(
     request: &ApiRequest,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
-) -> Result<WindowDispatch, ChromeError> {
+) -> Result<WindowDispatch, ExtensionApiError> {
     let requested_id = argument(request, 0)
         .and_then(Value::as_i64)
         .and_then(|id| i32::try_from(id).ok())
-        .ok_or_else(|| ChromeError::new("invalid_arguments", "windowId is required"))?;
+        .ok_or_else(|| ExtensionApiError::new("invalid_arguments", "windowId is required"))?;
     let update_value = argument(request, 1)
         .cloned()
-        .ok_or_else(|| ChromeError::new("invalid_arguments", "updateInfo is required"))?;
+        .ok_or_else(|| ExtensionApiError::new("invalid_arguments", "updateInfo is required"))?;
     let update: HostWindowUpdate = serde_json::from_value(update_value)
-        .map_err(|_| ChromeError::new("invalid_arguments", "updateInfo is invalid"))?;
+        .map_err(|_| ExtensionApiError::new("invalid_arguments", "updateInfo is invalid"))?;
     validate_update(&update)?;
     let id = resolve_window_id(requested_id, &request.caller_context, model, windows)?;
     if windows.windows.contains_key(&id) {
@@ -505,7 +512,7 @@ fn update(
             entry.window.focused = false;
             let fallback = focused_host_window(model).unwrap_or(WINDOW_ID_NONE);
             windows.last_focused = (fallback >= 0).then_some(fallback);
-            events.push(ChromeModelEvent::WindowFocusChanged {
+            events.push(ExtensionModelEvent::WindowFocusChanged {
                 window_id: fallback,
             });
         }
@@ -528,7 +535,7 @@ fn update(
         .iter()
         .find(|window| window.id == id)
         .cloned()
-        .ok_or_else(|| ChromeError::new("window_not_found", "window is unavailable"))?;
+        .ok_or_else(|| ExtensionApiError::new("window_not_found", "window is unavailable"))?;
     let mut after = before.clone();
     apply_update(&mut after, &update);
     if update.focused == Some(true) {
@@ -559,23 +566,22 @@ fn update(
 
 fn remove(
     request: &ApiRequest,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &mut ExtensionWindows,
-) -> Result<WindowDispatch, ChromeError> {
+) -> Result<WindowDispatch, ExtensionApiError> {
     let id = argument(request, 0)
         .and_then(Value::as_i64)
         .and_then(|id| i32::try_from(id).ok())
-        .ok_or_else(|| ChromeError::new("invalid_arguments", "windowId is required"))?;
-    let mut entry = windows
-        .windows
-        .remove(&id)
-        .ok_or_else(|| ChromeError::new("window_not_found", "extension window is unavailable"))?;
+        .ok_or_else(|| ExtensionApiError::new("invalid_arguments", "windowId is required"))?;
+    let mut entry = windows.windows.remove(&id).ok_or_else(|| {
+        ExtensionApiError::new("window_not_found", "extension window is unavailable")
+    })?;
     refresh_tab_ids(&mut entry, model, &mut HashSet::new());
-    let mut events = vec![ChromeModelEvent::WindowRemoved { window_id: id }];
+    let mut events = vec![ExtensionModelEvent::WindowRemoved { window_id: id }];
     if entry.window.focused {
         let fallback = focused_host_window(model).unwrap_or(WINDOW_ID_NONE);
         windows.last_focused = (fallback >= 0).then_some(fallback);
-        events.push(ChromeModelEvent::WindowFocusChanged {
+        events.push(ExtensionModelEvent::WindowFocusChanged {
             window_id: fallback,
         });
     }
@@ -612,22 +618,26 @@ fn argument(request: &ApiRequest, index: usize) -> Option<&Value> {
 fn resolve_window_id(
     id: i32,
     caller: &ExtensionCallerContext,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &ExtensionWindows,
-) -> Result<i32, ChromeError> {
+) -> Result<i32, ExtensionApiError> {
     if matches!(id, WINDOW_ID_NONE | WINDOW_ID_CURRENT) {
-        return current_window_id(caller, model, windows)
-            .ok_or_else(|| ChromeError::new("window_not_found", "current window is unavailable"));
+        return current_window_id(caller, model, windows).ok_or_else(|| {
+            ExtensionApiError::new("window_not_found", "current window is unavailable")
+        });
     }
     if id < 0 {
-        return Err(ChromeError::new("invalid_arguments", "windowId is invalid"));
+        return Err(ExtensionApiError::new(
+            "invalid_arguments",
+            "windowId is invalid",
+        ));
     }
     Ok(id)
 }
 
 fn current_window_id(
     caller: &ExtensionCallerContext,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &ExtensionWindows,
 ) -> Option<i32> {
     if let Some(caller_url) = caller.url()
@@ -651,7 +661,7 @@ fn current_window_id(
         .or(Some(FALLBACK_HOST_WINDOW_ID))
 }
 
-fn focused_host_window(model: &ChromeModel) -> Option<i32> {
+fn focused_host_window(model: &ExtensionModel) -> Option<i32> {
     model
         .windows
         .iter()
@@ -659,20 +669,20 @@ fn focused_host_window(model: &ChromeModel) -> Option<i32> {
         .map(|window| window.id)
 }
 
-fn window_exists(id: i32, model: &ChromeModel, windows: &ExtensionWindows) -> bool {
+fn window_exists(id: i32, model: &ExtensionModel, windows: &ExtensionWindows) -> bool {
     windows.windows.contains_key(&id) || model.windows.iter().any(|window| window.id == id)
 }
 
 fn resolve_native_window_alias(
     id: i32,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &ExtensionWindows,
-) -> Result<i32, ChromeError> {
+) -> Result<i32, ExtensionApiError> {
     if window_exists(id, model, windows) {
         return Ok(id);
     }
     if id >= FIRST_EXTENSION_WINDOW_ID && id < windows.next_id {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "window_not_found",
             "extension window is unavailable",
         ));
@@ -685,15 +695,15 @@ fn resolve_native_window_alias(
 fn window_by_id(
     id: i32,
     options: Option<&Value>,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     windows: &mut ExtensionWindows,
     request: &ApiRequest,
     authorization: &BridgeAuthorization,
-) -> Result<Value, ChromeError> {
+) -> Result<Value, ExtensionApiError> {
     if let Some(window) = windows.windows.get_mut(&id) {
         refresh_tab_ids(window, model, &mut HashSet::new());
         if !type_matches(&window.window, options) {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "window_not_found",
                 "window type is filtered out",
             ));
@@ -714,7 +724,7 @@ fn window_by_id(
         &fallback
     };
     if !type_matches(window, options) {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "window_not_found",
             "window type is filtered out",
         ));
@@ -733,8 +743,8 @@ fn window_by_id(
     ))
 }
 
-fn fallback_host_window(id: i32) -> ChromeWindow {
-    ChromeWindow {
+fn fallback_host_window(id: i32) -> ExtensionWindowSnapshot {
+    ExtensionWindowSnapshot {
         id,
         focused: true,
         left: 0,
@@ -749,8 +759,8 @@ fn fallback_host_window(id: i32) -> ChromeWindow {
 }
 
 fn window_value(
-    window: &ChromeWindow,
-    tabs: Vec<ChromeTab>,
+    window: &ExtensionWindowSnapshot,
+    tabs: Vec<ExtensionTabSnapshot>,
     populate: bool,
     request: &ApiRequest,
     authorization: &BridgeAuthorization,
@@ -772,11 +782,11 @@ fn window_value(
     value
 }
 
-fn window_base_value(window: &ChromeWindow) -> Value {
-    serde_json::to_value(window).expect("ChromeWindow serializes")
+fn window_base_value(window: &ExtensionWindowSnapshot) -> Value {
+    serde_json::to_value(window).expect("extension window serializes")
 }
 
-fn virtual_tabs(window: &ExtensionWindow, model: &ChromeModel) -> Vec<ChromeTab> {
+fn virtual_tabs(window: &ExtensionWindow, model: &ExtensionModel) -> Vec<ExtensionTabSnapshot> {
     window
         .tab_ids
         .iter()
@@ -784,7 +794,11 @@ fn virtual_tabs(window: &ExtensionWindow, model: &ChromeModel) -> Vec<ChromeTab>
         .collect()
 }
 
-fn refresh_tab_ids(window: &mut ExtensionWindow, model: &ChromeModel, claimed: &mut HashSet<i32>) {
+fn refresh_tab_ids(
+    window: &mut ExtensionWindow,
+    model: &ExtensionModel,
+    claimed: &mut HashSet<i32>,
+) {
     window
         .tab_ids
         .retain(|id| model.tabs.iter().any(|tab| tab.id == *id));
@@ -833,7 +847,7 @@ fn populate(options: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
-fn type_matches(window: &ChromeWindow, options: Option<&Value>) -> bool {
+fn type_matches(window: &ExtensionWindowSnapshot, options: Option<&Value>) -> bool {
     options
         .and_then(|options| options.get("windowTypes"))
         .and_then(Value::as_array)
@@ -848,7 +862,7 @@ fn type_matches(window: &ChromeWindow, options: Option<&Value>) -> bool {
 fn create_urls(
     data: Option<&serde_json::Map<String, Value>>,
     request: &ApiRequest,
-) -> Result<Vec<String>, ChromeError> {
+) -> Result<Vec<String>, ExtensionApiError> {
     let urls = match data.and_then(|data| data.get("url")) {
         Some(Value::String(url)) => vec![resolve_url(url, request)?],
         Some(Value::Array(values)) => values
@@ -856,12 +870,14 @@ fn create_urls(
             .map(|value| {
                 value
                     .as_str()
-                    .ok_or_else(|| ChromeError::new("invalid_arguments", "window URL is invalid"))
+                    .ok_or_else(|| {
+                        ExtensionApiError::new("invalid_arguments", "window URL is invalid")
+                    })
                     .and_then(|url| resolve_url(url, request))
             })
             .collect::<Result<Vec<_>, _>>()?,
         Some(_) => {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "invalid_arguments",
                 "window URL is invalid",
             ));
@@ -869,7 +885,7 @@ fn create_urls(
         None => Vec::new(),
     };
     if data.is_some_and(|data| data.contains_key("tabId")) {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "unsupported_option",
             "moving an existing tab into an extension window is unavailable",
         ));
@@ -877,7 +893,7 @@ fn create_urls(
     Ok(urls)
 }
 
-fn resolve_url(url: &str, request: &ApiRequest) -> Result<String, ChromeError> {
+fn resolve_url(url: &str, request: &ApiRequest) -> Result<String, ExtensionApiError> {
     let parsed = url::Url::parse(url).or_else(|_| {
         url::Url::parse(&format!(
             "chrome-extension://{}/",
@@ -885,12 +901,13 @@ fn resolve_url(url: &str, request: &ApiRequest) -> Result<String, ChromeError> {
         ))?
         .join(url)
     });
-    let parsed = parsed.map_err(|_| ChromeError::new("invalid_url", "window URL is invalid"))?;
+    let parsed =
+        parsed.map_err(|_| ExtensionApiError::new("invalid_url", "window URL is invalid"))?;
     match parsed.scheme() {
         "http" | "https" => {}
         "chrome-extension" if parsed.host_str() == Some(request.caller_context.extension_id()) => {}
         _ => {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "invalid_url",
                 "window URL uses an unsupported scheme",
             ));
@@ -913,7 +930,7 @@ fn positive_integer(data: Option<&serde_json::Map<String, Value>>, key: &str) ->
 
 fn validate_state_and_bounds(
     data: Option<&serde_json::Map<String, Value>>,
-) -> Result<(), ChromeError> {
+) -> Result<(), ExtensionApiError> {
     let state = data
         .and_then(|data| data.get("state"))
         .and_then(Value::as_str)
@@ -926,7 +943,7 @@ fn validate_state_and_bounds(
                 .any(|key| data.contains_key(*key))
         })
     {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "invalid_arguments",
             "window bounds cannot be combined with this state",
         ));
@@ -934,7 +951,7 @@ fn validate_state_and_bounds(
     Ok(())
 }
 
-fn validate_update(update: &HostWindowUpdate) -> Result<(), ChromeError> {
+fn validate_update(update: &HostWindowUpdate) -> Result<(), ExtensionApiError> {
     if let Some(state) = update.state.as_deref() {
         validate_state(state)?;
         if state != "normal"
@@ -943,19 +960,19 @@ fn validate_update(update: &HostWindowUpdate) -> Result<(), ChromeError> {
                 || update.width.is_some()
                 || update.height.is_some())
         {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "invalid_arguments",
                 "window bounds cannot be combined with this state",
             ));
         }
         if state == "minimized" && update.focused == Some(true) {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "invalid_arguments",
                 "a minimized window cannot be focused",
             ));
         }
         if matches!(state, "fullscreen" | "maximized") && update.focused == Some(false) {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "invalid_arguments",
                 "a fullscreen or maximized window cannot be unfocused",
             ));
@@ -964,18 +981,18 @@ fn validate_update(update: &HostWindowUpdate) -> Result<(), ChromeError> {
     Ok(())
 }
 
-fn validate_state(state: &str) -> Result<(), ChromeError> {
+fn validate_state(state: &str) -> Result<(), ExtensionApiError> {
     if matches!(state, "normal" | "minimized" | "maximized" | "fullscreen") {
         Ok(())
     } else {
-        Err(ChromeError::new(
+        Err(ExtensionApiError::new(
             "invalid_arguments",
             "window state is invalid",
         ))
     }
 }
 
-fn apply_update(window: &mut ChromeWindow, update: &HostWindowUpdate) {
+fn apply_update(window: &mut ExtensionWindowSnapshot, update: &HostWindowUpdate) {
     if let Some(left) = update.left {
         window.left = left;
     }
@@ -996,17 +1013,20 @@ fn apply_update(window: &mut ChromeWindow, update: &HostWindowUpdate) {
     }
 }
 
-fn window_update_events(before: &ChromeWindow, after: &ChromeWindow) -> Vec<ChromeModelEvent> {
+fn window_update_events(
+    before: &ExtensionWindowSnapshot,
+    after: &ExtensionWindowSnapshot,
+) -> Vec<ExtensionModelEvent> {
     let mut events = Vec::new();
     if before.left != after.left
         || before.top != after.top
         || before.width != after.width
         || before.height != after.height
     {
-        events.push(ChromeModelEvent::WindowBoundsChanged(after.clone()));
+        events.push(ExtensionModelEvent::WindowBoundsChanged(after.clone()));
     }
     if before.focused != after.focused {
-        events.push(ChromeModelEvent::WindowFocusChanged {
+        events.push(ExtensionModelEvent::WindowFocusChanged {
             window_id: if after.focused {
                 after.id
             } else {
@@ -1017,16 +1037,16 @@ fn window_update_events(before: &ChromeWindow, after: &ChromeWindow) -> Vec<Chro
     events
 }
 
-pub fn event_payload(event: &ChromeModelEvent) -> Option<(&'static str, Value)> {
+pub fn event_payload(event: &ExtensionModelEvent) -> Option<(&'static str, Value)> {
     match event {
-        ChromeModelEvent::WindowCreated(window) => {
+        ExtensionModelEvent::WindowCreated(window) => {
             Some(("onCreated", json!([window_base_value(window)])))
         }
-        ChromeModelEvent::WindowRemoved { window_id } => Some(("onRemoved", json!([window_id]))),
-        ChromeModelEvent::WindowFocusChanged { window_id } => {
+        ExtensionModelEvent::WindowRemoved { window_id } => Some(("onRemoved", json!([window_id]))),
+        ExtensionModelEvent::WindowFocusChanged { window_id } => {
             Some(("onFocusChanged", json!([window_id])))
         }
-        ChromeModelEvent::WindowBoundsChanged(window) => {
+        ExtensionModelEvent::WindowBoundsChanged(window) => {
             Some(("onBoundsChanged", json!([window_base_value(window)])))
         }
         _ => None,
@@ -1053,9 +1073,9 @@ mod tests {
         }
     }
 
-    fn model() -> ChromeModel {
-        ChromeModel {
-            windows: vec![ChromeWindow {
+    fn model() -> ExtensionModel {
+        ExtensionModel {
+            windows: vec![ExtensionWindowSnapshot {
                 id: 1,
                 focused: true,
                 left: 10,
@@ -1067,7 +1087,7 @@ mod tests {
                 state: "normal".into(),
                 always_on_top: false,
             }],
-            tabs: vec![ChromeTab {
+            tabs: vec![ExtensionTabSnapshot {
                 id: 7,
                 window_id: 1,
                 index: 0,
@@ -1104,7 +1124,7 @@ mod tests {
         let id = created.result["id"].as_i64().unwrap() as i32;
         assert_eq!(created.result["type"], "popup");
         assert!(created.open_window.is_some());
-        model.tabs.push(ChromeTab {
+        model.tabs.push(ExtensionTabSnapshot {
             id: 8,
             window_id: 1,
             index: 1,
@@ -1152,7 +1172,7 @@ mod tests {
         assert_eq!(removed.close_window.unwrap().tab_ids, vec![8]);
         assert!(matches!(
             removed.events[0],
-            ChromeModelEvent::WindowRemoved { window_id } if window_id == id
+            ExtensionModelEvent::WindowRemoved { window_id } if window_id == id
         ));
     }
 
@@ -1228,7 +1248,7 @@ mod tests {
 
     #[test]
     fn window_queries_return_fallback_geometry_before_host_projection() {
-        let model = ChromeModel {
+        let model = ExtensionModel {
             windows: Vec::new(),
             tabs: Vec::new(),
         };
@@ -1310,8 +1330,8 @@ mod tests {
     #[test]
     fn close_fallback_selects_most_recent_matching_extension_page() {
         let mut app = App::new();
-        app.init_resource::<ChromeStableIds>()
-            .add_message::<CloseExtensionWindowRequest>()
+        app.world_mut().spawn(ExtensionStableIds::default());
+        app.add_message::<CloseExtensionWindowRequest>()
             .add_message::<CloseStackRequest>()
             .add_systems(Update, route_close_extension_windows);
         let older = app

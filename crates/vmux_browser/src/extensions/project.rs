@@ -11,25 +11,48 @@ use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::tab::Tab;
 
 use super::model::{
-    ChromeModel, ChromeModelEvent, ChromeStableIds, ChromeTab, ChromeWindow, extension_visible_url,
+    ExtensionModel, ExtensionModelEvent, ExtensionStableIds, ExtensionTabSnapshot,
+    ExtensionWindowSnapshot, extension_visible_url,
 };
 use crate::extensions::bridge_page::ExtensionBridgeWebview;
 
 pub(crate) struct ExtensionProjectPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ExtensionProjectionSet;
+
 impl Plugin for ExtensionProjectPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ChromeModel>()
-            .init_resource::<ChromeStableIds>()
-            .add_message::<ChromeModelEvent>()
+        app.add_message::<ExtensionModelEvent>()
+            .add_systems(Startup, spawn_extension_model)
             .add_systems(
                 Update,
-                rebuild_chrome_model
+                rebuild_extension_model
+                    .in_set(ExtensionProjectionSet)
                     .after(vmux_layout::apply_cef_state_from_webview)
                     .after(vmux_layout::stack::ComputeFocusSet),
             );
     }
 }
+
+type HierarchyData = (
+    Option<&'static Children>,
+    Option<&'static ChildOf>,
+    Option<&'static Order>,
+    Has<Tab>,
+    Has<Stack>,
+    Option<&'static HostWindow>,
+    Has<Loading>,
+);
+
+type PageData = (
+    Entity,
+    &'static PageMetadata,
+    Option<&'static LastActivatedAt>,
+    Option<&'static vmux_core::PageIdentity>,
+    Has<ExtensionBridgeWebview>,
+    Has<Loading>,
+);
 
 struct WindowCandidate {
     entity: Entity,
@@ -53,31 +76,41 @@ struct PageCandidate {
 struct ProjectedTab {
     entity: Entity,
     activated_at: i64,
-    tab: ChromeTab,
+    tab: ExtensionTabSnapshot,
 }
 
-pub(crate) fn rebuild_chrome_model(world: &mut World) {
-    let previous = world.resource::<ChromeModel>().clone();
-    let focused_stack = world
-        .get_resource::<FocusedStack>()
-        .and_then(|focused| focused.stack);
-    let windows = collect_windows(world);
+fn spawn_extension_model(mut commands: Commands) {
+    commands.spawn((ExtensionModel::default(), ExtensionStableIds::default()));
+}
+
+fn rebuild_extension_model(
+    window_query: Query<(Entity, &Window, Has<PrimaryWindow>)>,
+    space_query: Query<(Entity, Option<&Order>), With<Space>>,
+    hierarchy: Query<HierarchyData>,
+    page_query: Query<PageData>,
+    focused_stack: Option<Res<FocusedStack>>,
+    runtime: Single<(&mut ExtensionModel, &mut ExtensionStableIds)>,
+    mut events: MessageWriter<ExtensionModelEvent>,
+) {
+    let (mut current, mut stable_ids) = runtime.into_inner();
+    let previous = current.clone();
+    let focused_stack = focused_stack.and_then(|focused| focused.stack);
+    let windows = WindowCandidate::collect(&window_query);
     let primary_window = windows
         .iter()
         .find(|window| window.primary)
         .or_else(|| windows.first())
         .map(|window| window.entity);
-    let pages = collect_pages(world);
+    let pages = PageCandidate::collect(&space_query, &hierarchy, &page_query);
 
-    let (chrome_windows, mut projected_tabs) = {
-        let mut stable_ids = world.resource_mut::<ChromeStableIds>();
+    let (projected_windows, mut projected_tabs) = {
         let window_ids = windows
             .iter()
             .map(|window| (window.entity, stable_ids.window(window.entity)))
             .collect::<HashMap<_, _>>();
-        let chrome_windows = windows
+        let projected_windows = windows
             .iter()
-            .map(|window| ChromeWindow {
+            .map(|window| ExtensionWindowSnapshot {
                 id: window_ids[&window.entity],
                 focused: window.focused,
                 left: window.left,
@@ -100,7 +133,7 @@ pub(crate) fn rebuild_chrome_model(world: &mut World) {
                     .or(primary_window)?;
                 let window_id = window_ids[&window_entity];
                 let index = indices.entry(window_id).or_default();
-                let tab = ChromeTab {
+                let tab = ExtensionTabSnapshot {
                     id: stable_ids.tab(page.entity),
                     window_id,
                     index: *index,
@@ -119,266 +152,297 @@ pub(crate) fn rebuild_chrome_model(world: &mut World) {
                 })
             })
             .collect::<Vec<_>>();
-        (chrome_windows, projected_tabs)
+        (projected_windows, projected_tabs)
     };
 
-    select_active_tabs(&previous, focused_stack, &mut projected_tabs);
-    let model = ChromeModel {
-        windows: chrome_windows,
+    ProjectedTab::select_active(&previous, focused_stack, &mut projected_tabs);
+    let model = ExtensionModel {
+        windows: projected_windows,
         tabs: projected_tabs.into_iter().map(|item| item.tab).collect(),
     };
-    emit_model_events(world, &previous, &model);
+    for event in previous.events(&model) {
+        events.write(event);
+    }
     if previous != model {
-        *world.resource_mut::<ChromeModel>() = model;
+        *current = model;
     }
 }
 
-fn collect_windows(world: &mut World) -> Vec<WindowCandidate> {
-    let mut query = world.query::<(Entity, &Window, Has<PrimaryWindow>)>();
-    let mut windows = query
-        .iter(world)
-        .map(|(entity, window, primary)| {
-            let scale = window.resolution.scale_factor().max(f32::EPSILON);
-            let (left, top) = match window.position {
-                WindowPosition::At(position) => (
-                    (position.x as f32 / scale).round() as i32,
-                    (position.y as f32 / scale).round() as i32,
-                ),
-                _ => (0, 0),
-            };
-            WindowCandidate {
-                entity,
-                primary,
-                focused: window.focused,
-                left,
-                top,
-                width: window.resolution.width().round() as i32,
-                height: window.resolution.height().round() as i32,
-            }
-        })
-        .collect::<Vec<_>>();
-    windows.sort_by_key(|window| (!window.primary, window.entity.to_bits()));
-    windows
-}
-
-fn collect_pages(world: &mut World) -> Vec<PageCandidate> {
-    let mut spaces_query = world.query_filtered::<(Entity, Option<&Order>), With<Space>>();
-    let mut spaces = spaces_query
-        .iter(world)
-        .map(|(entity, order)| (order.map_or(u32::MAX, |order| order.0), entity))
-        .collect::<Vec<_>>();
-    spaces.sort_by_key(|(order, entity)| (*order, entity.to_bits()));
-    let mut pages = Vec::new();
-    for (_, space) in spaces {
-        let mut tabs = world
-            .get::<Children>(space)
-            .into_iter()
-            .flat_map(|children| children.iter())
-            .filter(|entity| world.get::<Tab>(*entity).is_some())
-            .map(|entity| {
-                (
-                    world.get::<Order>(entity).map_or(u32::MAX, |order| order.0),
+impl WindowCandidate {
+    fn collect(query: &Query<(Entity, &Window, Has<PrimaryWindow>)>) -> Vec<Self> {
+        let mut windows = query
+            .iter()
+            .map(|(entity, window, primary)| {
+                let scale = window.resolution.scale_factor().max(f32::EPSILON);
+                let (left, top) = match window.position {
+                    WindowPosition::At(position) => (
+                        (position.x as f32 / scale).round() as i32,
+                        (position.y as f32 / scale).round() as i32,
+                    ),
+                    _ => (0, 0),
+                };
+                WindowCandidate {
                     entity,
-                )
+                    primary,
+                    focused: window.focused,
+                    left,
+                    top,
+                    width: window.resolution.width().round() as i32,
+                    height: window.resolution.height().round() as i32,
+                }
             })
             .collect::<Vec<_>>();
-        tabs.sort_by_key(|(order, entity)| (*order, entity.to_bits()));
-        for (_, tab) in tabs {
-            let mut stacks = Vec::new();
-            collect_stacks(world, tab, &mut stacks);
-            for stack in stacks {
-                if let Some(page) = page_candidate(world, stack) {
-                    pages.push(page);
+        windows.sort_by_key(|window| (!window.primary, window.entity.to_bits()));
+        windows
+    }
+}
+
+impl PageCandidate {
+    fn collect(
+        space_query: &Query<(Entity, Option<&Order>), With<Space>>,
+        hierarchy: &Query<HierarchyData>,
+        page_query: &Query<PageData>,
+    ) -> Vec<Self> {
+        let mut spaces = space_query
+            .iter()
+            .map(|(entity, order)| (order.map_or(u32::MAX, |order| order.0), entity))
+            .collect::<Vec<_>>();
+        spaces.sort_by_key(|(order, entity)| (*order, entity.to_bits()));
+        let mut pages = Vec::new();
+        for (_, space) in spaces {
+            let Ok((Some(children), _, _, _, _, _, _)) = hierarchy.get(space) else {
+                continue;
+            };
+            let mut tabs = children
+                .iter()
+                .filter_map(|entity| {
+                    let Ok((_, _, order, is_tab, _, _, _)) = hierarchy.get(entity) else {
+                        return None;
+                    };
+                    is_tab.then_some((order.map_or(u32::MAX, |order| order.0), entity))
+                })
+                .collect::<Vec<_>>();
+            tabs.sort_by_key(|(order, entity)| (*order, entity.to_bits()));
+            for (_, tab) in tabs {
+                let mut stacks = Vec::new();
+                Self::collect_stacks(hierarchy, tab, &mut stacks);
+                for stack in stacks {
+                    if let Some(page) = Self::from_entity(hierarchy, page_query, stack) {
+                        pages.push(page);
+                    }
                 }
             }
         }
+        pages
     }
-    pages
-}
 
-fn collect_stacks(world: &World, entity: Entity, stacks: &mut Vec<Entity>) {
-    if world.get::<Stack>(entity).is_some() {
-        stacks.push(entity);
-        return;
-    }
-    if let Some(children) = world.get::<Children>(entity) {
-        for child in children.iter() {
-            collect_stacks(world, child, stacks);
+    fn collect_stacks(hierarchy: &Query<HierarchyData>, entity: Entity, stacks: &mut Vec<Entity>) {
+        let Ok((children, _, _, _, is_stack, _, _)) = hierarchy.get(entity) else {
+            return;
+        };
+        if is_stack {
+            stacks.push(entity);
+            return;
+        }
+        if let Some(children) = children {
+            for child in children.iter() {
+                Self::collect_stacks(hierarchy, child, stacks);
+            }
         }
     }
-}
 
-fn page_candidate(world: &World, entity: Entity) -> Option<PageCandidate> {
-    if world.get::<ExtensionBridgeWebview>(entity).is_some() {
-        return None;
+    fn from_entity(
+        hierarchy: &Query<HierarchyData>,
+        page_query: &Query<PageData>,
+        entity: Entity,
+    ) -> Option<Self> {
+        let (_, metadata, activated, identity, is_bridge, loading) = page_query.get(entity).ok()?;
+        if is_bridge || !extension_visible_url(&metadata.url) {
+            return None;
+        }
+        let child_loading = hierarchy
+            .get(entity)
+            .ok()
+            .and_then(|(children, _, _, _, _, _, _)| children)
+            .is_some_and(|children| {
+                children.iter().any(|child| {
+                    hierarchy
+                        .get(child)
+                        .is_ok_and(|(_, _, _, _, _, _, loading)| loading)
+                })
+            });
+        Some(Self {
+            entity,
+            host_window: Self::host_window(hierarchy, entity),
+            activated_at: activated.map_or(0, |activated| activated.0),
+            url: metadata.url.clone(),
+            title: metadata.title_with(identity).to_string(),
+            status: if loading || child_loading {
+                "loading"
+            } else {
+                "complete"
+            }
+            .into(),
+        })
     }
-    let metadata = world.get::<PageMetadata>(entity)?;
-    if !extension_visible_url(&metadata.url) {
-        return None;
-    }
-    let loading = world.get::<Loading>(entity).is_some()
-        || world.get::<Children>(entity).is_some_and(|children| {
-            children
-                .iter()
-                .any(|child| world.get::<Loading>(child).is_some())
-        });
-    Some(PageCandidate {
-        entity,
-        host_window: host_window_for(world, entity),
-        activated_at: world
-            .get::<LastActivatedAt>(entity)
-            .map_or(0, |activated| activated.0),
-        url: metadata.url.clone(),
-        title: metadata
-            .title_with(world.get::<vmux_core::PageIdentity>(entity))
-            .to_string(),
-        status: if loading { "loading" } else { "complete" }.into(),
-    })
-}
 
-fn host_window_for(world: &World, entity: Entity) -> Option<Entity> {
-    if let Some(host) = world.get::<HostWindow>(entity) {
-        return Some(host.0);
-    }
-    if let Some(host) = world.get::<Children>(entity).and_then(|children| {
-        children
-            .iter()
-            .find_map(|child| world.get::<HostWindow>(child))
-    }) {
-        return Some(host.0);
-    }
-    let mut current = entity;
-    while let Some(parent) = world.get::<ChildOf>(current).map(Relationship::get) {
-        if let Some(host) = world.get::<HostWindow>(parent) {
+    fn host_window(hierarchy: &Query<HierarchyData>, entity: Entity) -> Option<Entity> {
+        let (children, _, _, _, _, host, _) = hierarchy.get(entity).ok()?;
+        if let Some(host) = host {
             return Some(host.0);
         }
-        current = parent;
-    }
-    None
-}
-
-fn select_active_tabs(
-    previous: &ChromeModel,
-    focused_stack: Option<Entity>,
-    projected: &mut [ProjectedTab],
-) {
-    let mut selected = HashMap::<i32, i32>::new();
-    if let Some(focused) = focused_stack
-        && let Some(item) = projected.iter().find(|item| item.entity == focused)
-    {
-        selected.insert(item.tab.window_id, item.tab.id);
-    }
-    for previous_tab in previous.tabs.iter().filter(|tab| tab.active) {
-        if selected.contains_key(&previous_tab.window_id) {
-            continue;
-        }
-        if projected.iter().any(|item| item.tab.id == previous_tab.id) {
-            selected.insert(previous_tab.window_id, previous_tab.id);
-        }
-    }
-    let window_ids = projected
-        .iter()
-        .map(|item| item.tab.window_id)
-        .collect::<std::collections::HashSet<_>>();
-    for window_id in window_ids {
-        if selected.contains_key(&window_id) {
-            continue;
-        }
-        if let Some(item) = projected
-            .iter()
-            .filter(|item| item.tab.window_id == window_id)
-            .max_by_key(|item| item.activated_at)
+        if let Some(host) = children
+            .into_iter()
+            .flat_map(|children| children.iter())
+            .find_map(|child| {
+                hierarchy
+                    .get(child)
+                    .ok()
+                    .and_then(|(_, _, _, _, _, host, _)| host)
+            })
         {
-            selected.insert(window_id, item.tab.id);
+            return Some(host.0);
         }
-    }
-    for item in projected {
-        item.tab.active = selected.get(&item.tab.window_id) == Some(&item.tab.id);
-        item.tab.highlighted = item.tab.active;
+        let mut current = entity;
+        while let Some(parent) = hierarchy
+            .get(current)
+            .ok()
+            .and_then(|(_, parent, _, _, _, _, _)| parent)
+            .map(Relationship::get)
+        {
+            if let Ok((_, _, _, _, _, Some(host), _)) = hierarchy.get(parent) {
+                return Some(host.0);
+            }
+            current = parent;
+        }
+        None
     }
 }
 
-fn emit_model_events(world: &mut World, previous: &ChromeModel, current: &ChromeModel) {
-    let old_windows = previous
-        .windows
-        .iter()
-        .map(|window| (window.id, window))
-        .collect::<HashMap<_, _>>();
-    let new_windows = current
-        .windows
-        .iter()
-        .map(|window| (window.id, window))
-        .collect::<HashMap<_, _>>();
-    let old_tabs = previous
-        .tabs
-        .iter()
-        .map(|tab| (tab.id, tab))
-        .collect::<HashMap<_, _>>();
-    let new_tabs = current
-        .tabs
-        .iter()
-        .map(|tab| (tab.id, tab))
-        .collect::<HashMap<_, _>>();
-    let mut events = Vec::new();
-    for old in &previous.windows {
-        if !new_windows.contains_key(&old.id) {
-            events.push(ChromeModelEvent::WindowRemoved { window_id: old.id });
+impl ProjectedTab {
+    fn select_active(
+        previous: &ExtensionModel,
+        focused_stack: Option<Entity>,
+        projected: &mut [Self],
+    ) {
+        let mut selected = HashMap::<i32, i32>::new();
+        if let Some(focused) = focused_stack
+            && let Some(item) = projected.iter().find(|item| item.entity == focused)
+        {
+            selected.insert(item.tab.window_id, item.tab.id);
         }
-    }
-    for new in &current.windows {
-        match old_windows.get(&new.id) {
-            None => events.push(ChromeModelEvent::WindowCreated(new.clone())),
-            Some(old)
-                if old.left != new.left
-                    || old.top != new.top
-                    || old.width != new.width
-                    || old.height != new.height =>
-            {
-                events.push(ChromeModelEvent::WindowBoundsChanged(new.clone()));
+        for previous_tab in previous.tabs.iter().filter(|tab| tab.active) {
+            if selected.contains_key(&previous_tab.window_id) {
+                continue;
             }
-            Some(_) => {}
+            if projected.iter().any(|item| item.tab.id == previous_tab.id) {
+                selected.insert(previous_tab.window_id, previous_tab.id);
+            }
+        }
+        let window_ids = projected
+            .iter()
+            .map(|item| item.tab.window_id)
+            .collect::<std::collections::HashSet<_>>();
+        for window_id in window_ids {
+            if selected.contains_key(&window_id) {
+                continue;
+            }
+            if let Some(item) = projected
+                .iter()
+                .filter(|item| item.tab.window_id == window_id)
+                .max_by_key(|item| item.activated_at)
+            {
+                selected.insert(window_id, item.tab.id);
+            }
+        }
+        for item in projected {
+            item.tab.active = selected.get(&item.tab.window_id) == Some(&item.tab.id);
+            item.tab.highlighted = item.tab.active;
         }
     }
-    let old_focused = previous
-        .windows
-        .iter()
-        .find(|window| window.focused)
-        .map_or(-1, |window| window.id);
-    let new_focused = current
-        .windows
-        .iter()
-        .find(|window| window.focused)
-        .map_or(-1, |window| window.id);
-    if old_focused != new_focused {
-        events.push(ChromeModelEvent::WindowFocusChanged {
-            window_id: new_focused,
-        });
-    }
-    for old in &previous.tabs {
-        if !new_tabs.contains_key(&old.id) {
-            events.push(ChromeModelEvent::TabRemoved {
-                tab_id: old.id,
-                window_id: old.window_id,
+}
+
+impl ExtensionModel {
+    fn events(&self, current: &Self) -> Vec<ExtensionModelEvent> {
+        let old_windows = self
+            .windows
+            .iter()
+            .map(|window| (window.id, window))
+            .collect::<HashMap<_, _>>();
+        let new_windows = current
+            .windows
+            .iter()
+            .map(|window| (window.id, window))
+            .collect::<HashMap<_, _>>();
+        let old_tabs = self
+            .tabs
+            .iter()
+            .map(|tab| (tab.id, tab))
+            .collect::<HashMap<_, _>>();
+        let new_tabs = current
+            .tabs
+            .iter()
+            .map(|tab| (tab.id, tab))
+            .collect::<HashMap<_, _>>();
+        let mut events = Vec::new();
+        for old in &self.windows {
+            if !new_windows.contains_key(&old.id) {
+                events.push(ExtensionModelEvent::WindowRemoved { window_id: old.id });
+            }
+        }
+        for new in &current.windows {
+            match old_windows.get(&new.id) {
+                None => events.push(ExtensionModelEvent::WindowCreated(new.clone())),
+                Some(old)
+                    if old.left != new.left
+                        || old.top != new.top
+                        || old.width != new.width
+                        || old.height != new.height =>
+                {
+                    events.push(ExtensionModelEvent::WindowBoundsChanged(new.clone()));
+                }
+                Some(_) => {}
+            }
+        }
+        let old_focused = self
+            .windows
+            .iter()
+            .find(|window| window.focused)
+            .map_or(-1, |window| window.id);
+        let new_focused = current
+            .windows
+            .iter()
+            .find(|window| window.focused)
+            .map_or(-1, |window| window.id);
+        if old_focused != new_focused {
+            events.push(ExtensionModelEvent::WindowFocusChanged {
+                window_id: new_focused,
             });
         }
-    }
-    for new in &current.tabs {
-        match old_tabs.get(&new.id) {
-            None => events.push(ChromeModelEvent::TabCreated(new.clone())),
-            Some(old) if *old != new => events.push(ChromeModelEvent::TabUpdated {
-                old: (*old).clone(),
-                new: new.clone(),
-            }),
-            Some(_) => {}
+        for old in &self.tabs {
+            if !new_tabs.contains_key(&old.id) {
+                events.push(ExtensionModelEvent::TabRemoved {
+                    tab_id: old.id,
+                    window_id: old.window_id,
+                });
+            }
         }
-        if new.active && !old_tabs.get(&new.id).is_some_and(|old| old.active) {
-            events.push(ChromeModelEvent::TabActivated {
-                tab_id: new.id,
-                window_id: new.window_id,
-            });
+        for new in &current.tabs {
+            match old_tabs.get(&new.id) {
+                None => events.push(ExtensionModelEvent::TabCreated(new.clone())),
+                Some(old) if *old != new => events.push(ExtensionModelEvent::TabUpdated {
+                    old: (*old).clone(),
+                    new: new.clone(),
+                }),
+                Some(_) => {}
+            }
+            if new.active && !old_tabs.get(&new.id).is_some_and(|old| old.active) {
+                events.push(ExtensionModelEvent::TabActivated {
+                    tab_id: new.id,
+                    window_id: new.window_id,
+                });
+            }
         }
-    }
-    for event in events {
-        world.write_message(event);
+        events
     }
 }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChromeWindow {
+pub struct ExtensionWindowSnapshot {
     pub id: i32,
     pub focused: bool,
     pub left: i32,
@@ -19,7 +19,7 @@ pub struct ChromeWindow {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChromeTab {
+pub struct ExtensionTabSnapshot {
     pub id: i32,
     pub window_id: i32,
     pub index: u32,
@@ -31,7 +31,7 @@ pub struct ChromeTab {
     pub status: String,
 }
 
-impl ChromeTab {
+impl ExtensionTabSnapshot {
     pub(crate) fn disclosed_value(
         mut self,
         window_id: i32,
@@ -50,7 +50,7 @@ impl ChromeTab {
                         .iter()
                         .any(|pattern| pattern.matches(&url))
             });
-        let mut value = serde_json::to_value(self).expect("ChromeTab serializes");
+        let mut value = serde_json::to_value(self).expect("extension tab serializes");
         if !disclose {
             let object = value.as_object_mut().expect("tab object");
             object.remove("url");
@@ -60,21 +60,21 @@ impl ChromeTab {
     }
 }
 
-#[derive(Resource, Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
-pub struct ChromeModel {
-    pub windows: Vec<ChromeWindow>,
-    pub tabs: Vec<ChromeTab>,
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ExtensionModel {
+    pub windows: Vec<ExtensionWindowSnapshot>,
+    pub tabs: Vec<ExtensionTabSnapshot>,
 }
 
-#[derive(Resource)]
-pub struct ChromeStableIds {
+#[derive(Component)]
+pub struct ExtensionStableIds {
     next_window: i32,
     next_tab: i32,
     windows: HashMap<Entity, i32>,
     tabs: HashMap<Entity, i32>,
 }
 
-impl Default for ChromeStableIds {
+impl Default for ExtensionStableIds {
     fn default() -> Self {
         Self {
             next_window: 1,
@@ -85,7 +85,7 @@ impl Default for ChromeStableIds {
     }
 }
 
-impl ChromeStableIds {
+impl ExtensionStableIds {
     pub(crate) fn window(&mut self, entity: Entity) -> i32 {
         if let Some(id) = self.windows.get(&entity) {
             return *id;
@@ -122,15 +122,28 @@ impl ChromeStableIds {
 #[derive(Message, Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 #[allow(clippy::enum_variant_names)]
-pub enum ChromeModelEvent {
-    WindowCreated(ChromeWindow),
-    WindowRemoved { window_id: i32 },
-    WindowFocusChanged { window_id: i32 },
-    WindowBoundsChanged(ChromeWindow),
-    TabCreated(ChromeTab),
-    TabUpdated { old: ChromeTab, new: ChromeTab },
-    TabRemoved { tab_id: i32, window_id: i32 },
-    TabActivated { tab_id: i32, window_id: i32 },
+pub enum ExtensionModelEvent {
+    WindowCreated(ExtensionWindowSnapshot),
+    WindowRemoved {
+        window_id: i32,
+    },
+    WindowFocusChanged {
+        window_id: i32,
+    },
+    WindowBoundsChanged(ExtensionWindowSnapshot),
+    TabCreated(ExtensionTabSnapshot),
+    TabUpdated {
+        old: ExtensionTabSnapshot,
+        new: ExtensionTabSnapshot,
+    },
+    TabRemoved {
+        tab_id: i32,
+        window_id: i32,
+    },
+    TabActivated {
+        tab_id: i32,
+        window_id: i32,
+    },
 }
 
 pub fn extension_visible_url(url: &str) -> bool {
@@ -175,11 +188,8 @@ mod tests {
     #[test]
     fn projects_ordered_visible_pages_with_stable_ids_and_removals() {
         let mut app = App::new();
-        app.init_resource::<ChromeModel>()
-            .init_resource::<ChromeStableIds>()
-            .insert_resource(FocusedStack::default())
-            .add_message::<ChromeModelEvent>()
-            .add_systems(Update, crate::extensions::project::rebuild_chrome_model);
+        app.insert_resource(FocusedStack::default())
+            .add_plugins(crate::extensions::project::ExtensionProjectPlugin);
         app.world_mut().spawn((
             Window {
                 resolution: (1200, 800).into(),
@@ -222,7 +232,13 @@ mod tests {
 
         app.update();
 
-        let model = app.world().resource::<ChromeModel>();
+        let runtime = app
+            .world()
+            .iter_entities()
+            .find(|entity| entity.contains::<ExtensionModel>())
+            .unwrap()
+            .id();
+        let model = app.world().get::<ExtensionModel>(runtime).unwrap();
         assert_eq!(model.windows.len(), 1);
         assert_eq!(model.tabs.len(), 3);
         assert_eq!(
@@ -247,7 +263,8 @@ mod tests {
         app.update();
         assert_eq!(
             app.world()
-                .resource::<ChromeModel>()
+                .get::<ExtensionModel>(runtime)
+                .unwrap()
                 .tabs
                 .iter()
                 .find(|tab| tab.active)
@@ -261,18 +278,21 @@ mod tests {
             .unwrap()
             .title = "Updated".into();
         app.update();
-        assert_eq!(app.world().resource::<ChromeModel>().tabs[0].id, first_id);
+        assert_eq!(
+            app.world().get::<ExtensionModel>(runtime).unwrap().tabs[0].id,
+            first_id
+        );
 
         let mut cursor = app
             .world()
-            .resource::<Messages<ChromeModelEvent>>()
+            .resource::<Messages<ExtensionModelEvent>>()
             .get_cursor();
         app.world_mut().entity_mut(first).despawn();
         app.update();
-        let messages = app.world().resource::<Messages<ChromeModelEvent>>();
+        let messages = app.world().resource::<Messages<ExtensionModelEvent>>();
         assert!(cursor.read(messages).any(|event| matches!(
             event,
-            ChromeModelEvent::TabRemoved { tab_id, .. } if *tab_id == first_id
+            ExtensionModelEvent::TabRemoved { tab_id, .. } if *tab_id == first_id
         )));
     }
 

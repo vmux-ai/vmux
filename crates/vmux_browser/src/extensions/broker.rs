@@ -6,13 +6,13 @@ use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use vmux_core::extension::protocol::{
-    ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ChromeError,
+    ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ExtensionApiError,
     ExtensionCallerContext,
 };
 
 use super::bridge::{BridgeAuthorization, BridgeInbound, ExtensionBridgeServer};
 use super::capability::{CapabilityKind, CapabilityMatrix, CapabilityStatus};
-use super::model::{ChromeModel, ChromeModelEvent};
+use super::model::{ExtensionModel, ExtensionModelEvent};
 use super::windows::{
     CloseExtensionWindowRequest, ExtensionWindows, OpenExtensionWindowRequest,
     UpdateHostWindowRequest,
@@ -34,7 +34,7 @@ impl Plugin for ExtensionBrokerPlugin {
             )
             .add_systems(
                 Update,
-                forward_chrome_model_events.after(super::project::rebuild_chrome_model),
+                forward_extension_model_events.after(super::project::ExtensionProjectionSet),
             )
             .add_systems(Update, fire_conformance_wake_timer)
             .add_systems(Update, arm_bridge_wake);
@@ -126,7 +126,7 @@ pub fn drain_bridge_requests(
     server: Res<ExtensionBridgeServer>,
     mut subscriptions: ResMut<BridgeSubscriptions>,
     mut pending: ResMut<PendingBridgeEvents>,
-    model: Res<ChromeModel>,
+    model: Single<&ExtensionModel>,
     mut wake_timer: Option<ResMut<ConformanceWakeTimer>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut response_cache: ResMut<BridgeResponseCache>,
@@ -136,7 +136,7 @@ pub fn drain_bridge_requests(
     mut open_window_requests: MessageWriter<OpenExtensionWindowRequest>,
     mut close_window_requests: MessageWriter<CloseExtensionWindowRequest>,
     mut update_host_window_requests: MessageWriter<UpdateHostWindowRequest>,
-    mut model_events: MessageWriter<ChromeModelEvent>,
+    mut model_events: MessageWriter<ExtensionModelEvent>,
 ) {
     for _ in 0..MAX_BRIDGE_MESSAGES_PER_UPDATE {
         let Ok(inbound) = server.try_recv() else {
@@ -212,7 +212,7 @@ pub fn drain_bridge_requests(
                 if requests.contains(&request_id) {
                     let duplicate = BridgeServerMessage::Response(ApiResponse::failure(
                         request_id,
-                        ChromeError::new("duplicate_request", "duplicate bridge request id"),
+                        ExtensionApiError::new("duplicate_request", "duplicate bridge request id"),
                     ));
                     if let Err(error) = server.send_to_session(&extension_id, session_id, duplicate)
                     {
@@ -429,17 +429,17 @@ fn authorize_api_request(
     server: &ExtensionBridgeServer,
     extension_id: &str,
     request: &ApiRequest,
-    model: &ChromeModel,
-) -> Result<(), ChromeError> {
+    model: &ExtensionModel,
+) -> Result<(), ExtensionApiError> {
     validate_caller_context(extension_id, &request.caller_context, model)?;
     if request.request_id.is_empty() || request.request_id.len() > 128 {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "invalid_request",
             "extension request id is invalid",
         ));
     }
     let authorization = server.authorization(extension_id).ok_or_else(|| {
-        ChromeError::new(
+        ExtensionApiError::new(
             "permission_denied",
             "extension authorization is unavailable",
         )
@@ -448,7 +448,7 @@ fn authorize_api_request(
         if extension_conformance_enabled() && authorization.conformance {
             return Ok(());
         }
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "permission_denied",
             "reserved conformance API is not authorized for this extension",
         ));
@@ -456,14 +456,14 @@ fn authorize_api_request(
     if let Some(permission) = required_api_permission(&request.namespace, &request.method)?
         && !authorization.permissions.contains(permission)
     {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "permission_denied",
             format!("{} requires the {permission} permission", request.namespace),
         ));
     }
     if requires_host_permission(&request.namespace, &request.method) {
         if authorization.host_permissions.is_empty() {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "host_permission_denied",
                 format!(
                     "{}.{} requires a host permission",
@@ -473,7 +473,7 @@ fn authorize_api_request(
         }
         let urls = request_target_urls(request, model)?;
         if urls.is_empty() {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "host_permission_denied",
                 format!(
                     "{}.{} target host could not be resolved",
@@ -489,7 +489,7 @@ fn authorize_api_request(
                     .take(64)
                     .any(|pattern| pattern.matches(url))
         }) {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "host_permission_denied",
                 format!(
                     "{}.{} is not allowed for the requested host",
@@ -504,10 +504,10 @@ fn authorize_api_request(
 fn validate_caller_context<'a>(
     extension_id: &str,
     caller: &'a ExtensionCallerContext,
-    model: &ChromeModel,
-) -> Result<&'a ExtensionCallerContext, ChromeError> {
+    model: &ExtensionModel,
+) -> Result<&'a ExtensionCallerContext, ExtensionApiError> {
     if caller.extension_id() != extension_id || caller.context_id().is_empty() {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "invalid_context",
             "extension caller context is not authorized",
         ));
@@ -519,7 +519,7 @@ fn validate_caller_context<'a>(
         .url()
         .is_some_and(|url| !url.starts_with(&format!("chrome-extension://{extension_id}/")))
     {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "invalid_context",
             "extension caller URL does not match its extension origin",
         ));
@@ -531,7 +531,7 @@ fn validate_caller_context<'a>(
     } = caller
         && context_id != document_id
     {
-        return Err(ChromeError::new(
+        return Err(ExtensionApiError::new(
             "invalid_context",
             "extension page context identity is inconsistent",
         ));
@@ -547,7 +547,7 @@ fn validate_caller_context<'a>(
             .ok()
             .and_then(|tab_id| model.tabs.iter().find(|tab| tab.id == tab_id));
         if *frame_id < 0 || tab.is_none_or(|tab| tab.url != *url) {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "invalid_context",
                 "content-script caller does not match the browser model",
             ));
@@ -559,7 +559,7 @@ fn validate_caller_context<'a>(
 fn required_api_permission(
     namespace: &str,
     method: &str,
-) -> Result<Option<&'static str>, ChromeError> {
+) -> Result<Option<&'static str>, ExtensionApiError> {
     let namespace = namespace.split('.').next().unwrap_or(namespace);
     let permission = match namespace {
         "runtime" | "tabs" | "windows" | "action" | "commands" => None,
@@ -584,7 +584,7 @@ fn required_api_permission(
         "webRequest" => Some("webRequest"),
         "scripting" => Some("scripting"),
         _ => {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "permission_policy_missing",
                 format!("{namespace}.{method} has no permission policy"),
             ));
@@ -611,8 +611,8 @@ fn requires_host_permission(namespace: &str, method: &str) -> bool {
 
 fn request_target_urls(
     request: &ApiRequest,
-    model: &ChromeModel,
-) -> Result<Vec<url::Url>, ChromeError> {
+    model: &ExtensionModel,
+) -> Result<Vec<url::Url>, ExtensionApiError> {
     let mut urls = Vec::new();
     let mut tab_ids = Vec::new();
     collect_request_targets(&request.arguments, &mut urls, &mut tab_ids, 0);
@@ -638,7 +638,7 @@ fn request_target_urls(
             .ok()
             .and_then(|tab_id| model.tabs.iter().find(|tab| tab.id == tab_id))
         else {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "host_permission_denied",
                 "extension request target tab is unavailable",
             ));
@@ -691,8 +691,8 @@ fn collect_request_targets(
     }
 }
 
-pub fn forward_chrome_model_events(
-    mut events: MessageReader<ChromeModelEvent>,
+pub fn forward_extension_model_events(
+    mut events: MessageReader<ExtensionModelEvent>,
     subscriptions: Res<BridgeSubscriptions>,
     server: Res<ExtensionBridgeServer>,
     mut pending: ResMut<PendingBridgeEvents>,
@@ -703,7 +703,7 @@ pub fn forward_chrome_model_events(
                 entry.namespace == CONFORMANCE_NAMESPACE && entry.event == MODEL_CHANGED_EVENT
             }) {
                 let Ok(value) = serde_json::to_value(event) else {
-                    bevy::log::error!("failed to serialize Chrome model event");
+                    bevy::log::error!("failed to serialize extension model event");
                     continue;
                 };
                 queue_event(
@@ -735,7 +735,7 @@ pub fn forward_chrome_model_events(
 
 pub fn fire_conformance_wake_timer(
     timer: Option<ResMut<ConformanceWakeTimer>>,
-    model: Res<ChromeModel>,
+    model: Single<&ExtensionModel>,
     server: Res<ExtensionBridgeServer>,
     mut pending: ResMut<PendingBridgeEvents>,
 ) {
@@ -750,8 +750,8 @@ pub fn fire_conformance_wake_timer(
         .collect::<Vec<_>>();
     for extension_id in ready {
         timer.deadlines.remove(&extension_id);
-        let Ok(snapshot) = serde_json::to_value(&*model) else {
-            bevy::log::error!("failed to serialize Chrome model snapshot");
+        let Ok(snapshot) = serde_json::to_value(*model) else {
+            bevy::log::error!("failed to serialize extension model snapshot");
             continue;
         };
         queue_event(
@@ -771,7 +771,7 @@ struct DispatchedApiRequest {
     open_window: Option<OpenExtensionWindowRequest>,
     close_window: Option<CloseExtensionWindowRequest>,
     update_host_window: Option<UpdateHostWindowRequest>,
-    events: Vec<ChromeModelEvent>,
+    events: Vec<ExtensionModelEvent>,
 }
 
 fn dispatched_response(response: BridgeServerMessage) -> DispatchedApiRequest {
@@ -787,7 +787,7 @@ fn dispatched_response(response: BridgeServerMessage) -> DispatchedApiRequest {
 
 fn create_page_request(
     request: &ApiRequest,
-) -> Result<vmux_layout::stack::OpenRequest, ChromeError> {
+) -> Result<vmux_layout::stack::OpenRequest, ExtensionApiError> {
     let create_info = request
         .arguments
         .as_array()
@@ -805,12 +805,12 @@ fn create_page_request(
         return Ok(vmux_layout::stack::OpenRequest { url: None });
     };
     let parsed = url::Url::parse(url)
-        .map_err(|_| ChromeError::new("invalid_url", "extension page URL is invalid"))?;
+        .map_err(|_| ExtensionApiError::new("invalid_url", "extension page URL is invalid"))?;
     match parsed.scheme() {
         "http" | "https" => {}
         "chrome-extension" if parsed.host_str() == Some(request.caller_context.extension_id()) => {}
         _ => {
-            return Err(ChromeError::new(
+            return Err(ExtensionApiError::new(
                 "invalid_url",
                 "extension page URL uses an unsupported scheme",
             ));
@@ -824,7 +824,7 @@ fn create_page_request(
 fn dispatch_api_request(
     matrix: &CapabilityMatrix,
     request: ApiRequest,
-    model: &ChromeModel,
+    model: &ExtensionModel,
     extension_windows: &mut ExtensionWindows,
     authorization: &BridgeAuthorization,
     conformance_enabled: bool,
@@ -838,13 +838,13 @@ fn dispatch_api_request(
                 )),
                 Err(error) => BridgeServerMessage::Response(ApiResponse::failure(
                     request.request_id,
-                    ChromeError::new("serialization_failed", error.to_string()),
+                    ExtensionApiError::new("serialization_failed", error.to_string()),
                 )),
             });
         }
         return dispatched_response(BridgeServerMessage::Response(ApiResponse::failure(
             request.request_id,
-            ChromeError::new("unsupported_api", "reserved conformance API is disabled"),
+            ExtensionApiError::new("unsupported_api", "reserved conformance API is disabled"),
         )));
     }
     if request.namespace == "windows" {
@@ -870,7 +870,7 @@ fn dispatch_api_request(
         (request.namespace.as_str(), request.method.as_str()),
         ("tabs", "query" | "get")
     ) {
-        return match super::tabs::ChromeTabs::from(model).dispatch(&request, authorization) {
+        return match super::tabs::ExtensionTabs::from(model).dispatch(&request, authorization) {
             Ok(result) => dispatched_response(BridgeServerMessage::Response(ApiResponse::success(
                 request.request_id,
                 result,
@@ -912,7 +912,7 @@ fn dispatch_api_request(
     ) else {
         return dispatched_response(BridgeServerMessage::Response(ApiResponse::failure(
             request.request_id,
-            ChromeError::new(
+            ExtensionApiError::new(
                 "unsupported_api",
                 format!(
                     "{member} is not listed for Chromium {} on {}",
@@ -932,7 +932,7 @@ fn dispatch_api_request(
     };
     dispatched_response(BridgeServerMessage::Response(ApiResponse::failure(
         request.request_id,
-        ChromeError::new(
+        ExtensionApiError::new(
             code,
             format!(
                 "{member} is {status} for Chromium {} on {}",
@@ -1002,7 +1002,7 @@ fn resend_pending(
 fn send_fatal(server: &ExtensionBridgeServer, extension_id: &str, code: &str, message: &str) {
     if let Err(error) = server.send(
         extension_id,
-        BridgeServerMessage::Fatal(ChromeError::new(code, message)),
+        BridgeServerMessage::Fatal(ExtensionApiError::new(code, message)),
     ) {
         bevy::log::warn!("failed to send extension bridge error: {error}");
     }
@@ -1018,7 +1018,7 @@ fn send_fatal_to_session(
     if let Err(error) = server.send_to_session(
         extension_id,
         session_id,
-        BridgeServerMessage::Fatal(ChromeError::new(code, message)),
+        BridgeServerMessage::Fatal(ExtensionApiError::new(code, message)),
     ) {
         bevy::log::warn!("failed to send extension bridge error: {error}");
     }
@@ -1057,7 +1057,7 @@ mod tests {
     };
     use vmux_core::extension::protocol::{
         ApiRequest, ApiResponse, BRIDGE_PROTOCOL_VERSION, BridgeClientMessage, BridgeHello,
-        BridgeServerMessage, ChromeError, EventSubscribe, ExtensionCallerContext,
+        BridgeServerMessage, EventSubscribe, ExtensionApiError, ExtensionCallerContext,
         ExtensionContextKind,
     };
 
@@ -1155,7 +1155,7 @@ mod tests {
         let dispatched = dispatch_api_request(
             &CapabilityMatrix::embedded().unwrap(),
             request,
-            &ChromeModel::default(),
+            &ExtensionModel::default(),
             &mut ExtensionWindows::default(),
             &BridgeAuthorization::default(),
             false,
@@ -1191,7 +1191,7 @@ mod tests {
         let dispatched = dispatch_api_request(
             &CapabilityMatrix::embedded().unwrap(),
             request,
-            &ChromeModel::default(),
+            &ExtensionModel::default(),
             &mut ExtensionWindows::default(),
             &BridgeAuthorization::default(),
             false,
@@ -1202,7 +1202,7 @@ mod tests {
             dispatched.response,
             BridgeServerMessage::Response(ApiResponse::failure(
                 "window-create",
-                ChromeError::new("invalid_url", "window URL uses an unsupported scheme",),
+                ExtensionApiError::new("invalid_url", "window URL uses an unsupported scheme",),
             ))
         );
     }
@@ -1250,14 +1250,14 @@ mod tests {
             .init_resource::<BridgeSubscriptions>()
             .init_resource::<BridgeResponseCache>()
             .init_resource::<PendingBridgeEvents>()
-            .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
             .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
-            .add_message::<ChromeModelEvent>()
+            .add_message::<ExtensionModelEvent>()
             .add_systems(Update, drain_bridge_requests);
+        app.world_mut().spawn(ExtensionModel::default());
         for _ in 0..20 {
             app.update();
             std::thread::sleep(Duration::from_millis(5));
@@ -1271,7 +1271,7 @@ mod tests {
             response,
             BridgeServerMessage::Response(ApiResponse::failure(
                 "r1",
-                ChromeError::new(
+                ExtensionApiError::new(
                     "unsupported_api",
                     format!(
                         "runtime.sendMessage is Untested for Chromium 148 on {}",
@@ -1318,7 +1318,7 @@ mod tests {
     #[test]
     fn conformance_snapshot_requires_gate() {
         let matrix = CapabilityMatrix::embedded().unwrap();
-        let model = ChromeModel::default();
+        let model = ExtensionModel::default();
         let request = || ApiRequest {
             request_id: "snapshot".into(),
             namespace: CONFORMANCE_NAMESPACE.into(),
@@ -1356,7 +1356,7 @@ mod tests {
             disabled.response,
             BridgeServerMessage::Response(ApiResponse::failure(
                 "snapshot",
-                ChromeError::new("unsupported_api", "reserved conformance API is disabled")
+                ExtensionApiError::new("unsupported_api", "reserved conformance API is disabled")
             ))
         );
     }
@@ -1380,7 +1380,7 @@ mod tests {
             }],
         )
         .unwrap();
-        let model = ChromeModel::default();
+        let model = ExtensionModel::default();
         let request = |namespace: &str, method: &str, arguments: serde_json::Value| ApiRequest {
             request_id: "request".into(),
             namespace: namespace.into(),
@@ -1505,15 +1505,15 @@ mod tests {
             .insert_resource(pending)
             .init_resource::<BridgeSubscriptions>()
             .init_resource::<BridgeResponseCache>()
-            .init_resource::<ChromeModel>()
             .init_resource::<ConformanceWakeTimer>()
             .init_resource::<ExtensionWindows>()
             .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
-            .add_message::<ChromeModelEvent>()
+            .add_message::<ExtensionModelEvent>()
             .add_systems(Update, drain_bridge_requests);
+        app.world_mut().spawn(ExtensionModel::default());
         pump(&mut app);
 
         let resent = read_server(&mut restarted);
@@ -1576,20 +1576,20 @@ mod tests {
             .init_resource::<BridgeSubscriptions>()
             .init_resource::<BridgeResponseCache>()
             .init_resource::<PendingBridgeEvents>()
-            .init_resource::<ChromeModel>()
             .init_resource::<ExtensionWindows>()
             .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
-            .add_message::<ChromeModelEvent>()
+            .add_message::<ExtensionModelEvent>()
             .add_systems(
                 Update,
                 (
                     drain_bridge_requests,
-                    forward_chrome_model_events.after(drain_bridge_requests),
+                    forward_extension_model_events.after(drain_bridge_requests),
                 ),
             );
+        app.world_mut().spawn(ExtensionModel::default());
         pump(&mut app);
         assert!(
             app.world().resource::<BridgeSubscriptions>().0[EXTENSION_ID]
@@ -1598,7 +1598,7 @@ mod tests {
         );
 
         app.world_mut()
-            .write_message(ChromeModelEvent::WindowRemoved { window_id: 42 });
+            .write_message(ExtensionModelEvent::WindowRemoved { window_id: 42 });
         app.update();
 
         let BridgeServerMessage::Event(event) = read_server(&mut socket) else {
@@ -1628,7 +1628,6 @@ mod tests {
             .init_resource::<BridgeSubscriptions>()
             .init_resource::<BridgeResponseCache>()
             .init_resource::<PendingBridgeEvents>()
-            .init_resource::<ChromeModel>()
             .insert_resource(ConformanceWakeTimer {
                 scheduler: Some(scheduler),
                 ..Default::default()
@@ -1638,8 +1637,9 @@ mod tests {
             .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
-            .add_message::<ChromeModelEvent>()
+            .add_message::<ExtensionModelEvent>()
             .add_systems(Update, drain_bridge_requests);
+        app.world_mut().spawn(ExtensionModel::default());
         pump(&mut app);
         let first_deadline = app.world().resource::<ConformanceWakeTimer>().deadlines[EXTENSION_ID];
         assert_eq!(scheduled.try_recv().unwrap(), first_deadline);
@@ -1661,7 +1661,7 @@ mod tests {
     fn wake_timer_delivers_snapshot_event() {
         let server = conformance_server();
         let mut socket = connect_bridge(&server);
-        let model = ChromeModel::default();
+        let model = ExtensionModel::default();
         let mut timer = ConformanceWakeTimer {
             delay: Duration::ZERO,
             deadlines: HashMap::new(),
@@ -1671,10 +1671,10 @@ mod tests {
         timer.deadlines.insert(EXTENSION_ID.into(), Instant::now());
         let mut app = App::new();
         app.insert_resource(server)
-            .insert_resource(model.clone())
             .insert_resource(timer)
             .init_resource::<PendingBridgeEvents>()
             .add_systems(Update, fire_conformance_wake_timer);
+        app.world_mut().spawn(model.clone());
 
         app.update();
 
