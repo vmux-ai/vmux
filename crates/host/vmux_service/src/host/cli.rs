@@ -87,9 +87,9 @@ fn live_status_inner() -> std::io::Result<Option<(u64, u32)>> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut stream = stream;
-    crate::write_message_blocking!(&mut stream, &ClientMessage::Status)?;
+    crate::framing::write_client_message_blocking(&mut stream, &ClientMessage::Status)?;
     let mut reader = std::io::BufReader::new(&mut stream);
-    let msg = crate::read_message_blocking!(&mut reader, ServiceMessage)?;
+    let msg = crate::framing::read_service_message_blocking(&mut reader)?;
     Ok(match msg {
         Some(ServiceMessage::StatusResponse {
             uptime_secs,

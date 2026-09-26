@@ -1,29 +1,17 @@
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use vmux_api::protocol::{AgentCommand, AgentInvokeCommand, AgentNotify, JsonValue};
-use vmux_core::JsonArguments;
-use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin,
-    ToolRequestSet,
-};
+use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
 
 pub struct CommandToolPlugin;
 
 impl Plugin for CommandToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolKindManifestPlugin::<CommandTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(Update, (open_command_bar, notify).in_set(ToolDispatchSet));
+        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
+            .register_tool::<OpenCommandBarArgs>("open_command_bar")
+            .register_tool::<NotifyArgs>("notify")
+            .add_systems(Update, (open_command_bar, notify).in_set(ToolDispatchSet));
     }
-}
-
-#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum CommandTool {
-    OpenCommandBar,
-    Notify,
 }
 
 #[derive(Component, Deserialize)]
@@ -37,38 +25,6 @@ struct OpenCommandBarArgs {
 struct NotifyArgs {
     title: Option<String>,
     body: Option<String>,
-}
-
-fn parse(
-    mut commands: Commands,
-    calls: Query<(Entity, &Name, &JsonArguments, &CommandTool), AddedTool<CommandTool>>,
-) {
-    for (entity, name, arguments, tool) in &calls {
-        match tool {
-            CommandTool::OpenCommandBar => {
-                match arguments.parse::<OpenCommandBarArgs>(name.as_str()) {
-                    Ok(args) => {
-                        commands.entity(entity).insert(args);
-                    }
-                    Err(message) => {
-                        commands
-                            .entity(entity)
-                            .insert(ToolDispatchError::new(message));
-                    }
-                }
-            }
-            CommandTool::Notify => match arguments.parse::<NotifyArgs>(name.as_str()) {
-                Ok(args) => {
-                    commands.entity(entity).insert(args);
-                }
-                Err(message) => {
-                    commands
-                        .entity(entity)
-                        .insert(ToolDispatchError::new(message));
-                }
-            },
-        }
-    }
 }
 
 fn open_command_bar(
@@ -106,9 +62,12 @@ fn notify(mut commands: Commands, requests: Query<(Entity, &NotifyArgs), AddedTo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_core::JsonArguments;
     use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
 
-    impl CommandTool {
+    struct CommandToolFixture;
+
+    impl CommandToolFixture {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(CommandToolPlugin);
@@ -155,7 +114,10 @@ mod tests {
 
     #[test]
     fn manifest_registers_command_tools() {
-        assert_eq!(CommandTool::definitions(), ["open_command_bar", "notify"]);
+        assert_eq!(
+            CommandToolFixture::definitions(),
+            ["open_command_bar", "notify"]
+        );
     }
 
     #[test]
@@ -166,7 +128,7 @@ mod tests {
             ("path", "browser_open_path_bar"),
         ] {
             assert_eq!(
-                CommandTool::dispatch("open_command_bar", serde_json::json!({"mode": mode})),
+                CommandToolFixture::dispatch("open_command_bar", serde_json::json!({"mode": mode})),
                 Ok(AgentCommand::InvokeCommand(AgentInvokeCommand {
                     id: id.to_string(),
                     args: JsonValue::Object(Vec::new()),
@@ -174,7 +136,7 @@ mod tests {
             );
         }
         assert!(
-            CommandTool::dispatch("open_command_bar", serde_json::json!({"mode": "other"}))
+            CommandToolFixture::dispatch("open_command_bar", serde_json::json!({"mode": "other"}))
                 .is_err()
         );
     }
@@ -182,7 +144,7 @@ mod tests {
     #[test]
     fn notify_dispatches_optional_content() {
         assert_eq!(
-            CommandTool::dispatch(
+            CommandToolFixture::dispatch(
                 "notify",
                 serde_json::json!({"title": "done", "body": "built X"}),
             ),
@@ -192,7 +154,7 @@ mod tests {
             }))
         );
         assert_eq!(
-            CommandTool::dispatch("notify", serde_json::json!({})),
+            CommandToolFixture::dispatch("notify", serde_json::json!({})),
             Ok(AgentCommand::Notify(AgentNotify {
                 title: None,
                 body: None,

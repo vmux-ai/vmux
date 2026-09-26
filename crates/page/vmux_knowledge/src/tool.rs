@@ -1,48 +1,43 @@
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use vmux_api::protocol::{
     AgentCommand, AgentOpenBeside, AgentQuery, AgentReadKnowledge, AgentSearchKnowledge,
     AgentSetConversationTitle, AgentWriteKnowledge,
 };
-use vmux_core::{JsonArguments, ProcessAnchor};
+use vmux_core::ProcessAnchor;
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
-    ToolRequestSet,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
 };
 
 pub struct KnowledgeToolPlugin;
 
 impl Plugin for KnowledgeToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolKindManifestPlugin::<KnowledgeTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(
-            Update,
-            (
-                vault_status,
-                open_vault,
-                set_conversation_title,
-                search,
-                read,
-                write,
-            )
-                .in_set(ToolDispatchSet),
-        );
+        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
+            .register_tool::<VaultStatusArgs>("vault_status")
+            .register_tool::<OpenVaultArgs>("open_vault")
+            .register_tool::<SetConversationTitleArgs>("set_conversation_title")
+            .register_tool::<SearchKnowledgeArgs>("search_knowledge")
+            .register_tool::<ReadKnowledgeArgs>("read_knowledge")
+            .register_tool::<WriteKnowledgeArgs>("write_knowledge")
+            .add_systems(
+                Update,
+                (
+                    vault_status,
+                    open_vault,
+                    set_conversation_title,
+                    search,
+                    read,
+                    write,
+                )
+                    .in_set(ToolDispatchSet),
+            );
     }
 }
 
-#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum KnowledgeTool {
-    VaultStatus,
-    OpenVault,
-    SetConversationTitle,
-    SearchKnowledge,
-    ReadKnowledge,
-    WriteKnowledge,
-}
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VaultStatusArgs {}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,58 +82,11 @@ struct WriteKnowledgeArgs {
     content: String,
 }
 
-fn vault_status(
-    mut commands: Commands,
-    calls: Query<(Entity, &KnowledgeTool), AddedTool<KnowledgeTool>>,
-) {
-    for (request, tool) in &calls {
-        if *tool != KnowledgeTool::VaultStatus {
-            continue;
-        }
+fn vault_status(mut commands: Commands, calls: Query<Entity, AddedTool<VaultStatusArgs>>) {
+    for request in &calls {
         commands
             .entity(request)
             .insert(ToolQuery(Ok(AgentQuery::VaultStatus)));
-    }
-}
-
-fn parse(
-    mut commands: Commands,
-    calls: Query<(Entity, &Name, &JsonArguments, &KnowledgeTool), AddedTool<KnowledgeTool>>,
-) {
-    for (request, name, arguments, tool) in &calls {
-        let parsed = match tool {
-            KnowledgeTool::VaultStatus => continue,
-            KnowledgeTool::OpenVault => {
-                arguments.parse::<OpenVaultArgs>(name.as_str()).map(|args| {
-                    commands.entity(request).insert(args);
-                })
-            }
-            KnowledgeTool::SetConversationTitle => arguments
-                .parse::<SetConversationTitleArgs>(name.as_str())
-                .map(|args| {
-                    commands.entity(request).insert(args);
-                }),
-            KnowledgeTool::SearchKnowledge => arguments
-                .parse::<SearchKnowledgeArgs>(name.as_str())
-                .map(|args| {
-                    commands.entity(request).insert(args);
-                }),
-            KnowledgeTool::ReadKnowledge => arguments
-                .parse::<ReadKnowledgeArgs>(name.as_str())
-                .map(|args| {
-                    commands.entity(request).insert(args);
-                }),
-            KnowledgeTool::WriteKnowledge => arguments
-                .parse::<WriteKnowledgeArgs>(name.as_str())
-                .map(|args| {
-                    commands.entity(request).insert(args);
-                }),
-        };
-        if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchError::new(message));
-        }
     }
 }
 

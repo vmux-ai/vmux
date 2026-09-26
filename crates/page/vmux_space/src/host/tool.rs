@@ -1,37 +1,31 @@
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use vmux_api::protocol::{
     AgentCommand, AgentQuery, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
-use vmux_core::JsonArguments;
 use vmux_tool::{
-    AddedTool, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
-    ToolRequestSet,
+    AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
 };
 
 pub struct SpaceToolPlugin;
 
 impl Plugin for SpaceToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolKindManifestPlugin::<SpaceTool>::new(include_str!(
-            "tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(
-            Update,
-            (list_spaces, create, rename, delete).in_set(ToolDispatchSet),
-        );
+        app.add_plugins(ToolManifestPlugin::new(include_str!("tool.ron")))
+            .register_tool::<ListSpacesArgs>("list_spaces")
+            .register_tool::<CreateSpaceArgs>("create_space")
+            .register_tool::<RenameSpaceArgs>("rename_space")
+            .register_tool::<DeleteSpaceArgs>("delete_space")
+            .add_systems(
+                Update,
+                (list_spaces, create, rename, delete).in_set(ToolDispatchSet),
+            );
     }
 }
 
-#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum SpaceTool {
-    ListSpaces,
-    CreateSpace,
-    RenameSpace,
-    DeleteSpace,
-}
+#[derive(Component, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListSpacesArgs {}
 
 #[derive(Component, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -52,48 +46,8 @@ struct DeleteSpaceArgs {
     space_id: String,
 }
 
-fn parse(
-    mut commands: Commands,
-    calls: Query<(Entity, &Name, &JsonArguments, &SpaceTool), AddedTool<SpaceTool>>,
-) {
-    for (request, name, arguments, tool) in &calls {
-        let parsed = match tool {
-            SpaceTool::ListSpaces => continue,
-            SpaceTool::CreateSpace => {
-                arguments
-                    .parse::<CreateSpaceArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    })
-            }
-            SpaceTool::RenameSpace => {
-                arguments
-                    .parse::<RenameSpaceArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    })
-            }
-            SpaceTool::DeleteSpace => {
-                arguments
-                    .parse::<DeleteSpaceArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    })
-            }
-        };
-        if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchError::new(message));
-        }
-    }
-}
-
-fn list_spaces(mut commands: Commands, calls: Query<(Entity, &SpaceTool), AddedTool<SpaceTool>>) {
-    for (request, tool) in &calls {
-        if *tool != SpaceTool::ListSpaces {
-            continue;
-        }
+fn list_spaces(mut commands: Commands, calls: Query<Entity, AddedTool<ListSpacesArgs>>) {
+    for request in &calls {
         commands
             .entity(request)
             .insert(ToolQuery(Ok(AgentQuery::ListSpaces)));

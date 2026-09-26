@@ -36,7 +36,6 @@ impl Plugin for ToolRegistryPlugin {
             Update,
             (
                 ToolResolveSet,
-                ToolRouteSet,
                 ToolRequestSet,
                 ToolRequestFlush,
                 ToolDispatchSet,
@@ -106,55 +105,8 @@ impl ToolAppExt for App {
     }
 }
 
-pub struct ToolKindManifestPlugin<T> {
-    manifest: &'static str,
-    marker: PhantomData<fn() -> T>,
-}
-
-impl<T> ToolKindManifestPlugin<T> {
-    pub const fn new(manifest: &'static str) -> Self {
-        Self {
-            manifest,
-            marker: PhantomData,
-        }
-    }
-}
-
-impl<T> Plugin for ToolKindManifestPlugin<T>
-where
-    T: Component + Clone + serde::de::DeserializeOwned + Serialize,
-{
-    fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ToolRegistryPlugin>() {
-            app.add_plugins(ToolRegistryPlugin);
-        }
-        app.world_mut()
-            .spawn(ToolKindManifestSource::<T>::new(self.manifest));
-        app.add_systems(
-            Startup,
-            register_kind_tools::<T>.in_set(ToolStartupSet::Manifest),
-        )
-        .add_systems(Update, route_kind_tools::<T>.in_set(ToolRouteSet));
-    }
-}
-
 #[derive(Component)]
 struct ToolManifestSource(&'static str);
-
-#[derive(Component)]
-struct ToolKindManifestSource<T> {
-    source: &'static str,
-    marker: PhantomData<fn() -> T>,
-}
-
-impl<T> ToolKindManifestSource<T> {
-    fn new(source: &'static str) -> Self {
-        Self {
-            source,
-            marker: PhantomData,
-        }
-    }
-}
 
 fn spawn_tool_registry(mut commands: Commands) {
     commands.spawn((Name::new("Tool registry"), NextToolOrder::default()));
@@ -185,52 +137,6 @@ fn register_tool_manifests(
             }
         }
         commands.entity(source_entity).despawn();
-    }
-}
-
-fn register_kind_tools<T>(
-    manifests: Query<(Entity, &ToolKindManifestSource<T>)>,
-    mut commands: Commands,
-    mut next_order: Single<&mut NextToolOrder>,
-) where
-    T: Component + serde::de::DeserializeOwned + Serialize,
-{
-    for (source_entity, source) in &manifests {
-        let manifest = ToolKindManifest::<T>::from_ron(source.source);
-        for entry in manifest.0 {
-            let (seed, kind) = entry.into_seed();
-            let order = next_order.0;
-            next_order.0 += 1;
-            let mut entity = commands.spawn((
-                RegisteredTool,
-                Name::new(seed.name),
-                ToolAliases(seed.aliases),
-                ToolDescription(seed.description),
-                ToolInputSchema(seed.input_schema),
-                ToolAccess(seed.availability),
-                RegistrationOrder(order),
-                kind,
-            ));
-            if seed.shell_aware {
-                entity.insert(ShellAware);
-            }
-        }
-        commands.entity(source_entity).despawn();
-    }
-}
-
-fn route_kind_tools<T>(
-    mut commands: Commands,
-    calls: Query<(Entity, &ToolTarget), Added<ToolCall>>,
-    tools: Query<&T>,
-) where
-    T: Component + Clone,
-{
-    for (request, target) in &calls {
-        let Ok(tool) = tools.get(target.0) else {
-            continue;
-        };
-        commands.entity(request).insert(tool.clone());
     }
 }
 
@@ -295,9 +201,6 @@ enum ToolStartupSet {
     Manifest,
     Binding,
 }
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-struct ToolRouteSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
 pub struct ToolRequestSet;
@@ -569,60 +472,6 @@ struct ToolSeed {
     input_schema: InputSchema,
     availability: ToolAvailability,
     shell_aware: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ToolKindEntry<K> {
-    kind: K,
-    #[serde(default)]
-    aliases: Vec<String>,
-    description: String,
-    input_schema: InputSchema,
-    #[serde(default)]
-    availability: ToolAvailability,
-    #[serde(default)]
-    shell_aware: bool,
-}
-
-impl<K: Component + Serialize> ToolKindEntry<K> {
-    fn into_seed(self) -> (ToolSeed, K) {
-        let Value::String(name) =
-            serde_json::to_value(&self.kind).expect("tool kind must serialize")
-        else {
-            panic!("tool kind must serialize as a string")
-        };
-        (
-            ToolSeed {
-                name,
-                aliases: self.aliases,
-                description: self.description,
-                input_schema: self.input_schema,
-                availability: self.availability,
-                shell_aware: self.shell_aware,
-            },
-            self.kind,
-        )
-    }
-}
-
-struct ToolKindManifest<K>(Vec<ToolKindEntry<K>>);
-
-impl<K> ToolKindManifest<K>
-where
-    K: Component + serde::de::DeserializeOwned + Serialize,
-{
-    fn from_ron(source: &str) -> Self {
-        let entries: Vec<ToolKindEntry<K>> =
-            ron::from_str(source).expect("embedded tool definitions must be valid RON");
-        for entry in &entries {
-            entry
-                .input_schema
-                .validate()
-                .expect("embedded tool input schemas must be valid");
-        }
-        Self(entries)
-    }
 }
 
 #[derive(Deserialize)]

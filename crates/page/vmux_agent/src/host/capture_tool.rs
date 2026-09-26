@@ -1,33 +1,21 @@
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use vmux_api::protocol::AgentQuery;
-use vmux_core::JsonArguments;
-use vmux_tool::{
-    AddedTool, ToolDispatchError, ToolDispatchSet, ToolKindManifestPlugin, ToolQuery,
-    ToolRequestSet,
-};
+use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery};
 
 pub struct CaptureToolPlugin;
 
 impl Plugin for CaptureToolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ToolKindManifestPlugin::<CaptureTool>::new(include_str!(
-            "capture_tool.ron"
-        )))
-        .add_systems(Update, parse.in_set(ToolRequestSet))
-        .add_systems(
-            Update,
-            (screenshot, record_start, record_stop).in_set(ToolDispatchSet),
-        );
+        app.add_plugins(ToolManifestPlugin::new(include_str!("capture_tool.ron")))
+            .register_tool::<ScreenshotArgs>("screenshot")
+            .register_tool::<RecordStartArgs>("record_start")
+            .register_tool::<RecordStopArgs>("record_stop")
+            .add_systems(
+                Update,
+                (screenshot, record_start, record_stop).in_set(ToolDispatchSet),
+            );
     }
-}
-
-#[derive(Clone, Copy, Component, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum CaptureTool {
-    Screenshot,
-    RecordStart,
-    RecordStop,
 }
 
 #[derive(Component, Deserialize)]
@@ -50,42 +38,6 @@ struct RecordStartArgs {
 struct RecordStopArgs {
     dir: Option<String>,
     name: Option<String>,
-}
-
-fn parse(
-    mut commands: Commands,
-    calls: Query<(Entity, &Name, &JsonArguments, &CaptureTool), AddedTool<CaptureTool>>,
-) {
-    for (request, name, arguments, tool) in &calls {
-        let parsed = match tool {
-            CaptureTool::Screenshot => {
-                arguments
-                    .parse::<ScreenshotArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    })
-            }
-            CaptureTool::RecordStart => {
-                arguments
-                    .parse::<RecordStartArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    })
-            }
-            CaptureTool::RecordStop => {
-                arguments
-                    .parse::<RecordStopArgs>(name.as_str())
-                    .map(|args| {
-                        commands.entity(request).insert(args);
-                    })
-            }
-        };
-        if let Err(message) = parsed {
-            commands
-                .entity(request)
-                .insert(ToolDispatchError::new(message));
-        }
-    }
 }
 
 fn screenshot(
@@ -144,9 +96,12 @@ impl OptionalText {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_core::JsonArguments;
     use vmux_tool::{ToolCatalog, ToolCatalogRequest, ToolDispatchError, ToolInvocation};
 
-    impl CaptureTool {
+    struct CaptureToolFixture;
+
+    impl CaptureToolFixture {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(CaptureToolPlugin);
@@ -194,7 +149,7 @@ mod tests {
     #[test]
     fn manifest_registers_capture_tools() {
         assert_eq!(
-            CaptureTool::definitions(),
+            CaptureToolFixture::definitions(),
             ["screenshot", "record_start", "record_stop"]
         );
     }
@@ -202,11 +157,11 @@ mod tests {
     #[test]
     fn screenshot_dispatches_optional_pane() {
         assert_eq!(
-            CaptureTool::dispatch("screenshot", serde_json::json!({})),
+            CaptureToolFixture::dispatch("screenshot", serde_json::json!({})),
             Ok(AgentQuery::Screenshot { pane: None })
         );
         assert_eq!(
-            CaptureTool::dispatch("screenshot", serde_json::json!({"pane": "pane:7"})),
+            CaptureToolFixture::dispatch("screenshot", serde_json::json!({"pane": "pane:7"})),
             Ok(AgentQuery::Screenshot {
                 pane: Some("pane:7".to_string()),
             })
@@ -216,7 +171,7 @@ mod tests {
     #[test]
     fn recording_dispatches_defaults_and_output() {
         assert_eq!(
-            CaptureTool::dispatch("record_start", serde_json::json!({})),
+            CaptureToolFixture::dispatch("record_start", serde_json::json!({})),
             Ok(AgentQuery::RecordStart {
                 gif: false,
                 max_secs: 600,
@@ -224,7 +179,7 @@ mod tests {
             })
         );
         assert_eq!(
-            CaptureTool::dispatch(
+            CaptureToolFixture::dispatch(
                 "record_start",
                 serde_json::json!({"gif": true, "max_secs": 30, "pane": "pane:3"}),
             ),
@@ -235,7 +190,7 @@ mod tests {
             })
         );
         assert_eq!(
-            CaptureTool::dispatch(
+            CaptureToolFixture::dispatch(
                 "record_stop",
                 serde_json::json!({"dir": "/tmp/out", "name": "feature-x"}),
             ),

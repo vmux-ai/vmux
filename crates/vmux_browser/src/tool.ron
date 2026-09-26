@@ -1,6 +1,6 @@
 [
     (
-        kind: browser_navigate,
+        name: "browser_navigate",
         description: "Navigate the active webview to a URL, or open a URL in a target pane. This is the primary tool for web access. When navigating the focused browser page, it returns the page semantic snapshot after loading. vmux://terminal/ opens a terminal, vmux://spaces/ opens spaces, and vmux://services/ opens the process monitor. Other vmux:// URLs are rejected.",
         input_schema: (
             type: Object,
@@ -12,7 +12,7 @@
         ),
     ),
     (
-        kind: browser_go_back,
+        name: "browser_go_back",
         description: "Navigate the active or specified browser pane back one page in history.",
         input_schema: (
             type: Object,
@@ -20,7 +20,7 @@
         ),
     ),
     (
-        kind: browser_go_forward,
+        name: "browser_go_forward",
         description: "Navigate the active or specified browser pane forward one page in history.",
         input_schema: (
             type: Object,
@@ -28,7 +28,7 @@
         ),
     ),
     (
-        kind: browser_history_search,
+        name: "browser_history_search",
         description: "Search vmux browsing history. Returns entries ranked by frecency.",
         input_schema: (
             type: Object,
@@ -40,7 +40,7 @@
         ),
     ),
     (
-        kind: browser_install_extension,
+        name: "browser_install_extension",
         description: "Install a browser extension from a supported extension-store URL or a 32-character extension ID. The extension activates after the next vmux relaunch and runs only in windowed browse panes on macOS.",
         input_schema: (
             type: Object,
@@ -49,7 +49,7 @@
         ),
     ),
     (
-        kind: browser_snapshot,
+        name: "browser_snapshot",
         description: r#"Read the current page's DOM as a compact semantic snapshot. Returns JSON with the page url/title and a list of interactive elements, each with a stable `ref`, `role`, `name`, `value`, `bbox` ([x,y,w,h] in CSS px), and `state` flags. Use the `ref` values to target later interaction tools. Pass `target` = a pane:<id> or stack:<id> from read_layout to pick a specific page; defaults to the focused page."#,
         input_schema: (
             type: Object,
@@ -62,7 +62,7 @@
         ),
     ),
     (
-        kind: browser_scroll,
+        name: "browser_scroll",
         description: r#"Scroll the visible browser page so the user can watch, then return the post-scroll snapshot (same shape as browser_snapshot, including viewport + inViewport flags). Pass exactly one of `to` ("top" or "bottom") or `delta` (pixels; positive = down, e.g. one screen is about the snapshot's viewport.height). Pass `target` = pane:<id> or stack:<id> to pick a page; defaults to the focused page. Prefer scrolling to read long pages instead of assuming off-screen content."#,
         input_schema: (
             one_of: [
