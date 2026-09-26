@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::HostWindow;
 use vmux_command::WriteCommandRequests;
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{
     AgentBookmark, AgentBookmarkNode, AgentBookmarks, AgentCommandResult, AgentQuery,
     AgentQueryResult, AgentRequestId, AgentSpace, ClientMessage, JsonValue,
@@ -117,10 +117,8 @@ impl AgentSpaceCatalog {
 
 fn route_layout_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
     mut writer: MessageWriter<vmux_layout::apply::LayoutSnapshotRequest>,
 ) {
-    let Some(_) = service else { return };
     for request in reader.read() {
         let AgentQuery::ReadLayout { anchor } = request.query else {
             continue;
@@ -134,11 +132,10 @@ fn route_layout_queries(
 
 fn answer_working_directory_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
     browse: AgentBrowserResolve,
     tabs: Query<&vmux_layout::tab::Tab>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for request in reader.read() {
         let AgentQuery::WorkingDirectory { anchor } = request.query else {
             continue;
@@ -153,19 +150,18 @@ fn answer_working_directory_queries(
                 Err(message) => AgentQueryResult::Error(message),
             }
         };
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: request.request_id,
             result,
-        });
+        }));
     }
 }
 
 fn answer_settings_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
     settings: Res<AppSettings>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for request in reader.read() {
         if !matches!(request.query, AgentQuery::GetSettings) {
             continue;
@@ -174,16 +170,15 @@ fn answer_settings_queries(
             Ok(settings) => AgentQueryResult::Settings(JsonValue::from(settings)),
             Err(error) => AgentQueryResult::Error(format!("failed to serialize settings: {error}")),
         };
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: request.request_id,
             result,
-        });
+        }));
     }
 }
 
 fn answer_space_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
     spaces: Query<
         (
             Entity,
@@ -197,8 +192,8 @@ fn answer_space_queries(
     focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for request in reader.read() {
         if !matches!(request.query, AgentQuery::ListSpaces) {
             continue;
@@ -209,19 +204,18 @@ fn answer_space_queries(
             &child_of,
             &host_windows,
         );
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: request.request_id,
             result: AgentQueryResult::Spaces(rows.0),
-        });
+        }));
     }
 }
 
 fn answer_command_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
     commands: Query<&vmux_command::CommandDefinition>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for request in reader.read() {
         if !matches!(request.query, AgentQuery::ListCommands) {
             continue;
@@ -231,32 +225,30 @@ fn answer_command_queries(
             .filter_map(vmux_command::CommandDefinition::agent_tool)
             .collect::<Vec<_>>();
         tools.sort_by(|left, right| left.name.cmp(&right.name));
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: request.request_id,
             result: AgentQueryResult::Commands(tools),
-        });
+        }));
     }
 }
 
 fn answer_vault_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for request in reader.read() {
         if !matches!(request.query, AgentQuery::VaultStatus) {
             continue;
         }
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: request.request_id,
             result: AgentQueryResult::VaultStatus(vmux_core::profile::vault::status().snapshot()),
-        });
+        }));
     }
 }
 
 fn answer_bookmark_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
     pins: Query<
         (
             &vmux_core::Uuid,
@@ -291,8 +283,8 @@ fn answer_bookmark_queries(
         ),
         With<vmux_core::Bookmark>,
     >,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for request in reader.read() {
         if !matches!(request.query, AgentQuery::BookmarkList) {
             continue;
@@ -361,21 +353,19 @@ fn answer_bookmark_queries(
         }
         roots.sort_by_key(|(order, _)| *order);
         let roots = roots.into_iter().map(|(_, node)| node).collect();
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: request.request_id,
             result: AgentQueryResult::Bookmarks(AgentBookmarks { pins, roots }),
-        });
+        }));
     }
 }
 
 fn route_capture_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
     mut screenshot_writer: MessageWriter<ScreenshotRequest>,
     mut record_start_writer: MessageWriter<RecordStartRequest>,
     mut record_stop_writer: MessageWriter<RecordStopRequest>,
 ) {
-    let Some(_) = service else { return };
     for request in reader.read() {
         match &request.query {
             AgentQuery::Screenshot { pane } => {
@@ -410,13 +400,11 @@ fn route_capture_queries(
 
 fn route_browser_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
     mut scroll_writer: MessageWriter<BrowserScrollRequest>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
     browse: AgentBrowserResolve,
 ) {
-    let Some(_) = service else { return };
     for request in reader.read() {
         match &request.query {
             AgentQuery::BrowserSnapshot { pane, anchor } => {
@@ -454,11 +442,9 @@ fn route_browser_queries(
 
 fn route_simulator_queries(
     mut reader: MessageReader<AgentQueryRequest>,
-    service: Option<Single<&ServiceClient>>,
     mut control_writer: MessageWriter<vmux_simulator::SimulatorControlRequest>,
     mut screenshot_writer: MessageWriter<vmux_simulator::SimulatorScreenshotRequest>,
 ) {
-    let Some(_) = service else { return };
     for request in reader.read() {
         match &request.query {
             AgentQuery::SimulatorScreenshot => {
@@ -479,31 +465,29 @@ fn route_simulator_queries(
 
 fn forward_layout_apply_responses(
     mut reader: MessageReader<vmux_layout::apply::LayoutApplyResponse>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
         let result = match response.result.clone() {
             Ok(snapshot) => AgentCommandResult::Layout(snapshot),
             Err(message) => AgentCommandResult::Error(message),
         };
-        service.0.send(ClientMessage::AgentCommandResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
             request_id: AgentRequestId(response.request_id),
             result,
-        });
+        }));
     }
 }
 
 fn forward_layout_snapshot_responses(
     mut reader: MessageReader<vmux_layout::apply::LayoutSnapshotResponse>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result: AgentQueryResult::Layout(response.snapshot.clone()),
-        });
+        }));
     }
 }
 
@@ -523,44 +507,41 @@ fn screenshot_response_to_query_result(
 
 fn forward_screenshot_responses(
     mut reader: MessageReader<ScreenshotResponse>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result: screenshot_response_to_query_result(&response.result),
-        });
+        }));
     }
 }
 
 fn forward_snapshot_responses(
     mut reader: MessageReader<BrowserSnapshotResponse>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result: snapshot_response_to_query_result(&response.result),
-        });
+        }));
     }
 }
 
 fn forward_navigation_snapshot_responses(
     mut reader: MessageReader<BrowserNavigationSnapshotResponse>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
         let result = match &response.result {
             Ok(json) => AgentCommandResult::Text(json.clone()),
             Err(message) => AgentCommandResult::Error(message.clone()),
         };
-        service.0.send(ClientMessage::AgentCommandResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
             request_id: AgentRequestId(response.request_id),
             result,
-        });
+        }));
     }
 }
 
@@ -573,14 +554,13 @@ fn record_start_response_to_query_result(result: &Result<u32, String>) -> AgentQ
 
 fn forward_record_start_responses(
     mut reader: MessageReader<RecordStartResponse>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result: record_start_response_to_query_result(&response.result),
-        });
+        }));
     }
 }
 
@@ -601,39 +581,36 @@ fn record_stop_response_to_query_result(
 
 fn forward_record_stop_responses(
     mut reader: MessageReader<RecordStopResponse>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result: record_stop_response_to_query_result(&response.result),
-        });
+        }));
     }
 }
 
 fn forward_simulator_control_responses(
     mut reader: MessageReader<vmux_simulator::SimulatorControlResponse>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
         let result = match &response.result {
             Ok(message) => AgentQueryResult::Text(message.clone()),
             Err(message) => AgentQueryResult::Error(message.clone()),
         };
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result,
-        });
+        }));
     }
 }
 
 fn forward_simulator_screenshot_responses(
     mut reader: MessageReader<vmux_simulator::SimulatorScreenshotResponse>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     for response in reader.read() {
         let result = match &response.result {
             Ok(image) => AgentQueryResult::Image {
@@ -644,10 +621,10 @@ fn forward_simulator_screenshot_responses(
             },
             Err(message) => AgentQueryResult::Error(message.clone()),
         };
-        service.0.send(ClientMessage::AgentQueryResponse {
+        service_requests.write(ServiceRequest(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result,
-        });
+        }));
     }
 }
 

@@ -3,9 +3,9 @@ use crate::host::run_state::AgentRunState;
 use bevy::prelude::*;
 use vmux_chat::activity::ActivityIcon;
 use vmux_chat::tab::Accent;
+use vmux_core::chat::group_turns_tail;
 use vmux_core::team::Profile;
 use vmux_core::{PageIcon, PageIdentity};
-use vmux_service::chat::group_turns_tail;
 use vmux_session::{AgentConversationTitle, AgentMessages, AgentSession};
 
 pub struct ChatTabPlugin;
@@ -61,7 +61,7 @@ fn activity_icon(
 ) -> Option<PageIcon> {
     let running = matches!(state, AgentRunState::Streaming);
     let page = group_turns_tail(&[], &messages.0, &[], &[], running, TAIL_ITEMS);
-    let activity = vmux_service::chat_projection::current_activity(&page.items, state.status())?;
+    let activity = vmux_core::chat_projection::current_activity(&page.items, state.status())?;
     let provider = session
         .map(|session| session.provider.as_str())
         .unwrap_or_default();
@@ -198,8 +198,8 @@ mod tests {
             blocks: vec![ChatBlock::Thinking(String::new())],
             ..Default::default()
         };
-        vmux_service::chat_projection::project_turn(&mut thinking_turn);
-        let thinking = vmux_service::chat_projection::current_activity(
+        vmux_core::chat_projection::project_turn(&mut thinking_turn);
+        let thinking = vmux_core::chat_projection::current_activity(
             &[vmux_api::chat::ChatItem::Turn(thinking_turn)],
             "streaming",
         )
@@ -212,8 +212,8 @@ mod tests {
             ],
             ..Default::default()
         };
-        vmux_service::chat_projection::project_turn(&mut writing_turn);
-        let writing = vmux_service::chat_projection::current_activity(
+        vmux_core::chat_projection::project_turn(&mut writing_turn);
+        let writing = vmux_core::chat_projection::current_activity(
             &[vmux_api::chat::ChatItem::Turn(writing_turn)],
             "streaming",
         )

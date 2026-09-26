@@ -9,9 +9,9 @@ use vmux_api::protocol::{
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
 use vmux_mcp::tool::{
-    AcpSessionContext, AcpTerminalContext, AddedTool, McpToolPlugin, ShellNote, ToolCall,
-    ToolCatalog, ToolCatalogRequest, ToolCommand, ToolDefinition, ToolDispatchError,
-    ToolDispatchSet, ToolInvocation, ToolQuery, ToolTarget,
+    AcpSessionContext, AcpTerminalContext, AddedTool, McpToolPlugin, ShellNote, ToolCatalog,
+    ToolCatalogRequest, ToolCommand, ToolDefinition, ToolDispatchError, ToolDispatchSet,
+    ToolInvocation, ToolQuery, ToolTarget,
 };
 
 use crate::ToolPlugin;
@@ -25,6 +25,15 @@ enum DispatchTarget {
 enum TestToolDispatch {
     Target(DispatchTarget),
     Protocol,
+}
+
+#[derive(Default)]
+struct ToolCallContext {
+    anchor: Option<ProcessId>,
+    host_shell: String,
+    acp_session: bool,
+    acp_terminals: bool,
+    protocol: bool,
 }
 
 fn tool_app() -> App {
@@ -86,11 +95,13 @@ fn dispatch_tool_call(
         app,
         name,
         arguments,
-        anchor,
-        host_shell,
-        acp_session,
-        acp_terminals,
-        false,
+        ToolCallContext {
+            anchor,
+            host_shell: host_shell.to_string(),
+            acp_session,
+            acp_terminals,
+            protocol: false,
+        },
     )
 }
 
@@ -98,29 +109,25 @@ fn dispatch_tool_call_with_protocol(
     app: &mut App,
     name: &str,
     arguments: serde_json::Value,
-    anchor: Option<ProcessId>,
-    host_shell: &str,
-    acp_session: bool,
-    acp_terminals: bool,
-    protocol: bool,
+    context: ToolCallContext,
 ) -> Result<TestToolDispatch, String> {
     let normalized = vmux_mcp::tool::canonical_tool_name(name).to_string();
     let mut request = app.world_mut().spawn((
         Name::new(name.to_string()),
         JsonArguments(arguments),
-        HostShell(host_shell.to_string()),
+        HostShell(context.host_shell),
         ToolInvocation,
     ));
-    if let Some(anchor) = anchor {
+    if let Some(anchor) = context.anchor {
         request.insert(ProcessAnchor(anchor));
     }
-    if acp_session {
+    if context.acp_session {
         request.insert(AcpSessionContext);
     }
-    if acp_terminals {
+    if context.acp_terminals {
         request.insert(AcpTerminalContext);
     }
-    if protocol {
+    if context.protocol {
         request.insert(McpRequest::new(std::time::Duration::from_secs(50)));
     }
     let request = request.id();
@@ -479,11 +486,10 @@ fn aliases_resolve_to_the_same_tool_entity() {
         &mut app,
         "vmux_read_file",
         serde_json::json!({"path": "/tmp/example"}),
-        None,
-        "",
-        false,
-        false,
-        true,
+        ToolCallContext {
+            protocol: true,
+            ..ToolCallContext::default()
+        },
     )
     .unwrap();
     assert!(matches!(execution, TestToolDispatch::Protocol));

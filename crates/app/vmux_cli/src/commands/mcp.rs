@@ -15,12 +15,12 @@ pub async fn run(
         unsafe { std::env::set_var("VMUX_PROFILE", p) };
     }
     let anchor = anchor.and_then(|s| s.parse::<vmux_service::protocol::ProcessId>().ok());
-    let server = vmux_app::ToolPlugin::server(
+    let app = vmux_app::ToolPlugin::mcp_app(
         anchor,
         acp_session,
         acp_terminals,
         std::time::Duration::from_secs(run_timeout_secs),
         shell,
     );
-    vmux_mcp::protocol::run_stdio(server).await
+    vmux_mcp::protocol::run_stdio(app).await
 }

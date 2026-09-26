@@ -15,7 +15,8 @@ use vmux_service::agent_events::{
     PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus,
     PageAgentSnapshot,
 };
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
+use vmux_service::plugin::ServiceConnected;
 use vmux_service::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
 use vmux_session::AcpSession;
 use vmux_session::{
@@ -24,6 +25,7 @@ use vmux_session::{
 
 impl Plugin for ProviderAgentPlugin {
     fn build(&self, app: &mut App) {
+        app.add_message::<ServiceRequest>();
         if !app.is_plugin_added::<vmux_mcp::tool::ToolRuntimePlugin>() {
             app.add_plugins(vmux_mcp::tool::ToolRuntimePlugin);
         }
@@ -102,13 +104,10 @@ fn spawn_provider_session(
         ),
         Added<vmux_mcp::tool::ToolCatalog>,
     >,
-    service: Option<Single<&ServiceClient>>,
     commands: Query<&vmux_command::CommandDefinition>,
     mut ecs: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     for (entity, session, policy, catalog) in &q {
         if session.variant != AgentVariant::Page {
             continue;
@@ -140,18 +139,18 @@ fn spawn_provider_session(
             })
             .collect::<Vec<_>>();
         let tools_json = serde_json::to_string(&definitions).unwrap_or_else(|_| "[]".to_string());
-        service.0.send(ClientMessage::SpawnPageAgent {
+        service_requests.write(ServiceRequest(ClientMessage::SpawnPageAgent {
             sid: session.sid.clone(),
             provider: session.provider.clone(),
             model: session.model.clone(),
             cwd: String::new(),
             auto_tools,
             tools_json,
-        });
-        service.0.send(ClientMessage::Shared(SharedMessage::agent(
+        }));
+        service_requests.write(ServiceRequest(ClientMessage::Shared(SharedMessage::agent(
             session.sid.clone(),
             vmux_api::protocol::AgentRequest::Attach,
-        )));
+        ))));
         ecs.entity(entity)
             .remove::<vmux_mcp::tool::ToolCatalogRequest>()
             .remove::<vmux_mcp::tool::ToolCatalog>();
@@ -160,11 +159,8 @@ fn spawn_provider_session(
 
 fn send_provider_agent_input(
     mut q: Query<(&AgentSession, &mut AgentRunState, &mut PromptQueue)>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     for (session, mut state, mut queue) in &mut q {
         if session.variant != AgentVariant::Page {
             continue;
@@ -175,12 +171,12 @@ fn send_provider_agent_input(
         let Some(prompt) = queue.take_next() else {
             continue;
         };
-        service.0.send(ClientMessage::agent_input(
+        service_requests.write(ServiceRequest(ClientMessage::agent_input(
             session.sid.clone(),
             prompt.text,
             None,
             prompt.attachments,
-        ));
+        )));
         *state = AgentRunState::Streaming;
     }
 }
@@ -203,23 +199,20 @@ fn ensure_prompt_queue(
 fn close_provider_session_on_remove(
     trigger: On<Remove, AgentSession>,
     sessions: Query<&AgentSession>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     let Ok(session) = sessions.get(trigger.event_target()) else {
         return;
     };
     if session.variant != AgentVariant::Page {
         return;
     }
-    service.0.send(ClientMessage::DetachPageAgent {
+    service_requests.write(ServiceRequest(ClientMessage::DetachPageAgent {
         sid: session.sid.clone(),
-    });
-    service.0.send(ClientMessage::ClosePageAgent {
+    }));
+    service_requests.write(ServiceRequest(ClientMessage::ClosePageAgent {
         sid: session.sid.clone(),
-    });
+    }));
 }
 
 #[allow(clippy::type_complexity)]
@@ -242,7 +235,7 @@ fn consume_provider_agent_stream(
         Option<&ImportedConversation>,
     )>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
 ) {
     let by_sid: std::collections::HashMap<String, Entity> = q
@@ -323,7 +316,7 @@ fn consume_provider_agent_stream(
             continue;
         };
         if let Ok((_, _, _, mut state, _, _, acp, policy, _, _)) = q.get_mut(entity) {
-            let auto_allowed = service.is_some()
+            let auto_allowed = connected.is_some()
                 && acp.is_some()
                 && policy.is_some_and(|policy| policy.allows(&approval.name));
             if !auto_allowed {

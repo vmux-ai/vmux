@@ -1,6 +1,6 @@
 use crate::protocol::{ClientMessage, ServiceMessage};
 use crate::{DaemonBinary, DaemonIdentity, ServicePaths};
-use bevy_ecs::component::Component;
+use bevy_ecs::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::BufReader;
@@ -34,18 +34,24 @@ impl ServiceConnection {
 }
 
 #[derive(Component)]
-pub struct ServiceClient(pub ServiceHandle);
+pub(crate) struct ServiceClient(pub ServiceHandle);
+
+#[derive(Clone, Message)]
+pub struct ServiceRequest(pub ClientMessage);
+
+#[derive(Clone, Message)]
+pub struct ServiceInbound(pub ServiceMessage);
 
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
 
-pub struct ServiceHandle {
+pub(crate) struct ServiceHandle {
     cmd_tx: std::sync::mpsc::Sender<ClientMessage>,
     msg_rx: std::sync::Mutex<std::sync::mpsc::Receiver<ServiceMessage>>,
     wake_pending: Arc<AtomicBool>,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
-pub type ServiceWake = Arc<dyn Fn() + Send + Sync + 'static>;
+pub(crate) type ServiceWake = Arc<dyn Fn() + Send + Sync + 'static>;
 
 #[allow(clippy::result_large_err)]
 fn forward_service_message(
@@ -132,10 +138,6 @@ impl ServiceHandle {
             return false;
         }
         true
-    }
-
-    pub fn connect() -> Option<Self> {
-        Self::connect_with_wake(None)
     }
 
     pub fn connect_with_wake(wake: Option<ServiceWake>) -> Option<Self> {
@@ -230,10 +232,6 @@ impl ServiceHandle {
 
     pub fn send(&self, msg: ClientMessage) {
         let _ = self.cmd_tx.send(msg);
-    }
-
-    pub fn drain(&self) -> Vec<ServiceMessage> {
-        self.drain_with_status().0
     }
 
     pub fn drain_with_status(&self) -> (Vec<ServiceMessage>, bool) {

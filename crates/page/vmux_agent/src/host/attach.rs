@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use vmux_command::WriteCommandRequests;
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentKind;
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{
     AgentCommand as ServiceAgentCommand, AgentCommandResult, ClientMessage, ProcessId,
 };
@@ -21,7 +21,7 @@ pub(super) struct AttachPlugin;
 
 impl Plugin for AttachPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_message::<ServiceRequest>().add_systems(
             Update,
             handle_resume_in_acp
                 .in_set(WriteCommandRequests)
@@ -288,7 +288,7 @@ fn handle_resume_in_acp(
     settings: Res<AppSettings>,
     catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     mut swap: MessageWriter<vmux_core::agent::SwapStackSession>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let ServiceAgentCommand::ResumeInAcp { anchor } = &request.command else {
@@ -340,12 +340,10 @@ fn handle_resume_in_acp(
         } else {
             AgentCommandResult::Error("resume_in_acp: current CLI session not found".to_string())
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(ClientMessage::AgentCommandResponse {
-                request_id: request.request_id,
-                result,
-            });
-        }
+        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
+            request_id: request.request_id,
+            result,
+        }));
     }
 }
 
@@ -491,6 +489,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AgentCommandRequest>()
+            .add_message::<ServiceRequest>()
             .add_message::<vmux_core::agent::SwapStackSession>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_resume_in_acp);

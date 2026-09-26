@@ -6,8 +6,7 @@ use vmux_api::protocol::{AgentCommand, JsonValue};
 use vmux_core::JsonArguments;
 
 use vmux_mcp::tool::{
-    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet,
-    ToolRequestSet,
+    AddedTool, McpToolPlugin, ToolCommand, ToolDispatchError, ToolDispatchSet, ToolRequestSet,
 };
 
 pub struct ToolPlugin;
@@ -41,13 +40,13 @@ impl Plugin for ToolPlugin {
 }
 
 impl ToolPlugin {
-    pub fn server(
+    pub fn mcp_app(
         anchor: Option<vmux_api::protocol::ProcessId>,
         acp_session: bool,
         acp_terminals: bool,
         run_block_timeout: std::time::Duration,
         shell: String,
-    ) -> vmux_mcp::protocol::McpServer {
+    ) -> App {
         let mut app = App::new();
         app.add_plugins((
             Self,
@@ -59,7 +58,7 @@ impl ToolPlugin {
                 shell,
             ),
         ));
-        vmux_mcp::protocol::McpServer::from(app)
+        app
     }
 }
 

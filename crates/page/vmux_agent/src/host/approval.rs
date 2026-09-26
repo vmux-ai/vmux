@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::events::{AgentApprovalReply, ApprovalDecision};
 use crate::run_state::AgentRunState;
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{ClientMessage, SharedMessage};
 use vmux_session::AcpSession;
 use vmux_session::{AgentApprovalPolicy, AgentSession, approval_tool_key};
@@ -17,6 +17,7 @@ pub(crate) struct ApprovalSyncSet;
 
 impl Plugin for ApprovalPlugin {
     fn build(&self, app: &mut App) {
+        app.add_message::<ServiceRequest>();
         if app.world().get_resource::<AgentApprovalStore>().is_none() {
             app.insert_resource(AgentApprovalStore::load());
         }
@@ -124,7 +125,7 @@ fn handle_approval_reply(
         Option<&AgentSession>,
         Option<&AcpSession>,
     )>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
     mut store: Option<ResMut<AgentApprovalStore>>,
 ) {
     let reply = trigger.event();
@@ -154,15 +155,13 @@ fn handle_approval_reply(
             store.remember(&acp.agent_id, &acp.cwd, name);
         }
     }
-    if let Some(service) = service.as_ref() {
-        service.0.send(ClientMessage::Shared(SharedMessage::agent(
-            sid,
-            vmux_api::protocol::AgentRequest::Approve {
-                call_id: reply.call_id.clone(),
-                decision: reply.decision,
-            },
-        )));
-    }
+    service_requests.write(ServiceRequest(ClientMessage::Shared(SharedMessage::agent(
+        sid,
+        vmux_api::protocol::AgentRequest::Approve {
+            call_id: reply.call_id.clone(),
+            decision: reply.decision,
+        },
+    ))));
     *state = AgentRunState::Streaming;
 }
 

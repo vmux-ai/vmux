@@ -160,7 +160,7 @@ pub struct ComposerContext {
 #[vmux_api::contract(Default, Eq)]
 pub struct ModeState {
     pub current_mode_id: String,
-    pub modes: Vec<vmux_service::protocol::AcpModeOption>,
+    pub modes: Vec<vmux_api::protocol::AcpModeOption>,
 }
 
 #[vmux_api::ui_event(Default)]

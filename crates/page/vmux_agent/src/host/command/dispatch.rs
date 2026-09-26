@@ -6,7 +6,7 @@ use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
 };
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{
     AgentBookmarkCommand, AgentCommand as ServiceAgentCommand, AgentCommandResult, AgentRequestId,
     AgentShellMode, AgentSpaceCommand, SharedAgentCommand,
@@ -26,27 +26,28 @@ pub(super) struct DispatchPlugin;
 
 impl Plugin for DispatchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                forward_history_open_intent.in_set(CommandSet::History),
+        app.add_message::<ServiceRequest>()
+            .add_systems(
+                Update,
                 (
-                    handle_command_invocations,
-                    handle_terminal_commands,
-                    handle_browser_commands,
-                    handle_desktop_commands,
-                    handle_space_commands,
-                    handle_bookmark_commands,
-                    handle_shared_commands,
-                )
-                    .in_set(CommandSet::Commands),
-            ),
-        )
-        .add_systems(
-            Update,
-            (handle_focus_pane_requests, handle_rename_profile_requests)
-                .after(CommandSet::Commands),
-        );
+                    forward_history_open_intent.in_set(CommandSet::History),
+                    (
+                        handle_command_invocations,
+                        handle_terminal_commands,
+                        handle_browser_commands,
+                        handle_desktop_commands,
+                        handle_space_commands,
+                        handle_bookmark_commands,
+                        handle_shared_commands,
+                    )
+                        .in_set(CommandSet::Commands),
+                ),
+            )
+            .add_systems(
+                Update,
+                (handle_focus_pane_requests, handle_rename_profile_requests)
+                    .after(CommandSet::Commands),
+            );
     }
 }
 
@@ -158,7 +159,7 @@ fn handle_command_invocations(
         Option<&vmux_service::protocol::ProcessId>,
     )>,
     user: Query<Entity, With<vmux_core::team::User>>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -169,11 +170,9 @@ fn handle_command_invocations(
                 let args = match vmux_core::JsonArguments::try_from(args) {
                     Ok(args) => args.0,
                     Err(message) => {
-                        if let Some(service) = service.as_ref() {
-                            service
-                                .0
-                                .send(request.response(AgentCommandResult::Error(message)));
-                        }
+                        service_requests.write(ServiceRequest(
+                            request.response(AgentCommandResult::Error(message)),
+                        ));
                         continue;
                     }
                 };
@@ -207,9 +206,7 @@ fn handle_command_invocations(
             }
             _ => continue,
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(request.response(result));
-        }
+        service_requests.write(ServiceRequest(request.response(result)));
     }
 }
 
@@ -223,7 +220,7 @@ fn handle_terminal_commands(
     mut run_shell: MessageWriter<vmux_terminal::RunShellRequest>,
     mut terminal_spawn: MessageWriter<TerminalStackSpawnRequest>,
     mut process_spawn: MessageWriter<ProcessStackSpawnRequest>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -293,9 +290,7 @@ fn handle_terminal_commands(
             }
             _ => continue,
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(request.response(result));
-        }
+        service_requests.write(ServiceRequest(request.response(result)));
     }
 }
 
@@ -309,7 +304,7 @@ fn handle_browser_commands(
     mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
     browse: AgentBrowserResolve,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -338,11 +333,11 @@ fn handle_browser_commands(
                         });
                         continue;
                     } else {
-                        if let Some(service) = service.as_ref() {
-                            service.0.send(request.response(AgentCommandResult::Error(
+                        service_requests.write(ServiceRequest(request.response(
+                            AgentCommandResult::Error(
                                 "browser_navigate: agent has no resolvable pane".to_string(),
-                            )));
-                        }
+                            ),
+                        )));
                         continue;
                     }
                 }
@@ -391,9 +386,7 @@ fn handle_browser_commands(
             }
             _ => continue,
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(request.response(result));
-        }
+        service_requests.write(ServiceRequest(request.response(result)));
     }
 }
 
@@ -412,7 +405,7 @@ fn handle_desktop_commands(
     mut focus_pane: MessageWriter<FocusPaneRequest>,
     mut rename_profile: MessageWriter<RenameProfileRequest>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -497,9 +490,7 @@ fn handle_desktop_commands(
             }
             _ => continue,
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(request.response(result));
-        }
+        service_requests.write(ServiceRequest(request.response(result)));
     }
 }
 
@@ -508,7 +499,7 @@ fn handle_space_commands(
     mut create_requests: MessageWriter<vmux_space::SpaceCreateRequest>,
     mut rename_requests: MessageWriter<vmux_space::SpaceRenameRequest>,
     mut delete_requests: MessageWriter<vmux_space::SpaceDeleteRequest>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -535,9 +526,7 @@ fn handle_space_commands(
             }
             _ => continue,
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(request.response(result));
-        }
+        service_requests.write(ServiceRequest(request.response(result)));
     }
 }
 
@@ -550,7 +539,7 @@ fn handle_bookmark_commands(
     mut pin_url_requests: MessageWriter<vmux_layout::bookmark::PinUrlRequest>,
     mut unpin_requests: MessageWriter<vmux_layout::bookmark::UnpinRequest>,
     mut create_folder_requests: MessageWriter<vmux_layout::bookmark::CreateFolderRequest>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let ServiceAgentCommand::BookmarkCommand(command) = &request.command else {
@@ -597,9 +586,7 @@ fn handle_bookmark_commands(
                 ));
             }
         }
-        if let Some(service) = service.as_ref() {
-            service.0.send(request.response(AgentCommandResult::Ok));
-        }
+        service_requests.write(ServiceRequest(request.response(AgentCommandResult::Ok)));
     }
 }
 
@@ -608,7 +595,7 @@ fn handle_shared_commands(
     command_bar: Res<vmux_command::snapshot::CommandBarProjection>,
     contributed_pages: Query<&vmux_command::snapshot::ContributedPage>,
     mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
         let result = match &request.command {
@@ -637,9 +624,7 @@ fn handle_shared_commands(
             }
             _ => continue,
         };
-        if let Some(service) = service.as_ref() {
-            service.0.send(request.response(result));
-        }
+        service_requests.write(ServiceRequest(request.response(result)));
     }
 }
 

@@ -1,6 +1,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
+use vmux_service::plugin::ServiceConnected;
 use vmux_service::protocol::ClientMessage;
 
 use super::plugin::{
@@ -117,10 +118,13 @@ fn flush_terminal_input(
         ),
         With<Terminal>,
     >,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
+    if connected.is_none() {
+        return;
+    }
     let mut pending = inputs.iter().collect::<Vec<_>>();
     pending.sort_by_key(|(_, input, _)| input.sequence);
 
@@ -134,10 +138,10 @@ fn flush_terminal_input(
         if !shell_output_seen || creating || restarting || exited {
             continue;
         }
-        service.0.send(ClientMessage::ProcessInput {
+        service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
             process_id: *process_id,
             data: input.data.clone(),
-        });
+        }));
         commands.entity(entity).despawn();
     }
 }

@@ -9,7 +9,7 @@ use vmux_chat::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
     ChatEscape, ChatResume, ChatStop, ChatSubmit,
 };
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{AgentAttachment, ClientMessage, SharedMessage};
 use vmux_session::AcpSession;
 use vmux_session::{
@@ -20,15 +20,16 @@ pub(super) struct ChatPromptPlugin;
 
 impl Plugin for ChatPromptPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            ChatSubmit,
-            ChatCancel,
-            ChatStop,
-            ChatEscape,
-            ChatResume,
-            ChatClearQueue,
-            ChatCancelQueuedPrompt,
-        )>::default())
+        app.add_message::<ServiceRequest>()
+            .add_plugins(UiEventPlugin::<(
+                ChatSubmit,
+                ChatCancel,
+                ChatStop,
+                ChatEscape,
+                ChatResume,
+                ChatClearQueue,
+                ChatCancelQueuedPrompt,
+            )>::default())
             .add_plugins(UiEventPlugin::<(ChatApproval, ChatChoiceSelected)>::default())
             .add_observer(on_chat_submit)
             .add_observer(on_chat_cancel)
@@ -118,7 +119,7 @@ fn on_chat_stop(
         Option<&AcpSession>,
         Option<&AgentSession>,
     )>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
@@ -130,7 +131,7 @@ fn on_chat_stop(
         if queue.flush_pending() {
             queue.cancel_flush();
         }
-        cancel_session(service.as_ref().map(|service| **service), acp, page);
+        cancel_session(acp, page, &mut service_requests);
         return;
     }
     if queue.request_flush() && matches!(*state, AgentRunState::Errored(_)) {
@@ -140,7 +141,7 @@ fn on_chat_stop(
         *state,
         AgentRunState::Streaming | AgentRunState::AwaitingApproval { .. }
     ) {
-        cancel_session(service.as_ref().map(|service| **service), acp, page);
+        cancel_session(acp, page, &mut service_requests);
     }
 }
 
@@ -160,7 +161,7 @@ fn on_chat_cancel(
     trigger: On<UiInput<ChatCancel>>,
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&mut PromptQueue, Option<&AcpSession>, Option<&AgentSession>)>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
@@ -171,27 +172,24 @@ fn on_chat_cancel(
     if queue.flush_pending() {
         queue.cancel_flush();
     }
-    cancel_session(service.as_ref().map(|service| **service), acp, page);
+    cancel_session(acp, page, &mut service_requests);
 }
 
 fn cancel_session(
-    service: Option<&ServiceClient>,
     acp: Option<&AcpSession>,
     page: Option<&AgentSession>,
+    service_requests: &mut MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     let Some(sid) = acp
         .map(|session| session.sid.clone())
         .or_else(|| page.map(|session| session.sid.clone()))
     else {
         return;
     };
-    service.0.send(ClientMessage::Shared(SharedMessage::agent(
+    service_requests.write(ServiceRequest(ClientMessage::Shared(SharedMessage::agent(
         sid,
         vmux_api::protocol::AgentRequest::Cancel,
-    )));
+    ))));
 }
 
 fn on_chat_escape(
@@ -204,8 +202,8 @@ fn on_chat_escape(
         Option<&AcpSession>,
         Option<&AgentSession>,
     )>,
-    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let webview = trigger.event().webview;
     let Ok(parent) = child_of.get(webview) else {
@@ -230,7 +228,7 @@ fn on_chat_escape(
         *state = AgentRunState::Idle;
     }
     if running {
-        cancel_session(service.as_ref().map(|service| **service), acp, page);
+        cancel_session(acp, page, &mut service_requests);
     }
     let Ok(mut composer) = composers.get_mut(webview) else {
         return;
@@ -315,9 +313,15 @@ fn on_chat_choice_selected(trigger: On<UiInput<ChatChoiceSelected>>, mut command
 mod tests {
     use super::*;
 
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_message::<ServiceRequest>();
+        app
+    }
+
     #[test]
     fn first_prompt_updates_conversation_title_immediately() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_submit);
         let session = app
             .world_mut()
@@ -383,7 +387,7 @@ mod tests {
 
     #[test]
     fn normal_cancel_overrides_pending_flush() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_cancel);
         let mut queue = PromptQueue::default();
         queue.enqueue("queued".into());
@@ -407,7 +411,7 @@ mod tests {
 
     #[test]
     fn stop_with_queued_work_flushes_and_rearms_the_session() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_stop);
         let mut queue = PromptQueue::default();
         queue.enqueue("retry".into());
@@ -435,7 +439,7 @@ mod tests {
 
     #[test]
     fn escape_flush_rearms_errored_queue() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_escape);
         let mut queue = PromptQueue::default();
         queue.enqueue("retry".into());
@@ -463,7 +467,7 @@ mod tests {
 
     #[test]
     fn escape_without_queue_clears_stale_flush() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_escape);
         let mut queue = PromptQueue::default();
         queue.enqueue("queued".into());
@@ -491,7 +495,7 @@ mod tests {
 
     #[test]
     fn idle_escape_clears_the_host_owned_composer_draft() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_escape);
         let stack = app
             .world_mut()
@@ -520,7 +524,7 @@ mod tests {
 
     #[test]
     fn cancel_queued_prompt_removes_only_target() {
-        let mut app = App::new();
+        let mut app = test_app();
         app.add_observer(on_chat_cancel_queued_prompt);
         let mut queue = PromptQueue::default();
         queue.enqueue("first".into());

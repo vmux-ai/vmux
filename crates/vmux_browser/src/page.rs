@@ -22,7 +22,8 @@ pub(crate) struct PagePlugin;
 
 impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PageOpenRequest>()
+        app.add_message::<vmux_service::client::ServiceRequest>()
+            .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
             .add_message::<PendingNavigationUpdate>()
             .configure_sets(
@@ -93,9 +94,9 @@ fn handle_page_open_requests(
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_filter: Query<Entity, With<Stack>>,
-    service: Option<Single<&vmux_service::client::ServiceClient>>,
     time: Res<Time>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
 ) {
     for request in reader.read() {
         let stack = match resolve_page_open_target(
@@ -109,7 +110,7 @@ fn handle_page_open_requests(
         ) {
             Ok(stack) => stack,
             Err(message) => {
-                send_page_open_response(&service, request.request_id, Err(message));
+                send_page_open_response(&mut service_requests, request.request_id, Err(message));
                 continue;
             }
         };
@@ -315,22 +316,26 @@ fn respond_page_open_tasks(
         ),
         With<PageOpenHandled>,
     >,
-    service: Option<Single<&vmux_service::client::ServiceClient>>,
     time: Res<Time>,
     children: Query<&Children>,
     browsers: Query<(), With<Browser>>,
     child_of: Query<&ChildOf>,
     mut pending_navigation: MessageWriter<PendingNavigationUpdate>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<vmux_service::client::ServiceRequest>,
 ) {
     for (entity, task, error, await_snapshot) in &tasks {
         if let Some(error) = error {
-            send_page_open_response(&service, task.request_id, Err(error.message.clone()));
+            send_page_open_response(
+                &mut service_requests,
+                task.request_id,
+                Err(error.message.clone()),
+            );
             commands.entity(entity).despawn();
             continue;
         }
         let Some(await_snapshot) = await_snapshot else {
-            send_page_open_response(&service, task.request_id, Ok(()));
+            send_page_open_response(&mut service_requests, task.request_id, Ok(()));
             commands.entity(entity).despawn();
             continue;
         };
@@ -357,7 +362,7 @@ fn respond_page_open_tasks(
             > 10.0
         {
             send_page_open_response(
-                &service,
+                &mut service_requests,
                 task.request_id,
                 Err("page opened without a snapshot-capable webview".to_string()),
             );

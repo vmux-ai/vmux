@@ -10311,7 +10311,6 @@ dependencies = [
  "vmux_api",
  "vmux_core",
  "vmux_native",
- "vmux_service",
  "vmux_ui",
 ]
 
@@ -10381,6 +10380,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "similar",
  "tempfile",
  "toml",
  "url",
@@ -10775,7 +10775,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "similar",
  "tempfile",
  "tokio",
  "tokio-util",

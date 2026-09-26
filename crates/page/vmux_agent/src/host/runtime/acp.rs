@@ -4,7 +4,7 @@ use vmux_core::LastActivatedAt;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::{PlacementCtx, resolve_spiral_pane};
 use vmux_layout::stack::stack_bundle;
-use vmux_service::client::ServiceClient;
+use vmux_service::client::ServiceRequest;
 use vmux_service::protocol::{ClientMessage, SharedMessage};
 use vmux_terminal::reattach_terminal_bundle;
 
@@ -20,7 +20,8 @@ pub(crate) struct AcpModelInfoSet;
 
 impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::acp_tool::AcpToolPlugin)
+        app.add_message::<ServiceRequest>()
+            .add_plugins(crate::acp_tool::AcpToolPlugin)
             .init_resource::<AcpCatalog>()
             .add_message::<vmux_service::agent_events::PageAgentInfo>()
             .add_message::<vmux_service::agent_events::PageAgentWorkspaceChanged>()
@@ -130,7 +131,7 @@ pub struct AcpModeState {
     pub config_id: String,
     pub current_mode_id: String,
     pub(crate) pending: Option<PendingAcpModeSelection>,
-    pub modes: Vec<vmux_service::protocol::AcpModeOption>,
+    pub modes: Vec<vmux_api::protocol::AcpModeOption>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -457,7 +458,7 @@ fn acp_auto_approval_message(
 fn auto_allow_acp_approval(
     trigger: On<AgentApprovalRequest>,
     sessions: Query<(&AcpSession, &AgentApprovalPolicy)>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let request = trigger.event();
     let Ok((session, policy)) = sessions.get(request.session) else {
@@ -466,11 +467,7 @@ fn auto_allow_acp_approval(
     let Some(message) = acp_auto_approval_message(session, policy, request) else {
         return;
     };
-    let Some(service) = service else {
-        warn!(sid = %session.sid, call_id = %request.call_id, "auto-approval waiting for service connection");
-        return;
-    };
-    service.0.send(message);
+    service_requests.write(ServiceRequest(message));
 }
 
 #[allow(clippy::type_complexity)]
@@ -572,11 +569,8 @@ fn send_acp_input(
     pending_projects: Query<(), With<crate::host::PendingAgentProject>>,
     repositories_needing_worktrees: Query<(), With<crate::host::RepositoryNeedsWorktree>>,
     modes: Option<Res<crate::chat::model::AgentModeSelections>>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     for (entity, session, mut state, mut queue, install_started, mut pending, mut imported) in
         &mut q
     {
@@ -609,13 +603,13 @@ fn send_acp_input(
             .as_deref()
             .map(|modes| modes.selected_for(&session.agent_id).to_string())
             .filter(|mode| !mode.is_empty());
-        service.0.send(ClientMessage::agent_input_with_mode(
+        service_requests.write(ServiceRequest(ClientMessage::agent_input_with_mode(
             session.sid.clone(),
             text,
             context,
             prompt.attachments,
             preferred_mode,
-        ));
+        )));
         *state = AgentRunState::Streaming;
     }
 }
@@ -631,17 +625,14 @@ fn acp_prompt_dispatch_ready(
 fn close_acp_session_on_remove(
     trigger: On<Remove, AcpSession>,
     sessions: Query<&AcpSession>,
-    service: Option<Single<&ServiceClient>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     let Ok(session) = sessions.get(trigger.event_target()) else {
         return;
     };
-    service.0.send(ClientMessage::ClosePageAgent {
+    service_requests.write(ServiceRequest(ClientMessage::ClosePageAgent {
         sid: session.sid.clone(),
-    });
+    }));
 }
 
 #[cfg(test)]
@@ -1173,8 +1164,8 @@ mod tests {
 
     #[test]
     fn mode_results_preserve_latest_pending_selection() {
+        use vmux_api::protocol::AcpModeOption;
         use vmux_service::agent_events::{PageAgentModeInfo, PageAgentModeSelectionResult};
-        use vmux_service::protocol::AcpModeOption;
 
         let modes = vec![
             AcpModeOption {

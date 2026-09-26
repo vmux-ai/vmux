@@ -20,7 +20,8 @@ use vmux_layout::Browser;
 use vmux_layout::stack::{CloseRequest as StackCloseRequest, FocusRequest};
 use vmux_layout::{CloseRequiresConfirmation, TerminalLayoutSpawnRequest};
 use vmux_service::{
-    plugin::ServiceUnavailable,
+    client::{ServiceInbound, ServiceRequest},
+    plugin::{ServiceConnected, ServiceUnavailable},
     protocol::{ClientMessage, ProcessId, ServiceMessage, SharedEvent},
 };
 use vmux_setting::AppSettings;
@@ -53,33 +54,34 @@ impl Plugin for TerminalPlugin {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.world_mut()
             .spawn(vmux_core::HostSpawnRoute::host("terminal"));
-        app.add_plugins((
-            vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
-            crate::TerminalToolPlugin,
-            vmux_command::CommandTypePlugin::<super::command::TerminalCloseRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::TerminalNextRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::TerminalPrevRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::TerminalClearRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::CopyModeRequest>::default(),
-        ))
-        .add_plugins(crate::contract::TerminalContractPlugin)
-        .register_type::<crate::launch::TerminalLaunch>()
-        .register_type::<crate::launch::TerminalKind>()
-        .add_message::<TerminalStackSpawnRequest>()
-        .add_message::<TerminalSpawnRequest>()
-        .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
-        .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
-        .add_plugins((
-            crate::pid::PidPlugin,
-            crate::host::request::TerminalRequestPlugin,
-            TerminalServicePlugin,
-            TerminalInputPlugin,
-            crate::processes_monitor::ProcessesMonitorPlugin,
-            super::loading::LoadingPlugin,
-            super::prompt::PromptPlugin,
-            crate::snapshot_updater::SnapshotPlugin,
-            crate::theme::TerminalThemePlugin,
-        ));
+        app.add_message::<ServiceRequest>()
+            .add_plugins((
+                vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
+                crate::TerminalToolPlugin,
+                vmux_command::CommandTypePlugin::<super::command::TerminalCloseRequest>::default(),
+                vmux_command::CommandTypePlugin::<super::command::TerminalNextRequest>::default(),
+                vmux_command::CommandTypePlugin::<super::command::TerminalPrevRequest>::default(),
+                vmux_command::CommandTypePlugin::<super::command::TerminalClearRequest>::default(),
+                vmux_command::CommandTypePlugin::<super::command::CopyModeRequest>::default(),
+            ))
+            .add_plugins(crate::contract::TerminalContractPlugin)
+            .register_type::<crate::launch::TerminalLaunch>()
+            .register_type::<crate::launch::TerminalKind>()
+            .add_message::<TerminalStackSpawnRequest>()
+            .add_message::<TerminalSpawnRequest>()
+            .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
+            .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
+            .add_plugins((
+                crate::pid::PidPlugin,
+                crate::host::request::TerminalRequestPlugin,
+                TerminalServicePlugin,
+                TerminalInputPlugin,
+                crate::processes_monitor::ProcessesMonitorPlugin,
+                super::loading::LoadingPlugin,
+                super::prompt::PromptPlugin,
+                crate::snapshot_updater::SnapshotPlugin,
+                crate::theme::TerminalThemePlugin,
+            ));
     }
 }
 
@@ -192,8 +194,6 @@ pub fn has_live_terminal(
     }
 }
 
-pub use vmux_service::client::ServiceClient;
-
 #[derive(Clone, Copy)]
 struct CopyModeKeyInput<'a> {
     key: &'a Key,
@@ -269,17 +269,16 @@ pub fn format_terminal_url(
 
 fn on_terminal_removed(
     trigger: On<Remove, ProcessId>,
-    service: Option<Single<&ServiceClient>>,
     pids: Query<&ProcessId>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     let entity = trigger.event_target();
     let Ok(process_id) = pids.get(entity) else {
         return;
     };
-    service.0.send(ClientMessage::KillProcess {
+    service_requests.write(ServiceRequest(ClientMessage::KillProcess {
         process_id: *process_id,
-    });
+    }));
 }
 
 fn spawn_layout_requested_content(
@@ -720,7 +719,7 @@ fn broadcast_service_unavailable(
 }
 
 fn publish_service_status(
-    connected: Query<(), Added<ServiceClient>>,
+    connected: Query<(), Added<ServiceConnected>>,
     unavailable: Query<&ServiceUnavailable, Changed<ServiceUnavailable>>,
     terminal_webviews: Query<Entity, With<Terminal>>,
     mut commands: Commands,
@@ -735,6 +734,7 @@ fn publish_service_status(
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PollServiceWriters<'w> {
+    service_requests: MessageWriter<'w, ServiceRequest>,
     stack_close_requests: MessageWriter<'w, StackCloseRequest>,
     agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
     agent_queries: MessageWriter<'w, vmux_service::agent_events::AgentQueryRequest>,
@@ -801,27 +801,26 @@ fn sync_agent_focus(
     >,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    service: Option<Single<&ServiceClient>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else { return };
     let active_pid = crate::target::active_terminal_for_tab(focus.stack, &terminals)
         .and_then(|entity| agents.get(entity).ok().map(|(_, pid, _, _)| *pid));
     for (entity, process_id, mode, blurred) in &agents {
         let active = Some(*process_id) == active_pid;
         match agent_focus_transition(mode.focus_reporting, active, blurred) {
             Some(AgentFocusTransition::FocusIn) => {
-                service.0.send(ClientMessage::ProcessInput {
+                service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
                     process_id: *process_id,
                     data: b"\x1b[I".to_vec(),
-                });
+                }));
                 commands.entity(entity).remove::<AgentFocusBlurred>();
             }
             Some(AgentFocusTransition::FocusOut) => {
-                service.0.send(ClientMessage::ProcessInput {
+                service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
                     process_id: *process_id,
                     data: b"\x1b[O".to_vec(),
-                });
+                }));
                 commands.entity(entity).insert(AgentFocusBlurred);
             }
             None => {}
@@ -883,7 +882,8 @@ fn poll_service_messages(
         ),
         With<Terminal>,
     >,
-    service: Option<Single<&ServiceClient>>,
+    connected: Option<Single<(), With<ServiceConnected>>>,
+    mut inbound: MessageReader<ServiceInbound>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writers: PollServiceWriters,
@@ -892,9 +892,10 @@ fn poll_service_messages(
     launches: Query<&crate::launch::TerminalLaunch>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
     output_seen: Query<(), With<ShellOutputSeen>>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
-    let Some(service) = service else { return };
+    if connected.is_none() {
+        return;
+    }
 
     let create_budget = process_create_budget(
         awaiting_create.iter().count(),
@@ -905,15 +906,17 @@ fn poll_service_messages(
         if should_merge_login_shell_env(agent_sessions.contains(entity), agent_run) {
             crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
         }
-        service.0.send(ClientMessage::CreateProcess {
-            process_id: *process_id,
-            command: launch.command.clone(),
-            args: launch.args.clone(),
-            cwd: launch.cwd.clone(),
-            env,
-            cols: 80,
-            rows: 24,
-        });
+        writers
+            .service_requests
+            .write(ServiceRequest(ClientMessage::CreateProcess {
+                process_id: *process_id,
+                command: launch.command.clone(),
+                args: launch.args.clone(),
+                cwd: launch.cwd.clone(),
+                env,
+                cols: 80,
+                rows: 24,
+            }));
         commands
             .entity(entity)
             .remove::<PendingServiceCreate>()
@@ -921,28 +924,31 @@ fn poll_service_messages(
     }
 
     for (entity, pid) in &pending_attach {
-        service
-            .0
-            .send(ClientMessage::AttachProcess { process_id: *pid });
-        service
-            .0
-            .send(ClientMessage::RequestSnapshot { process_id: *pid });
+        writers
+            .service_requests
+            .write(ServiceRequest(ClientMessage::AttachProcess {
+                process_id: *pid,
+            }));
+        writers
+            .service_requests
+            .write(ServiceRequest(ClientMessage::RequestSnapshot {
+                process_id: *pid,
+            }));
         commands.entity(entity).remove::<PendingServiceAttach>();
     }
 
     let mut restarted_missing_processes = Vec::new();
-    let (messages, capped) = service.0.drain_with_status();
-    if capped && let Some(proxy) = proxy.as_deref() {
-        let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-    }
-    for msg in messages {
+    for inbound in inbound.read() {
+        let msg = inbound.0.clone();
         match msg {
             ServiceMessage::ProcessCreated { process_id, pid } => {
                 let entity = process_index
                     .get(&process_id)
                     .filter(|entity| awaiting_create.contains(*entity));
                 if let Some(entity) = entity {
-                    service.0.send(ClientMessage::AttachProcess { process_id });
+                    writers
+                        .service_requests
+                        .write(ServiceRequest(ClientMessage::AttachProcess { process_id }));
                     apply_process_created(&mut commands, entity, process_id, pid);
                 } else {
                     bevy::log::warn!(
@@ -1152,7 +1158,9 @@ fn poll_service_messages(
                     let agent_kind = restart.agent_kind;
                     let new_id = restart.new_id;
                     let entity = restart.entity;
-                    service.0.send(restart.command);
+                    writers
+                        .service_requests
+                        .write(ServiceRequest(restart.command));
                     commands.entity(entity).insert(new_id);
                     mark_terminal_restarting(&mut commands, entity);
                     if let Some(kind) = agent_kind {
@@ -1969,13 +1977,13 @@ fn on_term_key(
     >,
     agents: Query<&vmux_core::agent::AgentSession>,
     launches: Query<&crate::launch::TerminalLaunch>,
-    service: Option<Single<&ServiceClient>>,
     keymap: Res<Keymap>,
     mut command_invocations: MessageWriter<vmux_command::CommandInvocation>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut capture_q: Query<&mut PromptCapture, With<Terminal>>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
@@ -1997,7 +2005,6 @@ fn on_term_key(
     if event.is_modifier_key() {
         return;
     }
-    let Some(service) = service else { return };
     let process_id = *pid;
     let is_vibe = agents.get(entity).ok().map(|session| session.kind)
         == Some(vmux_core::agent::AgentKind::Vibe)
@@ -2026,16 +2033,17 @@ fn on_term_key(
                 let is_vibe = agent_kind == Some(vmux_core::agent::AgentKind::Vibe)
                     || launch_kind == Some(crate::launch::TerminalKind::Vibe);
                 if let Some(data) = resolve_paste(is_vibe, process_id) {
-                    service
-                        .0
-                        .send(ClientMessage::ProcessInput { process_id, data });
+                    service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
+                        process_id,
+                        data,
+                    }));
                 }
                 return;
             }
             "KeyC" => {
-                service
-                    .0
-                    .send(ClientMessage::GetSelectionText { process_id });
+                service_requests.write(ServiceRequest(ClientMessage::GetSelectionText {
+                    process_id,
+                }));
                 return;
             }
             _ => return,
@@ -2057,18 +2065,20 @@ fn on_term_key(
             if copy_mode_key_exits(k) {
                 copy_mode.set(false);
             }
-            service
-                .0
-                .send(ClientMessage::CopyModeKey { process_id, key: k });
+            service_requests.write(ServiceRequest(ClientMessage::CopyModeKey {
+                process_id,
+                key: k,
+            }));
         }
         return;
     }
 
     let data = term_key_event_to_bytes(event);
     if !data.is_empty() {
-        service
-            .0
-            .send(ClientMessage::ProcessInput { process_id, data });
+        service_requests.write(ServiceRequest(ClientMessage::ProcessInput {
+            process_id,
+            data,
+        }));
     }
 }
 
@@ -2082,13 +2092,12 @@ fn on_restart_pty(
         Option<&TerminalGridSize>,
         Has<crate::AgentRunTerminal>,
     )>,
-    service: Option<Single<&ServiceClient>>,
     settings: Res<AppSettings>,
     mut restart_agent: MessageWriter<vmux_core::agent::RestartAgentPty>,
     mut commands: Commands,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     let entity = trigger.event().entity;
-    let Some(service) = service else { return };
     let Ok((mut pid, mut meta, mut launch, agent_session, grid, agent_run)) = q.get_mut(entity)
     else {
         return;
@@ -2099,9 +2108,9 @@ fn on_restart_pty(
         return;
     }
 
-    service
-        .0
-        .send(ClientMessage::KillProcess { process_id: *pid });
+    service_requests.write(ServiceRequest(ClientMessage::KillProcess {
+        process_id: *pid,
+    }));
 
     let (command, args, cwd, mut env) = match launch.as_deref() {
         Some(l) => (
@@ -2125,7 +2134,7 @@ fn on_restart_pty(
 
     let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));
     let new_id = ProcessId::new();
-    service.0.send(ClientMessage::CreateProcess {
+    service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
         process_id: new_id,
         command: command.clone(),
         args: args.clone(),
@@ -2133,7 +2142,7 @@ fn on_restart_pty(
         env: env.clone(),
         cols,
         rows,
-    });
+    }));
 
     *pid = new_id;
     mark_terminal_restarting(&mut commands, entity);
@@ -2154,14 +2163,10 @@ fn handle_terminal_copy_mode_command(
     keyboard_targets: Query<(), With<KeyboardOwner>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    service: Option<Single<&ServiceClient>>,
     process_index: Res<TerminalProcessIndex>,
     mut copy_modes: Query<&mut TerminalCopyMode, With<Terminal>>,
+    mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let Some(service) = service else {
-        for _ in requests.read() {}
-        return;
-    };
     let target_processes = resolve_terminal_input_targets(
         targeted_terminals
             .iter()
@@ -2180,7 +2185,7 @@ fn handle_terminal_copy_mode_command(
             {
                 copy_mode.set(true);
             }
-            service.0.send(ClientMessage::EnterCopyMode { process_id });
+            service_requests.write(ServiceRequest(ClientMessage::EnterCopyMode { process_id }));
         }
     }
 }

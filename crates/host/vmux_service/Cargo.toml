@@ -21,7 +21,6 @@ path = "src/lib.rs"
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-similar = "2"
 vmux_transport = { path = "../vmux_transport" }
 vmux_api = { path = "../../vmux_api" }
 vmux_native = { path = "../../vmux_native" }
