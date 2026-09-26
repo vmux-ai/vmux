@@ -1,6 +1,9 @@
 mod tree;
 pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
 
+#[derive(bevy::prelude::SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct AgentContinuationSet;
+
 pub mod acp_registry;
 pub mod acp_tool;
 pub(crate) mod approval;

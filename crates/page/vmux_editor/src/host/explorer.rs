@@ -28,6 +28,13 @@ pub use search::GlobalSearchRequest;
 use search::SearchPlugin;
 use tree::{ExplorerDirLoadRequest, TreePlugin};
 
+#[derive(EntityEvent)]
+struct RevealCurrent {
+    #[event_target]
+    entity: Entity,
+    reveal: vmux_core::event::ExplorerReveal,
+}
+
 #[derive(Component)]
 pub(super) struct OutlineDirty;
 

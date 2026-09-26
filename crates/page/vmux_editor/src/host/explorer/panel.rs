@@ -2,11 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelWidth};
 
-use super::tree::{emit_explorer_focus, reveal_current_in_tree};
-use super::{
-    ExplorerPanelDefaults, ExplorerPanelSent, ExplorerState, ExplorerTree, StackExplorerRevision,
-    UsesExplorerTree,
-};
+use super::{ExplorerPanelDefaults, ExplorerPanelSent, RevealCurrent, StackExplorerRevision};
 use crate::host::editor::FileView;
 
 pub(super) struct PanelPlugin;
@@ -143,9 +139,6 @@ fn on_explorer_panel_set_visible(
     mut visibility: Query<&mut StackExplorerVisibility>,
     mut revisions: Query<&mut StackExplorerRevision>,
     editors: Query<(Entity, Option<&ChildOf>), With<FileView>>,
-    mut active_editor: Query<(&FileView, &mut ExplorerState, Option<&UsesExplorerTree>)>,
-    mut trees: Query<&mut ExplorerTree>,
-    browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -176,28 +169,11 @@ fn on_explorer_panel_set_visible(
             commands.entity(view).remove::<ExplorerPanelSent>();
         }
     }
-    if next_visibility.visible
-        && let Ok((file_view, mut state, Some(tree_of))) = active_editor.get_mut(entity)
-        && let Ok(mut tree) = trees.get_mut(tree_of.0)
-    {
-        reveal_current_in_tree(
+    if next_visibility.visible {
+        commands.trigger(RevealCurrent {
             entity,
-            &file_view.path,
-            &mut state,
-            tree_of.0,
-            &mut tree,
-            &mut commands,
-        );
-        if let Some(browsers) = browsers {
-            emit_explorer_focus(
-                entity,
-                &file_view.path,
-                vmux_core::event::ExplorerReveal::Followed,
-                &mut state,
-                &browsers,
-                &mut commands,
-            );
-        }
+            reveal: vmux_core::event::ExplorerReveal::Followed,
+        });
     }
 }
 

@@ -45,7 +45,7 @@ impl Plugin for QueryPlugin {
                 .in_set(QuerySet)
                 .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet)
-                .after(super::workspace::send_pending_agent_continuations),
+                .after(super::AgentContinuationSet),
         )
         .add_systems(
             Update,

@@ -8,7 +8,7 @@ use vmux_core::event::*;
 use super::panel::StackExplorerVisibility;
 use super::{
     ExplorerPanelDefaults, ExplorerState, ExplorerTree, ExplorerTreeChanged, ExplorerTreeDirty,
-    ExplorerTreeUsers, IDLE_TREE_CAPACITY, UsesExplorerTree,
+    ExplorerTreeUsers, IDLE_TREE_CAPACITY, RevealCurrent, UsesExplorerTree,
 };
 use crate::dir::{list_dir, project_root};
 use crate::host::editor::FileView;
@@ -50,7 +50,8 @@ impl Plugin for TreePlugin {
                 .chain(),
         )
         .add_observer(mark_explorer_tree_dirty)
-        .add_observer(on_explorer_reveal_current)
+        .add_observer(on_explorer_reveal_current_input)
+        .add_observer(reveal_current)
         .add_observer(on_explorer_collapse_all)
         .add_observer(on_explorer_tree_toggle)
         .add_observer(on_explorer_tree_prefetch)
@@ -58,7 +59,7 @@ impl Plugin for TreePlugin {
     }
 }
 
-pub(super) fn reveal_current_in_tree(
+fn reveal_current_in_tree(
     entity: Entity,
     current: &Path,
     state: &mut ExplorerState,
@@ -99,7 +100,7 @@ pub(super) fn reveal_current_in_tree(
     }
 }
 
-pub(super) fn emit_explorer_focus(
+fn emit_explorer_focus(
     entity: Entity,
     current: &Path,
     reveal: ExplorerReveal,
@@ -432,14 +433,24 @@ fn on_explorer_tree_refresh(
     }
 }
 
-fn on_explorer_reveal_current(
+fn on_explorer_reveal_current_input(
     trigger: On<UiInput<ExplorerRevealCurrent>>,
+    mut commands: Commands,
+) {
+    commands.trigger(RevealCurrent {
+        entity: trigger.event().webview,
+        reveal: ExplorerReveal::Requested,
+    });
+}
+
+fn reveal_current(
+    trigger: On<RevealCurrent>,
     mut query: Query<(&FileView, &mut ExplorerState, &UsesExplorerTree)>,
     mut trees: Query<&mut ExplorerTree>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview;
+    let entity = trigger.event().entity;
     let Ok((view, mut state, tree_of)) = query.get_mut(entity) else {
         return;
     };
@@ -458,7 +469,7 @@ fn on_explorer_reveal_current(
         emit_explorer_focus(
             entity,
             &view.path,
-            ExplorerReveal::Requested,
+            trigger.event().reveal,
             &mut state,
             &browsers,
             &mut commands,
