@@ -84,11 +84,14 @@ impl Default for OsMenuState {
 #[derive(Component)]
 pub(crate) struct OsMenuEntry {
     id: Option<String>,
+    #[cfg(target_os = "macos")]
     label: String,
+    #[cfg(target_os = "macos")]
     enabled: bool,
 }
 
 impl OsMenuEntry {
+    #[cfg(target_os = "macos")]
     pub(crate) fn new(label: String, enabled: bool) -> Self {
         Self {
             id: None,
@@ -100,7 +103,9 @@ impl OsMenuEntry {
     pub(crate) fn identified(id: String) -> Self {
         Self {
             id: Some(id),
+            #[cfg(target_os = "macos")]
             label: String::new(),
+            #[cfg(target_os = "macos")]
             enabled: true,
         }
     }
@@ -110,11 +115,13 @@ impl OsMenuEntry {
     }
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Component)]
 pub(crate) struct OsContextMenu {
     view: usize,
 }
 
+#[cfg(target_os = "macos")]
 impl OsContextMenu {
     pub(crate) fn new(view: *mut std::ffi::c_void) -> Self {
         Self {
@@ -123,6 +130,7 @@ impl OsContextMenu {
     }
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Component)]
 pub(crate) struct OsMenuSeparator;
 
@@ -150,6 +158,7 @@ const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
 
 struct OsMenuResource {
     menu: Menu,
+    #[cfg(target_os = "macos")]
     context_menu: Option<Menu>,
     locale: Locale,
     close_window: Option<MenuItem>,
@@ -211,6 +220,7 @@ fn setup(world: &mut World) {
     }
     world.insert_non_send(OsMenuResource {
         menu,
+        #[cfg(target_os = "macos")]
         context_menu: None,
         locale,
         close_window,
