@@ -1775,11 +1775,7 @@ impl Process {
         let grid = self.term.grid();
         let num_lines = grid.screen_lines();
         let offset = grid.display_offset() as i32;
-
-        let mut lines = Vec::with_capacity(num_lines);
-        for row_idx in 0..num_lines {
-            lines.push(build_line(&self.term, row_idx, offset));
-        }
+        let lines = self.visible_lines();
 
         let cursor_point = grid.cursor.point;
         let scrolled_back = offset > 0;
@@ -1802,6 +1798,30 @@ impl Process {
             cols: grid.columns() as u16,
             rows: num_lines as u16,
         }
+    }
+
+    pub fn visible_text(&self) -> String {
+        self.visible_lines()
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.text.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn visible_lines(&self) -> Vec<TermLine> {
+        let grid = self.term.grid();
+        let num_lines = grid.screen_lines();
+        let offset = grid.display_offset() as i32;
+        let mut lines = Vec::with_capacity(num_lines);
+        for row_idx in 0..num_lines {
+            lines.push(build_line(&self.term, row_idx, offset));
+        }
+        lines
     }
 
     pub fn full_text(&self) -> String {
