@@ -64,9 +64,11 @@ fn toggle(app: &mut App, e: Entity, path: &Path) {
 impl ExplorerTree {
     fn in_app<'a>(app: &'a App, root: &Path) -> &'a Self {
         app.world()
-            .resource::<ExplorerTrees>()
-            .by_root
-            .get(root)
+            .iter_entities()
+            .find_map(|entity| {
+                let tree = entity.get::<ExplorerTree>()?;
+                tree.answers_for(root).then_some(tree)
+            })
             .unwrap_or_else(|| panic!("no explorer tree for {}", root.display()))
     }
 }
@@ -98,9 +100,9 @@ fn wait_for_children(app: &mut App, root: &Path, path: &Path) {
         app.update();
         let loaded = app
             .world()
-            .resource::<ExplorerTrees>()
-            .by_root
-            .get(root)
+            .iter_entities()
+            .filter_map(|entity| entity.get::<ExplorerTree>())
+            .find(|tree| tree.answers_for(root))
             .is_some_and(|tree| tree.children.contains_key(path));
         if loaded {
             return;
@@ -120,8 +122,9 @@ fn init_builds_root_listing_and_marks_dirty() {
         .spawn((FileView { path: file }, ExplorerState::default()))
         .id();
     wait_for_children(&mut app, tmp.path(), tmp.path());
+    let tree_of = app.world().get::<UsesExplorerTree>(e).unwrap();
     assert_eq!(
-        app.world().get::<ExplorerState>(e).unwrap().root.as_path(),
+        app.world().get::<ExplorerTree>(tree_of.0).unwrap().root,
         tmp.path()
     );
     let tree = ExplorerTree::in_app(&app, tmp.path());
@@ -164,6 +167,12 @@ fn a_second_page_on_a_warm_root_reuses_the_loaded_tree() {
         ))
         .id();
     app.update();
+    let first_tree = app.world().get::<UsesExplorerTree>(first).unwrap().0;
+    let second_tree = app.world().get::<UsesExplorerTree>(second).unwrap().0;
+    assert_eq!(first_tree, second_tree);
+    let users = app.world().get::<ExplorerTreeUsers>(first_tree).unwrap();
+    assert!(users.0.contains(&first));
+    assert!(users.0.contains(&second));
     assert!(
         app.world().get::<ExplorerTreeDirty>(second).is_some(),
         "a page joining a warm root must still be asked to draw its tree"
@@ -203,27 +212,58 @@ fn expansion_outlives_the_page_that_made_it() {
 
 #[test]
 fn pruning_drops_the_stalest_idle_trees_and_never_a_live_one() {
-    let mut trees = ExplorerTrees::default();
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, TreePlugin))
+        .insert_resource(ExplorerPanelDefaults {
+            default_visible: false,
+            width: 240,
+        });
     let roots: Vec<PathBuf> = (0..IDLE_TREE_CAPACITY + 2)
         .map(|n| PathBuf::from(format!("/project{n}")))
         .collect();
-    for root in &roots {
-        trees.at(root);
+    let mut tree_entities = Vec::new();
+    for (index, root) in roots.iter().enumerate() {
+        let mut tree = ExplorerTree::new(root.clone());
+        tree.used -= std::time::Duration::from_secs((roots.len() - index) as u64);
+        tree_entities.push(app.world_mut().spawn(tree).id());
     }
-    let live: HashSet<PathBuf> = [roots[0].clone()].into_iter().collect();
+    let live = app
+        .world_mut()
+        .spawn((ExplorerState::default(), UsesExplorerTree(tree_entities[0])))
+        .id();
+    let closed = app.world_mut().spawn(ExplorerState::default()).id();
+    app.world_mut().entity_mut(closed).remove::<ExplorerState>();
 
-    trees.prune(&live);
+    app.update();
 
     assert!(
-        trees.by_root.contains_key(&roots[0]),
+        app.world()
+            .iter_entities()
+            .filter_map(|entity| entity.get::<ExplorerTree>())
+            .any(|tree| tree.answers_for(&roots[0])),
         "a root a page still shows must survive however stale it is"
     );
     assert!(
-        !trees.by_root.contains_key(&roots[1]),
+        !app.world()
+            .iter_entities()
+            .filter_map(|entity| entity.get::<ExplorerTree>())
+            .any(|tree| tree.answers_for(&roots[1])),
         "the stalest idle root is the one that goes"
     );
-    assert!(trees.by_root.contains_key(roots.last().unwrap()));
-    assert_eq!(trees.by_root.len(), IDLE_TREE_CAPACITY + 1);
+    assert!(
+        app.world()
+            .iter_entities()
+            .filter_map(|entity| entity.get::<ExplorerTree>())
+            .any(|tree| tree.answers_for(roots.last().unwrap()))
+    );
+    assert_eq!(
+        app.world()
+            .iter_entities()
+            .filter_map(|entity| entity.get::<ExplorerTree>())
+            .count(),
+        IDLE_TREE_CAPACITY + 1
+    );
+    assert!(app.world().get_entity(live).is_ok());
 }
 
 #[test]
@@ -525,8 +565,7 @@ fn collapse_all_leaves_the_root_expanded_and_nothing_else() {
 #[test]
 fn showing_the_panel_reveals_without_taking_the_caret() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, PanelPlugin))
-        .init_resource::<ExplorerTrees>()
+    app.add_plugins((MinimalPlugins, TreePlugin, PanelPlugin))
         .insert_resource(ExplorerPanelDefaults {
             default_visible: false,
             width: 240,
@@ -546,6 +585,7 @@ fn showing_the_panel_reveals_without_taking_the_caret() {
         ))
         .id();
     SentReveals::watch(&mut app, view);
+    app.update();
 
     app.world_mut().trigger(UiInput {
         webview: view,
@@ -567,8 +607,7 @@ fn showing_the_panel_reveals_without_taking_the_caret() {
 #[test]
 fn panel_visibility_is_shared_only_within_stack() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, PanelPlugin))
-        .init_resource::<ExplorerTrees>();
+    app.add_plugins((MinimalPlugins, TreePlugin, PanelPlugin));
     let first_stack = app
         .world_mut()
         .spawn(StackExplorerVisibility { visible: true })
