@@ -10363,6 +10363,7 @@ dependencies = [
  "vmux_flex",
  "vmux_history",
  "vmux_macro",
+ "vmux_mcp",
  "vmux_ui",
 ]
 
@@ -10946,6 +10947,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_layout",
+ "vmux_mcp",
  "vmux_native",
  "vmux_service",
  "vmux_space",

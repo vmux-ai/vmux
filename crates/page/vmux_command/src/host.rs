@@ -11,6 +11,7 @@ pub mod settings;
 pub mod shortcut;
 pub mod snapshot;
 pub mod surface;
+mod tool;
 
 pub use vmux_api::InputSchema;
 
@@ -29,3 +30,4 @@ pub use payload::{
 };
 pub use settings::ResolvedLocale;
 pub use snapshot::*;
+pub use tool::CommandToolPlugin;

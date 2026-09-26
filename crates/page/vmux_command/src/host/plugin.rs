@@ -15,17 +15,22 @@ impl Plugin for CommandPlugin {
         if !app.is_plugin_added::<CommandRuntimePlugin>() {
             app.add_plugins(CommandRuntimePlugin);
         }
-        app.add_plugins((KeyPlugin, UiStatePlugin, SurfacePlugin))
-            .add_message::<crate::host::ExLineSubmitted>()
-            .add_message::<crate::host::FileStatusPicked>()
-            .init_resource::<CommandSettle>()
-            .add_systems(
-                Update,
-                log_command_invocations
-                    .after(WriteCommandRequests)
-                    .before(DispatchCommandInvocations),
-            )
-            .add_systems(Last, keep_frames_coming);
+        app.add_plugins((
+            KeyPlugin,
+            UiStatePlugin,
+            SurfacePlugin,
+            crate::CommandToolPlugin,
+        ))
+        .add_message::<crate::host::ExLineSubmitted>()
+        .add_message::<crate::host::FileStatusPicked>()
+        .init_resource::<CommandSettle>()
+        .add_systems(
+            Update,
+            log_command_invocations
+                .after(WriteCommandRequests)
+                .before(DispatchCommandInvocations),
+        )
+        .add_systems(Last, keep_frames_coming);
     }
 }
 
