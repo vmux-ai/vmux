@@ -29,7 +29,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_core::ProcessId;
 
 use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
-use crate::process::{ProcessManager, PtyInputWriter};
+use crate::process::ProcessManager;
 use crate::protocol::{
     AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
     ServiceMessage, SharedEvent, compose_agent_prompt,
@@ -157,7 +157,6 @@ pub struct AcpShared {
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     pub terminals: Mutex<HashMap<String, AcpTerminal>>,
     pub manager: Arc<tokio::sync::Mutex<ProcessManager>>,
-    pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
     model_info: Mutex<Option<AcpModelInfoState>>,
     mode_info: Mutex<Option<AcpModeInfoState>>,
@@ -177,7 +176,6 @@ impl AcpShared {
         anchor: ProcessId,
         stream_tx: broadcast::Sender<ServiceMessage>,
         manager: Arc<tokio::sync::Mutex<ProcessManager>>,
-        input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     ) -> Self {
         Self {
             sid,
@@ -189,7 +187,6 @@ impl AcpShared {
             pending_perms: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
             manager,
-            input_writers,
             agent_name: Mutex::new(None),
             model_info: Mutex::new(None),
             mode_info: Mutex::new(None),
@@ -1834,7 +1831,7 @@ async fn create_terminal(
     let cwd = cwd.to_string_lossy().into_owned();
     let id = ProcessId::new();
 
-    let (exit_stream, writer) = {
+    let exit_stream = {
         let mut mgr = shared.manager.lock().await;
         mgr.create_process_keep_alive(
             id,
@@ -1845,13 +1842,8 @@ async fn create_terminal(
             ACP_TERMINAL_COLS,
             ACP_TERMINAL_ROWS,
         )?;
-        let exit_stream = mgr.processes.get(&id).map(|process| process.subscribe());
-        (exit_stream, mgr.input_writer(&id))
+        mgr.processes.get(&id).map(|process| process.subscribe())
     };
-
-    if let Some(writer) = writer {
-        shared.input_writers.lock().await.insert(id, writer);
-    }
 
     let (exit_tx, exit_rx) = watch::channel(AcpTerminalExit::Pending);
     if let Some(mut exit_stream) = exit_stream {
@@ -2027,7 +2019,7 @@ async fn release_terminal(
         .manager
         .lock()
         .await
-        .kill_process(&terminal.process_id);
+        .remove_process(&terminal.process_id);
     Ok(ReleaseTerminalResponse::new())
 }
 
@@ -2391,7 +2383,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
 
         shared.publish_agent_info("Antigravity".into());
@@ -2514,7 +2505,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         publish_mode_selection_result(&shared, 9, "auto", true);
 
@@ -2543,7 +2533,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         let config = SessionConfigOption::select(
             "approval",
@@ -2583,7 +2572,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         let config = SessionConfigOption::select(
             "model",
@@ -2619,7 +2607,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         publish_model_selection_result(&shared, 7, "fable", false);
 
@@ -2648,7 +2635,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         let stale = SessionConfigOption::select(
             "model",
@@ -2682,7 +2668,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         let config = SessionConfigOption::select(
             "model",
@@ -2741,7 +2726,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         shared.begin_history_replay();
 
@@ -2798,7 +2782,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         shared.begin_history_replay();
         project_session_update(
@@ -2927,7 +2910,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         let request = RequestPermissionRequest::new(
             "session-1",
@@ -2971,7 +2953,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
         project_session_update(
             &shared,
@@ -3288,7 +3269,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             manager,
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         (shared, stream_rx)
     }
@@ -3372,7 +3352,6 @@ mod tests {
             ProcessId::new(),
             stream_tx,
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
-            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
 
         shared.publish_workspace_change(
@@ -3588,7 +3567,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn release_terminal_kills_running_command() {
+    async fn release_terminal_removes_running_command() {
         let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
         let (shared, _rx) = test_shared(manager.clone());
         let created = create_terminal(
@@ -3608,27 +3587,7 @@ mod tests {
         .await
         .expect("release");
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
-        let exited = loop {
-            let exited = {
-                let mut manager = manager.lock().await;
-                manager.poll_all();
-                manager
-                    .processes
-                    .get(&process_id)
-                    .and_then(|process| process.process_exit())
-                    .is_some()
-            };
-            if exited || std::time::Instant::now() >= deadline {
-                break exited;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        };
-        if !exited {
-            manager.lock().await.remove_process(&process_id);
-        }
-
-        assert!(exited, "release must kill a running terminal command");
+        assert!(!manager.lock().await.processes.contains_key(&process_id));
     }
 
     #[tokio::test]
