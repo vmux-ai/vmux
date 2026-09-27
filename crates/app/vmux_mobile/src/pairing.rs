@@ -30,7 +30,10 @@ impl Plugin for PairingPlugin {
             .add_message::<PairingFailure>()
             .add_message::<DisconnectRequest>()
             .insert_non_send(ConnectionSubscribers::default())
-            .add_systems(Startup, (spawn_connection_state, restore_connection).chain())
+            .add_systems(
+                Startup,
+                (spawn_connection_state, restore_connection).chain(),
+            )
             .add_systems(
                 Update,
                 (

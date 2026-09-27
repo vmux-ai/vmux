@@ -45,10 +45,7 @@ impl Plugin for ChatPromptPlugin {
 
 fn on_chat_submit(
     trigger: On<UiInput<ChatSubmit>>,
-    mut views: Query<
-        (&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState),
-        With<ChatView>,
-    >,
+    mut views: Query<(&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState), With<ChatView>>,
     mut sessions: Query<(
         &mut PromptQueue,
         &mut AgentRunState,
@@ -322,10 +319,7 @@ mod tests {
             .world_mut()
             .spawn((PromptQueue::default(), AgentRunState::Idle))
             .id();
-        let webview = app
-            .world_mut()
-            .spawn((ChildOf(session), ChatView))
-            .id();
+        let webview = app.world_mut().spawn((ChildOf(session), ChatView)).id();
 
         app.world_mut().trigger(UiInput {
             webview,

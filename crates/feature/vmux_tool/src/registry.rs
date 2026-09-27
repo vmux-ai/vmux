@@ -114,7 +114,7 @@ impl ToolAppExt for App {
             .in_set(ToolStartupSet::Registry),
         )
         .add_systems(Startup, bind_tool::<T>.in_set(ToolStartupSet::Binding))
-            .add_systems(Update, parse_tool::<T>.in_set(ToolRequestSet))
+        .add_systems(Update, parse_tool::<T>.in_set(ToolRequestSet))
     }
 }
 

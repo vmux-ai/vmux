@@ -2,8 +2,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::project::SpaceProjects;
-use vmux_chat::host::{ChatBranchesProjection, ChatView};
-use vmux_core::agent::{AgentRequestInput, CommandOrigin};
 use vmux_api::protocol::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentRequest,
     AgentRequestId,
@@ -11,6 +9,8 @@ use vmux_api::protocol::{
 use vmux_chat::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
 };
+use vmux_chat::host::{ChatBranchesProjection, ChatView};
+use vmux_core::agent::{AgentRequestInput, CommandOrigin};
 use vmux_session::AcpSession;
 use vmux_session::AgentApprovalPolicy;
 

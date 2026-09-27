@@ -210,7 +210,9 @@ fn submit(host: &MobileHost, payload: ChatSubmit) -> Result<(), EventListenerErr
     if host.session.sid().is_empty() {
         return Err(EventListenerError::Unsupported);
     }
-    let attachments = host.runtime.project(|selected: &Attachments| {
+    let attachments = host
+        .runtime
+        .project(|selected: &Attachments| {
             selected
                 .0
                 .iter()

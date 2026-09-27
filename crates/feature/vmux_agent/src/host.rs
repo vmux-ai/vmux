@@ -66,6 +66,7 @@ pub(crate) use self::workspace::{
 
 pub use vmux_service::{http, message, stream};
 
+pub use cli::CliAgentStrategy;
 pub use event::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
@@ -75,7 +76,6 @@ pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 pub use run_state::AgentRunState;
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
-pub use cli::CliAgentStrategy;
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
 pub use tool::WorkspaceToolPlugin;

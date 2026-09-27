@@ -857,11 +857,7 @@ mod tests {
             execution_dir.to_string_lossy()
         );
         assert_eq!(app.world().get::<ChildOf>(view).unwrap().parent(), stack);
-        assert!(
-            app.world()
-                .get::<vmux_chat::host::ChatView>(view)
-                .is_some()
-        );
+        assert!(app.world().get::<vmux_chat::host::ChatView>(view).is_some());
         assert!(matches!(
             rebind,
             ClientMessage::RebindAcpWorkspace { sid, cwd }
