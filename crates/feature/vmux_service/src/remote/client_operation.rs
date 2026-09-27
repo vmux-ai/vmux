@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use bevy::prelude::*;
 use tokio::sync::{mpsc, oneshot};
@@ -7,7 +7,7 @@ use vmux_api::room::ClientOpId;
 const MAX_CLIENT_OPERATIONS: usize = 4096;
 
 pub(crate) struct ClientOperationPlugin {
-    inbox: Arc<Mutex<Option<ClientOperationReceivers>>>,
+    inbox: Mutex<Option<ClientOperationReceivers>>,
 }
 
 impl ClientOperationPlugin {
@@ -16,10 +16,10 @@ impl ClientOperationPlugin {
         let (releases, release_inbox) = mpsc::unbounded_channel();
         (
             Self {
-                inbox: Arc::new(Mutex::new(Some(ClientOperationReceivers {
+                inbox: Mutex::new(Some(ClientOperationReceivers {
                     claims: claim_inbox,
                     releases: release_inbox,
-                }))),
+                })),
             },
             ClientOperations {
                 claims,
@@ -32,19 +32,17 @@ impl ClientOperationPlugin {
 
 impl Plugin for ClientOperationPlugin {
     fn build(&self, app: &mut App) {
-        let inbox = Arc::clone(&self.inbox);
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let inbox = inbox
-                .lock()
-                .unwrap()
-                .take()
-                .expect("client operation plugin can only be built once");
-            commands.spawn((
-                Name::new("remote client operations"),
-                ClientOperationInbox(Mutex::new(inbox)),
-            ));
-        })
-        .add_systems(
+        let inbox = self
+            .inbox
+            .lock()
+            .unwrap()
+            .take()
+            .expect("client operation plugin can only be built once");
+        app.world_mut().spawn((
+            Name::new("remote client operations"),
+            ClientOperationInbox(Mutex::new(inbox)),
+        ));
+        app.add_systems(
             Update,
             (
                 receive_client_operation_requests,

@@ -148,7 +148,7 @@ impl ProcessQueries {
 
 pub(crate) struct ProcessQueryPlugin {
     manager: Arc<AsyncMutex<ProcessManager>>,
-    receivers: Arc<Mutex<Option<ProcessQueryReceivers>>>,
+    receivers: Mutex<Option<ProcessQueryReceivers>>,
 }
 
 impl ProcessQueryPlugin {
@@ -160,7 +160,7 @@ impl ProcessQueryPlugin {
         (
             Self {
                 manager,
-                receivers: Arc::new(Mutex::new(Some(receivers))),
+                receivers: Mutex::new(Some(receivers)),
             },
             queries,
         )
@@ -169,21 +169,18 @@ impl ProcessQueryPlugin {
 
 impl Plugin for ProcessQueryPlugin {
     fn build(&self, app: &mut App) {
-        let manager = Arc::clone(&self.manager);
-        let receivers = Arc::clone(&self.receivers);
-        app.add_systems(Startup, move |mut commands: Commands| {
-            let receivers = receivers
-                .lock()
-                .unwrap()
-                .take()
-                .expect("daemon query plugin can only be built once");
-            commands.spawn((
-                Name::new("vmux service process runtime"),
-                ProcessRuntime(Arc::clone(&manager)),
-                ProcessQueryInbox(Mutex::new(receivers)),
-            ));
-        })
-        .add_systems(
+        let receivers = self
+            .receivers
+            .lock()
+            .unwrap()
+            .take()
+            .expect("daemon query plugin can only be built once");
+        app.world_mut().spawn((
+            Name::new("vmux service process runtime"),
+            ProcessRuntime(Arc::clone(&self.manager)),
+            ProcessQueryInbox(Mutex::new(receivers)),
+        ));
+        app.add_systems(
             Update,
             (
                 receive_process_queries,
