@@ -1,6 +1,11 @@
 (
     url: "vmux://tools/lsp",
     title: "Language Servers",
+    asset_host: "lsp",
+    title_message_id: "lsp-title",
+    keywords: ["lsp", "language", "server", "install", "mason"],
+    icon: "Server",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

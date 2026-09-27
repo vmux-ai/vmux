@@ -21,13 +21,14 @@ use vmux_layout::stack::Stack;
 
 use crate::projection::TeamStateProjection;
 
+#[vmux_native::page]
 pub struct TeamPlugin;
 
 impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::TeamPage::plugin());
-        app.add_plugins(crate::PAGE_MANIFEST.plugin())
+        app.add_plugins(Self::MANIFEST.plugin())
             .add_plugins((
                 HostedPagePlugin::<Team>::default(),
                 TeamProjectionPlugin,
@@ -78,18 +79,6 @@ impl Plugin for TeamIntentPlugin {
 pub struct ProfileSwitchRequested {
     pub profile_id: String,
 }
-
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: vmux_api::team::TEAM_PAGE_URL,
-    asset_host: "team",
-    owns_subtree: false,
-    title: "Team",
-    title_message_id: Some("team-title"),
-    replaces_command: None,
-    keywords: &["team", "agents", "profile"],
-    icon: Some(vmux_core::BuiltinIcon::Users),
-    command_bar: true,
-};
 
 #[derive(Component, Default)]
 struct Team;

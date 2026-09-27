@@ -22,6 +22,7 @@ use vmux_layout::stack::{ComputeFocusSet, FocusedStack};
 pub use device::{Axe, SimulatorDevice};
 pub use tool::SimulatorToolPlugin;
 
+#[vmux_native::page]
 pub struct SimulatorPlugin;
 
 impl Plugin for SimulatorPlugin {
@@ -29,9 +30,9 @@ impl Plugin for SimulatorPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::SimulatorPage::plugin());
         app.add_plugins(
-            PAGE_MANIFEST
+            Self::MANIFEST
                 .plugin()
-                .hosted(NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title)),
+                .hosted(NativelyHosted::subtree(PAGE_URL, Self::MANIFEST.title)),
         )
         .add_plugins(UiStatePlugin::<SimulatorReady>::default())
         .add_plugins(SimulatorToolPlugin)
@@ -168,18 +169,6 @@ pub struct SimulatorFocusSet;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SimulatorInputSet;
-
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: crate::url::PAGE_URL,
-    asset_host: PAGE_HOST,
-    owns_subtree: true,
-    title: "Simulator",
-    title_message_id: Some("simulator-title"),
-    replaces_command: None,
-    keywords: &["simulator", "ios", "iphone", "device"],
-    icon: Some(vmux_core::BuiltinIcon::Smartphone),
-    command_bar: true,
-};
 
 #[derive(Component)]
 struct DevicePoints(f32, f32);

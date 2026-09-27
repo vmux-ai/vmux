@@ -19,13 +19,14 @@ use vmux_layout::stack::FocusedStack;
 use vmux_layout::window::host_window_of;
 use vmux_ui::i18n::Locale;
 
+#[vmux_native::page]
 pub struct ShortcutPlugin;
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::ShortcutPage::plugin());
-        app.add_plugins(PAGE_MANIFEST.plugin())
+        app.add_plugins(Self::MANIFEST.plugin())
             .add_plugins((
                 HostedPagePlugin::<Shortcuts>::default(),
                 UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
@@ -53,18 +54,6 @@ impl Plugin for ShortcutPlugin {
             );
     }
 }
-
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: crate::PAGE_URL,
-    asset_host: "shortcuts",
-    owns_subtree: false,
-    title: "Keyboard Shortcuts",
-    title_message_id: Some("shortcuts-title"),
-    replaces_command: None,
-    keywords: &["keyboard", "shortcut", "keymap", "cheatsheet"],
-    icon: Some(vmux_core::BuiltinIcon::Keyboard),
-    command_bar: true,
-};
 
 #[derive(Component, Default)]
 #[require(ShortcutUiStateUpdates, ShortcutCapture)]

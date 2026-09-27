@@ -1,6 +1,10 @@
 (
     url: "vmux://spaces/",
     title: "Spaces",
+    title_message_id: "spaces-title",
+    keywords: ["space"],
+    icon: "Layers",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

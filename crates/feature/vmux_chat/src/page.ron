@@ -1,6 +1,9 @@
 (
     url: "vmux://sessions/",
     title: "Sessions",
+    owns_subtree: true,
+    keywords: ["ai", "chat", "assistant", "agent"],
+    icon: "Sparkles",
     permissions: [
         "PageReady",
         "ThemeEvent",

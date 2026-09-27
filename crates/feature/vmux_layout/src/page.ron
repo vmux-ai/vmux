@@ -1,6 +1,7 @@
 (
     url: "vmux://layout/",
     title: "vmux",
+    manifest_title: "Layout",
     permissions: [
         "PageReady",
         "ThemeEvent",

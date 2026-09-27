@@ -22,6 +22,7 @@ pub use state::Settings;
 pub use tool::SettingToolPlugin;
 pub use vmux_command::event::SearchEngine;
 
+#[vmux_native::page]
 pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
@@ -37,23 +38,11 @@ impl Plugin for SettingsPlugin {
             appearance::AppearancePlugin,
             vmux_layout::LayoutContractPlugin,
         ))
-        .add_plugins(crate::PAGE_MANIFEST.plugin())
+        .add_plugins(Self::MANIFEST.plugin())
         .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
         .add_systems(Update, respond_settings_spawn.in_set(ReadCommandRequests));
     }
 }
-
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: crate::event::SETTINGS_PAGE_URL,
-    asset_host: "settings",
-    owns_subtree: false,
-    title: "Settings",
-    title_message_id: Some("settings-title"),
-    replaces_command: None,
-    keywords: &["preferences", "config"],
-    icon: Some(vmux_core::BuiltinIcon::Settings),
-    command_bar: true,
-};
 
 fn respond_settings_spawn(
     mut reader: MessageReader<vmux_core::page::SettingsPageSpawnRequest>,

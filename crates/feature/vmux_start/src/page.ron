@@ -1,6 +1,10 @@
 (
     url: "vmux://start/",
     title: "Start",
+    title_message_id: "start-title",
+    keywords: ["start", "home", "new tab", "launcher"],
+    icon: "Sparkles",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

@@ -20,13 +20,14 @@ use vmux_layout::settings::ResolvedLocale;
 use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
 use vmux_layout::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
 
+#[vmux_native::page]
 pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
-        app.add_plugins(crate::PAGE_MANIFEST.plugin().hosted(
+        app.add_plugins(Self::MANIFEST.plugin().hosted(
             vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
         ))
         .init_resource::<CommandBarProjection>()

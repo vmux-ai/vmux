@@ -16,11 +16,12 @@ use vmux_layout::native_open::HostedPage;
 use crate::lsp::catalog::{self, Package};
 use crate::lsp::{install, purl, store, target};
 
+#[vmux_native::page(file = "src/lsp.ron")]
 pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(PAGE_MANIFEST.plugin())
+        app.add_plugins(Self::MANIFEST.plugin())
             .add_plugins(vmux_layout::native_open::HostedPagePlugin::<LspManagerPage>::default())
             .add_plugins(UiStatePlugin::<LspManagerUiState>::default())
             .add_plugins(UiEventPlugin::<(
@@ -53,18 +54,6 @@ impl Plugin for ManagerPlugin {
             );
     }
 }
-
-const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: "vmux://tools/lsp",
-    asset_host: "lsp",
-    owns_subtree: false,
-    title: "Language Servers",
-    title_message_id: Some("lsp-title"),
-    replaces_command: None,
-    keywords: &["lsp", "language", "server", "install", "mason"],
-    icon: Some(vmux_core::BuiltinIcon::Server),
-    command_bar: true,
-};
 
 #[derive(Component, Default)]
 #[require(ManagerState, UiState<LspManagerUiState>)]

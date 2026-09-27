@@ -1,6 +1,10 @@
 (
     url: "vmux://terminal/",
     title: "Terminal",
+    title_message_id: "command-terminal",
+    keywords: ["shell", "console"],
+    icon: "Terminal",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

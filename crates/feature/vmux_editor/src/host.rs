@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+#[vmux_native::page]
 pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
@@ -37,37 +38,16 @@ impl Plugin for EditorPlugin {
             vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiState>::default(),
         ))
         .add_plugins((
-            FILES_PAGE_MANIFEST
+            Self::MANIFEST
                 .plugin()
                 .route(vmux_core::HostSpawnRoute::scheme("file")),
-            PROJECTS_PAGE_MANIFEST.plugin(),
+            ProjectsPage::MANIFEST.plugin(),
         ));
     }
 }
 
-const FILES_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: "vmux://files/",
-    asset_host: "files",
-    owns_subtree: false,
-    title: "Files",
-    title_message_id: None,
-    replaces_command: None,
-    keywords: &["file", "open"],
-    icon: Some(vmux_core::BuiltinIcon::Files),
-    command_bar: true,
-};
-
-const PROJECTS_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: vmux_api::space::PROJECTS_PAGE_URL,
-    asset_host: "projects",
-    owns_subtree: true,
-    title: "Projects",
-    title_message_id: Some("layout-projects"),
-    replaces_command: None,
-    keywords: &["project", "files", "folder", "open"],
-    icon: Some(vmux_core::BuiltinIcon::Project),
-    command_bar: true,
-};
+#[vmux_native::page(file = "src/projects.ron")]
+struct ProjectsPage;
 
 pub mod contract;
 pub mod edit;

@@ -68,7 +68,7 @@ pub(crate) struct FilePage;
 pub(crate) struct ProjectsPage;
 
 #[vmux_native::page(
-    file = "src/knowledge.ron",
+    file = "../vmux_knowledge/src/page.ron",
     component = Page,
     dom_group = "editor",
     subtree

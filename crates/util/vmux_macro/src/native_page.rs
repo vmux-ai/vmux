@@ -1,4 +1,4 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{TokenStream, TokenTree};
 use quote::quote;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -12,6 +12,14 @@ use syn::{
 struct PageManifestFile {
     url: String,
     title: String,
+    #[serde(default)]
+    manifest_url: String,
+    #[serde(default)]
+    manifest_title: String,
+    #[serde(default)]
+    asset_host: String,
+    #[serde(default)]
+    owns_subtree: bool,
     #[serde(default)]
     title_message_id: String,
     #[serde(default)]
@@ -60,6 +68,108 @@ impl PageManifestFile {
         })?;
         Ok(Some(parse_quote!(::vmux_core::BuiltinIcon::#icon)))
     }
+
+    fn manifest(&self, file: &LitStr) -> syn::Result<TokenStream> {
+        let url = if self.manifest_url.is_empty() {
+            &self.url
+        } else {
+            &self.manifest_url
+        };
+        let title = if self.manifest_title.is_empty() {
+            &self.title
+        } else {
+            &self.manifest_title
+        };
+        let asset_host = if self.asset_host.is_empty() {
+            url.strip_prefix("vmux://")
+                .and_then(|url| url.split('/').next())
+                .or_else(|| url.split_once("://").map(|(scheme, _)| scheme))
+                .filter(|host| !host.is_empty())
+                .ok_or_else(|| syn::Error::new(file.span(), "page manifest requires asset_host"))?
+        } else {
+            &self.asset_host
+        };
+        let url = LitStr::new(url, file.span());
+        let title = LitStr::new(title, file.span());
+        let asset_host = LitStr::new(asset_host, file.span());
+        let owns_subtree = self.owns_subtree;
+        let title_message_id = if self.title_message_id.is_empty() {
+            quote! { ::core::option::Option::None }
+        } else {
+            let value = LitStr::new(&self.title_message_id, file.span());
+            quote! { ::core::option::Option::Some(#value) }
+        };
+        let replaces_command = if self.replaces_command.is_empty() {
+            quote! { ::core::option::Option::None }
+        } else {
+            let value = LitStr::new(&self.replaces_command, file.span());
+            quote! { ::core::option::Option::Some(#value) }
+        };
+        let keywords = self
+            .keywords
+            .iter()
+            .map(|value| LitStr::new(value, file.span()))
+            .collect::<Vec<_>>();
+        let icon = match self.icon(file)? {
+            Some(value) => quote! { ::core::option::Option::Some(#value) },
+            None => quote! { ::core::option::Option::None },
+        };
+        let command_bar = self.command_bar;
+        Ok(quote! {
+            ::vmux_core::page::PageManifest {
+                url: #url,
+                asset_host: #asset_host,
+                owns_subtree: #owns_subtree,
+                title: #title,
+                title_message_id: #title_message_id,
+                replaces_command: #replaces_command,
+                keywords: &[#(#keywords),*],
+                icon: #icon,
+                command_bar: #command_bar,
+            }
+        })
+    }
+}
+
+struct ManifestArgs {
+    file: LitStr,
+}
+
+impl Parse for ManifestArgs {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let mut file = None;
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            match key.to_string().as_str() {
+                "file" => file = Some(input.parse()?),
+                _ => return Err(syn::Error::new_spanned(key, "unknown page manifest option")),
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(Self {
+            file: file
+                .unwrap_or_else(|| LitStr::new("src/page.ron", proc_macro2::Span::call_site())),
+        })
+    }
+}
+
+pub(crate) fn expand_manifest(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
+    let args = syn::parse2::<ManifestArgs>(args)?;
+    let manifest = PageManifestFile::read(&args.file)?.manifest(&args.file)?;
+    let ident = &input.ident;
+    let file = &args.file;
+    Ok(quote! {
+        const _: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/", #file));
+
+        #input
+
+        impl #ident {
+            pub const MANIFEST: ::vmux_core::page::PageManifest = #manifest;
+        }
+    })
 }
 
 struct Args {
@@ -315,6 +425,18 @@ impl Parse for Args {
 }
 
 pub(crate) fn expand(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
+    let native = args
+        .clone()
+        .into_iter()
+        .any(|token| matches!(token, TokenTree::Ident(ident) if ident == "component"));
+    if native {
+        expand_native(args, input)
+    } else {
+        expand_manifest(args, input)
+    }
+}
+
+fn expand_native(args: TokenStream, input: DeriveInput) -> syn::Result<TokenStream> {
     let args = syn::parse2::<Args>(args)?;
     let Data::Struct(data) = &input.data else {
         return Err(syn::Error::new_spanned(

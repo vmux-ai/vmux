@@ -1,6 +1,10 @@
 (
     url: "file://",
     title: "Files",
+    manifest_url: "vmux://files/",
+    keywords: ["file", "open"],
+    icon: "Files",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

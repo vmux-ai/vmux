@@ -49,6 +49,7 @@ use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 
+#[vmux_native::page]
 pub struct TerminalPlugin;
 
 impl Plugin for TerminalPlugin {
@@ -56,7 +57,7 @@ impl Plugin for TerminalPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::TerminalPage::plugin());
         app.add_plugins(
-            crate::PAGE_MANIFEST
+            Self::MANIFEST
                 .plugin()
                 .route(vmux_core::HostSpawnRoute::page("vmux://terminal/")),
         )

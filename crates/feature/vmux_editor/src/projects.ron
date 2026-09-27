@@ -1,6 +1,11 @@
 (
     url: "vmux://projects/",
     title: "Projects",
+    owns_subtree: true,
+    title_message_id: "layout-projects",
+    keywords: ["project", "files", "folder", "open"],
+    icon: "Project",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

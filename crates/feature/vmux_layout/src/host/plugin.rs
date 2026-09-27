@@ -6,7 +6,6 @@ use super::projection::LayoutUiProjectionPlugin;
 use crate::active_pane::ActivePanePlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
-use crate::cef::LayoutCefPlugin;
 use crate::contract::LayoutContractPlugin;
 use crate::host::header::HeaderLayoutPlugin;
 use crate::host::webview_reveal::WebviewRevealPlugin;
@@ -27,6 +26,7 @@ use crate::{
     LayoutStartupSet, Open, TabLayoutSpawnRequest, TerminalLayoutSpawnRequest, apply, settings,
 };
 
+#[vmux_native::page]
 pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
@@ -76,6 +76,8 @@ impl Plugin for LayoutPlugin {
                 WorktreePlugin,
             ))
             .add_plugins((
+                Self::MANIFEST.plugin(),
+                ErrorPage::MANIFEST.plugin(),
                 PageContextPlugin,
                 TogglePlugin,
                 WebviewRevealPlugin,
@@ -83,10 +85,12 @@ impl Plugin for LayoutPlugin {
                 PrewarmPagesPlugin,
                 NativeOpenPlugin,
                 BookmarkPlugin,
-                LayoutCefPlugin,
                 vmux_core::host::UiStatePlugin::<crate::state::LayoutUiState>::default(),
                 crate::workspace_snapshot_publish::SnapshotPlugin,
                 crate::pending_stack::PendingStackPlugin,
             ));
     }
 }
+
+#[vmux_native::page(file = "src/error.ron")]
+struct ErrorPage;

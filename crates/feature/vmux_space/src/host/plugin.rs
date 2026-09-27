@@ -17,13 +17,14 @@ use crate::event::{
 };
 use crate::spaces::{ActiveSpace, SpaceSelection, Spaces, SpacesPageSnapshot};
 
+#[vmux_native::page]
 pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::SpacesPage::plugin());
-        app.add_plugins(crate::PAGE_MANIFEST.plugin())
+        app.add_plugins(Self::MANIFEST.plugin())
             .add_plugins((
                 vmux_command::CommandTypePlugin::<OpenRequest>::default(),
                 SpaceAgentPlugin,

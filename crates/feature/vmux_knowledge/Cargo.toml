@@ -22,6 +22,7 @@ moonshine-save = { workspace = true }
 notify = { workspace = true }
 vmux_git = { path = "../vmux_git" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_native = { path = "../../util/vmux_native" }
 vmux_tool = { path = "../vmux_tool" }
 
 [dev-dependencies]

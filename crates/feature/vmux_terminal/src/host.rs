@@ -35,15 +35,3 @@ pub use prompt::{BufferedAgentPrompt, PromptCapture};
 pub use request::{RunShellRequest, ShellMode, TerminalRequestPlugin, TerminalSendRequest};
 pub use theme::{TerminalFontSizeCommand, TerminalThemePlugin};
 pub use tool::TerminalToolPlugin;
-
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: crate::event::TERMINAL_PAGE_URL,
-    asset_host: "terminal",
-    owns_subtree: false,
-    title: "Terminal",
-    title_message_id: Some("command-terminal"),
-    replaces_command: None,
-    keywords: &["shell", "console"],
-    icon: Some(vmux_core::BuiltinIcon::Terminal),
-    command_bar: true,
-};

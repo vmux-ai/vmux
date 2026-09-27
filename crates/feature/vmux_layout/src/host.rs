@@ -57,29 +57,6 @@ pub use window::fit_window_to_screen;
 
 pub type LayoutUiStateUpdates = vmux_core::host::UiState<crate::state::LayoutUiState>;
 
-pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: crate::event::LAYOUT_PAGE_URL,
-    asset_host: "layout",
-    owns_subtree: false,
-    title: "Layout",
-    title_message_id: None,
-    replaces_command: None,
-    keywords: &[],
-    icon: None,
-    command_bar: false,
-};
-pub const ERROR_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: vmux_api::error::ERROR_PAGE_URL,
-    asset_host: "error",
-    owns_subtree: false,
-    title: "Error",
-    title_message_id: None,
-    replaces_command: None,
-    keywords: &[],
-    icon: None,
-    command_bar: false,
-};
-
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutStartupSet {
     Window,

@@ -25,16 +25,3 @@ pub struct StartInlineTransition {
 pub struct StartInlineTransitionView;
 
 pub const START_PAGE_URL: &str = "vmux://start/";
-
-#[cfg(host)]
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: START_PAGE_URL,
-    asset_host: "start",
-    owns_subtree: false,
-    title: "Start",
-    title_message_id: Some("start-title"),
-    replaces_command: None,
-    keywords: &["start", "home", "new tab", "launcher"],
-    icon: Some(vmux_core::icon::BuiltinIcon::Sparkles),
-    command_bar: true,
-};

@@ -3,11 +3,12 @@ use bevy::prelude::*;
 mod agent;
 mod index;
 
+#[vmux_native::page]
 pub struct KnowledgePlugin;
 
 impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(PAGE_MANIFEST.plugin())
+        app.add_plugins(Self::MANIFEST.plugin())
             .add_plugins((
                 crate::KnowledgeToolPlugin,
                 agent::KnowledgeAgentPlugin,
@@ -16,18 +17,6 @@ impl Plugin for KnowledgePlugin {
             .register_type::<ExpandedKnowledgeDirs>();
     }
 }
-
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: vmux_core::knowledge::KNOWLEDGE_PAGE_URL,
-    asset_host: "knowledge",
-    owns_subtree: true,
-    title: "Knowledge",
-    title_message_id: Some("layout-knowledge"),
-    replaces_command: None,
-    keywords: &["knowledge", "notes", "markdown"],
-    icon: Some(vmux_core::BuiltinIcon::Brain),
-    command_bar: true,
-};
 
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Component)]

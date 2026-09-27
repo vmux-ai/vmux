@@ -35,6 +35,7 @@ use crate::host::repository_picker::RepositoryPickerPlugin;
 use crate::host::status::StatusPlugin;
 use crate::host::watch::WatchPlugin;
 
+#[vmux_native::page]
 pub struct GitPlugin;
 
 impl Plugin for GitPlugin {
@@ -68,7 +69,7 @@ impl Plugin for GitPlugin {
             RepositoryPickerPlugin,
         ))
         .add_plugins(
-            PAGE_MANIFEST
+            Self::MANIFEST
                 .plugin()
                 .hosted(NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"))
                 .alias(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git")),
@@ -83,21 +84,3 @@ enum GitUpdateSet {
     Diff,
     Jobs,
 }
-
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: crate::GIT_DOCUMENT_URL,
-    asset_host: "git",
-    owns_subtree: false,
-    title: "Git",
-    title_message_id: Some("git-title"),
-    replaces_command: None,
-    keywords: &[
-        "repository",
-        "changes",
-        "commit",
-        "branch",
-        "source control",
-    ],
-    icon: Some(vmux_core::BuiltinIcon::GitBranch),
-    command_bar: true,
-};

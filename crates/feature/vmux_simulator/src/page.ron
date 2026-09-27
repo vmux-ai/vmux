@@ -1,6 +1,11 @@
 (
     url: "vmux://simulator/",
     title: "Simulator",
+    owns_subtree: true,
+    title_message_id: "simulator-title",
+    keywords: ["simulator", "ios", "iphone", "device"],
+    icon: "Smartphone",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

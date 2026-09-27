@@ -1,6 +1,10 @@
 (
     url: "vmux://team/",
     title: "Team",
+    title_message_id: "team-title",
+    keywords: ["team", "agents", "profile"],
+    icon: "Users",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

@@ -1,6 +1,11 @@
 (
     url: "vmux://knowledge/",
     title: "Knowledge",
+    owns_subtree: true,
+    title_message_id: "layout-knowledge",
+    keywords: ["knowledge", "notes", "markdown"],
+    icon: "Brain",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

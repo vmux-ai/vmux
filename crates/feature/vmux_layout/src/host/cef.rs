@@ -2,17 +2,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_flex::prelude::*;
 
-pub struct LayoutCefPlugin;
-
-impl Plugin for LayoutCefPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins((
-            crate::LAYOUT_PAGE_MANIFEST.plugin(),
-            crate::ERROR_PAGE_MANIFEST.plugin(),
-        ));
-    }
-}
-
 #[derive(Component)]
 pub struct Browser;
 

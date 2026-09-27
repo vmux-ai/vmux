@@ -1,6 +1,11 @@
 (
     url: "git://",
     title: "Git",
+    manifest_url: "vmux://git/",
+    title_message_id: "git-title",
+    keywords: ["repository", "changes", "commit", "branch", "source control"],
+    icon: "GitBranch",
+    command_bar: true,
     permissions: [
         "PageReady",
         "ThemeEvent",

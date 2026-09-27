@@ -9,6 +9,7 @@ use vmux_core::host::page::NativelyHosted;
 
 pub use vmux_core::{CreatedAt, LastActivatedAt, Visit, now_millis};
 
+#[vmux_native::page]
 pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {
@@ -16,7 +17,7 @@ impl Plugin for HistoryPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::HistoryPage::plugin());
         app.add_plugins(
-            crate::PAGE_MANIFEST
+            Self::MANIFEST
                 .plugin()
                 .hosted(NativelyHosted::page(crate::PAGE_URL, "History")),
         )
@@ -28,15 +29,3 @@ impl Plugin for HistoryPlugin {
         ));
     }
 }
-
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: crate::PAGE_URL,
-    asset_host: "history",
-    owns_subtree: false,
-    title: "History",
-    title_message_id: Some("history-title"),
-    replaces_command: Some("browser_open_history"),
-    keywords: &["recent", "visited"],
-    icon: Some(vmux_core::BuiltinIcon::Clock),
-    command_bar: true,
-};

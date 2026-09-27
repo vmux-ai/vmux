@@ -11,11 +11,12 @@ use vmux_core::team::Profile;
 use vmux_core::{PageIcon, PageIdentity};
 use vmux_session::{AgentConversationTitle, AgentMessages, AgentSession};
 
+#[vmux_native::page(file = "../vmux_chat/src/page.ron")]
 pub struct AgentChatPagePlugin;
 
 impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(PAGE_MANIFEST.plugin())
+        app.add_plugins(Self::MANIFEST.plugin())
             .add_plugins((
                 vmux_chat::ChatKeyPlugin,
                 vmux_chat::ChatMediaPlugin,
@@ -32,18 +33,6 @@ impl Plugin for AgentChatPagePlugin {
             .add_systems(Update, report_tab_identity);
     }
 }
-
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    url: "vmux://sessions/",
-    asset_host: "sessions",
-    owns_subtree: true,
-    title: "Sessions",
-    title_message_id: None,
-    replaces_command: None,
-    keywords: &["ai", "chat", "assistant", "agent"],
-    icon: Some(vmux_core::BuiltinIcon::Sparkles),
-    command_bar: false,
-};
 
 fn on_chat_open_page(
     trigger: On<UiInput<ChatOpenPage>>,
