@@ -12,13 +12,6 @@ impl ShortcutUrl {
 }
 
 #[cfg(host)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ShortcutCaptureToken {
-    pub target: bevy::prelude::Entity,
-    pub generation: u64,
-}
-
-#[cfg(host)]
 #[derive(bevy::prelude::EntityEvent, Clone, Debug)]
 pub struct ShortcutProbePress {
     #[event_target]
@@ -188,7 +181,7 @@ impl ShortcutStroke {
 #[cfg(host)]
 mod host;
 #[cfg(host)]
-pub use host::{CapturingShortcuts, ShortcutCapture, ShortcutCaptureSet, ShortcutPlugin};
+pub use host::{ShortcutCaptureSet, ShortcutPlugin};
 
 #[cfg(ui)]
 pub mod ui;

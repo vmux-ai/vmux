@@ -29,6 +29,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg"] }
 libc = "0.2"
 serde_json = { workspace = true }
 vmux_tool = { path = "../vmux_tool" }
+vmux_layout = { path = "../vmux_layout" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

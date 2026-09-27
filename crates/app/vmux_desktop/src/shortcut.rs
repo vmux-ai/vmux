@@ -4,6 +4,7 @@ use std::time::Instant;
 use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{Binding, Source, When};
 pub(crate) use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
+use vmux_core::input::NativeKeyCapture;
 use vmux_setting::{AppSettings, SettingsLoadSet};
 
 pub struct ShortcutPlugin;
@@ -81,7 +82,7 @@ fn process_key_input(
     mut pending_prefix: Local<Option<(KeyCombo, Instant)>>,
     mut invocations: MessageWriter<vmux_command::CommandInvocation>,
     user: Query<Entity, With<vmux_core::team::User>>,
-    capture: Query<(), With<vmux_shortcut::CapturingShortcuts>>,
+    capture: Query<(), With<NativeKeyCapture>>,
 ) {
     if !capture.is_empty() {
         *pending_prefix = None;

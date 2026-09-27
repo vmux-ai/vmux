@@ -3,9 +3,8 @@ use super::hid::{HidBroker, HidRequest};
 use super::{
     ActiveSimulatorView, DevicePixels, DevicePoints, HardwareButtonRequest,
     SimulatorButtonPressRequest, SimulatorClipboardRequest, SimulatorControlResponse,
-    SimulatorFocusRequest, SimulatorFocusSet, SimulatorInputSet, SimulatorKeyPressRequest,
-    SimulatorSoftwareKeyboardRequest, SimulatorSwipeRequest, SimulatorTapRequest,
-    SimulatorTypeTextRequest,
+    SimulatorInputSet, SimulatorKeyPressRequest, SimulatorSoftwareKeyboardRequest,
+    SimulatorSwipeRequest, SimulatorTapRequest, SimulatorTypeTextRequest,
 };
 use crate::event::{
     HardwareButton, SimulatorClipboardCopyRequest, SimulatorClipboardCutRequest,
@@ -21,7 +20,11 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use vmux_api::protocol::SimulatorButton;
-use vmux_core::host::page::PageReady;
+use vmux_core::input::{
+    ConsumesNativeKey, NativeKey, NativeKeyClaimSet, NativeKeyInput, NativeKeyInputSet,
+    PassesNativeKey,
+};
+use vmux_core::{Active, KeyModifiers};
 
 pub(super) struct SimulatorInputPlugin;
 
@@ -29,7 +32,7 @@ impl Plugin for SimulatorInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SimulatorInputRequest>()
             .add_message::<SimulatorClipboardInputRequest>()
-            .add_systems(Update, apply_focus_requests.in_set(SimulatorFocusSet))
+            .add_plugins(SimulatorNativeKeyPlugin)
             .add_systems(
                 Update,
                 (
@@ -70,6 +73,193 @@ impl Plugin for SimulatorInputPlugin {
             .add_observer(on_clipboard_paste)
             .add_observer(on_clipboard_select_all)
             .add_observer(on_software_keyboard);
+    }
+}
+
+struct SimulatorNativeKeyPlugin;
+
+impl Plugin for SimulatorNativeKeyPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<NativeKeyInput>()
+            .add_systems(Startup, spawn_native_key_bindings)
+            .add_systems(
+                Update,
+                (sync_native_key_bindings, ApplyDeferred)
+                    .chain()
+                    .in_set(NativeKeyClaimSet),
+            )
+            .add_systems(
+                Update,
+                handle_native_key_input
+                    .after(NativeKeyInputSet)
+                    .before(SimulatorInputSet),
+            );
+    }
+}
+
+#[derive(Component)]
+struct SimulatorNativeKey;
+
+#[derive(Component)]
+struct SimulatorHardwareKey(HardwareButton);
+
+#[derive(Component)]
+struct SimulatorClipboardKey(SimulatorClipboardOperation);
+
+#[derive(Component)]
+struct SimulatorSoftwareKeyboardKey;
+
+type SimulatorNativeKeyBindings<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static SimulatorHardwareKey>,
+        Option<&'static SimulatorClipboardKey>,
+        Has<SimulatorSoftwareKeyboardKey>,
+    ),
+    With<Active>,
+>;
+
+fn spawn_native_key_bindings(mut commands: Commands) {
+    let command = KeyModifiers {
+        super_key: true,
+        ..default()
+    };
+    for (key, button) in [
+        (KeyCode::KeyH, HardwareButton::Home),
+        (KeyCode::KeyL, HardwareButton::Lock),
+        (KeyCode::KeyS, HardwareButton::Siri),
+    ] {
+        commands.spawn((
+            Name::new(format!("Simulator {button:?} key")),
+            SimulatorNativeKey,
+            SimulatorHardwareKey(button),
+            NativeKey {
+                key,
+                modifiers: command,
+            },
+            ConsumesNativeKey,
+        ));
+    }
+    for (key, operation) in [
+        (KeyCode::KeyA, SimulatorClipboardOperation::SelectAll),
+        (KeyCode::KeyC, SimulatorClipboardOperation::Copy),
+        (KeyCode::KeyX, SimulatorClipboardOperation::Cut),
+        (KeyCode::KeyV, SimulatorClipboardOperation::Paste),
+    ] {
+        commands.spawn((
+            Name::new(format!("Simulator {operation:?} key")),
+            SimulatorNativeKey,
+            SimulatorClipboardKey(operation),
+            NativeKey {
+                key,
+                modifiers: command,
+            },
+            ConsumesNativeKey,
+        ));
+    }
+    commands.spawn((
+        Name::new("Simulator software keyboard key"),
+        SimulatorNativeKey,
+        SimulatorSoftwareKeyboardKey,
+        NativeKey {
+            key: KeyCode::KeyK,
+            modifiers: command,
+        },
+        ConsumesNativeKey,
+    ));
+    for key in [
+        KeyCode::KeyZ,
+        KeyCode::ArrowLeft,
+        KeyCode::ArrowRight,
+        KeyCode::ArrowUp,
+        KeyCode::ArrowDown,
+        KeyCode::Backspace,
+        KeyCode::Delete,
+    ] {
+        for shift in [false, true] {
+            commands.spawn((
+                Name::new(format!("Simulator command {key:?} pass-through")),
+                SimulatorNativeKey,
+                NativeKey {
+                    key,
+                    modifiers: KeyModifiers { shift, ..command },
+                },
+                PassesNativeKey,
+            ));
+        }
+    }
+    for key in [
+        KeyCode::ArrowLeft,
+        KeyCode::ArrowRight,
+        KeyCode::ArrowUp,
+        KeyCode::ArrowDown,
+        KeyCode::Backspace,
+        KeyCode::Delete,
+    ] {
+        for shift in [false, true] {
+            commands.spawn((
+                Name::new(format!("Simulator option {key:?} pass-through")),
+                SimulatorNativeKey,
+                NativeKey {
+                    key,
+                    modifiers: KeyModifiers {
+                        shift,
+                        alt: true,
+                        ..default()
+                    },
+                },
+                PassesNativeKey,
+            ));
+        }
+    }
+}
+
+fn sync_native_key_bindings(
+    simulator: Query<(), With<ActiveSimulatorView>>,
+    bindings: Query<(Entity, Has<Active>), With<SimulatorNativeKey>>,
+    mut commands: Commands,
+) {
+    let enabled = !simulator.is_empty();
+    for (entity, active) in &bindings {
+        if active == enabled {
+            continue;
+        }
+        if enabled {
+            commands.entity(entity).insert(Active);
+        } else {
+            commands.entity(entity).remove::<Active>();
+        }
+    }
+}
+
+fn handle_native_key_input(
+    mut inputs: MessageReader<NativeKeyInput>,
+    bindings: SimulatorNativeKeyBindings,
+    mut buttons: MessageWriter<HardwareButtonRequest>,
+    mut clipboard: MessageWriter<SimulatorClipboardRequest>,
+    mut keyboard: MessageWriter<SimulatorSoftwareKeyboardRequest>,
+) {
+    for input in inputs.read() {
+        let Some(claim) = input.claim else { continue };
+        let Ok((button, operation, software_keyboard)) = bindings.get(claim) else {
+            continue;
+        };
+        if let Some(button) = button {
+            buttons.write(HardwareButtonRequest {
+                view: None,
+                button: button.0,
+            });
+        }
+        if let Some(operation) = operation {
+            clipboard.write(SimulatorClipboardRequest {
+                view: None,
+                operation: operation.0,
+            });
+        }
+        if software_keyboard {
+            keyboard.write(SimulatorSoftwareKeyboardRequest { view: None });
+        }
     }
 }
 
@@ -558,29 +748,6 @@ fn on_software_keyboard(
     });
 }
 
-fn apply_focus_requests(
-    mut requests: MessageReader<SimulatorFocusRequest>,
-    active: Query<Entity, With<ActiveSimulatorView>>,
-    views: Query<(), With<PageReady>>,
-    mut commands: Commands,
-) {
-    let mut received = false;
-    let mut target = None;
-    for request in requests.read() {
-        received = true;
-        target = request.0;
-    }
-    if !received {
-        return;
-    }
-    for entity in &active {
-        commands.entity(entity).remove::<ActiveSimulatorView>();
-    }
-    if let Some(entity) = target.filter(|entity| views.contains(*entity)) {
-        commands.entity(entity).insert(ActiveSimulatorView);
-    }
-}
-
 fn handle_button_requests(
     mut requests: MessageReader<HardwareButtonRequest>,
     mut inputs: MessageWriter<SimulatorInputRequest>,
@@ -846,8 +1013,58 @@ fn send_key_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::message::Messages;
 
     const POINTS: (f32, f32) = (402.0, 874.0);
+
+    struct NativeKeyHarness {
+        app: App,
+    }
+
+    impl NativeKeyHarness {
+        fn new() -> Self {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_message::<HardwareButtonRequest>()
+                .add_message::<SimulatorClipboardRequest>()
+                .add_message::<SimulatorSoftwareKeyboardRequest>()
+                .add_plugins(SimulatorNativeKeyPlugin);
+            app.world_mut().spawn(ActiveSimulatorView);
+            app.update();
+            Self { app }
+        }
+
+        fn claim<T: Component>(&mut self, key: KeyCode) -> Entity {
+            let mut query = self
+                .app
+                .world_mut()
+                .query_filtered::<(Entity, &NativeKey), (With<T>, With<Active>)>();
+            query
+                .iter(self.app.world())
+                .find_map(|(entity, binding)| (binding.key == key).then_some(entity))
+                .expect("native key binding")
+        }
+
+        fn press(&mut self, claim: Entity, key: KeyCode) {
+            self.app
+                .world_mut()
+                .resource_mut::<Messages<NativeKeyInput>>()
+                .write(NativeKeyInput {
+                    key: Some(key),
+                    native_code: 0,
+                    text: String::new(),
+                    modifiers: KeyModifiers {
+                        super_key: true,
+                        ..default()
+                    },
+                    repeat: false,
+                    captured: false,
+                    claim: Some(claim),
+                    pressed_at_ms: 0,
+                });
+            self.app.update();
+        }
+    }
 
     #[test]
     fn the_centre_of_the_view_is_the_centre_of_the_device() {
@@ -920,29 +1137,24 @@ mod tests {
     }
 
     #[test]
-    fn latest_focus_request_marks_one_ready_view() {
-        let mut app = App::new();
-        app.add_message::<SimulatorFocusRequest>()
-            .add_systems(Update, apply_focus_requests);
-        let first = app.world_mut().spawn(PageReady {}).id();
-        let second = app.world_mut().spawn(PageReady {}).id();
-        app.world_mut()
-            .resource_mut::<Messages<SimulatorFocusRequest>>()
-            .write(SimulatorFocusRequest(Some(first)));
-        app.world_mut()
-            .resource_mut::<Messages<SimulatorFocusRequest>>()
-            .write(SimulatorFocusRequest(Some(second)));
+    fn native_hardware_key_is_dispatched_by_its_binding_entity() {
+        let mut harness = NativeKeyHarness::new();
+        let claim = harness.claim::<SimulatorHardwareKey>(KeyCode::KeyH);
 
-        app.update();
+        harness.press(claim, KeyCode::KeyH);
 
-        assert!(!app.world().entity(first).contains::<ActiveSimulatorView>());
-        assert!(app.world().entity(second).contains::<ActiveSimulatorView>());
-
-        app.world_mut()
-            .resource_mut::<Messages<SimulatorFocusRequest>>()
-            .write(SimulatorFocusRequest(None));
-        app.update();
-
-        assert!(!app.world().entity(second).contains::<ActiveSimulatorView>());
+        let requests = harness
+            .app
+            .world_mut()
+            .resource_mut::<Messages<HardwareButtonRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests,
+            vec![HardwareButtonRequest {
+                view: None,
+                button: HardwareButton::Home,
+            }]
+        );
     }
 }

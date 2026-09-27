@@ -16,6 +16,8 @@ use stream::StreamServer;
 use vmux_core::PageMetadata;
 use vmux_core::host::page::{NativelyHosted, PageReady};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
+use vmux_core::input::{NativeKeyClaimSet, NativeKeyInputSet};
+use vmux_layout::stack::{ComputeFocusSet, FocusedStack};
 
 pub use device::{Axe, SimulatorDevice};
 pub use tool::SimulatorToolPlugin;
@@ -32,11 +34,19 @@ impl Plugin for SimulatorPlugin {
         ));
         app.add_plugins(UiStatePlugin::<SimulatorReady>::default())
             .add_plugins(SimulatorToolPlugin)
-            .configure_sets(Update, (SimulatorFocusSet, SimulatorInputSet).chain())
+            .configure_sets(
+                Update,
+                (
+                    SimulatorFocusSet,
+                    NativeKeyClaimSet,
+                    NativeKeyInputSet,
+                    SimulatorInputSet,
+                )
+                    .chain(),
+            )
             .add_message::<HardwareButtonRequest>()
             .add_message::<SimulatorClipboardRequest>()
             .add_message::<SimulatorSoftwareKeyboardRequest>()
-            .add_message::<SimulatorFocusRequest>()
             .add_message::<SimulatorTapRequest>()
             .add_message::<SimulatorSwipeRequest>()
             .add_message::<SimulatorTypeTextRequest>()
@@ -53,6 +63,13 @@ impl Plugin for SimulatorPlugin {
                     announce_simulator,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Update,
+                (sync_active_simulator_view, ApplyDeferred)
+                    .chain()
+                    .in_set(SimulatorFocusSet)
+                    .after(ComputeFocusSet),
             )
             .add_systems(
                 Update,
@@ -84,9 +101,6 @@ pub struct SimulatorClipboardRequest {
 pub struct SimulatorSoftwareKeyboardRequest {
     pub view: Option<Entity>,
 }
-
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SimulatorFocusRequest(pub Option<Entity>);
 
 #[derive(Message, Clone, Copy)]
 pub struct SimulatorTapRequest {
@@ -219,6 +233,37 @@ struct AttachedDevice {
     points: Option<(f32, f32)>,
     pixels: Option<(u32, u32)>,
     server: StreamServer,
+}
+
+fn sync_active_simulator_view(
+    focus: Option<Res<FocusedStack>>,
+    children: Query<&Children>,
+    pages: Query<&PageMetadata, With<PageReady>>,
+    active: Query<Entity, With<ActiveSimulatorView>>,
+    mut commands: Commands,
+) {
+    let target = focus
+        .as_deref()
+        .and_then(|focus| focus.stack)
+        .and_then(|stack| children.get(stack).ok())
+        .and_then(|children| {
+            children.iter().find(|entity| {
+                pages
+                    .get(*entity)
+                    .is_ok_and(|metadata| SimulatorRoute::try_from(metadata.url.as_str()).is_ok())
+            })
+        });
+    let mut target_active = false;
+    for entity in &active {
+        if Some(entity) == target {
+            target_active = true;
+        } else {
+            commands.entity(entity).remove::<ActiveSimulatorView>();
+        }
+    }
+    if let Some(entity) = target.filter(|_| !target_active) {
+        commands.entity(entity).insert(ActiveSimulatorView);
+    }
 }
 
 impl SimulatorPlugin {

@@ -1,7 +1,7 @@
 use crate::{
-    PAGE_URL, ShortcutBinding, ShortcutCaptureToken, ShortcutCatalog, ShortcutEntry, ShortcutGroup,
-    ShortcutProbePress, ShortcutProbeRequest, ShortcutProbeStatus, ShortcutProbeView,
-    ShortcutStroke, ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
+    PAGE_URL, ShortcutBinding, ShortcutCatalog, ShortcutEntry, ShortcutGroup, ShortcutProbePress,
+    ShortcutProbeRequest, ShortcutProbeStatus, ShortcutProbeView, ShortcutStroke, ShortcutUiState,
+    ShortcutUiStateUpdates, ShortcutUrl,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use vmux_command::CommandRequest;
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
 use vmux_command::{CommandDefinition, ResolvedLocale};
+use vmux_core::input::{NativeKeyCapture, NativeKeyInput, NativeKeyInputSet};
 use vmux_core::page::PageReady;
 use vmux_core::{PageOpenSet, PageOpenTask, workspace::ComputeFocusSet};
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
@@ -30,6 +31,7 @@ impl Plugin for ShortcutPlugin {
             UiEventPlugin::<(ShortcutProbeRequest,)>::default(),
             vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
         ))
+        .add_message::<NativeKeyInput>()
         .add_observer(send_shortcuts)
         .add_observer(on_shortcut_probe_request)
         .add_observer(on_shortcut_probe_press)
@@ -43,6 +45,7 @@ impl Plugin for ShortcutPlugin {
                 .in_set(ShortcutCaptureSet)
                 .after(ComputeFocusSet),
         )
+        .add_systems(Update, capture_native_keys.after(NativeKeyInputSet))
         .add_systems(
             Update,
             (expire_shortcut_probe, publish_shortcut_state).chain(),
@@ -79,28 +82,10 @@ struct ShortcutProbe {
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ShortcutCapture {
-    generation: u64,
-}
-
-#[derive(Component)]
-pub struct CapturingShortcuts;
+struct ShortcutCapture;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ShortcutCaptureSet;
-
-impl ShortcutCapture {
-    fn activate(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
-    }
-
-    pub fn token(&self, target: Entity) -> ShortcutCaptureToken {
-        ShortcutCaptureToken {
-            target,
-            generation: self.generation,
-        }
-    }
-}
 
 #[derive(SystemParam)]
 struct ShortcutCaptureFocus<'w, 's> {
@@ -407,21 +392,45 @@ fn on_shortcut_probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mu
 
 fn sync_shortcut_capture(
     focus: ShortcutCaptureFocus,
-    mut captures: Query<(Entity, &mut ShortcutCapture, Has<CapturingShortcuts>)>,
+    captures: Query<(Entity, Has<NativeKeyCapture>), With<ShortcutCapture>>,
     mut commands: Commands,
 ) {
     let next = focus.active();
-    for (entity, mut capture, active) in &mut captures {
+    for (entity, active) in &captures {
         let should_capture = next == Some(entity);
         if active == should_capture {
             continue;
         }
         if should_capture {
-            capture.activate();
-            commands.entity(entity).insert(CapturingShortcuts);
+            commands.entity(entity).insert(NativeKeyCapture);
         } else {
-            commands.entity(entity).remove::<CapturingShortcuts>();
+            commands.entity(entity).remove::<NativeKeyCapture>();
         }
+    }
+}
+
+fn capture_native_keys(
+    mut inputs: MessageReader<NativeKeyInput>,
+    captures: Query<Entity, (With<ShortcutCapture>, With<NativeKeyCapture>)>,
+    mut commands: Commands,
+) {
+    let Some(target) = captures.iter().next() else {
+        inputs.clear();
+        return;
+    };
+    for input in inputs.read() {
+        if !input.captured || input.repeat {
+            continue;
+        }
+        if input.releases_capture() {
+            commands.entity(target).remove::<NativeKeyCapture>();
+            continue;
+        }
+        commands.trigger(ShortcutProbePress::new(
+            target,
+            ShortcutStroke::from_native_input(input),
+            input.pressed_at_ms,
+        ));
     }
 }
 
@@ -558,6 +567,39 @@ impl ShortcutStroke {
             super_key: combo.modifiers.super_key,
         }
     }
+
+    fn from_native_input(input: &NativeKeyInput) -> Self {
+        let modifiers = vmux_command::shortcut::Modifiers {
+            ctrl: input.modifiers.ctrl,
+            shift: input.modifiers.shift,
+            alt: input.modifiers.alt,
+            super_key: input.modifiers.super_key,
+        };
+        let resolved = input
+            .key
+            .map(|key| KeyCombo { key, modifiers })
+            .or_else(|| {
+                vmux_command::shortcut::resolve_key(&input.text).map(|key| KeyCombo {
+                    key: key.key,
+                    modifiers,
+                })
+            });
+        if let Some(combo) = resolved {
+            return Self::from_key_combo(&combo);
+        }
+        Self {
+            code: format!("NativeKeyCode{}", input.native_code),
+            label: if input.text.is_empty() {
+                format!("0x{:02X}", input.native_code)
+            } else {
+                input.text.to_uppercase()
+            },
+            ctrl: modifiers.ctrl,
+            shift: modifiers.shift,
+            alt: modifiers.alt,
+            super_key: modifiers.super_key,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -565,7 +607,7 @@ mod tests {
     use super::*;
     use bevy::input::keyboard::KeyCode;
     use vmux_command::shortcut::{Binding, Modifiers, Source, When};
-    use vmux_core::{PageMetadata, PageOpenId, PageOpenTask};
+    use vmux_core::{KeyModifiers, PageMetadata, PageOpenId, PageOpenTask};
     use vmux_layout::native_open::NativeOpenPlugin;
 
     fn stroke(code: &str, ctrl: bool) -> ShortcutStroke {
@@ -882,18 +924,39 @@ mod tests {
         });
 
         app.update();
-        assert!(app.world().entity(page).contains::<CapturingShortcuts>());
+        assert!(app.world().entity(page).contains::<NativeKeyCapture>());
+        app.world_mut()
+            .resource_mut::<Messages<NativeKeyInput>>()
+            .write(NativeKeyInput {
+                key: Some(KeyCode::KeyH),
+                native_code: 0x04,
+                text: "h".to_string(),
+                modifiers: KeyModifiers::default(),
+                repeat: false,
+                captured: true,
+                claim: None,
+                pressed_at_ms: 1,
+            });
+        app.update();
+        assert_eq!(
+            app.world().get::<Shortcuts>(page).unwrap().probe.sequence,
+            vec![ShortcutStroke {
+                code: "KeyH".to_string(),
+                label: "H".to_string(),
+                ..default()
+            }]
+        );
         app.world_mut().get_mut::<Window>(window).unwrap().focused = false;
         app.update();
-        assert!(!app.world().entity(page).contains::<CapturingShortcuts>());
+        assert!(!app.world().entity(page).contains::<NativeKeyCapture>());
         app.world_mut().get_mut::<Window>(window).unwrap().focused = true;
         app.update();
-        assert!(app.world().entity(page).contains::<CapturingShortcuts>());
+        assert!(app.world().entity(page).contains::<NativeKeyCapture>());
         app.world_mut().despawn(page);
         app.update();
         assert!(
             app.world_mut()
-                .query_filtered::<Entity, With<CapturingShortcuts>>()
+                .query_filtered::<Entity, With<NativeKeyCapture>>()
                 .iter(app.world())
                 .next()
                 .is_none()
