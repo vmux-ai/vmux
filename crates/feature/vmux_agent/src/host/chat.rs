@@ -20,7 +20,6 @@ pub struct AgentChatPagePlugin;
 
 impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(PAGE_MANIFEST);
         app.add_plugins((
             vmux_chat::ChatKeyPlugin,
             vmux_chat::ChatMediaPlugin,
@@ -35,8 +34,13 @@ impl Plugin for AgentChatPagePlugin {
             workspace::ChatWorkspacePlugin,
         ))
         .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
-        .add_observer(on_chat_open_page);
+        .add_observer(on_chat_open_page)
+        .add_systems(Startup, register_chat_page);
     }
+}
+
+fn register_chat_page(mut commands: Commands) {
+    commands.spawn(PAGE_MANIFEST);
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {

@@ -11,10 +11,14 @@ impl Plugin for KnowledgePlugin {
             crate::KnowledgeToolPlugin,
             agent::KnowledgeAgentPlugin,
             index::KnowledgeIndexPlugin,
-        ));
-        app.world_mut().spawn(PAGE_MANIFEST);
-        app.register_type::<ExpandedKnowledgeDirs>();
+        ))
+        .add_systems(Startup, register_knowledge_page)
+        .register_type::<ExpandedKnowledgeDirs>();
     }
+}
+
+fn register_knowledge_page(mut commands: Commands) {
+    commands.spawn(PAGE_MANIFEST);
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {

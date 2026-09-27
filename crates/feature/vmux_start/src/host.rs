@@ -26,12 +26,9 @@ impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::StartPage::plugin());
-        app.world_mut().spawn((
-            crate::PAGE_MANIFEST,
-            vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
-        ));
         app.init_resource::<CommandBarProjection>()
             .add_message::<InlineTransitionRequested>()
+            .add_systems(Startup, register_start_page)
             .add_systems(
                 Update,
                 (
@@ -61,6 +58,13 @@ impl Plugin for StartPlugin {
                 ),
             );
     }
+}
+
+fn register_start_page(mut commands: Commands) {
+    commands.spawn((
+        crate::PAGE_MANIFEST,
+        vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
+    ));
 }
 
 #[derive(Component)]

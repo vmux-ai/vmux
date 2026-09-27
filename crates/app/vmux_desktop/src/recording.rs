@@ -15,23 +15,28 @@ pub(crate) struct RecordingPlugin;
 
 impl Plugin for RecordingPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Recording capture"),
-            RecordingBridge::default(),
-            RecordingStatus::default(),
-        ));
-        app.add_message::<RecordingControl>().add_systems(
-            Update,
-            (
-                start_recording,
-                handle_recording_control,
-                auto_stop_recordings,
-                drain_recordings,
-            )
-                .chain()
-                .after(vmux_command::WriteCommandRequests),
-        );
+        app.add_message::<RecordingControl>()
+            .add_systems(Startup, spawn_recording_runtime)
+            .add_systems(
+                Update,
+                (
+                    start_recording,
+                    handle_recording_control,
+                    auto_stop_recordings,
+                    drain_recordings,
+                )
+                    .chain()
+                    .after(vmux_command::WriteCommandRequests),
+            );
     }
+}
+
+fn spawn_recording_runtime(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Recording capture"),
+        RecordingBridge::default(),
+        RecordingStatus::default(),
+    ));
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

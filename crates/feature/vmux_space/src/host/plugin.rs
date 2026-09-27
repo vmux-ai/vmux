@@ -23,7 +23,6 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::SpacesPage::plugin());
-        app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins((
             vmux_command::CommandTypePlugin::<OpenRequest>::default(),
             SpaceAgentPlugin,
@@ -64,9 +63,12 @@ impl Plugin for SpacePlugin {
         .add_systems(Update, sync_space_name_to_id)
         .add_systems(
             Startup,
-            update_effective_startup_url
-                .after(vmux_setting::SettingsLoadSet)
-                .before(vmux_layout::LayoutStartupSet::Post),
+            (
+                register_space_page,
+                update_effective_startup_url
+                    .after(vmux_setting::SettingsLoadSet)
+                    .before(vmux_layout::LayoutStartupSet::Post),
+            ),
         )
         .add_systems(
             Startup,
@@ -110,6 +112,10 @@ impl Plugin for SpacePlugin {
         )
         .add_systems(Update, broadcast_spaces_to_views);
     }
+}
+
+fn register_space_page(mut commands: Commands) {
+    commands.spawn(crate::PAGE_MANIFEST);
 }
 
 #[derive(Message, Clone)]

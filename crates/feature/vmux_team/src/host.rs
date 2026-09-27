@@ -27,15 +27,21 @@ impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::TeamPage::plugin());
-        app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins((
             HostedPagePlugin::<Team>::default(),
             TeamProjectionPlugin,
             TeamIntentPlugin,
             crate::TeamToolPlugin,
         ))
-        .add_systems(Startup, (spawn_user_profile, spawn_profile_labels));
+        .add_systems(
+            Startup,
+            (register_team_page, spawn_user_profile, spawn_profile_labels),
+        );
     }
+}
+
+fn register_team_page(mut commands: Commands) {
+    commands.spawn(crate::PAGE_MANIFEST);
 }
 
 struct TeamProjectionPlugin;

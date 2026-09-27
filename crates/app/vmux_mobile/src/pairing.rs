@@ -24,12 +24,11 @@ pub(crate) struct PairingPlugin;
 
 impl Plugin for PairingPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(ConnectionState::default());
         app.add_message::<PairLinkChanged>()
             .add_message::<PairRequest>()
             .add_message::<PairingFailure>()
             .add_message::<DisconnectRequest>()
-            .add_systems(Startup, restore_connection)
+            .add_systems(Startup, (spawn_connection_state, restore_connection).chain())
             .add_systems(
                 Update,
                 (
@@ -44,6 +43,10 @@ impl Plugin for PairingPlugin {
                     .chain(),
             );
     }
+}
+
+fn spawn_connection_state(mut commands: Commands) {
+    commands.spawn(ConnectionState::default());
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

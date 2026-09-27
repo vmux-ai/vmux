@@ -13,38 +13,42 @@ pub(super) struct KnowledgeIndexPlugin;
 
 impl Plugin for KnowledgeIndexPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(KnowledgeIndexRuntime::default());
-        app.init_resource::<KnowledgeIndex>().add_systems(
-            Update,
-            (
-                drain_knowledge_watch,
-                start_knowledge_index,
-                finish_knowledge_index,
-            )
-                .chain(),
-        );
+        app.insert_non_send(KnowledgeWatch::default())
+            .init_resource::<KnowledgeIndex>()
+            .add_systems(Startup, initialize_knowledge_index)
+            .add_systems(
+                Update,
+                (
+                    drain_knowledge_watch,
+                    start_knowledge_index,
+                    finish_knowledge_index,
+                )
+                    .chain(),
+            );
+    }
+}
 
-        let vault = vault_dir();
-        if let Err(error) = ensure_vault(&vault) {
-            warn!("knowledge vault initialization failed: {error}");
-            return;
-        }
-        if let Err(error) = ensure_vault_repository(&vault) {
-            warn!("knowledge Git initialization failed: {error}");
-        }
-        if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
-            warn!("external agent Knowledge sync failed: {error}");
-        }
-        let wake = app
-            .world()
-            .get_resource::<EventLoopProxyWrapper>()
-            .map(|wrapper| (**wrapper).clone());
-        match KnowledgeWatch::watching(&vault, wake) {
-            Ok(watch) => {
-                app.insert_non_send(watch);
-            }
-            Err(error) => warn!("knowledge watcher init failed: {error}"),
-        }
+fn initialize_knowledge_index(
+    mut commands: Commands,
+    wake: Option<Res<EventLoopProxyWrapper>>,
+    mut watch: NonSendMut<KnowledgeWatch>,
+) {
+    commands.spawn(KnowledgeIndexRuntime::default());
+    let vault = vault_dir();
+    if let Err(error) = ensure_vault(&vault) {
+        warn!("knowledge vault initialization failed: {error}");
+        return;
+    }
+    if let Err(error) = ensure_vault_repository(&vault) {
+        warn!("knowledge Git initialization failed: {error}");
+    }
+    if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
+        warn!("external agent Knowledge sync failed: {error}");
+    }
+    let wake = wake.map(|wrapper| (**wrapper).clone());
+    match KnowledgeWatcher::watching(&vault, wake) {
+        Ok(watcher) => watch.0 = Some(watcher),
+        Err(error) => warn!("knowledge watcher init failed: {error}"),
     }
 }
 
@@ -70,12 +74,15 @@ impl KnowledgeIndexRuntime {
     }
 }
 
-struct KnowledgeWatch {
+#[derive(Default)]
+struct KnowledgeWatch(Option<KnowledgeWatcher>);
+
+struct KnowledgeWatcher {
     _watcher: RecommendedWatcher,
     receiver: mpsc::Receiver<notify::Result<notify::Event>>,
 }
 
-impl KnowledgeWatch {
+impl KnowledgeWatcher {
     fn watching(root: &Path, wake: Option<EventLoopProxy<WinitUserEvent>>) -> notify::Result<Self> {
         let (sender, receiver) = mpsc::channel();
         let mut watcher = notify::recommended_watcher(move |result| {
@@ -94,10 +101,10 @@ impl KnowledgeWatch {
 }
 
 fn drain_knowledge_watch(
-    watch: Option<NonSend<KnowledgeWatch>>,
+    watch: NonSend<KnowledgeWatch>,
     mut runtime: Single<&mut KnowledgeIndexRuntime>,
 ) {
-    let Some(watch) = watch else {
+    let Some(watch) = watch.0.as_ref() else {
         return;
     };
     if watch

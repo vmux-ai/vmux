@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{Message, MessageReader, MessageWriter};
@@ -22,11 +22,11 @@ pub(crate) struct SessionPlugin;
 
 impl Plugin for SessionPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(SessionState::default());
         app.add_message::<OpenSession>()
             .add_message::<LeaveSession>()
             .add_message::<RestartSession>()
             .add_message::<StartChatRequest>()
+            .add_systems(Startup, spawn_session_state)
             .add_systems(
                 Update,
                 (
@@ -41,6 +41,10 @@ impl Plugin for SessionPlugin {
                     .chain(),
             );
     }
+}
+
+fn spawn_session_state(mut commands: Commands) {
+    commands.spawn(SessionState::default());
 }
 
 #[derive(Message)]

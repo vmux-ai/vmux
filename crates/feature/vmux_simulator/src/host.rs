@@ -28,12 +28,9 @@ impl Plugin for SimulatorPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::SimulatorPage::plugin());
-        app.world_mut().spawn((
-            PAGE_MANIFEST,
-            NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title),
-        ));
         app.add_plugins(UiStatePlugin::<SimulatorReady>::default())
             .add_plugins(SimulatorToolPlugin)
+            .add_systems(Startup, register_simulator_page)
             .configure_sets(
                 Update,
                 (
@@ -83,6 +80,13 @@ impl Plugin for SimulatorPlugin {
         #[cfg(target_os = "macos")]
         app.add_plugins(core_simulator::CoreSimulatorPlugin);
     }
+}
+
+fn register_simulator_page(mut commands: Commands) {
+    commands.spawn((
+        PAGE_MANIFEST,
+        NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title),
+    ));
 }
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]

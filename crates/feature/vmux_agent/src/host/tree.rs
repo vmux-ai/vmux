@@ -49,13 +49,12 @@ pub struct AgentSessionPlugin;
 
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn(vmux_core::HostSpawnRoute::subtree("vmux://sessions/"));
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
         strategies.register_cli(Box::new(ClaudeStrategy));
         strategies.register_cli(Box::new(CodexStrategy));
         app.insert_resource(strategies)
+            .add_systems(Startup, register_agent_session_route)
             .add_plugins((
                 vmux_layout::LayoutContractPlugin,
                 vmux_editor::ContractPlugin,
@@ -114,6 +113,10 @@ impl Plugin for AgentSessionPlugin {
             .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
             .add_systems(Update, super::run_terminal::remember_configured_shell);
     }
+}
+
+fn register_agent_session_route(mut commands: Commands) {
+    commands.spawn(vmux_core::HostSpawnRoute::subtree("vmux://sessions/"));
 }
 
 #[cfg(test)]

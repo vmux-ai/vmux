@@ -17,18 +17,16 @@ pub(crate) struct RemotePlugin;
 
 impl Plugin for RemotePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Remote runtime"),
-            RemoteState::default(),
-            PairingVisibility::default(),
-        ));
         app.add_message::<RemoteOperationRequest>()
             .add_observer(on_remote_request)
             .add_observer(show_remote_pairing)
             .add_observer(dismiss_remote_pairing)
             .add_observer(on_remote_copy)
             .add_observer(on_remote_revoke)
-            .add_systems(Startup, reconcile_remote_on_startup)
+            .add_systems(
+                Startup,
+                (spawn_remote_runtime, reconcile_remote_on_startup).chain(),
+            )
             .add_systems(
                 Update,
                 (
@@ -42,6 +40,14 @@ impl Plugin for RemotePlugin {
                     .chain(),
             );
     }
+}
+
+fn spawn_remote_runtime(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Remote runtime"),
+        RemoteState::default(),
+        PairingVisibility::default(),
+    ));
 }
 
 fn on_remote_copy(

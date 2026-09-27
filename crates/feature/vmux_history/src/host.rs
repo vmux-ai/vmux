@@ -15,17 +15,21 @@ impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::HistoryPage::plugin());
-        app.world_mut().spawn((
-            crate::PAGE_MANIFEST,
-            NativelyHosted::page(crate::PAGE_URL, "History"),
-        ));
         app.add_plugins((
             crate::spawn::HistorySpawnPlugin,
             crate::host::state::StatePlugin,
             crate::query::HistoryQueryPlugin,
             crate::prune::HistoryPrunePlugin,
-        ));
+        ))
+        .add_systems(Startup, register_history_page);
     }
+}
+
+fn register_history_page(mut commands: Commands) {
+    commands.spawn((
+        crate::PAGE_MANIFEST,
+        NativelyHosted::page(crate::PAGE_URL, "History"),
+    ));
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {

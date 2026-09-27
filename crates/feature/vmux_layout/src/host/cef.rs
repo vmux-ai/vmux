@@ -6,10 +6,13 @@ pub struct LayoutCefPlugin;
 
 impl Plugin for LayoutCefPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(crate::LAYOUT_PAGE_MANIFEST);
-
-        app.world_mut().spawn(crate::ERROR_PAGE_MANIFEST);
+        app.add_systems(Startup, register_layout_pages);
     }
+}
+
+fn register_layout_pages(mut commands: Commands) {
+    commands.spawn(crate::LAYOUT_PAGE_MANIFEST);
+    commands.spawn(crate::ERROR_PAGE_MANIFEST);
 }
 
 #[derive(Component)]
