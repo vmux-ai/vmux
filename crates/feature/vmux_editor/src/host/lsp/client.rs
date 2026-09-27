@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::lsp::{LspOutbox, PendingMap};
+use crate::lsp::{LspDiagnosticsSender, PendingMap};
 
 pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
     url::Url::parse(uri).ok()?.to_file_path().ok()
@@ -104,7 +104,7 @@ impl ServerClient {
     pub fn spawn(
         spec: &ServerSpec,
         root: &std::path::Path,
-        outbox: LspOutbox,
+        diagnostics: LspDiagnosticsSender,
         events: crossbeam_channel::Sender<ServerEvent>,
     ) -> std::io::Result<Self> {
         let store_root = crate::lsp::store::default_root();
@@ -142,7 +142,7 @@ impl ServerClient {
             }
         });
 
-        let dispatcher = Reader::new(pending.clone(), outbox, outgoing.clone(), events, root);
+        let dispatcher = Reader::new(pending.clone(), diagnostics, outgoing.clone(), events, root);
         let reader = std::thread::spawn(move || dispatcher.run(stdout));
 
         let cmd_name = spec.command.clone();

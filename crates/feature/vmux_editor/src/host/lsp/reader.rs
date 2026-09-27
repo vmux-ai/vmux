@@ -8,11 +8,11 @@ use serde_json::Value;
 use crate::lsp::client::path_from_uri;
 use crate::lsp::server_request::{ReplyHandle, ServerEvent};
 use crate::lsp::wire::{ErrorCode, Incoming, RequestId};
-use crate::lsp::{LspOutbox, PendingMap, framing};
+use crate::lsp::{LspDiagnosticsSender, PendingMap, framing};
 
 pub struct Reader {
     pending: PendingMap,
-    outbox: LspOutbox,
+    diagnostics: LspDiagnosticsSender,
     outgoing: mpsc::Sender<Value>,
     events: crossbeam_channel::Sender<ServerEvent>,
     root_uri: String,
@@ -23,7 +23,7 @@ pub struct Reader {
 impl Reader {
     pub fn new(
         pending: PendingMap,
-        outbox: LspOutbox,
+        diagnostics: LspDiagnosticsSender,
         outgoing: mpsc::Sender<Value>,
         events: crossbeam_channel::Sender<ServerEvent>,
         root: &std::path::Path,
@@ -38,7 +38,7 @@ impl Reader {
             .to_string();
         Self {
             pending,
-            outbox,
+            diagnostics,
             outgoing,
             events,
             root_uri,
@@ -127,11 +127,7 @@ impl Reader {
         let Some(path) = path_from_uri(parsed.uri.as_str()) else {
             return;
         };
-        self.outbox
-            .0
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push((path, parsed.diagnostics));
+        self.diagnostics.send((path, parsed.diagnostics));
     }
 
     fn log(&self, params: Value) {
@@ -169,6 +165,7 @@ mod tests {
 
     struct Harness {
         reader: Reader,
+        diagnostics: crate::lsp::LspDiagnosticsInbox,
         sent: mpsc::Receiver<Value>,
         events: crossbeam_channel::Receiver<ServerEvent>,
     }
@@ -177,15 +174,17 @@ mod tests {
         fn start() -> Self {
             let (outgoing, sent) = mpsc::channel();
             let (event_tx, events) = crossbeam_channel::unbounded();
+            let (diagnostics, inbox) = LspDiagnosticsSender::channel();
             let reader = Reader::new(
                 PendingMap::default(),
-                LspOutbox::default(),
+                diagnostics,
                 outgoing,
                 event_tx,
                 std::path::Path::new("/tmp/proj"),
             );
             Self {
                 reader,
+                diagnostics: inbox,
                 sent,
                 events,
             }
@@ -214,7 +213,7 @@ mod tests {
                 }]
             }
         }));
-        let q = h.reader.outbox.0.lock().unwrap();
+        let q = h.diagnostics.drain();
         assert_eq!(q.len(), 1);
         assert_eq!(q[0].0, PathBuf::from("/tmp/main.rs"));
         assert_eq!(q[0].1[0].message, "boom");
@@ -240,7 +239,7 @@ mod tests {
         let h = Harness::start();
         h.reader
             .dispatch(json!({"method": "telemetry/event", "params": {}}));
-        assert!(h.reader.outbox.0.lock().unwrap().is_empty());
+        assert!(h.diagnostics.drain().is_empty());
         assert!(
             h.sent.try_recv().is_err(),
             "a notification is never answered"

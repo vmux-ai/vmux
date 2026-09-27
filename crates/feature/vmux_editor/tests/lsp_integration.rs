@@ -1,15 +1,14 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use vmux_editor::lsp::LspOutbox;
 use vmux_editor::lsp::client::ServerClient;
 use vmux_editor::lsp::registry::ServerSpec;
-use vmux_editor::lsp::server_request::ServerEvents;
+use vmux_editor::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender};
 
 struct Mock {
     _client: ServerClient,
-    outbox: LspOutbox,
-    _events: ServerEvents,
+    diagnostics: LspDiagnosticsInbox,
+    _events: crossbeam_channel::Receiver<vmux_editor::lsp::server_request::ServerEvent>,
 }
 
 impl Mock {
@@ -24,9 +23,9 @@ impl Mock {
             root_markers: vec![".git".into()],
         };
 
-        let outbox = LspOutbox::default();
-        let events = ServerEvents::default();
-        let client = ServerClient::spawn(&spec, dir, outbox.clone(), events.sender())
+        let (diagnostics, inbox) = LspDiagnosticsSender::channel();
+        let (events, event_inbox) = crossbeam_channel::unbounded();
+        let client = ServerClient::spawn(&spec, dir, diagnostics, events)
             .expect("mock server spawns and initializes");
 
         let uri = url::Url::from_file_path(&file).unwrap().to_string();
@@ -34,24 +33,22 @@ impl Mock {
 
         Self {
             _client: client,
-            outbox,
-            _events: events,
+            diagnostics: inbox,
+            _events: event_inbox,
         }
     }
 
-    fn await_message(&self, wanted: &str) -> String {
+    fn await_message(&self, wanted: &str) -> (std::path::PathBuf, String) {
         let deadline = Instant::now() + Duration::from_secs(5);
+        let mut seen = Vec::new();
         loop {
-            let seen: Vec<String> = self
-                .outbox
-                .0
-                .lock()
-                .unwrap()
-                .iter()
-                .flat_map(|(_, diags)| diags.iter().map(|d| d.message.clone()))
-                .collect();
-            if let Some(found) = seen.iter().find(|m| m.contains(wanted)) {
-                return found.clone();
+            for (path, diagnostics) in self.diagnostics.0.try_iter() {
+                for diagnostic in diagnostics {
+                    if diagnostic.message.contains(wanted) {
+                        return (path, diagnostic.message);
+                    }
+                    seen.push(diagnostic.message);
+                }
             }
             assert!(
                 Instant::now() < deadline,
@@ -66,9 +63,7 @@ impl Mock {
 fn mock_server_handshake_and_diagnostics() {
     let tmp = tempfile::tempdir().unwrap();
     let mock = Mock::open("main.rs", tmp.path());
-    mock.await_message("mock diagnostic");
-
-    let (path, _) = mock.outbox.0.lock().unwrap().first().cloned().unwrap();
+    let (path, _) = mock.await_message("mock diagnostic");
     assert_eq!(path, tmp.path().join("main.rs"));
 }
 
@@ -76,5 +71,5 @@ fn mock_server_handshake_and_diagnostics() {
 fn unimplemented_server_request_is_refused_over_real_pipes() {
     let tmp = tempfile::tempdir().unwrap();
     let mock = Mock::open("probe-requests.rs", tmp.path());
-    assert_eq!(mock.await_message("answered"), "answered -32601");
+    assert_eq!(mock.await_message("answered").1, "answered -32601");
 }

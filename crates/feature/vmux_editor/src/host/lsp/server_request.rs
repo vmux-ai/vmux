@@ -11,8 +11,13 @@ pub struct ServerRequestPlugin;
 
 impl Plugin for ServerRequestPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ServerEvents>()
-            .add_message::<ServerReply>()
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        app.world_mut().spawn((
+            Name::new("LSP server events"),
+            ServerEventSender(sender),
+            ServerEventInbox(receiver),
+        ));
+        app.add_message::<ServerReply>()
             .configure_sets(
                 Update,
                 (
@@ -39,28 +44,18 @@ pub enum ServerRequestSet {
     Reply,
 }
 
-#[derive(Resource)]
-pub struct ServerEvents {
-    tx: crossbeam_channel::Sender<ServerEvent>,
-    rx: crossbeam_channel::Receiver<ServerEvent>,
-}
+#[derive(Component, Clone)]
+pub struct ServerEventSender(pub crossbeam_channel::Sender<ServerEvent>);
 
-impl Default for ServerEvents {
+impl Default for ServerEventSender {
     fn default() -> Self {
-        let (tx, rx) = crossbeam_channel::unbounded();
-        Self { tx, rx }
+        let (sender, _) = crossbeam_channel::unbounded();
+        Self(sender)
     }
 }
 
-impl ServerEvents {
-    pub fn sender(&self) -> crossbeam_channel::Sender<ServerEvent> {
-        self.tx.clone()
-    }
-
-    pub fn receiver(&self) -> crossbeam_channel::Receiver<ServerEvent> {
-        self.rx.clone()
-    }
-}
+#[derive(Component)]
+struct ServerEventInbox(crossbeam_channel::Receiver<ServerEvent>);
 
 pub enum ServerEvent {
     ApplyEdit {
@@ -131,8 +126,8 @@ pub struct ServerReply {
     pub result: Value,
 }
 
-fn spawn_server_requests(events: Res<ServerEvents>, mut commands: Commands) {
-    for event in events.rx.try_iter() {
+fn spawn_server_requests(events: Single<&ServerEventInbox>, mut commands: Commands) {
+    for event in events.0.try_iter() {
         match event {
             ServerEvent::ApplyEdit {
                 reply,
@@ -190,7 +185,11 @@ mod tests {
         fn start() -> Self {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, ServerRequestPlugin));
-            let events = app.world().resource::<ServerEvents>().sender();
+            let events = {
+                let world = app.world_mut();
+                let mut senders = world.query::<&ServerEventSender>();
+                senders.single(world).unwrap().0.clone()
+            };
             let (tx, outgoing) = mpsc::channel();
             let reply = ReplyHandle::new(RequestId::Number(1000), tx);
             events

@@ -25,7 +25,7 @@ fn apply_lsp_workspace_edit(
     requests: Query<(Entity, &crate::lsp::server_request::AwaitingApplyEdit)>,
     views: Query<(Entity, &FileView, &Editor)>,
     mut self_writes: NonSendMut<SelfWrites>,
-    manager: Res<crate::lsp::manager::LspManager>,
+    manager: Single<&crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut replies: MessageWriter<crate::lsp::server_request::ServerReply>,
     mut renames: MessageReader<crate::lsp::manager::LspRequestedEdit>,
@@ -237,12 +237,13 @@ mod tests {
         }
 
         fn with_workspace_edit(path: &Path, panes: usize, edit: lsp_types::WorkspaceEdit) -> Self {
-            let (app, views) = Self::bare(path, panes);
+            let (mut app, views) = Self::bare(path, panes);
             let (outgoing, sent) = std::sync::mpsc::channel();
-            let events = app
-                .world()
-                .resource::<crate::lsp::server_request::ServerEvents>()
-                .sender();
+            let events = {
+                let world = app.world_mut();
+                let mut senders = world.query::<&crate::lsp::server_request::ServerEventSender>();
+                senders.single(world).unwrap().0.clone()
+            };
             events
                 .send(crate::lsp::server_request::ServerEvent::ApplyEdit {
                     reply: crate::lsp::server_request::ReplyHandle::new(
@@ -267,11 +268,10 @@ mod tests {
             app.world_mut().insert_non_send(ClipboardHandle(None));
             app.world_mut().insert_non_send(SelfWrites::default());
             app.world_mut().insert_non_send(Browsers::default());
-            app.world_mut()
-                .insert_resource(crate::lsp::manager::LspManager::new(
-                    crate::lsp::LspOutbox::default(),
-                    crate::lsp::server_request::ServerEvents::default().sender(),
-                ));
+            app.world_mut().spawn(crate::lsp::manager::LspManager::new(
+                crate::lsp::LspDiagnosticsSender::default(),
+                crate::lsp::server_request::ServerEventSender::default().0,
+            ));
 
             let mut views = Vec::new();
             for _ in 0..panes {

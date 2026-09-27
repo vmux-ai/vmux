@@ -289,7 +289,7 @@ impl WikiCompletion {
 fn on_editor_hover(
     trigger: On<EditorHoverRequest>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -312,7 +312,7 @@ fn on_editor_hover(
 fn on_editor_definition(
     trigger: On<EditorDefinitionRequest>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -334,7 +334,7 @@ fn on_editor_definition(
 fn on_editor_references(
     trigger: On<EditorReferencesRequest>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -381,7 +381,7 @@ fn on_editor_rename(
 fn on_editor_completion(
     trigger: On<EditorCompletionRequest>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -404,7 +404,7 @@ fn on_editor_completion(
 fn on_editor_declaration(
     trigger: On<EditorDeclarationRequest>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -426,7 +426,7 @@ fn on_editor_declaration(
 fn on_editor_type_definition(
     trigger: On<EditorTypeDefinitionRequest>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -448,7 +448,7 @@ fn on_editor_type_definition(
 fn on_editor_implementation(
     trigger: On<EditorImplementationRequest>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -470,7 +470,7 @@ fn on_editor_implementation(
 fn on_editor_format_document(
     trigger: On<EditorFormatDocumentRequest>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -485,7 +485,7 @@ fn on_editor_format_document(
 fn on_editor_format_selection(
     trigger: On<EditorFormatSelectionRequest>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -538,7 +538,7 @@ fn on_wiki_completion_request(
 fn on_file_hover_request(
     trigger: On<UiInput<FileHoverRequest>>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -562,7 +562,7 @@ fn on_file_hover_request(
 fn on_file_definition_request(
     trigger: On<UiInput<FileDefinitionRequest>>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -689,7 +689,7 @@ fn on_file_editor_change_all_occurrences_request(
 fn on_file_code_action_pick(
     trigger: On<UiInput<FileCodeActionPick>>,
     views: Query<(&Editor, &crate::lsp::manager::OfferedCodeActions)>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut edits: MessageWriter<crate::lsp::manager::LspRequestedEdit>,
 ) {
     let entity = trigger.event().webview;
@@ -717,7 +717,7 @@ fn on_file_code_action_pick(
 fn on_file_rename_request(
     trigger: On<UiInput<FileRenameRequest>>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -744,7 +744,7 @@ fn on_file_rename_request(
 fn on_file_references_request(
     trigger: On<UiInput<FileReferencesRequest>>,
     views: Query<&Editor>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -769,7 +769,7 @@ fn on_file_completion_request(
     views: Query<&Editor>,
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
     mut commands: Commands,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
     let request = trigger.event().payload;
@@ -799,7 +799,7 @@ fn flush_lsp_changes(
     time: Res<Time>,
     mut elapsed: Local<f32>,
     views: Query<(Entity, &FileView, &Editor), With<LspEditDirty>>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     if views.is_empty() {

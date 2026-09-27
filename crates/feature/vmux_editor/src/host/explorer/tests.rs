@@ -751,11 +751,11 @@ fn open_editors_track_on_navigate_and_close() {
     let dir = tmp.path().join("src");
     std::fs::create_dir(&dir).unwrap();
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, TabsPlugin))
-        .insert_resource(crate::lsp::manager::LspManager::new(
-            crate::lsp::LspOutbox::default(),
-            crate::lsp::server_request::ServerEvents::default().sender(),
-        ));
+    app.add_plugins((MinimalPlugins, TabsPlugin));
+    app.world_mut().spawn(crate::lsp::manager::LspManager::new(
+        crate::lsp::LspDiagnosticsSender::default(),
+        crate::lsp::server_request::ServerEventSender::default().0,
+    ));
     let a = PathBuf::from("/proj/a.rs");
     let b = PathBuf::from("/proj/b.rs");
     let e = app

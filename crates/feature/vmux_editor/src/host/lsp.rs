@@ -31,11 +31,11 @@ pub mod workspace_edit;
 
 impl Plugin for LspPlugin {
     fn build(&self, app: &mut App) {
-        let outbox = LspOutbox::default();
-        app.insert_resource(outbox.clone())
-            .add_plugins(server_request::ServerRequestPlugin)
+        let (diagnostics, inbox) = LspDiagnosticsSender::channel();
+        app.world_mut().spawn((Name::new("LSP diagnostics"), inbox));
+        app.add_plugins(server_request::ServerRequestPlugin)
             .add_systems(Startup, spawn_tool_provider);
-        manager::build(app, outbox);
+        manager::build(app, diagnostics);
         app.add_plugins(manager_page::ManagerPlugin);
     }
 }
@@ -190,13 +190,60 @@ pub struct LspPlugin;
 
 pub type PathDiagnostics = (PathBuf, Vec<lsp_types::Diagnostic>);
 
-#[derive(Resource, Clone, Default)]
-pub struct LspOutbox(pub Arc<Mutex<Vec<PathDiagnostics>>>);
+#[derive(Clone)]
+pub struct LspDiagnosticsSender(crossbeam_channel::Sender<PathDiagnostics>);
+
+impl LspDiagnosticsSender {
+    pub fn channel() -> (Self, LspDiagnosticsInbox) {
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        (Self(sender), LspDiagnosticsInbox(receiver))
+    }
+
+    pub(crate) fn send(&self, diagnostics: PathDiagnostics) {
+        let _ = self.0.send(diagnostics);
+    }
+}
+
+impl Default for LspDiagnosticsSender {
+    fn default() -> Self {
+        let (sender, _) = crossbeam_channel::unbounded();
+        Self(sender)
+    }
+}
+
+#[derive(Component)]
+pub struct LspDiagnosticsInbox(pub crossbeam_channel::Receiver<PathDiagnostics>);
+
+impl LspDiagnosticsInbox {
+    pub(crate) fn drain(&self) -> Vec<PathDiagnostics> {
+        self.0.try_iter().collect()
+    }
+}
 
 pub type PathLintDiagnostics = (PathBuf, Vec<vmux_core::event::FileDiagnostic>);
 
-#[derive(Resource, Clone, Default)]
-pub struct LintOutbox(pub Arc<Mutex<Vec<PathLintDiagnostics>>>);
+#[derive(Component, Clone)]
+pub struct LintDiagnosticsSender(crossbeam_channel::Sender<PathLintDiagnostics>);
+
+impl LintDiagnosticsSender {
+    fn channel() -> (Self, LintDiagnosticsInbox) {
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        (Self(sender), LintDiagnosticsInbox(receiver))
+    }
+
+    fn send(&self, diagnostics: PathLintDiagnostics) {
+        let _ = self.0.send(diagnostics);
+    }
+}
+
+#[derive(Component)]
+struct LintDiagnosticsInbox(crossbeam_channel::Receiver<PathLintDiagnostics>);
+
+impl LintDiagnosticsInbox {
+    fn drain(&self) -> Vec<PathLintDiagnostics> {
+        self.0.try_iter().collect()
+    }
+}
 
 pub type ServerKey = (PathBuf, String);
 

@@ -81,11 +81,10 @@ mod tests {
                 .add_plugins(NavigationPlugin)
                 .add_plugins(HistoryPlugin)
                 .add_plugins(PageOpenPlugin);
-            app.world_mut()
-                .insert_resource(crate::lsp::manager::LspManager::new(
-                    crate::lsp::LspOutbox::default(),
-                    crate::lsp::server_request::ServerEvents::default().sender(),
-                ));
+            app.world_mut().spawn(crate::lsp::manager::LspManager::new(
+                crate::lsp::LspDiagnosticsSender::default(),
+                crate::lsp::server_request::ServerEventSender::default().0,
+            ));
             let stack = app.world_mut().spawn_empty().id();
             app.world_mut().spawn(PageOpenTask {
                 id: PageOpenId::new(),

@@ -87,8 +87,8 @@ use bevy::prelude::*;
 
 use crate::lsp::client::{ServerClient, server_key};
 use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
-use crate::lsp::server_request::{ServerEvent, ServerEvents};
-use crate::lsp::{LspOutbox, OpenDoc, ServerKey, store};
+use crate::lsp::server_request::{ServerEvent, ServerEventSender};
+use crate::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender, OpenDoc, ServerKey, store};
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
@@ -150,13 +150,13 @@ pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldR
         .unwrap_or_default()
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct LspManager {
     servers: HashMap<ServerKey, ServerClient>,
     starting: HashMap<ServerKey, StartingServer>,
     open_docs: HashMap<PathBuf, OpenDoc>,
     failed: HashSet<ServerKey>,
-    outbox: LspOutbox,
+    diagnostics: LspDiagnosticsSender,
     events: crossbeam_channel::Sender<ServerEvent>,
 }
 
@@ -198,13 +198,16 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 impl LspManager {
-    pub(crate) fn new(outbox: LspOutbox, events: crossbeam_channel::Sender<ServerEvent>) -> Self {
+    pub(crate) fn new(
+        diagnostics: LspDiagnosticsSender,
+        events: crossbeam_channel::Sender<ServerEvent>,
+    ) -> Self {
         Self {
             servers: HashMap::new(),
             starting: HashMap::new(),
             open_docs: HashMap::new(),
             failed: HashSet::new(),
-            outbox,
+            diagnostics,
             events,
         }
     }
@@ -272,11 +275,11 @@ impl LspManager {
         }
         let spec = spec.clone();
         let root = root.to_path_buf();
-        let outbox = self.outbox.clone();
+        let diagnostics = self.diagnostics.clone();
         let events = self.events.clone();
         let command = spec.command.clone();
         let task = bevy::tasks::IoTaskPool::get()
-            .spawn(async move { ServerClient::spawn(&spec, &root, outbox, events) });
+            .spawn(async move { ServerClient::spawn(&spec, &root, diagnostics, events) });
         self.starting.insert(key, StartingServer { command, task });
         ServerReadiness::Starting
     }
@@ -1013,7 +1016,7 @@ fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
 fn lsp_open_documents(
     q: Query<(Entity, &FileView, &Editor), Without<LspOpened>>,
     settings: Res<vmux_setting::AppSettings>,
-    mut manager: ResMut<LspManager>,
+    mut manager: Single<&mut LspManager>,
     mut commands: Commands,
 ) {
     manager.settle_starting_servers();
@@ -1046,7 +1049,7 @@ struct LspResponseWriters<'w> {
 }
 
 fn drain_lsp_requests(
-    manager: Res<LspManager>,
+    manager: Single<&LspManager>,
     requests: Query<(Entity, &LspRequestOperation)>,
     browsers: NonSend<Browsers>,
     mut writers: LspResponseWriters,
@@ -1249,11 +1252,20 @@ fn apply_semantic_tokens(
     }
 }
 
-pub fn build(app: &mut App, outbox: LspOutbox) {
-    let events = app.world().resource::<ServerEvents>().sender();
-    app.insert_resource(LspManager::new(outbox, events))
-        .init_resource::<LintOutbox>()
-        .add_message::<LspGoto>()
+pub fn build(app: &mut App, diagnostics: LspDiagnosticsSender) {
+    let events = {
+        let world = app.world_mut();
+        let mut senders = world.query::<&ServerEventSender>();
+        senders.single(world).unwrap().0.clone()
+    };
+    let (lint, lint_inbox) = crate::lsp::LintDiagnosticsSender::channel();
+    app.world_mut().spawn((
+        Name::new("LSP manager"),
+        LspManager::new(diagnostics, events),
+    ));
+    app.world_mut()
+        .spawn((Name::new("Lint diagnostics"), lint, lint_inbox));
+    app.add_message::<LspGoto>()
         .add_message::<LspFolds>()
         .add_message::<LspSemantic>()
         .add_message::<LspRequestedEdit>()
@@ -1278,7 +1290,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
 use bevy_cef::prelude::Browsers;
 use vmux_core::event::FileDiagnostics;
 
-use crate::lsp::LintOutbox;
+use crate::lsp::{LintDiagnosticsInbox, LintDiagnosticsSender};
 
 fn canon(p: &Path) -> PathBuf {
     vmux_path::PathIdentity::resolve(p).into_path_buf()
@@ -1334,15 +1346,11 @@ fn emit_diagnostics_system(
 }
 
 fn drain_lsp_diagnostics(
-    outbox: Res<LspOutbox>,
+    inbox: Single<&LspDiagnosticsInbox>,
     views: Query<(Entity, &FileView, &Editor)>,
     mut commands: Commands,
 ) {
-    let drained: Vec<(PathBuf, Vec<lsp_types::Diagnostic>)> = {
-        let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
-        q.drain(..).collect()
-    };
-    for (path, diags) in drained {
+    for (path, diags) in inbox.drain() {
         let target = canon(&path);
         for (entity, view, edit) in &views {
             if canon(&view.path) != target {
@@ -1357,12 +1365,12 @@ fn drain_lsp_diagnostics(
     }
 }
 
-fn drain_lint(outbox: Res<LintOutbox>, views: Query<(Entity, &FileView)>, mut commands: Commands) {
-    let drained: Vec<(PathBuf, Vec<FileDiagnostic>)> = {
-        let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
-        q.drain(..).collect()
-    };
-    for (path, diags) in drained {
+fn drain_lint(
+    inbox: Single<&LintDiagnosticsInbox>,
+    views: Query<(Entity, &FileView)>,
+    mut commands: Commands,
+) {
+    for (path, diags) in inbox.drain() {
         let target = canon(&path);
         for (entity, view) in &views {
             if canon(&view.path) == target {
@@ -1385,7 +1393,7 @@ pub struct LspCodeActionRequest {
 fn request_code_actions(
     mut reader: MessageReader<LspCodeActionRequest>,
     diagnostics: Query<&LspDiagnostics>,
-    mut manager: ResMut<LspManager>,
+    mut manager: Single<&mut LspManager>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -1411,7 +1419,7 @@ pub struct LintRan;
 
 fn lint_on_open(
     q: Query<(Entity, &FileView, &Editor), Without<LintRan>>,
-    outbox: Res<LintOutbox>,
+    outbox: Single<&LintDiagnosticsSender>,
     mut commands: Commands,
 ) {
     for (entity, fv, _edit) in &q {
@@ -1429,13 +1437,10 @@ fn lint_on_open(
             continue;
         }
         let path = fv.path.clone();
-        let sink = outbox.clone();
+        let sink = LintDiagnosticsSender::clone(&outbox);
         std::thread::spawn(move || {
             let diags = crate::lsp::lint::run_linter(&spec, &path);
-            sink.0
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push((path, diags));
+            sink.send((path, diags));
         });
     }
 }
@@ -1449,7 +1454,7 @@ pub struct LspStatusSent {
 fn lsp_status_system(
     q: Query<(Entity, &FileView, Option<&LspStatusSent>), With<vmux_core::page::PageReady>>,
     settings: Res<vmux_setting::AppSettings>,
-    manager: Res<LspManager>,
+    manager: Single<&LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1611,23 +1616,20 @@ mod tests {
 
     #[test]
     fn drain_empties_outbox() {
-        use crate::lsp::LspOutbox;
+        use crate::lsp::{LspDiagnosticsInbox, LspDiagnosticsSender};
         use std::path::PathBuf;
 
         let mut app = App::new();
-        let outbox = LspOutbox::default();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(outbox.clone());
-        outbox
-            .0
-            .lock()
-            .unwrap()
-            .push((PathBuf::from("/x.rs"), vec![]));
-        app.add_systems(Update, |ob: Res<LspOutbox>| {
-            ob.0.lock().unwrap().drain(..).for_each(drop);
+        let (outbox, inbox) = LspDiagnosticsSender::channel();
+        let probe = inbox.0.clone();
+        app.add_plugins(MinimalPlugins);
+        app.world_mut().spawn(inbox);
+        outbox.send((PathBuf::from("/x.rs"), vec![]));
+        app.add_systems(Update, |inbox: Single<&LspDiagnosticsInbox>| {
+            drop(inbox.drain());
         });
         app.update();
-        assert!(outbox.0.lock().unwrap().is_empty());
+        assert!(probe.is_empty());
     }
 
     #[test]
@@ -1645,15 +1647,15 @@ mod tests {
         use crate::edit::highlight_cache::HighlightCache;
         use crate::edit::{EditCore, EditMode};
         use crate::host::editor::{Editor, FileView};
-        use crate::lsp::LspOutbox;
+        use crate::lsp::LspDiagnosticsSender;
         use std::path::PathBuf;
 
         let path = PathBuf::from("/tmp/vmux_lsp_editor.rs");
         let mut app = App::new();
-        let outbox = LspOutbox::default();
+        let (outbox, inbox) = LspDiagnosticsSender::channel();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(outbox.clone())
             .add_systems(Update, drain_lsp_diagnostics);
+        app.world_mut().spawn(inbox);
 
         let core = EditCore::new(
             path.clone(),
@@ -1684,7 +1686,7 @@ mod tests {
             message: "boom".into(),
             ..Default::default()
         };
-        outbox.0.lock().unwrap().push((path.clone(), vec![diag]));
+        outbox.send((path.clone(), vec![diag]));
         app.update();
 
         let mapped = &app

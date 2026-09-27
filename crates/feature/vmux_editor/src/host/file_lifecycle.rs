@@ -536,7 +536,7 @@ fn drain_file_changes(
 fn reload_changed_files(
     files: Query<(Entity, &FileView, Option<&Editor>), With<FileReloadRequested>>,
     browsers: NonSend<Browsers>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     for (entity, file, edit) in &files {
@@ -614,11 +614,10 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(FileLifecyclePlugin);
         app.world_mut().insert_non_send(Browsers::default());
-        app.world_mut()
-            .insert_resource(crate::lsp::manager::LspManager::new(
-                crate::lsp::LspOutbox::default(),
-                crate::lsp::server_request::ServerEvents::default().sender(),
-            ));
+        app.world_mut().spawn(crate::lsp::manager::LspManager::new(
+            crate::lsp::LspDiagnosticsSender::default(),
+            crate::lsp::server_request::ServerEventSender::default().0,
+        ));
         app
     }
 

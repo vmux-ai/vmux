@@ -28,7 +28,7 @@ impl Plugin for EncodingPlugin {
 fn reopen_with_encoding(
     trigger: On<UiInput<FileEncodingReopenRequest>>,
     views: Query<&FileView>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;

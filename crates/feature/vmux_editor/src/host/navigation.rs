@@ -82,7 +82,7 @@ fn apply_file_navigation(
         &mut FileViewport,
         &mut PageMetadata,
     )>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let request = trigger.event();
@@ -267,7 +267,7 @@ fn apply_goto(
         &mut FileView,
         &mut PageMetadata,
     )>,
-    mut manager: ResMut<crate::lsp::manager::LspManager>,
+    mut manager: Single<&mut crate::lsp::manager::LspManager>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
@@ -420,11 +420,10 @@ mod tests {
                         emitted.0.extend(event.patches);
                     },
                 );
-            app.world_mut()
-                .insert_resource(crate::lsp::manager::LspManager::new(
-                    crate::lsp::LspOutbox::default(),
-                    crate::lsp::server_request::ServerEvents::default().sender(),
-                ));
+            app.world_mut().spawn(crate::lsp::manager::LspManager::new(
+                crate::lsp::LspDiagnosticsSender::default(),
+                crate::lsp::server_request::ServerEventSender::default().0,
+            ));
             let view = app
                 .world_mut()
                 .spawn((

@@ -329,11 +329,10 @@ mod tests {
                 .init_resource::<BinIpcEventRawBuffer>();
             app.world_mut().insert_non_send(Browsers::default());
             app.world_mut().insert_non_send(ClipboardHandle(None));
-            app.world_mut()
-                .insert_resource(crate::lsp::manager::LspManager::new(
-                    crate::lsp::LspOutbox::default(),
-                    crate::lsp::server_request::ServerEvents::default().sender(),
-                ));
+            app.world_mut().spawn(crate::lsp::manager::LspManager::new(
+                crate::lsp::LspDiagnosticsSender::default(),
+                crate::lsp::server_request::ServerEventSender::default().0,
+            ));
             let entity = app
                 .world_mut()
                 .spawn((
