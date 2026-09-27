@@ -20,6 +20,25 @@ use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
+pub(super) struct LayoutApplyPlugin;
+
+impl Plugin for LayoutApplyPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<LayoutApplyPlan>()
+            .add_message::<LayoutApplyResult>()
+            .add_systems(
+                Update,
+                (
+                    plan_layout_requests,
+                    apply_layout_plans,
+                    respond_to_layout_apply,
+                )
+                    .chain(),
+            )
+            .add_systems(Update, serve_snapshot_requests);
+    }
+}
+
 #[derive(Message, Clone)]
 pub struct LayoutApplyRequest {
     pub request_id: [u8; 16],
@@ -44,7 +63,20 @@ pub struct LayoutSnapshotResponse {
     pub snapshot: LayoutSnapshot,
 }
 
-pub fn serve_snapshot_requests(
+#[derive(Message)]
+struct LayoutApplyPlan {
+    request_id: [u8; 16],
+    snapshot: LayoutSnapshot,
+    diff: DiffPlan,
+}
+
+#[derive(Message)]
+struct LayoutApplyResult {
+    request_id: [u8; 16],
+    result: Result<(), String>,
+}
+
+fn serve_snapshot_requests(
     mut reader: MessageReader<LayoutSnapshotRequest>,
     tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
     splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
@@ -125,64 +157,95 @@ fn fill_process_ids(node: &mut LayoutNode, pid_by_stack: &HashMap<u64, String>) 
     }
 }
 
-pub fn apply_layout_requests(
+fn plan_layout_requests(
     mut reader: MessageReader<LayoutApplyRequest>,
-    mut commands: Commands,
+    active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
+    tabs_q: Query<(Entity, Option<&ChildOf>), With<LayoutTab>>,
+    nodes_q: Query<
+        (
+            Option<&Children>,
+            Has<LayoutTab>,
+            Has<PaneSplit>,
+            Has<Pane>,
+            Has<Stack>,
+        ),
+    >,
+    mut plans: MessageWriter<LayoutApplyPlan>,
+    mut results: MessageWriter<LayoutApplyResult>,
 ) {
     for request in reader.read() {
-        let snapshot = request.snapshot.clone();
-        let request_id = request.request_id;
-        commands.queue(move |world: &mut World| {
-            let result = match apply(world, &snapshot) {
-                Ok(()) => {
-                    let snapshot = run_build_snapshot(world);
-                    Ok(snapshot)
-                }
-                Err(err) => Err(format!("update_layout: {err:?}")),
-            };
-            world
-                .resource_mut::<Messages<LayoutApplyResponse>>()
-                .write(LayoutApplyResponse { request_id, result });
+        let existing = collect_existing_ids(&active_space_q, &tabs_q, &nodes_q);
+        match plan_diff(&request.snapshot, &existing) {
+            Ok(diff) => {
+                plans.write(LayoutApplyPlan {
+                    request_id: request.request_id,
+                    snapshot: request.snapshot.clone(),
+                    diff,
+                });
+            }
+            Err(error) => {
+                results.write(LayoutApplyResult {
+                    request_id: request.request_id,
+                    result: Err(format!("update_layout: {error:?}")),
+                });
+            }
+        }
+    }
+}
+
+fn apply_layout_plans(world: &mut World) {
+    let plans: Vec<LayoutApplyPlan> = world
+        .resource_mut::<Messages<LayoutApplyPlan>>()
+        .drain()
+        .collect();
+    for plan in plans {
+        apply_layout_plan(world, &plan.snapshot, &plan.diff);
+        world
+            .resource_mut::<Messages<LayoutApplyResult>>()
+            .write(LayoutApplyResult {
+                request_id: plan.request_id,
+                result: Ok(()),
+            });
+    }
+}
+
+fn respond_to_layout_apply(
+    mut reader: MessageReader<LayoutApplyResult>,
+    tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
+    splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
+    leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
+    stacks_q: Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
+    pane_sizes_q: Query<&PaneSize>,
+    zoomed_q: Query<&crate::pane::Zoomed>,
+    focused: Res<crate::stack::FocusedStack>,
+    mut writer: MessageWriter<LayoutApplyResponse>,
+) {
+    for result in reader.read() {
+        let response = match &result.result {
+            Ok(()) => Ok(crate::snapshot::build_layout_snapshot(
+                &tabs_q,
+                &splits_q,
+                &leaves_q,
+                &stacks_q,
+                &pane_sizes_q,
+                &zoomed_q,
+                &focused,
+                None,
+            )),
+            Err(error) => Err(error.clone()),
+        };
+        writer.write(LayoutApplyResponse {
+            request_id: result.request_id,
+            result: response,
         });
     }
 }
 
-fn run_build_snapshot(world: &mut World) -> LayoutSnapshot {
-    use bevy::ecs::system::SystemState;
-    let mut state = SystemState::<(
-        Query<(Entity, &LayoutTab, Option<&Children>)>,
-        Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
-        Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
-        Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
-        Query<&PaneSize>,
-        Query<&crate::pane::Zoomed>,
-        Res<crate::stack::FocusedStack>,
-    )>::new(world);
-    let (tabs, splits, leaves, stacks, pane_sizes, zoomed, focused) = state.get(world).unwrap();
-    crate::snapshot::build_layout_snapshot(
-        &tabs,
-        &splits,
-        &leaves,
-        &stacks,
-        &pane_sizes,
-        &zoomed,
-        &focused,
-        None,
-    )
-}
-
-pub fn apply(world: &mut World, snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
-    let existing = collect_existing_ids(world);
-    apply_with_existing(world, snapshot, &existing)
-}
-
-pub fn apply_with_existing(
+fn apply_layout_plan(
     world: &mut World,
     snapshot: &LayoutSnapshot,
-    existing: &ApplyHashSet<String>,
-) -> Result<(), ValidationError> {
-    let plan = plan_diff(snapshot, existing)?;
-
+    plan: &DiffPlan,
+) {
     let mut new_entities: std::collections::HashMap<*const proto::LayoutNode, Entity> =
         std::collections::HashMap::new();
     let mut materialized: Vec<(&proto::Tab, Entity)> = Vec::with_capacity(snapshot.tabs.len());
@@ -247,7 +310,7 @@ pub fn apply_with_existing(
                 proto::LayoutNode::Pane { .. } => NodeKind::Pane,
             };
             let id = format_id(kind, entity.to_bits());
-            existing.contains(&id).then_some(id)
+            plan.closes.contains(&id).then_some(id)
         })
         .collect();
     for id in &plan.closes {
@@ -257,7 +320,6 @@ pub fn apply_with_existing(
         apply_close(world, id);
     }
     apply_focus(world, &snapshot.focused);
-    Ok(())
 }
 
 fn materialize_descendants(
@@ -381,42 +443,54 @@ fn apply_close(world: &mut World, id: &str) {
     }
 }
 
-fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<String>) {
-    let Ok(entity_ref) = world.get_entity(entity) else {
+fn collect_ids_recursive(
+    entity: Entity,
+    nodes_q: &Query<(
+        Option<&Children>,
+        Has<LayoutTab>,
+        Has<PaneSplit>,
+        Has<Pane>,
+        Has<Stack>,
+    )>,
+    out: &mut ApplyHashSet<String>,
+) {
+    let Ok((children, is_tab, is_split, is_pane, is_stack)) = nodes_q.get(entity) else {
         return;
     };
-    if entity_ref.contains::<LayoutTab>() {
+    if is_tab {
         out.insert(format_id(NodeKind::Tab, entity.to_bits()));
-    } else if entity_ref.contains::<PaneSplit>() {
+    } else if is_split {
         out.insert(format_id(NodeKind::Split, entity.to_bits()));
-    } else if entity_ref.contains::<Pane>() {
+    } else if is_pane {
         out.insert(format_id(NodeKind::Pane, entity.to_bits()));
-    } else if entity_ref.contains::<Stack>() {
+    } else if is_stack {
         out.insert(format_id(NodeKind::Stack, entity.to_bits()));
     }
-    if let Some(children) = entity_ref.get::<Children>() {
-        let kids: Vec<Entity> = children.iter().collect();
-        for child in kids {
-            collect_ids_recursive(world, child, out);
+    if let Some(children) = children {
+        for child in children.iter() {
+            collect_ids_recursive(child, nodes_q, out);
         }
     }
 }
 
-fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
-    let mut active_space_q =
-        world.query_filtered::<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>();
-    let active_space = active_space_q.iter(world).next();
-    let mut tab_q = world.query_filtered::<(Entity, Option<&ChildOf>), With<LayoutTab>>();
-    let tabs: Vec<Entity> = tab_q
-        .iter(world)
-        .filter(|(_, child_of)| {
-            active_space.is_none() || child_of.map(|c| c.parent()) == active_space
-        })
-        .map(|(entity, _)| entity)
-        .collect();
+fn collect_existing_ids(
+    active_space_q: &Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
+    tabs_q: &Query<(Entity, Option<&ChildOf>), With<LayoutTab>>,
+    nodes_q: &Query<(
+        Option<&Children>,
+        Has<LayoutTab>,
+        Has<PaneSplit>,
+        Has<Pane>,
+        Has<Stack>,
+    )>,
+) -> ApplyHashSet<String> {
+    let active_space = active_space_q.iter().next();
     let mut out = ApplyHashSet::new();
-    for tab in tabs {
-        collect_ids_recursive(world, tab, &mut out);
+    for (tab, child_of) in tabs_q.iter() {
+        if active_space.is_some() && child_of.map(|child| child.parent()) != active_space {
+            continue;
+        }
+        collect_ids_recursive(tab, nodes_q, &mut out);
     }
     out
 }
@@ -578,20 +652,83 @@ mod tests {
     use crate::protocol::{Focus, SplitDirection, Stack as StackDto, Tab as TabDto};
     use std::collections::HashSet;
 
+    struct ApplyHarness;
+
+    impl ApplyHarness {
+        fn install(app: &mut App) {
+            app.add_message::<LayoutApplyRequest>()
+                .add_message::<LayoutApplyResponse>()
+                .add_message::<LayoutSnapshotRequest>()
+                .add_message::<LayoutSnapshotResponse>()
+                .add_message::<crate::TerminalLayoutSpawnRequest>()
+                .add_message::<PageOpenRequest>()
+                .init_resource::<crate::stack::FocusedStack>()
+                .add_plugins(LayoutApplyPlugin);
+        }
+
+        fn apply(app: &mut App, snapshot: LayoutSnapshot) -> Result<LayoutSnapshot, String> {
+            if !app
+                .world()
+                .contains_resource::<Messages<LayoutApplyPlan>>()
+            {
+                Self::install(app);
+            }
+            let request_id = [42; 16];
+            app.world_mut()
+                .resource_mut::<Messages<LayoutApplyRequest>>()
+                .write(LayoutApplyRequest {
+                    request_id,
+                    snapshot,
+                });
+            app.update();
+            let responses = app.world().resource::<Messages<LayoutApplyResponse>>();
+            let mut cursor = responses.get_cursor();
+            cursor
+                .read(responses)
+                .find(|response| response.request_id == request_id)
+                .expect("layout apply response")
+                .result
+                .clone()
+        }
+    }
+
     #[test]
-    fn collect_existing_ids_scoped_to_active_space() {
-        let mut world = World::new();
-        let space_a = world.spawn((crate::space::Space, vmux_core::Active)).id();
-        let space_b = world.spawn(crate::space::Space).id();
-        let tab_a = world
+    fn apply_closes_are_scoped_to_active_space() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let space_a = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let space_b = app.world_mut().spawn(crate::space::Space).id();
+        let tab_a = app
+            .world_mut()
             .spawn((crate::tab::Tab::default(), ChildOf(space_a)))
             .id();
-        let tab_b = world
+        let pane_a = app.world_mut().spawn((Pane, ChildOf(tab_a))).id();
+        let tab_b = app
+            .world_mut()
             .spawn((crate::tab::Tab::default(), ChildOf(space_b)))
             .id();
-        let ids = collect_existing_ids(&mut world);
-        assert!(ids.contains(&format_id(NodeKind::Tab, tab_a.to_bits())));
-        assert!(!ids.contains(&format_id(NodeKind::Tab, tab_b.to_bits())));
+        let pane_b = app.world_mut().spawn((Pane, ChildOf(tab_b))).id();
+        let snapshot = LayoutSnapshot {
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab_a.to_bits())),
+                name: String::new(),
+                is_active: true,
+                root: proto::LayoutNode::Pane {
+                    id: Some(format_id(NodeKind::Pane, pane_a.to_bits())),
+                    is_zoomed: false,
+                    stacks: vec![],
+                },
+            }],
+            focused: proto::Focus::default(),
+        };
+
+        ApplyHarness::apply(&mut app, snapshot).unwrap();
+
+        assert!(app.world().get_entity(tab_b).is_ok());
+        assert!(app.world().get_entity(pane_b).is_ok());
     }
 
     fn pane(id: Option<&str>, stacks: Vec<StackDto>) -> LayoutNode {
@@ -914,7 +1051,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        apply(app.world_mut(), &snap).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
         let updated = app.world().get::<PaneSplit>(split_e).unwrap();
         assert_eq!(updated.direction, PaneSplitDirection::Column);
     }
@@ -975,7 +1112,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        apply(app.world_mut(), &snap).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
         assert_eq!(app.world().get::<PaneSize>(pane_a).unwrap().flex_grow, 3.0);
         assert_eq!(app.world().get::<PaneSize>(pane_b).unwrap().flex_grow, 1.0);
     }
@@ -1038,7 +1175,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        apply(app.world_mut(), &snap).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
         let parent = app.world().get::<ChildOf>(moved).map(|p| p.parent());
         assert_eq!(parent, Some(split_b));
     }
@@ -1087,15 +1224,7 @@ mod tests {
             ],
             focused: proto::Focus::default(),
         };
-        let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Tab, tab.to_bits()),
-            format_id(NodeKind::Pane, pane.to_bits()),
-            format_id(NodeKind::Stack, stack.to_bits()),
-        ]
-        .into_iter()
-        .collect();
-
-        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
 
         let s_parent = app
             .world()
@@ -1161,14 +1290,7 @@ mod tests {
             ],
             focused: proto::Focus::default(),
         };
-        let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Tab, active_tab.to_bits()),
-            format_id(NodeKind::Pane, active_pane.to_bits()),
-        ]
-        .into_iter()
-        .collect();
-
-        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
 
         let mut q = app
             .world_mut()
@@ -1240,14 +1362,7 @@ mod tests {
             ],
             focused: proto::Focus::default(),
         };
-        let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Tab, tab.to_bits()),
-            format_id(NodeKind::Pane, pane.to_bits()),
-        ]
-        .into_iter()
-        .collect();
-
-        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
 
         let mut q = app
             .world_mut()
@@ -1306,16 +1421,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Tab, tab.to_bits()),
-            format_id(NodeKind::Split, split_e.to_bits()),
-            format_id(NodeKind::Pane, keep.to_bits()),
-            format_id(NodeKind::Pane, drop_me.to_bits()),
-        ]
-        .into_iter()
-        .collect();
-
-        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
         assert!(
             app.world().get_entity(drop_me).is_err(),
             "drop_me should be despawned"
@@ -1361,11 +1467,8 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        let result = apply(app.world_mut(), &snap);
-        assert!(
-            matches!(result, Err(ValidationError::MissingReferencedEntity(_))),
-            "expected MissingReferencedEntity, got {result:?}"
-        );
+        let result = ApplyHarness::apply(&mut app, snap);
+        assert!(matches!(result, Err(error) if error.contains("MissingReferencedEntity")));
     }
 
     #[test]
@@ -1403,7 +1506,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        apply(app.world_mut(), &snap).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
 
         let stack_count = app
             .world_mut()
@@ -1576,7 +1679,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        apply(app.world_mut(), &snap).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
 
         let children = app
             .world()
@@ -1630,7 +1733,7 @@ mod tests {
             },
         };
 
-        apply(app.world_mut(), &snap).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
         let focused = app.world().resource::<crate::stack::FocusedStack>();
         assert_eq!(focused.tab, Some(tab));
         assert_eq!(focused.pane, Some(pane_e));
@@ -1682,7 +1785,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        apply(app.world_mut(), &snap).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
         let f = app.world().resource::<crate::stack::FocusedStack>();
         assert_eq!(f.tab, Some(tab), "focused.tab must be preserved");
         assert_eq!(f.pane, Some(pane_e), "focused.pane must be preserved");
@@ -1735,7 +1838,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        apply(app.world_mut(), &snap).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
 
         let split_count = app
             .world_mut()
@@ -1806,15 +1909,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Tab, tab.to_bits()),
-            format_id(NodeKind::Pane, existing_pane.to_bits()),
-            format_id(NodeKind::Stack, stack.to_bits()),
-        ]
-        .into_iter()
-        .collect();
-
-        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
 
         assert!(
             app.world().get::<PaneSplit>(existing_pane).is_none(),
@@ -1919,16 +2014,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Tab, tab.to_bits()),
-            format_id(NodeKind::Split, existing_root.to_bits()),
-            format_id(NodeKind::Pane, existing_leaf.to_bits()),
-            format_id(NodeKind::Stack, stack.to_bits()),
-        ]
-        .into_iter()
-        .collect();
-
-        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
 
         let splits: Vec<Entity> = app
             .world_mut()
@@ -1956,11 +2042,8 @@ mod tests {
         use bevy::ecs::message::Messages;
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<LayoutSnapshotRequest>()
-            .add_message::<LayoutSnapshotResponse>()
-            .insert_resource(crate::stack::FocusedStack::default())
-            .add_systems(Update, super::serve_snapshot_requests);
+        app.add_plugins(MinimalPlugins);
+        ApplyHarness::install(&mut app);
 
         let tab = app
             .world_mut()
@@ -1994,16 +2077,8 @@ mod tests {
 
     #[test]
     fn apply_layout_requests_emits_response_with_snapshot() {
-        use bevy::ecs::message::Messages;
-
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<LayoutApplyRequest>()
-            .add_message::<LayoutApplyResponse>()
-            .add_message::<crate::TerminalLayoutSpawnRequest>()
-            .add_message::<PageOpenRequest>()
-            .insert_resource(crate::stack::FocusedStack::default())
-            .add_systems(Update, super::apply_layout_requests);
+        app.add_plugins(MinimalPlugins);
 
         let tab = app
             .world_mut()
@@ -2031,22 +2106,8 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        app.world_mut()
-            .resource_mut::<Messages<LayoutApplyRequest>>()
-            .write(LayoutApplyRequest {
-                request_id: [42; 16],
-                snapshot: snap.clone(),
-            });
-        app.update();
-
-        let responses = app.world().resource::<Messages<LayoutApplyResponse>>();
-        let mut cursor = responses.get_cursor();
-        let response = cursor
-            .read(responses)
-            .next()
-            .expect("expected one response");
-        assert_eq!(response.request_id, [42; 16]);
-        assert!(response.result.is_ok(), "apply should succeed");
+        let response = ApplyHarness::apply(&mut app, snap).unwrap();
+        assert_eq!(response.tabs.len(), 1);
     }
 
     #[test]
@@ -2106,15 +2167,7 @@ mod tests {
             focused: proto::Focus::default(),
         };
 
-        let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Tab, tab.to_bits()),
-            format_id(NodeKind::Pane, existing_pane.to_bits()),
-            format_id(NodeKind::Stack, stack.to_bits()),
-        ]
-        .into_iter()
-        .collect();
-
-        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+        ApplyHarness::apply(&mut app, snap).unwrap();
 
         let splits: Vec<Entity> = app
             .world_mut()

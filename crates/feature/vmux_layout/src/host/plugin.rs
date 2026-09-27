@@ -57,11 +57,8 @@ impl Plugin for LayoutPlugin {
                 )
                     .chain(),
             )
-            .add_systems(
-                Update,
-                (apply::apply_layout_requests, apply::serve_snapshot_requests),
-            )
             .add_plugins((
+                apply::LayoutApplyPlugin,
                 crate::tool::LayoutToolPlugin,
                 crate::bookmark_tool::BookmarkToolPlugin,
                 ProfilePlugin,
