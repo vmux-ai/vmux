@@ -25,29 +25,28 @@ impl Plugin for ShortcutPlugin {
         #[cfg(ui)]
         app.add_plugins(crate::ui::ShortcutPage::plugin());
         app.world_mut().spawn(PAGE_MANIFEST);
-        app.init_resource::<ShortcutCaptureTarget>()
-            .add_plugins((
-                HostedPagePlugin::<Shortcuts>::default(),
-                UiEventPlugin::<(ShortcutProbeRequest,)>::default(),
-                vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
-            ))
-            .add_observer(send_shortcuts)
-            .add_observer(on_shortcut_probe_request)
-            .add_observer(on_shortcut_probe_press)
-            .add_systems(
-                Update,
-                normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
-            )
-            .add_systems(
-                Update,
-                sync_shortcut_capture
-                    .in_set(ShortcutCaptureSet)
-                    .after(ComputeFocusSet),
-            )
-            .add_systems(
-                Update,
-                (expire_shortcut_probe, publish_shortcut_state).chain(),
-            );
+        app.add_plugins((
+            HostedPagePlugin::<Shortcuts>::default(),
+            UiEventPlugin::<(ShortcutProbeRequest,)>::default(),
+            vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
+        ))
+        .add_observer(send_shortcuts)
+        .add_observer(on_shortcut_probe_request)
+        .add_observer(on_shortcut_probe_press)
+        .add_systems(
+            Update,
+            normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
+        )
+        .add_systems(
+            Update,
+            sync_shortcut_capture
+                .in_set(ShortcutCaptureSet)
+                .after(ComputeFocusSet),
+        )
+        .add_systems(
+            Update,
+            (expire_shortcut_probe, publish_shortcut_state).chain(),
+        );
     }
 }
 
@@ -64,7 +63,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 };
 
 #[derive(Component, Default)]
-#[require(ShortcutUiStateUpdates)]
+#[require(ShortcutUiStateUpdates, ShortcutCapture)]
 struct Shortcuts {
     catalog: ShortcutCatalog,
     probe: ShortcutProbe,
@@ -79,43 +78,27 @@ struct ShortcutProbe {
     missed: bool,
 }
 
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ShortcutCaptureTarget {
-    token: Option<ShortcutCaptureToken>,
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShortcutCapture {
     generation: u64,
 }
+
+#[derive(Component)]
+pub struct CapturingShortcuts;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ShortcutCaptureSet;
 
-impl ShortcutCaptureTarget {
-    pub fn target(&self) -> Option<Entity> {
-        self.token.map(|token| token.target)
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.token.is_some()
-    }
-
-    pub fn token(&self) -> Option<ShortcutCaptureToken> {
-        self.token
-    }
-
-    pub fn release(&mut self, token: ShortcutCaptureToken) {
-        if self.token == Some(token) {
-            self.replace(None);
-        }
-    }
-
-    fn replace(&mut self, next: Option<Entity>) {
-        if self.target() == next {
-            return;
-        }
+impl ShortcutCapture {
+    fn activate(&mut self) {
         self.generation = self.generation.wrapping_add(1);
-        self.token = next.map(|target| ShortcutCaptureToken {
+    }
+
+    pub fn token(&self, target: Entity) -> ShortcutCaptureToken {
+        ShortcutCaptureToken {
             target,
             generation: self.generation,
-        });
+        }
     }
 }
 
@@ -422,12 +405,24 @@ fn on_shortcut_probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mu
     );
 }
 
-fn sync_shortcut_capture(focus: ShortcutCaptureFocus, mut target: ResMut<ShortcutCaptureTarget>) {
+fn sync_shortcut_capture(
+    focus: ShortcutCaptureFocus,
+    mut captures: Query<(Entity, &mut ShortcutCapture, Has<CapturingShortcuts>)>,
+    mut commands: Commands,
+) {
     let next = focus.active();
-    if target.target() == next {
-        return;
+    for (entity, mut capture, active) in &mut captures {
+        let should_capture = next == Some(entity);
+        if active == should_capture {
+            continue;
+        }
+        if should_capture {
+            capture.activate();
+            commands.entity(entity).insert(CapturingShortcuts);
+        } else {
+            commands.entity(entity).remove::<CapturingShortcuts>();
+        }
     }
-    target.replace(next);
 }
 
 fn expire_shortcut_probe(mut views: Query<&mut Shortcuts>) {
@@ -887,27 +882,21 @@ mod tests {
         });
 
         app.update();
-        assert_eq!(
-            app.world().resource::<ShortcutCaptureTarget>().target(),
-            Some(page)
-        );
+        assert!(app.world().entity(page).contains::<CapturingShortcuts>());
         app.world_mut().get_mut::<Window>(window).unwrap().focused = false;
         app.update();
-        assert_eq!(
-            app.world().resource::<ShortcutCaptureTarget>().target(),
-            None
-        );
+        assert!(!app.world().entity(page).contains::<CapturingShortcuts>());
         app.world_mut().get_mut::<Window>(window).unwrap().focused = true;
         app.update();
-        assert_eq!(
-            app.world().resource::<ShortcutCaptureTarget>().target(),
-            Some(page)
-        );
+        assert!(app.world().entity(page).contains::<CapturingShortcuts>());
         app.world_mut().despawn(page);
         app.update();
-        assert_eq!(
-            app.world().resource::<ShortcutCaptureTarget>().target(),
-            None
+        assert!(
+            app.world_mut()
+                .query_filtered::<Entity, With<CapturingShortcuts>>()
+                .iter(app.world())
+                .next()
+                .is_none()
         );
     }
 }

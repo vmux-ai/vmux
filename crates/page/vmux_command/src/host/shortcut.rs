@@ -1,7 +1,6 @@
 use bevy::ecs::component::Component;
 use bevy::ecs::resource::Resource;
 use bevy::input::keyboard::KeyCode;
-use std::time::Instant;
 use vmux_core::input::{ClaimedKey, KeyClaims, KeyModifiers};
 
 #[derive(Resource, Debug, Clone, Default)]
@@ -270,11 +269,6 @@ impl FromIterator<String> for KeyContext {
     fn from_iter<I: IntoIterator<Item = String>>(keys: I) -> Self {
         Self(keys.into_iter().collect())
     }
-}
-
-#[derive(Resource, Default)]
-pub struct ChordState {
-    pub pending_prefix: Option<(KeyCombo, Instant)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

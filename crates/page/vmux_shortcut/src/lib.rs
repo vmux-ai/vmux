@@ -188,7 +188,7 @@ impl ShortcutStroke {
 #[cfg(host)]
 mod host;
 #[cfg(host)]
-pub use host::{ShortcutCaptureSet, ShortcutCaptureTarget, ShortcutPlugin};
+pub use host::{CapturingShortcuts, ShortcutCapture, ShortcutCaptureSet, ShortcutPlugin};
 
 #[cfg(ui)]
 pub mod ui;

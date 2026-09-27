@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use std::time::Instant;
 use vmux_command::WriteCommandRequests;
 use vmux_command::shortcut::{Binding, Source, When};
-pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Keymap, Modifiers};
+pub(crate) use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_setting::{AppSettings, SettingsLoadSet};
 
 pub struct ShortcutPlugin;
@@ -13,8 +13,7 @@ pub(crate) struct ShortcutInit;
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ChordState>()
-            .add_plugins(crate::key_claim::KeyClaimPlugin)
+        app.add_plugins(crate::key_claim::KeyClaimPlugin)
             .add_systems(
                 Startup,
                 sync_keymap
@@ -79,25 +78,22 @@ fn sync_keymap(
 fn process_key_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     bindings: Res<Keymap>,
-    mut chord_state: ResMut<ChordState>,
+    mut pending_prefix: Local<Option<(KeyCombo, Instant)>>,
     mut invocations: MessageWriter<vmux_command::CommandInvocation>,
     user: Query<Entity, With<vmux_core::team::User>>,
-    capture: Option<Res<vmux_shortcut::ShortcutCaptureTarget>>,
+    capture: Query<(), With<vmux_shortcut::CapturingShortcuts>>,
 ) {
-    if capture
-        .as_deref()
-        .is_some_and(|capture| capture.is_active())
-    {
-        chord_state.pending_prefix = None;
+    if !capture.is_empty() {
+        *pending_prefix = None;
         return;
     }
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     let current_modifiers = read_current_modifiers(&keyboard);
 
-    if let Some((_, instant)) = &chord_state.pending_prefix {
+    if let Some((_, instant)) = pending_prefix.as_ref() {
         let timeout = std::time::Duration::from_millis(bindings.chord_timeout_ms);
         if instant.elapsed() > timeout {
-            chord_state.pending_prefix = None;
+            *pending_prefix = None;
         }
     }
 
@@ -110,7 +106,7 @@ fn process_key_input(
         })
         .collect();
 
-    if let Some((prefix, instant)) = chord_state.pending_prefix.clone() {
+    if let Some((prefix, instant)) = pending_prefix.clone() {
         let timeout = std::time::Duration::from_millis(bindings.chord_timeout_ms);
         if instant.elapsed() <= timeout
             && let Some(cmd) = just_pressed
@@ -118,13 +114,13 @@ fn process_key_input(
                 .find_map(|pressed| bindings.chord(&prefix, pressed))
         {
             invocations.write(vmux_command::CommandInvocation::new(caller, cmd));
-            chord_state.pending_prefix = None;
+            *pending_prefix = None;
             return;
         }
         if just_pressed.is_empty() {
             return;
         }
-        chord_state.pending_prefix = None;
+        *pending_prefix = None;
     }
 
     for (index, pressed) in just_pressed.iter().enumerate() {
@@ -133,14 +129,14 @@ fn process_key_input(
             return;
         }
         if bindings.has_chord_prefix(pressed) {
-            chord_state.pending_prefix = Some((pressed.clone(), Instant::now()));
+            *pending_prefix = Some((pressed.clone(), Instant::now()));
             for (second_index, second) in just_pressed.iter().enumerate() {
                 if second_index == index {
                     continue;
                 }
                 if let Some(cmd) = bindings.chord(pressed, second) {
                     invocations.write(vmux_command::CommandInvocation::new(caller, cmd));
-                    chord_state.pending_prefix = None;
+                    *pending_prefix = None;
                     return;
                 }
             }

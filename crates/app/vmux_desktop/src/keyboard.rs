@@ -581,7 +581,10 @@ fn sync_keyboard_context(
     keyboard: Single<&KeyboardBridge>,
     keymap: Res<Keymap>,
     browser: Option<Res<vmux_browser::KeyboardContext>>,
-    capture: Option<Res<vmux_shortcut::ShortcutCaptureTarget>>,
+    capture: Query<
+        (Entity, &vmux_shortcut::ShortcutCapture),
+        With<vmux_shortcut::CapturingShortcuts>,
+    >,
     focus: Option<Res<vmux_layout::stack::FocusedStack>>,
     focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
     children: Query<&Children>,
@@ -605,7 +608,10 @@ fn sync_keyboard_context(
         if keymap.is_changed() || context.keymap.is_none() {
             context.keymap = Some(keymap.clone());
         }
-        context.capture_target = capture.as_deref().and_then(|capture| capture.token());
+        context.capture_target = capture
+            .iter()
+            .next()
+            .map(|(entity, capture)| capture.token(entity));
         context.simulator_active = active.is_some();
         context.window_fullscreen = focused_window
             .as_deref()
@@ -633,22 +639,29 @@ fn dispatch_keyboard_input(
     mut fullscreen: MessageWriter<ExitFullscreenRequest>,
     mut hide_windows: Option<MessageWriter<crate::runtime::HideAllWindowsRequest>>,
     user: Query<Entity, With<vmux_core::team::User>>,
-    mut shortcut_capture: Option<ResMut<vmux_shortcut::ShortcutCaptureTarget>>,
+    shortcut_capture: Query<
+        (Entity, &vmux_shortcut::ShortcutCapture),
+        With<vmux_shortcut::CapturingShortcuts>,
+    >,
     mut commands: Commands,
 ) {
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     for command in inbox.commands.try_iter() {
         invocations.write(vmux_command::CommandInvocation::new(caller, command));
     }
-    if let Some(target) = shortcut_capture.as_deref_mut() {
-        for token in inbox.shortcut_releases.try_iter() {
-            target.release(token);
+    let mut active_token = shortcut_capture
+        .iter()
+        .next()
+        .map(|(entity, capture)| capture.token(entity));
+    for token in inbox.shortcut_releases.try_iter() {
+        if active_token == Some(token) {
+            commands
+                .entity(token.target)
+                .remove::<vmux_shortcut::CapturingShortcuts>();
+            active_token = None;
         }
     }
-    if let Some(token) = shortcut_capture
-        .as_deref()
-        .and_then(|target| target.token())
-    {
+    if let Some(token) = active_token {
         for capture in inbox.shortcut_captures.try_iter() {
             if capture.token == token {
                 commands.trigger(vmux_shortcut::ShortcutProbePress::new(

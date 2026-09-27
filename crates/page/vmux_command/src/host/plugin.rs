@@ -23,7 +23,6 @@ impl Plugin for CommandPlugin {
         ))
         .add_message::<crate::host::ExLineSubmitted>()
         .add_message::<crate::host::FileStatusPicked>()
-        .init_resource::<CommandSettle>()
         .add_systems(
             Update,
             log_command_invocations
@@ -34,24 +33,21 @@ impl Plugin for CommandPlugin {
     }
 }
 
-#[derive(Resource, Default)]
-struct CommandSettle(Option<std::time::Instant>);
-
 const COMMAND_SETTLE_WINDOW: std::time::Duration = std::time::Duration::from_millis(150);
 
 fn keep_frames_coming(
-    mut settle: ResMut<CommandSettle>,
+    mut settle: Local<Option<std::time::Instant>>,
     mut reader: MessageReader<CommandInvocation>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
     if reader.read().count() > 0 {
-        settle.0 = Some(std::time::Instant::now());
+        *settle = Some(std::time::Instant::now());
     }
-    let Some(since) = settle.0 else {
+    let Some(since) = *settle else {
         return;
     };
     if since.elapsed() >= COMMAND_SETTLE_WINDOW {
-        settle.0 = None;
+        *settle = None;
         return;
     }
     let Some(proxy) = proxy else {
