@@ -1,4 +1,3 @@
-use std::future::Future;
 use std::io::{self, Read};
 
 use bevy::app::{App, Plugin, Update};
@@ -22,7 +21,9 @@ impl Plugin for AgentCliPlugin {
                     start_notify,
                     start_file_touch,
                     start_turn_end,
-                    poll_agent_cli,
+                    poll_notify,
+                    poll_file_touch,
+                    poll_turn_end,
                 )
                     .chain(),
             );
@@ -36,94 +37,9 @@ struct NotifyCliRequest {
     anchor: Option<String>,
 }
 
-impl NotifyCliRequest {
-    async fn send(self) -> io::Result<()> {
-        let anchor = CliAnchor::strict(self.anchor)?;
-        let connection = match ServiceConnection::connect().await {
-            Ok(connection) => connection,
-            Err(error) => {
-                eprintln!("vmux notify: cannot connect to vmux service: {error}");
-                return Ok(());
-            }
-        };
-        let request_id = AgentRequestId::new();
-        if let Err(error) = connection
-            .send(&ClientMessage::AgentCommand {
-                request_id,
-                anchor,
-                command: AgentCommand::Notify(AgentNotify {
-                    title: self.title,
-                    body: self.body,
-                }),
-            })
-            .await
-        {
-            eprintln!("vmux notify: failed to send: {error}");
-            return Ok(());
-        }
-        let _ = tokio::time::timeout(AGENT_COMMAND_TIMEOUT, async {
-            while let Ok(Some(message)) = connection.recv().await {
-                if let ServiceMessage::AgentCommandResult {
-                    request_id: received,
-                    result,
-                } = message
-                    && received == request_id
-                {
-                    if let AgentCommandResult::Error(message) = result {
-                        eprintln!("vmux notify: {message}");
-                    }
-                    break;
-                }
-            }
-        })
-        .await;
-        Ok(())
-    }
-}
-
 #[derive(Component, Clone)]
 struct FileTouchCliRequest {
     anchor: Option<String>,
-}
-
-impl FileTouchCliRequest {
-    async fn send(self) -> io::Result<()> {
-        let Some(anchor) = CliAnchor::optional(self.anchor) else {
-            return Ok(());
-        };
-        let mut input = String::new();
-        io::stdin().read_to_string(&mut input)?;
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&input) else {
-            return Ok(());
-        };
-        let Ok(touch) = FileTouch::try_from(&value) else {
-            return Ok(());
-        };
-        let Ok(connection) = ServiceConnection::connect().await else {
-            return Ok(());
-        };
-        let request_id = AgentRequestId::new();
-        if connection
-            .send(&ClientMessage::AgentCommand {
-                request_id,
-                anchor: Some(anchor),
-                command: AgentCommand::FileTouched(AgentFileTouched {
-                    anchor,
-                    path: touch.path,
-                    line: touch.line,
-                    col: None,
-                    end_col: None,
-                    kind: touch.kind,
-                }),
-            })
-            .await
-            .is_err()
-        {
-            return Ok(());
-        }
-        AgentCommandResponse::wait(&connection, request_id).await;
-        Ok(())
-    }
 }
 
 #[derive(Component, Clone)]
@@ -131,85 +47,14 @@ struct TurnEndCliRequest {
     anchor: Option<String>,
 }
 
-impl TurnEndCliRequest {
-    async fn send(self) -> io::Result<()> {
-        let Some(anchor) = CliAnchor::optional(self.anchor) else {
-            return Ok(());
-        };
-        let mut input = String::new();
-        let _ = io::stdin().read_to_string(&mut input);
-        let Ok(connection) = ServiceConnection::connect().await else {
-            return Ok(());
-        };
-        let request_id = AgentRequestId::new();
-        if connection
-            .send(&ClientMessage::AgentCommand {
-                request_id,
-                anchor: Some(anchor),
-                command: AgentCommand::TurnEnded(AgentTurnEnded { anchor }),
-            })
-            .await
-            .is_err()
-        {
-            return Ok(());
-        }
-        AgentCommandResponse::wait(&connection, request_id).await;
-        Ok(())
-    }
-}
+#[derive(Component)]
+struct NotifyCliTask(tokio::task::JoinHandle<io::Result<()>>);
 
 #[derive(Component)]
-struct AgentCliTask(tokio::task::JoinHandle<Result<u8, String>>);
+struct FileTouchCliTask(tokio::task::JoinHandle<io::Result<()>>);
 
-impl AgentCliTask {
-    fn spawn(task: impl Future<Output = io::Result<()>> + Send + 'static) -> Self {
-        Self(tokio::spawn(async move {
-            task.await.map(|()| 0).map_err(|error| error.to_string())
-        }))
-    }
-}
-
-struct CliAnchor;
-
-impl CliAnchor {
-    fn optional(value: Option<String>) -> Option<ProcessId> {
-        value
-            .or_else(|| std::env::var("VMUX_ANCHOR").ok())
-            .and_then(|value| value.parse::<ProcessId>().ok())
-    }
-
-    fn strict(value: Option<String>) -> io::Result<Option<ProcessId>> {
-        let Some(value) = value.or_else(|| std::env::var("VMUX_ANCHOR").ok()) else {
-            return Ok(None);
-        };
-        value.parse::<ProcessId>().map(Some).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("invalid --anchor: {value}"),
-            )
-        })
-    }
-}
-
-struct AgentCommandResponse;
-
-impl AgentCommandResponse {
-    async fn wait(connection: &ServiceConnection, request_id: AgentRequestId) {
-        let _ = tokio::time::timeout(AGENT_COMMAND_TIMEOUT, async {
-            while let Ok(Some(message)) = connection.recv().await {
-                if let ServiceMessage::AgentCommandResult {
-                    request_id: received,
-                    ..
-                } = message
-                    && received == request_id
-                {
-                    break;
-                }
-            }
-        })
-        .await;
-    }
-}
+#[derive(Component)]
+struct TurnEndCliTask(tokio::task::JoinHandle<io::Result<()>>);
 
 #[derive(Debug, PartialEq)]
 struct FileTouch {
@@ -287,9 +132,63 @@ fn start_notify(
     mut commands: Commands,
 ) {
     for (entity, request) in &requests {
-        commands
-            .entity(entity)
-            .insert(AgentCliTask::spawn(request.clone().send()));
+        let anchor = request
+            .anchor
+            .clone()
+            .or_else(|| std::env::var("VMUX_ANCHOR").ok());
+        let anchor = match anchor {
+            Some(value) => match value.parse::<ProcessId>() {
+                Ok(anchor) => Some(anchor),
+                Err(_) => {
+                    commands
+                        .entity(entity)
+                        .insert(CliResult(Err(format!("invalid --anchor: {value}"))));
+                    continue;
+                }
+            },
+            None => None,
+        };
+        let title = request.title.clone();
+        let body = request.body.clone();
+        let task = tokio::spawn(async move {
+            let connection = match ServiceConnection::connect().await {
+                Ok(connection) => connection,
+                Err(error) => {
+                    eprintln!("vmux notify: cannot connect to vmux service: {error}");
+                    return Ok(());
+                }
+            };
+            let request_id = AgentRequestId::new();
+            if let Err(error) = connection
+                .send(&ClientMessage::AgentCommand {
+                    request_id,
+                    anchor,
+                    command: AgentCommand::Notify(AgentNotify { title, body }),
+                })
+                .await
+            {
+                eprintln!("vmux notify: failed to send: {error}");
+                return Ok(());
+            }
+            let _ = tokio::time::timeout(AGENT_COMMAND_TIMEOUT, async {
+                while let Ok(Some(message)) = connection.recv().await {
+                    if let ServiceMessage::AgentCommandResult {
+                        request_id: received,
+                        result,
+                    } = message
+                        && received == request_id
+                    {
+                        if let AgentCommandResult::Error(message) = result {
+                            eprintln!("vmux notify: {message}");
+                        }
+                        break;
+                    }
+                }
+            })
+            .await;
+            Ok(())
+        });
+        commands.entity(entity).insert(NotifyCliTask(task));
     }
 }
 
@@ -298,9 +197,62 @@ fn start_file_touch(
     mut commands: Commands,
 ) {
     for (entity, request) in &requests {
-        commands
-            .entity(entity)
-            .insert(AgentCliTask::spawn(request.clone().send()));
+        let Some(anchor) = request
+            .anchor
+            .clone()
+            .or_else(|| std::env::var("VMUX_ANCHOR").ok())
+            .and_then(|value| value.parse::<ProcessId>().ok())
+        else {
+            commands.entity(entity).insert(CliResult::success());
+            continue;
+        };
+        let task = tokio::spawn(async move {
+            let mut input = String::new();
+            io::stdin().read_to_string(&mut input)?;
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&input) else {
+                return Ok(());
+            };
+            let Ok(touch) = FileTouch::try_from(&value) else {
+                return Ok(());
+            };
+            let Ok(connection) = ServiceConnection::connect().await else {
+                return Ok(());
+            };
+            let request_id = AgentRequestId::new();
+            if connection
+                .send(&ClientMessage::AgentCommand {
+                    request_id,
+                    anchor: Some(anchor),
+                    command: AgentCommand::FileTouched(AgentFileTouched {
+                        anchor,
+                        path: touch.path,
+                        line: touch.line,
+                        col: None,
+                        end_col: None,
+                        kind: touch.kind,
+                    }),
+                })
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
+            let _ = tokio::time::timeout(AGENT_COMMAND_TIMEOUT, async {
+                while let Ok(Some(message)) = connection.recv().await {
+                    if let ServiceMessage::AgentCommandResult {
+                        request_id: received,
+                        ..
+                    } = message
+                        && received == request_id
+                    {
+                        break;
+                    }
+                }
+            })
+            .await;
+            Ok(())
+        });
+        commands.entity(entity).insert(FileTouchCliTask(task));
     }
 }
 
@@ -309,24 +261,96 @@ fn start_turn_end(
     mut commands: Commands,
 ) {
     for (entity, request) in &requests {
-        commands
-            .entity(entity)
-            .insert(AgentCliTask::spawn(request.clone().send()));
+        let Some(anchor) = request
+            .anchor
+            .clone()
+            .or_else(|| std::env::var("VMUX_ANCHOR").ok())
+            .and_then(|value| value.parse::<ProcessId>().ok())
+        else {
+            commands.entity(entity).insert(CliResult::success());
+            continue;
+        };
+        let task = tokio::spawn(async move {
+            let mut input = String::new();
+            let _ = io::stdin().read_to_string(&mut input);
+            let Ok(connection) = ServiceConnection::connect().await else {
+                return Ok(());
+            };
+            let request_id = AgentRequestId::new();
+            if connection
+                .send(&ClientMessage::AgentCommand {
+                    request_id,
+                    anchor: Some(anchor),
+                    command: AgentCommand::TurnEnded(AgentTurnEnded { anchor }),
+                })
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
+            let _ = tokio::time::timeout(AGENT_COMMAND_TIMEOUT, async {
+                while let Ok(Some(message)) = connection.recv().await {
+                    if let ServiceMessage::AgentCommandResult {
+                        request_id: received,
+                        ..
+                    } = message
+                        && received == request_id
+                    {
+                        break;
+                    }
+                }
+            })
+            .await;
+            Ok(())
+        });
+        commands.entity(entity).insert(TurnEndCliTask(task));
     }
 }
 
-fn poll_agent_cli(mut tasks: Query<(Entity, &mut AgentCliTask)>, mut commands: Commands) {
+fn poll_notify(mut tasks: Query<(Entity, &mut NotifyCliTask)>, mut commands: Commands) {
     for (entity, mut task) in &mut tasks {
         if !task.0.is_finished() {
             continue;
         }
         let result = match bevy::tasks::futures_lite::future::block_on(&mut task.0) {
-            Ok(result) => result,
+            Ok(result) => result.map(|()| 0).map_err(|error| error.to_string()),
             Err(error) => Err(error.to_string()),
         };
         commands
             .entity(entity)
-            .remove::<AgentCliTask>()
+            .remove::<NotifyCliTask>()
+            .insert(CliResult(result));
+    }
+}
+
+fn poll_file_touch(mut tasks: Query<(Entity, &mut FileTouchCliTask)>, mut commands: Commands) {
+    for (entity, mut task) in &mut tasks {
+        if !task.0.is_finished() {
+            continue;
+        }
+        let result = match bevy::tasks::futures_lite::future::block_on(&mut task.0) {
+            Ok(result) => result.map(|()| 0).map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        commands
+            .entity(entity)
+            .remove::<FileTouchCliTask>()
+            .insert(CliResult(result));
+    }
+}
+
+fn poll_turn_end(mut tasks: Query<(Entity, &mut TurnEndCliTask)>, mut commands: Commands) {
+    for (entity, mut task) in &mut tasks {
+        if !task.0.is_finished() {
+            continue;
+        }
+        let result = match bevy::tasks::futures_lite::future::block_on(&mut task.0) {
+            Ok(result) => result.map(|()| 0).map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        commands
+            .entity(entity)
+            .remove::<TurnEndCliTask>()
             .insert(CliResult(result));
     }
 }
