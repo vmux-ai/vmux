@@ -9,7 +9,6 @@ pub mod acp_tool;
 pub(crate) mod approval;
 pub mod attach;
 pub mod attention;
-pub mod browser_pane;
 mod capture_tool;
 pub mod chat;
 pub mod command;

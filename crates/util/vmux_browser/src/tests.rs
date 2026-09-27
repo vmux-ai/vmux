@@ -1,7 +1,11 @@
 use super::*;
 use crate::appearance::sync_appearance_to_cef;
 use crate::host::*;
+use vmux_core::PageMetadata;
 use vmux_core::overlay::WindowOverlay;
+use vmux_flex::prelude::{ComputedNode, Node, UiRect, Val};
+use vmux_layout::stack::Stack;
+use vmux_setting::AppSettings;
 
 #[test]
 fn pending_navigation_updates_keep_only_the_latest_request() {
@@ -254,8 +258,9 @@ fn layout_state_padding_reads_effective_window_node_padding() {
 }
 
 mod browser_navigate_flow {
+    use crate::Browser;
+    use crate::host::PendingNavigationSnapshot;
     use crate::input::RecentBrowserInteraction;
-    use crate::{Browser, PendingNavigationSnapshot};
     use bevy::ecs::relationship::Relationship;
     use bevy::prelude::*;
     use vmux_agent::event::AgentCommandRequest;

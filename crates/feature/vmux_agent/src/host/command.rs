@@ -1,5 +1,4 @@
 mod application;
-mod browser;
 mod dispatch;
 mod operation;
 mod tool_call;
@@ -36,7 +35,6 @@ impl Plugin for CommandPlugin {
             )
             .add_plugins((
                 application::ApplicationCommandPlugin,
-                browser::BrowserCommandPlugin,
                 dispatch::DispatchPlugin,
                 operation::AgentOperationPlugin,
                 tool_call::ToolCallPlugin,

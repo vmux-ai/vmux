@@ -18,7 +18,7 @@ use vmux_core::browser::{
     BrowserSnapshotRequest, BrowserSnapshotResponse,
 };
 
-use super::browser_pane::AgentBrowserResolve;
+use vmux_browser::AgentBrowserResolve;
 
 pub(crate) struct AgentQueryPlugin;
 

@@ -4,10 +4,6 @@ use vmux_api::protocol::{AgentCommand as ServiceAgentCommand, SharedAgentCommand
 use crate::host::event::AgentCommandRequest;
 
 use super::application::AgentNotifyRequest;
-use super::browser::{
-    AgentBrowserGoBackRequest, AgentBrowserGoForwardRequest, AgentBrowserHistorySearchRequest,
-    AgentBrowserInstallExtensionRequest, AgentBrowserNavigateRequest, AgentOpenInNewStackRequest,
-};
 use super::operation::{
     AgentFileSearchRequest, AgentFileTouchedRequest, AgentListRequest, AgentNewChatRequest,
     AgentTurnEndedRequest,
@@ -20,69 +16,12 @@ impl Plugin for DispatchPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (route_browser_operations, route_application_operations).in_set(CommandSet::Dispatch),
+            route_application_operations.in_set(CommandSet::Dispatch),
         )
         .add_systems(
             Update,
             route_remaining_operations.in_set(CommandSet::Dispatch),
         );
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn route_browser_operations(
-    mut commands: MessageReader<AgentCommandRequest>,
-    mut navigate: MessageWriter<AgentBrowserNavigateRequest>,
-    mut install_extension: MessageWriter<AgentBrowserInstallExtensionRequest>,
-    mut go_back: MessageWriter<AgentBrowserGoBackRequest>,
-    mut go_forward: MessageWriter<AgentBrowserGoForwardRequest>,
-    mut search_history: MessageWriter<AgentBrowserHistorySearchRequest>,
-    mut open_in_new_stack: MessageWriter<AgentOpenInNewStackRequest>,
-) {
-    for request in commands.read() {
-        let reply = AgentReply::new(request.request_id);
-        match &request.command {
-            ServiceAgentCommand::BrowserNavigate(payload) => {
-                navigate.write(AgentBrowserNavigateRequest {
-                    reply,
-                    origin: request.origin.clone(),
-                    payload: payload.clone(),
-                });
-            }
-            ServiceAgentCommand::BrowserInstallExtension(payload) => {
-                install_extension.write(AgentBrowserInstallExtensionRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            ServiceAgentCommand::BrowserGoBack(payload) => {
-                go_back.write(AgentBrowserGoBackRequest {
-                    reply,
-                    origin: request.origin.clone(),
-                    payload: payload.clone(),
-                });
-            }
-            ServiceAgentCommand::BrowserGoForward(payload) => {
-                go_forward.write(AgentBrowserGoForwardRequest {
-                    reply,
-                    origin: request.origin.clone(),
-                    payload: payload.clone(),
-                });
-            }
-            ServiceAgentCommand::BrowserHistorySearch(payload) => {
-                search_history.write(AgentBrowserHistorySearchRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            ServiceAgentCommand::OpenInNewStack(payload) => {
-                open_in_new_stack.write(AgentOpenInNewStackRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            _ => {}
-        }
     }
 }
 

@@ -1,39 +1,136 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentBrowserHistorySearch, AgentBrowserHistoryStep, AgentBrowserInstallExtension,
-    AgentBrowserNavigate, AgentCommandResult, AgentOpenInNewStack, AgentRequestId,
+    AgentBrowserNavigate, AgentCommand, AgentCommandResult, AgentOpenInNewStack, AgentRequestId,
 };
-use vmux_core::agent::AgentCommandResponse;
+use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply, CommandOrigin};
 
-use crate::host::browser_pane::AgentBrowserResolve;
-use crate::host::event::CommandOrigin;
+use super::agent_pane::AgentBrowserResolve;
 
-use super::{AgentReply, CommandSet};
+pub(crate) struct AgentBrowserPlugin;
 
-pub(super) struct BrowserCommandPlugin;
-
-impl Plugin for BrowserCommandPlugin {
+impl Plugin for AgentBrowserPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentBrowserNavigateRequest>()
+        app.add_message::<AgentCommandRequest>()
+            .add_message::<AgentCommandResponse>()
+            .add_message::<AgentBrowserNavigateRequest>()
             .add_message::<AgentBrowserInstallExtensionRequest>()
             .add_message::<AgentBrowserGoBackRequest>()
             .add_message::<AgentBrowserGoForwardRequest>()
             .add_message::<AgentBrowserHistorySearchRequest>()
             .add_message::<AgentOpenInNewStackRequest>()
             .add_message::<vmux_extension::ExtensionInstallRequest>()
-            .add_systems(Update, open_history.in_set(CommandSet::History))
+            .add_systems(Update, open_history)
             .add_systems(
                 Update,
                 (
-                    navigate,
-                    install_extension,
-                    go_back,
-                    go_forward,
-                    search_history,
-                    open_in_new_stack,
+                    route_browser_commands,
+                    (
+                        navigate,
+                        install_extension,
+                        go_back,
+                        go_forward,
+                        search_history,
+                        open_in_new_stack,
+                    ),
                 )
-                    .in_set(CommandSet::Commands),
+                    .chain(),
             );
+    }
+}
+
+#[derive(Message, Clone)]
+struct AgentBrowserNavigateRequest {
+    reply: AgentReply,
+    origin: CommandOrigin,
+    payload: AgentBrowserNavigate,
+}
+
+#[derive(Message, Clone)]
+struct AgentBrowserInstallExtensionRequest {
+    reply: AgentReply,
+    payload: AgentBrowserInstallExtension,
+}
+
+#[derive(Message, Clone)]
+struct AgentBrowserGoBackRequest {
+    reply: AgentReply,
+    origin: CommandOrigin,
+    payload: AgentBrowserHistoryStep,
+}
+
+#[derive(Message, Clone)]
+struct AgentBrowserGoForwardRequest {
+    reply: AgentReply,
+    origin: CommandOrigin,
+    payload: AgentBrowserHistoryStep,
+}
+
+#[derive(Message, Clone)]
+struct AgentBrowserHistorySearchRequest {
+    reply: AgentReply,
+    payload: AgentBrowserHistorySearch,
+}
+
+#[derive(Message, Clone)]
+struct AgentOpenInNewStackRequest {
+    reply: AgentReply,
+    payload: AgentOpenInNewStack,
+}
+
+fn route_browser_commands(
+    mut commands: MessageReader<AgentCommandRequest>,
+    mut navigate: MessageWriter<AgentBrowserNavigateRequest>,
+    mut install_extension: MessageWriter<AgentBrowserInstallExtensionRequest>,
+    mut go_back: MessageWriter<AgentBrowserGoBackRequest>,
+    mut go_forward: MessageWriter<AgentBrowserGoForwardRequest>,
+    mut search_history: MessageWriter<AgentBrowserHistorySearchRequest>,
+    mut open_in_new_stack: MessageWriter<AgentOpenInNewStackRequest>,
+) {
+    for request in commands.read() {
+        let reply = AgentReply::new(request.request_id);
+        match &request.command {
+            AgentCommand::BrowserNavigate(payload) => {
+                navigate.write(AgentBrowserNavigateRequest {
+                    reply,
+                    origin: request.origin.clone(),
+                    payload: payload.clone(),
+                });
+            }
+            AgentCommand::BrowserInstallExtension(payload) => {
+                install_extension.write(AgentBrowserInstallExtensionRequest {
+                    reply,
+                    payload: payload.clone(),
+                });
+            }
+            AgentCommand::BrowserGoBack(payload) => {
+                go_back.write(AgentBrowserGoBackRequest {
+                    reply,
+                    origin: request.origin.clone(),
+                    payload: payload.clone(),
+                });
+            }
+            AgentCommand::BrowserGoForward(payload) => {
+                go_forward.write(AgentBrowserGoForwardRequest {
+                    reply,
+                    origin: request.origin.clone(),
+                    payload: payload.clone(),
+                });
+            }
+            AgentCommand::BrowserHistorySearch(payload) => {
+                search_history.write(AgentBrowserHistorySearchRequest {
+                    reply,
+                    payload: payload.clone(),
+                });
+            }
+            AgentCommand::OpenInNewStack(payload) => {
+                open_in_new_stack.write(AgentOpenInNewStackRequest {
+                    reply,
+                    payload: payload.clone(),
+                });
+            }
+            _ => {}
+        }
     }
 }
 
@@ -62,45 +159,6 @@ fn open_history(
             });
         }
     }
-}
-
-#[derive(Message, Clone)]
-pub(super) struct AgentBrowserNavigateRequest {
-    pub(super) reply: AgentReply,
-    pub(super) origin: CommandOrigin,
-    pub(super) payload: AgentBrowserNavigate,
-}
-
-#[derive(Message, Clone)]
-pub(super) struct AgentBrowserInstallExtensionRequest {
-    pub(super) reply: AgentReply,
-    pub(super) payload: AgentBrowserInstallExtension,
-}
-
-#[derive(Message, Clone)]
-pub(super) struct AgentBrowserGoBackRequest {
-    pub(super) reply: AgentReply,
-    pub(super) origin: CommandOrigin,
-    pub(super) payload: AgentBrowserHistoryStep,
-}
-
-#[derive(Message, Clone)]
-pub(super) struct AgentBrowserGoForwardRequest {
-    pub(super) reply: AgentReply,
-    pub(super) origin: CommandOrigin,
-    pub(super) payload: AgentBrowserHistoryStep,
-}
-
-#[derive(Message, Clone)]
-pub(super) struct AgentBrowserHistorySearchRequest {
-    pub(super) reply: AgentReply,
-    pub(super) payload: AgentBrowserHistorySearch,
-}
-
-#[derive(Message, Clone)]
-pub(super) struct AgentOpenInNewStackRequest {
-    pub(super) reply: AgentReply,
-    pub(super) payload: AgentOpenInNewStack,
 }
 
 fn navigate(

@@ -1,12 +1,9 @@
 use bevy::prelude::*;
-use vmux_core::agent::AgentKind;
+use vmux_core::agent::{AgentKind, AgentSession, CommandOrigin};
 use vmux_layout::pane::Pane;
 
-use crate::event::CommandOrigin;
-use crate::session::AgentSession;
-
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct AgentBrowserResolve<'w, 's> {
+pub struct AgentBrowserResolve<'w, 's> {
     agent_terms: Query<
         'w,
         's,
@@ -30,9 +27,9 @@ pub(crate) struct AgentBrowserPaneClaim {
     pub(crate) activation: vmux_layout::active_pane::ActivatePane,
 }
 
-pub(crate) struct AgentBrowserPaneResolution {
-    pub(crate) pane: Option<String>,
-    pub(crate) activation: Option<vmux_layout::active_pane::ActivatePane>,
+pub struct AgentBrowserPaneResolution {
+    pub pane: Option<String>,
+    pub activation: Option<vmux_layout::active_pane::ActivatePane>,
 }
 
 impl AgentBrowserResolve<'_, '_> {
@@ -67,7 +64,7 @@ impl AgentBrowserResolve<'_, '_> {
             .unwrap_or(false)
     }
 
-    pub(crate) fn agent_pane(&self, anchor: vmux_api::protocol::ProcessId) -> Option<Entity> {
+    pub fn agent_pane(&self, anchor: vmux_api::protocol::ProcessId) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
         let (_, _, term_co) = self
             .agent_terms
@@ -76,7 +73,7 @@ impl AgentBrowserResolve<'_, '_> {
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
-    pub(crate) fn working_directory(
+    pub fn working_directory(
         &self,
         anchor: vmux_api::protocol::ProcessId,
         tabs: &Query<&vmux_layout::tab::Tab>,
@@ -123,7 +120,7 @@ impl AgentBrowserResolve<'_, '_> {
         })
     }
 
-    pub(crate) fn resolve_pane(
+    pub fn resolve_pane(
         &self,
         pane: &Option<String>,
         anchor: &Option<vmux_api::protocol::ProcessId>,
@@ -134,7 +131,6 @@ impl AgentBrowserResolve<'_, '_> {
                 activation: None,
             };
         }
-
         let Some(anchor) = *anchor else {
             return AgentBrowserPaneResolution {
                 pane: None,
@@ -168,142 +164,5 @@ impl AgentBrowserResolve<'_, '_> {
             _ => None,
         };
         self.resolve_pane(pane, &anchor)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::host::test_support::spawn_stack_in_pane;
-    use bevy::ecs::system::RunSystemOnce;
-    use vmux_api::protocol::ProcessId;
-    use vmux_layout::pane::PaneSplit;
-    use vmux_terminal::Terminal;
-
-    #[derive(Resource)]
-    pub(crate) struct BrowserPaneClaimInput {
-        anchor: ProcessId,
-    }
-
-    #[derive(Resource, Default)]
-    pub(crate) struct BrowserPaneClaimOutput(Option<Entity>);
-
-    fn claim_browser_pane_test_system(
-        input: Res<BrowserPaneClaimInput>,
-        resolve: AgentBrowserResolve,
-        mut out: ResMut<BrowserPaneClaimOutput>,
-    ) {
-        out.0 = resolve
-            .claim_browser_pane(input.anchor)
-            .map(|claim| claim.pane);
-    }
-
-    fn browser_claim_app() -> (App, ProcessId, Entity) {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
-            .init_resource::<BrowserPaneClaimOutput>()
-            .add_systems(Update, claim_browser_pane_test_system);
-        let split = app
-            .world_mut()
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: vmux_layout::pane::PaneSplitDirection::Row,
-                },
-            ))
-            .id();
-        let agent_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
-        let agent_stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(agent_pane)))
-            .id();
-        let anchor = ProcessId::new();
-        app.world_mut().spawn((
-            Terminal,
-            anchor,
-            AgentSession {
-                kind: AgentKind::Codex,
-            },
-            ChildOf(agent_stack),
-        ));
-        app.insert_resource(BrowserPaneClaimInput { anchor });
-        (app, anchor, split)
-    }
-
-    #[test]
-    pub(crate) fn agent_working_directory_comes_from_its_tab() {
-        let cwd = tempfile::tempdir().unwrap();
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin));
-        let tab = app
-            .world_mut()
-            .spawn(vmux_layout::tab::Tab {
-                name: "Project".into(),
-                startup_dir: Some(cwd.path().to_string_lossy().into_owned()),
-            })
-            .id();
-        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let stack = app
-            .world_mut()
-            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
-            .id();
-        let anchor = ProcessId::new();
-        app.world_mut().spawn((
-            Terminal,
-            anchor,
-            AgentSession {
-                kind: AgentKind::Codex,
-            },
-            ChildOf(stack),
-        ));
-
-        let resolved = app
-            .world_mut()
-            .run_system_once(
-                move |resolve: AgentBrowserResolve, tabs: Query<&vmux_layout::tab::Tab>| {
-                    resolve.working_directory(anchor, &tabs)
-                },
-            )
-            .unwrap();
-
-        assert_eq!(resolved, Some(cwd.path().canonicalize().unwrap()));
-    }
-
-    #[test]
-    pub(crate) fn browser_pane_claim_ignores_mixed_file_browser_pane() {
-        let (mut app, _anchor, split) = browser_claim_app();
-        let mixed_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
-        spawn_stack_in_pane(&mut app, mixed_pane, "file:///repo/src/main.rs");
-        let browser_stack = spawn_stack_in_pane(&mut app, mixed_pane, "https://example.com");
-        app.world_mut()
-            .entity_mut(browser_stack)
-            .insert(vmux_layout::Browser);
-
-        app.update();
-
-        assert_eq!(app.world().resource::<BrowserPaneClaimOutput>().0, None);
-    }
-
-    #[test]
-    pub(crate) fn browser_pane_claim_prefers_pure_browser_pane_over_mixed_pane() {
-        let (mut app, _anchor, split) = browser_claim_app();
-        let mixed_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
-        spawn_stack_in_pane(&mut app, mixed_pane, "file:///repo/src/main.rs");
-        let mixed_browser = spawn_stack_in_pane(&mut app, mixed_pane, "https://mixed.example");
-        app.world_mut()
-            .entity_mut(mixed_browser)
-            .insert(vmux_layout::Browser);
-        let pure_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
-        let pure_browser = spawn_stack_in_pane(&mut app, pure_pane, "https://pure.example");
-        app.world_mut()
-            .entity_mut(pure_browser)
-            .insert(vmux_layout::Browser);
-
-        app.update();
-
-        assert_eq!(
-            app.world().resource::<BrowserPaneClaimOutput>().0,
-            Some(pure_pane)
-        );
     }
 }

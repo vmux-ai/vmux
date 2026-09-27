@@ -1,3 +1,6 @@
+mod agent;
+mod agent_pane;
+
 use crate::page_life::spawn_popup_stacks;
 use crate::present::CommandBarWindowedFrame;
 use bevy::{ecs::relationship::Relationship, input::mouse::MouseButton, prelude::*};
@@ -22,6 +25,9 @@ use vmux_layout::{
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 use vmux_ui::theme::ThemeEvent;
+
+pub(crate) use agent::AgentBrowserPlugin;
+pub use agent_pane::AgentBrowserResolve;
 
 #[derive(Clone, Copy, Debug, Message)]
 pub(crate) struct WebviewLoadCompleted {

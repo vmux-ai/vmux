@@ -38,6 +38,7 @@ tempfile = "3"
 uuid = { workspace = true }
 url = { workspace = true }
 vmux_core = { path = "../../util/vmux_core" }
+vmux_browser = { path = "../../util/vmux_browser" }
 vmux_editor = { path = "../vmux_editor" }
 vmux_extension = { path = "../vmux_extension" }
 vmux_git = { path = "../vmux_git" }
