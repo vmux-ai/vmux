@@ -10,12 +10,12 @@ pub(crate) struct BootStatusPlugin;
 
 impl Plugin for BootStatusPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SplashStatus>()
-            .init_resource::<RestoreComplete>()
-            .add_systems(
-                Update,
-                compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
-            );
+        app.world_mut()
+            .spawn((Name::new("Boot status"), SplashStatus::default()));
+        app.init_resource::<RestoreComplete>().add_systems(
+            Update,
+            compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
+        );
     }
 }
 
@@ -57,7 +57,7 @@ impl BootPhase {
     }
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct SplashStatus {
     pub phase: BootPhase,
     pub reveal_ready: bool,
@@ -103,7 +103,7 @@ pub fn compute(i: BootInputs) -> (BootPhase, bool) {
 }
 
 fn compute_boot_status(
-    mut status: ResMut<SplashStatus>,
+    mut status: Single<&mut SplashStatus>,
     space_present: Res<SpaceFilePresent>,
     restore: Res<RestoreComplete>,
     layout_q: Query<(), (With<LayoutCef>, With<PageReady>)>,
@@ -249,8 +249,8 @@ mod tests {
     #[test]
     fn system_reports_loading_pages_and_reveals_on_layout_ready() {
         let mut app = App::new();
+        let status = app.world_mut().spawn(SplashStatus::default()).id();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<SplashStatus>()
             .init_resource::<RestoreComplete>()
             .insert_resource(SpaceFilePresent(true))
             .add_systems(Update, compute_boot_status);
@@ -261,7 +261,7 @@ mod tests {
 
         app.update();
 
-        let status = app.world().resource::<SplashStatus>();
+        let status = app.world().get::<SplashStatus>(status).unwrap();
         assert_eq!(status.phase, BootPhase::LoadingPages { ready: 1, total: 1 });
         assert!(status.reveal_ready);
     }
@@ -269,15 +269,15 @@ mod tests {
     #[test]
     fn system_reports_restoring_space_before_layout_ready() {
         let mut app = App::new();
+        let status = app.world_mut().spawn(SplashStatus::default()).id();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<SplashStatus>()
             .init_resource::<RestoreComplete>()
             .insert_resource(SpaceFilePresent(true))
             .add_systems(Update, compute_boot_status);
 
         app.update();
 
-        let status = app.world().resource::<SplashStatus>();
+        let status = app.world().get::<SplashStatus>(status).unwrap();
         assert_eq!(status.phase, BootPhase::RestoringSpace);
         assert!(!status.reveal_ready);
     }

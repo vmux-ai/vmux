@@ -209,7 +209,10 @@ fn dismiss_splash(
     }
 }
 
-fn update_splash_text(state: NonSend<SplashState>, status: Res<crate::boot_status::SplashStatus>) {
+fn update_splash_text(
+    state: NonSend<SplashState>,
+    status: Single<&crate::boot_status::SplashStatus>,
+) {
     use objc2_foundation::NSString;
     if let Some(label) = &state.status_label {
         label.setStringValue(&NSString::from_str(&status.phase.display()));

@@ -220,7 +220,7 @@ fn install_window_glass(mut state: NonSendMut<GlassState>, windows: Query<(Entit
 fn reveal_window_after_layout_ready(
     mut state: NonSendMut<GlassState>,
     mut windows: Query<(Entity, &mut Window)>,
-    status: Res<crate::boot_status::SplashStatus>,
+    status: Single<&crate::boot_status::SplashStatus>,
 ) {
     if !status.reveal_ready {
         return;
@@ -464,7 +464,7 @@ mod tests {
         let mut state = GlassState::default();
         state.0.insert(window, WindowGlass::default());
         app.world_mut().insert_non_send(state);
-        app.insert_resource(crate::boot_status::SplashStatus {
+        app.world_mut().spawn(crate::boot_status::SplashStatus {
             phase: crate::boot_status::BootPhase::Starting,
             reveal_ready,
         });
