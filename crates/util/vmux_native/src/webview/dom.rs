@@ -339,7 +339,7 @@ impl PageHost for SurfaceHost {
     }
 
     fn write_to_clipboard(&self, text: &str) {
-        vmux_clipboard::write(text.to_string());
+        vmux_clipboard::Clipboard::write(text.to_string());
     }
 
     fn event_field_selection(&self, element_id: &str) -> (usize, usize) {

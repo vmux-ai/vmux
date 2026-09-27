@@ -5,23 +5,23 @@ impl super::Clipboard {
         warn!("clipboard write not implemented on this platform");
     }
 
-    pub(super) fn read_text() -> Option<String> {
+    pub fn read_text() -> Option<String> {
         None
     }
 
-    pub(super) fn has_png() -> bool {
+    pub fn has_image() -> bool {
         false
     }
 
-    pub(super) fn read_png() -> Option<Vec<u8>> {
+    pub fn read_image_png() -> Option<Vec<u8>> {
         None
     }
 
-    pub(super) fn read_tiff() -> Option<Vec<u8>> {
+    pub fn read_image_tiff() -> Option<Vec<u8>> {
         None
     }
 
-    pub(super) fn image_file_path() -> Option<String> {
+    pub fn image_file_path() -> Option<String> {
         None
     }
 }

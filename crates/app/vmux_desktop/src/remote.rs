@@ -52,7 +52,7 @@ fn on_remote_copy(
         return;
     };
     if state.phase == RemotePhase::Enabled {
-        vmux_clipboard::write(pairing.pairing_url.clone());
+        vmux_clipboard::Clipboard::write(pairing.pairing_url.clone());
     }
 }
 

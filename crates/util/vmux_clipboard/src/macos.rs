@@ -18,7 +18,7 @@ impl super::Clipboard {
         }
     }
 
-    pub(super) fn read_text() -> Option<String> {
+    pub fn read_text() -> Option<String> {
         use std::process::Command;
         let output = Command::new("/usr/bin/pbpaste").output().ok()?;
         if !output.status.success() {
@@ -27,7 +27,7 @@ impl super::Clipboard {
         Some(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
-    pub(super) fn has_png() -> bool {
+    pub fn has_image() -> bool {
         use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG};
         use objc2_foundation::NSArray;
         let png_type = unsafe { NSArray::from_slice(&[NSPasteboardTypePNG]) };
@@ -36,21 +36,21 @@ impl super::Clipboard {
             .is_some()
     }
 
-    pub(super) fn read_png() -> Option<Vec<u8>> {
+    pub fn read_image_png() -> Option<Vec<u8>> {
         use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG};
         let png_type = unsafe { NSPasteboardTypePNG };
         let data = NSPasteboard::generalPasteboard().dataForType(png_type)?;
         Some(data.to_vec())
     }
 
-    pub(super) fn read_tiff() -> Option<Vec<u8>> {
+    pub fn read_image_tiff() -> Option<Vec<u8>> {
         use objc2_app_kit::{NSPasteboard, NSPasteboardTypeTIFF};
         let tiff_type = unsafe { NSPasteboardTypeTIFF };
         let data = NSPasteboard::generalPasteboard().dataForType(tiff_type)?;
         Some(data.to_vec())
     }
 
-    pub(super) fn image_file_path() -> Option<String> {
+    pub fn image_file_path() -> Option<String> {
         use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
         use objc2_foundation::NSURL;
         let url_type = unsafe { NSPasteboardTypeFileURL };

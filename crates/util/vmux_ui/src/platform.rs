@@ -10,7 +10,7 @@ pub async fn sleep_ms(ms: u32) {
 }
 
 pub async fn copy_to_clipboard(text: String) -> bool {
-    vmux_clipboard::write(text);
+    vmux_clipboard::Clipboard::write(text);
     true
 }
 

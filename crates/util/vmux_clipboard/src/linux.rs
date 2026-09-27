@@ -25,7 +25,7 @@ impl super::Clipboard {
         warn!("no clipboard helper found (need wl-copy or xclip)");
     }
 
-    pub(super) fn read_text() -> Option<String> {
+    pub fn read_text() -> Option<String> {
         use std::process::Command;
         let candidates: &[(&str, &[&str])] = &[
             ("/usr/bin/wl-paste", &[]),
@@ -42,19 +42,19 @@ impl super::Clipboard {
         None
     }
 
-    pub(super) fn has_png() -> bool {
+    pub fn has_image() -> bool {
         false
     }
 
-    pub(super) fn read_png() -> Option<Vec<u8>> {
+    pub fn read_image_png() -> Option<Vec<u8>> {
         None
     }
 
-    pub(super) fn read_tiff() -> Option<Vec<u8>> {
+    pub fn read_image_tiff() -> Option<Vec<u8>> {
         None
     }
 
-    pub(super) fn image_file_path() -> Option<String> {
+    pub fn image_file_path() -> Option<String> {
         None
     }
 }
