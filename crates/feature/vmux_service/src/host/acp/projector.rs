@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::Path;
 
 use crate::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
 use agent_client_protocol::schema::v1::{
@@ -7,6 +6,7 @@ use agent_client_protocol::schema::v1::{
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 use vmux_api::protocol::AgentAttachment;
+use vmux_core::host::workspace::WorkspaceLocation;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
@@ -23,12 +23,7 @@ pub enum Intent {
         line: Option<u32>,
         kind: vmux_api::protocol::FileTouchKind,
     },
-    WorkspaceChanged {
-        name: String,
-        branch: String,
-        cwd: String,
-        workspace_cwd: String,
-    },
+    WorkspaceChanged(WorkspaceLocation),
 }
 
 #[derive(serde::Deserialize)]
@@ -54,19 +49,15 @@ fn workspace_changed_intent(
     let Ok(worktree) = serde_json::from_value::<AcpWorktreeMetadata>(value) else {
         return Vec::new();
     };
-    if worktree.name.trim().is_empty()
-        || worktree.branch.trim().is_empty()
-        || !Path::new(&worktree.cwd).is_absolute()
-        || !Path::new(&worktree.workspace_cwd).is_absolute()
-    {
+    let Ok(workspace) = WorkspaceLocation::new(
+        worktree.name,
+        worktree.branch,
+        worktree.cwd,
+        worktree.workspace_cwd,
+    ) else {
         return Vec::new();
-    }
-    vec![Intent::WorkspaceChanged {
-        name: worktree.name,
-        branch: worktree.branch,
-        cwd: worktree.cwd,
-        workspace_cwd: worktree.workspace_cwd,
-    }]
+    };
+    vec![Intent::WorkspaceChanged(workspace)]
 }
 
 fn file_touch_kind(kind: ToolKind) -> Option<vmux_api::protocol::FileTouchKind> {
@@ -1020,14 +1011,19 @@ mod tests {
 
     #[test]
     fn session_info_worktree_metadata_emits_workspace_change() {
+        let project = tempfile::tempdir().unwrap();
+        let working = project.path().join("quiet-amber-wolf");
+        std::fs::create_dir(&working).unwrap();
+        let working_path = working.to_string_lossy().into_owned();
+        let project_path = project.path().to_string_lossy().into_owned();
         let mut meta = serde_json::Map::new();
         meta.insert(
             "worktree".to_string(),
             serde_json::json!({
                 "name": "quiet-amber-wolf",
                 "branch": "vibe/quiet-amber-wolf",
-                "cwd": "/worktrees/quiet-amber-wolf/subdir",
-                "workspaceCwd": "/repo/subdir"
+                "cwd": working_path,
+                "workspaceCwd": project_path
             }),
         );
         let mut projector = AcpProjector::new();
@@ -1038,25 +1034,26 @@ mod tests {
 
         assert_eq!(
             intents,
-            vec![Intent::WorkspaceChanged {
+            vec![Intent::WorkspaceChanged(WorkspaceLocation {
                 name: "quiet-amber-wolf".to_string(),
-                branch: "vibe/quiet-amber-wolf".to_string(),
-                cwd: "/worktrees/quiet-amber-wolf/subdir".to_string(),
-                workspace_cwd: "/repo/subdir".to_string(),
-            }]
+                revision: "vibe/quiet-amber-wolf".to_string(),
+                working_directory: working.canonicalize().unwrap(),
+                project_directory: project.path().canonicalize().unwrap(),
+            })]
         );
     }
 
     #[test]
     fn session_info_rejects_relative_worktree_paths() {
+        let project = tempfile::tempdir().unwrap();
         let mut meta = serde_json::Map::new();
         meta.insert(
             "worktree".to_string(),
             serde_json::json!({
                 "name": "quiet-amber-wolf",
                 "branch": "vibe/quiet-amber-wolf",
-                "cwd": "worktrees/quiet-amber-wolf",
-                "workspaceCwd": "/repo"
+                "cwd": ".",
+                "workspaceCwd": project.path().to_string_lossy()
             }),
         );
         let mut projector = AcpProjector::new();

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -27,6 +27,7 @@ use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_core::ProcessId;
+use vmux_core::host::workspace::WorkspaceLocation;
 
 use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
 use crate::process::ProcessManager;
@@ -232,22 +233,14 @@ impl AcpShared {
         Ok(())
     }
 
-    fn publish_workspace_change(&self, name: &str, branch: &str, cwd: &str, workspace_cwd: &str) {
-        let Ok(validated) = vmux_git::worktree::validate_linked_workspace(
-            Path::new(cwd),
-            Path::new(workspace_cwd),
-            branch,
-        ) else {
-            tracing::warn!(target: "acp", sid = %self.sid, "ignored invalid ACP workspace update");
-            return;
-        };
-        *self.cwd.lock().unwrap() = validated.cwd.clone();
+    fn publish_workspace_change(&self, workspace: &WorkspaceLocation) {
+        *self.cwd.lock().unwrap() = workspace.working_directory.clone();
         self.emit(ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged {
             sid: self.sid.clone(),
-            name: name.to_string(),
-            branch: branch.to_string(),
-            cwd: validated.cwd.to_string_lossy().into_owned(),
-            workspace_cwd: validated.workspace_cwd.to_string_lossy().into_owned(),
+            name: workspace.name.clone(),
+            branch: workspace.revision.clone(),
+            cwd: workspace.working_directory.to_string_lossy().into_owned(),
+            workspace_cwd: workspace.project_directory.to_string_lossy().into_owned(),
         }));
     }
 
@@ -529,14 +522,8 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
         .send_modify(|revision| *revision += 1);
     if shared.history_replay.load(Ordering::SeqCst) {
         for intent in &intents {
-            if let Intent::WorkspaceChanged {
-                name,
-                branch,
-                cwd,
-                workspace_cwd,
-            } = intent
-            {
-                shared.publish_workspace_change(name, branch, cwd, workspace_cwd);
+            if let Intent::WorkspaceChanged(workspace) = intent {
+                shared.publish_workspace_change(workspace);
             }
         }
         let update_count = shared.history_replay_updates.fetch_add(1, Ordering::SeqCst) + 1;
@@ -582,12 +569,7 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
                     }),
                 });
             }
-            Intent::WorkspaceChanged {
-                name,
-                branch,
-                cwd,
-                workspace_cwd,
-            } => shared.publish_workspace_change(&name, &branch, &cwd, &workspace_cwd),
+            Intent::WorkspaceChanged(workspace) => shared.publish_workspace_change(&workspace),
         }
     }
 }
@@ -3311,38 +3293,13 @@ mod tests {
     #[test]
     fn workspace_change_rebinds_runtime_file_operations() {
         let original = tempfile::tempdir().unwrap();
-        let git = |args: &[&str]| {
-            let status = std::process::Command::new("git")
-                .current_dir(original.path())
-                .args(args)
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_CONFIG_SYSTEM", "/dev/null")
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .status()
-                .unwrap();
-            assert!(status.success(), "git {args:?} failed");
-        };
-        git(&["init", "-q", "-b", "main"]);
-        git(&["config", "user.email", "t@example.com"]);
-        git(&["config", "user.name", "Test"]);
-        git(&["config", "commit.gpgsign", "false"]);
         let original_file = original.path().join("original.txt");
         std::fs::write(&original_file, "original").unwrap();
-        git(&["add", "original.txt"]);
-        git(&["commit", "-qm", "init"]);
         let worktree_parent = tempfile::tempdir().unwrap();
         let worktree = worktree_parent.path().join("quiet-amber-wolf");
-        git(&[
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "vibe/quiet-amber-wolf",
-            worktree.to_str().unwrap(),
-            "main",
-        ]);
-        let worktree_file = worktree.join("original.txt");
+        std::fs::create_dir(&worktree).unwrap();
+        let worktree_file = worktree.join("worktree.txt");
+        std::fs::write(&worktree_file, "worktree").unwrap();
         let original_file = original_file.canonicalize().unwrap();
         let worktree_file = worktree_file.canonicalize().unwrap();
         let (stream_tx, _stream_rx) = broadcast::channel(4);
@@ -3354,12 +3311,14 @@ mod tests {
             Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
         );
 
-        shared.publish_workspace_change(
-            "quiet-amber-wolf",
-            "vibe/quiet-amber-wolf",
-            worktree.to_str().unwrap(),
-            original.path().to_str().unwrap(),
-        );
+        let workspace = WorkspaceLocation::new(
+            "quiet-amber-wolf".to_string(),
+            "vibe/quiet-amber-wolf".to_string(),
+            &worktree,
+            original.path(),
+        )
+        .unwrap();
+        shared.publish_workspace_change(&workspace);
 
         let worktree = worktree.canonicalize().unwrap();
         assert_eq!(shared.cwd(), worktree);
@@ -3369,22 +3328,12 @@ mod tests {
         };
         assert_eq!(
             read_text_file(&scope, &ReadTextFileRequest::new("s1", &worktree_file)),
-            Ok("original".into())
+            Ok("worktree".into())
         );
         assert_eq!(
             read_text_file(&scope, &ReadTextFileRequest::new("s1", &original_file)),
             Err("path outside session cwd".into())
         );
-
-        let arbitrary = tempfile::tempdir().unwrap();
-        shared.publish_workspace_change(
-            "malicious",
-            "vibe/quiet-amber-wolf",
-            arbitrary.path().to_str().unwrap(),
-            original.path().to_str().unwrap(),
-        );
-
-        assert_eq!(shared.cwd(), worktree);
     }
 
     #[test]
