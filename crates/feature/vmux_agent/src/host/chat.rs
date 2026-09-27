@@ -1,5 +1,4 @@
 mod composer;
-mod media;
 pub(crate) mod model;
 mod prompt;
 mod resume;
@@ -10,9 +9,11 @@ mod workspace;
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use vmux_chat::event::{
-    ChatAttachment, ChatBranchesState, ChatItem, ChatMediaState, ChatOpenPage, ChatResumeState,
-    ChatSnapshot, ChatTranscriptState,
+use vmux_chat::event::ChatOpenPage;
+pub use vmux_chat::host::ChatView as AgentChatView;
+pub(crate) use vmux_chat::host::{ChatAttachmentProjection, ChatSnapshotProjection};
+pub(crate) use vmux_chat::host::{
+    ChatBranchesProjection, ChatResumeProjection, ChatSynced, ChatTranscriptProjection,
 };
 
 pub struct AgentChatPagePlugin;
@@ -22,7 +23,7 @@ impl Plugin for AgentChatPagePlugin {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.add_plugins((
             vmux_chat::ChatKeyPlugin,
-            media::ChatMediaPlugin,
+            vmux_chat::ChatMediaPlugin,
             model::ChatModelPlugin,
             composer::ChatComposerPlugin,
             prompt::ChatPromptPlugin,
@@ -48,51 +49,6 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     icon: Some(vmux_core::BuiltinIcon::Sparkles),
     command_bar: false,
 };
-
-#[derive(Component)]
-#[require(
-    ChatUiStateUpdates,
-    ChatAttachmentProjection,
-    ChatSnapshotProjection,
-    ChatTranscriptProjection,
-    ChatMediaProjection,
-    ChatResumeProjection,
-    ChatBranchesProjection,
-    vmux_chat::composer::ComposerState
-)]
-pub struct AgentChatView;
-
-type ChatUiStateUpdates = vmux_core::host::UiState<vmux_chat::state::ChatUiState>;
-
-#[derive(Component, Default)]
-struct ChatTranscriptProjection {
-    state: ChatTranscriptState,
-    tail: Vec<ChatItem>,
-    tail_start: u32,
-}
-
-#[derive(Component, Default)]
-struct ChatSnapshotProjection(ChatSnapshot);
-
-#[derive(Component, Default)]
-struct ChatAttachmentProjection {
-    selected: Vec<ChatAttachment>,
-    previews: std::collections::HashMap<String, ChatAttachment>,
-    pending: std::collections::HashSet<String>,
-    resolved: std::collections::HashSet<String>,
-}
-
-#[derive(Component, Default)]
-struct ChatMediaProjection(ChatMediaState);
-
-#[derive(Component, Default)]
-struct ChatResumeProjection(ChatResumeState);
-
-#[derive(Component, Default)]
-struct ChatBranchesProjection(ChatBranchesState);
-
-#[derive(Component)]
-pub(crate) struct ChatSynced;
 
 fn on_chat_open_page(
     trigger: On<UiInput<ChatOpenPage>>,

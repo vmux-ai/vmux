@@ -202,25 +202,6 @@ struct BranchRead {
     task: bevy::tasks::Task<Vec<ChatBranch>>,
 }
 
-impl ChatBranchesProjection {
-    fn start(&mut self, project: String) -> u64 {
-        self.0.request_id = self.0.request_id.wrapping_add(1).max(1);
-        self.0.project = project;
-        self.0.branches.clear();
-        self.0.loading = true;
-        self.0.request_id
-    }
-
-    fn finish(&mut self, request_id: u64, project: &str, branches: Vec<ChatBranch>) -> bool {
-        if self.0.request_id != request_id || self.0.project != project {
-            return false;
-        }
-        self.0.branches = branches;
-        self.0.loading = false;
-        true
-    }
-}
-
 fn on_chat_branches_request(
     trigger: On<UiInput<ChatBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,

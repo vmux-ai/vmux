@@ -3,17 +3,18 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use super::{
-    AgentChatView, ChatAttachmentProjection, ChatMediaProjection, ChatSnapshotProjection,
-    ChatTranscriptProjection,
-};
-use vmux_chat::event::{
+use crate as vmux_chat;
+use crate::event::{
     ChatAttachPaths, ChatAttachment, ChatAttachments, ChatItem, ChatMediaEntries, ChatMediaEntry,
     ChatMediaListRequest, ChatMediaQueryRequest, ChatPasteMedia, ChatPickFiles,
     ChatRemoveAttachment, ChatSnapshot, ChatTranscriptState,
 };
+use crate::host::{
+    ChatAttachmentProjection, ChatMediaProjection, ChatSnapshotProjection,
+    ChatTranscriptProjection, ChatView,
+};
 
-pub(super) struct ChatMediaPlugin;
+pub struct ChatMediaPlugin;
 
 impl Plugin for ChatMediaPlugin {
     fn build(&self, app: &mut App) {
@@ -59,9 +60,9 @@ enum ChatAttachmentDelivery {
 }
 
 #[derive(Event)]
-pub(super) struct ChatAttachmentHydrationRequest {
-    pub(super) webview: Entity,
-    pub(super) paths: Vec<String>,
+pub struct ChatAttachmentHydrationRequest {
+    pub webview: Entity,
+    pub paths: Vec<String>,
 }
 
 #[derive(Component)]
@@ -77,14 +78,14 @@ struct ChatMediaPreviewTask {
 }
 
 #[derive(EntityEvent)]
-pub(super) struct ChatMediaQuery {
+pub struct ChatMediaQuery {
     #[event_target]
     webview: Entity,
     query: String,
 }
 
 impl ChatMediaQuery {
-    pub(super) fn new(webview: Entity, query: String) -> Self {
+    pub fn new(webview: Entity, query: String) -> Self {
         Self { webview, query }
     }
 }
@@ -131,7 +132,7 @@ impl ChatAttachmentProjection {
         self.selected.len() != previous
     }
 
-    pub(super) fn clear_selected(&mut self) -> bool {
+    pub fn clear_selected(&mut self) -> bool {
         if self.selected.is_empty() {
             return false;
         }
@@ -139,7 +140,7 @@ impl ChatAttachmentProjection {
         true
     }
 
-    pub(super) fn state(&self) -> ChatAttachments {
+    pub fn state(&self) -> ChatAttachments {
         ChatAttachments {
             attachments: self.selected.clone(),
         }
@@ -173,7 +174,7 @@ impl ChatAttachmentProjection {
         self.hydrate_selected()
     }
 
-    pub(super) fn hydrate_transcript(&self, state: &mut ChatTranscriptState) -> bool {
+    pub fn hydrate_transcript(&self, state: &mut ChatTranscriptState) -> bool {
         let mut changed = false;
         for item in &mut state.items {
             let ChatItem::User { attachments, .. } = item else {
@@ -184,7 +185,7 @@ impl ChatAttachmentProjection {
         changed
     }
 
-    pub(super) fn hydrate_snapshot(&self, snapshot: &mut ChatSnapshot) -> bool {
+    pub fn hydrate_snapshot(&self, snapshot: &mut ChatSnapshot) -> bool {
         let mut changed = false;
         for prompt in &mut snapshot.queued {
             changed |= self.hydrate(&mut prompt.attachments);
@@ -192,7 +193,7 @@ impl ChatAttachmentProjection {
         changed
     }
 
-    pub(super) fn hydration_paths(
+    pub fn hydration_paths(
         &self,
         transcript: &ChatTranscriptState,
         snapshot: &ChatSnapshot,
@@ -597,7 +598,7 @@ fn on_chat_media_query_request(
 
 fn on_chat_media_query(
     trigger: On<ChatMediaQuery>,
-    mut projections: Query<&mut ChatMediaProjection, With<AgentChatView>>,
+    mut projections: Query<&mut ChatMediaProjection, With<ChatView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event_target();
@@ -644,7 +645,7 @@ fn on_chat_attach_paths(
 
 fn on_chat_attachment_hydration_request(
     trigger: On<ChatAttachmentHydrationRequest>,
-    mut projections: Query<&mut ChatAttachmentProjection, With<AgentChatView>>,
+    mut projections: Query<&mut ChatAttachmentProjection, With<ChatView>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -664,7 +665,7 @@ fn on_chat_attachment_hydration_request(
 
 fn on_chat_remove_attachment(
     trigger: On<UiInput<ChatRemoveAttachment>>,
-    mut projections: Query<&mut ChatAttachmentProjection, With<AgentChatView>>,
+    mut projections: Query<&mut ChatAttachmentProjection, With<ChatView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -747,7 +748,7 @@ fn drain_chat_attachment_tasks(
             &mut ChatTranscriptProjection,
             &mut ChatSnapshotProjection,
         ),
-        With<AgentChatView>,
+        With<ChatView>,
     >,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -825,7 +826,7 @@ fn drain_chat_attachment_tasks(
 
 fn drain_chat_media_list_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaListTask)>,
-    mut projections: Query<&mut ChatMediaProjection, With<AgentChatView>>,
+    mut projections: Query<&mut ChatMediaProjection, With<ChatView>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -870,7 +871,7 @@ fn drain_chat_media_list_tasks(
 
 fn drain_chat_media_preview_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaPreviewTask)>,
-    mut projections: Query<&mut ChatMediaProjection, With<AgentChatView>>,
+    mut projections: Query<&mut ChatMediaProjection, With<ChatView>>,
     mut commands: Commands,
 ) {
     for (entity, mut pending) in &mut tasks {

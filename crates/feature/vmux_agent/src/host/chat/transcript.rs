@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use super::media::ChatAttachmentHydrationRequest;
 use super::model::{ModeProjection, ModelProjection};
 use super::{
     AgentChatView, ChatAttachmentProjection, ChatSnapshotProjection, ChatSynced,
@@ -12,9 +11,13 @@ use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_chat::event::{
-    CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_SIZE, CHAT_INITIAL_ITEM_LIMIT,
-    ChatHistoryRequest, ChatItem, ChatSnapshot, PendingApproval, QueuedPromptSnapshot,
+    CHAT_INITIAL_ITEM_LIMIT, ChatHistoryRequest, ChatSnapshot, PendingApproval,
+    QueuedPromptSnapshot,
 };
+#[cfg(test)]
+use vmux_chat::event::ChatItem;
+use vmux_chat::host::{ChatHistoryQuery, ChatHistoryResult, TranscriptPage, TranscriptTail};
+use vmux_chat::media::ChatAttachmentHydrationRequest;
 use vmux_core::PageMetadata;
 use vmux_core::chat::{group_turns_before, group_turns_tail, grouped_item_count};
 use vmux_core::team::{Profile, User};
@@ -46,127 +49,6 @@ impl Plugin for ChatTranscriptPlugin {
 struct ChatProjection {
     snapshot: ChatSnapshot,
     transcript: TranscriptTail,
-}
-
-struct TranscriptTail {
-    items: Vec<ChatItem>,
-    start: u32,
-    total: u32,
-}
-
-struct TranscriptPage {
-    items: Vec<ChatItem>,
-    start: u32,
-    end: u32,
-    total: u32,
-}
-
-#[derive(Component)]
-struct ChatHistoryQuery {
-    webview: Entity,
-    session: Entity,
-    generation: u64,
-    request_id: u64,
-    before: u32,
-    limit: u32,
-}
-
-#[derive(Component)]
-struct ChatHistoryResult {
-    webview: Entity,
-    generation: u64,
-    request_id: u64,
-    page: Option<TranscriptPage>,
-}
-
-impl ChatTranscriptProjection {
-    fn merge_tail(&mut self, tail: TranscriptTail) -> bool {
-        if self.tail_start == tail.start
-            && self.tail == tail.items
-            && self.state.total == tail.total
-        {
-            return false;
-        }
-        let initialized = self.state.generation != 0;
-        let compatible = initialized
-            && tail.total >= self.state.total
-            && self.state.loaded_start <= tail.start
-            && tail.start.saturating_sub(self.state.loaded_start) as usize
-                <= self.state.items.len();
-        self.tail.clone_from(&tail.items);
-        self.tail_start = tail.start;
-        if compatible {
-            let keep = tail.start.saturating_sub(self.state.loaded_start) as usize;
-            self.state.items.truncate(keep);
-            self.state.items.extend(tail.items);
-        } else {
-            self.state.generation = self.state.generation.wrapping_add(1).max(1);
-            self.state.request_id = 0;
-            self.state.prepend_revision = 0;
-            self.state.items = tail.items;
-            self.state.loaded_start = tail.start;
-            self.state.loading = false;
-        }
-        self.state.total = tail.total;
-        if self.state.loaded_start == 0 {
-            self.state.loading = false;
-        }
-        self.refresh_activity();
-        true
-    }
-
-    fn start_history_query(
-        &mut self,
-        webview: Entity,
-        session: Entity,
-        request: &ChatHistoryRequest,
-    ) -> Option<ChatHistoryQuery> {
-        if request.generation != self.state.generation
-            || request.request_id <= self.state.request_id
-            || self.state.loaded_start == 0
-            || self.state.loading
-        {
-            return None;
-        }
-        self.state.request_id = request.request_id;
-        self.state.loading = true;
-        Some(ChatHistoryQuery {
-            webview,
-            session,
-            generation: request.generation,
-            request_id: request.request_id,
-            before: self.state.loaded_start,
-            limit: CHAT_HISTORY_PAGE_SIZE.min(CHAT_HISTORY_MAX_PAGE_SIZE),
-        })
-    }
-
-    fn finish_history_query(&mut self, result: &ChatHistoryResult) -> bool {
-        if result.generation != self.state.generation
-            || result.request_id != self.state.request_id
-            || !self.state.loading
-        {
-            return false;
-        }
-        self.state.loading = false;
-        let Some(page) = result.page.as_ref() else {
-            return true;
-        };
-        if page.end != self.state.loaded_start || page.start > page.end || page.end > page.total {
-            return true;
-        }
-        self.state.items.splice(0..0, page.items.iter().cloned());
-        self.state.loaded_start = page.start;
-        self.state.total = self.state.total.max(page.total);
-        self.state.prepend_revision = self.state.prepend_revision.wrapping_add(1).max(1);
-        self.refresh_activity();
-        true
-    }
-
-    fn refresh_activity(&mut self) {
-        let (subagents, tasks) = vmux_core::chat_projection::activity_counts(&self.state.items);
-        self.state.active_subagents = subagents;
-        self.state.active_tasks = tasks;
-    }
 }
 
 fn track_turn_duration(

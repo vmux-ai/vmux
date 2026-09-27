@@ -1,6 +1,6 @@
+use crate::event::ChatKey;
 use bevy_app::{App, Plugin, Startup};
 use bevy_ecs::prelude::*;
-use crate::event::ChatKey;
 use vmux_command::{
     CommandDispatch, CommandManifest, CommandRuntimePlugin, RegisterCommandDefinitions,
 };

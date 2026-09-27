@@ -71,7 +71,7 @@ fn on_slash_command(
 fn dispatch_composer_queries(trigger: On<ComposerQueriesChanged>, mut commands: Commands) {
     let webview = trigger.event_target();
     if let Some(query) = trigger.event().media() {
-        commands.trigger(super::media::ChatMediaQuery::new(
+        commands.trigger(vmux_chat::media::ChatMediaQuery::new(
             webview,
             query.to_string(),
         ));

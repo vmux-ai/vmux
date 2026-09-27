@@ -73,34 +73,6 @@ impl ChatResumeQuery {
     }
 }
 
-impl ChatResumeProjection {
-    fn start(&mut self, active: bool, query: String) -> Option<u64> {
-        if self.0.active == active && self.0.query == query {
-            return None;
-        }
-        self.0.request_id = self.0.request_id.wrapping_add(1).max(1);
-        self.0.active = active;
-        self.0.query = query;
-        self.0.sessions.clear();
-        self.0.total = 0;
-        self.0.loading = active;
-        Some(self.0.request_id)
-    }
-
-    fn finish(&mut self, sessions: &ResumableSessions) -> bool {
-        if self.0.request_id != sessions.request_id
-            || self.0.query != sessions.query
-            || !self.0.active
-        {
-            return false;
-        }
-        self.0.sessions.clone_from(&sessions.sessions);
-        self.0.total = sessions.total;
-        self.0.loading = false;
-        true
-    }
-}
-
 #[derive(Component)]
 struct ResumeHandoffTask {
     stack: Entity,
