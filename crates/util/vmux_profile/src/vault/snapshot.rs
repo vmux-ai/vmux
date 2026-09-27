@@ -5,7 +5,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use ring::{aead, digest, hmac};
 use serde::{Deserialize, Serialize};
 
-use super::repository::{read_manifest, validate_encrypted_worktree, write_manifest};
+use super::repository::VaultRepositoryPath;
 use super::sync::{remove_existing_path, same_entry};
 
 pub(super) const FORMAT_VERSION: u32 = 1;
@@ -96,13 +96,16 @@ pub(super) fn write_encrypted_snapshot(
     files: &BTreeMap<String, LocalEntry>,
     previous: Option<&BTreeMap<String, LocalEntry>>,
 ) -> Result<(), String> {
+    let vault = VaultRepositoryPath::at(repository);
     validate_key(key)?;
     if previous.is_some_and(|previous| same_files(previous, files))
         && repository.join(MANIFEST_FILE).is_file()
         && repository.join(INDEX_FILE).is_file()
-        && read_manifest(repository).is_ok_and(|manifest| manifest.version == MANIFEST_VERSION)
+        && vault
+            .manifest()
+            .is_ok_and(|manifest| manifest.version == MANIFEST_VERSION)
     {
-        return validate_encrypted_worktree(repository);
+        return vault.validate_encrypted_worktree();
     }
     let objects = repository.join(OBJECTS_DIR);
     std::fs::create_dir_all(&objects).map_err(|error| error.to_string())?;
@@ -155,8 +158,8 @@ pub(super) fn write_encrypted_snapshot(
         vault_id: vault_id.to_string(),
         index: INDEX_FILE.to_string(),
     };
-    write_manifest(repository, &manifest)?;
-    validate_encrypted_worktree(repository)
+    vault.write_manifest(&manifest)?;
+    vault.validate_encrypted_worktree()
 }
 
 pub(super) fn same_files(
@@ -174,7 +177,7 @@ pub(super) fn load_encrypted_snapshot(
     key: &[u8],
 ) -> Result<(RemoteManifest, BTreeMap<String, LocalEntry>), String> {
     validate_key(key)?;
-    let manifest = read_manifest(repository)?;
+    let manifest = VaultRepositoryPath::at(repository).manifest()?;
     let encrypted_index = std::fs::read(repository.join(&manifest.index))
         .map_err(|error| format!("failed to read encrypted Vault index: {error}"))?;
     let index_source = decrypt_bytes(key, INDEX_AAD, &encrypted_index)?;

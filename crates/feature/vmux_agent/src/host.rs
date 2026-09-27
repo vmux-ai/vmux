@@ -16,7 +16,7 @@ pub mod command;
 pub mod command_bar;
 pub mod echo;
 pub mod echo_plugin;
-pub mod events;
+pub mod event;
 pub mod exec;
 pub mod follow;
 pub mod handoff;
@@ -61,7 +61,7 @@ pub(crate) use self::workspace::{
 
 pub use vmux_service::{http, message, stream};
 
-pub use events::{
+pub use event::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
 };

@@ -9,11 +9,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::keys::{KeyStore, SystemKeyStore};
-use super::repository::{
-    command_success, commit_changes, current_branch, ensure_repository, gh_command, git,
-    git_optional, manifest_from_ref, remote_branch, remote_has_key_recipients,
-    validate_remote_history,
-};
+use super::repository::{GitHubCli, OutputText, VaultRepositoryPath};
 use super::snapshot::{load_encrypted_snapshot, write_encrypted_snapshot};
 use super::sync::{collect_local_files, initialize_paths, reconcile_local, write_local_state};
 use super::{repository_dir, root_dir};
@@ -87,7 +83,7 @@ where
     C: Fn() -> bool,
 {
     let has_saved_account = github_has_saved_account()?;
-    let mut command = gh_command()?;
+    let mut command = GitHubCli::command()?;
     if has_saved_account {
         command.args([
             "auth",
@@ -114,12 +110,11 @@ where
     if canceled() {
         return Err("GitHub authorization canceled".to_string());
     }
-    command_success(
-        gh_command()?
-            .args(["api", "user", "--jq", ".login"])
-            .output()
-            .map_err(|error| format!("failed to run gh: {error}"))?,
-    )
+    GitHubCli::command()?
+        .args(["api", "user", "--jq", ".login"])
+        .output()
+        .map_err(|error| format!("failed to run gh: {error}"))?
+        .success_text()
 }
 
 pub(super) fn run_github_auth<F, C>(
@@ -262,29 +257,27 @@ pub(super) fn connect_folder_paths<K: KeyStore>(
     };
     if remote.exists() {
         let remote_arg = remote.to_string_lossy().into_owned();
-        let bare = command_success(
-            Command::new("git")
-                .args([
-                    "--git-dir",
-                    &remote_arg,
-                    "rev-parse",
-                    "--is-bare-repository",
-                ])
-                .output()
-                .map_err(|error| format!("failed to run git: {error}"))?,
-        )?;
+        let bare = Command::new("git")
+            .args([
+                "--git-dir",
+                &remote_arg,
+                "rev-parse",
+                "--is-bare-repository",
+            ])
+            .output()
+            .map_err(|error| format!("failed to run git: {error}"))?
+            .success_text()?;
         if bare != "true" {
             return Err("selected folder is not a Vault repository".to_string());
         }
     } else {
         std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
         let remote_arg = remote.to_string_lossy().into_owned();
-        command_success(
-            Command::new("git")
-                .args(["init", "--bare", &remote_arg])
-                .output()
-                .map_err(|error| format!("failed to run git: {error}"))?,
-        )?;
+        Command::new("git")
+            .args(["init", "--bare", &remote_arg])
+            .output()
+            .map_err(|error| format!("failed to run git: {error}"))?
+            .success_text()?;
     }
     connect_remote_paths(root, repository, &remote.to_string_lossy(), keys)?;
     Ok(remote.to_string_lossy().into_owned())
@@ -297,13 +290,18 @@ pub(super) fn create_remote_paths<K: KeyStore>(
     visibility: RepositoryVisibility,
     keys: &K,
 ) -> Result<String, String> {
+    let vault = VaultRepositoryPath::at(vault_repository);
     let repository = if repository.trim().is_empty() {
         "vmux-vault"
     } else {
         repository.trim()
     };
     initialize_paths(root, vault_repository, keys)?;
-    if !git_optional(vault_repository, &["remote", "get-url", "origin"]).is_empty() {
+    if !vault
+        .git()
+        .optional(&["remote", "get-url", "origin"])
+        .is_empty()
+    {
         return Err("Vault already has an origin remote".to_string());
     }
     let root_arg = vault_repository.to_string_lossy().into_owned();
@@ -311,16 +309,15 @@ pub(super) fn create_remote_paths<K: KeyStore>(
         RepositoryVisibility::Private => "--private",
         RepositoryVisibility::Public => "--public",
     };
-    command_success(
-        gh_command()?
-            .current_dir(vault_repository)
-            .args([
-                "repo", "create", repository, visibility, "--source", &root_arg, "--remote",
-                "origin", "--push",
-            ])
-            .output()
-            .map_err(|error| format!("failed to run gh: {error}"))?,
-    )?;
+    GitHubCli::command()?
+        .current_dir(vault_repository)
+        .args([
+            "repo", "create", repository, visibility, "--source", &root_arg, "--remote",
+            "origin", "--push",
+        ])
+        .output()
+        .map_err(|error| format!("failed to run gh: {error}"))?
+        .success_text()?;
     write_local_state(root, vault_repository)?;
     Ok(repository.to_string())
 }
@@ -335,27 +332,26 @@ pub(super) fn connect_remote_paths<K: KeyStore>(
     if repository.is_empty() {
         return Err("repository is required".to_string());
     }
-    ensure_repository(vault_repository)?;
+    let vault = VaultRepositoryPath::at(vault_repository);
+    let git = vault.git();
+    vault.ensure()?;
     let url = resolve_remote_url(repository)?;
-    let previous_remote = git_optional(vault_repository, &["remote", "get-url", "origin"]);
+    let previous_remote = git.optional(&["remote", "get-url", "origin"]);
     if !previous_remote.is_empty() {
-        git(vault_repository, &["remote", "set-url", "origin", &url])?;
+        git.run(&["remote", "set-url", "origin", &url])?;
     } else {
-        git(vault_repository, &["remote", "add", "origin", &url])?;
+        git.run(&["remote", "add", "origin", &url])?;
     }
     let result = (|| {
-        git(vault_repository, &["fetch", "origin"])?;
-        let _ = git(
-            vault_repository,
-            &["remote", "set-head", "origin", "--auto"],
-        );
-        match remote_branch(vault_repository) {
+        git.run(&["fetch", "origin"])?;
+        let _ = git.run(&["remote", "set-head", "origin", "--auto"]);
+        match git.remote_branch() {
             Some(remote_branch) => {
-                validate_remote_history(vault_repository, &remote_branch)?;
-                let manifest = manifest_from_ref(vault_repository, &remote_branch)?;
+                vault.validate_remote_history(&remote_branch)?;
+                let manifest = vault.manifest_at(&remote_branch)?;
                 let key = match keys.load(&manifest.vault_id) {
                     Ok(key) => Some(key),
-                    Err(_error) if remote_has_key_recipients(vault_repository, &remote_branch)? => {
+                    Err(_error) if vault.remote_has_key_recipients(&remote_branch)? => {
                         None
                     }
                     Err(error) => return Err(error),
@@ -363,14 +359,8 @@ pub(super) fn connect_remote_paths<K: KeyStore>(
                 let branch = remote_branch
                     .strip_prefix("origin/")
                     .unwrap_or(&remote_branch);
-                git(
-                    vault_repository,
-                    &["checkout", "-B", branch, &remote_branch],
-                )?;
-                git(
-                    vault_repository,
-                    &["branch", "--set-upstream-to", &remote_branch],
-                )?;
+                git.run(&["checkout", "-B", branch, &remote_branch])?;
+                git.run(&["branch", "--set-upstream-to", &remote_branch])?;
                 let Some(key) = key else {
                     return Ok(());
                 };
@@ -384,25 +374,22 @@ pub(super) fn connect_remote_paths<K: KeyStore>(
                     &files,
                     Some(&remote_files),
                 )?;
-                commit_changes(vault_repository, "Connect vmux Vault")?;
-                git(vault_repository, &["push", "-u", "origin", branch])?;
+                git.commit("Connect vmux Vault")?;
+                git.run(&["push", "-u", "origin", branch])?;
             }
             None => {
                 initialize_paths(root, vault_repository, keys)?;
-                let branch = current_branch(vault_repository)?;
-                git(vault_repository, &["push", "-u", "origin", &branch])?;
+                let branch = git.current_branch()?;
+                git.run(&["push", "-u", "origin", &branch])?;
             }
         }
         write_local_state(root, vault_repository)
     })();
     if let Err(error) = result {
         if previous_remote.is_empty() {
-            let _ = git(vault_repository, &["remote", "remove", "origin"]);
+            let _ = git.run(&["remote", "remove", "origin"]);
         } else {
-            let _ = git(
-                vault_repository,
-                &["remote", "set-url", "origin", &previous_remote],
-            );
+            let _ = git.run(&["remote", "set-url", "origin", &previous_remote]);
         }
         return Err(error);
     }
@@ -416,12 +403,11 @@ pub(super) fn resolve_remote_url(repository: &str) -> Result<String, String> {
     {
         return Ok(repository.to_string());
     }
-    command_success(
-        gh_command()?
-            .args(["repo", "view", repository, "--json", "url", "--jq", ".url"])
-            .output()
-            .map_err(|error| format!("failed to run gh: {error}"))?,
-    )
+    GitHubCli::command()?
+        .args(["repo", "view", repository, "--json", "url", "--jq", ".url"])
+        .output()
+        .map_err(|error| format!("failed to run gh: {error}"))?
+        .success_text()
 }
 
 pub(super) fn github_identity_and_repositories()
@@ -429,32 +415,31 @@ pub(super) fn github_identity_and_repositories()
     if !github_has_saved_account()? {
         return Ok((String::new(), Vec::new(), Vec::new()));
     }
-    let mut command = gh_command()?;
+    let mut command = GitHubCli::command()?;
     command
         .args(["api", "graphql", "-f"])
         .arg(format!("query={GITHUB_VIEWER_QUERY}"));
-    let source = command_success(
-        command
-            .output()
-            .map_err(|error| format!("failed to run gh: {error}"))?,
-    )?;
+    let source = command
+        .output()
+        .map_err(|error| format!("failed to run gh: {error}"))?
+        .success_text()?;
     let (owner, owners) = github_owners_from_graphql(&source)?;
     let mut repositories = Vec::new();
     for repository_owner in &owners {
-        let Ok(source) = command_success(
-            gh_command()?
-                .args([
-                    "repo",
-                    "list",
-                    repository_owner,
-                    "--limit",
-                    "100",
-                    "--json",
-                    "nameWithOwner,isPrivate,url,isEmpty",
-                ])
-                .output()
-                .map_err(|error| format!("failed to run gh: {error}"))?,
-        ) else {
+        let Ok(source) = GitHubCli::command()?
+            .args([
+                "repo",
+                "list",
+                repository_owner,
+                "--limit",
+                "100",
+                "--json",
+                "nameWithOwner,isPrivate,url,isEmpty",
+            ])
+            .output()
+            .map_err(|error| format!("failed to run gh: {error}"))?
+            .success_text()
+        else {
             continue;
         };
         repositories.extend(
@@ -502,7 +487,7 @@ pub(super) fn github_owners_from_graphql(source: &str) -> Result<(String, Vec<St
 }
 
 pub(super) fn github_has_saved_account() -> Result<bool, String> {
-    let output = gh_command()?
+    let output = GitHubCli::command()?
         .args([
             "auth",
             "status",

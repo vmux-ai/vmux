@@ -8,7 +8,7 @@ use vmux_layout::stack::stack_bundle;
 use vmux_service::client::ServiceRequest;
 use vmux_terminal::reattach_terminal_bundle;
 
-use crate::events::AgentApprovalRequest;
+use crate::event::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
@@ -23,14 +23,14 @@ impl Plugin for AcpAgentPlugin {
         app.add_message::<ServiceRequest>()
             .add_plugins(crate::acp_tool::AcpToolPlugin)
             .init_resource::<AcpCatalog>()
-            .add_message::<crate::events::PageAgentInfo>()
-            .add_message::<crate::events::PageAgentWorkspaceChanged>()
-            .add_message::<crate::events::PageAgentModelInfo>()
-            .add_message::<crate::events::PageAgentModelSelectionResult>()
-            .add_message::<crate::events::PageAgentModeInfo>()
-            .add_message::<crate::events::PageAgentModeSelectionResult>()
-            .add_message::<crate::events::PageAgentSessionCreated>()
-            .add_message::<crate::events::PageAgentAcpTerminalCreated>()
+            .add_message::<crate::event::PageAgentInfo>()
+            .add_message::<crate::event::PageAgentWorkspaceChanged>()
+            .add_message::<crate::event::PageAgentModelInfo>()
+            .add_message::<crate::event::PageAgentModelSelectionResult>()
+            .add_message::<crate::event::PageAgentModeInfo>()
+            .add_message::<crate::event::PageAgentModeSelectionResult>()
+            .add_message::<crate::event::PageAgentSessionCreated>()
+            .add_message::<crate::event::PageAgentAcpTerminalCreated>()
             .add_systems(Startup, start_catalog_fetch)
             .add_systems(
                 Update,
@@ -212,7 +212,7 @@ fn receive_catalog(
 }
 
 fn apply_acp_agent_info(
-    mut reader: MessageReader<crate::events::PageAgentInfo>,
+    mut reader: MessageReader<crate::event::PageAgentInfo>,
     mut sessions: Query<(&AcpSession, &mut vmux_core::team::Profile)>,
 ) {
     for event in reader.read() {
@@ -229,7 +229,7 @@ fn apply_acp_agent_info(
 }
 
 fn validate_acp_workspace(
-    event: &crate::events::PageAgentWorkspaceChanged,
+    event: &crate::event::PageAgentWorkspaceChanged,
 ) -> Result<vmux_git::worktree::ValidatedLinkedWorkspace, String> {
     vmux_git::worktree::validate_linked_workspace(
         std::path::Path::new(&event.cwd),
@@ -253,7 +253,7 @@ fn ancestor_tab(
 }
 
 fn apply_acp_workspace_changed(
-    mut reader: MessageReader<crate::events::PageAgentWorkspaceChanged>,
+    mut reader: MessageReader<crate::event::PageAgentWorkspaceChanged>,
     mut sessions: Query<(Entity, &mut AcpSession)>,
     child_of: Query<&ChildOf>,
     tab_entities: Query<(), With<vmux_layout::tab::Tab>>,
@@ -322,7 +322,7 @@ fn apply_acp_workspace_changed(
 }
 
 fn apply_acp_model_info(
-    mut reader: MessageReader<crate::events::PageAgentModelInfo>,
+    mut reader: MessageReader<crate::event::PageAgentModelInfo>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModelState>)>,
     mut commands: Commands,
 ) {
@@ -364,7 +364,7 @@ fn apply_acp_model_info(
 }
 
 fn apply_acp_model_selection_result(
-    mut reader: MessageReader<crate::events::PageAgentModelSelectionResult>,
+    mut reader: MessageReader<crate::event::PageAgentModelSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
 ) {
     for event in reader.read() {
@@ -384,7 +384,7 @@ fn apply_acp_model_selection_result(
 }
 
 fn apply_acp_mode_info(
-    mut reader: MessageReader<crate::events::PageAgentModeInfo>,
+    mut reader: MessageReader<crate::event::PageAgentModeInfo>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModeState>)>,
     mut commands: Commands,
 ) {
@@ -420,7 +420,7 @@ fn apply_acp_mode_info(
 }
 
 fn apply_acp_mode_selection_result(
-    mut reader: MessageReader<crate::events::PageAgentModeSelectionResult>,
+    mut reader: MessageReader<crate::event::PageAgentModeSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpModeState)>,
 ) {
     for event in reader.read() {
@@ -470,7 +470,7 @@ fn auto_allow_acp_approval(
 
 #[allow(clippy::type_complexity)]
 fn apply_acp_session_created(
-    mut reader: MessageReader<crate::events::PageAgentSessionCreated>,
+    mut reader: MessageReader<crate::event::PageAgentSessionCreated>,
     mut sessions: Query<
         (
             Entity,
@@ -515,7 +515,7 @@ fn apply_acp_session_created(
 
 #[allow(clippy::too_many_arguments)]
 fn apply_acp_terminal_created(
-    mut reader: MessageReader<crate::events::PageAgentAcpTerminalCreated>,
+    mut reader: MessageReader<crate::event::PageAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
     ctx: PlacementCtx,
     mut commands: Commands,
@@ -866,7 +866,7 @@ mod tests {
         let project_dir = repo.path().canonicalize().unwrap();
         let worktree_dir = worktree.canonicalize().unwrap();
         let mut app = App::new();
-        app.add_message::<crate::events::PageAgentWorkspaceChanged>()
+        app.add_message::<crate::event::PageAgentWorkspaceChanged>()
             .add_systems(Update, apply_acp_workspace_changed);
         let tab = app
             .world_mut()
@@ -901,8 +901,8 @@ mod tests {
             })
             .id();
         app.world_mut()
-            .resource_mut::<Messages<crate::events::PageAgentWorkspaceChanged>>()
-            .write(crate::events::PageAgentWorkspaceChanged {
+            .resource_mut::<Messages<crate::event::PageAgentWorkspaceChanged>>()
+            .write(crate::event::PageAgentWorkspaceChanged {
                 sid: "matching-sid".into(),
                 name: "quiet-amber-wolf".into(),
                 branch: "vibe/quiet-amber-wolf".into(),
@@ -936,7 +936,7 @@ mod tests {
 
     #[test]
     fn live_acp_identity_updates_only_matching_profile() {
-        use crate::events::PageAgentInfo;
+        use crate::event::PageAgentInfo;
         use vmux_core::team::Profile;
 
         let mut app = App::new();
@@ -998,7 +998,7 @@ mod tests {
 
     #[test]
     fn live_acp_model_info_updates_only_matching_session() {
-        use crate::events::PageAgentModelInfo;
+        use crate::event::PageAgentModelInfo;
         use vmux_api::protocol::AcpModelOption;
 
         let mut app = App::new();
@@ -1045,7 +1045,7 @@ mod tests {
 
     #[test]
     fn model_results_preserve_latest_pending_selection() {
-        use crate::events::{PageAgentModelInfo, PageAgentModelSelectionResult};
+        use crate::event::{PageAgentModelInfo, PageAgentModelSelectionResult};
         use vmux_api::protocol::AcpModelOption;
 
         let models = vec![
@@ -1163,7 +1163,7 @@ mod tests {
 
     #[test]
     fn mode_results_preserve_latest_pending_selection() {
-        use crate::events::{PageAgentModeInfo, PageAgentModeSelectionResult};
+        use crate::event::{PageAgentModeInfo, PageAgentModeSelectionResult};
         use vmux_api::protocol::AcpModeOption;
 
         let modes = vec![
@@ -1243,7 +1243,7 @@ mod tests {
 
     #[test]
     fn acp_terminal_stack_does_not_take_focus_from_agent() {
-        use crate::events::PageAgentAcpTerminalCreated;
+        use crate::event::PageAgentAcpTerminalCreated;
         use vmux_layout::pane::leaf_pane_bundle;
         use vmux_layout::stack::Stack;
         use vmux_layout::tab::tab_bundle;

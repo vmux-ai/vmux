@@ -10,7 +10,7 @@ use vmux_layout::pane::Pane;
 use vmux_setting::AppSettings;
 use vmux_terminal::ServiceMessageSet;
 
-use crate::events::{AgentCommandRequest, CommandOrigin};
+use crate::event::{AgentCommandRequest, CommandOrigin};
 use crate::session::AgentSession;
 
 pub(super) struct FollowPlugin;

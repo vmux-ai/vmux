@@ -14,7 +14,7 @@ use vmux_terminal::Terminal;
 use vmux_terminal::launch::TerminalLaunch;
 
 use crate::AgentVariant;
-use crate::events::{AgentCommandRequest, CommandOrigin};
+use crate::event::{AgentCommandRequest, CommandOrigin};
 use crate::session::{AgentSession, SessionId};
 
 pub(super) struct AttachPlugin;

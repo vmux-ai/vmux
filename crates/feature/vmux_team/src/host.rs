@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 
 use vmux_agent::AgentRunState;
-use vmux_agent::events::AgentCommandRequest;
+use vmux_agent::event::AgentCommandRequest;
 use vmux_api::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 use vmux_core::agent::SessionId;
 use vmux_core::event::team::{

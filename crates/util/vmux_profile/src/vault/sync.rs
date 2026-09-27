@@ -5,10 +5,7 @@ use std::process::Command;
 use super::files::FileAttributes;
 use super::keys::{KeyStore, SystemKeyStore};
 use super::recovery::load_repository_key;
-use super::repository::{
-    commit_changes, current_branch, ensure_repository, git, git_optional, read_manifest,
-    remote_branch, validate_empty_vault_repository, validate_remote_history,
-};
+use super::repository::VaultRepositoryPath;
 use super::snapshot::{
     EntryKind, LocalEntry, LocalFingerprint, LocalState, LocalStateEntry, entry_digest,
     load_encrypted_snapshot, modified_time, random_hex, state_path, validate_relative_path,
@@ -54,28 +51,33 @@ pub(super) fn sync_paths<K: KeyStore>(
     repository: &Path,
     keys: &K,
 ) -> Result<String, String> {
+    let vault = VaultRepositoryPath::at(repository);
+    let git = vault.git();
     if !repository.join(".git").is_dir() {
         return Err("Vault is not connected to Git".to_string());
     }
-    if git_optional(repository, &["remote", "get-url", "origin"]).is_empty() {
+    if git.optional(&["remote", "get-url", "origin"]).is_empty() {
         return Err("Vault has no origin remote".to_string());
     }
-    let manifest = read_manifest(repository)?;
+    let manifest = vault.manifest()?;
     let key = load_repository_key(repository, keys, &manifest.vault_id)?;
     let baseline = baseline_files(repository).unwrap_or_else(|_| {
         load_encrypted_snapshot(repository, &key)
             .map(|(_, files)| files)
             .unwrap_or_default()
     });
-    let branch = current_branch(repository)?;
+    let branch = git.current_branch()?;
     for attempt in 0..3 {
-        git(repository, &["fetch", "origin"])?;
-        if let Some(remote_branch) = remote_branch(repository) {
-            validate_remote_history(repository, &remote_branch)?;
-            if git(repository, &["merge-base", "HEAD", &remote_branch]).is_err() {
+        git.run(&["fetch", "origin"])?;
+        if let Some(remote_branch) = git.remote_branch() {
+            vault.validate_remote_history(&remote_branch)?;
+            if git
+                .run(&["merge-base", "HEAD", &remote_branch])
+                .is_err()
+            {
                 return Err("Vault remote has unrelated history".to_string());
             }
-            git(repository, &["reset", "--hard", &remote_branch])?;
+            git.run(&["reset", "--hard", &remote_branch])?;
         }
         let (_, remote_files) = load_encrypted_snapshot(repository, &key)?;
         let outcome = reconcile_local(root, &baseline, &remote_files)?;
@@ -87,8 +89,8 @@ pub(super) fn sync_paths<K: KeyStore>(
             &files,
             Some(&remote_files),
         )?;
-        commit_changes(repository, "Sync vmux Vault")?;
-        match git(repository, &["push", "-u", "origin", &branch]) {
+        git.commit("Sync vmux Vault")?;
+        match git.run(&["push", "-u", "origin", &branch]) {
             Ok(_) => {
                 write_local_state(root, repository)?;
                 return Ok(sync_message(&outcome));
@@ -138,8 +140,9 @@ pub(super) fn initialize_paths<K: KeyStore>(
     repository: &Path,
     keys: &K,
 ) -> Result<(), String> {
-    ensure_repository(repository)?;
-    let (vault_id, key, previous) = match read_manifest(repository) {
+    let vault = VaultRepositoryPath::at(repository);
+    vault.ensure()?;
+    let (vault_id, key, previous) = match vault.manifest() {
         Ok(manifest) => {
             let key = load_repository_key(repository, keys, &manifest.vault_id)?;
             let previous = load_encrypted_snapshot(repository, &key)
@@ -148,7 +151,7 @@ pub(super) fn initialize_paths<K: KeyStore>(
             (manifest.vault_id, key, previous)
         }
         Err(_) => {
-            validate_empty_vault_repository(repository)?;
+            vault.validate_empty()?;
             let vault_id = random_hex(16)?;
             let key = keys.create(&vault_id)?;
             (vault_id, key, None)
@@ -156,7 +159,7 @@ pub(super) fn initialize_paths<K: KeyStore>(
     };
     let files = collect_local_files(root)?;
     write_encrypted_snapshot(repository, &vault_id, &key, &files, previous.as_ref())?;
-    commit_changes(repository, "Initialize vmux Vault")
+    vault.git().commit("Initialize vmux Vault")
 }
 
 pub(super) fn collect_local_files(root: &Path) -> Result<BTreeMap<String, LocalEntry>, String> {

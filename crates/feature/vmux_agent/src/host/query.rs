@@ -9,7 +9,7 @@ use vmux_service::client::ServiceRequest;
 use vmux_setting::AppSettings;
 use vmux_terminal::ServiceMessageSet;
 
-use crate::events::{
+use crate::event::{
     AgentQueryRequest, RecordStartRequest, RecordStartResponse, RecordStopRequest,
     RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
 };

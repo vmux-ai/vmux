@@ -8,7 +8,7 @@ use vmux_service::client::ServiceRequest;
 use vmux_service::plugin::ServiceConnected;
 use vmux_terminal::ServiceMessageSet;
 
-use crate::events::AgentChoiceSelected;
+use crate::event::AgentChoiceSelected;
 use crate::session::AgentSession;
 
 use super::run_terminal::ProjectsDirectory;

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::{AgentChatView, ChatBranchesProjection};
-use crate::events::{AgentCommandRequest, CommandOrigin};
+use crate::event::{AgentCommandRequest, CommandOrigin};
 use vmux_api::protocol::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCommand as ServiceAgentCommand,
     AgentCreateWorktreeOnBranch, AgentRequestId,

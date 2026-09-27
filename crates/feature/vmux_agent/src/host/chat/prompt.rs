@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use super::{AgentChatView, ChatAttachmentProjection};
-use crate::events::{AgentApprovalReply, AgentChoiceSelected};
+use crate::event::{AgentApprovalReply, AgentChoiceSelected};
 use crate::run_state::AgentRunState;
 use vmux_api::protocol::{AgentAttachment, ClientMessage, SharedMessage};
 use vmux_chat::composer::{ComposerQueriesChanged, ComposerState};

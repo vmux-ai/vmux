@@ -6,8 +6,8 @@ use bevy::prelude::*;
 
 use crate::AgentVariant;
 use crate::approval;
-use crate::events::{AgentApprovalRequest, AgentDelta};
-use crate::events::{
+use crate::event::{AgentApprovalRequest, AgentDelta};
+use crate::event::{
     PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus,
     PageAgentSnapshot,
 };
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn interrupted_status_pauses_queue_and_idles() {
-        use crate::events::{
+        use crate::event::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_api::protocol::AgentRunStatus;
@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn flush_pending_interrupt_does_not_pause() {
-        use crate::events::{
+        use crate::event::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_api::protocol::AgentRunStatus;
@@ -522,7 +522,7 @@ mod tests {
 
     #[test]
     fn flush_pending_error_rearms_queue() {
-        use crate::events::{
+        use crate::event::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_api::protocol::AgentRunStatus;

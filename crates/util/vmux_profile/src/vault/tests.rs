@@ -223,26 +223,30 @@ fn repository(root: &Path) -> PathBuf {
 }
 
 fn configure_identity(root: &Path) {
-    git(root, &["config", "user.name", "Vmux Test"]).unwrap();
-    git(root, &["config", "user.email", "vmux@example.com"]).unwrap();
-    git(root, &["config", "commit.gpgSign", "false"]).unwrap();
+    let git = GitRepository::at(root);
+    git.run(&["config", "user.name", "Vmux Test"]).unwrap();
+    git.run(&["config", "user.email", "vmux@example.com"])
+        .unwrap();
+    git.run(&["config", "commit.gpgSign", "false"])
+        .unwrap();
 }
 
 fn prepare_repository(root: &Path) -> PathBuf {
     let repository = repository(root);
-    ensure_repository(&repository).unwrap();
+    VaultRepositoryPath::at(&repository)
+        .ensure()
+        .unwrap();
     configure_identity(&repository);
     repository
 }
 
 fn create_bare_remote(path: &Path) {
-    command_success(
-        Command::new("git")
-            .args(["init", "--bare", path.to_string_lossy().as_ref()])
-            .output()
-            .unwrap(),
-    )
-    .unwrap();
+    Command::new("git")
+        .args(["init", "--bare", path.to_string_lossy().as_ref()])
+        .output()
+        .unwrap()
+        .success_text()
+        .unwrap();
 }
 
 #[test]
@@ -377,12 +381,10 @@ fn recovery_key_unlocks_knowledge_and_tools_on_a_new_device() {
     let remote = tempfile::tempdir().unwrap();
     let remote_path = remote.path().join("vault.git");
     create_bare_remote(&remote_path);
-    git(
-        &first_repository,
-        &["remote", "add", "origin", remote_path.to_str().unwrap()],
-    )
-    .unwrap();
-    git(&first_repository, &["push", "-u", "origin", "main"]).unwrap();
+    let git = GitRepository::at(&first_repository);
+    git.run(&["remote", "add", "origin", remote_path.to_str().unwrap()])
+        .unwrap();
+    git.run(&["push", "-u", "origin", "main"]).unwrap();
 
     let second = tempfile::tempdir().unwrap();
     let second_repository = prepare_repository(second.path());
@@ -436,11 +438,9 @@ fn recovery_key_creation_survives_remote_upload_failure() {
     let keys = FixedKeyStore::new(44);
     initialize_paths(root.path(), &repository, &keys).unwrap();
     let unavailable = root.path().join("missing-remote.git");
-    git(
-        &repository,
-        &["remote", "add", "origin", unavailable.to_str().unwrap()],
-    )
-    .unwrap();
+    GitRepository::at(&repository)
+        .run(&["remote", "add", "origin", unavailable.to_str().unwrap()])
+        .unwrap();
 
     let recovery_key_bytes = [46; KEY_LEN];
     let recovery_key = format_recovery_key(&recovery_key_bytes);
@@ -470,7 +470,9 @@ fn initialization_commits_only_encrypted_paths_and_content() {
 
     initialize_paths(root.path(), &repository, &keys).unwrap();
 
-    let tree = git(&repository, &["ls-tree", "-r", "--name-only", "HEAD"]).unwrap();
+    let tree = GitRepository::at(&repository)
+        .run(&["ls-tree", "-r", "--name-only", "HEAD"])
+        .unwrap();
     assert!(tree.lines().any(|path| path == MANIFEST_FILE));
     assert!(tree.lines().any(|path| path == INDEX_FILE));
     assert!(tree.lines().any(|path| path.starts_with("objects/")));
@@ -482,7 +484,9 @@ fn initialization_commits_only_encrypted_paths_and_content() {
             .windows(7)
             .any(|window| window == b"Private")
     );
-    let manifest = read_manifest(&repository).unwrap();
+    let manifest = VaultRepositoryPath::at(&repository)
+        .manifest()
+        .unwrap();
     let key = keys.load(&manifest.vault_id).unwrap();
     let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
     assert_eq!(files["settings.ron"].data, b"(secret: true)\n");
@@ -513,7 +517,11 @@ fn initialization_rejects_unencrypted_staging_files() {
     let error = initialize_paths(root.path(), &repository, &FixedKeyStore::new(11)).unwrap_err();
 
     assert!(error.contains("unencrypted"));
-    assert!(git(&repository, &["rev-parse", "--verify", "HEAD"]).is_err());
+    assert!(
+        GitRepository::at(&repository)
+            .run(&["rev-parse", "--verify", "HEAD"])
+            .is_err()
+    );
 }
 
 #[test]
@@ -537,15 +545,15 @@ fn empty_remote_receives_encrypted_initial_and_followup_syncs() {
     sync_paths(root.path(), &repository, &keys).unwrap();
 
     assert_eq!(
-        git(&repository, &["rev-list", "--count", "origin/main"]).unwrap(),
+        GitRepository::at(&repository)
+            .run(&["rev-list", "--count", "origin/main"])
+            .unwrap(),
         "2"
     );
     assert_eq!(local_change_count(root.path(), &repository).unwrap(), 0);
-    let tree = git(
-        &repository,
-        &["ls-tree", "-r", "--name-only", "origin/main"],
-    )
-    .unwrap();
+    let tree = GitRepository::at(&repository)
+        .run(&["ls-tree", "-r", "--name-only", "origin/main"])
+        .unwrap();
     assert!(!tree.contains("settings.ron"));
 }
 
@@ -568,16 +576,20 @@ fn stale_encrypted_commit_is_discarded_and_regenerated_from_plaintext() {
     .unwrap();
     std::fs::write(&path, "(value: 2)\n").unwrap();
     std::fs::write(repository.join(INDEX_FILE), b"stale encrypted commit").unwrap();
-    git(&repository, &["add", INDEX_FILE]).unwrap();
-    git(&repository, &["commit", "-m", "Stale local snapshot"]).unwrap();
+    let git = GitRepository::at(&repository);
+    git.run(&["add", INDEX_FILE]).unwrap();
+    git.run(&["commit", "-m", "Stale local snapshot"])
+        .unwrap();
 
     sync_paths(root.path(), &repository, &keys).unwrap();
 
-    let manifest = read_manifest(&repository).unwrap();
+    let manifest = VaultRepositoryPath::at(&repository)
+        .manifest()
+        .unwrap();
     let key = keys.load(&manifest.vault_id).unwrap();
     let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
     assert_eq!(files["settings.ron"].data, b"(value: 2)\n");
-    assert_eq!(git(&repository, &["status", "--short"]).unwrap(), "");
+    assert_eq!(git.run(&["status", "--short"]).unwrap(), "");
 }
 
 #[test]
@@ -613,7 +625,9 @@ fn existing_encrypted_vault_merges_non_conflicting_local_files() {
         std::fs::read_to_string(root.path().join("settings.ron")).unwrap(),
         "(remote: true)\n"
     );
-    let manifest = read_manifest(&repository).unwrap();
+    let manifest = VaultRepositoryPath::at(&repository)
+        .manifest()
+        .unwrap();
     let key = keys.load(&manifest.vault_id).unwrap();
     let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
     assert!(files.contains_key("settings.ron"));
@@ -865,17 +879,20 @@ fn plaintext_remote_history_is_rejected() {
     let remote_parent = tempfile::tempdir().unwrap();
     let remote = remote_parent.path().join("vault.git");
     create_bare_remote(&remote);
-    git(seed.path(), &["init", "-b", "main"]).unwrap();
+    let git = GitRepository::at(seed.path());
+    git.run(&["init", "-b", "main"]).unwrap();
     configure_identity(seed.path());
     std::fs::write(seed.path().join("settings.ron"), "()\n").unwrap();
-    git(seed.path(), &["add", "--all"]).unwrap();
-    git(seed.path(), &["commit", "-m", "Plaintext"]).unwrap();
-    git(
-        seed.path(),
-        &["remote", "add", "origin", remote.to_string_lossy().as_ref()],
-    )
+    git.run(&["add", "--all"]).unwrap();
+    git.run(&["commit", "-m", "Plaintext"]).unwrap();
+    git.run(&[
+        "remote",
+        "add",
+        "origin",
+        remote.to_string_lossy().as_ref(),
+    ])
     .unwrap();
-    git(seed.path(), &["push", "-u", "origin", "main"]).unwrap();
+    git.run(&["push", "-u", "origin", "main"]).unwrap();
     let repository = prepare_repository(root.path());
 
     let error = connect_remote_paths(
@@ -900,26 +917,28 @@ fn existing_vault_uses_the_remote_default_branch() {
     std::fs::write(seed.path().join("settings.ron"), "(remote: true)\n").unwrap();
     let seed_repository = prepare_repository(seed.path());
     initialize_paths(seed.path(), &seed_repository, &keys).unwrap();
-    git(&seed_repository, &["branch", "--move", "trunk"]).unwrap();
-    git(
-        &seed_repository,
-        &["remote", "add", "origin", remote.to_string_lossy().as_ref()],
-    )
+    let git = GitRepository::at(&seed_repository);
+    git.run(&["branch", "--move", "trunk"]).unwrap();
+    git.run(&[
+        "remote",
+        "add",
+        "origin",
+        remote.to_string_lossy().as_ref(),
+    ])
     .unwrap();
-    git(&seed_repository, &["push", "-u", "origin", "trunk"]).unwrap();
-    command_success(
-        Command::new("git")
-            .args([
-                "--git-dir",
-                remote.to_string_lossy().as_ref(),
-                "symbolic-ref",
-                "HEAD",
-                "refs/heads/trunk",
-            ])
-            .output()
-            .unwrap(),
-    )
-    .unwrap();
+    git.run(&["push", "-u", "origin", "trunk"]).unwrap();
+    Command::new("git")
+        .args([
+            "--git-dir",
+            remote.to_string_lossy().as_ref(),
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/trunk",
+        ])
+        .output()
+        .unwrap()
+        .success_text()
+        .unwrap();
     let repository = prepare_repository(root.path());
 
     connect_remote_paths(
@@ -930,9 +949,11 @@ fn existing_vault_uses_the_remote_default_branch() {
     )
     .unwrap();
 
-    assert_eq!(current_branch(&repository).unwrap(), "trunk");
+    let git = GitRepository::at(&repository);
+    assert_eq!(git.current_branch().unwrap(), "trunk");
     assert_eq!(
-        git(&repository, &["rev-list", "--count", "origin/trunk"]).unwrap(),
+        git.run(&["rev-list", "--count", "origin/trunk"])
+            .unwrap(),
         "1"
     );
 }
@@ -953,23 +974,22 @@ fn cloud_folder_creates_an_encrypted_bare_vault_repository() {
     .unwrap();
 
     assert_eq!(
-        git(&repository, &["remote", "get-url", "origin"]).unwrap(),
+        GitRepository::at(&repository)
+            .run(&["remote", "get-url", "origin"])
+            .unwrap(),
         remote
     );
     assert_eq!(
-        command_success(
-            Command::new("git")
-                .args(["--git-dir", &remote, "rev-parse", "--is-bare-repository"])
-                .output()
-                .unwrap(),
-        )
-        .unwrap(),
+        Command::new("git")
+            .args(["--git-dir", &remote, "rev-parse", "--is-bare-repository"])
+            .output()
+            .unwrap()
+            .success_text()
+            .unwrap(),
         "true"
     );
-    let tree = git(
-        &repository,
-        &["ls-tree", "-r", "--name-only", "origin/main"],
-    )
-    .unwrap();
+    let tree = GitRepository::at(&repository)
+        .run(&["ls-tree", "-r", "--name-only", "origin/main"])
+        .unwrap();
     assert!(!tree.contains("settings.ron"));
 }

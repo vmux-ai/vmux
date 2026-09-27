@@ -1,4 +1,4 @@
-use crate::events::{
+use crate::event::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin,
     PageAgentAcpTerminalCreated, PageAgentApprovalResolved, PageAgentAwaitingApproval,
     PageAgentDelta, PageAgentInfo, PageAgentModeInfo, PageAgentModeSelectionResult,

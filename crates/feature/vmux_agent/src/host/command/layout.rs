@@ -7,7 +7,7 @@ use vmux_api::protocol::{
 };
 use vmux_service::client::ServiceRequest;
 
-use crate::events::AgentCommandRequest;
+use crate::event::AgentCommandRequest;
 
 use super::CommandSet;
 

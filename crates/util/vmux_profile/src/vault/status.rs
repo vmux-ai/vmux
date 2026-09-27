@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use super::connect::{VaultRepository, github_identity_and_repositories};
 use super::keys::{KeyStore, SilentSystemKeyStore};
 use super::recovery::read_recovery_envelope;
-use super::repository::{git_optional, read_manifest};
+use super::repository::VaultRepositoryPath;
 use super::snapshot::state_path;
 use super::sync::local_change_count;
 use super::{repository_dir, root_dir};
@@ -132,9 +132,11 @@ pub fn status_with_repositories() -> VaultStatus {
 }
 
 pub(super) fn status_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> VaultStatus {
+    let vault = VaultRepositoryPath::at(repository);
+    let git = vault.git();
     let initialized = repository.join(".git").is_dir();
     let manifest = initialized
-        .then(|| read_manifest(repository))
+        .then(|| vault.manifest())
         .transpose()
         .ok()
         .flatten();
@@ -156,14 +158,16 @@ pub(super) fn status_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K
         }
     }
     if initialized {
-        status.remote = git_optional(repository, &["remote", "get-url", "origin"]);
-        status.branch = git_optional(repository, &["branch", "--show-current"]);
+        status.remote = git.optional(&["remote", "get-url", "origin"]);
+        status.branch = git.optional(&["branch", "--show-current"]);
         status.dirty = local_change_count(root, repository).unwrap_or(0);
         if !status.remote.is_empty() {
-            let counts = git_optional(
-                repository,
-                &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
-            );
+            let counts = git.optional(&[
+                "rev-list",
+                "--left-right",
+                "--count",
+                "HEAD...@{upstream}",
+            ]);
             let mut values = counts.split_whitespace();
             status.ahead = values
                 .next()

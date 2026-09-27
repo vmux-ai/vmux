@@ -13,7 +13,7 @@ use vmux_terminal::{
     TerminalStackSpawnSet,
 };
 
-use crate::events::AgentCommandRequest;
+use crate::event::AgentCommandRequest;
 use crate::session::AgentSession;
 
 use super::follow::file_touch_url;

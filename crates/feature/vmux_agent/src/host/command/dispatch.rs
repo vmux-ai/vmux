@@ -15,7 +15,7 @@ use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 use vmux_terminal::TerminalStackSpawnRequest;
 
-use crate::events::{AgentCommandRequest, CommandOrigin};
+use crate::event::{AgentCommandRequest, CommandOrigin};
 
 use crate::host::browser_pane::AgentBrowserResolve;
 use crate::host::valid_cwd;

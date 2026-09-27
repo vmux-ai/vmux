@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_api::protocol::AgentCommand as ServiceAgentCommand;
 
-use crate::events::AgentCommandRequest;
+use crate::event::AgentCommandRequest;
 use crate::session::SessionId;
 
 pub(super) struct AttentionPlugin;
@@ -199,7 +199,7 @@ fn handle_agent_turn_ended(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::CommandOrigin;
+    use crate::event::CommandOrigin;
 
     pub(crate) fn bell_test_app() -> App {
         let mut app = App::new();

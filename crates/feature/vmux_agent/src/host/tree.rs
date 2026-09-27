@@ -9,7 +9,7 @@ use vmux_core::browser::{
 };
 use vmux_terminal::TerminalStackSpawnRequest;
 
-use crate::events::{
+use crate::event::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, RecordStartRequest,
     RecordStartResponse, RecordStopRequest, RecordStopResponse, ScreenshotRequest,
     ScreenshotResponse,

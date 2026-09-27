@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use crate::events::AgentCommandRequest;
+use crate::event::AgentCommandRequest;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
 use vmux_api::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};

@@ -1043,7 +1043,7 @@ mod tests {
         use crate::{Browser, PendingNavigationSnapshot};
         use bevy::ecs::relationship::Relationship;
         use bevy::prelude::*;
-        use vmux_agent::events::AgentCommandRequest;
+        use vmux_agent::event::AgentCommandRequest;
         use vmux_agent::host::AgentSessionPlugin;
         use vmux_agent::strategy::AgentStrategies;
         use vmux_api::protocol::{
@@ -1182,7 +1182,7 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_agent::events::CommandOrigin::User,
+                    origin: vmux_agent::event::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "https://example.com".to_string(),
                         pane: None,
@@ -1220,7 +1220,7 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_agent::events::CommandOrigin::User,
+                    origin: vmux_agent::event::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "https://example.com".to_string(),
                         pane: None,
@@ -1372,7 +1372,7 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_agent::events::CommandOrigin::User,
+                    origin: vmux_agent::event::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "https://example.com".to_string(),
                         pane: Some(pane_b.to_bits().to_string()),
@@ -1417,7 +1417,7 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id,
-                    origin: vmux_agent::events::CommandOrigin::User,
+                    origin: vmux_agent::event::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://terminal/".to_string(),
                         pane: None,
@@ -1618,7 +1618,7 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_agent::events::CommandOrigin::User,
+                    origin: vmux_agent::event::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://terminal/".to_string(),
                         pane: Some(pane_b.to_bits().to_string()),
@@ -1668,7 +1668,7 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_agent::events::CommandOrigin::User,
+                    origin: vmux_agent::event::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://nonsense/".to_string(),
                         pane: None,
@@ -1796,7 +1796,7 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_agent::events::CommandOrigin::User,
+                    origin: vmux_agent::event::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://sessions/claude/cli/".into(),
                         pane: None,
@@ -1842,7 +1842,7 @@ mod tests {
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
                     request_id: AgentRequestId::new(),
-                    origin: vmux_agent::events::CommandOrigin::User,
+                    origin: vmux_agent::event::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
                         url: "vmux://sessions/codex/cli/".into(),
                         pane: None,

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::events::{AgentApprovalReply, ApprovalDecision};
+use crate::event::{AgentApprovalReply, ApprovalDecision};
 use crate::run_state::AgentRunState;
 use vmux_api::protocol::{ClientMessage, SharedMessage};
 use vmux_service::client::ServiceRequest;

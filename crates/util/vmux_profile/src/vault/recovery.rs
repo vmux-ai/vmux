@@ -7,10 +7,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use super::keys::{KeyStore, SystemKeyStore};
-use super::repository::{
-    commit_changes, current_branch, git, git_optional, read_manifest, validate_encrypted_worktree,
-    write_manifest,
-};
+use super::repository::VaultRepositoryPath;
 use super::snapshot::{
     KEY_LEN, decode_hex, decrypt_bytes, encrypt_bytes, hex, load_encrypted_snapshot, validate_key,
 };
@@ -101,10 +98,12 @@ impl VaultRecovery {
         keys: &K,
         recovery_key: &[u8],
     ) -> Result<RecoveryKeyCreation, String> {
+        let vault = VaultRepositoryPath::at(&self.repository);
+        let git = vault.git();
         if read_recovery_envelope(&self.repository)?.is_some() {
             return Err("This Vault already has a Recovery Key".to_string());
         }
-        let mut manifest = read_manifest(&self.repository)?;
+        let mut manifest = vault.manifest()?;
         let previous_manifest = manifest.clone();
         let key = load_repository_key(&self.repository, keys, &manifest.vault_id)?;
         validate_key(recovery_key)?;
@@ -124,21 +123,22 @@ impl VaultRecovery {
         .map_err(|error| error.to_string())?;
         let finalization = (|| {
             manifest.version = MANIFEST_VERSION;
-            write_manifest(&self.repository, &manifest)?;
-            validate_encrypted_worktree(&self.repository)?;
-            commit_changes(&self.repository, "Add Vault Recovery Key")
+            vault.write_manifest(&manifest)?;
+            vault.validate_encrypted_worktree()?;
+            git.commit("Add Vault Recovery Key")
         })();
         if let Err(error) = finalization {
             let _ = std::fs::remove_file(directory.join(RECOVERY_FILE));
             let _ = std::fs::remove_dir(&directory);
-            let _ = write_manifest(&self.repository, &previous_manifest);
-            let _ = git(&self.repository, &["reset"]);
+            let _ = vault.write_manifest(&previous_manifest);
+            let _ = git.run(&["reset"]);
             return Err(error);
         }
         let mut pending_upload = false;
-        if !git_optional(&self.repository, &["remote", "get-url", "origin"]).is_empty() {
-            pending_upload = current_branch(&self.repository)
-                .and_then(|branch| git(&self.repository, &["push", "-u", "origin", &branch]))
+        if !git.optional(&["remote", "get-url", "origin"]).is_empty() {
+            pending_upload = git
+                .current_branch()
+                .and_then(|branch| git.run(&["push", "-u", "origin", &branch]))
                 .is_err();
         }
         Ok(RecoveryKeyCreation { pending_upload })
@@ -150,7 +150,7 @@ impl VaultRecovery {
         recovery_key: &str,
     ) -> Result<String, String> {
         let recovery_key = parse_recovery_key(recovery_key)?;
-        let manifest = read_manifest(&self.repository)?;
+        let manifest = VaultRepositoryPath::at(&self.repository).manifest()?;
         let envelope = read_recovery_envelope(&self.repository)?
             .ok_or_else(|| "This Vault has no Recovery Key".to_string())?;
         let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;

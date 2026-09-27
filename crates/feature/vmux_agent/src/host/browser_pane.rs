@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use vmux_core::agent::AgentKind;
 use vmux_layout::pane::Pane;
 
-use crate::events::CommandOrigin;
+use crate::event::CommandOrigin;
 use crate::session::AgentSession;
 
 #[derive(bevy::ecs::system::SystemParam)]
