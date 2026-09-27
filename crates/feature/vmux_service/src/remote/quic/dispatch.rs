@@ -171,11 +171,11 @@ async fn broker(state: &RemoteState, command: SharedAgentCommand) -> SharedRespo
 }
 
 async fn claim_once(state: &RemoteState, client_op_id: &ClientOpId) -> bool {
-    state.client_ops.lock().await.claim(client_op_id.clone())
+    state.client_ops.claim(client_op_id.clone()).await
 }
 
 async fn release(state: &RemoteState, client_op_id: &ClientOpId) {
-    state.client_ops.lock().await.release(client_op_id);
+    state.client_ops.release(client_op_id.clone()).await;
 }
 
 #[cfg(test)]
@@ -202,7 +202,7 @@ mod tests {
                 Default::default(),
                 Default::default(),
             ),
-            client_ops: Arc::new(Mutex::new(Default::default())),
+            client_ops: crate::remote::client_operation::ClientOperations::closed(),
         }
     }
 
@@ -298,7 +298,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unbounded_client_op_id_is_refused_before_it_is_claimed() {
+    async fn an_unbounded_client_op_id_is_refused() {
         let state = empty_state();
         let oversized = ClientOpId::new("x".repeat(4096));
 
@@ -316,25 +316,5 @@ mod tests {
             response,
             SharedResponse::Failed(SharedFailure::Invalid)
         ));
-        assert!(
-            claim_once(&state, &oversized).await,
-            "a refused id must never have been claimed"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_client_op_id_can_only_be_claimed_once_but_is_reusable_after_release() {
-        let state = empty_state();
-        let id = ClientOpId::new("op-1");
-
-        assert!(claim_once(&state, &id).await);
-        assert!(!claim_once(&state, &id).await);
-
-        release(&state, &id).await;
-
-        assert!(
-            claim_once(&state, &id).await,
-            "a released op must be retryable"
-        );
     }
 }

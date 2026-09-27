@@ -528,7 +528,7 @@ mod live {
                     Default::default(),
                     Default::default(),
                 ),
-                client_ops: Arc::new(Mutex::new(Default::default())),
+                client_ops: super::super::client_operation::ClientOperations::closed(),
             };
             let identity =
                 SelfSignedIdentity::generate(vec!["localhost".into()]).expect("identity");

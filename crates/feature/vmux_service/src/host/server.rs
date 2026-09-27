@@ -12,6 +12,7 @@ use vmux_api::protocol::{
 };
 
 use super::query::{ProcessQueries, ProcessQueryPlugin};
+use crate::remote::client_operation::{ClientOperationPlugin, ClientOperations};
 
 type PendingQueries = Arc<
     Mutex<
@@ -26,17 +27,22 @@ pub(crate) struct ServiceDaemonPlugin {
     exit: mpsc::Sender<()>,
     queries: ProcessQueries,
     query_plugin: std::sync::Mutex<Option<ProcessQueryPlugin>>,
+    client_operations: ClientOperations,
+    client_operation_plugin: std::sync::Mutex<Option<ClientOperationPlugin>>,
 }
 
 impl ServiceDaemonPlugin {
     pub(crate) fn new(
         listener: UnixListener,
-        wake: mpsc::UnboundedSender<ProcessId>,
+        wake: mpsc::UnboundedSender<()>,
         runtime: tokio::runtime::Handle,
         exit: mpsc::Sender<()>,
     ) -> Self {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
-        let (query_plugin, queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake);
+        let (query_plugin, queries) =
+            ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
+        let (client_operation_plugin, client_operations) =
+            ClientOperationPlugin::new(wake);
         Self {
             listener: std::sync::Mutex::new(Some(listener)),
             manager,
@@ -44,6 +50,8 @@ impl ServiceDaemonPlugin {
             exit,
             queries,
             query_plugin: std::sync::Mutex::new(Some(query_plugin)),
+            client_operations,
+            client_operation_plugin: std::sync::Mutex::new(Some(client_operation_plugin)),
         }
     }
 }
@@ -66,10 +74,24 @@ impl Plugin for ServiceDaemonPlugin {
             .unwrap()
             .take()
             .expect("service daemon plugin can only be built once");
+        let client_operations = self.client_operations.clone();
+        let client_operation_plugin = self
+            .client_operation_plugin
+            .lock()
+            .unwrap()
+            .take()
+            .expect("service daemon plugin can only be built once");
         let started_at = ServiceStartedAt(Instant::now());
-        app.add_plugins(query_plugin);
+        app.add_plugins((query_plugin, client_operation_plugin));
         let task = self.runtime.spawn(async move {
-            run_server(listener, server_manager, queries, started_at).await;
+            run_server(
+                listener,
+                server_manager,
+                queries,
+                client_operations,
+                started_at,
+            )
+            .await;
             let _ = exit.send(()).await;
         });
         app.world_mut().spawn((
@@ -211,6 +233,7 @@ async fn run_server(
     listener: UnixListener,
     manager: Arc<Mutex<ProcessManager>>,
     process_queries: ProcessQueries,
+    client_operations: ClientOperations,
     started_at: ServiceStartedAt,
 ) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
@@ -230,6 +253,7 @@ async fn run_server(
         Arc::clone(&agent_manager),
         Arc::clone(&acp_manager),
         remote_broker,
+        client_operations,
     );
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
@@ -1312,13 +1336,14 @@ mod tests {
     use tokio::sync::oneshot;
     use vmux_api::protocol::{AgentCommandResult, AgentQuery, AgentRequestId};
 
-    async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<ProcessId>) {
+    async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<()>) {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
         let (_query_plugin, process_queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake);
         let mut server = Box::pin(super::run_server(
             listener,
             Arc::clone(&manager),
             process_queries,
+            ClientOperations::closed(),
             ServiceStartedAt(Instant::now()),
         ));
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));

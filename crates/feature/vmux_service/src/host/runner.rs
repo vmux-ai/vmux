@@ -4,8 +4,6 @@ use bevy_app::prelude::*;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 
-use vmux_api::protocol::ProcessId;
-
 const HOUSEKEEPING_FLOOR: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,7 +15,7 @@ pub enum ParkOutcome {
 
 pub fn park_for_wake(
     runtime: &Handle,
-    wake_rx: &mut mpsc::UnboundedReceiver<ProcessId>,
+    wake_rx: &mut mpsc::UnboundedReceiver<()>,
     signal_rx: &mut mpsc::Receiver<()>,
     floor: Duration,
 ) -> ParkOutcome {
@@ -40,7 +38,7 @@ pub fn park_for_wake(
 
 pub fn wake_driven_runner(
     runtime: Handle,
-    mut wake_rx: mpsc::UnboundedReceiver<ProcessId>,
+    mut wake_rx: mpsc::UnboundedReceiver<()>,
     mut signal_rx: mpsc::Receiver<()>,
 ) -> impl FnOnce(App) -> AppExit {
     move |mut app: App| {
@@ -76,7 +74,7 @@ mod tests {
         let (wake_tx, mut wake_rx) = mpsc::unbounded_channel();
         let (_signal_tx, mut signal_rx) = mpsc::channel(1);
         for _ in 0..5 {
-            wake_tx.send(ProcessId::new()).unwrap();
+            wake_tx.send(()).unwrap();
         }
 
         let outcome = park_for_wake(
@@ -129,7 +127,7 @@ mod tests {
     #[test]
     fn the_server_dropping_its_wake_sender_stops_the_runner() {
         let rt = runtime();
-        let (wake_tx, mut wake_rx) = mpsc::unbounded_channel::<ProcessId>();
+        let (wake_tx, mut wake_rx) = mpsc::unbounded_channel::<()>();
         let (_signal_tx, mut signal_rx) = mpsc::channel(1);
         drop(wake_tx);
 

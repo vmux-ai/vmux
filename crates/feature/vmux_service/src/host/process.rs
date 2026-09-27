@@ -127,8 +127,7 @@ fn run_pty_reader(
     mut reader: Box<dyn Read + Send>,
     reader_fd: std::os::fd::RawFd,
     pty_tx: mpsc::UnboundedSender<Vec<u8>>,
-    wake_tx: mpsc::UnboundedSender<ProcessId>,
-    process_id: ProcessId,
+    wake_tx: mpsc::UnboundedSender<()>,
     in_flight: Arc<AtomicBool>,
     send_delay: Duration,
 ) {
@@ -161,7 +160,7 @@ fn run_pty_reader(
                 if !sent {
                     break;
                 }
-                let _ = wake_tx.send(process_id);
+                let _ = wake_tx.send(());
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
                 in_flight.store(false, Ordering::Release);
@@ -172,7 +171,7 @@ fn run_pty_reader(
             }
         }
     }
-    let _ = wake_tx.send(process_id);
+    let _ = wake_tx.send(());
 }
 
 #[derive(Clone)]
@@ -394,7 +393,7 @@ impl Process {
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
-        wake_tx: mpsc::UnboundedSender<ProcessId>,
+        wake_tx: mpsc::UnboundedSender<()>,
     ) -> Result<Self, String> {
         Self::new_with_wake_and_reader_delay(
             id,
@@ -418,7 +417,7 @@ impl Process {
         mut env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
-        wake_tx: mpsc::UnboundedSender<ProcessId>,
+        wake_tx: mpsc::UnboundedSender<()>,
         reader_send_delay: Duration,
     ) -> Result<Self, String> {
         crate::host::shell_integration::inject(
@@ -512,7 +511,6 @@ impl Process {
         drop(pair.slave);
 
         let (pty_tx, pty_rx) = mpsc::unbounded_channel();
-        let wake_process_id = id;
         #[cfg(unix)]
         let pty_reader_in_flight = Arc::new(AtomicBool::new(false));
         #[cfg(unix)]
@@ -526,7 +524,6 @@ impl Process {
                     reader_fd,
                     pty_tx,
                     wake_tx,
-                    wake_process_id,
                     thread_reader_in_flight,
                     reader_send_delay,
                 );
@@ -548,12 +545,12 @@ impl Process {
                             if pty_tx.send(buf[..n].to_vec()).is_err() {
                                 break;
                             }
-                            let _ = wake_tx.send(wake_process_id);
+                            let _ = wake_tx.send(());
                         }
                         Err(_) => break,
                     }
                 }
-                let _ = wake_tx.send(wake_process_id);
+                let _ = wake_tx.send(());
             })
             .map_err(|e| format!("failed to spawn PTY reader: {e}"))?;
 
@@ -1870,7 +1867,7 @@ impl Process {
 
 pub struct ProcessManager {
     pub processes: HashMap<ProcessId, Process>,
-    wake_tx: mpsc::UnboundedSender<ProcessId>,
+    wake_tx: mpsc::UnboundedSender<()>,
 }
 
 impl Default for ProcessManager {
@@ -1881,7 +1878,7 @@ impl Default for ProcessManager {
 }
 
 impl ProcessManager {
-    pub fn new(wake_tx: mpsc::UnboundedSender<ProcessId>) -> Self {
+    pub fn new(wake_tx: mpsc::UnboundedSender<()>) -> Self {
         Self {
             processes: HashMap::new(),
             wake_tx,

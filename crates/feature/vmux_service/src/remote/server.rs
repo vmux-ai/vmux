@@ -1,4 +1,3 @@
-use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use crate::{RelayToken, RemoteAuthorizationStore};
@@ -10,6 +9,7 @@ use crate::acp::AcpSessionManager;
 use crate::agent::AgentSessionManager;
 use crate::agent_broker::AgentBroker;
 use crate::message::Message;
+use crate::remote::client_operation::ClientOperations;
 use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
 use vmux_api::protocol::AgentAttachment;
 
@@ -21,7 +21,6 @@ pub(crate) const MAX_MEDIA_QUERY_BYTES: usize = 4 * 1024;
 const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
 const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 512;
-const MAX_CLIENT_OP_IDS: usize = 4096;
 const MAX_CLIENT_OP_ID_BYTES: usize = 256;
 
 #[derive(Clone)]
@@ -31,39 +30,14 @@ pub(crate) struct RemoteState {
     pub(crate) agents: Arc<Mutex<AgentSessionManager>>,
     pub(crate) acp: Arc<Mutex<AcpSessionManager>>,
     pub(crate) broker: AgentBroker,
-    pub(crate) client_ops: Arc<Mutex<ClientOpDeduper>>,
-}
-
-#[derive(Default)]
-pub(crate) struct ClientOpDeduper {
-    seen: HashSet<ClientOpId>,
-    order: VecDeque<ClientOpId>,
-}
-
-impl ClientOpDeduper {
-    pub(crate) fn claim(&mut self, client_op_id: ClientOpId) -> bool {
-        if !self.seen.insert(client_op_id.clone()) {
-            return false;
-        }
-        self.order.push_back(client_op_id);
-        while self.order.len() > MAX_CLIENT_OP_IDS {
-            if let Some(expired) = self.order.pop_front() {
-                self.seen.remove(&expired);
-            }
-        }
-        true
-    }
-
-    pub(crate) fn release(&mut self, client_op_id: &ClientOpId) {
-        self.seen.remove(client_op_id);
-        self.order.retain(|queued| queued != client_op_id);
-    }
+    pub(crate) client_ops: ClientOperations,
 }
 
 pub fn spawn(
     agents: Arc<Mutex<AgentSessionManager>>,
     acp: Arc<Mutex<AcpSessionManager>>,
     broker: AgentBroker,
+    client_ops: ClientOperations,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let relay_token = match RelayToken::ensure() {
@@ -84,7 +58,7 @@ pub fn spawn(
             agents,
             acp,
             broker,
-            client_ops: Arc::new(Mutex::new(ClientOpDeduper::default())),
+            client_ops,
         };
         if let Err(error) = super::quic::Supervisor::spawn(state).await {
             tracing::error!(%error, "remote quic: the relay supervisor ended");
@@ -423,19 +397,4 @@ mod tests {
         assert!(validate_remote_attachments(attachments).is_none());
     }
 
-    #[test]
-    fn client_operation_deduplication_is_bounded_and_releasable() {
-        let mut deduper = ClientOpDeduper::default();
-        let first = ClientOpId::new("first");
-        assert!(deduper.claim(first.clone()));
-        assert!(!deduper.claim(first.clone()));
-        deduper.release(&first);
-        assert!(deduper.claim(first));
-
-        for index in 0..=MAX_CLIENT_OP_IDS {
-            assert!(deduper.claim(ClientOpId::new(format!("op-{index}"))));
-        }
-        assert_eq!(deduper.order.len(), MAX_CLIENT_OP_IDS);
-        assert_eq!(deduper.seen.len(), MAX_CLIENT_OP_IDS);
-    }
 }

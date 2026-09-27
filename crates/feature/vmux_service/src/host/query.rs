@@ -49,11 +49,11 @@ pub(crate) struct ProcessQueries {
     transcript: mpsc::UnboundedSender<ProcessTranscriptQuery>,
     command_exit: mpsc::UnboundedSender<ProcessCommandExitQuery>,
     run_completion: mpsc::UnboundedSender<ProcessRunCompletionQuery>,
-    wake: mpsc::UnboundedSender<ProcessId>,
+    wake: mpsc::UnboundedSender<()>,
 }
 
 impl ProcessQueries {
-    fn new(wake: mpsc::UnboundedSender<ProcessId>) -> (Self, ProcessQueryReceivers) {
+    fn new(wake: mpsc::UnboundedSender<()>) -> (Self, ProcessQueryReceivers) {
         let (output, output_rx) = mpsc::unbounded_channel();
         let (transcript, transcript_rx) = mpsc::unbounded_channel();
         let (command_exit, command_exit_rx) = mpsc::unbounded_channel();
@@ -84,7 +84,7 @@ impl ProcessQueries {
             })
             .map_err(|_| "service query runtime unavailable".to_string())?;
         self.wake
-            .send(process_id)
+            .send(())
             .map_err(|_| "service query runtime unavailable".to_string())?;
         receiver
             .await
@@ -100,7 +100,7 @@ impl ProcessQueries {
             })
             .map_err(|_| "service query runtime unavailable".to_string())?;
         self.wake
-            .send(process_id)
+            .send(())
             .map_err(|_| "service query runtime unavailable".to_string())?;
         receiver
             .await
@@ -119,7 +119,7 @@ impl ProcessQueries {
             })
             .map_err(|_| "service query runtime unavailable".to_string())?;
         self.wake
-            .send(process_id)
+            .send(())
             .map_err(|_| "service query runtime unavailable".to_string())?;
         receiver
             .await
@@ -138,7 +138,7 @@ impl ProcessQueries {
             })
             .map_err(|_| "service query runtime unavailable".to_string())?;
         self.wake
-            .send(process_id)
+            .send(())
             .map_err(|_| "service query runtime unavailable".to_string())?;
         receiver
             .await
@@ -154,7 +154,7 @@ pub(crate) struct ProcessQueryPlugin {
 impl ProcessQueryPlugin {
     pub(crate) fn new(
         manager: Arc<AsyncMutex<ProcessManager>>,
-        wake: mpsc::UnboundedSender<ProcessId>,
+        wake: mpsc::UnboundedSender<()>,
     ) -> (Self, ProcessQueries) {
         let (queries, receivers) = ProcessQueries::new(wake);
         (
