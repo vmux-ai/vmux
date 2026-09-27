@@ -3,12 +3,12 @@ use vmux_api::protocol::{ProcessId, ServiceMessage};
 use vmux_core::event::TermViewportPatch;
 use vmux_service::client::ServiceInbound;
 
+use super::input_queue::TerminalProcessIndex;
 use super::plugin::{
     CommandLifecycleEvent, OscTitleChanged, ProcessExitedEvent, ServiceMessageSet,
 };
 use super::state::{TerminalCopyMode, TerminalMode};
 use crate::Terminal;
-use crate::process_index::TerminalProcessIndex;
 
 #[derive(Message)]
 pub(crate) struct TerminalProcessCreated {
@@ -202,7 +202,7 @@ fn route_service_messages(mut inbound: MessageReader<ServiceInbound>, mut writer
 
 fn project_terminal_modes(
     mut inbound: MessageReader<ServiceInbound>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     mut terminals: Query<(&mut TerminalMode, &mut TerminalCopyMode), With<Terminal>>,
 ) {
     for inbound in inbound.read() {
@@ -235,7 +235,6 @@ fn project_terminal_modes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process_index::TerminalProcessIndexPlugin;
     use bevy::ecs::message::Messages;
 
     #[test]
@@ -243,7 +242,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            TerminalProcessIndexPlugin,
+            super::super::input_queue::InputQueuePlugin,
             ServiceIngressPlugin,
         ))
         .add_message::<ServiceInbound>()

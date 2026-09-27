@@ -30,7 +30,7 @@ use vmux_setting::AppSettings;
 use super::input_queue::InputQueuePlugin;
 #[cfg(test)]
 use super::input_queue::pending_terminal_input;
-use super::input_queue::{NextTerminalInputSequence, enqueue_terminal_input};
+use super::input_queue::{QueueTerminalInput, TerminalProcessIndex};
 use super::loading::AgentLoading;
 use super::mouse::TerminalMouseState;
 use super::process_control::{PendingTerminalSnapshot, ProcessControlPlugin, TerminalGridSize};
@@ -44,7 +44,6 @@ use super::state::{
 };
 use crate::event::*;
 use crate::pid::{self, Pid};
-use crate::process_index::TerminalProcessIndex;
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
@@ -534,7 +533,7 @@ fn new_terminal_bundle_with_cwd_and_shell(
 fn respond_terminal_stack_spawn(
     mut reader: MessageReader<TerminalStackSpawnRequest>,
     settings: Res<AppSettings>,
-    mut sequence: ResMut<NextTerminalInputSequence>,
+    mut terminal_inputs: MessageWriter<QueueTerminalInput>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -579,7 +578,7 @@ fn respond_terminal_stack_spawn(
             commands.entity(terminal).insert(pid);
         }
         if let Some(data) = request.pending_input.clone() {
-            enqueue_terminal_input(&mut commands, &mut sequence, terminal, data);
+            terminal_inputs.write(QueueTerminalInput { terminal, data });
         }
     }
 }
@@ -675,40 +674,6 @@ fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
 
-struct MissingTerminalRestart {
-    entity: Entity,
-    new_id: ProcessId,
-    command: ClientMessage,
-    cwd: String,
-    agent_kind: Option<vmux_core::agent::AgentKind>,
-}
-
-impl MissingTerminalRestart {
-    fn new(
-        entity: Entity,
-        launch: crate::launch::TerminalLaunch,
-        agent_kind: Option<vmux_core::agent::AgentKind>,
-    ) -> Self {
-        let new_id = ProcessId::new();
-        let cwd = launch.cwd.clone();
-        Self {
-            entity,
-            new_id,
-            command: ClientMessage::CreateProcess {
-                process_id: new_id,
-                command: launch.command,
-                args: launch.args,
-                cwd: launch.cwd,
-                env: launch.env,
-                cols: 80,
-                rows: 24,
-            },
-            cwd,
-            agent_kind,
-        }
-    }
-}
-
 fn terminal_shell(settings: &AppSettings) -> String {
     settings
         .terminal
@@ -793,8 +758,18 @@ fn sync_agent_focus(
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
-    let active_pid = crate::target::active_terminal_for_tab(focus.stack, &terminals)
-        .and_then(|entity| agents.get(entity).ok().map(|(_, pid, _, _)| *pid));
+    let mut active_pid = None;
+    if let Some(stack) = focus.stack {
+        for (entity, _, child_of) in &terminals {
+            if child_of.get() != stack {
+                continue;
+            }
+            if let Ok((_, process_id, _, _)) = agents.get(entity) {
+                active_pid = Some(*process_id);
+            }
+            break;
+        }
+    }
     for (entity, process_id, mode, blurred) in &agents {
         let active = Some(*process_id) == active_pid;
         match agent_focus_transition(mode.focus_reporting, active, blurred) {
@@ -904,7 +879,7 @@ fn apply_process_start(
     mut created: MessageReader<TerminalProcessCreated>,
     mut failed: MessageReader<TerminalProcessCreateFailed>,
     awaiting_create: Query<(), (With<Terminal>, With<AwaitingProcessCreated>)>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     mut service_requests: MessageWriter<ServiceRequest>,
     mut commands: Commands,
 ) {
@@ -939,7 +914,7 @@ fn apply_process_start(
 fn apply_viewport_updates(
     mut updates: MessageReader<TerminalViewportUpdate>,
     terminals: Query<(), ServiceTerminalFilter>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     output_seen: Query<(), With<ShellOutputSeen>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -992,7 +967,7 @@ fn apply_process_exits(
         ),
         With<Terminal>,
     >,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
     mut stack_close_requests: MessageWriter<StackCloseRequest>,
     mut commands: Commands,
@@ -1043,7 +1018,7 @@ fn apply_process_exits(
 fn apply_service_errors(
     mut errors: MessageReader<TerminalServiceError>,
     terminals: Query<(), ServiceTerminalFilter>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     launches: Query<&crate::launch::TerminalLaunch>,
     settings: Res<AppSettings>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
@@ -1069,20 +1044,27 @@ fn apply_service_errors(
                         kind: crate::launch::TerminalKind::Plain,
                     });
             let agent_kind = agent_sessions.get(entity).ok().map(|session| session.kind);
-            let restart = MissingTerminalRestart::new(entity, launch, agent_kind);
+            let new_id = ProcessId::new();
+            let cwd = launch.cwd.clone();
             restarted_missing_processes.push(stale_pid);
-            service_requests.write(ServiceRequest(restart.command));
-            commands.entity(restart.entity).insert(restart.new_id);
-            commands.trigger(TerminalRestartRequest {
-                terminal: restart.entity,
-            });
-            if let Some(kind) = restart.agent_kind {
+            service_requests.write(ServiceRequest(ClientMessage::CreateProcess {
+                process_id: new_id,
+                command: launch.command,
+                args: launch.args,
+                cwd: launch.cwd,
+                env: launch.env,
+                cols: 80,
+                rows: 24,
+            }));
+            commands.entity(entity).insert(new_id);
+            commands.trigger(TerminalRestartRequest { terminal: entity });
+            if let Some(kind) = agent_kind {
                 commands
-                    .entity(restart.entity)
+                    .entity(entity)
                     .insert(vmux_core::agent::PendingAgentSession {
                         kind,
                         spawn_time: std::time::SystemTime::now(),
-                        cwd: std::path::PathBuf::from(&restart.cwd),
+                        cwd: std::path::PathBuf::from(cwd),
                     });
             }
         }
@@ -1092,7 +1074,7 @@ fn apply_service_errors(
 
 fn copy_service_selection(
     mut selections: MessageReader<TerminalSelectionText>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
 ) {
     for selection in selections.read() {
         if process_index.get(&selection.process_id).is_some() && !selection.text.is_empty() {
@@ -1857,7 +1839,7 @@ fn handle_terminal_copy_mode_command(
     keyboard_targets: Query<(), With<KeyboardOwner>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     mut copy_modes: Query<&mut TerminalCopyMode, With<Terminal>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -1919,15 +1901,25 @@ fn handle_terminal_clear_command(
     mut requests: MessageReader<super::command::TerminalClearRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    mut sequence: ResMut<NextTerminalInputSequence>,
-    mut commands: Commands,
+    mut terminal_inputs: MessageWriter<QueueTerminalInput>,
 ) {
-    let terminal = crate::target::active_terminal_for_tab(focus.stack, &terminals);
+    let mut terminal = None;
+    if let Some(stack) = focus.stack {
+        for (entity, _, child_of) in &terminals {
+            if child_of.get() == stack {
+                terminal = Some(entity);
+                break;
+            }
+        }
+    }
     for _ in requests.read() {
         let Some(terminal) = terminal else {
             continue;
         };
-        enqueue_terminal_input(&mut commands, &mut sequence, terminal, vec![0x0c]);
+        terminal_inputs.write(QueueTerminalInput {
+            terminal,
+            data: vec![0x0c],
+        });
     }
 }
 
@@ -1966,7 +1958,7 @@ pub struct OscTitleChanged {
 fn apply_osc_title(
     mut reader: MessageReader<OscTitleChanged>,
     mut commands: Commands,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     terminals: Query<Option<&PageIdentity>, With<Terminal>>,
     browsers: Option<NonSend<Browsers>>,
 ) {
@@ -2006,7 +1998,7 @@ fn apply_osc_title(
 fn clear_osc_title_on_exit(
     mut reader: MessageReader<ProcessExitedEvent>,
     mut commands: Commands,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     terminals: Query<(), (With<Terminal>, With<PageIdentity>)>,
 ) {
     for ev in reader.read() {
@@ -2021,7 +2013,6 @@ fn clear_osc_title_on_exit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process_index::TerminalProcessIndexPlugin;
     use bevy::ecs::schedule::Schedules;
     use vmux_core::input::KeyModifiers;
     use vmux_layout::settings::{
@@ -2059,26 +2050,17 @@ mod tests {
     #[test]
     fn terminal_reinput_preserves_existing_queued_input() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin, InputQueuePlugin));
+        app.add_plugins((MinimalPlugins, InputQueuePlugin));
         let pid = process_id(7);
         let terminal = app.world_mut().spawn((Terminal, pid)).id();
-        app.world_mut()
-            .run_system_cached_with(
-                |In((terminal, data)): In<(Entity, Vec<u8>)>,
-                 mut sequence: ResMut<NextTerminalInputSequence>,
-                 mut commands: Commands| {
-                    enqueue_terminal_input(&mut commands, &mut sequence, terminal, data);
-                },
-                (terminal, b"initial\r".to_vec()),
-            )
-            .unwrap();
-
-        app.world_mut()
-            .resource_mut::<Messages<TerminalReinputRequest>>()
-            .write(TerminalReinputRequest {
-                process_id: pid,
-                data: b"next\r".to_vec(),
-            });
+        app.world_mut().write_message(QueueTerminalInput {
+            terminal,
+            data: b"initial\r".to_vec(),
+        });
+        app.world_mut().write_message(TerminalReinputRequest {
+            process_id: pid,
+            data: b"next\r".to_vec(),
+        });
         app.update();
 
         assert_eq!(
@@ -2090,7 +2072,7 @@ mod tests {
     #[test]
     fn terminal_reinput_preserves_multiple_messages_in_order() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin, InputQueuePlugin));
+        app.add_plugins((MinimalPlugins, InputQueuePlugin));
         let pid = process_id(8);
         let terminal = app.world_mut().spawn((Terminal, pid)).id();
 
@@ -2456,34 +2438,6 @@ mod tests {
                 .count(),
             0
         );
-    }
-
-    #[test]
-    fn missing_service_process_restart_preserves_launch() {
-        let target = Entity::from_bits(1);
-        let launch = crate::launch::TerminalLaunch {
-            command: default_shell(),
-            args: vec![],
-            cwd: String::new(),
-            env: vec![],
-            kind: crate::launch::TerminalKind::Plain,
-        };
-        let restart = MissingTerminalRestart::new(target, launch, None);
-
-        assert_eq!(restart.entity, target);
-        assert!(restart.agent_kind.is_none());
-        assert!(matches!(
-            restart.command,
-            ClientMessage::CreateProcess {
-                process_id: _,
-                command,
-                args,
-                cwd,
-                env,
-                cols: 80,
-                rows: 24
-            } if command == default_shell() && args.is_empty() && cwd.is_empty() && env.is_empty()
-        ));
     }
 
     #[test]
@@ -2902,16 +2856,11 @@ mod tests {
         app.add_plugins((MinimalPlugins, InputQueuePlugin))
             .add_observer(on_terminal_restart);
         let entity = app.world_mut().spawn((Terminal, ShellOutputSeen)).id();
-        app.world_mut()
-            .run_system_cached_with(
-                |In((terminal, data)): In<(Entity, Vec<u8>)>,
-                 mut sequence: ResMut<NextTerminalInputSequence>,
-                 mut commands: Commands| {
-                    enqueue_terminal_input(&mut commands, &mut sequence, terminal, data);
-                },
-                (entity, b"queued\r".to_vec()),
-            )
-            .unwrap();
+        app.world_mut().write_message(QueueTerminalInput {
+            terminal: entity,
+            data: b"queued\r".to_vec(),
+        });
+        app.update();
 
         app.world_mut()
             .run_system_cached_with(
@@ -3062,7 +3011,7 @@ mod tests {
     fn apply_osc_title_sets_and_clears() {
         use bevy::ecs::message::Messages;
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
+        app.add_plugins((MinimalPlugins, InputQueuePlugin))
             .add_message::<OscTitleChanged>()
             .add_systems(Update, apply_osc_title);
         let pid = ProcessId::new();
@@ -3096,7 +3045,7 @@ mod tests {
     fn clear_osc_title_on_exit_removes_override() {
         use bevy::ecs::message::Messages;
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, TerminalProcessIndexPlugin))
+        app.add_plugins((MinimalPlugins, InputQueuePlugin))
             .add_message::<ProcessExitedEvent>()
             .add_systems(Update, clear_osc_title_on_exit);
         let pid = ProcessId::new();

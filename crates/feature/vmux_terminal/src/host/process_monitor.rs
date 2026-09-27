@@ -11,9 +11,9 @@ use vmux_service::client::ServiceRequest;
 use vmux_service::event::*;
 use vmux_service::plugin::ServiceConnected;
 
+use super::input_queue::TerminalProcessIndex;
 use crate::Terminal;
 use crate::plugin::reattach_terminal_bundle;
-use crate::process_index::TerminalProcessIndex;
 use vmux_core::{KeyboardOwner, Order};
 use vmux_layout::{
     native_open::{HostedPage, HostedPagePlugin},
@@ -472,7 +472,7 @@ fn broadcast_to_monitors(
 
 fn on_process_navigate(
     trigger: On<UiInput<ProcessNavigateEvent>>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
     active_tab_param: ActiveTabParam,
@@ -520,7 +520,7 @@ fn on_process_kill(
     trigger: On<UiInput<ProcessKillEvent>>,
     service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
     mut commands: Commands,
@@ -555,7 +555,7 @@ fn on_process_kill_all(
     _trigger: On<UiInput<ProcessKillAllEvent>>,
     service_processes: Query<(Entity, &ServiceProcessId), With<ServiceProcess>>,
     runtime: Query<Entity, With<ProcessMonitor>>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     terminals: Query<&ChildOf, With<Terminal>>,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,

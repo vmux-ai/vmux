@@ -9,7 +9,6 @@ mod mouse;
 pub mod pid;
 pub mod plugin;
 mod process_control;
-pub(crate) mod process_index;
 pub mod process_monitor;
 mod prompt;
 mod request;
@@ -18,7 +17,6 @@ pub mod shell_env;
 pub mod shell_input;
 pub mod snapshot_updater;
 mod state;
-pub mod target;
 pub mod theme;
 mod tool;
 

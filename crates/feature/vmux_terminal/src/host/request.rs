@@ -1,21 +1,16 @@
+use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_api::protocol::ProcessId;
 
-use crate::host::input_queue::{
-    InputQueuePlugin, NextTerminalInputSequence, enqueue_terminal_input,
-};
+use crate::host::input_queue::{InputQueuePlugin, QueueTerminalInput, TerminalProcessIndex};
 use crate::host::plugin::{ServiceMessageSet, TerminalStackSpawnRequest};
-use crate::host::process_index::TerminalProcessIndex;
 use crate::{ProcessExited, Terminal};
 
 pub struct TerminalRequestPlugin;
 
 impl Plugin for TerminalRequestPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            crate::contract::TerminalContractPlugin,
-            crate::host::process_index::TerminalProcessIndexPlugin,
-        ));
+        app.add_plugins(crate::contract::TerminalContractPlugin);
         if !app.is_plugin_added::<InputQueuePlugin>() {
             app.add_plugins(InputQueuePlugin);
         }
@@ -48,23 +43,41 @@ pub struct RunShellRequest {
 fn handle_terminal_send_requests(
     mut reader: MessageReader<TerminalSendRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    mut sequence: ResMut<NextTerminalInputSequence>,
-    mut commands: Commands,
+    mut terminal_inputs: MessageWriter<QueueTerminalInput>,
 ) {
     for request in reader.read() {
         let TerminalSendRequest { text, terminal } = request.clone();
-
-        let target = if let Some(target) = terminal.as_deref() {
-            crate::target::parse_terminal_target(target, &process_index, &terminals)
-        } else {
-            crate::target::active_terminal_for_tab(focus.stack, &terminals)
-        };
+        let mut target_entity = None;
+        if let Some(target) = terminal.as_deref() {
+            if let Ok(process_id) = target.parse::<ProcessId>()
+                && let Some(entity) = process_index.get(&process_id)
+                && terminals.contains(entity)
+            {
+                target_entity = Some(entity);
+            } else if let Ok(bits) = target.parse::<u64>()
+                && let Some(entity) = Entity::try_from_bits(bits)
+                && terminals.contains(entity)
+            {
+                target_entity = Some(entity);
+            }
+        } else if let Some(stack) = focus.stack {
+            for (entity, _, child_of) in &terminals {
+                if child_of.get() == stack {
+                    target_entity = Some(entity);
+                    break;
+                }
+            }
+        }
+        let target = target_entity;
         let Some(terminal) = target else {
             continue;
         };
-        enqueue_terminal_input(&mut commands, &mut sequence, terminal, text.into_bytes());
+        terminal_inputs.write(QueueTerminalInput {
+            terminal,
+            data: text.into_bytes(),
+        });
     }
 }
 
@@ -79,18 +92,29 @@ fn handle_run_shell_requests(
         ),
     >,
     terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    mut sequence: ResMut<NextTerminalInputSequence>,
-    mut commands: Commands,
+    mut terminal_inputs: MessageWriter<QueueTerminalInput>,
     mut terminal_stack_spawns: Option<MessageWriter<TerminalStackSpawnRequest>>,
 ) {
     for request in reader.read() {
         let RunShellRequest { command, cwd, mode } = request.clone();
         let input = crate::shell_input::shell_command_input(&command);
-        if matches!(mode, ShellMode::Active)
-            && let Some(terminal) = crate::target::active_terminal_for_tab(focus.stack, &terminals)
-        {
-            enqueue_terminal_input(&mut commands, &mut sequence, terminal, input);
-            continue;
+        if matches!(mode, ShellMode::Active) {
+            let mut active_terminal = None;
+            if let Some(stack) = focus.stack {
+                for (terminal, _, child_of) in &terminals {
+                    if child_of.get() == stack {
+                        active_terminal = Some(terminal);
+                        break;
+                    }
+                }
+            }
+            if let Some(terminal) = active_terminal {
+                terminal_inputs.write(QueueTerminalInput {
+                    terminal,
+                    data: input,
+                });
+                continue;
+            }
         }
         let Some(terminal_stack_spawns) = terminal_stack_spawns.as_mut() else {
             continue;

@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
+use bevy::ecs::entity::EntityHashMap;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use vmux_api::protocol::ClientMessage;
+use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_service::client::ServiceRequest;
 use vmux_service::plugin::ServiceConnected;
 
@@ -8,41 +11,52 @@ use super::plugin::{
     AwaitingProcessCreated, PendingServiceCreate, ServiceMessageSet, ShellOutputSeen,
     TerminalReinputRequest,
 };
-use super::process_index::TerminalProcessIndex;
 use crate::{ProcessExited, Terminal};
 
 pub(super) struct InputQueuePlugin;
 
 impl Plugin for InputQueuePlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<super::process_index::TerminalProcessIndexPlugin>() {
-            app.add_plugins(super::process_index::TerminalProcessIndexPlugin);
-        }
-        app.init_resource::<NextTerminalInputSequence>()
-            .add_message::<ServiceRequest>()
+        app.add_message::<ServiceRequest>()
             .add_message::<TerminalReinputRequest>()
+            .add_message::<QueueTerminalInput>()
             .add_systems(
-                Update,
+                Startup,
+                (spawn_terminal_process_index, spawn_terminal_input_sequence),
+            )
+            .add_systems(PreUpdate, sync_terminal_process_index)
+            .add_systems(Update, enqueue_terminal_reinput.after(ServiceMessageSet))
+            .add_systems(
+                PostUpdate,
                 (
-                    enqueue_terminal_reinput,
+                    queue_terminal_input,
                     bevy::ecs::schedule::ApplyDeferred,
                     flush_terminal_input,
                 )
-                    .chain()
-                    .after(ServiceMessageSet),
+                    .chain(),
             );
     }
 }
 
-#[derive(Resource, Default)]
-pub(crate) struct NextTerminalInputSequence(u64);
+#[derive(Component, Default, Debug)]
+pub(crate) struct TerminalProcessIndex {
+    by_process: HashMap<ProcessId, Entity>,
+    by_entity: EntityHashMap<ProcessId>,
+}
 
-impl NextTerminalInputSequence {
-    fn take(&mut self) -> u64 {
-        let sequence = self.0;
-        self.0 = self.0.wrapping_add(1);
-        sequence
+impl TerminalProcessIndex {
+    pub fn get(&self, process_id: &ProcessId) -> Option<Entity> {
+        self.by_process.get(process_id).copied()
     }
+}
+
+#[derive(Component, Default)]
+struct NextTerminalInputSequence(u64);
+
+#[derive(Message)]
+pub(crate) struct QueueTerminalInput {
+    pub terminal: Entity,
+    pub data: Vec<u8>,
 }
 
 #[derive(Component)]
@@ -62,19 +76,75 @@ pub(crate) struct TerminalInput {
     data: Vec<u8>,
 }
 
-pub(crate) fn enqueue_terminal_input(
-    commands: &mut Commands,
-    sequence: &mut NextTerminalInputSequence,
-    terminal: Entity,
-    data: Vec<u8>,
-) {
+fn spawn_terminal_process_index(mut commands: Commands) {
     commands.spawn((
-        TerminalInput {
-            sequence: sequence.take(),
-            data,
-        },
-        TerminalInputTarget { terminal },
+        Name::new("Terminal process index"),
+        TerminalProcessIndex::default(),
     ));
+}
+
+fn sync_terminal_process_index(
+    mut index: Single<&mut TerminalProcessIndex>,
+    changed: Query<
+        (Entity, &ProcessId),
+        (With<Terminal>, Or<(Changed<ProcessId>, Added<Terminal>)>),
+    >,
+    mut removed_process_ids: RemovedComponents<ProcessId>,
+    mut removed_terminals: RemovedComponents<Terminal>,
+) {
+    for entity in removed_process_ids.read() {
+        let Some(process_id) = index.by_entity.remove(&entity) else {
+            continue;
+        };
+        if index.by_process.get(&process_id) == Some(&entity) {
+            index.by_process.remove(&process_id);
+        }
+    }
+    for entity in removed_terminals.read() {
+        let Some(process_id) = index.by_entity.remove(&entity) else {
+            continue;
+        };
+        if index.by_process.get(&process_id) == Some(&entity) {
+            index.by_process.remove(&process_id);
+        }
+    }
+    for (entity, process_id) in &changed {
+        if let Some(previous_process_id) = index.by_entity.insert(entity, *process_id) {
+            index.by_process.remove(&previous_process_id);
+        }
+        if let Some(previous_entity) = index.by_process.insert(*process_id, entity)
+            && previous_entity != entity
+        {
+            index.by_entity.remove(&previous_entity);
+        }
+    }
+}
+
+fn spawn_terminal_input_sequence(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Terminal input sequence"),
+        NextTerminalInputSequence::default(),
+    ));
+}
+
+fn queue_terminal_input(
+    mut requests: MessageReader<QueueTerminalInput>,
+    mut next: Single<&mut NextTerminalInputSequence>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let sequence = next.0;
+        next.0 = next.0.wrapping_add(1);
+        commands.spawn((
+            TerminalInput {
+                sequence,
+                data: request.data.clone(),
+            },
+            TerminalInputTarget {
+                terminal: request.terminal,
+            },
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -91,10 +161,9 @@ pub(crate) fn pending_terminal_input(world: &mut World, terminal: Entity) -> Vec
 
 fn enqueue_terminal_reinput(
     mut requests: MessageReader<TerminalReinputRequest>,
-    process_index: Res<TerminalProcessIndex>,
+    process_index: Single<&TerminalProcessIndex>,
     terminals: Query<(), With<Terminal>>,
-    mut sequence: ResMut<NextTerminalInputSequence>,
-    mut commands: Commands,
+    mut terminal_inputs: MessageWriter<QueueTerminalInput>,
 ) {
     for request in requests.read() {
         let Some(terminal) = process_index.get(&request.process_id) else {
@@ -103,7 +172,10 @@ fn enqueue_terminal_reinput(
         if !terminals.contains(terminal) {
             continue;
         }
-        enqueue_terminal_input(&mut commands, &mut sequence, terminal, request.data.clone());
+        terminal_inputs.write(QueueTerminalInput {
+            terminal,
+            data: request.data.clone(),
+        });
     }
 }
 
@@ -144,5 +216,64 @@ fn flush_terminal_input(
             data: input.data.clone(),
         }));
         commands.entity(entity).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn process_id(byte: u8) -> ProcessId {
+        ProcessId([byte; 16])
+    }
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.add_plugins(InputQueuePlugin);
+        app
+    }
+
+    fn indexed_entity(app: &mut App, process_id: &ProcessId) -> Option<Entity> {
+        let mut query = app.world_mut().query::<&TerminalProcessIndex>();
+        query.single(app.world()).unwrap().get(process_id)
+    }
+
+    #[test]
+    fn indexes_terminal_processes() {
+        let mut app = app();
+        let process_id = process_id(1);
+        let entity = app.world_mut().spawn((Terminal, process_id)).id();
+
+        app.update();
+
+        assert_eq!(indexed_entity(&mut app, &process_id), Some(entity));
+    }
+
+    #[test]
+    fn replaces_changed_process_ids() {
+        let mut app = app();
+        let previous = process_id(1);
+        let current = process_id(2);
+        let entity = app.world_mut().spawn((Terminal, previous)).id();
+        app.update();
+
+        app.world_mut().entity_mut(entity).insert(current);
+        app.update();
+
+        assert_eq!(indexed_entity(&mut app, &previous), None);
+        assert_eq!(indexed_entity(&mut app, &current), Some(entity));
+    }
+
+    #[test]
+    fn removes_despawned_terminals() {
+        let mut app = app();
+        let process_id = process_id(1);
+        let entity = app.world_mut().spawn((Terminal, process_id)).id();
+        app.update();
+
+        app.world_mut().entity_mut(entity).despawn();
+        app.update();
+
+        assert_eq!(indexed_entity(&mut app, &process_id), None);
     }
 }
