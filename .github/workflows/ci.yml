@@ -235,7 +235,7 @@ jobs:
               - 'scripts/*ios*'
               - '.github/workflows/ci.yml'
               - '!crates/app/vmux_desktop/**'
-              - '!crates/vmux_native/**'
+              - '!crates/util/vmux_native/**'
               - '!patches/**'
 
   deps-rust:

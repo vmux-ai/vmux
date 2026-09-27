@@ -669,7 +669,7 @@ there to ask.
 ## Agents
 
 Every action a person can take is also an **MCP tool**. Vmux ships a stdio MCP server —
-line-delimited JSON-RPC in `crates/host/vmux_mcp` — so any MCP-capable agent drives the
+line-delimited JSON-RPC in `crates/util/vmux_mcp` — so any MCP-capable agent drives the
 workspace the way a person does.
 
 The server is a thin front end: it forwards each call to the daemon over the unix socket.
@@ -748,46 +748,47 @@ crates/
 │   ├── vmux_cli
 │   ├── vmux_desktop
 │   └── vmux_mobile
-├── host/                   runtime with no UI, owns state
-│   ├── vmux_mcp
-│   ├── vmux_transport
-│   └── vmux_service
-├── page/                   answers a URL, one per page
+├── feature/                user-facing capability and page ownership
 │   ├── vmux_agent
 │   ├── vmux_chat
 │   ├── vmux_command
 │   ├── vmux_editor
+│   ├── vmux_extension
+│   ├── vmux_git
 │   ├── vmux_history
 │   ├── vmux_knowledge
 │   ├── vmux_layout
+│   ├── vmux_service
 │   ├── vmux_setting
+│   ├── vmux_shortcut
+│   ├── vmux_simulator
 │   ├── vmux_space
 │   ├── vmux_start
 │   ├── vmux_team
-│   └── vmux_terminal
-├── vmux_app                platform-neutral application plugin facade
-├── vmux_browser            browser runtime and native-page renderer
-├── vmux_clipboard
-├── vmux_core
-├── vmux_flex
-├── vmux_git
-├── vmux_macro
-├── vmux_native             the VirtualDom driver and its wry webview
-├── vmux_path               canonical and scoped path identities
-├── vmux_profile
-├── vmux_session
-├── vmux_tool               tool manifests, imports, and dotfile state
-├── vmux_ui
-└── vmux_api
+│   ├── vmux_terminal
+│   ├── vmux_tool
+│   └── vmux_vault
+└── util/                   reusable infrastructure without its own page
+    ├── vmux_api
+    ├── vmux_app            platform-neutral application plugin facade
+    ├── vmux_browser        browser runtime and native-page renderer
+    ├── vmux_clipboard
+    ├── vmux_core
+    ├── vmux_flex
+    ├── vmux_macro
+    ├── vmux_mcp
+    ├── vmux_native         the VirtualDom driver and its wry webview
+    ├── vmux_path           canonical and scoped path identities
+    ├── vmux_profile
+    ├── vmux_session
+    ├── vmux_transport
+    └── vmux_ui
 ```
 
-Everything not in the three directories stays flat: shared libraries, plus `vmux_browser`,
-which sits above `page/` and below `vmux_app` — a `page/` crate must never depend on it, and
-only the framework facade may compose it. Application crates consume `vmux_app` and add their
-platform adapters.
-
-Two traps. `host/` is **not** a layer above `page/` — `page/vmux_agent` depends on
-`host/vmux_service`, because those crates cfg-split and a page links only the non-host half.
+Directory placement follows ownership, not dependency depth. A feature owns its page registration,
+UI, host ECS, and domain behavior. Utilities may provide transport, rendering, shared types, or
+application composition without owning a user-facing page. The `host` cfg alias describes compiled
+code and has no directory counterpart.
 And the `host` cfg alias is **not** the directory: `vmux_ui` holds host-gated code while
 staying flat.
 

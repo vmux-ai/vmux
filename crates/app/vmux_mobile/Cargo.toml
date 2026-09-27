@@ -36,15 +36,15 @@ tokio = { workspace = true, features = ["time"] }
 url = { workspace = true }
 uuid = { workspace = true }
 quinn = { workspace = true }
-vmux_transport = { path = "../../host/vmux_transport" }
-vmux_app = { path = "../../vmux_app", features = ["mobile"] }
-vmux_path = { path = "../../vmux_path" }
-vmux_service = { path = "../../host/vmux_service" }
-vmux_api = { path = "../../vmux_api", features = ["bevy"] }
-vmux_chat = { path = "../../page/vmux_chat" }
-vmux_start = { path = "../../page/vmux_start" }
-vmux_team = { path = "../../page/vmux_team" }
-vmux_ui = { path = "../../vmux_ui" }
+vmux_transport = { path = "../../util/vmux_transport" }
+vmux_app = { path = "../../util/vmux_app", features = ["mobile"] }
+vmux_path = { path = "../../util/vmux_path" }
+vmux_service = { path = "../../feature/vmux_service" }
+vmux_api = { path = "../../util/vmux_api", features = ["bevy"] }
+vmux_chat = { path = "../../feature/vmux_chat" }
+vmux_start = { path = "../../feature/vmux_start" }
+vmux_team = { path = "../../feature/vmux_team" }
+vmux_ui = { path = "../../util/vmux_ui" }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 block2 = "0.6"

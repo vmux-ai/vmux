@@ -81,7 +81,7 @@ features = ["derive"]
 version = "1"
 
 [dependencies.vmux_api]
-path = "../../crates/vmux_api"
+path = "../../crates/util/vmux_api"
 features = ["bevy"]
 
 [dependencies.zeroize]

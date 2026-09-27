@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-dist="${1:-${VMUX_WEB_BUNDLE_DIST:-$ROOT/crates/vmux_ui/dist}}"
+dist="${1:-${VMUX_WEB_BUNDLE_DIST:-$ROOT/crates/util/vmux_ui/dist}}"
 stamp="$dist/.bundle-stamp"
 
 if [[ ! -f "$stamp" ]]; then

@@ -1,0 +1,77 @@
+[package]
+name = "vmux_editor"
+build = "../../build_cfg.rs"
+description = "Bevy + CEF + Dioxus file viewer webview"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+regex.workspace = true
+serde = { workspace = true }
+rkyv = { workspace = true }
+unicode-width = "0.2"
+vmux_core = { path = "../../util/vmux_core" }
+vmux_native = { path = "../../util/vmux_native" }
+vmux_git = { path = "../vmux_git" }
+vmux_api = { path = "../../util/vmux_api" }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+arboard = "3"
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+chardetng = "1"
+crossbeam-channel = { workspace = true }
+encoding_rs = "0.8"
+flate2 = "1"
+ignore = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+lsp-types = "0.97"
+notify = { workspace = true }
+percent-encoding = "2"
+pulldown-cmark = { version = "0.12", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+ron = { workspace = true }
+ropey = "1"
+serde_json = { workspace = true }
+sha2 = "0.10"
+syntect = { workspace = true }
+tar = "0.4"
+tempfile = "3"
+tracing = "0.1"
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+unicode-segmentation = "1"
+url = { workspace = true }
+vmux_command = { path = "../vmux_command" }
+vmux_flex = { path = "../../util/vmux_flex" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_mcp = { path = "../../util/vmux_mcp" }
+vmux_tool = { path = "../vmux_tool" }
+vmux_path = { path = "../../util/vmux_path" }
+vmux_service = { path = "../vmux_service" }
+vmux_setting = { path = "../vmux_setting" }
+vmux_space = { path = "../vmux_space" }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(not(target_os = "ios"))'.dev-dependencies]
+url = { workspace = true }
+
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+base64 = "0.22"
+dioxus = { workspace = true }
+vmux_ui = { path = "../../util/vmux_ui", default-features = false }
+
+[[bin]]
+name = "vmux_mock_lsp"
+path = "src/bin/vmux_mock_lsp.rs"
+
+[lints]
+workspace = true
