@@ -78,7 +78,7 @@ impl Plugin for TerminalPlugin {
                 crate::host::request::TerminalRequestPlugin,
                 TerminalServicePlugin,
                 TerminalInputPlugin,
-                crate::processes_monitor::ProcessesMonitorPlugin,
+                crate::process_monitor::ProcessMonitorPlugin,
                 super::loading::LoadingPlugin,
                 super::prompt::PromptPlugin,
                 crate::snapshot_updater::SnapshotPlugin,

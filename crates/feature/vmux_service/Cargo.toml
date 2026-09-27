@@ -2,7 +2,7 @@
 name = "vmux_service"
 version.workspace = true
 edition.workspace = true
-description = "Background service hosting persistent terminal processes (and its monitor webview)"
+description = "Background service hosting persistent processes"
 publish = false
 build = "../../build_cfg_git.rs"
 
@@ -23,7 +23,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 vmux_transport = { path = "../../util/vmux_transport" }
 vmux_api = { path = "../../util/vmux_api" }
-vmux_native = { path = "../../util/vmux_native" }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 base64 = "0.22"
@@ -54,10 +53,6 @@ tokio-util = { version = "0.7", features = ["compat"] }
 tempfile = "3.27.0"
 uuid = { workspace = true }
 url = { workspace = true }
-
-[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
-dioxus = { workspace = true }
-vmux_ui = { path = "../../util/vmux_ui", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { version = "0.3", default-features = false, features = [

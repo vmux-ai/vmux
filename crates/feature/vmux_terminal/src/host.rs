@@ -9,7 +9,7 @@ pub mod pid;
 pub mod plugin;
 mod process_control;
 pub(crate) mod process_index;
-pub mod processes_monitor;
+pub mod process_monitor;
 mod prompt;
 mod request;
 mod service;

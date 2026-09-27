@@ -1386,12 +1386,16 @@ mod tests {
 
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<()>) {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
-        let (_query_plugin, process_queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake);
+        let (_query_plugin, process_queries) =
+            ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
+        let (_agent_plugin, agent_sessions) =
+            crate::agent::AgentSessionPlugin::new(tokio::runtime::Handle::current(), wake);
         let mut server = Box::pin(super::run_server(
             listener,
             Arc::clone(&manager),
             process_queries,
             ClientOperations::closed(),
+            agent_sessions,
             ServiceStartedAt(Instant::now()),
         ));
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));

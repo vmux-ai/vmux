@@ -5,6 +5,8 @@
 )]
 
 pub mod event;
+#[cfg(not(target_os = "ios"))]
+pub mod monitor;
 pub mod render_model;
 
 #[cfg(ui)]

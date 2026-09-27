@@ -67,7 +67,7 @@ struct IngressWriters<'w> {
     create_failed: MessageWriter<'w, TerminalProcessCreateFailed>,
     viewport: MessageWriter<'w, TerminalViewportUpdate>,
     exited: MessageWriter<'w, ProcessExitedEvent>,
-    process_snapshot: MessageWriter<'w, crate::processes_monitor::ServiceProcessSnapshot>,
+    process_snapshot: MessageWriter<'w, super::process_monitor::ServiceProcessSnapshot>,
     service_error: MessageWriter<'w, TerminalServiceError>,
     selection: MessageWriter<'w, TerminalSelectionText>,
     lifecycle: MessageWriter<'w, CommandLifecycleEvent>,
@@ -144,7 +144,7 @@ fn route_service_messages(mut inbound: MessageReader<ServiceInbound>, mut writer
             ServiceMessage::ProcessList { processes } => {
                 writers
                     .process_snapshot
-                    .write(crate::processes_monitor::ServiceProcessSnapshot(
+                    .write(super::process_monitor::ServiceProcessSnapshot(
                         processes.clone(),
                     ));
             }
@@ -248,7 +248,7 @@ mod tests {
         ))
         .add_message::<ServiceInbound>()
         .add_message::<ProcessExitedEvent>()
-        .add_message::<crate::processes_monitor::ServiceProcessSnapshot>()
+        .add_message::<crate::process_monitor::ServiceProcessSnapshot>()
         .add_message::<CommandLifecycleEvent>()
         .add_message::<OscTitleChanged>()
         .add_message::<vmux_core::notify::BellReceived>();

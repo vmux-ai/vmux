@@ -21,10 +21,12 @@ use vmux_layout::{
     stack::{ActiveTabParam, OpenRequest, Stack, focused_stack, stack_bundle},
 };
 
-pub struct ProcessesMonitorPlugin;
+pub struct ProcessMonitorPlugin;
 
-impl Plugin for ProcessesMonitorPlugin {
+impl Plugin for ProcessMonitorPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(ui)]
+        app.add_plugins(crate::monitor::ProcessMonitorPage::plugin());
         app.add_message::<ServiceProcessSnapshot>()
             .add_systems(Startup, spawn_process_monitor)
             .add_plugins(UiEventPlugin::<(
@@ -54,19 +56,17 @@ impl Plugin for ProcessesMonitorPlugin {
             .add_observer(on_process_navigate)
             .add_observer(on_process_kill)
             .add_observer(on_process_kill_all)
-            .add_plugins(HostedPagePlugin::<ProcessesMonitor>::default());
+            .add_plugins(HostedPagePlugin::<ProcessMonitorView>::default());
     }
 }
 
 #[derive(Component, Default)]
 #[require(UiState<ProcessesUiState>)]
-pub struct ProcessesMonitor;
+pub struct ProcessMonitorView;
 
-impl ProcessesMonitor {}
-
-impl HostedPage for ProcessesMonitor {
+impl HostedPage for ProcessMonitorView {
     const HOST: &'static str = "services";
-    const URL: &'static str = vmux_service::PAGE_URL;
+    const URL: &'static str = crate::monitor::ProcessMonitorPage::URL;
     const TITLE: &'static str = "Background Services";
 }
 
@@ -75,8 +75,7 @@ struct OpenServicesRequest;
 
 impl CommandRequest for OpenServicesRequest {
     fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("processes_monitor.ron"))
-            .select(&["service_open"])
+        CommandDefinitions::from_ron(include_str!("process_monitor.ron")).select(&["service_open"])
     }
 }
 
@@ -97,7 +96,7 @@ fn open_services(
 ) {
     for _ in requests.read() {
         stack_requests.write(OpenRequest {
-            url: Some(vmux_service::PAGE_URL.to_string()),
+            url: Some(crate::monitor::ProcessMonitorPage::URL.to_string()),
         });
     }
 }
@@ -252,6 +251,7 @@ struct ProcSample {
 
 fn spawn_process_monitor(mut commands: Commands) {
     commands.spawn((Name::new("Process monitor"), ProcessMonitor::default()));
+    commands.spawn(crate::monitor::ProcessMonitorPage::MANIFEST);
 }
 
 fn reconcile_service_processes(
@@ -293,8 +293,8 @@ fn request_process_list(
     time: Res<Time>,
     mut runtime: Query<&mut ProcessMonitor>,
     connected: Option<Single<(), With<ServiceConnected>>>,
-    monitors: Query<(), With<ProcessesMonitor>>,
-    claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
+    monitors: Query<(), With<ProcessMonitorView>>,
+    claimed: Query<(), (With<ProcessMonitorView>, Added<KeyboardOwner>)>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     if monitors.is_empty() {
@@ -312,8 +312,8 @@ fn request_process_list(
 fn sample_process_usage(
     time: Res<Time>,
     mut runtime: Query<(Entity, &mut ProcessMonitor)>,
-    monitors: Query<(), With<ProcessesMonitor>>,
-    claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
+    monitors: Query<(), With<ProcessMonitorView>>,
+    claimed: Query<(), (With<ProcessMonitorView>, Added<KeyboardOwner>)>,
     mut service_processes: Query<(&ProcessPid, &mut Usage), With<ServiceProcess>>,
     local_processes: Query<(Entity, &ProcessPid), With<LocalVmuxProcess>>,
     mut commands: Commands,
@@ -413,8 +413,8 @@ fn broadcast_to_monitors(
     )>,
     local_processes: Query<(&ProcessPid, &LocalVmuxProcess, &Usage)>,
     connected: Option<Single<(), With<ServiceConnected>>>,
-    monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
-    claimed: Query<(), (With<ProcessesMonitor>, Added<KeyboardOwner>)>,
+    monitors: Query<Entity, (With<ProcessMonitorView>, With<PageReady>)>,
+    claimed: Query<(), (With<ProcessMonitorView>, Added<KeyboardOwner>)>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
     mut commands: Commands,
 ) {

@@ -1,6 +1,6 @@
-use vmux_api::protocol::{CopyModeKey, ProcessId, ServiceMessage};
+use vmux_api::protocol::{CopyModeKey, ProcessId};
 use vmux_core::event::TermSelectionRange;
-use vmux_service::process::Process;
+use vmux_service::process::{Process, ProcessUpdate};
 
 static PTY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -338,14 +338,13 @@ struct ViewportPatchProbe {
 }
 
 fn latest_viewport_patch(
-    rx: &mut tokio::sync::broadcast::Receiver<ServiceMessage>,
+    rx: &mut tokio::sync::broadcast::Receiver<ProcessUpdate>,
 ) -> Option<ViewportPatchProbe> {
     let mut latest = None;
     while let Ok(msg) = rx.try_recv() {
-        if let ServiceMessage::ViewportPatch {
-            cursor, copy_mode, ..
-        } = msg
-        {
+        if let ProcessUpdate::Viewport(patch) = msg {
+            let cursor = patch.cursor;
+            let copy_mode = patch.copy_mode;
             latest = Some(ViewportPatchProbe { cursor, copy_mode });
         }
     }

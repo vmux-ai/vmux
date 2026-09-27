@@ -1,12 +1,7 @@
 pub use vmux_api::service as event;
 
-#[cfg(ui)]
-pub mod ui;
-
 pub mod message;
 pub mod remote;
-
-pub const PAGE_URL: &str = "vmux://services/";
 
 #[cfg(host)]
 mod host;

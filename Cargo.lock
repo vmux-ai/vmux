@@ -10832,7 +10832,6 @@ dependencies = [
  "bevy_ecs",
  "chrono",
  "crossbeam-channel",
- "dioxus",
  "futures-util",
  "image",
  "libc",
@@ -10858,11 +10857,9 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_core",
- "vmux_native",
  "vmux_path",
  "vmux_profile",
  "vmux_transport",
- "vmux_ui",
  "vte",
 ]
 

@@ -2,8 +2,8 @@
 
 use std::collections::VecDeque;
 
-use crate::event::*;
 use dioxus::prelude::*;
+use vmux_api::service::*;
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerTone,
@@ -12,8 +12,8 @@ use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{LineIcon, LineIconView};
 
-#[vmux_native::page(component = Page)]
-pub struct ServicePage;
+#[vmux_native::page(file = "src/monitor.ron", component = Page)]
+pub struct ProcessMonitorPage;
 
 #[component]
 pub fn Page() -> Element {
