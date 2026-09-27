@@ -178,7 +178,7 @@ fn on_close_request(
 }
 
 fn inject_sizing(
-    mut events: MessageReader<crate::WebviewLoadCompleted>,
+    mut events: MessageReader<crate::host::WebviewLoadCompleted>,
     popups: Query<(), With<ExtensionPopup>>,
     browsers: NonSend<Browsers>,
 ) {

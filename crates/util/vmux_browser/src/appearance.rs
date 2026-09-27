@@ -8,7 +8,7 @@ use vmux_layout::LayoutCef;
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 
-use crate::{browser_accept_language_list, theme_event};
+use crate::host::{browser_accept_language_list, theme_event};
 pub(crate) struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {

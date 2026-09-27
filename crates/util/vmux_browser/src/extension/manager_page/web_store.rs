@@ -170,7 +170,7 @@ fn inject_on_navigation(
 }
 
 fn inject_on_load(
-    mut events: MessageReader<crate::WebviewLoadCompleted>,
+    mut events: MessageReader<crate::host::WebviewLoadCompleted>,
     browsers: NonSend<Browsers>,
     browser_meta: Query<&vmux_core::PageMetadata, With<vmux_layout::Browser>>,
     injectors: Query<&WebStoreInjector>,

@@ -14,7 +14,7 @@ use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
 
-use crate::{
+use crate::host::{
     CefPointerRegionQuery, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE,
     cef_pointer_regions_contains, pointer_button_from_mouse_button,
 };

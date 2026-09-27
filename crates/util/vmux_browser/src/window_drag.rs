@@ -6,7 +6,7 @@ use vmux_flex::prelude::{ComputedNode, LayoutSystems};
 use vmux_layout::event::WindowDragRegionEvent;
 use vmux_layout::{LayoutCef, window::VmuxWindow};
 
-use crate::LayoutPointerCapture;
+use crate::host::LayoutPointerCapture;
 
 impl Plugin for WindowDragPlugin {
     fn build(&self, app: &mut App) {

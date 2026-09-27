@@ -1,4 +1,4 @@
-use crate::PendingNavigationSnapshot;
+use crate::host::{PendingNavigationSnapshot, apply_pending_navigation_updates};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, SnapshotResult};
@@ -31,7 +31,7 @@ impl Plugin for SnapshotPlugin {
             .add_systems(
                 Update,
                 drive_pending_nav_snapshots
-                    .after(crate::apply_pending_navigation_updates)
+                    .after(apply_pending_navigation_updates)
                     .after(vmux_command::WriteCommandRequests),
             )
             .add_systems(

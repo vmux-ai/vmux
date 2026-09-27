@@ -9,7 +9,7 @@ use vmux_layout::{
     stack::{Stack, stack_bundle},
 };
 
-use crate::WebviewLoadCompleted;
+use crate::host::WebviewLoadCompleted;
 pub(crate) struct PageLifePlugin;
 
 impl Plugin for PageLifePlugin {

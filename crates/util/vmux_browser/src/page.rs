@@ -13,7 +13,7 @@ use vmux_layout::{
     stack::{Stack, active_stack_in_pane, stack_bundle},
 };
 
-use crate::{
+use crate::host::{
     PageOpenAwaitSnapshot, PageOpenFallbackDeferred, PendingNavigationUpdate,
     apply_pending_navigation_updates, send_page_open_response,
 };

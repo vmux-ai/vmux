@@ -25,7 +25,7 @@ use vmux_native::{
 use vmux_setting::{AppSettings, ColorScheme};
 use vmux_ui::hooks::EventListenerError;
 
-use crate::LayoutPointerCapture;
+use crate::host::LayoutPointerCapture;
 use crate::present::PaneFrames;
 
 pub(super) struct MacosBrowserPlugin;

@@ -27,7 +27,7 @@ use vmux_layout::{
 
 use vmux_setting::AppSettings;
 
-use crate::{
+use crate::host::{
     LayoutFixedOffsets, active_stack_in_tab, first_browser_meta, layout_window_padding_from_node,
     layout_window_padding_from_settings, should_emit_cached_payload, should_emit_update, tab_of,
 };

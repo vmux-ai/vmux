@@ -20,7 +20,7 @@ use vmux_layout::{
 use vmux_terminal::{self as terminal, Terminal};
 
 use crate::input::RecentBrowserInteraction;
-use crate::{PendingNavigationUpdate, send_page_open_response};
+use crate::host::{PendingNavigationUpdate, send_page_open_response};
 
 pub(crate) struct NavigationPlugin;
 

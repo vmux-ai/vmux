@@ -28,7 +28,7 @@ use vmux_layout::{
 use vmux_core::KeyboardOwner;
 use vmux_setting::AppSettings;
 
-use crate::{
+use crate::host::{
     CLAUDE_LOGO_PNG, CODEX_LOGO_PNG, CommandBarRoute, LayoutPointerCapture, LogoBitmap,
     NATIVE_COMMAND_BAR_ROUTE, VIBE_LOGO_PNG, agent_ring_rgb, decode_premultiplied, hex_to_rgb,
 };
@@ -1549,7 +1549,7 @@ mod tests {
         assert_eq!(width, 0.0);
     }
 
-    use crate::native_command_bar_route;
+    use crate::host::native_command_bar_route;
     use crate::tests::test_app_settings_with_radius;
 
     #[test]

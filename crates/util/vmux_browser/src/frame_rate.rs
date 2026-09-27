@@ -17,14 +17,15 @@ use vmux_layout::Browser;
 use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState};
 
 #[cfg(not(target_os = "macos"))]
-use crate::{
+use crate::host::{
     CefPointerRegionQuery, LayoutHoverRefreshState, LayoutPointerCapture,
     cef_pointer_regions_contains, reset_layout_cef_hover,
 };
-use crate::{
-    LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE, NativeLayout,
+use crate::host::{
+    LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE,
     WindowedHoverRefreshState, native_left_mouse_down,
 };
+use crate::NativeLayout;
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 pub(crate) struct FrameRatePlugin;
