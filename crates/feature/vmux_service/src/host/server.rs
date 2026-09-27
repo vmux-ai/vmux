@@ -14,11 +14,7 @@ use vmux_api::protocol::{
 use super::query::{ProcessQueries, ProcessQueryPlugin};
 use crate::remote::client_operation::{ClientOperationPlugin, ClientOperations};
 
-type PendingQueries = Arc<
-    Mutex<
-        HashMap<vmux_api::protocol::AgentRequestId, tokio::sync::oneshot::Sender<ServiceMessage>>,
-    >,
->;
+type PendingQueries = crate::agent::AgentQueryResponses;
 
 pub(crate) struct ServiceDaemonPlugin {
     listener: std::sync::Mutex<Option<UnixListener>>,
@@ -116,14 +112,7 @@ impl Drop for ServiceServerTask {
     }
 }
 
-type PendingCommands = Arc<
-    Mutex<
-        HashMap<
-            vmux_api::protocol::AgentRequestId,
-            tokio::sync::oneshot::Sender<vmux_api::protocol::AgentCommandResult>,
-        >,
-    >,
->;
+type PendingCommands = crate::agent::AgentCommandResponses;
 
 fn to_acp_mcp_server(
     server: ManagedMcpServer,
@@ -235,17 +224,16 @@ async fn run_server(
     started_at: ServiceStartedAt,
 ) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
-    let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
-    let pending_commands: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
-    let pending_tool_calls: crate::agent_broker::PendingToolCalls =
-        Arc::new(Mutex::new(HashMap::new()));
+    let pending_queries = PendingQueries::default();
+    let pending_commands = PendingCommands::default();
+    let pending_tool_calls = crate::agent::AgentToolResponses::default();
     let agent_manager = Arc::new(Mutex::new(crate::agent::AgentSessionManager::default()));
     let acp_manager = Arc::new(Mutex::new(crate::acp::AcpSessionManager::default()));
-    let remote_broker = crate::agent_broker::AgentBroker::new(
+    let remote_broker = crate::agent::AgentBroker::new(
         agent_tx.clone(),
-        Arc::clone(&pending_commands),
-        Arc::clone(&pending_queries),
-        Arc::clone(&pending_tool_calls),
+        pending_commands.clone(),
+        pending_queries.clone(),
+        pending_tool_calls.clone(),
     );
     let remote_handle = crate::remote::server::spawn(
         Arc::clone(&agent_manager),
@@ -267,9 +255,9 @@ async fn run_server(
                 };
                 let mgr = Arc::clone(&manager);
                 let agent_tx = agent_tx.clone();
-                let pending_queries = Arc::clone(&pending_queries);
-                let pending_commands = Arc::clone(&pending_commands);
-                let pending_tool_calls = Arc::clone(&pending_tool_calls);
+                let pending_queries = pending_queries.clone();
+                let pending_commands = pending_commands.clone();
+                let pending_tool_calls = pending_tool_calls.clone();
                 let agent_manager = Arc::clone(&agent_manager);
                 let acp_manager = Arc::clone(&acp_manager);
                 let process_queries = process_queries.clone();
@@ -427,11 +415,9 @@ async fn route_agent_query_response(
     request_id: vmux_api::protocol::AgentRequestId,
     response: ServiceMessage,
     pending_queries: &PendingQueries,
-    broker: &crate::agent_broker::AgentBroker,
+    broker: &crate::agent::AgentBroker,
 ) {
-    let pending = pending_queries.lock().await.remove(&request_id);
-    if let Some(tx) = pending {
-        let _ = tx.send(response);
+    if pending_queries.resolve(request_id, response.clone()).await {
         return;
     }
     if let Some((content, is_error)) = query_response_to_content(response) {
@@ -446,7 +432,7 @@ async fn handle_client(
     agent_tx: broadcast::Sender<ServiceMessage>,
     pending_queries: PendingQueries,
     pending_commands: PendingCommands,
-    pending_tool_calls: crate::agent_broker::PendingToolCalls,
+    pending_tool_calls: crate::agent::AgentToolResponses,
     agent_manager: Arc<Mutex<crate::agent::AgentSessionManager>>,
     acp_manager: Arc<Mutex<crate::acp::AcpSessionManager>>,
     process_queries: ProcessQueries,
@@ -461,11 +447,11 @@ async fn handle_client(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
     let mut page_agent_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
-    let broker = crate::agent_broker::AgentBroker::new(
+    let broker = crate::agent::AgentBroker::new(
         agent_tx.clone(),
-        Arc::clone(&pending_commands),
-        Arc::clone(&pending_queries),
-        Arc::clone(&pending_tool_calls),
+        pending_commands.clone(),
+        pending_queries.clone(),
+        pending_tool_calls.clone(),
     );
 
     let mut created_processes: Vec<ProcessId> = Vec::new();
@@ -1004,10 +990,7 @@ async fn handle_client(
             }
 
             ClientMessage::AgentCommandResponse { request_id, result } => {
-                let pending = pending_commands.lock().await.remove(&request_id);
-                if let Some(tx) = pending {
-                    let _ = tx.send(result);
-                } else {
+                if !broker.resolve_command(request_id, result.clone()).await {
                     let (content, is_error) = command_result_to_content(result);
                     broker.resolve_tool(request_id, content, is_error).await;
                 }
@@ -1331,8 +1314,6 @@ async fn handle_client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::oneshot;
-    use vmux_api::protocol::{AgentCommandResult, AgentQuery, AgentRequestId};
 
     async fn run_test_server(listener: UnixListener, wake: mpsc::UnboundedSender<()>) {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
@@ -1394,54 +1375,6 @@ mod tests {
             })
             .is_none()
         );
-    }
-
-    #[tokio::test]
-    async fn pending_queries_roundtrips_oneshot() {
-        let pending: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
-        let request_id = AgentRequestId::new();
-        let (tx, rx) = oneshot::channel::<ServiceMessage>();
-        pending.lock().await.insert(request_id, tx);
-
-        let response = ServiceMessage::AgentSettingsResult {
-            request_id,
-            result: Ok(vmux_api::protocol::JsonValue::Object(Vec::new())),
-        };
-        let resp_tx = pending.lock().await.remove(&request_id).expect("entry");
-        resp_tx.send(response).expect("send");
-
-        let received = rx.await.expect("recv");
-        assert!(matches!(
-            received,
-            ServiceMessage::AgentSettingsResult {
-                request_id: received_id,
-                result: Ok(_),
-            } if received_id == request_id
-        ));
-    }
-
-    #[tokio::test]
-    async fn pending_queries_returns_none_for_unknown_request_id() {
-        let pending: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
-        let request_id = AgentRequestId::new();
-        assert!(pending.lock().await.remove(&request_id).is_none());
-
-        let _ = AgentQuery::ReadLayout { anchor: None };
-    }
-
-    #[tokio::test]
-    async fn pending_commands_roundtrips_oneshot() {
-        let pending: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
-        let request_id = AgentRequestId::new();
-        let (tx, rx) = oneshot::channel::<AgentCommandResult>();
-        pending.lock().await.insert(request_id, tx);
-
-        let result = AgentCommandResult::Ok;
-        let resp_tx = pending.lock().await.remove(&request_id).expect("entry");
-        resp_tx.send(result.clone()).expect("send");
-
-        let received = rx.await.expect("recv");
-        assert_eq!(received, result);
     }
 
     #[tokio::test]

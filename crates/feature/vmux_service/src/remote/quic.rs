@@ -522,7 +522,7 @@ mod live {
                 authorizations: Arc::new(Mutex::new(authorizations.clone())),
                 agents: Arc::new(Mutex::new(Default::default())),
                 acp: Arc::new(Mutex::new(Default::default())),
-                broker: crate::agent_broker::AgentBroker::new(
+                broker: crate::agent::AgentBroker::new(
                     agent_tx,
                     Default::default(),
                     Default::default(),

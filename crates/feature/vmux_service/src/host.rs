@@ -6,7 +6,6 @@ pub use vmux_transport::DeviceId;
 
 pub mod acp;
 pub mod agent;
-pub mod agent_broker;
 pub mod bundle;
 pub mod cleanup;
 pub mod cli;
@@ -20,6 +19,7 @@ pub mod plugin;
 pub mod process;
 pub mod providers;
 mod query;
+mod request;
 pub mod registry;
 pub mod run_marker;
 pub mod runner;

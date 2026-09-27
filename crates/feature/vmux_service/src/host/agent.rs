@@ -4,15 +4,160 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{Mutex, broadcast, mpsc};
 
-use crate::agent_broker::AgentBroker;
 use crate::message::{AssistantBlock, Message};
 use crate::providers::{anthropic, mistral, openai};
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
+use crate::request::PendingRequests;
 use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
 use vmux_api::protocol::{
-    AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, JsonValue, ServiceMessage,
-    SharedEvent,
+    AGENT_COMMAND_TIMEOUT, AGENT_QUERY_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentAttachment, AgentCommand,
+    AgentCommandResult, AgentQuery, AgentRequestId, AgentRunStatus, ApprovalDecision,
+    BROWSER_NAVIGATE_TIMEOUT, JsonValue, ProcessId, ServiceMessage, SharedEvent,
 };
+
+pub(crate) type AgentCommandResponses = PendingRequests<AgentRequestId, AgentCommandResult>;
+pub(crate) type AgentQueryResponses = PendingRequests<AgentRequestId, ServiceMessage>;
+pub(crate) type AgentToolResponses = PendingRequests<AgentRequestId, (String, bool)>;
+
+const NO_AGENT_SUBSCRIBER: &str = "no desktop subscribed to agent commands";
+
+#[derive(Clone)]
+pub struct AgentBroker {
+    outbound: broadcast::Sender<ServiceMessage>,
+    commands: AgentCommandResponses,
+    queries: AgentQueryResponses,
+    tools: AgentToolResponses,
+}
+
+impl AgentBroker {
+    pub(crate) fn new(
+        outbound: broadcast::Sender<ServiceMessage>,
+        commands: AgentCommandResponses,
+        queries: AgentQueryResponses,
+        tools: AgentToolResponses,
+    ) -> Self {
+        Self {
+            outbound,
+            commands,
+            queries,
+            tools,
+        }
+    }
+
+    pub(crate) async fn command(
+        &self,
+        request_id: AgentRequestId,
+        anchor: Option<ProcessId>,
+        command: AgentCommand,
+    ) -> Result<AgentCommandResult, String> {
+        if self.outbound.receiver_count() == 0 {
+            return Err(NO_AGENT_SUBSCRIBER.to_string());
+        }
+        let timeout = match &command {
+            AgentCommand::BrowserNavigate(_) => BROWSER_NAVIGATE_TIMEOUT,
+            _ => AGENT_COMMAND_TIMEOUT,
+        };
+        self.commands
+            .request(
+                request_id,
+                timeout,
+                || {
+                    self.outbound
+                        .send(ServiceMessage::AgentCommand {
+                            request_id,
+                            anchor,
+                            command,
+                        })
+                        .is_ok()
+                },
+                NO_AGENT_SUBSCRIBER,
+                "agent command timed out",
+            )
+            .await
+    }
+
+    pub(crate) async fn query(
+        &self,
+        request_id: AgentRequestId,
+        query: AgentQuery,
+    ) -> Result<ServiceMessage, String> {
+        if self.outbound.receiver_count() == 0 {
+            return Err(NO_AGENT_SUBSCRIBER.to_string());
+        }
+        let timeout = match &query {
+            AgentQuery::RecordStop { .. } => vmux_api::protocol::RECORD_STOP_TIMEOUT,
+            _ => AGENT_QUERY_TIMEOUT,
+        };
+        self.queries
+            .request(
+                request_id,
+                timeout,
+                || {
+                    self.outbound
+                        .send(ServiceMessage::AgentQuery { request_id, query })
+                        .is_ok()
+                },
+                NO_AGENT_SUBSCRIBER,
+                "agent query timed out",
+            )
+            .await
+    }
+
+    pub(crate) async fn tool_call(
+        &self,
+        request_id: AgentRequestId,
+        sid: String,
+        name: String,
+        args: JsonValue,
+    ) -> Result<(String, bool), String> {
+        if self.outbound.receiver_count() == 0 {
+            return Err(NO_AGENT_SUBSCRIBER.to_string());
+        }
+        self.tools
+            .request(
+                request_id,
+                AGENT_TOOL_TIMEOUT,
+                || {
+                    self.outbound
+                        .send(ServiceMessage::AgentToolCall {
+                            request_id,
+                            sid,
+                            name,
+                            args,
+                        })
+                        .is_ok()
+                },
+                NO_AGENT_SUBSCRIBER,
+                "agent tool call timed out",
+            )
+            .await
+    }
+
+    pub(crate) async fn resolve_command(
+        &self,
+        request_id: AgentRequestId,
+        result: AgentCommandResult,
+    ) -> bool {
+        self.commands.resolve(request_id, result).await
+    }
+
+    pub(crate) async fn resolve_query(
+        &self,
+        request_id: AgentRequestId,
+        response: ServiceMessage,
+    ) -> bool {
+        self.queries.resolve(request_id, response).await
+    }
+
+    pub(crate) async fn resolve_tool(
+        &self,
+        request_id: AgentRequestId,
+        content: String,
+        is_error: bool,
+    ) {
+        self.tools.resolve(request_id, (content, is_error)).await;
+    }
+}
 
 pub struct PageProvider {
     pub build_request: BuildRequest,

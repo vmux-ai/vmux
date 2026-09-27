@@ -6,8 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::RemotePaths;
 use crate::acp::AcpSessionManager;
-use crate::agent::AgentSessionManager;
-use crate::agent_broker::AgentBroker;
+use crate::agent::{AgentBroker, AgentSessionManager};
 use crate::message::Message;
 use crate::remote::client_operation::ClientOperations;
 use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
