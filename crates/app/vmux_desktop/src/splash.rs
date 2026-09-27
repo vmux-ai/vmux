@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn splash_plugin_registered_by_native_window_plugin() {
         let mut app = App::new();
-        app.add_plugins(crate::plugins::NativeWindowPlugin);
+        app.add_plugins(crate::plugin::NativeWindowPlugin);
 
         assert!(app.is_plugin_added::<SplashPlugin>());
     }

@@ -6,9 +6,9 @@ use crate::{
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
 
-pub struct DesktopPlugins;
+pub struct DesktopPluginGroup;
 
-impl PluginGroup for DesktopPlugins {
+impl PluginGroup for DesktopPluginGroup {
     fn build(self) -> PluginGroupBuilder {
         #[allow(unused_mut)]
         let mut builder = PluginGroupBuilder::start::<Self>()
