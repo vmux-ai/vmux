@@ -48,7 +48,7 @@ pub fn ui_event(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn agent_request(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn agent(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match bin_event::expand(args.into(), input, bin_event::Direction::Agent) {
         Ok(tokens) => tokens.into(),

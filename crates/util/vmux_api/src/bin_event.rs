@@ -38,7 +38,7 @@ mod tests {
     #[vmux_api::host_event]
     struct SecondEvent;
 
-    #[vmux_api::agent_request]
+    #[vmux_api::agent]
     struct OpenAgentRequest;
 
     #[test]
@@ -67,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_request_uses_the_same_typed_id_contract() {
+    fn agent_contract_uses_the_same_typed_id_contract() {
         assert_eq!(OpenAgentRequest::id(), "open_agent@1");
         assert_eq!(OpenAgentRequest::PERMISSION, "OpenAgentRequest");
     }

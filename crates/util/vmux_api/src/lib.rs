@@ -47,6 +47,6 @@ pub use terminal::{
 };
 pub use ui_state::{BatchedUiState, UiState, UiStatePatch};
 pub use vmux_macro::{
-    agent_request, bidirectional_event, contract, host_event, ui_event, ui_event_variants,
-    ui_state, ui_state_patch,
+    agent, bidirectional_event, contract, host_event, ui_event, ui_event_variants, ui_state,
+    ui_state_patch,
 };

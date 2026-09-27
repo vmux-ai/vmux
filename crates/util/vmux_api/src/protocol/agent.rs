@@ -116,14 +116,14 @@ pub struct AgentBookmarkPage {
     pub favicon_url: Option<String>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentInvokeCommand {
     pub id: String,
     #[rkyv(attr(allow(dead_code)))]
     pub args: JsonValue,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentNewTerminalTab {
     pub cwd: String,
     pub command: String,
@@ -131,68 +131,68 @@ pub struct AgentNewTerminalTab {
     pub env: Vec<(String, String)>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentRunShell {
     pub command: String,
     pub cwd: String,
     pub mode: AgentShellMode,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBrowserNavigate {
     pub url: String,
     pub pane: Option<String>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBrowserInstallExtension {
     pub source: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentTerminalSend {
     pub text: String,
     pub terminal: Option<String>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentFocusPane {
     pub pane: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentRenameProfile {
     pub name: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentUpdateSettings {
     pub path: String,
     pub value: JsonValue,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentUpdateLayout {
     pub layout: crate::protocol::layout::LayoutSnapshot,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBrowserHistoryStep {
     pub pane: Option<String>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBrowserHistorySearch {
     pub query: String,
     pub limit: u32,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentOpenInNewStack {
     pub url: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentSpaceCreate {
     pub name: Option<String>,
 }
@@ -208,7 +208,7 @@ impl AgentSpaceCreate {
     }
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentSpaceRename {
     pub space_id: String,
     pub name: String,
@@ -223,7 +223,7 @@ impl AgentSpaceRename {
     }
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentSpaceDelete {
     pub space_id: String,
 }
@@ -237,7 +237,7 @@ impl AgentSpaceDelete {
     }
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentOpenBeside {
     pub anchor: ProcessId,
     pub direction: Option<AgentPaneDirection>,
@@ -245,7 +245,7 @@ pub struct AgentOpenBeside {
     pub focus: bool,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentRun {
     pub anchor: ProcessId,
     pub command: String,
@@ -257,13 +257,13 @@ pub struct AgentRun {
     pub done_marker: Option<String>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentNotify {
     pub title: Option<String>,
     pub body: Option<String>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentFileTouched {
     pub anchor: ProcessId,
     pub path: String,
@@ -273,60 +273,60 @@ pub struct AgentFileTouched {
     pub kind: FileTouchKind,
 }
 
-#[vmux_api::agent_request(Copy, Eq)]
+#[vmux_api::agent(Copy, Eq)]
 pub struct AgentCreateWorktree {
     pub anchor: ProcessId,
 }
 
-#[vmux_api::agent_request(Copy, Eq)]
+#[vmux_api::agent(Copy, Eq)]
 pub struct AgentTurnEnded {
     pub anchor: ProcessId,
 }
 
-#[vmux_api::agent_request(Copy, Eq)]
+#[vmux_api::agent(Copy, Eq)]
 pub struct AgentResumeInAcp {
     pub anchor: ProcessId,
 }
 
-#[vmux_api::agent_request(Copy, Eq)]
+#[vmux_api::agent(Copy, Eq)]
 pub struct AgentChooseWorkspace {
     pub anchor: ProcessId,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentCreateWorktreeOnBranch {
     pub anchor: ProcessId,
     pub branch: String,
     pub project: Option<String>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBookmarkAdd {
     pub page: AgentBookmarkPage,
     pub folder: Option<String>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBookmarkRemove {
     pub uuid: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBookmarkPin {
     pub uuid: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBookmarkUnpin {
     pub uuid: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBookmarkPinUrl {
     pub page: AgentBookmarkPage,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentBookmarkFolderCreate {
     pub name: String,
 }
@@ -388,20 +388,20 @@ impl AgentBookmarkFolderCreate {
     }
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentRequestUserChoice {
     pub anchor: ProcessId,
     pub question: String,
     pub options: Vec<String>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentChooseWorkspaceAtPath {
     pub anchor: ProcessId,
     pub path: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentPrepareWorktree {
     pub anchor: ProcessId,
     pub path: Option<String>,
@@ -409,7 +409,7 @@ pub struct AgentPrepareWorktree {
     pub create: bool,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentFileSearch {
     pub anchor: ProcessId,
     pub root: String,
@@ -417,13 +417,13 @@ pub struct AgentFileSearch {
     pub matches: Vec<FileSearchMatch>,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentSetConversationTitle {
     pub anchor: ProcessId,
     pub title: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentWriteKnowledge {
     pub anchor: ProcessId,
     pub path: Option<String>,
@@ -431,14 +431,14 @@ pub struct AgentWriteKnowledge {
     pub content: String,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentSearchKnowledge {
     pub anchor: ProcessId,
     pub query: String,
     pub limit: u16,
 }
 
-#[vmux_api::agent_request]
+#[vmux_api::agent]
 pub struct AgentReadKnowledge {
     pub anchor: ProcessId,
     pub path: String,
