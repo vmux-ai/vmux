@@ -17,8 +17,7 @@ pub struct ProcessMonitorPage;
 
 #[component]
 pub fn Page() -> Element {
-    let monitor = ProcessMonitorUi::use_state();
-    let view = monitor.view();
+    let (view, mut search) = use_process_monitor();
 
     let empty_detail = format!(
         "{} {}",
@@ -31,9 +30,9 @@ pub fn Page() -> Element {
             ManagerHeader {
                 title: translate("services-title"),
                 count: view.process_count,
-                search_value: view.search,
+                search_value: search(),
                 search_placeholder: translate("services-filter"),
-                onsearch: move |event: FormEvent| monitor.set_search(event.value()),
+                onsearch: move |event: FormEvent| search.set(event.value()),
                 onkeydown: None,
                 actions: rsx! {
                     StatusBadge { connected: view.connected }
@@ -68,61 +67,44 @@ pub fn Page() -> Element {
     }
 }
 
-#[derive(Clone, Copy)]
-struct ProcessMonitorUi {
-    state: Signal<ProcessesUiState>,
-    history: Signal<ServiceHistory>,
-    search: Signal<String>,
-}
+fn use_process_monitor() -> (ProcessMonitorView, Signal<String>) {
+    use_theme();
+    let state = use_ui_state::<ProcessesUiState>();
+    let mut history = use_signal(ServiceHistory::default);
+    use_effect(move || history.write().push(&state.read()));
+    let search = use_signal(String::new);
 
-impl ProcessMonitorUi {
-    fn use_state() -> Self {
-        use_theme();
-        let state = use_ui_state::<ProcessesUiState>();
-        let mut history = use_signal(ServiceHistory::default);
-        use_effect(move || history.write().push(&state.read()));
-        Self {
-            state,
-            history,
-            search: use_signal(String::new),
+    let state = state.read();
+    let query = search.read().to_lowercase();
+    let mut processes = Vec::new();
+    for process in &state.processes {
+        if query.is_empty()
+            || process.id.to_lowercase().contains(&query)
+            || process.shell.to_lowercase().contains(&query)
+            || process.cwd.to_lowercase().contains(&query)
+            || process.pid.to_string().contains(&query)
+        {
+            processes.push(process.clone());
         }
     }
-
-    fn view(self) -> ProcessMonitorView {
-        let state = self.state.read();
-        let query = self.search.read().to_lowercase();
-        let mut processes = Vec::new();
-        for process in &state.processes {
-            if query.is_empty()
-                || process.id.to_lowercase().contains(&query)
-                || process.shell.to_lowercase().contains(&query)
-                || process.cwd.to_lowercase().contains(&query)
-                || process.pid.to_string().contains(&query)
-            {
-                processes.push(process.clone());
-            }
-        }
-        processes.sort_by(|left, right| {
-            right
-                .cpu_percent
-                .total_cmp(&left.cpu_percent)
-                .then_with(|| right.mem_bytes.cmp(&left.mem_bytes))
-                .then_with(|| left.pid.cmp(&right.pid))
-        });
+    processes.sort_by(|left, right| {
+        right
+            .cpu_percent
+            .total_cmp(&left.cpu_percent)
+            .then_with(|| right.mem_bytes.cmp(&left.mem_bytes))
+            .then_with(|| left.pid.cmp(&right.pid))
+    });
+    (
         ProcessMonitorView {
             connected: state.connected,
             has_processes: !state.processes.is_empty(),
             has_managed_processes: state.processes.iter().any(|process| process.managed),
             process_count: state.processes.len(),
             processes,
-            history: self.history.read().clone(),
-            search: (self.search)(),
-        }
-    }
-
-    fn set_search(mut self, search: String) {
-        self.search.set(search);
-    }
+            history: history.read().clone(),
+        },
+        search,
+    )
 }
 
 struct ProcessMonitorView {
@@ -132,7 +114,6 @@ struct ProcessMonitorView {
     process_count: usize,
     processes: Vec<ProcessEntry>,
     history: ServiceHistory,
-    search: String,
 }
 
 #[derive(Clone, Default, PartialEq)]
