@@ -1,4 +1,5 @@
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::schedule::common_conditions::any_with_component;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::*;
@@ -31,13 +32,15 @@ pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::bookmark::BookmarkPersistencePlugin)
-            .insert_resource(AutoSave {
+        app.world_mut().spawn((
+            Name::new("Space persistence"),
+            AutoSave {
                 debounce: Timer::from_seconds(0.5, TimerMode::Once),
                 periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
                 dirty: false,
-            })
-            .init_resource::<crate::boot_status::RestoreComplete>()
+            },
+        ));
+        app.add_plugins(crate::bookmark::BookmarkPersistencePlugin)
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<vmux_space::SaveSpaceRequest>()
             .add_observer(save_on_default_event)
@@ -52,7 +55,7 @@ impl Plugin for PersistencePlugin {
                 Update,
                 (rebuild_space_views, clear_space_views_need_rebuild)
                     .chain()
-                    .run_if(resource_exists::<SpaceViewsNeedRebuild>),
+                    .run_if(any_with_component::<SpaceViewsNeedRebuild>),
             )
             .add_systems(
                 Update,
@@ -79,22 +82,29 @@ fn handle_save_space_requests(
     }
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 struct SpaceViewsNeedRebuild;
 
-fn mark_space_views_need_rebuild(_trigger: On<Loaded>, mut commands: Commands) {
-    commands.insert_resource(SpaceViewsNeedRebuild);
+fn mark_space_views_need_rebuild(
+    _trigger: On<Loaded>,
+    persistence: Single<Entity, With<AutoSave>>,
+    mut commands: Commands,
+) {
+    commands.entity(*persistence).insert(SpaceViewsNeedRebuild);
 }
 
 fn clear_space_views_need_rebuild(
-    mut restore: ResMut<crate::boot_status::RestoreComplete>,
+    mut restore: Single<&mut crate::boot_status::RestoreComplete>,
+    persistence: Single<Entity, With<SpaceViewsNeedRebuild>>,
     mut commands: Commands,
 ) {
     restore.0 = true;
-    commands.remove_resource::<SpaceViewsNeedRebuild>();
+    commands
+        .entity(*persistence)
+        .remove::<SpaceViewsNeedRebuild>();
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 struct AutoSave {
     debounce: Timer,
     periodic: Timer,
@@ -185,7 +195,7 @@ fn write_store_schema_version(path: &Path) {
 }
 
 fn mark_dirty_on_change(
-    mut auto_save: ResMut<AutoSave>,
+    mut auto_save: Single<&mut AutoSave>,
     added_stacks: Query<(), Added<Stack>>,
     added_panes: Query<(), Added<Pane>>,
     added_tabs: Query<(), Added<Tab>>,
@@ -228,7 +238,7 @@ fn mark_dirty_on_change(
 
 fn auto_save_system(
     time: Res<Time>,
-    mut auto_save: ResMut<AutoSave>,
+    mut auto_save: Single<&mut AutoSave>,
     spaces: Query<(), With<Space>>,
     save_entities: SpaceSaveEntities,
     mut commands: Commands,
@@ -314,7 +324,7 @@ fn save_space_to_path_excluding(
 pub(crate) fn load_space_on_startup(
     active: Res<ActiveSpace>,
     registry: Res<AppTypeRegistry>,
-    mut restore: ResMut<crate::boot_status::RestoreComplete>,
+    mut restore: Single<&mut crate::boot_status::RestoreComplete>,
     mut commands: Commands,
 ) {
     if vmux_core::profile::is_test_session() {
@@ -847,50 +857,68 @@ mod tests {
     #[test]
     fn adding_archived_page_marks_store_dirty() {
         let mut app = App::new();
-        app.insert_resource(AutoSave {
-            debounce: Timer::from_seconds(0.5, TimerMode::Once),
-            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: false,
-        })
-        .add_systems(Update, mark_dirty_on_change);
+        let auto_save = app
+            .world_mut()
+            .spawn(AutoSave {
+                debounce: Timer::from_seconds(0.5, TimerMode::Once),
+                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+                dirty: false,
+            })
+            .id();
+        app.add_systems(Update, mark_dirty_on_change);
         app.update();
-        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut()
+            .get_mut::<AutoSave>(auto_save)
+            .unwrap()
+            .dirty = false;
         app.world_mut().spawn(ArchivedPage::default());
         app.update();
-        assert!(app.world().resource::<AutoSave>().dirty);
+        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
     }
 
     #[test]
     fn adding_visit_marks_store_dirty() {
         let mut app = App::new();
-        app.insert_resource(AutoSave {
-            debounce: Timer::from_seconds(0.5, TimerMode::Once),
-            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: false,
-        })
-        .add_systems(Update, mark_dirty_on_change);
+        let auto_save = app
+            .world_mut()
+            .spawn(AutoSave {
+                debounce: Timer::from_seconds(0.5, TimerMode::Once),
+                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+                dirty: false,
+            })
+            .id();
+        app.add_systems(Update, mark_dirty_on_change);
         app.update();
-        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut()
+            .get_mut::<AutoSave>(auto_save)
+            .unwrap()
+            .dirty = false;
         app.world_mut().spawn(vmux_history::Visit);
         app.update();
-        assert!(app.world().resource::<AutoSave>().dirty);
+        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
     }
 
     #[test]
     fn changing_stack_explorer_visibility_marks_store_dirty() {
         let mut app = App::new();
-        app.insert_resource(AutoSave {
-            debounce: Timer::from_seconds(0.5, TimerMode::Once),
-            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: false,
-        })
-        .add_systems(Update, mark_dirty_on_change);
+        let auto_save = app
+            .world_mut()
+            .spawn(AutoSave {
+                debounce: Timer::from_seconds(0.5, TimerMode::Once),
+                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+                dirty: false,
+            })
+            .id();
+        app.add_systems(Update, mark_dirty_on_change);
         let stack = app
             .world_mut()
             .spawn(vmux_editor::StackExplorerVisibility { visible: false })
             .id();
         app.update();
-        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut()
+            .get_mut::<AutoSave>(auto_save)
+            .unwrap()
+            .dirty = false;
         app.world_mut()
             .get_mut::<vmux_editor::StackExplorerVisibility>(stack)
             .unwrap()
@@ -898,21 +926,27 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().resource::<AutoSave>().dirty);
+        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
     }
 
     #[test]
     fn changing_tab_startup_dir_marks_store_dirty() {
         let mut app = App::new();
-        app.insert_resource(AutoSave {
-            debounce: Timer::from_seconds(0.5, TimerMode::Once),
-            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: false,
-        })
-        .add_systems(Update, mark_dirty_on_change);
+        let auto_save = app
+            .world_mut()
+            .spawn(AutoSave {
+                debounce: Timer::from_seconds(0.5, TimerMode::Once),
+                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+                dirty: false,
+            })
+            .id();
+        app.add_systems(Update, mark_dirty_on_change);
         let tab = app.world_mut().spawn(Tab::default()).id();
         app.update();
-        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut()
+            .get_mut::<AutoSave>(auto_save)
+            .unwrap()
+            .dirty = false;
         app.world_mut()
             .entity_mut(tab)
             .get_mut::<Tab>()
@@ -921,39 +955,48 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().resource::<AutoSave>().dirty);
+        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
     }
 
     #[test]
     fn adding_tab_workspace_marks_store_dirty() {
         let mut app = App::new();
-        app.insert_resource(AutoSave {
-            debounce: Timer::from_seconds(0.5, TimerMode::Once),
-            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: false,
-        })
-        .add_systems(Update, mark_dirty_on_change);
+        let auto_save = app
+            .world_mut()
+            .spawn(AutoSave {
+                debounce: Timer::from_seconds(0.5, TimerMode::Once),
+                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+                dirty: false,
+            })
+            .id();
+        app.add_systems(Update, mark_dirty_on_change);
         let tab = app.world_mut().spawn(Tab::default()).id();
         app.update();
-        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut()
+            .get_mut::<AutoSave>(auto_save)
+            .unwrap()
+            .dirty = false;
         app.world_mut().entity_mut(tab).insert(TabWorkspace {
             project_dir: "/tmp/project".into(),
         });
 
         app.update();
 
-        assert!(app.world().resource::<AutoSave>().dirty);
+        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
     }
 
     #[test]
     fn removing_tab_worktree_marks_store_dirty() {
         let mut app = App::new();
-        app.insert_resource(AutoSave {
-            debounce: Timer::from_seconds(0.5, TimerMode::Once),
-            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: false,
-        })
-        .add_systems(Update, mark_dirty_on_change);
+        let auto_save = app
+            .world_mut()
+            .spawn(AutoSave {
+                debounce: Timer::from_seconds(0.5, TimerMode::Once),
+                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+                dirty: false,
+            })
+            .id();
+        app.add_systems(Update, mark_dirty_on_change);
         let tab = app
             .world_mut()
             .spawn((
@@ -967,12 +1010,15 @@ mod tests {
             ))
             .id();
         app.update();
-        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut()
+            .get_mut::<AutoSave>(auto_save)
+            .unwrap()
+            .dirty = false;
         app.world_mut().entity_mut(tab).remove::<TabWorktree>();
 
         app.update();
 
-        assert!(app.world().resource::<AutoSave>().dirty);
+        assert!(app.world().get::<AutoSave>(auto_save).unwrap().dirty);
     }
 
     #[test]
@@ -1655,6 +1701,8 @@ mod tests {
         let mut app = App::new();
         app.world_mut()
             .spawn(vmux_agent::strategy::AgentStrategies::default());
+        app.world_mut()
+            .spawn(crate::boot_status::RestoreComplete::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .insert_resource(ActiveSpace {
@@ -1941,6 +1989,8 @@ mod tests {
         let mut app = App::new();
         app.world_mut()
             .spawn(vmux_agent::strategy::AgentStrategies::default());
+        app.world_mut()
+            .spawn(crate::boot_status::RestoreComplete::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .insert_resource(ActiveSpace {
@@ -1967,16 +2017,16 @@ mod tests {
     fn auto_save_system_skips_save_without_space() {
         let _home = HomeEnvGuard::use_temp_home("auto-save-system-skips-without-space");
         let mut app = App::new();
+        app.world_mut().spawn(AutoSave {
+            debounce: Timer::from_seconds(0.0, TimerMode::Once),
+            periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
+            dirty: true,
+        });
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
             .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
-            .insert_resource(AutoSave {
-                debounce: Timer::from_seconds(0.0, TimerMode::Once),
-                periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
-                dirty: true,
-            })
             .add_observer(save_on_default_event)
             .add_systems(Update, auto_save_system);
         app.world_mut().spawn((
@@ -1999,16 +2049,16 @@ mod tests {
     fn auto_save_system_saves_with_space() {
         let _home = HomeEnvGuard::use_temp_home("auto-save-system-saves-with-space");
         let mut app = App::new();
+        app.world_mut().spawn(AutoSave {
+            debounce: Timer::from_seconds(0.0, TimerMode::Once),
+            periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
+            dirty: true,
+        });
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
             .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
-            .insert_resource(AutoSave {
-                debounce: Timer::from_seconds(0.0, TimerMode::Once),
-                periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
-                dirty: true,
-            })
             .add_observer(save_on_default_event)
             .add_systems(Update, auto_save_system);
         app.world_mut().spawn((

@@ -54,7 +54,7 @@ fn ensure_window_state(
 }
 
 fn ensure_geometry_singleton(
-    restore: Res<crate::boot_status::RestoreComplete>,
+    restore: Single<&crate::boot_status::RestoreComplete>,
     existing: Query<(), With<WindowGeometry>>,
     mut commands: Commands,
 ) {
