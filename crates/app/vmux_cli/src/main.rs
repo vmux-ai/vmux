@@ -1,11 +1,11 @@
 use bevy_app::AppExit;
 use clap::Parser;
 
-mod commands;
+mod command;
 
-use commands::Cli;
+use command::Cli;
 
 #[tokio::main]
 async fn main() -> AppExit {
-    commands::run(Cli::parse()).await
+    command::run(Cli::parse()).await
 }
