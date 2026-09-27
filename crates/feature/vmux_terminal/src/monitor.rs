@@ -17,41 +17,8 @@ pub struct ProcessMonitorPage;
 
 #[component]
 pub fn Page() -> Element {
-    use_theme();
-    let state = use_ui_state::<ProcessesUiState>();
-    let mut history = use_signal(ServiceHistory::default);
-    use_effect(move || {
-        history.write().push(&state.read());
-    });
-    let mut search = use_signal(String::new);
-
-    let data = state.read();
-    let query = search.read().to_lowercase();
-    let mut filtered: Vec<ProcessEntry> = data
-        .processes
-        .iter()
-        .filter(|p| {
-            if query.is_empty() {
-                return true;
-            }
-            p.id.to_lowercase().contains(&query)
-                || p.shell.to_lowercase().contains(&query)
-                || p.cwd.to_lowercase().contains(&query)
-                || p.pid.to_string().contains(&query)
-        })
-        .cloned()
-        .collect();
-    filtered.sort_by(|left, right| {
-        right
-            .cpu_percent
-            .total_cmp(&left.cpu_percent)
-            .then_with(|| right.mem_bytes.cmp(&left.mem_bytes))
-            .then_with(|| left.pid.cmp(&right.pid))
-    });
-
-    let has_processes = !data.processes.is_empty();
-    let has_managed_processes = data.processes.iter().any(|process| process.managed);
-    let process_count = data.processes.len();
+    let monitor = ProcessMonitorUi::use_state();
+    let view = monitor.view();
 
     let empty_detail = format!(
         "{} {}",
@@ -63,14 +30,14 @@ pub fn Page() -> Element {
         ManagerPage {
             ManagerHeader {
                 title: translate("services-title"),
-                count: process_count,
-                search_value: search(),
+                count: view.process_count,
+                search_value: view.search,
                 search_placeholder: translate("services-filter"),
-                onsearch: move |event: FormEvent| search.set(event.value()),
+                onsearch: move |event: FormEvent| monitor.set_search(event.value()),
                 onkeydown: None,
                 actions: rsx! {
-                    StatusBadge { connected: data.connected }
-                    if has_managed_processes {
+                    StatusBadge { connected: view.connected }
+                    if view.has_managed_processes {
                         ManagerButton {
                             variant: ManagerButtonVariant::Danger,
                             onclick: move |event: Event<MouseData>| {
@@ -84,21 +51,88 @@ pub fn Page() -> Element {
             }
             ManagerList {
                 class: "mx-auto flex w-full max-w-7xl flex-col gap-3".to_string(),
-                if !data.connected && !has_processes {
+                if !view.connected && !view.has_processes {
                     ManagerEmpty { title: translate("services-not-running"), detail: empty_detail }
-                } else if !has_processes {
+                } else if !view.has_processes {
                     ManagerEmpty { title: translate("services-empty"), detail: String::new() }
-                } else if filtered.is_empty() {
+                } else if view.processes.is_empty() {
                     ManagerEmpty { title: translate("services-no-match"), detail: String::new() }
                 } else {
                     ServiceDashboard {
-                        processes: filtered,
-                        history: history.read().clone(),
+                        processes: view.processes,
+                        history: view.history,
                     }
                 }
             }
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct ProcessMonitorUi {
+    state: Signal<ProcessesUiState>,
+    history: Signal<ServiceHistory>,
+    search: Signal<String>,
+}
+
+impl ProcessMonitorUi {
+    fn use_state() -> Self {
+        use_theme();
+        let state = use_ui_state::<ProcessesUiState>();
+        let mut history = use_signal(ServiceHistory::default);
+        use_effect(move || history.write().push(&state.read()));
+        Self {
+            state,
+            history,
+            search: use_signal(String::new),
+        }
+    }
+
+    fn view(self) -> ProcessMonitorView {
+        let state = self.state.read();
+        let query = self.search.read().to_lowercase();
+        let mut processes = Vec::new();
+        for process in &state.processes {
+            if query.is_empty()
+                || process.id.to_lowercase().contains(&query)
+                || process.shell.to_lowercase().contains(&query)
+                || process.cwd.to_lowercase().contains(&query)
+                || process.pid.to_string().contains(&query)
+            {
+                processes.push(process.clone());
+            }
+        }
+        processes.sort_by(|left, right| {
+            right
+                .cpu_percent
+                .total_cmp(&left.cpu_percent)
+                .then_with(|| right.mem_bytes.cmp(&left.mem_bytes))
+                .then_with(|| left.pid.cmp(&right.pid))
+        });
+        ProcessMonitorView {
+            connected: state.connected,
+            has_processes: !state.processes.is_empty(),
+            has_managed_processes: state.processes.iter().any(|process| process.managed),
+            process_count: state.processes.len(),
+            processes,
+            history: self.history.read().clone(),
+            search: (self.search)(),
+        }
+    }
+
+    fn set_search(mut self, search: String) {
+        self.search.set(search);
+    }
+}
+
+struct ProcessMonitorView {
+    connected: bool,
+    has_processes: bool,
+    has_managed_processes: bool,
+    process_count: usize,
+    processes: Vec<ProcessEntry>,
+    history: ServiceHistory,
+    search: String,
 }
 
 #[derive(Clone, Default, PartialEq)]
