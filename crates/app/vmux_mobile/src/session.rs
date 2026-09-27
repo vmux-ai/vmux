@@ -11,6 +11,7 @@ use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
 use vmux_api::room::{NewChatRequest, RemoteEvent, RemoteSession};
 use vmux_chat::room::{Conversation, LiveTurn, Log, Reported};
+use vmux_chat::state::ChatRuntime;
 
 use crate::pairing::ConnectionState;
 use crate::remote::{Api, ApiError, next_client_op_id, remote_event_from_shared};
@@ -259,6 +260,7 @@ fn open_sessions(
     mut requests: MessageReader<OpenSession>,
     mut sessions: Query<(Entity, &mut SessionState)>,
     connections: Query<&ConnectionState>,
+    mut chats: Query<(&mut Conversation, &mut Log, &mut LiveTurn), With<ChatRuntime>>,
     mut commands: Commands,
 ) {
     let Ok((entity, mut state)) = sessions.single_mut() else {
@@ -268,6 +270,9 @@ fn open_sessions(
         return;
     };
     let Some(api) = connection.api() else {
+        return;
+    };
+    let Ok((mut conversation, mut log, mut live)) = chats.single_mut() else {
         return;
     };
     for request in requests.read() {
@@ -281,25 +286,29 @@ fn open_sessions(
             state.view.generation,
             false,
         ));
-        commands.insert_resource(Log {
+        *log = Log {
             room_id: Some(request.0.room_id.clone()),
             ..Log::default()
-        });
-        commands.insert_resource(LiveTurn::default());
-        commands.insert_resource(Conversation {
+        };
+        *live = LiveTurn::default();
+        *conversation = Conversation {
             status: request.0.status.clone(),
             approval: request.0.approval.clone(),
             session: Some(request.0.clone()),
-        });
+        };
     }
 }
 
 fn leave_sessions(
     mut requests: MessageReader<LeaveSession>,
     mut sessions: Query<(Entity, &mut SessionState)>,
+    mut chats: Query<(&mut Conversation, &mut Log, &mut LiveTurn), With<ChatRuntime>>,
     mut commands: Commands,
 ) {
     let Ok((entity, mut state)) = sessions.single_mut() else {
+        return;
+    };
+    let Ok((mut conversation, mut log, mut live)) = chats.single_mut() else {
         return;
     };
     for _ in requests.read() {
@@ -308,9 +317,9 @@ fn leave_sessions(
         state.view.current = None;
         state.view.connected = false;
         commands.entity(entity).remove::<SessionStream>();
-        commands.insert_resource(Conversation::default());
-        commands.insert_resource(Log::default());
-        commands.insert_resource(LiveTurn::default());
+        *conversation = Conversation::default();
+        *log = Log::default();
+        *live = LiveTurn::default();
         dismissing.finish();
     }
 }

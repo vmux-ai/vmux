@@ -9,10 +9,10 @@ use vmux_chat::event::{
     ChatApproval, ChatCancel, ChatComposerEffect, ChatDraftChanged, ChatEscape,
     ChatRemoveAttachment, ChatStop, ChatSubmit, SelectModel, SetAgentEffort,
 };
-use vmux_chat::model::{Models, Picker};
-use vmux_chat::prompt::{Attach, Attachments, Browsed, Media, RemoveAttachment};
-use vmux_chat::room::{Conversation, Reported, Snapshot, Submitted};
-use vmux_chat::state::{ChatUiState, ChatUiStateProjection};
+use vmux_chat::model::Models;
+use vmux_chat::prompt::{Attach, Attachments, Browsed, RemoveAttachment};
+use vmux_chat::room::{Conversation, Reported, Submitted};
+use vmux_chat::state::{ChatUiState, PublishComposerEffect, RepublishChatUiState};
 use vmux_start::event::StartDataRequest;
 use vmux_start::roster::Launcher;
 use vmux_team::roster::{Members, Team};
@@ -196,10 +196,7 @@ impl PageHost for MobileHost {
                     .non_send_mut::<PageListeners>()
                     .0
                     .insert(ChatUiState::ID.to_string(), on_bytes);
-                mark_changed::<Snapshot>(world);
-                mark_changed::<Attachments>(world);
-                mark_changed::<Media>(world);
-                mark_changed::<Picker>(world);
+                world.write_message(RepublishChatUiState);
             }
             CommandBarUiState::ID => {
                 let mut runtime = self.runtime.borrow_mut();
@@ -230,24 +227,32 @@ fn submit(host: &MobileHost, payload: ChatSubmit) -> Result<(), EventListenerErr
     if host.session.sid().is_empty() {
         return Err(EventListenerError::Unsupported);
     }
-    let runtime = host.runtime.borrow();
-    let selected = &runtime.app.world().resource::<Attachments>().0;
-    let mut attachments = Vec::with_capacity(selected.len());
-    for attachment in selected {
-        attachments.push(AgentAttachment {
-            path: attachment.path.clone(),
-            name: attachment.name.clone(),
-            mime_type: attachment.mime_type.clone(),
-            size: attachment.size,
-        });
-    }
-    drop(runtime);
+    let attachments = host
+        .runtime
+        .borrow()
+        .app
+        .world()
+        .iter_entities()
+        .find_map(|entity| entity.get::<Attachments>())
+        .map(|selected| {
+            selected
+                .0
+                .iter()
+                .map(|attachment| AgentAttachment {
+                    path: attachment.path.clone(),
+                    name: attachment.name.clone(),
+                    mime_type: attachment.mime_type.clone(),
+                    size: attachment.size,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let effect = host.composer.clear_effect();
     let mut runtime = host.runtime.borrow_mut();
     let world = runtime.app.world_mut();
     world.write_message(Submitted);
     if let Some(effect) = effect {
-        world.resource_mut::<ChatUiStateProjection>().write(&effect);
+        world.write_message(PublishComposerEffect(effect));
     }
     drop(runtime);
     let runtime = host.runtime.clone();
@@ -292,23 +297,20 @@ fn cancel(host: &MobileHost) -> Result<(), EventListenerError> {
 }
 
 fn escape(host: &MobileHost) -> Result<(), EventListenerError> {
-    let running = matches!(
-        &host
-            .runtime
-            .borrow()
-            .app
-            .world()
-            .resource::<Conversation>()
-            .status,
-        RemoteStatus::Streaming
-    );
+    let running = host
+        .runtime
+        .borrow()
+        .app
+        .world()
+        .iter_entities()
+        .find_map(|entity| entity.get::<Conversation>())
+        .is_some_and(|conversation| matches!(&conversation.status, RemoteStatus::Streaming));
     if !running && let Some(effect) = host.composer.clear_effect() {
         host.runtime
             .borrow_mut()
             .app
             .world_mut()
-            .resource_mut::<ChatUiStateProjection>()
-            .write(&effect);
+            .write_message(PublishComposerEffect(effect));
     }
     cancel(host)
 }
@@ -414,7 +416,11 @@ fn poll_models(host: &MobileHost) {
                 }
                 match fetched {
                     Ok(state) => {
-                        runtime.borrow_mut().app.insert_resource(Models(state));
+                        runtime
+                            .borrow_mut()
+                            .app
+                            .world_mut()
+                            .write_message(Models(state));
                         break;
                     }
                     Err(ApiError::Unauthorized | ApiError::NotFound) => return,
@@ -445,7 +451,7 @@ fn poll_media(host: &MobileHost) {
             if let Some(request) = asked {
                 if request.query.is_empty() {
                     offered.set(Vec::new());
-                    runtime.borrow_mut().app.insert_resource(Browsed {
+                    runtime.borrow_mut().app.world_mut().write_message(Browsed {
                         request_id: request.request_id,
                         query: request.query,
                         entries: Vec::new(),
@@ -476,7 +482,7 @@ fn poll_media(host: &MobileHost) {
                 }
                 if let Ok(found) = fetched {
                     offered.set(found.clone());
-                    runtime.borrow_mut().app.insert_resource(Browsed {
+                    runtime.borrow_mut().app.world_mut().write_message(Browsed {
                         request_id: request.request_id,
                         query: request.query,
                         entries: found,

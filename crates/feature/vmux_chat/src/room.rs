@@ -9,7 +9,7 @@ use vmux_core::chat::group_turns_tail;
 
 use crate::event::{ChatSnapshot, ChatTranscriptState, PendingApproval};
 use crate::prompt::AttachmentPreviews;
-use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
+use crate::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
 
 pub struct ChatRoomPlugin;
 
@@ -22,27 +22,14 @@ impl Plugin for ChatRoomPlugin {
         app.add_plugins(crate::ui::ChatPage::plugin());
         app.add_message::<Reported>()
             .add_message::<Submitted>()
-            .init_resource::<Conversation>()
-            .init_resource::<Log>()
-            .init_resource::<LiveTurn>()
-            .init_resource::<Agents>()
-            .init_resource::<AttachmentPreviews>()
-            .init_resource::<Snapshot>()
-            .init_resource::<RoomTranscript>()
+            .add_message::<Agents>()
             .add_systems(
                 Update,
                 (
+                    receive_agents.before(RoomProjection),
                     fold_conversation.before(RoomProjection),
-                    project_snapshot.in_set(RoomProjection).run_if(
-                        resource_changed::<Conversation>
-                            .or_else(resource_changed::<Log>)
-                            .or_else(resource_changed::<LiveTurn>)
-                            .or_else(resource_changed::<Agents>)
-                            .or_else(resource_changed::<AttachmentPreviews>),
-                    ),
-                    emit_snapshot.after(RoomProjection).run_if(
-                        resource_changed::<Snapshot>.or_else(resource_changed::<RoomTranscript>),
-                    ),
+                    project_snapshot.in_set(RoomProjection),
+                    emit_snapshot.after(RoomProjection),
                 ),
             );
     }
@@ -57,7 +44,7 @@ pub struct Submitted;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct RoomProjection;
 
-#[derive(Resource, PartialEq)]
+#[derive(Component, PartialEq)]
 pub struct Conversation {
     pub session: Option<RemoteSession>,
     pub status: RemoteStatus,
@@ -77,10 +64,11 @@ impl Default for Conversation {
 fn fold_conversation(
     mut submitted: MessageReader<Submitted>,
     mut reported: MessageReader<Reported>,
-    mut conversation: ResMut<Conversation>,
-    mut log: ResMut<Log>,
-    mut live: ResMut<LiveTurn>,
+    mut runtimes: Query<(&mut Conversation, &mut Log, &mut LiveTurn), With<ChatRuntime>>,
 ) {
+    let Ok((mut conversation, mut log, mut live)) = runtimes.single_mut() else {
+        return;
+    };
     for Submitted in submitted.read() {
         if conversation.session.is_some() {
             conversation.status = RemoteStatus::Streaming;
@@ -143,46 +131,78 @@ fn fold_conversation(
     }
 }
 
-#[derive(Resource, Default, PartialEq)]
+#[derive(Component, Default, PartialEq)]
 pub struct Log {
     pub room_id: Option<RoomId>,
     pub through_seq: u64,
     pub events: Vec<RoomEvent>,
 }
 
-#[derive(Resource, Default, PartialEq)]
+#[derive(Component, Default, PartialEq)]
 pub struct LiveTurn(pub String);
 
-#[derive(Resource, Default, PartialEq)]
+#[derive(Component, Message, Clone, Default, PartialEq)]
 pub struct Agents(pub Vec<RemoteAgent>);
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct Snapshot(pub ChatSnapshot);
 
-#[derive(Resource, Default)]
-struct RoomTranscript {
+#[derive(Component, Default)]
+pub(crate) struct RoomTranscript {
     room_id: Option<RoomId>,
     state: ChatTranscriptState,
 }
 
 fn emit_snapshot(
-    snapshot: Res<Snapshot>,
-    transcript: Res<RoomTranscript>,
-    mut projection: ResMut<ChatUiStateProjection>,
+    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut runtimes: Query<
+        (
+            Ref<Snapshot>,
+            Ref<RoomTranscript>,
+            &mut ChatUiStateProjection,
+        ),
+        With<ChatRuntime>,
+    >,
 ) {
+    let refresh = refreshes.read().next().is_some();
+    let Ok((snapshot, transcript, mut projection)) = runtimes.single_mut() else {
+        return;
+    };
+    if !refresh && !snapshot.is_changed() && !transcript.is_changed() {
+        return;
+    }
     projection.write(&snapshot.0);
     projection.write(&transcript.state);
 }
 
 fn project_snapshot(
-    conversation: Res<Conversation>,
-    log: Res<Log>,
-    live: Res<LiveTurn>,
-    agents: Res<Agents>,
-    previews: Res<AttachmentPreviews>,
-    mut snapshot: ResMut<Snapshot>,
-    mut transcript: ResMut<RoomTranscript>,
+    mut runtimes: Query<
+        (
+            &Conversation,
+            &Log,
+            &LiveTurn,
+            &Agents,
+            &AttachmentPreviews,
+            &mut Snapshot,
+            &mut RoomTranscript,
+        ),
+        (
+            With<ChatRuntime>,
+            Or<(
+                Changed<Conversation>,
+                Changed<Log>,
+                Changed<LiveTurn>,
+                Changed<Agents>,
+                Changed<AttachmentPreviews>,
+            )>,
+        ),
+    >,
 ) {
+    let Ok((conversation, log, live, agents, previews, mut snapshot, mut transcript)) =
+        runtimes.single_mut()
+    else {
+        return;
+    };
     let Some(session) = conversation.session.as_ref() else {
         snapshot.0 = ChatSnapshot::default();
         transcript.room_id = None;
@@ -238,6 +258,20 @@ fn project_snapshot(
     };
 }
 
+fn receive_agents(
+    mut messages: MessageReader<Agents>,
+    mut runtimes: Query<&mut Agents, With<ChatRuntime>>,
+) {
+    let Ok(mut agents) = runtimes.single_mut() else {
+        return;
+    };
+    for update in messages.read() {
+        if *agents != *update {
+            *agents = update.clone();
+        }
+    }
+}
+
 impl Agents {
     fn named(&self, name: &str) -> Option<&RemoteAgent> {
         self.0.iter().find(|agent| agent.name == name)
@@ -287,28 +321,44 @@ mod tests {
     impl Started {
         fn open() -> Self {
             let mut app = App::new();
-            app.add_plugins(ChatRoomPlugin)
-                .insert_resource(Conversation::with_agent("ada"))
-                .insert_resource(Log::sample());
+            app.add_plugins(ChatRoomPlugin);
             app.update();
-            Self(app)
+            let mut started = Self(app);
+            started.insert(Conversation::with_agent("ada"));
+            started.insert(Log::sample());
+            started
         }
 
         fn snapshot(&self) -> &ChatSnapshot {
-            &self.0.world().resource::<Snapshot>().0
+            &self.component::<Snapshot>().0
         }
 
         fn transcript(&self) -> &ChatTranscriptState {
-            &self.0.world().resource::<RoomTranscript>().state
+            &self.component::<RoomTranscript>().state
         }
 
         fn items(&self) -> Vec<ChatItem> {
             self.transcript().items.clone()
         }
 
-        fn insert(&mut self, resource: impl Resource) {
-            self.0.insert_resource(resource);
+        fn insert<T: Component>(&mut self, component: T) {
+            let runtime = self
+                .0
+                .world()
+                .iter_entities()
+                .find(|entity| entity.contains::<ChatRuntime>())
+                .map(|entity| entity.id())
+                .expect("chat runtime");
+            self.0.world_mut().entity_mut(runtime).insert(component);
             self.0.update();
+        }
+
+        fn component<T: Component>(&self) -> &T {
+            self.0
+                .world()
+                .iter_entities()
+                .find_map(|entity| entity.get::<T>())
+                .expect("chat runtime component")
         }
 
         fn report(&mut self, event: RemoteEvent) {
@@ -322,11 +372,11 @@ mod tests {
         }
 
         fn status(&self) -> RemoteStatus {
-            self.0.world().resource::<Conversation>().status.clone()
+            self.component::<Conversation>().status.clone()
         }
 
         fn log(&self) -> &Log {
-            self.0.world().resource::<Log>()
+            self.component::<Log>()
         }
 
         fn snapshot_of(seq: u64, text: &str) -> RemoteEvent {
@@ -499,10 +549,10 @@ mod tests {
             room_id: RoomId::from("r"),
             text: "partial".to_string(),
         });
-        assert_eq!(started.0.world().resource::<LiveTurn>().0, "partial");
+        assert_eq!(started.component::<LiveTurn>().0, "partial");
 
         started.report(Started::snapshot_of(1, "folded"));
-        assert!(started.0.world().resource::<LiveTurn>().0.is_empty());
+        assert!(started.component::<LiveTurn>().0.is_empty());
     }
 
     #[test]

@@ -151,11 +151,8 @@ fn AppBody() -> Element {
 
     let agents_runtime = runtime.clone();
     use_effect(move || {
-        let next = Agents(agents());
         let mut runtime = agents_runtime.borrow_mut();
-        if runtime.app.world().get_resource::<Agents>() != Some(&next) {
-            runtime.app.insert_resource(next);
-        }
+        runtime.app.world_mut().write_message(Agents(agents()));
     });
 
     let view = (connection.view)();

@@ -3,7 +3,7 @@ use bevy_ecs::prelude::*;
 use vmux_api::room::RemoteModelState;
 
 use crate::event::ModelState;
-use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
+use crate::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
 
 pub struct ChatModelPlugin;
 
@@ -12,32 +12,46 @@ impl Plugin for ChatModelPlugin {
         if !app.is_plugin_added::<ChatUiStatePlugin>() {
             app.add_plugins(ChatUiStatePlugin);
         }
-        app.init_resource::<Models>()
-            .init_resource::<Picker>()
-            .add_systems(
-                Update,
-                (
-                    project_model_picker
-                        .in_set(ModelProjection)
-                        .run_if(resource_changed::<Models>),
-                    emit_model_picker
-                        .after(ModelProjection)
-                        .run_if(resource_changed::<Picker>),
-                ),
-            );
+        app.add_message::<Models>().add_systems(
+            Update,
+            (
+                receive_models,
+                project_model_picker.in_set(ModelProjection),
+                emit_model_picker.after(ModelProjection),
+            ),
+        );
     }
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct ModelProjection;
 
-#[derive(Resource, Default, PartialEq)]
+#[derive(Component, Message, Clone, Default, PartialEq)]
 pub struct Models(pub RemoteModelState);
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct Picker(pub ModelState);
 
-fn project_model_picker(models: Res<Models>, mut picker: ResMut<Picker>) {
+fn receive_models(
+    mut messages: MessageReader<Models>,
+    mut runtimes: Query<&mut Models, With<ChatRuntime>>,
+) {
+    let Ok(mut models) = runtimes.single_mut() else {
+        return;
+    };
+    for update in messages.read() {
+        if *models != *update {
+            *models = update.clone();
+        }
+    }
+}
+
+fn project_model_picker(
+    mut runtimes: Query<(&Models, &mut Picker), (With<ChatRuntime>, Changed<Models>)>,
+) {
+    let Ok((models, mut picker)) = runtimes.single_mut() else {
+        return;
+    };
     picker.0 = ModelState {
         current_model_id: models.0.selected_id.clone(),
         models: models.0.models.clone(),
@@ -47,6 +61,15 @@ fn project_model_picker(models: Res<Models>, mut picker: ResMut<Picker>) {
     };
 }
 
-fn emit_model_picker(picker: Res<Picker>, mut projection: ResMut<ChatUiStateProjection>) {
-    projection.write(&picker.0);
+fn emit_model_picker(
+    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut runtimes: Query<(Ref<Picker>, &mut ChatUiStateProjection), With<ChatRuntime>>,
+) {
+    let refresh = refreshes.read().next().is_some();
+    let Ok((picker, mut projection)) = runtimes.single_mut() else {
+        return;
+    };
+    if refresh || picker.is_changed() {
+        projection.write(&picker.0);
+    }
 }

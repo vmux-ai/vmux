@@ -6,7 +6,7 @@ use vmux_api::room::RemoteMediaEntry;
 
 use crate::event::ChatMediaState;
 use crate::room::Submitted;
-use crate::state::{ChatUiStatePlugin, ChatUiStateProjection};
+use crate::state::{ChatRuntime, ChatUiStatePlugin, ChatUiStateProjection, RepublishChatUiState};
 
 pub struct ChatPromptPlugin;
 
@@ -18,25 +18,17 @@ impl Plugin for ChatPromptPlugin {
         app.add_message::<Attach>()
             .add_message::<RemoveAttachment>()
             .add_message::<Submitted>()
-            .init_resource::<Attachments>()
-            .init_resource::<AttachmentPreviews>()
-            .init_resource::<Browsed>()
-            .init_resource::<Media>()
+            .add_message::<Browsed>()
             .add_systems(
                 Update,
                 (
                     (fold_attachments, remove_attachments, spend_attachments)
                         .chain()
                         .in_set(PromptProjection),
-                    emit_attachments
-                        .after(PromptProjection)
-                        .run_if(resource_changed::<Attachments>),
-                    project_media
-                        .in_set(PromptProjection)
-                        .run_if(resource_changed::<Browsed>),
-                    emit_media
-                        .after(PromptProjection)
-                        .run_if(resource_changed::<Media>),
+                    receive_browsed.before(project_media),
+                    project_media.in_set(PromptProjection),
+                    emit_attachments.after(PromptProjection),
+                    emit_media.after(PromptProjection),
                 ),
             );
     }
@@ -51,11 +43,11 @@ pub struct Attach(pub Vec<ChatAttachment>);
 #[derive(Message)]
 pub struct RemoveAttachment(pub String);
 
-#[derive(Resource, Default, PartialEq)]
+#[derive(Component, Default, PartialEq)]
 pub struct Attachments(pub Vec<ChatAttachment>);
 
-#[derive(Resource, Default, PartialEq)]
-pub struct AttachmentPreviews(HashMap<String, ChatAttachment>);
+#[derive(Component, Default, PartialEq)]
+pub(crate) struct AttachmentPreviews(HashMap<String, ChatAttachment>);
 
 impl AttachmentPreviews {
     pub(crate) fn hydrate(&self, attachments: &mut [ChatAttachment]) -> bool {
@@ -79,17 +71,36 @@ impl AttachmentPreviews {
     }
 }
 
-#[derive(Resource, Default, PartialEq)]
+#[derive(Component, Message, Clone, Default, PartialEq)]
 pub struct Browsed {
     pub request_id: u64,
     pub query: String,
     pub entries: Vec<RemoteMediaEntry>,
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct Media(pub ChatMediaState);
 
-fn project_media(browsed: Res<Browsed>, mut media: ResMut<Media>) {
+fn receive_browsed(
+    mut messages: MessageReader<Browsed>,
+    mut runtimes: Query<&mut Browsed, With<ChatRuntime>>,
+) {
+    let Ok(mut browsed) = runtimes.single_mut() else {
+        return;
+    };
+    for update in messages.read() {
+        if *browsed != *update {
+            *browsed = update.clone();
+        }
+    }
+}
+
+fn project_media(
+    mut runtimes: Query<(&Browsed, &mut Media), (With<ChatRuntime>, Changed<Browsed>)>,
+) {
+    let Ok((browsed, mut media)) = runtimes.single_mut() else {
+        return;
+    };
     let mut entries = Vec::with_capacity(browsed.entries.len());
     for entry in &browsed.entries {
         entries.push(ChatMediaEntry {
@@ -109,14 +120,31 @@ fn project_media(browsed: Res<Browsed>, mut media: ResMut<Media>) {
     };
 }
 
-fn emit_media(media: Res<Media>, mut projection: ResMut<ChatUiStateProjection>) {
-    if media.0.request_id == 0 {
+fn emit_media(
+    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut runtimes: Query<(Ref<Media>, &mut ChatUiStateProjection), With<ChatRuntime>>,
+) {
+    let refresh = refreshes.read().next().is_some();
+    let Ok((media, mut projection)) = runtimes.single_mut() else {
+        return;
+    };
+    if media.0.request_id == 0 || (!refresh && !media.is_changed()) {
         return;
     }
     projection.write(&media.0);
 }
 
-fn emit_attachments(attachments: Res<Attachments>, mut projection: ResMut<ChatUiStateProjection>) {
+fn emit_attachments(
+    mut refreshes: MessageReader<RepublishChatUiState>,
+    mut runtimes: Query<(Ref<Attachments>, &mut ChatUiStateProjection), With<ChatRuntime>>,
+) {
+    let refresh = refreshes.read().next().is_some();
+    let Ok((attachments, mut projection)) = runtimes.single_mut() else {
+        return;
+    };
+    if !refresh && !attachments.is_changed() {
+        return;
+    }
     let payload = ChatAttachments {
         attachments: attachments.0.clone(),
     };
@@ -125,8 +153,11 @@ fn emit_attachments(attachments: Res<Attachments>, mut projection: ResMut<ChatUi
 
 fn spend_attachments(
     mut submitted: MessageReader<Submitted>,
-    mut attachments: ResMut<Attachments>,
+    mut runtimes: Query<&mut Attachments, With<ChatRuntime>>,
 ) {
+    let Ok(mut attachments) = runtimes.single_mut() else {
+        return;
+    };
     if submitted.read().count() == 0 || attachments.0.is_empty() {
         return;
     }
@@ -135,9 +166,11 @@ fn spend_attachments(
 
 fn fold_attachments(
     mut asked: MessageReader<Attach>,
-    mut attachments: ResMut<Attachments>,
-    mut previews: ResMut<AttachmentPreviews>,
+    mut runtimes: Query<(&mut Attachments, &mut AttachmentPreviews), With<ChatRuntime>>,
 ) {
+    let Ok((mut attachments, mut previews)) = runtimes.single_mut() else {
+        return;
+    };
     for Attach(added) in asked.read() {
         for attachment in added {
             if attachment.preview_data_url.is_empty() {
@@ -156,8 +189,11 @@ fn fold_attachments(
 
 fn remove_attachments(
     mut removed: MessageReader<RemoveAttachment>,
-    mut attachments: ResMut<Attachments>,
+    mut runtimes: Query<&mut Attachments, With<ChatRuntime>>,
 ) {
+    let Ok(mut attachments) = runtimes.single_mut() else {
+        return;
+    };
     for RemoveAttachment(path) in removed.read() {
         attachments.0.retain(|attachment| attachment.path != *path);
     }
@@ -206,7 +242,13 @@ mod tests {
 
         fn paths(&self) -> Vec<&str> {
             let mut paths = Vec::new();
-            for attachment in &self.0.world().resource::<Attachments>().0 {
+            let attachments = self
+                .0
+                .world()
+                .iter_entities()
+                .find_map(|entity| entity.get::<Attachments>())
+                .expect("chat attachments");
+            for attachment in &attachments.0 {
                 paths.push(attachment.path.as_str());
             }
             paths

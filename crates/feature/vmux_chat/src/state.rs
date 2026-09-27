@@ -3,7 +3,10 @@ use crate::event::{
     ChatResumeState, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState, ModelState,
     SlashCommands,
 };
-use bevy_app::{App, Last, Plugin};
+use crate::model::{Models, Picker};
+use crate::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
+use crate::room::{Agents, Conversation, LiveTurn, Log, RoomTranscript, Snapshot};
+use bevy_app::{App, Last, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::page::PageEmit;
 
@@ -11,11 +14,23 @@ pub struct ChatUiStatePlugin;
 
 impl Plugin for ChatUiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ChatUiStateProjection>()
-            .add_message::<PageEmit>()
+        app.add_message::<PageEmit>()
+            .add_message::<PublishComposerEffect>()
+            .add_message::<RepublishChatUiState>()
+            .add_systems(Startup, spawn_chat_runtime)
+            .add_systems(Update, publish_composer_effects)
             .add_systems(Last, emit_ui_state);
     }
 }
+
+#[derive(Component)]
+pub struct ChatRuntime;
+
+#[derive(Message)]
+pub struct PublishComposerEffect(pub ChatComposerEffect);
+
+#[derive(Message)]
+pub struct RepublishChatUiState;
 
 #[vmux_api::ui_state_patch(Default)]
 pub struct ChatUiStatePatch {
@@ -39,7 +54,7 @@ pub struct ChatUiState {
     pub patches: Vec<ChatUiStatePatch>,
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct ChatUiStateProjection {
     sequence: u64,
     patches: Vec<ChatUiStatePatch>,
@@ -54,10 +69,44 @@ impl ChatUiStateProjection {
     }
 }
 
+fn spawn_chat_runtime(mut commands: Commands) {
+    commands.spawn((
+        ChatRuntime,
+        ChatUiStateProjection::default(),
+        Models::default(),
+        Picker::default(),
+        Attachments::default(),
+        AttachmentPreviews::default(),
+        Browsed::default(),
+        Media::default(),
+        Conversation::default(),
+        Log::default(),
+        LiveTurn::default(),
+        Agents::default(),
+        Snapshot::default(),
+        RoomTranscript::default(),
+    ));
+}
+
+fn publish_composer_effects(
+    mut effects: MessageReader<PublishComposerEffect>,
+    mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
+) {
+    let Ok(mut projection) = runtimes.single_mut() else {
+        return;
+    };
+    for PublishComposerEffect(effect) in effects.read() {
+        projection.write(effect);
+    }
+}
+
 fn emit_ui_state(
-    mut projection: ResMut<ChatUiStateProjection>,
+    mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
     mut emits: MessageWriter<PageEmit>,
 ) {
+    let Ok(mut projection) = runtimes.single_mut() else {
+        return;
+    };
     if projection.patches.is_empty() {
         return;
     }
