@@ -5,6 +5,7 @@ use crate::edit::command::{
     CursorPos, EditCommand, EditMode, Motion, MotionKind, Operator, SelSpan, Selection, Target,
     VerticalDirection,
 };
+use crate::edit::motion::MotionResolver;
 use crate::edit::register::{RegisterKind, RegisterValue, Registers};
 use crate::edit::text_object::char_class;
 use crate::page_model::DisplayCells;
@@ -531,57 +532,14 @@ impl EditCore {
     }
 
     fn resolve_motion(&self, from: usize, motion: Motion) -> usize {
-        let len = self.buffer.len_chars();
         match motion {
-            Motion::Left => self.buffer.prev_grapheme(from),
-            Motion::Right => self.buffer.next_grapheme(from).min(len),
-            Motion::LeftBounded => self.line_left(from),
-            Motion::RightBounded => self.line_right(from),
-            Motion::Up => self.vertical(from, -1),
-            Motion::Down => self.vertical(from, 1),
-            Motion::PageUp => self.vertical(from, -(self.rows.max(1) as i64)),
-            Motion::PageDown => self.vertical(from, self.rows.max(1) as i64),
-            Motion::ParagraphPrev => self.paragraph_prev(from),
-            Motion::ParagraphNext => self.paragraph_next(from),
-            Motion::LineStart => {
-                let (l, _) = self.buffer.char_to_coords(from);
-                self.buffer.line_to_char(l)
-            }
-            Motion::FirstNonBlank => self.first_non_blank(from),
-            Motion::LineEnd => {
-                let (l, _) = self.buffer.char_to_coords(from);
-                self.buffer.line_to_char(l) + self.buffer.line_len_chars(l)
-            }
-            Motion::DocStart => 0,
-            Motion::DocEnd => len,
-            Motion::GotoLine(n) => self.buffer.line_to_char(n as usize),
-            Motion::WordNext => self.word_next(from, false),
-            Motion::WordPrev => self.word_prev(from, false),
-            Motion::WordEnd => self.word_end(from, false),
-            Motion::BigWordNext => self.word_next(from, true),
-            Motion::BigWordPrev => self.word_prev(from, true),
-            Motion::BigWordEnd => self.word_end(from, true),
-            Motion::WordEndPrev => self.word_end_prev(from, false),
-            Motion::BigWordEndPrev => self.word_end_prev(from, true),
-            Motion::LastNonBlank => self.last_non_blank(from),
-            Motion::Column(n) => {
-                let (l, _) = self.buffer.char_to_coords(from);
-                let start = self.buffer.line_to_char(l);
-                (start + n.saturating_sub(1)).min(start + self.buffer.line_len_chars(l))
-            }
-            Motion::HalfPageUp => self.vertical(from, -((self.rows.max(2) / 2) as i64)),
-            Motion::HalfPageDown => self.vertical(from, (self.rows.max(2) / 2) as i64),
-            Motion::ScreenTop => self.screen_line(0),
-            Motion::ScreenMiddle => self.screen_line(self.rows.saturating_sub(1) / 2),
-            Motion::ScreenBottom => self.screen_line(self.rows.saturating_sub(1)),
-            Motion::NextLineStart => self.first_non_blank(self.vertical(from, 1)),
-            Motion::PrevLineStart => self.first_non_blank(self.vertical(from, -1)),
-            Motion::MatchPair => self.match_pair(from).unwrap_or(from),
-            Motion::FindChar { ch, forward, till } => {
-                self.find_char(from, ch, forward, till).unwrap_or(from)
-            }
             Motion::SearchNext { reverse } => self.search_step(from, reverse).unwrap_or(from),
+            _ => self.motion().resolve(from, motion).unwrap_or(from),
         }
+    }
+
+    fn motion(&self) -> MotionResolver<'_> {
+        MotionResolver::new(&self.buffer, &self.fold_view, self.rows, self.top_row)
     }
 
     pub fn search_matches(&self) -> Vec<std::ops::Range<usize>> {
@@ -774,89 +732,6 @@ impl EditCore {
         Some(self.buffer.rope.slice(start..end).chars().collect())
     }
 
-    fn screen_line(&self, offset: u16) -> usize {
-        let line = self.fold_view.step_rows(self.top_row, offset as i64);
-        self.first_non_blank(self.buffer.line_to_char(line as usize))
-    }
-
-    fn last_non_blank(&self, from: usize) -> usize {
-        let (l, _) = self.buffer.char_to_coords(from);
-        let base = self.buffer.line_to_char(l);
-        let llen = self.buffer.line_len_chars(l);
-        let mut i = llen;
-        while i > 0 {
-            let ch = self.buffer.rope.char(base + i - 1);
-            if ch != ' ' && ch != '\t' {
-                return base + i - 1;
-            }
-            i -= 1;
-        }
-        base
-    }
-
-    fn match_pair(&self, from: usize) -> Option<usize> {
-        const PAIRS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
-        let (line, _) = self.buffer.char_to_coords(from);
-        let base = self.buffer.line_to_char(line);
-        let llen = self.buffer.line_len_chars(line);
-        let col = from - base;
-        for i in col..llen {
-            let at = base + i;
-            let c = self.buffer.rope.char(at);
-            if let Some((open, close)) = PAIRS.iter().find(|(o, _)| *o == c) {
-                return self.scan_pair(at, *open, *close, true);
-            }
-            if let Some((open, close)) = PAIRS.iter().find(|(_, c2)| *c2 == c) {
-                return self.scan_pair(at, *open, *close, false);
-            }
-        }
-        None
-    }
-
-    fn scan_pair(&self, at: usize, open: char, close: char, forward: bool) -> Option<usize> {
-        let len = self.buffer.len_chars();
-        let mut depth = 0i32;
-        let mut i = at as i64;
-        loop {
-            let c = self.buffer.rope.char(i as usize);
-            if c == open {
-                depth += 1;
-            } else if c == close {
-                depth -= 1;
-            }
-            if depth == 0 && (c == open || c == close) && i as usize != at {
-                return Some(i as usize);
-            }
-            i += if forward { 1 } else { -1 };
-            if i < 0 || i as usize >= len {
-                return None;
-            }
-        }
-    }
-
-    fn find_char(&self, from: usize, ch: char, forward: bool, till: bool) -> Option<usize> {
-        let (line, _) = self.buffer.char_to_coords(from);
-        let base = self.buffer.line_to_char(line);
-        let llen = self.buffer.line_len_chars(line);
-        let col = from - base;
-        if forward {
-            let start = if till { col + 2 } else { col + 1 };
-            for i in start..llen {
-                if self.buffer.rope.char(base + i) == ch {
-                    return Some(base + if till { i - 1 } else { i });
-                }
-            }
-        } else {
-            let end = if till { col.checked_sub(1)? } else { col };
-            for i in (0..end).rev() {
-                if self.buffer.rope.char(base + i) == ch {
-                    return Some(base + if till { i + 1 } else { i });
-                }
-            }
-        }
-        None
-    }
-
     fn resolve_navigation_motion(&mut self, from: usize, motion: Motion) -> usize {
         let delta = match motion {
             Motion::Up => Some(-1),
@@ -879,169 +754,16 @@ impl EditCore {
         self.buffer.coords_to_char(target, preferred_col)
     }
 
-    fn vertical(&self, from: usize, delta: i64) -> usize {
-        let (l, c) = self.buffer.char_to_coords(from);
-        let target = self.fold_view.step_rows(l as u32, delta) as usize;
-        self.buffer.coords_to_char(target, c)
-    }
-
-    fn line_left(&self, from: usize) -> usize {
-        let (line, col) = self.buffer.char_to_coords(from);
-        let start = self.buffer.line_to_char(line);
-        if col == 0 {
-            start
-        } else {
-            self.buffer.prev_grapheme(from).max(start)
-        }
-    }
-
-    fn line_right(&self, from: usize) -> usize {
-        let (line, _) = self.buffer.char_to_coords(from);
-        let start = self.buffer.line_to_char(line);
-        let end = start + self.buffer.line_len_chars(line);
-        if end == start {
-            return start;
-        }
-        let last = self.buffer.prev_grapheme(end);
-        if from >= last {
-            last
-        } else {
-            self.buffer.next_grapheme(from).min(last)
-        }
-    }
-
     fn normal_cursor_target(&self, at: usize) -> usize {
-        let at = at.min(self.buffer.len_chars());
-        let (line, _) = self.buffer.char_to_coords(at);
-        let start = self.buffer.line_to_char(line);
-        let end = start + self.buffer.line_len_chars(line);
-        if start == end {
-            start
-        } else {
-            at.clamp(start, self.buffer.prev_grapheme(end))
-        }
-    }
-
-    fn paragraph_prev(&self, from: usize) -> usize {
-        let (current, _) = self.buffer.char_to_coords(from);
-        if current == 0 {
-            return 0;
-        }
-        let mut line = current - 1;
-        while line > 0 && self.buffer.line_len_chars(line) == 0 {
-            line -= 1;
-        }
-        while line > 0 && self.buffer.line_len_chars(line - 1) > 0 {
-            line -= 1;
-        }
-        self.buffer.line_to_char(line)
-    }
-
-    fn paragraph_next(&self, from: usize) -> usize {
-        let (current, _) = self.buffer.char_to_coords(from);
-        let total = self.buffer.len_lines();
-        let mut line = current.saturating_add(1);
-        while line < total && self.buffer.line_len_chars(line) > 0 {
-            line += 1;
-        }
-        while line < total && self.buffer.line_len_chars(line) == 0 {
-            line += 1;
-        }
-        if line < total {
-            return self.buffer.line_to_char(line);
-        }
-        from
+        self.motion().normal_cursor_target(at)
     }
 
     fn first_non_blank(&self, from: usize) -> usize {
-        let (l, _) = self.buffer.char_to_coords(from);
-        let base = self.buffer.line_to_char(l);
-        let llen = self.buffer.line_len_chars(l);
-        for i in 0..llen {
-            let ch = self.buffer.rope.char(base + i);
-            if ch != ' ' && ch != '\t' {
-                return base + i;
-            }
-        }
-        base
-    }
-
-    fn cls(&self, i: usize, big: bool) -> u8 {
-        let c = self.buffer.rope.char(i);
-        if big {
-            if c.is_whitespace() { 0 } else { 1 }
-        } else {
-            char_class(c)
-        }
-    }
-
-    fn word_next(&self, from: usize, big: bool) -> usize {
-        let len = self.buffer.len_chars();
-        let mut i = from;
-        if i >= len {
-            return len;
-        }
-        let start_class = self.cls(i, big);
-        while i < len && self.cls(i, big) == start_class && start_class != 0 {
-            i += 1;
-        }
-        while i < len && self.cls(i, big) == 0 {
-            i += 1;
-        }
-        i
+        self.motion().first_non_blank(from)
     }
 
     fn word_prev(&self, from: usize, big: bool) -> usize {
-        let mut i = from;
-        while i > 0 && self.cls(i - 1, big) == 0 {
-            i -= 1;
-        }
-        if i == 0 {
-            return 0;
-        }
-        let cls = self.cls(i - 1, big);
-        while i > 0 && self.cls(i - 1, big) == cls {
-            i -= 1;
-        }
-        i
-    }
-
-    fn word_end(&self, from: usize, big: bool) -> usize {
-        let len = self.buffer.len_chars();
-        let mut i = (from + 1).min(len);
-        while i < len && self.cls(i, big) == 0 {
-            i += 1;
-        }
-        if i >= len {
-            return len;
-        }
-        let cls = self.cls(i, big);
-        while i + 1 < len && self.cls(i + 1, big) == cls {
-            i += 1;
-        }
-        i
-    }
-
-    fn word_end_prev(&self, from: usize, big: bool) -> usize {
-        let len = self.buffer.len_chars();
-        if from == 0 || len == 0 {
-            return 0;
-        }
-        let mut i = from.min(len - 1);
-        let start = self.cls(i, big);
-        if start != 0 {
-            while i > 0 && self.cls(i - 1, big) == start {
-                i -= 1;
-            }
-        }
-        if i == 0 {
-            return 0;
-        }
-        i -= 1;
-        while i > 0 && self.cls(i, big) == 0 {
-            i -= 1;
-        }
-        i
+        self.motion().word_prev(from, big)
     }
 
     pub fn paste(&mut self, text: &str) -> bool {

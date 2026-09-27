@@ -3,6 +3,7 @@ pub mod command;
 pub mod core;
 pub mod ex;
 pub mod highlight_cache;
+mod motion;
 pub mod register;
 pub mod search;
 pub mod text_object;
