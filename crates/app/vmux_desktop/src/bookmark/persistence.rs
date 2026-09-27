@@ -10,9 +10,12 @@ pub(crate) struct BookmarkPersistencePlugin;
 
 impl Plugin for BookmarkPersistencePlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn((
+            Name::new("Bookmark persistence"),
+            BookmarkAutoSave::default(),
+        ));
         app.register_type::<OfferedBookmarkDefaults>()
             .init_resource::<OfferedBookmarkDefaults>()
-            .init_resource::<BookmarkAutoSave>()
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_default_bookmarks_after_load)
@@ -74,7 +77,10 @@ fn save_bookmarks_to_path(commands: &mut Commands, path: PathBuf) {
     commands.trigger_save(save);
 }
 
-fn load_bookmarks_on_startup(mut commands: Commands) {
+fn load_bookmarks_on_startup(
+    persistence: Single<Entity, With<BookmarkAutoSave>>,
+    mut commands: Commands,
+) {
     if vmux_core::profile::is_test_session() {
         return;
     }
@@ -83,26 +89,26 @@ fn load_bookmarks_on_startup(mut commands: Commands) {
         commands.trigger(SeedBookmarkDefaults);
         return;
     }
-    commands.insert_resource(BookmarkLoadPending);
+    commands.entity(*persistence).insert(BookmarkLoadPending);
     commands.trigger_load(LoadWorld::<BookmarkFilter>::from_file(path));
 }
 
 fn seed_default_bookmarks_after_load(
     _trigger: On<Loaded>,
-    pending: Option<Res<BookmarkLoadPending>>,
+    pending: Option<Single<Entity, With<BookmarkLoadPending>>>,
     mut commands: Commands,
 ) {
-    if pending.is_none() {
+    let Some(pending) = pending else {
         return;
-    }
+    };
     commands.trigger(SeedBookmarkDefaults);
-    commands.remove_resource::<BookmarkLoadPending>();
+    commands.entity(*pending).remove::<BookmarkLoadPending>();
 }
 
 #[derive(Event)]
 struct SeedBookmarkDefaults;
 
-#[derive(Resource)]
+#[derive(Component)]
 struct BookmarkLoadPending;
 
 #[derive(Resource, Reflect, Default, Clone, Debug, PartialEq, Eq)]
@@ -183,7 +189,7 @@ fn seed_bookmark_defaults(
     folders: Query<(Entity, &Name, Option<&vmux_core::SmartBookmarkFolder>), With<Folder>>,
     orders: Query<&BookmarkOrder, BookmarkFilter>,
     mut offered: ResMut<OfferedBookmarkDefaults>,
-    mut auto: ResMut<BookmarkAutoSave>,
+    mut auto: Single<&mut BookmarkAutoSave>,
     mut commands: Commands,
 ) {
     let defaults = BookmarkDefaults::new(
@@ -303,7 +309,7 @@ fn seed_bookmark_defaults(
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct BookmarkAutoSave {
     dirty: bool,
 }
@@ -324,7 +330,7 @@ fn migrate_legacy_bookmark_order(
 fn migrate_smart_bookmark_folders(
     folders: Query<(Entity, Option<&Children>), With<vmux_core::SmartBookmarkFolder>>,
     mut offered: ResMut<OfferedBookmarkDefaults>,
-    mut auto: ResMut<BookmarkAutoSave>,
+    mut auto: Single<&mut BookmarkAutoSave>,
     mut commands: Commands,
 ) {
     let mut changed = false;
@@ -359,7 +365,7 @@ fn migrate_shortcut_bookmark_aliases(
         Or<(With<Pin>, With<Bookmark>)>,
     >,
     mut offered: ResMut<OfferedBookmarkDefaults>,
-    mut auto: ResMut<BookmarkAutoSave>,
+    mut auto: Single<&mut BookmarkAutoSave>,
     mut commands: Commands,
 ) {
     let mut changed = false;
@@ -479,7 +485,7 @@ impl From<&str> for ToolBookmarkUrl {
 fn migrate_tool_page_bookmarks(
     items: Query<(Entity, &PageMetadata), Or<(With<Pin>, With<Bookmark>)>>,
     mut offered: ResMut<OfferedBookmarkDefaults>,
-    mut auto: ResMut<BookmarkAutoSave>,
+    mut auto: Single<&mut BookmarkAutoSave>,
     mut commands: Commands,
 ) {
     let mut changed = false;
@@ -535,7 +541,7 @@ fn migrate_tool_page_bookmarks(
 }
 
 fn mark_bookmarks_dirty(
-    mut auto: ResMut<BookmarkAutoSave>,
+    mut auto: Single<&mut BookmarkAutoSave>,
     changed: Query<
         (),
         (
@@ -572,7 +578,7 @@ fn mark_bookmarks_dirty(
     }
 }
 
-fn autosave_bookmarks(mut auto: ResMut<BookmarkAutoSave>, mut commands: Commands) {
+fn autosave_bookmarks(mut auto: Single<&mut BookmarkAutoSave>, mut commands: Commands) {
     if !auto.dirty {
         return;
     }
@@ -709,11 +715,11 @@ mod tests {
     #[test]
     fn shortcut_alias_bookmarks_migrate_to_one_canonical_entry() {
         let mut app = App::new();
+        let auto_save = app.world_mut().spawn(BookmarkAutoSave::default()).id();
         app.insert_resource(OfferedBookmarkDefaults {
             urls: vec!["vmux://cheatsheet/".into(), vmux_shortcut::PAGE_URL.into()],
             ..default()
         })
-        .init_resource::<BookmarkAutoSave>()
         .add_systems(Update, migrate_shortcut_bookmark_aliases);
         let survivor = app
             .world_mut()
@@ -754,17 +760,31 @@ mod tests {
             app.world().resource::<OfferedBookmarkDefaults>().urls,
             [vmux_shortcut::PAGE_URL]
         );
-        assert!(app.world().resource::<BookmarkAutoSave>().dirty);
+        assert!(
+            app.world()
+                .get::<BookmarkAutoSave>(auto_save)
+                .unwrap()
+                .dirty
+        );
 
-        app.world_mut().resource_mut::<BookmarkAutoSave>().dirty = false;
+        app.world_mut()
+            .get_mut::<BookmarkAutoSave>(auto_save)
+            .unwrap()
+            .dirty = false;
         app.update();
 
-        assert!(!app.world().resource::<BookmarkAutoSave>().dirty);
+        assert!(
+            !app.world()
+                .get::<BookmarkAutoSave>(auto_save)
+                .unwrap()
+                .dirty
+        );
     }
 
     #[test]
     fn tool_child_bookmarks_migrate_to_the_single_tools_root() {
         let mut app = App::new();
+        let auto_save = app.world_mut().spawn(BookmarkAutoSave::default()).id();
         app.insert_resource(OfferedBookmarkDefaults {
             urls: vec![
                 "vmux://tools".into(),
@@ -774,7 +794,6 @@ mod tests {
             ],
             ..default()
         })
-        .init_resource::<BookmarkAutoSave>()
         .add_systems(Update, migrate_tool_page_bookmarks);
         let root = app
             .world_mut()
@@ -834,7 +853,12 @@ mod tests {
             app.world().resource::<OfferedBookmarkDefaults>().urls,
             [TOOL_ROOT_URL]
         );
-        assert!(app.world().resource::<BookmarkAutoSave>().dirty);
+        assert!(
+            app.world()
+                .get::<BookmarkAutoSave>(auto_save)
+                .unwrap()
+                .dirty
+        );
     }
 
     #[test]
@@ -902,17 +926,18 @@ mod tests {
         ];
         let mut load_app = App::new();
         load_app
+            .world_mut()
+            .spawn((BookmarkAutoSave::default(), BookmarkLoadPending));
+        load_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
             .add_plugins(vmux_core::CorePlugin)
             .insert_resource(settings)
             .register_type::<OfferedBookmarkDefaults>()
             .init_resource::<OfferedBookmarkDefaults>()
-            .init_resource::<BookmarkAutoSave>()
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
             .add_observer(seed_default_bookmarks_after_load)
             .add_observer(seed_bookmark_defaults);
-        load_app.world_mut().insert_resource(BookmarkLoadPending);
         load_app
             .world_mut()
             .commands()
@@ -983,6 +1008,7 @@ mod tests {
     #[test]
     fn smart_folder_migration_moves_children_to_bookmark_root() {
         let mut app = App::new();
+        let auto_save = app.world_mut().spawn(BookmarkAutoSave::default()).id();
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
             .insert_resource(OfferedBookmarkDefaults {
@@ -990,7 +1016,6 @@ mod tests {
                 folder_bookmarks: vec!["projects\nvmux://projects".into()],
                 ..default()
             })
-            .init_resource::<BookmarkAutoSave>()
             .add_systems(Update, migrate_smart_bookmark_folders);
         let bookmark = app
             .world_mut()
@@ -1027,7 +1052,12 @@ mod tests {
                 .folder_bookmarks
                 .is_empty()
         );
-        assert!(app.world().resource::<BookmarkAutoSave>().dirty);
+        assert!(
+            app.world()
+                .get::<BookmarkAutoSave>(auto_save)
+                .unwrap()
+                .dirty
+        );
     }
 
     #[test]
