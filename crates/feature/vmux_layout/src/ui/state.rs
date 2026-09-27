@@ -177,22 +177,18 @@ mod tests {
 
         state.apply(
             &BookmarkMenuEffect {
-                revision: 4,
-                input: Some(vmux_api::bookmark::BookmarkMenuInput::Rename {
+                rename: vmux_api::bookmark::BookmarkRenameEffect {
+                    revision: 4,
                     uuid: "bookmark".to_string(),
-                }),
+                },
+                ..Default::default()
             }
             .into(),
         );
         state.apply(&ReloadEffect { revision: 7 }.into());
 
-        assert_eq!(state.bookmark_menu.revision, 4);
-        assert_eq!(
-            state.bookmark_menu.input,
-            Some(vmux_api::bookmark::BookmarkMenuInput::Rename {
-                uuid: "bookmark".to_string(),
-            })
-        );
+        assert_eq!(state.bookmark_menu.rename.revision, 4);
+        assert_eq!(state.bookmark_menu.rename.uuid, "bookmark");
         assert_eq!(state.reload_revision, 7);
     }
 

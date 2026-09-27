@@ -162,14 +162,20 @@ pub struct BookmarkContextMenuRequest {
     pub active: bool,
 }
 
-#[vmux_api::contract(Eq)]
-pub enum BookmarkMenuInput {
-    CreateFolder { parent: Option<String> },
-    Rename { uuid: String },
+#[vmux_api::contract(Eq, Default)]
+pub struct BookmarkFolderCreateEffect {
+    pub revision: u64,
+    pub parent: Option<String>,
+}
+
+#[vmux_api::contract(Eq, Default)]
+pub struct BookmarkRenameEffect {
+    pub revision: u64,
+    pub uuid: String,
 }
 
 #[vmux_api::contract(Eq, Default)]
 pub struct BookmarkMenuEffect {
-    pub revision: u64,
-    pub input: Option<BookmarkMenuInput>,
+    pub create_folder: BookmarkFolderCreateEffect,
+    pub rename: BookmarkRenameEffect,
 }

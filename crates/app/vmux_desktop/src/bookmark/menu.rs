@@ -17,7 +17,9 @@ mod macos {
     use bevy::ecs::system::NonSendMarker;
     use bevy::prelude::*;
     use std::collections::HashSet;
-    use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkMenuInput};
+    use vmux_api::bookmark::{
+        BookmarkFolderCreateEffect, BookmarkMenuEffect, BookmarkRenameEffect,
+    };
     use vmux_core::{Bookmark, Collapsed, Folder, PageMetadata, Pin, Uuid, host::UiStateWrite};
     use vmux_layout::bookmark::{
         AddRequest, BookmarkMenuTarget, MoveFolderRequest, MoveRequest, PinRequest,
@@ -563,10 +565,11 @@ mod macos {
             commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
                 request.webview,
                 &BookmarkMenuEffect {
-                    revision: revision.0,
-                    input: Some(BookmarkMenuInput::CreateFolder {
+                    create_folder: BookmarkFolderCreateEffect {
+                        revision: revision.0,
                         parent: request.parent.clone(),
-                    }),
+                    },
+                    ..Default::default()
                 },
             ));
         }
@@ -575,10 +578,11 @@ mod macos {
             commands.trigger(UiStateWrite::<LayoutUiState>::from_event(
                 request.webview,
                 &BookmarkMenuEffect {
-                    revision: revision.0,
-                    input: Some(BookmarkMenuInput::Rename {
+                    rename: BookmarkRenameEffect {
+                        revision: revision.0,
                         uuid: request.uuid.clone(),
-                    }),
+                    },
+                    ..Default::default()
                 },
             ));
         }
