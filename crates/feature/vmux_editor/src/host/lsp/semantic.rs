@@ -142,11 +142,11 @@ impl SemanticKind {
         Self::resolved(dark)[slot]
     }
 
-    fn resolved(dark: bool) -> &'static [[u8; 3]; 7] {
+    fn resolved(dark: bool) -> [[u8; 3]; 7] {
         static DARK: OnceLock<[[u8; 3]; 7]> = OnceLock::new();
         static LIGHT: OnceLock<[[u8; 3]; 7]> = OnceLock::new();
         let cell = if dark { &DARK } else { &LIGHT };
-        cell.get_or_init(|| {
+        *cell.get_or_init(|| {
             let theme = crate::palette::Palette::for_scheme(dark).theme();
             let highlighter = Highlighter::new(&theme);
             let mut out = [[0u8; 3]; 7];
