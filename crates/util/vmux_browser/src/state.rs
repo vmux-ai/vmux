@@ -63,30 +63,31 @@ pub(crate) struct StatePlugin;
 
 impl Plugin for StatePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<StateRevision>()
-            .add_systems(
-                Update,
-                mark_page_state_dirty
-                    .after(vmux_layout::apply_cef_state_from_webview)
-                    .after(vmux_layout::stack::ComputeFocusSet),
+        app.world_mut()
+            .spawn((Name::new("Page state revision"), StateRevision::default()));
+        app.add_systems(
+            Update,
+            mark_page_state_dirty
+                .after(vmux_layout::apply_cef_state_from_webview)
+                .after(vmux_layout::stack::ComputeFocusSet),
+        )
+        .add_systems(
+            Update,
+            (
+                push_layout_state_emit,
+                push_stacks_host_emit,
+                push_pane_tree_emit,
+                push_tabs_host_emit,
+                push_bookmarks_host_emit,
+                push_update_notice_emit,
+                push_projects_host_emit,
             )
-            .add_systems(
-                Update,
-                (
-                    push_layout_state_emit,
-                    push_stacks_host_emit,
-                    push_pane_tree_emit,
-                    push_tabs_host_emit,
-                    push_bookmarks_host_emit,
-                    push_update_notice_emit,
-                    push_projects_host_emit,
-                )
-                    .after(mark_page_state_dirty),
-            );
+                .after(mark_page_state_dirty),
+        );
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct StateRevision(u64);
 
 impl StateRevision {
@@ -361,7 +362,7 @@ fn mark_page_state_dirty(
     settings: Res<AppSettings>,
     active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
     repo_info: Option<Single<Ref<vmux_git::RepoInfoCache>>>,
-    mut revision: ResMut<StateRevision>,
+    mut revision: Single<&mut StateRevision>,
 ) {
     let resource_changed = focused_window.is_changed()
         || focused_stack.is_changed()
@@ -385,7 +386,7 @@ fn push_layout_state_emit(
     window_q: Query<(&HostWindow, &Node), With<VmuxWindow>>,
     windows: Query<&Window>,
     settings: Res<AppSettings>,
-    revision: Res<StateRevision>,
+    revision: Single<&StateRevision>,
     mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
@@ -519,7 +520,7 @@ fn push_stacks_host_emit(
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
-    revision: Res<StateRevision>,
+    revision: Single<&StateRevision>,
     mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
@@ -621,7 +622,7 @@ fn push_pane_tree_emit(
         ),
         With<Browser>,
     >,
-    revision: Res<StateRevision>,
+    revision: Single<&StateRevision>,
     mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
@@ -749,7 +750,7 @@ fn push_projects_host_emit(
     active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
     space_projects: vmux_space::SpaceProjects,
     expansion_changed: Query<(), Changed<vmux_space::ExpandedProjectDirs>>,
-    revision: Res<StateRevision>,
+    revision: Single<&StateRevision>,
     mut cache: Local<ProjectionCache>,
     mut listed: Local<Option<Vec<vmux_core::event::ProjectRow>>>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
@@ -869,7 +870,7 @@ fn push_bookmarks_host_emit(
         ),
         With<vmux_core::Bookmark>,
     >,
-    revision: Res<StateRevision>,
+    revision: Single<&StateRevision>,
     mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
@@ -970,7 +971,7 @@ fn push_tabs_host_emit(
     stack_children: Query<&Children>,
     browser_meta: Query<(&PageMetadata, Option<&PageIdentity>), With<Browser>>,
     done_agents: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
-    revision: Res<StateRevision>,
+    revision: Single<&StateRevision>,
     mut cache: Local<ProjectionCache>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {

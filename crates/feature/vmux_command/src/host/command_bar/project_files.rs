@@ -48,7 +48,7 @@ impl ProjectCompletions {
     }
 }
 
-#[derive(bevy::prelude::Resource, Default)]
+#[derive(bevy::prelude::Component, Default)]
 pub struct ProjectIndex {
     roots: Vec<RootIndex>,
     generation: u64,

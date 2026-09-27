@@ -16,8 +16,9 @@ pub(super) struct CompletionPlugin;
 
 impl Plugin for CompletionPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut()
+            .spawn((Name::new("Project file index"), ProjectIndex::default()));
         app.add_plugins(UiEventPlugin::<(PathCompleteRequest,)>::default())
-            .init_resource::<ProjectIndex>()
             .add_observer(on_path_complete_request)
             .add_systems(
                 Update,
@@ -36,7 +37,7 @@ fn on_path_complete_request(
     state: Res<CommandBarProjection>,
     browsers: NonSend<Browsers>,
     pending: Query<&PendingProjectCompletion>,
-    mut index: ResMut<ProjectIndex>,
+    mut index: Single<&mut ProjectIndex>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -104,7 +105,7 @@ fn warm_project_index(
     state: Res<CommandBarProjection>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     pending: Query<&PendingProjectCompletion>,
-    mut index: ResMut<ProjectIndex>,
+    mut index: Single<&mut ProjectIndex>,
 ) {
     if !state.is_changed() {
         return;
@@ -125,7 +126,7 @@ fn answer_settled_project_index(
     state: Res<CommandBarProjection>,
     browsers: NonSend<Browsers>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut index: ResMut<ProjectIndex>,
+    mut index: Single<&mut ProjectIndex>,
     mut pending: Query<(Entity, &mut PendingProjectCompletion)>,
     mut commands: Commands,
 ) {
