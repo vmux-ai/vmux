@@ -1,18 +1,33 @@
+use std::io::{self, Write};
+use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
-use bevy_app::{App, Plugin};
+use bevy_app::{App, Plugin, Update};
+use bevy_ecs::name::Name;
+use bevy_ecs::prelude::*;
 use vmux_api::protocol::ProcessId;
-use vmux_core::cli::{CliAppFuture, CliAppHandler, CliInvocation, CliManifestPlugin, CliResult};
+use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
+
+use crate::protocol::{McpConfig, McpInput, McpOutput, McpPlugin, McpRuntime, McpServer, McpSet};
 
 pub struct McpCliPlugin;
 
 impl Plugin for McpCliPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CliManifestPlugin::new(include_str!("cli.ron")));
-        app.world_mut().spawn(CliAppHandler {
-            command: "mcp",
-            run: run_mcp,
-        });
+        app.add_plugins((CliManifestPlugin::new(include_str!("cli.ron")), McpPlugin))
+            .add_systems(
+                Update,
+                (start_stdio, receive_stdio).chain().in_set(McpSet::Input),
+            )
+            .add_systems(
+                Update,
+                (write_stdio, finish_stdio).chain().in_set(McpSet::Output),
+            );
+        app.world_mut().spawn((
+            Name::new("MCP async runtime"),
+            McpRuntime(tokio::runtime::Handle::current()),
+        ));
     }
 }
 
@@ -53,27 +68,156 @@ impl TryFrom<&CliInvocation> for McpCliOptions {
     }
 }
 
-fn run_mcp(mut app: App, invocation: CliInvocation) -> CliAppFuture {
-    Box::pin(async move {
-        let options = match McpCliOptions::try_from(&invocation) {
+#[derive(Component)]
+struct McpStdio {
+    invocation: Entity,
+    receiver: Mutex<Receiver<McpStdin>>,
+    pending: usize,
+    eof: bool,
+    failed: bool,
+}
+
+impl McpStdio {
+    fn start(invocation: Entity) -> Self {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(64);
+        std::thread::spawn(move || {
+            let stdin = io::stdin();
+            let mut reader = stdin.lock();
+            loop {
+                match crate::protocol::read_json_line(&mut reader) {
+                    Ok(Some(value)) => {
+                        if sender.send(McpStdin::Input(value)).is_err() {
+                            return;
+                        }
+                    }
+                    Ok(None) => {
+                        let _ = sender.send(McpStdin::Eof);
+                        return;
+                    }
+                    Err(error) => {
+                        let _ = sender.send(McpStdin::Error(error.to_string()));
+                        return;
+                    }
+                }
+            }
+        });
+        Self {
+            invocation,
+            receiver: Mutex::new(receiver),
+            pending: 0,
+            eof: false,
+            failed: false,
+        }
+    }
+}
+
+enum McpStdin {
+    Input(serde_json::Value),
+    Eof,
+    Error(String),
+}
+
+fn start_stdio(
+    invocations: Query<(Entity, &CliInvocation), Added<CliInvocation>>,
+    mut commands: Commands,
+) {
+    for (entity, invocation) in &invocations {
+        if !invocation.is("mcp") {
+            continue;
+        }
+        let options = match McpCliOptions::try_from(invocation) {
             Ok(options) => options,
-            Err(error) => return CliResult(Err(error)),
+            Err(error) => {
+                commands.entity(entity).insert(CliResult(Err(error)));
+                continue;
+            }
         };
         if let Some(profile) = options.profile {
             unsafe { std::env::set_var("VMUX_PROFILE", profile) };
         }
-        app.add_plugins(crate::protocol::McpPlugin::new(
-            options.anchor,
-            options.acp_session,
-            options.acp_terminals,
-            options.run_block_timeout,
-            options.shell,
+        commands.spawn((
+            Name::new("MCP protocol runtime"),
+            McpServer::default(),
+            McpConfig {
+                anchor: options.anchor,
+                acp_session: options.acp_session,
+                acp_terminals: options.acp_terminals,
+                run_block_timeout: options.run_block_timeout,
+                shell: options.shell,
+            },
+            McpStdio::start(entity),
         ));
-        CliResult(
-            crate::protocol::run_stdio(app)
-                .await
-                .map(|()| 0)
-                .map_err(|error| error.to_string()),
-        )
-    })
+    }
+}
+
+fn receive_stdio(
+    mut servers: Query<&mut McpStdio>,
+    mut input: MessageWriter<McpInput>,
+    mut commands: Commands,
+) {
+    for mut stdio in &mut servers {
+        loop {
+            let received = stdio.receiver.get_mut().unwrap().try_recv();
+            match received {
+                Ok(McpStdin::Input(value)) => {
+                    if value.get("id").is_some() {
+                        stdio.pending += 1;
+                    }
+                    input.write(McpInput(value));
+                }
+                Ok(McpStdin::Eof) | Err(TryRecvError::Disconnected) => {
+                    stdio.eof = true;
+                    break;
+                }
+                Ok(McpStdin::Error(error)) => {
+                    stdio.eof = true;
+                    stdio.failed = true;
+                    commands
+                        .entity(stdio.invocation)
+                        .insert(CliResult(Err(error)));
+                    break;
+                }
+                Err(TryRecvError::Empty) => break,
+            }
+        }
+    }
+}
+
+fn write_stdio(
+    mut output: MessageReader<McpOutput>,
+    mut servers: Query<&mut McpStdio>,
+    mut commands: Commands,
+) {
+    let Ok(mut stdio) = servers.single_mut() else {
+        return;
+    };
+    let stdout = io::stdout();
+    let mut writer = stdout.lock();
+    for McpOutput(value) in output.read() {
+        let result = serde_json::to_writer(&mut writer, value)
+            .and_then(|()| writer.write_all(b"\n").map_err(serde_json::Error::io))
+            .and_then(|()| writer.flush().map_err(serde_json::Error::io));
+        if let Err(error) = result {
+            stdio.eof = true;
+            stdio.failed = true;
+            commands
+                .entity(stdio.invocation)
+                .insert(CliResult(Err(error.to_string())));
+        }
+        stdio.pending = stdio.pending.saturating_sub(1);
+    }
+}
+
+fn finish_stdio(servers: Query<(Entity, &McpStdio)>, mut commands: Commands) {
+    for (server, stdio) in &servers {
+        if !stdio.eof || stdio.pending != 0 {
+            continue;
+        }
+        if !stdio.failed {
+            commands
+                .entity(stdio.invocation)
+                .insert(CliResult::success());
+        }
+        commands.entity(server).despawn();
+    }
 }

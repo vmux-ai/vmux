@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::future::Future;
-use std::pin::Pin;
 
 use bevy::app::{App, Plugin};
 use bevy_ecs::prelude::*;
@@ -121,14 +119,6 @@ impl CliResult {
     pub fn from_unit(result: std::io::Result<()>) -> Self {
         Self(result.map(|()| 0).map_err(|error| error.to_string()))
     }
-}
-
-pub type CliAppFuture = Pin<Box<dyn Future<Output = CliResult>>>;
-
-#[derive(Component, Clone, Copy)]
-pub struct CliAppHandler {
-    pub command: &'static str,
-    pub run: fn(App, CliInvocation) -> CliAppFuture,
 }
 
 #[cfg(test)]

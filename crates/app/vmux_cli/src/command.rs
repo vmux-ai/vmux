@@ -9,7 +9,7 @@ use clap::builder::{OsStringValueParser, PossibleValuesParser};
 use clap::error::ErrorKind;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use vmux_core::cli::{
-    CliAppHandler, CliArgumentManifest, CliCommandManifest, CliInvocation, CliManifest, CliResult,
+    CliArgumentManifest, CliCommandManifest, CliInvocation, CliManifest, CliResult,
 };
 
 pub async fn run(mut app: App) -> AppExit {
@@ -29,18 +29,6 @@ pub async fn run(mut app: App) -> AppExit {
             };
         }
     };
-    let app_handler = {
-        let world = app.world_mut();
-        let mut handlers = world.query::<&CliAppHandler>();
-        handlers
-            .iter(world)
-            .find(|handler| handler.command == invocation.command)
-            .copied()
-    };
-    if let Some(handler) = app_handler {
-        return exit((handler.run)(app, invocation).await);
-    }
-
     app.finish();
     app.cleanup();
     let invocation = app.world_mut().spawn(invocation).id();

@@ -1,5 +1,3 @@
-pub mod strategy;
-
 use bevy::prelude::*;
 
 use crate::AgentVariant;

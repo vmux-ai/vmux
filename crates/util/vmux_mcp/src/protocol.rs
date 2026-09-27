@@ -3,87 +3,67 @@ use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use serde_json::{Value, json};
 use std::future::Future;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead};
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
 use vmux_api::protocol::{AgentCommand, AgentQuery, AgentRequestId, ClientMessage, ServiceMessage};
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 
-pub struct McpPlugin {
-    config: McpConfig,
-}
-
-impl McpPlugin {
-    pub fn new(
-        anchor: Option<vmux_api::protocol::ProcessId>,
-        acp_session: bool,
-        acp_terminals: bool,
-        run_block_timeout: Duration,
-        shell: String,
-    ) -> Self {
-        Self {
-            config: McpConfig {
-                anchor,
-                acp_session,
-                acp_terminals,
-                run_block_timeout,
-                shell,
-            },
-        }
-    }
-}
+pub struct McpPlugin;
 
 impl Plugin for McpPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<vmux_tool::ToolRegistryPlugin>() {
             app.add_plugins(vmux_tool::ToolRegistryPlugin);
         }
-        app.world_mut().spawn((
-            Name::new("MCP protocol runtime"),
-            McpServer::default(),
-            self.config.clone(),
-        ));
-        app.configure_sets(
-            Update,
-            (
-                McpSet::Route,
-                vmux_tool::ToolResolveSet,
-                vmux_tool::ToolRequestSet,
-                vmux_tool::ToolDispatchSet,
-                vmux_tool::ToolDispatchFlush,
-                McpSet::StartTasks,
-                McpSet::BuildResponses,
-            )
-                .chain(),
-        )
-        .add_systems(
-            Update,
-            (
-                route_request.in_set(McpSet::Route),
+        app.add_message::<McpInput>()
+            .add_message::<McpOutput>()
+            .configure_sets(
+                Update,
                 (
-                    finish_tool_errors,
-                    start_list_tools,
-                    start_tool_commands,
-                    start_tool_queries,
-                    bevy_ecs::schedule::ApplyDeferred,
-                    start_mcp_tasks,
-                    bevy_ecs::schedule::ApplyDeferred,
-                    poll_tool_tasks,
+                    McpSet::Input,
+                    McpSet::Route,
+                    vmux_tool::ToolResolveSet,
+                    vmux_tool::ToolRequestSet,
+                    vmux_tool::ToolDispatchSet,
+                    vmux_tool::ToolDispatchFlush,
+                    McpSet::StartTasks,
+                    McpSet::BuildResponses,
+                    McpSet::Output,
                 )
-                    .chain()
-                    .in_set(McpSet::StartTasks),
-                build_responses.in_set(McpSet::BuildResponses),
-            ),
-        );
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    receive_requests.in_set(McpSet::Route),
+                    route_request.in_set(McpSet::Route),
+                    (
+                        finish_tool_errors,
+                        start_list_tools,
+                        start_tool_commands,
+                        start_tool_queries,
+                        bevy_ecs::schedule::ApplyDeferred,
+                        start_mcp_tasks,
+                        bevy_ecs::schedule::ApplyDeferred,
+                        poll_tool_tasks,
+                    )
+                        .chain()
+                        .in_set(McpSet::StartTasks),
+                    build_responses.in_set(McpSet::BuildResponses),
+                ),
+            );
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-enum McpSet {
+pub(crate) enum McpSet {
+    Input,
     Route,
     StartTasks,
     BuildResponses,
+    Output,
 }
 
 #[derive(Component, Default)]
@@ -92,16 +72,22 @@ pub struct McpServer {
 }
 
 #[derive(Component, Clone)]
-struct McpConfig {
-    anchor: Option<vmux_api::protocol::ProcessId>,
-    acp_session: bool,
-    acp_terminals: bool,
-    run_block_timeout: Duration,
-    shell: String,
+pub(crate) struct McpConfig {
+    pub(crate) anchor: Option<vmux_api::protocol::ProcessId>,
+    pub(crate) acp_session: bool,
+    pub(crate) acp_terminals: bool,
+    pub(crate) run_block_timeout: Duration,
+    pub(crate) shell: String,
 }
 
 #[derive(Component, Clone)]
-struct McpRuntime(tokio::runtime::Handle);
+pub(crate) struct McpRuntime(pub(crate) tokio::runtime::Handle);
+
+#[derive(Message)]
+pub(crate) struct McpInput(pub(crate) Value);
+
+#[derive(Message)]
+pub(crate) struct McpOutput(pub(crate) Value);
 
 #[derive(Component)]
 pub struct McpRequest {
@@ -153,9 +139,6 @@ enum McpReply {
     ProtocolError { code: i64, message: String },
 }
 
-#[derive(Component)]
-struct McpResponse(Value);
-
 type PendingRequests<'w, 's> = Query<
     'w,
     's,
@@ -179,85 +162,41 @@ pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     Ok(Some(value))
 }
 
-pub async fn run_stdio(mut app: App) -> io::Result<()> {
-    let stdin = io::stdin();
-    let mut reader = stdin.lock();
-    let stdout = io::stdout();
-    let mut writer = stdout.lock();
-    while let Some(message) = read_json_line(&mut reader)? {
-        if let Some(response) = handle_message(&mut app, message).await {
-            serde_json::to_writer(&mut writer, &response)?;
-            writer.write_all(b"\n")?;
-            writer.flush()?;
-        }
-    }
-    Ok(())
-}
-
-async fn handle_message(app: &mut App, message: Value) -> Option<Value> {
-    let server = app
-        .world_mut()
-        .query_filtered::<Entity, With<McpServer>>()
-        .single(app.world())
-        .expect("MCP server requires exactly one protocol runtime");
-    app.world_mut()
-        .entity_mut(server)
-        .insert(McpRuntime(tokio::runtime::Handle::current()));
-    let id = message.get("id").cloned()?;
-    let method = message
-        .get("method")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
-    let run_block_timeout = app
-        .world()
-        .get::<McpConfig>(server)
-        .expect("MCP protocol runtime must own its config")
-        .run_block_timeout;
-    let sequence = {
-        let mut server = app.world_mut().entity_mut(server);
-        let mut state = server
-            .get_mut::<McpServer>()
-            .expect("MCP protocol runtime must own its server state");
-        let sequence = state.next_request_sequence;
-        state.next_request_sequence += 1;
-        sequence
+fn receive_requests(
+    mut input: MessageReader<McpInput>,
+    mut servers: Query<(&mut McpServer, &McpConfig)>,
+    mut commands: Commands,
+) {
+    let Ok((mut server, config)) = servers.single_mut() else {
+        return;
     };
-    let request = app
-        .world_mut()
-        .spawn((
-            McpRequest::new(run_block_timeout),
+    for McpInput(message) in input.read() {
+        let Some(id) = message.get("id").cloned() else {
+            continue;
+        };
+        let method = message
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
+        let sequence = server.next_request_sequence;
+        server.next_request_sequence += 1;
+        commands.spawn((
+            McpRequest::new(config.run_block_timeout),
             Name::new(format!("MCP request {sequence}")),
-            McpRequestId(id.clone()),
+            McpRequestId(id),
             McpMethod(method),
             McpParams(params),
             McpRequestSequence(sequence),
-        ))
-        .id();
-
-    loop {
-        app.update();
-        if let Some(response) = app.world_mut().entity_mut(request).take::<McpResponse>() {
-            app.world_mut().despawn(request);
-            return Some(response.0);
-        }
-        if !app.world().entity(request).contains::<McpTask>() {
-            app.world_mut().despawn(request);
-            return Some(json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": {
-                    "code": -32603,
-                    "message": "request did not produce a response"
-                }
-            }));
-        }
-        tokio::task::yield_now().await;
+        ));
     }
 }
 
-fn route_request(mut commands: Commands, requests: PendingRequests, config: Single<&McpConfig>) {
+fn route_request(mut commands: Commands, requests: PendingRequests, configs: Query<&McpConfig>) {
+    let Ok(config) = configs.single() else {
+        return;
+    };
     let Some((entity, method, params, _)) =
         requests.iter().min_by_key(|(_, _, _, sequence)| sequence.0)
     else {
@@ -410,10 +349,13 @@ fn start_tool_queries(
 }
 
 fn start_mcp_tasks(
-    runtime: Single<&McpRuntime>,
+    runtimes: Query<&McpRuntime>,
     mut pending: Query<(Entity, &mut McpExecution), Added<McpExecution>>,
     mut commands: Commands,
 ) {
+    let Ok(runtime) = runtimes.single() else {
+        return;
+    };
     for (entity, mut pending) in &mut pending {
         let future = pending
             .0
@@ -450,7 +392,8 @@ fn poll_tool_tasks(mut commands: Commands, mut tasks: Query<(Entity, &mut McpTas
 
 fn build_responses(
     mut commands: Commands,
-    replies: Query<(Entity, &McpRequestId, &McpReply), Without<McpResponse>>,
+    replies: Query<(Entity, &McpRequestId, &McpReply)>,
+    mut output: MessageWriter<McpOutput>,
 ) {
     for (entity, id, reply) in &replies {
         let response = match reply {
@@ -473,7 +416,8 @@ fn build_responses(
                 }
             }),
         };
-        commands.entity(entity).insert(McpResponse(response));
+        output.write(McpOutput(response));
+        commands.entity(entity).despawn();
     }
 }
 
