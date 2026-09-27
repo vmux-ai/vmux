@@ -19,6 +19,7 @@ bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_tasks = "0.19"
 bevy_window = { workspace = true }
+crossbeam-channel = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"

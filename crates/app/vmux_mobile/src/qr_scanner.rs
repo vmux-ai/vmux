@@ -1,9 +1,7 @@
 #[cfg(target_os = "ios")]
 mod platform {
-    use std::cell::Cell;
-    use std::collections::VecDeque;
+    use std::cell::{Cell, RefCell};
     use std::ptr;
-    use std::sync::{LazyLock, Mutex};
 
     use block2::RcBlock;
     use dioxus::mobile::tao::platform::ios::WindowExtIOS;
@@ -29,14 +27,15 @@ mod platform {
     };
     use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
+    use crate::pairing::{PairRequest, PairingFailure};
+    use crate::runtime::RuntimeHandle;
+
     thread_local! {
         static ROOT_CONTROLLER: Cell<*mut UIViewController> = const { Cell::new(ptr::null_mut()) };
         static ACTIVE: Cell<bool> = const { Cell::new(false) };
         static REQUESTING: Cell<bool> = const { Cell::new(false) };
+        static RUNTIME: RefCell<Option<RuntimeHandle>> = const { RefCell::new(None) };
     }
-
-    static RESULTS: LazyLock<Mutex<VecDeque<Result<String, String>>>> =
-        LazyLock::new(|| Mutex::new(VecDeque::new()));
 
     struct ScannerIvars {
         capture: Option<Capture>,
@@ -239,17 +238,15 @@ mod platform {
                 }
             }
             if let Some(result) = result {
-                RESULTS
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .push_back(result);
+                report(result);
             }
             self.dismissViewControllerAnimated_completion(true, None);
         }
     }
 
-    pub fn install(window: &dioxus::mobile::DesktopContext) {
+    pub fn install(window: &dioxus::mobile::DesktopContext, runtime: RuntimeHandle) {
         ROOT_CONTROLLER.set(window.window.ui_view_controller().cast());
+        RUNTIME.with_borrow_mut(|installed| *installed = Some(runtime));
     }
 
     pub struct ScannerSupport(Option<String>);
@@ -305,10 +302,7 @@ mod platform {
                             present_denied(marker)
                         };
                         if let Err(message) = outcome {
-                            RESULTS
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner())
-                                .push_back(Err(message));
+                            report(Err(message));
                         }
                     });
                 });
@@ -394,11 +388,27 @@ mod platform {
         Ok(())
     }
 
-    pub fn take_result() -> Option<Result<String, String>> {
-        RESULTS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .pop_front()
+    fn report(result: Result<String, String>) {
+        RUNTIME.with_borrow(|installed| {
+            let Some(runtime) = installed else {
+                return;
+            };
+            let Ok(mut runtime) = runtime.try_borrow_mut() else {
+                tracing::error!("QR result arrived while ECS was running");
+                return;
+            };
+            match result {
+                Ok(value) => {
+                    runtime.app.world_mut().write_message(PairRequest(value));
+                }
+                Err(message) => {
+                    runtime
+                        .app
+                        .world_mut()
+                        .write_message(PairingFailure(message));
+                }
+            }
+        });
     }
 }
 
@@ -406,7 +416,9 @@ mod platform {
 mod platform {
     use vmux_ui::i18n::translate;
 
-    pub fn install(_: &dioxus::mobile::DesktopContext) {}
+    use crate::runtime::RuntimeHandle;
+
+    pub fn install(_: &dioxus::mobile::DesktopContext, _: RuntimeHandle) {}
 
     pub struct ScannerSupport(Option<String>);
 
@@ -424,9 +436,6 @@ mod platform {
         Err(translate("mobile-qr-unsupported-platform"))
     }
 
-    pub fn take_result() -> Option<Result<String, String>> {
-        None
-    }
 }
 
 pub use platform::*;

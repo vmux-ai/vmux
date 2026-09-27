@@ -358,13 +358,14 @@ fn attach(host: &MobileHost, payload: ChatAttachPaths) -> Result<(), EventListen
 }
 
 fn prompt(host: &MobileHost, request: CommandBarPromptRequest) -> Result<(), EventListenerError> {
-    crate::session::start_chat(
-        host.runtime.clone(),
-        host.api.clone(),
-        host.sessions,
-        request.text,
-        request.target_url,
-    );
+    host.runtime
+        .borrow_mut()
+        .app
+        .world_mut()
+        .write_message(crate::session::StartChatRequest {
+            text: request.text,
+            agent_url: request.target_url,
+        });
     Ok(())
 }
 

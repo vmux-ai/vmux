@@ -13,26 +13,21 @@ mod session;
 mod transition;
 
 use crate::logs::Logs;
-use crate::pairing::{AuthState, Credentials, PairCard};
-use crate::remote::{Api, ApiError};
+use crate::pairing::{
+    AuthState, DisconnectRequest, PairCard, PairLinkChanged, PairRequest, PairingFailure,
+    PairingPlugin,
+};
 use crate::runtime::RuntimeHandle;
-use crate::session::{LeaveSession, SessionPlugin, use_session};
+use crate::session::{LeaveSession, RestartSession, SessionPlugin, use_session};
 use vmux_chat::room::Agents;
 use vmux_start::roster::Roster;
 
-use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
-
 use dioxus::prelude::*;
-use vmux_api::room::{RemoteAgent, RemoteSession};
 use vmux_ui::back::PageBack;
 use vmux_ui::components::start_hero::{START_BACKDROP_CLASS, StartBackdrop, StartHero};
 use vmux_ui::i18n::translate;
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
-static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-
-static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
 #[cfg(target_os = "ios")]
@@ -61,6 +56,7 @@ fn main() {
     let runtime = runtime::create(|app| {
         app.add_plugins((
             vmux_app::VmuxPlugin::builder().mobile().build(),
+            PairingPlugin,
             SessionPlugin,
         ));
     });
@@ -74,16 +70,23 @@ fn main() {
             use dioxus::mobile::tao::event::Event;
             match event {
                 Event::Opened { urls } => {
-                    let mut opened = OPENED_URLS
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    opened.extend(
-                        urls.iter()
-                            .filter(|url| url.scheme() == "vmux" && url.host_str() == Some("pair"))
-                            .map(ToString::to_string),
-                    );
+                    let Ok(mut runtime) = event_runtime.try_borrow_mut() else {
+                        return;
+                    };
+                    for url in urls {
+                        if url.scheme() == "vmux" && url.host_str() == Some("pair") {
+                            runtime
+                                .app
+                                .world_mut()
+                                .write_message(PairRequest(url.to_string()));
+                        }
+                    }
                 }
-                Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
+                Event::Resumed => {
+                    if let Ok(mut runtime) = event_runtime.try_borrow_mut() {
+                        runtime.app.world_mut().write_message(RestartSession);
+                    }
+                }
                 Event::MainEventsCleared => {
                     runtime::update(&event_runtime);
                 }
@@ -91,10 +94,6 @@ fn main() {
             }
         });
     dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
-}
-
-pub(crate) fn take_resumed() -> bool {
-    RESUMED.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
 
 #[component]
@@ -110,27 +109,13 @@ fn App() -> Element {
 fn AppBody() -> Element {
     let runtime = use_context::<RuntimeHandle>();
     transition::install(&dioxus::mobile::window());
-    qr_scanner::install(&dioxus::mobile::window());
-    let mut auth = use_signal(|| AuthState::Loading);
-    let mut pair_url = use_signal(String::new);
-    let mut error = use_signal(String::new);
-    let mut api = use_signal(|| None::<Api>);
-    let mut sessions = use_signal(Vec::<RemoteSession>::new);
-    let mut agents = use_signal(Vec::<RemoteAgent>::new);
-    let session = use_session();
-    let session_runtime = runtime.clone();
-    use_hook(move || {
-        session_runtime
-            .borrow_mut()
-            .app
-            .world_mut()
-            .insert_non_send(session);
-    });
+    qr_scanner::install(&dioxus::mobile::window(), runtime.clone());
+    let connection = pairing::use_connection(runtime.clone());
+    let api = connection.api;
+    let sessions = connection.sessions;
+    let agents = connection.agents;
+    let session = use_session(runtime.clone());
     let composer = page_host::use_composer_exchange();
-    let mut reachable = use_signal(|| false);
-    let mut pending_pair_url = use_signal(|| None::<String>);
-    let mut deep_link_received = use_signal(|| false);
-    let mut pairing = use_signal(|| false);
     let mut team_open = use_signal(|| false);
 
     let page_back_runtime = runtime.clone();
@@ -173,191 +158,9 @@ fn AppBody() -> Element {
         }
     });
 
-    let stream_runtime = runtime.clone();
-    let _room = use_resource(move || {
-        let client = api();
-        let sid = session.sid();
-        let generation = (session.generation)();
-        let stream_runtime = stream_runtime.clone();
-        async move {
-            let Some(client) = client else {
-                return;
-            };
-            if sid.is_empty() {
-                return;
-            }
-            session::stream(session, stream_runtime, client, sid, generation).await;
-        }
-    });
+    let view = connection.view();
 
-    use_future(move || async move {
-        if let Some(opened) = take_opened_url() {
-            deep_link_received.set(true);
-            pair_url.set(opened.clone());
-            pending_pair_url.set(Some(opened));
-            auth.set(AuthState::Unpaired);
-            return;
-        }
-        let Some(credentials) = credentials::StoredCredentials::load() else {
-            if deep_link_received() {
-                return;
-            }
-            auth.set(AuthState::Unpaired);
-            return;
-        };
-        if deep_link_received() {
-            return;
-        }
-        pair_url.set(credentials.pairing_url());
-        let client = match Api::new(credentials) {
-            Ok(client) => client,
-            Err(reason) => {
-                credentials::StoredCredentials::clear();
-                error.set(reason.to_string());
-                auth.set(AuthState::Unpaired);
-                return;
-            }
-        };
-        let displaced = api.peek().clone();
-        api.set(Some(client.clone()));
-        if let Some(displaced) = displaced {
-            displaced.close();
-        }
-        auth.set(AuthState::Paired);
-        match client.sessions().await {
-            Ok(next) => {
-                sessions.set(next);
-                agents.set(client.agents().await.unwrap_or_default());
-                reachable.set(true);
-            }
-            Err(ApiError::Unauthorized) => {
-                credentials::StoredCredentials::clear();
-                error.set(translate("mobile-error-pairing-expired"));
-                auth.set(AuthState::Unpaired);
-            }
-            Err(other) => error.set(other.to_string()),
-        }
-    });
-
-    use_future(move || async move {
-        loop {
-            if let Some(opened) = take_opened_url() {
-                deep_link_received.set(true);
-                pair_url.set(opened.clone());
-                pending_pair_url.set(Some(opened));
-                error.set(String::new());
-                auth.set(AuthState::Unpaired);
-            }
-            tokio::time::sleep(Duration::from_millis(150)).await;
-        }
-    });
-
-    use_future(move || async move {
-        loop {
-            if let Some(result) = qr_scanner::take_result() {
-                match result {
-                    Ok(scanned) => {
-                        pair_url.set(scanned.clone());
-                        error.set(String::new());
-                        pending_pair_url.set(Some(scanned));
-                    }
-                    Err(message) => error.set(message),
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    });
-
-    use_future(move || async move {
-        loop {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let pending = pending_pair_url.write().take();
-            let Some(input) = pending else {
-                continue;
-            };
-            let credentials = match Credentials::parse(&input) {
-                Ok(credentials) => credentials,
-                Err(message) => {
-                    pairing.set(false);
-                    error.set(message);
-                    auth.set(AuthState::Unpaired);
-                    continue;
-                }
-            };
-            pairing.set(true);
-            error.set(String::new());
-            let client = match Api::new(credentials.clone()) {
-                Ok(client) => client,
-                Err(reason) => {
-                    pairing.set(false);
-                    error.set(reason.to_string());
-                    auth.set(AuthState::Unpaired);
-                    continue;
-                }
-            };
-            let result = client.sessions().await;
-            if let Some(credentials) = client.paired_credentials().await {
-                credentials::StoredCredentials::save(&credentials);
-                pair_url.set(String::new());
-            }
-            match result {
-                Ok(next) => {
-                    let displaced = api.peek().clone();
-                    api.set(Some(client.clone()));
-                    if let Some(displaced) = displaced {
-                        displaced.close();
-                    }
-                    sessions.set(next);
-                    auth.set(AuthState::Paired);
-                }
-                Err(ApiError::Unauthorized) => {
-                    error.set(translate("mobile-error-token-rejected"));
-                    auth.set(AuthState::Unpaired);
-                }
-                Err(other) => {
-                    error.set(other.to_string());
-                    auth.set(AuthState::Unpaired);
-                }
-            }
-            pairing.set(false);
-        }
-    });
-
-    use_future(move || async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            if auth() != AuthState::Paired {
-                continue;
-            }
-            let Some(client) = api() else {
-                continue;
-            };
-            match client.sessions().await {
-                Ok(next) => {
-                    sessions.set(next);
-                    reachable.set(true);
-                    error.set(String::new());
-                }
-                Err(ApiError::Unauthorized) => {
-                    reachable.set(false);
-                    credentials::StoredCredentials::clear();
-                    let displaced = api.peek().clone();
-                    api.set(None);
-                    if let Some(displaced) = displaced {
-                        displaced.close();
-                    }
-                    error.set(translate("mobile-error-pairing-expired"));
-                    auth.set(AuthState::Unpaired);
-                }
-                Err(other) => {
-                    reachable.set(false);
-                    error.set(other.to_string());
-                }
-            }
-        }
-    });
-
-    if auth() == AuthState::Loading {
+    if view.auth == AuthState::Loading {
         return rsx! {
             div { class: "flex h-dvh items-center justify-center bg-background text-foreground",
                 div { class: "h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" }
@@ -365,18 +168,37 @@ fn AppBody() -> Element {
         };
     }
 
-    if auth() == AuthState::Unpaired {
+    if view.auth == AuthState::Unpaired {
+        let value_runtime = runtime.clone();
+        let pair_runtime = runtime.clone();
+        let scan_runtime = runtime.clone();
+        let pair_url = view.pair_url.clone();
         return rsx! {
             PairScreen {
-                value: pair_url(),
-                error: error(),
-                pairing: pairing(),
-                on_value: move |value| pair_url.set(value),
-                on_pair: move |_| pending_pair_url.set(Some(pair_url())),
+                value: view.pair_url,
+                error: view.error,
+                pairing: view.pairing,
+                on_value: move |value| {
+                    value_runtime
+                        .borrow_mut()
+                        .app
+                        .world_mut()
+                        .write_message(PairLinkChanged(value));
+                },
+                on_pair: move |_| {
+                    pair_runtime
+                        .borrow_mut()
+                        .app
+                        .world_mut()
+                        .write_message(PairRequest(pair_url.clone()));
+                },
                 on_scan: move |_| {
-                    error.set(String::new());
                     if let Err(message) = qr_scanner::open() {
-                        error.set(message);
+                        scan_runtime
+                            .borrow_mut()
+                            .app
+                            .world_mut()
+                            .write_message(PairingFailure(message));
                     }
                 },
             }
@@ -411,23 +233,14 @@ fn AppBody() -> Element {
                 vmux_start::ui::Page {}
             }
             LinkStatus {
-                reachable: reachable(),
+                reachable: view.reachable,
                 on_team: move |_| team_open.set(true),
                 on_disconnect: move |_| {
-                    credentials::StoredCredentials::clear();
                     runtime
                         .borrow_mut()
                         .app
                         .world_mut()
-                        .write_message(LeaveSession);
-                    let displaced = api.peek().clone();
-                    api.set(None);
-                    if let Some(displaced) = displaced {
-                        displaced.close();
-                    }
-                    sessions.set(Vec::new());
-                    agents.set(Vec::new());
-                    auth.set(AuthState::Unpaired);
+                        .write_message(DisconnectRequest);
                 },
             }
         }
@@ -509,11 +322,4 @@ fn AppHead() -> Element {
         document::Meta { name: "color-scheme", content: "light dark" }
         document::Stylesheet { href: TAILWIND_CSS }
     }
-}
-
-fn take_opened_url() -> Option<String> {
-    OPENED_URLS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .pop()
 }

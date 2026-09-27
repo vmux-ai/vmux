@@ -1,15 +1,484 @@
-use crate::qr_scanner;
+use std::time::{Duration, Instant};
+
+use bevy_app::{App, Plugin, Startup, Update};
+use bevy_ecs::component::Component;
+use bevy_ecs::message::{Message, MessageReader, MessageWriter};
+use bevy_ecs::schedule::IntoScheduleConfigs;
+use bevy_ecs::system::{Commands, Query};
+use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
+use vmux_api::room::{RemoteAgent, RemoteSession};
 use vmux_transport::{ClientCredential, DeviceId};
 use vmux_ui::i18n::translate;
 
-#[derive(Clone, Copy, PartialEq)]
+use crate::credentials::StoredCredentials;
+use crate::qr_scanner;
+use crate::remote::{Api, ApiError};
+use crate::runtime::RuntimeHandle;
+
+const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
+
+pub(crate) struct PairingPlugin;
+
+impl Plugin for PairingPlugin {
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn(ConnectionState::default());
+        app.add_message::<PairLinkChanged>()
+            .add_message::<PairRequest>()
+            .add_message::<PairingFailure>()
+            .add_message::<DisconnectRequest>()
+            .add_systems(Startup, restore_connection)
+            .add_systems(
+                Update,
+                (
+                    change_pair_link,
+                    begin_pairing,
+                    show_pairing_failures,
+                    disconnect,
+                    poll_connection_attempts,
+                    begin_refresh,
+                    poll_refreshes,
+                )
+                    .chain(),
+            );
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum AuthState {
+    #[default]
     Loading,
     Paired,
     Unpaired,
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub(crate) struct ConnectionView {
+    pub(crate) auth: AuthState,
+    pub(crate) pair_url: String,
+    pub(crate) error: String,
+    pub(crate) sessions: Vec<RemoteSession>,
+    pub(crate) agents: Vec<RemoteAgent>,
+    pub(crate) reachable: bool,
+    pub(crate) pairing: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ConnectionProjection {
+    pub(crate) view: Signal<ConnectionView>,
+    pub(crate) api: Signal<Option<Api>>,
+    pub(crate) sessions: Signal<Vec<RemoteSession>>,
+    pub(crate) agents: Signal<Vec<RemoteAgent>>,
+}
+
+pub(crate) fn use_connection(runtime: RuntimeHandle) -> ConnectionProjection {
+    let mut view = use_signal(ConnectionView::default);
+    let mut api = use_signal(|| None);
+    let mut sessions = use_signal(Vec::new);
+    let mut agents = use_signal(Vec::new);
+    let mut api_generation = use_signal(|| u64::MAX);
+
+    use_future(move || {
+        let runtime = runtime.clone();
+        async move {
+            loop {
+                let projected = {
+                    if let Ok(mut runtime) = runtime.try_borrow_mut() {
+                        let world = runtime.app.world_mut();
+                        let mut query = world.query::<&ConnectionState>();
+                        query.single(world).ok().map(ConnectionState::projected)
+                    } else {
+                        None
+                    }
+                };
+                if let Some((next, next_api, next_generation)) = projected {
+                    if *view.peek() != next {
+                        sessions.set(next.sessions.clone());
+                        agents.set(next.agents.clone());
+                        view.set(next);
+                    }
+                    if *api_generation.peek() != next_generation {
+                        api.set(next_api);
+                        api_generation.set(next_generation);
+                    }
+                }
+                vmux_ui::platform::sleep_ms(50).await;
+            }
+        }
+    });
+
+    ConnectionProjection {
+        view,
+        api,
+        sessions,
+        agents,
+    }
+}
+
+#[derive(Message)]
+pub(crate) struct PairLinkChanged(pub(crate) String);
+
+#[derive(Message)]
+pub(crate) struct PairRequest(pub(crate) String);
+
+#[derive(Message)]
+pub(crate) struct PairingFailure(pub(crate) String);
+
+#[derive(Message)]
+pub(crate) struct DisconnectRequest;
+
+#[derive(Component)]
+pub(super) struct ConnectionState {
+    view: ConnectionView,
+    api: Option<Api>,
+    api_generation: u64,
+    operation_generation: u64,
+    refresh_at: Instant,
+}
+
+impl Default for ConnectionState {
+    fn default() -> Self {
+        Self {
+            view: ConnectionView::default(),
+            api: None,
+            api_generation: 0,
+            operation_generation: 0,
+            refresh_at: Instant::now() + REFRESH_INTERVAL,
+        }
+    }
+}
+
+impl ConnectionState {
+    pub(super) fn api(&self) -> Option<Api> {
+        self.api.clone()
+    }
+
+    pub(super) fn sessions(&self) -> &[RemoteSession] {
+        &self.view.sessions
+    }
+
+    pub(super) fn set_sessions(&mut self, sessions: Vec<RemoteSession>) {
+        self.view.sessions = sessions;
+        self.view.reachable = true;
+        self.view.error.clear();
+    }
+
+    fn projected(&self) -> (ConnectionView, Option<Api>, u64) {
+        (self.view.clone(), self.api.clone(), self.api_generation)
+    }
+
+    fn replace_api(&mut self, api: Option<Api>) {
+        if let Some(displaced) = std::mem::replace(&mut self.api, api) {
+            displaced.close();
+        }
+        self.api_generation = self.api_generation.wrapping_add(1);
+    }
+
+    fn clear(&mut self) {
+        self.replace_api(None);
+        self.operation_generation = self.operation_generation.wrapping_add(1);
+        self.view = ConnectionView {
+            auth: AuthState::Unpaired,
+            ..ConnectionView::default()
+        };
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ConnectionSource {
+    Restore,
+    Pair,
+}
+
+#[derive(Component)]
+struct ConnectionAttempt {
+    target: bevy_ecs::entity::Entity,
+    generation: u64,
+    source: ConnectionSource,
+    task: Task<Result<ConnectionAttemptOutput, ApiError>>,
+}
+
+struct ConnectionAttemptOutput {
+    api: Api,
+    sessions: Result<Vec<RemoteSession>, ApiError>,
+    agents: Vec<RemoteAgent>,
+    credentials: Option<Credentials>,
+}
+
+impl ConnectionAttempt {
+    fn spawn(
+        commands: &mut Commands,
+        target: bevy_ecs::entity::Entity,
+        generation: u64,
+        source: ConnectionSource,
+        credentials: Credentials,
+    ) {
+        let task = IoTaskPool::get().spawn(async move {
+            let api = Api::new(credentials)?;
+            let sessions = api.sessions().await;
+            let agents = if sessions.is_ok() {
+                api.agents().await.unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let credentials = api.paired_credentials().await;
+            Ok(ConnectionAttemptOutput {
+                api,
+                sessions,
+                agents,
+                credentials,
+            })
+        });
+        commands.spawn(Self {
+            target,
+            generation,
+            source,
+            task,
+        });
+    }
+}
+
+#[derive(Component)]
+struct ConnectionRefresh {
+    target: bevy_ecs::entity::Entity,
+    api_generation: u64,
+    task: Task<Result<Vec<RemoteSession>, ApiError>>,
+}
+
+fn restore_connection(
+    mut states: Query<(bevy_ecs::entity::Entity, &mut ConnectionState)>,
+    mut commands: Commands,
+) {
+    let Ok((entity, mut state)) = states.single_mut() else {
+        return;
+    };
+    let Some(credentials) = StoredCredentials::load() else {
+        state.view.auth = AuthState::Unpaired;
+        return;
+    };
+    state.view.pair_url = credentials.pairing_url();
+    state.operation_generation = state.operation_generation.wrapping_add(1);
+    ConnectionAttempt::spawn(
+        &mut commands,
+        entity,
+        state.operation_generation,
+        ConnectionSource::Restore,
+        credentials,
+    );
+}
+
+fn change_pair_link(
+    mut requests: MessageReader<PairLinkChanged>,
+    mut states: Query<&mut ConnectionState>,
+) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
+    for request in requests.read() {
+        state.view.pair_url.clone_from(&request.0);
+        state.view.error.clear();
+    }
+}
+
+fn begin_pairing(
+    mut requests: MessageReader<PairRequest>,
+    mut states: Query<(bevy_ecs::entity::Entity, &mut ConnectionState)>,
+    mut leaves: MessageWriter<crate::session::LeaveSession>,
+    mut commands: Commands,
+) {
+    let Ok((entity, mut state)) = states.single_mut() else {
+        return;
+    };
+    for request in requests.read() {
+        leaves.write(crate::session::LeaveSession);
+        state.replace_api(None);
+        state.view.auth = AuthState::Unpaired;
+        state.view.pair_url.clone_from(&request.0);
+        state.view.error.clear();
+        state.view.sessions.clear();
+        state.view.agents.clear();
+        state.view.reachable = false;
+        let credentials = match Credentials::parse(&request.0) {
+            Ok(credentials) => credentials,
+            Err(message) => {
+                state.view.pairing = false;
+                state.view.error = message;
+                continue;
+            }
+        };
+        state.view.pairing = true;
+        state.operation_generation = state.operation_generation.wrapping_add(1);
+        ConnectionAttempt::spawn(
+            &mut commands,
+            entity,
+            state.operation_generation,
+            ConnectionSource::Pair,
+            credentials,
+        );
+    }
+}
+
+fn show_pairing_failures(
+    mut failures: MessageReader<PairingFailure>,
+    mut states: Query<&mut ConnectionState>,
+) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
+    for failure in failures.read() {
+        state.view.error.clone_from(&failure.0);
+        state.view.pairing = false;
+    }
+}
+
+fn disconnect(
+    mut requests: MessageReader<DisconnectRequest>,
+    mut states: Query<&mut ConnectionState>,
+    mut leaves: MessageWriter<crate::session::LeaveSession>,
+) {
+    let Ok(mut state) = states.single_mut() else {
+        return;
+    };
+    for _ in requests.read() {
+        leaves.write(crate::session::LeaveSession);
+        StoredCredentials::clear();
+        state.clear();
+    }
+}
+
+fn poll_connection_attempts(
+    mut attempts: Query<(bevy_ecs::entity::Entity, &mut ConnectionAttempt)>,
+    mut states: Query<&mut ConnectionState>,
+    mut commands: Commands,
+) {
+    for (entity, mut attempt) in &mut attempts {
+        let Some(result) = future::block_on(future::poll_once(&mut attempt.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        let Ok(mut state) = states.get_mut(attempt.target) else {
+            continue;
+        };
+        if attempt.generation != state.operation_generation {
+            if let Ok(output) = result {
+                output.api.close();
+            }
+            continue;
+        }
+        state.view.pairing = false;
+        let output = match result {
+            Ok(output) => output,
+            Err(error) => {
+                StoredCredentials::clear();
+                state.view.auth = AuthState::Unpaired;
+                state.view.error = error.to_string();
+                continue;
+            }
+        };
+        match output.sessions {
+            Ok(sessions) => {
+                if let Some(credentials) = output.credentials {
+                    StoredCredentials::save(&credentials);
+                }
+                state.replace_api(Some(output.api));
+                state.view.auth = AuthState::Paired;
+                state.view.pair_url.clear();
+                state.view.error.clear();
+                state.view.sessions = sessions;
+                state.view.agents = output.agents;
+                state.view.reachable = true;
+                state.refresh_at = Instant::now() + REFRESH_INTERVAL;
+            }
+            Err(ApiError::Unauthorized) => {
+                output.api.close();
+                StoredCredentials::clear();
+                state.view.auth = AuthState::Unpaired;
+                state.view.error = match attempt.source {
+                    ConnectionSource::Restore => translate("mobile-error-pairing-expired"),
+                    ConnectionSource::Pair => translate("mobile-error-token-rejected"),
+                };
+            }
+            Err(error) => match attempt.source {
+                ConnectionSource::Restore => {
+                    state.replace_api(Some(output.api));
+                    state.view.auth = AuthState::Paired;
+                    state.view.reachable = false;
+                    state.view.error = error.to_string();
+                    state.refresh_at = Instant::now() + REFRESH_INTERVAL;
+                }
+                ConnectionSource::Pair => {
+                    output.api.close();
+                    state.view.auth = AuthState::Unpaired;
+                    state.view.error = error.to_string();
+                }
+            },
+        }
+    }
+}
+
+fn begin_refresh(
+    states: Query<(bevy_ecs::entity::Entity, &ConnectionState)>,
+    refreshes: Query<&ConnectionRefresh>,
+    mut commands: Commands,
+) {
+    let Ok((entity, state)) = states.single() else {
+        return;
+    };
+    if state.view.auth != AuthState::Paired || Instant::now() < state.refresh_at {
+        return;
+    }
+    if refreshes.iter().any(|refresh| refresh.target == entity) {
+        return;
+    }
+    let Some(api) = state.api.clone() else {
+        return;
+    };
+    let task = IoTaskPool::get().spawn(async move { api.sessions().await });
+    commands.spawn(ConnectionRefresh {
+        target: entity,
+        api_generation: state.api_generation,
+        task,
+    });
+}
+
+fn poll_refreshes(
+    mut refreshes: Query<(bevy_ecs::entity::Entity, &mut ConnectionRefresh)>,
+    mut states: Query<&mut ConnectionState>,
+    mut leaves: MessageWriter<crate::session::LeaveSession>,
+    mut commands: Commands,
+) {
+    for (entity, mut refresh) in &mut refreshes {
+        let Some(result) = future::block_on(future::poll_once(&mut refresh.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        let Ok(mut state) = states.get_mut(refresh.target) else {
+            continue;
+        };
+        if refresh.api_generation != state.api_generation {
+            continue;
+        }
+        state.refresh_at = Instant::now() + REFRESH_INTERVAL;
+        match result {
+            Ok(sessions) => {
+                state.view.sessions = sessions;
+                state.view.reachable = true;
+                state.view.error.clear();
+            }
+            Err(ApiError::Unauthorized) => {
+                leaves.write(crate::session::LeaveSession);
+                StoredCredentials::clear();
+                state.clear();
+                state.view.error = translate("mobile-error-pairing-expired");
+            }
+            Err(error) => {
+                state.view.reachable = false;
+                state.view.error = error.to_string();
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
