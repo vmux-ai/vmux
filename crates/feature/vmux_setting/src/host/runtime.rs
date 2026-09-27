@@ -16,9 +16,12 @@ pub struct SettingsRuntimePlugin;
 
 impl Plugin for SettingsRuntimePlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn((
+            Name::new("Search engine setting"),
+            SearchEngineSetting::default(),
+        ));
         app.init_resource::<LastSelfWriteHash>()
             .init_resource::<SettingsSaveDebounce>()
-            .init_resource::<SearchEngineSetting>()
             .add_message::<SettingsWriteRequest>()
             .add_message::<SettingsSaveRequest>()
             .configure_sets(
@@ -1211,7 +1214,7 @@ fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
 
 fn sync_search_engine(
     settings: Option<Res<AppSettings>>,
-    mut search_engine: ResMut<SearchEngineSetting>,
+    mut search_engine: Single<&mut SearchEngineSetting>,
 ) {
     let Some(settings) = settings else {
         return;

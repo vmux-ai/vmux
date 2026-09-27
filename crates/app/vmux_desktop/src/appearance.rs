@@ -30,7 +30,7 @@ fn read_system_appearance() -> Option<ResolvedScheme> {
 
 fn seed_system_appearance(
     _non_send: bevy::ecs::system::NonSendMarker,
-    mut system: ResMut<SystemAppearance>,
+    mut system: Single<&mut SystemAppearance>,
 ) {
     if system.0.is_some() {
         return;

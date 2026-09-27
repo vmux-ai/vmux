@@ -1,7 +1,7 @@
 pub use vmux_api::command_bar::*;
 
 #[cfg(host)]
-#[derive(bevy::prelude::Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(bevy::prelude::Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchEngineSetting(pub SearchEngine);
 
 #[derive(Clone, Copy, Debug, PartialEq)]

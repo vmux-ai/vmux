@@ -901,7 +901,7 @@ fn on_prompt_request(
 
 fn on_page_open_request(
     trigger: On<UiInput<CommandBarPageOpenRequest>>,
-    search_engine: Option<Res<SearchEngineSetting>>,
+    search_engine: Option<Single<&SearchEngineSetting>>,
     child_of: Query<&ChildOf>,
     launcher_hosts: Query<(), With<HostsLauncher>>,
     claimed_urls: Query<&ClaimedUrl>,

@@ -96,7 +96,7 @@ fn sync_terminal_theme(
     newly_ready: Query<Entity, (With<Terminal>, Changed<PageReady>)>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
-    scheme: Option<Res<vmux_setting::ResolvedColorScheme>>,
+    scheme: Option<Single<&vmux_setting::ResolvedColorScheme>>,
     mut commands: Commands,
     mut last_theme_hash: Local<u64>,
 ) {

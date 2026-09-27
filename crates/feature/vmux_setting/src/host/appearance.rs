@@ -8,13 +8,15 @@ pub struct AppearancePlugin;
 
 impl Plugin for AppearancePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SystemAppearance>()
-            .init_resource::<ResolvedColorScheme>()
-            .add_message::<ColorSchemeChanged>()
-            .add_systems(
-                Update,
-                (track_window_theme, update_resolved_color_scheme).chain(),
-            );
+        app.world_mut().spawn((
+            Name::new("System appearance"),
+            SystemAppearance::default(),
+            ResolvedColorScheme::default(),
+        ));
+        app.add_message::<ColorSchemeChanged>().add_systems(
+            Update,
+            (track_window_theme, update_resolved_color_scheme).chain(),
+        );
     }
 }
 
@@ -24,10 +26,10 @@ pub enum ResolvedScheme {
     Dark,
 }
 
-#[derive(Resource, Default, Clone, Copy, Debug)]
+#[derive(Component, Default, Clone, Copy, Debug)]
 pub struct SystemAppearance(pub Option<ResolvedScheme>);
 
-#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResolvedColorScheme(pub ResolvedScheme);
 
 impl Default for ResolvedColorScheme {
@@ -49,7 +51,7 @@ pub fn resolve(mode: ColorScheme, system: Option<ResolvedScheme>) -> ResolvedSch
 
 fn track_window_theme(
     mut reader: MessageReader<WindowThemeChanged>,
-    mut system: ResMut<SystemAppearance>,
+    mut system: Single<&mut SystemAppearance>,
 ) {
     for ev in reader.read() {
         let scheme = match ev.theme {
@@ -64,8 +66,8 @@ fn track_window_theme(
 
 fn update_resolved_color_scheme(
     settings: Res<crate::AppSettings>,
-    system: Res<SystemAppearance>,
-    mut resolved: ResMut<ResolvedColorScheme>,
+    system: Single<Ref<SystemAppearance>>,
+    mut resolved: Single<&mut ResolvedColorScheme>,
     mut changed: MessageWriter<ColorSchemeChanged>,
 ) {
     if !settings.is_changed() && !system.is_changed() {
