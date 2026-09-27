@@ -1,4 +1,6 @@
-use crate::process::{Process, ProcessManager};
+use crate::process::{
+    Process, ProcessCommandLifecycle, ProcessManager, ProcessSnapshot, ProcessUpdate,
+};
 use bevy::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,6 +17,64 @@ use super::query::{ProcessQueries, ProcessQueryPlugin};
 use crate::remote::client_operation::{ClientOperationPlugin, ClientOperations};
 
 type PendingQueries = crate::agent::AgentQueryResponses;
+
+impl ProcessUpdate {
+    fn into_service_message(self, process_id: ProcessId) -> ServiceMessage {
+        match self {
+            Self::Viewport(patch) => ServiceMessage::ViewportPatch {
+                process_id,
+                changed_lines: patch.changed_lines,
+                cursor: patch.cursor,
+                cols: patch.cols,
+                rows: patch.rows,
+                selection: patch.selection,
+                copy_mode: patch.copy_mode,
+                full: patch.full,
+                first_row: patch.first_row,
+                total_rows: patch.total_rows,
+                alt: patch.alt,
+                mouse: patch.mouse,
+                evicted_total: patch.evicted_total,
+            },
+            Self::Exited { exit_code } => ServiceMessage::ProcessExited {
+                process_id,
+                exit_code,
+            },
+            Self::Title(title) => ServiceMessage::ProcessTitle { process_id, title },
+            Self::Bell => ServiceMessage::Bell { process_id },
+            Self::CommandLifecycle(lifecycle) => ServiceMessage::CommandLifecycle {
+                process_id,
+                kind: match lifecycle {
+                    ProcessCommandLifecycle::Started => {
+                        vmux_api::protocol::CommandLifecycleKind::Started
+                    }
+                    ProcessCommandLifecycle::Ended { exit_code } => {
+                        vmux_api::protocol::CommandLifecycleKind::Ended { exit_code }
+                    }
+                },
+            },
+            Self::Mode(mode) => ServiceMessage::TerminalMode {
+                process_id,
+                mouse_capture: mode.mouse_capture,
+                copy_mode: mode.copy_mode,
+                alt_screen: mode.alt_screen,
+                focus_reporting: mode.focus_reporting,
+            },
+        }
+    }
+}
+
+impl ProcessSnapshot {
+    fn into_service_message(self, process_id: ProcessId) -> ServiceMessage {
+        ServiceMessage::Snapshot {
+            process_id,
+            lines: self.lines,
+            cursor: self.cursor,
+            cols: self.cols,
+            rows: self.rows,
+        }
+    }
+}
 
 pub(crate) struct ServiceDaemonPlugin {
     listener: std::sync::Mutex<Option<UnixListener>>,
@@ -511,7 +571,8 @@ async fn handle_client(
                     let handle = tokio::spawn(async move {
                         loop {
                             match rx.recv().await {
-                                Ok(msg) => {
+                                Ok(update) => {
+                                    let msg = update.into_service_message(process_id);
                                     let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
                                         Ok(b) => b,
                                         Err(_) => break,
@@ -618,7 +679,7 @@ async fn handle_client(
             ClientMessage::RequestSnapshot { process_id } => {
                 let mgr = manager.lock().await;
                 if let Some(process) = mgr.processes.get(&process_id) {
-                    let snap = process.snapshot();
+                    let snap = process.snapshot().into_service_message(process_id);
                     let mut w = writer.lock().await;
                     crate::framing::write_service_message(&mut *w, &snap).await?;
                 } else {

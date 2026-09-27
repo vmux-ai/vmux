@@ -36,8 +36,8 @@ use super::mouse::TerminalMouseState;
 use super::process_control::{PendingTerminalSnapshot, ProcessControlPlugin, TerminalGridSize};
 use super::prompt::PromptCapture;
 use super::service::{
-    ServiceIngressPlugin, ServiceIngressSet, TerminalModeUpdate, TerminalProcessCreateFailed,
-    TerminalProcessCreated, TerminalSelectionText, TerminalServiceError, TerminalViewportUpdate,
+    ServiceIngressPlugin, ServiceIngressSet, TerminalProcessCreateFailed, TerminalProcessCreated,
+    TerminalSelectionText, TerminalServiceError, TerminalViewportUpdate,
 };
 use super::state::{
     CopyModeInputState, CopyModePendingKey, TerminalCopyMode, TerminalMode, TerminalShortcutState,
@@ -175,7 +175,6 @@ impl Plugin for TerminalUpdatePlugin {
                     apply_viewport_updates,
                     apply_process_exits,
                     apply_service_errors,
-                    apply_terminal_modes,
                     copy_service_selection,
                 )
                     .after(ServiceIngressSet)
@@ -1075,28 +1074,6 @@ fn apply_service_errors(
             }
         }
         warn!("Service error: {}", error.message);
-    }
-}
-
-fn apply_terminal_modes(
-    mut updates: MessageReader<TerminalModeUpdate>,
-    process_index: Res<TerminalProcessIndex>,
-    mut terminal_states: Query<(&mut TerminalMode, &mut TerminalCopyMode), With<Terminal>>,
-) {
-    for update in updates.read() {
-        let Some(entity) = process_index.get(&update.process_id) else {
-            continue;
-        };
-        let Ok((mut mode, mut copy_mode)) = terminal_states.get_mut(entity) else {
-            continue;
-        };
-        *mode = TerminalMode {
-            mouse_capture: update.mouse_capture,
-            copy_mode: update.copy_mode,
-            alt_screen: update.alt_screen,
-            focus_reporting: update.focus_reporting,
-        };
-        copy_mode.set(update.copy_mode);
     }
 }
 

@@ -18,12 +18,44 @@ use std::{
 #[cfg(unix)]
 use std::{os::unix::ffi::OsStrExt, path::Component};
 use tokio::sync::{broadcast, mpsc};
-use vmux_api::protocol::{ProcessId, ProcessInfo, ServiceMessage};
+use vmux_api::protocol::{ProcessId, ProcessInfo};
 use vmux_core::event::*;
 
 const MAX_PTY_CHUNKS_PER_POLL: usize = 64;
 const _: () = assert!(MAX_PTY_CHUNKS_PER_POLL <= 256);
 const HEAVY_OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(100);
+
+#[derive(Clone, Debug)]
+pub enum ProcessUpdate {
+    Viewport(TermViewportPatch),
+    Exited { exit_code: Option<i32> },
+    Title(String),
+    Bell,
+    CommandLifecycle(ProcessCommandLifecycle),
+    Mode(ProcessMode),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessMode {
+    pub mouse_capture: bool,
+    pub copy_mode: bool,
+    pub alt_screen: bool,
+    pub focus_reporting: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessCommandLifecycle {
+    Started,
+    Ended { exit_code: Option<i32> },
+}
+
+#[derive(Clone, Debug)]
+pub struct ProcessSnapshot {
+    pub lines: Vec<TermLine>,
+    pub cursor: TermCursor,
+    pub cols: u16,
+    pub rows: u16,
+}
 
 #[derive(Clone)]
 pub struct PtyInputWriter {
@@ -176,9 +208,8 @@ fn run_pty_reader(
 
 #[derive(Clone)]
 struct ServiceEventProxy {
-    process_id: ProcessId,
     pty_writer: PtyInputWriter,
-    patch_tx: broadcast::Sender<ServiceMessage>,
+    update_tx: broadcast::Sender<ProcessUpdate>,
 }
 
 impl TermEventListener for ServiceEventProxy {
@@ -190,15 +221,10 @@ impl TermEventListener for ServiceEventProxy {
                 }
             }
             TermEvent::Title(title) => {
-                let _ = self.patch_tx.send(ServiceMessage::ProcessTitle {
-                    process_id: self.process_id,
-                    title,
-                });
+                let _ = self.update_tx.send(ProcessUpdate::Title(title));
             }
             TermEvent::Bell => {
-                let _ = self.patch_tx.send(ServiceMessage::Bell {
-                    process_id: self.process_id,
-                });
+                let _ = self.update_tx.send(ProcessUpdate::Bell);
             }
             _ => {}
         }
@@ -245,7 +271,7 @@ pub struct Process {
     pty_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     #[cfg(unix)]
     pty_reader_in_flight: Arc<AtomicBool>,
-    patch_tx: broadcast::Sender<ServiceMessage>,
+    update_tx: broadcast::Sender<ProcessUpdate>,
     line_hashes: Vec<u64>,
     win_hashes: HashMap<u32, u64>,
     view_top: u32,
@@ -554,11 +580,10 @@ impl Process {
             })
             .map_err(|e| format!("failed to spawn PTY reader: {e}"))?;
 
-        let (patch_tx, _) = broadcast::channel(256);
+        let (update_tx, _) = broadcast::channel(256);
         let event_proxy = ServiceEventProxy {
-            process_id: id,
             pty_writer: writer.clone(),
-            patch_tx: patch_tx.clone(),
+            update_tx: update_tx.clone(),
         };
         let dims = PtyDimensions { cols, rows };
         let term = Term::new(TermConfig::default(), &dims, event_proxy);
@@ -584,7 +609,7 @@ impl Process {
             pty_rx,
             #[cfg(unix)]
             pty_reader_in_flight,
-            patch_tx,
+            update_tx,
             line_hashes: Vec::new(),
             win_hashes: HashMap::new(),
             view_top: 0,
@@ -618,8 +643,8 @@ impl Process {
         self.exit_code
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<ServiceMessage> {
-        self.patch_tx.subscribe()
+    pub fn subscribe(&self) -> broadcast::Receiver<ProcessUpdate> {
+        self.update_tx.subscribe()
     }
 
     pub fn command_status(&self) -> (u64, Option<i32>) {
@@ -834,13 +859,12 @@ impl Process {
         let cur = (mouse_capture, copy_mode, alt_screen, focus_reporting);
         if self.last_terminal_mode != Some(cur) {
             self.last_terminal_mode = Some(cur);
-            let _ = self.patch_tx.send(ServiceMessage::TerminalMode {
-                process_id: self.id,
+            let _ = self.update_tx.send(ProcessUpdate::Mode(ProcessMode {
                 mouse_capture,
                 copy_mode,
                 alt_screen,
                 focus_reporting,
-            });
+            }));
         }
     }
 
@@ -1500,18 +1524,17 @@ impl Process {
             for event in self.osc133.feed(&data) {
                 let kind = match event {
                     crate::host::osc133::Osc133Event::CommandStart => {
-                        vmux_api::protocol::CommandLifecycleKind::Started
+                        ProcessCommandLifecycle::Started
                     }
                     crate::host::osc133::Osc133Event::CommandEnd(exit_code) => {
                         self.command_ended_seq = self.command_ended_seq.wrapping_add(1);
                         self.last_command_exit = exit_code;
-                        vmux_api::protocol::CommandLifecycleKind::Ended { exit_code }
+                        ProcessCommandLifecycle::Ended { exit_code }
                     }
                 };
-                let _ = self.patch_tx.send(ServiceMessage::CommandLifecycle {
-                    process_id: self.id,
-                    kind,
-                });
+                let _ = self
+                    .update_tx
+                    .send(ProcessUpdate::CommandLifecycle(kind));
             }
             for marker in self.run_marker.feed(&data) {
                 self.last_run_completion = Some((marker.token, marker.exit));
@@ -1539,8 +1562,7 @@ impl Process {
             && self.pty_rx.is_empty()
         {
             self.exit_reported = true;
-            let _ = self.patch_tx.send(ServiceMessage::ProcessExited {
-                process_id: self.id,
+            let _ = self.update_tx.send(ProcessUpdate::Exited {
                 exit_code: Some(code),
             });
         }
@@ -1653,8 +1675,7 @@ impl Process {
             cell.c.to_string()
         };
 
-        let patch = ServiceMessage::ViewportPatch {
-            process_id: self.id,
+        let patch = TermViewportPatch {
             changed_lines,
             cursor: TermCursor {
                 col: cursor_pos.0,
@@ -1674,7 +1695,7 @@ impl Process {
             mouse,
             evicted_total: 0,
         };
-        let _ = self.patch_tx.send(patch);
+        let _ = self.update_tx.send(ProcessUpdate::Viewport(patch));
         changed_rows
     }
 
@@ -1743,8 +1764,7 @@ impl Process {
         self.last_win = Some(win);
         self.last_viewport_copy_mode = Some(false);
 
-        let patch = ServiceMessage::ViewportPatch {
-            process_id: self.id,
+        let patch = TermViewportPatch {
             changed_lines,
             cursor: TermCursor {
                 col: cursor_col,
@@ -1764,11 +1784,11 @@ impl Process {
             mouse: false,
             evicted_total: 0,
         };
-        let _ = self.patch_tx.send(patch);
+        let _ = self.update_tx.send(ProcessUpdate::Viewport(patch));
         changed_rows
     }
 
-    pub fn snapshot(&self) -> ServiceMessage {
+    pub fn snapshot(&self) -> ProcessSnapshot {
         let grid = self.term.grid();
         let num_lines = grid.screen_lines();
         let offset = grid.display_offset() as i32;
@@ -1782,8 +1802,7 @@ impl Process {
             cell.c.to_string()
         };
 
-        ServiceMessage::Snapshot {
-            process_id: self.id,
+        ProcessSnapshot {
             lines,
             cursor: TermCursor {
                 col: cursor_point.column.0 as u16,
@@ -2430,10 +2449,8 @@ mod tests {
 
         let mut saw_end = false;
         while let Ok(msg) = rx.try_recv() {
-            if let ServiceMessage::CommandLifecycle {
-                kind: vmux_api::protocol::CommandLifecycleKind::Ended { exit_code },
-                ..
-            } = msg
+            if let ProcessUpdate::CommandLifecycle(ProcessCommandLifecycle::Ended { exit_code }) =
+                msg
             {
                 assert_eq!(exit_code, Some(0));
                 saw_end = true;
@@ -2462,11 +2479,9 @@ mod tests {
         }
     }
 
-    fn snapshot_text(snapshot: ServiceMessage) -> String {
-        let ServiceMessage::Snapshot { lines, .. } = snapshot else {
-            unreachable!();
-        };
-        lines
+    fn snapshot_text(snapshot: ProcessSnapshot) -> String {
+        snapshot
+            .lines
             .iter()
             .map(|line| {
                 line.spans
@@ -2645,12 +2660,11 @@ mod tests {
 
         let (changed_lines, first_row, total_rows) = std::iter::from_fn(|| patches.try_recv().ok())
             .find_map(|msg| match msg {
-                ServiceMessage::ViewportPatch {
-                    changed_lines,
-                    first_row,
-                    total_rows,
-                    ..
-                } => Some((changed_lines, first_row, total_rows)),
+                ProcessUpdate::Viewport(patch) => Some((
+                    patch.changed_lines,
+                    patch.first_row,
+                    patch.total_rows,
+                )),
                 _ => None,
             })
             .expect("scroll must broadcast a viewport patch");
@@ -2680,7 +2694,7 @@ mod tests {
 
         let changed_lines = std::iter::from_fn(|| patches.try_recv().ok())
             .find_map(|message| match message {
-                ServiceMessage::ViewportPatch { changed_lines, .. } => Some(changed_lines),
+                ProcessUpdate::Viewport(patch) => Some(patch.changed_lines),
                 _ => None,
             })
             .expect("output must broadcast a viewport patch");
@@ -2710,8 +2724,8 @@ mod tests {
 
         let mut alt_on = None;
         while let Ok(msg) = rx.try_recv() {
-            if let ServiceMessage::TerminalMode { alt_screen, .. } = msg {
-                alt_on = Some(alt_screen);
+            if let ProcessUpdate::Mode(mode) = msg {
+                alt_on = Some(mode.alt_screen);
             }
         }
         assert_eq!(
@@ -2725,8 +2739,8 @@ mod tests {
 
         let mut alt_off = None;
         while let Ok(msg) = rx.try_recv() {
-            if let ServiceMessage::TerminalMode { alt_screen, .. } = msg {
-                alt_off = Some(alt_screen);
+            if let ProcessUpdate::Mode(mode) = msg {
+                alt_off = Some(mode.alt_screen);
             }
         }
         assert_eq!(
@@ -2762,26 +2776,18 @@ mod tests {
     fn proxy_broadcasts_process_title_on_term_title_event() {
         use std::io;
 
-        let (tx, mut rx) = broadcast::channel::<ServiceMessage>(8);
+        let (tx, mut rx) = broadcast::channel::<ProcessUpdate>(8);
         let writer = PtyInputWriter::new(Box::new(io::sink()));
-        let process_id = ProcessId::new();
         let proxy = ServiceEventProxy {
-            process_id,
             pty_writer: writer,
-            patch_tx: tx,
+            update_tx: tx,
         };
 
         proxy.send_event(TermEvent::Title("hello-osc".into()));
 
         let msg = rx.try_recv().expect("ProcessTitle should be broadcast");
         match msg {
-            ServiceMessage::ProcessTitle {
-                process_id: got_id,
-                title,
-            } => {
-                assert_eq!(got_id, process_id);
-                assert_eq!(title, "hello-osc");
-            }
+            ProcessUpdate::Title(title) => assert_eq!(title, "hello-osc"),
             other => panic!("expected ProcessTitle, got {other:?}"),
         }
     }
@@ -2790,20 +2796,18 @@ mod tests {
     fn proxy_broadcasts_bell_on_term_bell_event() {
         use std::io;
 
-        let (tx, mut rx) = broadcast::channel::<ServiceMessage>(8);
+        let (tx, mut rx) = broadcast::channel::<ProcessUpdate>(8);
         let writer = PtyInputWriter::new(Box::new(io::sink()));
-        let process_id = ProcessId::new();
         let proxy = ServiceEventProxy {
-            process_id,
             pty_writer: writer,
-            patch_tx: tx,
+            update_tx: tx,
         };
 
         proxy.send_event(TermEvent::Bell);
 
         let msg = rx.try_recv().expect("Bell should be broadcast");
         match msg {
-            ServiceMessage::Bell { process_id: got_id } => assert_eq!(got_id, process_id),
+            ProcessUpdate::Bell => {}
             other => panic!("expected Bell, got {other:?}"),
         }
     }
@@ -2844,7 +2848,7 @@ mod tests {
 
         let mut exits = 0;
         while let Ok(msg) = rx.try_recv() {
-            if matches!(msg, ServiceMessage::ProcessExited { .. }) {
+            if matches!(msg, ProcessUpdate::Exited { .. }) {
                 exits += 1;
             }
         }
@@ -2923,7 +2927,7 @@ mod tests {
         while Instant::now() < deadline {
             mgr.poll_all();
             while let Ok(message) = rx.try_recv() {
-                if matches!(message, ServiceMessage::ProcessExited { .. }) {
+                if matches!(message, ProcessUpdate::Exited { .. }) {
                     reported = true;
                 }
             }
@@ -2967,7 +2971,7 @@ mod tests {
         while Instant::now() < deadline {
             process.poll();
             while let Ok(message) = rx.try_recv() {
-                if matches!(message, ServiceMessage::ProcessExited { .. }) {
+                if matches!(message, ProcessUpdate::Exited { .. }) {
                     reported = true;
                 }
             }
@@ -3014,7 +3018,7 @@ mod tests {
                 "process must remain until PTY output is drained"
             );
             while let Ok(message) = rx.try_recv() {
-                if matches!(message, ServiceMessage::ProcessExited { .. }) {
+                if matches!(message, ProcessUpdate::Exited { .. }) {
                     reported = true;
                 }
             }

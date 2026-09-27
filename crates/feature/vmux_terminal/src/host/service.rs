@@ -6,6 +6,9 @@ use vmux_service::client::ServiceInbound;
 use super::plugin::{
     CommandLifecycleEvent, OscTitleChanged, ProcessExitedEvent, ServiceMessageSet,
 };
+use super::state::{TerminalCopyMode, TerminalMode};
+use crate::Terminal;
+use crate::process_index::TerminalProcessIndex;
 
 #[derive(Message)]
 pub(crate) struct TerminalProcessCreated {
@@ -32,15 +35,6 @@ pub(crate) struct TerminalServiceError {
 }
 
 #[derive(Message)]
-pub(crate) struct TerminalModeUpdate {
-    pub process_id: ProcessId,
-    pub mouse_capture: bool,
-    pub copy_mode: bool,
-    pub alt_screen: bool,
-    pub focus_reporting: bool,
-}
-
-#[derive(Message)]
 pub(crate) struct TerminalSelectionText {
     pub process_id: ProcessId,
     pub text: String,
@@ -57,11 +51,10 @@ impl Plugin for ServiceIngressPlugin {
             .add_message::<TerminalProcessCreateFailed>()
             .add_message::<TerminalViewportUpdate>()
             .add_message::<TerminalServiceError>()
-            .add_message::<TerminalModeUpdate>()
             .add_message::<TerminalSelectionText>()
             .add_systems(
                 Update,
-                route_service_messages
+                (route_service_messages, project_terminal_modes)
                     .in_set(ServiceIngressSet)
                     .in_set(ServiceMessageSet),
             );
@@ -76,7 +69,6 @@ struct IngressWriters<'w> {
     exited: MessageWriter<'w, ProcessExitedEvent>,
     process_snapshot: MessageWriter<'w, crate::processes_monitor::ServiceProcessSnapshot>,
     service_error: MessageWriter<'w, TerminalServiceError>,
-    mode: MessageWriter<'w, TerminalModeUpdate>,
     selection: MessageWriter<'w, TerminalSelectionText>,
     lifecycle: MessageWriter<'w, CommandLifecycleEvent>,
     title: MessageWriter<'w, OscTitleChanged>,
@@ -198,21 +190,6 @@ fn route_service_messages(mut inbound: MessageReader<ServiceInbound>, mut writer
                     text: text.clone(),
                 });
             }
-            ServiceMessage::TerminalMode {
-                process_id,
-                mouse_capture,
-                copy_mode,
-                alt_screen,
-                focus_reporting,
-            } => {
-                writers.mode.write(TerminalModeUpdate {
-                    process_id: *process_id,
-                    mouse_capture: *mouse_capture,
-                    copy_mode: *copy_mode,
-                    alt_screen: *alt_screen,
-                    focus_reporting: *focus_reporting,
-                });
-            }
             ServiceMessage::Bell { process_id } => {
                 writers.bell.write(vmux_core::notify::BellReceived {
                     process_id: *process_id,
@@ -223,15 +200,52 @@ fn route_service_messages(mut inbound: MessageReader<ServiceInbound>, mut writer
     }
 }
 
+fn project_terminal_modes(
+    mut inbound: MessageReader<ServiceInbound>,
+    process_index: Res<TerminalProcessIndex>,
+    mut terminals: Query<(&mut TerminalMode, &mut TerminalCopyMode), With<Terminal>>,
+) {
+    for inbound in inbound.read() {
+        let ServiceMessage::TerminalMode {
+            process_id,
+            mouse_capture,
+            copy_mode,
+            alt_screen,
+            focus_reporting,
+        } = &inbound.0
+        else {
+            continue;
+        };
+        let Some(entity) = process_index.get(process_id) else {
+            continue;
+        };
+        let Ok((mut mode, mut copy_mode_state)) = terminals.get_mut(entity) else {
+            continue;
+        };
+        *mode = TerminalMode {
+            mouse_capture: *mouse_capture,
+            copy_mode: *copy_mode,
+            alt_screen: *alt_screen,
+            focus_reporting: *focus_reporting,
+        };
+        copy_mode_state.set(*copy_mode);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
+    use crate::process_index::TerminalProcessIndexPlugin;
 
     #[test]
     fn transport_envelopes_become_terminal_messages() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, ServiceIngressPlugin))
+        app.add_plugins((
+            MinimalPlugins,
+            TerminalProcessIndexPlugin,
+            ServiceIngressPlugin,
+        ))
             .add_message::<ServiceInbound>()
             .add_message::<ProcessExitedEvent>()
             .add_message::<crate::processes_monitor::ServiceProcessSnapshot>()
@@ -239,6 +253,15 @@ mod tests {
             .add_message::<OscTitleChanged>()
             .add_message::<vmux_core::notify::BellReceived>();
         let process_id = ProcessId([7; 16]);
+        let terminal = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                process_id,
+                TerminalMode::default(),
+                TerminalCopyMode::default(),
+            ))
+            .id();
         app.world_mut()
             .write_message(ServiceInbound(ServiceMessage::ProcessCreated {
                 process_id,
@@ -248,7 +271,7 @@ mod tests {
             .write_message(ServiceInbound(ServiceMessage::TerminalMode {
                 process_id,
                 mouse_capture: true,
-                copy_mode: false,
+                copy_mode: true,
                 alt_screen: true,
                 focus_reporting: true,
             }));
@@ -260,18 +283,15 @@ mod tests {
             .resource_mut::<Messages<TerminalProcessCreated>>()
             .drain()
             .collect::<Vec<_>>();
-        let modes = app
-            .world_mut()
-            .resource_mut::<Messages<TerminalModeUpdate>>()
-            .drain()
-            .collect::<Vec<_>>();
+        let mode = app.world().get::<TerminalMode>(terminal).unwrap();
+        let copy_mode = app.world().get::<TerminalCopyMode>(terminal).unwrap();
         assert_eq!(created.len(), 1);
         assert_eq!(created[0].process_id, process_id);
         assert_eq!(created[0].pid, 4242);
-        assert_eq!(modes.len(), 1);
-        assert_eq!(modes[0].process_id, process_id);
-        assert!(modes[0].mouse_capture);
-        assert!(modes[0].alt_screen);
-        assert!(modes[0].focus_reporting);
+        assert!(mode.mouse_capture);
+        assert!(mode.copy_mode);
+        assert!(mode.alt_screen);
+        assert!(mode.focus_reporting);
+        assert!(copy_mode.active);
     }
 }

@@ -30,7 +30,7 @@ use vmux_core::ProcessId;
 use vmux_core::host::workspace::WorkspaceLocation;
 
 use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
-use crate::process::ProcessManager;
+use crate::process::{ProcessManager, ProcessUpdate};
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_api::protocol::{
     AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
@@ -1833,7 +1833,7 @@ async fn create_terminal(
         tokio::spawn(async move {
             loop {
                 match exit_stream.recv().await {
-                    Ok(ServiceMessage::ProcessExited { exit_code, .. }) => {
+                    Ok(ProcessUpdate::Exited { exit_code }) => {
                         let _ = exit_tx.send(AcpTerminalExit::Exited(exit_code));
                         break;
                     }
