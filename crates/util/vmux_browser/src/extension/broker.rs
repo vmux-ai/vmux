@@ -1047,7 +1047,7 @@ pub(crate) const fn current_platform() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extensions::bridge::{
+    use crate::extension::bridge::{
         BridgeAuthorization, BridgeRegistration, ExtensionBridgeServer,
     };
     use std::time::Duration;

@@ -189,7 +189,7 @@ mod tests {
     fn projects_ordered_visible_pages_with_stable_ids_and_removals() {
         let mut app = App::new();
         app.insert_resource(FocusedStack::default())
-            .add_plugins(crate::extensions::project::ExtensionProjectPlugin);
+            .add_plugins(crate::extension::project::ExtensionProjectPlugin);
         app.world_mut().spawn((
             Window {
                 resolution: (1200, 800).into(),

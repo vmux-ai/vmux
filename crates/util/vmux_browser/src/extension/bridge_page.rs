@@ -189,9 +189,9 @@ fn bridge_config_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extensions::bridge::ExtensionBridgeServer;
-    use crate::extensions::load::PreparedExtensions;
-    use crate::extensions::runtime::PreparedRuntime;
+    use crate::extension::bridge::ExtensionBridgeServer;
+    use crate::extension::load::PreparedExtensions;
+    use crate::extension::runtime::PreparedRuntime;
     use bevy::window::PrimaryWindow;
     use bevy_cef::prelude::{
         PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,

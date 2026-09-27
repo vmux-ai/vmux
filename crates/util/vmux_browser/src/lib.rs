@@ -2,7 +2,7 @@
 
 mod appearance;
 mod command;
-mod extensions;
+mod extension;
 mod frame_rate;
 mod host_focus;
 mod input;
@@ -78,7 +78,7 @@ impl Plugin for BrowserPlugin {
         let startup_locale =
             Locale::requested(Some(&startup_settings.appearance.locale)).into_string();
         let startup_accept_language_list = browser_accept_language_list(&startup_locale);
-        let prepared_extensions = crate::extensions::load::apply_env().unwrap_or_else(|error| {
+        let prepared_extensions = crate::extension::load::apply_env().unwrap_or_else(|error| {
             bevy::log::error!(%error, "failed to prepare extensions; starting without them");
             unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
             Vec::new()
@@ -86,9 +86,9 @@ impl Plugin for BrowserPlugin {
         let conformance_extension = std::env::var("VMUX_EXTENSION_CONFORMANCE_ID").ok();
         let extension_registrations = prepared_extensions
             .iter()
-            .map(|runtime| crate::extensions::bridge::BridgeRegistration {
+            .map(|runtime| crate::extension::bridge::BridgeRegistration {
                 extension_id: runtime.extension_id.clone(),
-                authorization: crate::extensions::bridge::BridgeAuthorization {
+                authorization: crate::extension::bridge::BridgeAuthorization {
                     permissions: runtime.granted_permissions.iter().cloned().collect(),
                     host_permissions: runtime
                         .granted_host_permissions
@@ -105,7 +105,7 @@ impl Plugin for BrowserPlugin {
                 },
             })
             .collect::<Vec<_>>();
-        let extension_bridge = crate::extensions::bridge::ExtensionBridgeServer::start_registered(
+        let extension_bridge = crate::extension::bridge::ExtensionBridgeServer::start_registered(
             &profile,
             extension_registrations,
         )
@@ -114,11 +114,11 @@ impl Plugin for BrowserPlugin {
             vmux_command::command_bar::CommandBarPlugin,
             BrowserToolPlugin,
             platform::BrowserPlatformPlugin,
-            extensions::ExtensionBrowserPlugin,
-            extensions::bridge_page::ExtensionBridgePagePlugin,
-            extensions::broker::ExtensionBrokerPlugin,
-            extensions::project::ExtensionProjectPlugin,
-            extensions::windows::ExtensionWindowsPlugin,
+            extension::ExtensionBrowserPlugin,
+            extension::bridge_page::ExtensionBridgePagePlugin,
+            extension::broker::ExtensionBrokerPlugin,
+            extension::project::ExtensionProjectPlugin,
+            extension::windows::ExtensionWindowsPlugin,
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
@@ -129,7 +129,7 @@ impl Plugin for BrowserPlugin {
         );
         let cef_command_line = cef_command_line_config();
         configure_cef_backend_sync(app)
-            .insert_resource(crate::extensions::load::PreparedExtensions(
+            .insert_resource(crate::extension::load::PreparedExtensions(
                 prepared_extensions,
             ))
             .insert_resource(extension_bridge)

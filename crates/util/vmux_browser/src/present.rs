@@ -1095,12 +1095,12 @@ pub(crate) fn sync_windowed_extension_popups(
     popups: Query<
         (
             Entity,
-            &crate::extensions::ExtensionPopupBounds,
+            &crate::extension::ExtensionPopupBounds,
             Option<&HostWindow>,
-            Has<crate::extensions::ExtensionPopupPresented>,
+            Has<crate::extension::ExtensionPopupPresented>,
         ),
         (
-            With<crate::extensions::ExtensionPopup>,
+            With<crate::extension::ExtensionPopup>,
             With<WindowOverlay>,
             With<WebviewWindowed>,
         ),
@@ -1148,7 +1148,7 @@ pub(crate) fn sync_windowed_extension_popups(
         browsers.nudge_windowed_repaint(&entity);
         commands
             .entity(entity)
-            .insert(crate::extensions::ExtensionPopupPresented);
+            .insert(crate::extension::ExtensionPopupPresented);
     }
 }
 

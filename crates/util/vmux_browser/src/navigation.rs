@@ -80,9 +80,9 @@ fn issue_open_history(
 
 fn drain_committed_navigation(
     receiver: Res<WebviewCommittedNavigationReceiver>,
-    infrastructure: Query<(), With<crate::extensions::bridge_page::ExtensionInfrastructureWebview>>,
+    infrastructure: Query<(), With<crate::extension::bridge_page::ExtensionInfrastructureWebview>>,
     retired_infrastructure: Query<
-        &crate::extensions::bridge_page::RetiredExtensionInfrastructureWebview,
+        &crate::extension::bridge_page::RetiredExtensionInfrastructureWebview,
     >,
     mut writer: MessageWriter<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
 ) {
@@ -493,11 +493,11 @@ mod committed_navigation_tests {
         let infrastructure = app
             .world_mut()
             .spawn((
-                crate::extensions::bridge_page::ExtensionBridgeWebview {
+                crate::extension::bridge_page::ExtensionBridgeWebview {
                     extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-                    role: crate::extensions::bridge_page::ExtensionBridgeRole::Transport,
+                    role: crate::extension::bridge_page::ExtensionBridgeRole::Transport,
                 },
-                crate::extensions::bridge_page::ExtensionInfrastructureWebview,
+                crate::extension::bridge_page::ExtensionInfrastructureWebview,
             ))
             .id();
         let visible = app.world_mut().spawn_empty().id();
@@ -508,7 +508,7 @@ mod committed_navigation_tests {
             .add_systems(Update, (drain_committed_navigation, collect).chain());
         app.world_mut().despawn(infrastructure);
         app.world_mut().spawn(
-            crate::extensions::bridge_page::RetiredExtensionInfrastructureWebview::new(
+            crate::extension::bridge_page::RetiredExtensionInfrastructureWebview::new(
                 infrastructure,
             ),
         );

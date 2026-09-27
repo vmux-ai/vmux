@@ -14,7 +14,7 @@ use super::model::{
     ExtensionModel, ExtensionModelEvent, ExtensionStableIds, ExtensionTabSnapshot,
     ExtensionWindowSnapshot, extension_visible_url,
 };
-use crate::extensions::bridge_page::ExtensionBridgeWebview;
+use crate::extension::bridge_page::ExtensionBridgeWebview;
 
 pub(crate) struct ExtensionProjectPlugin;
 

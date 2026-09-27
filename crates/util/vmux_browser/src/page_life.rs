@@ -51,7 +51,7 @@ pub(crate) fn drain_loading_state(
 
 pub(crate) fn spawn_popup_stacks(
     popup_rx: Res<WebviewPopupReceiver>,
-    extension_popups: Query<(), With<crate::extensions::ExtensionPopup>>,
+    extension_popups: Query<(), With<crate::extension::ExtensionPopup>>,
     child_of_q: Query<&ChildOf>,
     stack_q: Query<(), With<Stack>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
