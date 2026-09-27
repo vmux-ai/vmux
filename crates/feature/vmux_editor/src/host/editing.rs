@@ -482,7 +482,7 @@ fn on_file_key(
     mut q: Query<(&Editor, &mut EditorKeymap)>,
     app_keymap: Option<Res<Keymap>>,
     app_contexts: Query<&KeyContext>,
-    view_mode: Res<SharedFileViewMode>,
+    view_mode: Single<&SharedFileViewMode>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;

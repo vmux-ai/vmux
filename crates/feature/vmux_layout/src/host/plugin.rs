@@ -38,11 +38,12 @@ impl Plugin for LayoutPlugin {
                 crate::error_page::ErrorPage::plugin(),
             ));
         }
+        app.world_mut()
+            .spawn((Name::new("Update state"), crate::UpdateState::default()));
         app.add_plugins((LayoutContractPlugin, LayoutRequestPlugin, LayoutAgentPlugin))
             .register_type::<Open>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .init_resource::<settings::ResolvedLocale>()
-            .init_resource::<crate::UpdateState>()
             .add_message::<TerminalLayoutSpawnRequest>()
             .add_message::<TabLayoutSpawnRequest>()
             .add_message::<vmux_core::PageOpenRequest>()

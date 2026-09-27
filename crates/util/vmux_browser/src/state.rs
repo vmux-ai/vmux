@@ -1030,7 +1030,7 @@ fn push_update_notice_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     layout: FocusedLayout,
-    state: Res<UpdateState>,
+    state: Single<&UpdateState>,
     mut last: Local<std::collections::HashMap<Entity, UpdateState>>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {

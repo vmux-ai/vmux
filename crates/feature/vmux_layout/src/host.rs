@@ -76,7 +76,7 @@ pub struct CloseRequiresConfirmation;
 #[derive(Component, Default)]
 pub struct SpaceFilePresent(pub bool);
 
-#[derive(Resource, Default, Clone, PartialEq, Debug)]
+#[derive(Component, Default, Clone, PartialEq, Debug)]
 pub enum UpdateState {
     #[default]
     Idle,

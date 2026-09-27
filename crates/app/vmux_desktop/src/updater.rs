@@ -185,8 +185,8 @@ fn poll_update_result(
     config: Single<&UpdateConfig>,
     settings: Res<AppSettings>,
     time: Res<Time>,
-    mut state: ResMut<vmux_layout::UpdateState>,
-    mut status: ResMut<CurrentUpdateCheckStatus>,
+    mut state: Single<&mut vmux_layout::UpdateState>,
+    mut status: Single<&mut CurrentUpdateCheckStatus>,
     mut manual_requests: MessageReader<CheckForUpdatesRequest>,
     mut git_requests: MessageReader<vmux_git::GitCheckForUpdatesRequest>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -214,7 +214,7 @@ fn poll_update_result(
                 status.0 = UpdateCheckStatus::Downloading {
                     version: version.clone(),
                 };
-                *state = vmux_layout::UpdateState::Downloading {
+                **state = vmux_layout::UpdateState::Downloading {
                     version,
                     downloaded,
                     total,
@@ -224,7 +224,7 @@ fn poll_update_result(
                 status.0 = UpdateCheckStatus::Installing {
                     version: version.clone(),
                 };
-                *state = vmux_layout::UpdateState::Installing { version };
+                **state = vmux_layout::UpdateState::Installing { version };
             }
             UpdateResult::Installed { version } => {
                 checker.in_flight = false;
@@ -232,7 +232,7 @@ fn poll_update_result(
                 status.0 = UpdateCheckStatus::Ready {
                     version: version.clone(),
                 };
-                *state = vmux_layout::UpdateState::Ready { version };
+                **state = vmux_layout::UpdateState::Ready { version };
                 checker.done = true;
             }
             UpdateResult::Failed(e) => {
@@ -240,10 +240,10 @@ fn poll_update_result(
                 status.0 = UpdateCheckStatus::Failed;
                 bevy::log::debug!("update check failed: {e}");
                 if !matches!(
-                    *state,
+                    **state,
                     vmux_layout::UpdateState::Idle | vmux_layout::UpdateState::Ready { .. }
                 ) {
-                    *state = vmux_layout::UpdateState::Idle;
+                    **state = vmux_layout::UpdateState::Idle;
                 }
             }
         }

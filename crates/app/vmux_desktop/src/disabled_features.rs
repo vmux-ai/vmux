@@ -78,14 +78,16 @@ fn reject_recording_stops(
 }
 
 #[cfg(not(feature = "updater"))]
-fn mark_updater_unavailable(mut status: ResMut<vmux_setting::event::CurrentUpdateCheckStatus>) {
+fn mark_updater_unavailable(
+    mut status: Single<&mut vmux_setting::event::CurrentUpdateCheckStatus>,
+) {
     status.0 = vmux_setting::event::UpdateCheckStatus::Unavailable;
 }
 
 #[cfg(not(feature = "updater"))]
 fn reject_update_checks(
     mut requests: MessageReader<vmux_setting::event::CheckForUpdatesRequest>,
-    mut status: ResMut<vmux_setting::event::CurrentUpdateCheckStatus>,
+    mut status: Single<&mut vmux_setting::event::CurrentUpdateCheckStatus>,
 ) {
     if requests.read().count() > 0 {
         status.0 = vmux_setting::event::UpdateCheckStatus::Unavailable;
@@ -184,19 +186,21 @@ mod tests {
     #[test]
     fn update_requests_fail_in_disabled_builds() {
         let mut app = App::new();
-        app.init_resource::<vmux_setting::event::CurrentUpdateCheckStatus>()
-            .add_message::<vmux_setting::event::CheckForUpdatesRequest>()
+        app.add_message::<vmux_setting::event::CheckForUpdatesRequest>()
             .add_systems(Update, reject_update_checks);
+        app.world_mut()
+            .spawn(vmux_setting::event::CurrentUpdateCheckStatus::default());
         app.world_mut()
             .resource_mut::<Messages<vmux_setting::event::CheckForUpdatesRequest>>()
             .write(vmux_setting::event::CheckForUpdatesRequest);
 
         app.update();
 
+        let mut statuses = app
+            .world_mut()
+            .query::<&vmux_setting::event::CurrentUpdateCheckStatus>();
         assert_eq!(
-            app.world()
-                .resource::<vmux_setting::event::CurrentUpdateCheckStatus>()
-                .0,
+            statuses.single(app.world()).unwrap().0,
             vmux_setting::event::UpdateCheckStatus::Unavailable
         );
     }

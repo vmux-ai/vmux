@@ -26,7 +26,7 @@ pub enum UpdateCheckStatus {
 pub struct CheckForUpdatesRequest;
 
 #[cfg(host)]
-#[derive(bevy::prelude::Resource, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(bevy::prelude::Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);
 
 #[vmux_api::ui_event(Default, Eq, version = 2)]

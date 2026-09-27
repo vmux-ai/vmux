@@ -41,7 +41,7 @@ fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
 }
 
 fn send_note(
-    mode: Res<SharedFileViewMode>,
+    mode: Single<&SharedFileViewMode>,
     index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
     notes: Query<(Entity, &FileView, &Editor, Option<&NoteRevealLine>), ReadyNote>,
     browsers: NonSend<Browsers>,

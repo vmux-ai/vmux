@@ -19,8 +19,11 @@ pub(super) struct ProjectionPlugin;
 
 impl Plugin for ProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CurrentUpdateCheckStatus>()
-            .add_plugins(vmux_core::host::UiStatePlugin::<SettingsUiState>::default())
+        app.world_mut().spawn((
+            Name::new("Update check status"),
+            CurrentUpdateCheckStatus::default(),
+        ));
+        app.add_plugins(vmux_core::host::UiStatePlugin::<SettingsUiState>::default())
             .add_systems(
                 Update,
                 (
@@ -73,7 +76,7 @@ fn project_settings_schema(
 
 fn project_settings_render_fields(
     settings: Res<AppSettings>,
-    status: Res<CurrentUpdateCheckStatus>,
+    status: Single<Ref<CurrentUpdateCheckStatus>>,
     mut views: Query<
         (Ref<SettingsSchemaProjection>, &mut SettingsRenderProjection),
         With<Settings>,
