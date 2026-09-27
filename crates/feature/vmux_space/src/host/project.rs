@@ -145,8 +145,7 @@ const UNLISTED_DIRS: &[&str] = &[
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct SpaceProjects<'w, 's> {
     settings: Option<Res<'w, vmux_setting::AppSettings>>,
-    active_space: Option<Res<'w, super::spaces::ActiveSpace>>,
-    current_space: Query<'w, 's, Entity, With<vmux_layout::space::CurrentSpace>>,
+    active_space: super::spaces::ActiveSpace<'w, 's>,
     child_of: Query<'w, 's, &'static ChildOf>,
     spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
     space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
@@ -165,18 +164,20 @@ impl SpaceProjects<'_, '_> {
     }
 
     pub fn active_rows(&self) -> Vec<vmux_core::event::ProjectRow> {
-        let Some(active) = self.active_space.as_deref() else {
+        let Some(space) = self.active_space.entity() else {
             return Vec::new();
         };
-        let space = self.current_space.iter().next();
-        self.rows_of(&active.record.id, space)
+        let Some(space_id) = self.active_space.id() else {
+            return Vec::new();
+        };
+        self.rows_of(space_id, Some(space))
     }
 
     pub fn active_projects(&self) -> Vec<vmux_core::event::ProjectRow> {
-        let Some(active) = self.active_space.as_deref() else {
+        let Some(space_id) = self.active_space.id() else {
             return Vec::new();
         };
-        self.projects_of(&active.record.id)
+        self.projects_of(space_id)
     }
 
     fn projects_of(&self, space_id: &str) -> Vec<vmux_core::event::ProjectRow> {

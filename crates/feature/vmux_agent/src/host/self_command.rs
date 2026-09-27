@@ -259,7 +259,7 @@ fn handle_agent_self_commands(
     mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
     mut service_requests: MessageWriter<ServiceRequest>,
-    active_space: Option<Res<ActiveSpace>>,
+    active_space: ActiveSpace,
     settings: Res<AppSettings>,
     mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
     mut tab_worktree: AgentTabWorktreeContext,
@@ -910,8 +910,8 @@ fn handle_agent_self_commands(
                                 Err(message) => AgentCommandResult::Error(message),
                                 Ok(stored) => 'create_worktree: {
                                     let configured_dir = active_space
-                                        .as_deref()
-                                        .and_then(|space| settings.startup_dir(&space.record.id));
+                                        .id()
+                                        .and_then(|space_id| settings.startup_dir(space_id));
                                     let workspace_dir =
                                         tab_worktree.workspaces.get(tab_e).ok().and_then(
                                             |workspace| {

@@ -301,14 +301,17 @@ fn on_terminal_removed(
 fn spawn_layout_requested_content(
     mut reader: MessageReader<TerminalLayoutSpawnRequest>,
     settings: Res<AppSettings>,
-    active_space: Res<vmux_space::spaces::ActiveSpace>,
+    active_space: vmux_space::ActiveSpace,
     child_of: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
     mut commands: Commands,
 ) {
+    let space_id = active_space
+        .id()
+        .unwrap_or(vmux_space::model::BOOTSTRAP_SPACE_ID);
     for request in reader.read() {
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(request.stack, &child_of, &tabs);
-        let Ok(cwd) = settings.workspace_dir(&active_space.record.id, tab_dir.as_deref()) else {
+        let Ok(cwd) = settings.workspace_dir(space_id, tab_dir.as_deref()) else {
             continue;
         };
         let terminal = commands
@@ -329,9 +332,12 @@ fn handle_terminal_page_open(
     child_of_q: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
     settings: Res<AppSettings>,
-    active_space: Res<vmux_space::spaces::ActiveSpace>,
+    active_space: vmux_space::ActiveSpace,
     mut commands: Commands,
 ) {
+    let space_id = active_space
+        .id()
+        .unwrap_or(vmux_space::model::BOOTSTRAP_SPACE_ID);
     for (entity, task) in &tasks {
         if task.url != TERMINAL_PAGE_URL.trim_end_matches('/')
             && !task.url.starts_with(TERMINAL_PAGE_URL)
@@ -384,7 +390,7 @@ fn handle_terminal_page_open(
         } else {
             let tab_dir =
                 vmux_layout::tab::ancestor_tab_startup_dir(task.stack, &child_of_q, &tabs);
-            match settings.workspace_dir(&active_space.record.id, tab_dir.as_deref()) {
+            match settings.workspace_dir(space_id, tab_dir.as_deref()) {
                 Ok(cwd) => cwd,
                 Err(message) => {
                     commands.entity(entity).insert(PageOpenError { message });
@@ -803,7 +809,7 @@ fn resolve_pending_terminal_cwd(
     spaces: Query<(), With<vmux_layout::space::Space>>,
     space_ids: Query<&vmux_layout::space::SpaceId>,
     settings: Res<AppSettings>,
-    active_space: Res<vmux_space::spaces::ActiveSpace>,
+    active_space: vmux_space::ActiveSpace,
 ) {
     for (entity, mut launch) in &mut pending {
         if !launch.cwd.is_empty() {
@@ -811,7 +817,8 @@ fn resolve_pending_terminal_cwd(
         }
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(entity, &child_of, &tabs);
         let space_id = vmux_layout::space::space_id_of(entity, &child_of, &spaces, &space_ids)
-            .unwrap_or_else(|| active_space.record.id.clone());
+            .or_else(|| active_space.id().map(str::to_string))
+            .unwrap_or_else(|| vmux_space::model::BOOTSTRAP_SPACE_ID.to_string());
         let Ok(Some(cwd)) = settings.workspace_dir(&space_id, tab_dir.as_deref()) else {
             continue;
         };
@@ -2021,6 +2028,13 @@ mod tests {
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
 
+    fn spawn_active_space(app: &mut App, record: &vmux_space::model::SpaceRecord) {
+        app.world_mut().spawn((
+            vmux_space::spaces::space_profile_bundle(record),
+            vmux_layout::space::CurrentSpace,
+        ));
+    }
+
     #[test]
     fn bracketed_paste_wraps_payload() {
         assert_eq!(bracketed_paste(b"hi"), b"\x1b[200~hi\x1b[201~".to_vec());
@@ -2191,8 +2205,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .init_resource::<vmux_space::spaces::ActiveSpace>()
             .add_systems(Update, handle_terminal_page_open);
+        spawn_active_space(&mut app, &vmux_space::model::bootstrap_space_record());
 
         let stack = app
             .world_mut()
@@ -2238,8 +2252,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
-            .insert_resource(vmux_space::spaces::ActiveSpace { record })
             .add_systems(Update, handle_terminal_page_open);
+        spawn_active_space(&mut app, &record);
 
         let stack = app
             .world_mut()
@@ -2267,8 +2281,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .insert_resource(vmux_space::spaces::ActiveSpace { record })
             .add_systems(Update, handle_terminal_page_open);
+        spawn_active_space(&mut app, &record);
 
         let stack = app
             .world_mut()
@@ -2308,8 +2322,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
-            .insert_resource(vmux_space::spaces::ActiveSpace { record })
             .add_systems(Update, handle_terminal_page_open);
+        spawn_active_space(&mut app, &record);
 
         let tab = app
             .world_mut()
@@ -2358,8 +2372,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
-            .insert_resource(vmux_space::spaces::ActiveSpace { record })
             .add_systems(Update, handle_terminal_page_open);
+        spawn_active_space(&mut app, &record);
 
         let tab = app
             .world_mut()
@@ -2412,8 +2426,8 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<TerminalLayoutSpawnRequest>()
             .insert_resource(settings)
-            .insert_resource(vmux_space::spaces::ActiveSpace { record })
             .add_systems(Update, spawn_layout_requested_content);
+        spawn_active_space(&mut app, &record);
 
         let tab = app
             .world_mut()

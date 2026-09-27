@@ -43,7 +43,7 @@ impl Plugin for PageOpenPlugin {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentPageOpenWorkspace<'w, 's> {
-    active_space: Option<Res<'w, ActiveSpace>>,
+    active_space: ActiveSpace<'w, 's>,
     tabs: Query<'w, 's, &'static vmux_layout::tab::Tab>,
     spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
     space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
@@ -188,10 +188,11 @@ fn resolved_space_startup_dir(
     spaces: &Query<(), With<vmux_layout::space::Space>>,
     space_ids: &Query<&vmux_layout::space::SpaceId>,
     settings: &AppSettings,
-    active_space: Option<&ActiveSpace>,
+    active_space: &ActiveSpace,
 ) -> Option<vmux_setting::StartupDir> {
     let space_id = vmux_layout::space::space_id_of(entity, child_of, spaces, space_ids)
-        .or_else(|| active_space.map(|space| space.record.id.clone()))?;
+        .map(|space_id| space_id.to_string())
+        .or_else(|| active_space.id().map(str::to_string))?;
     vmux_setting::StartupDir::resolve(settings, &space_id, None)
 }
 
@@ -212,7 +213,7 @@ fn prepare_agent_tab_worktrees(
         Option<&vmux_layout::tab::TabDirDecided>,
     )>,
     settings: Option<Res<AppSettings>>,
-    active_space: Option<Res<ActiveSpace>>,
+    active_space: ActiveSpace,
     managed_root: Option<Res<vmux_layout::worktree::ManagedWorktreeRoot>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -285,7 +286,7 @@ fn prepare_agent_tab_worktrees(
                 &spaces,
                 &space_ids,
                 settings,
-                active_space.as_deref(),
+                &active_space,
             )
             .map(|dir| dir.path.to_string_lossy().into_owned())
         });
@@ -511,7 +512,7 @@ fn handle_agent_page_open(
             &workspace.spaces,
             &workspace.space_ids,
             &settings,
-            workspace.active_space.as_deref(),
+            &workspace.active_space,
         );
         let default_cwd = match AgentCwd::from_tab(tab_dir.as_deref()).stored() {
             Ok(Some(path)) => path,
@@ -2034,14 +2035,15 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .insert_resource(vmux_space::spaces::ActiveSpace {
-                record: vmux_space::model::SpaceRecord {
-                    id: "space-1".into(),
-                    name: "Space 1".into(),
-                    profile: "Personal".into(),
-                },
-            })
             .add_systems(Update, handle_agent_page_open);
+        app.world_mut().spawn((
+            vmux_space::spaces::space_profile_bundle(&vmux_space::model::SpaceRecord {
+                id: "space-1".into(),
+                name: "Space 1".into(),
+                profile: "Personal".into(),
+            }),
+            vmux_layout::space::CurrentSpace,
+        ));
 
         let stack = app
             .world_mut()
@@ -2096,14 +2098,15 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .insert_resource(vmux_space::spaces::ActiveSpace {
-                record: vmux_space::model::SpaceRecord {
-                    id: "active".into(),
-                    name: "Active".into(),
-                    profile: "Personal".into(),
-                },
-            })
             .add_systems(Update, handle_agent_page_open);
+        app.world_mut().spawn((
+            vmux_space::spaces::space_profile_bundle(&vmux_space::model::SpaceRecord {
+                id: "active".into(),
+                name: "Active".into(),
+                profile: "Personal".into(),
+            }),
+            vmux_layout::space::CurrentSpace,
+        ));
         let space = app
             .world_mut()
             .spawn((
@@ -2318,14 +2321,15 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .insert_resource(vmux_space::spaces::ActiveSpace {
-                record: vmux_space::model::SpaceRecord {
-                    id: "space-1".into(),
-                    name: "Space 1".into(),
-                    profile: "Personal".into(),
-                },
-            })
             .add_systems(Update, handle_agent_page_open);
+        app.world_mut().spawn((
+            vmux_space::spaces::space_profile_bundle(&vmux_space::model::SpaceRecord {
+                id: "space-1".into(),
+                name: "Space 1".into(),
+                profile: "Personal".into(),
+            }),
+            vmux_layout::space::CurrentSpace,
+        ));
 
         let tab = app
             .world_mut()

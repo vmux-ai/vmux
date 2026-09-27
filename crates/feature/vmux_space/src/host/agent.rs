@@ -137,18 +137,25 @@ fn request_profile_rename(
 
 fn rename_profile(
     mut requests: MessageReader<RenameProfileRequest>,
-    active_space: Option<ResMut<crate::ActiveSpace>>,
+    mut profiles: Query<
+        &mut vmux_layout::profile::Profile,
+        (
+            With<vmux_layout::space::Space>,
+            With<vmux_layout::space::CurrentSpace>,
+        ),
+    >,
 ) {
-    let Some(mut active) = active_space else {
-        return;
-    };
     for request in requests.read() {
         let name = request.name.trim();
         if name.is_empty() {
             continue;
         }
         match vmux_core::profile::set_display_name(name) {
-            Ok(()) => active.record.profile = name.to_string(),
+            Ok(()) => {
+                if let Ok(mut profile) = profiles.single_mut() {
+                    profile.name = name.to_string();
+                }
+            }
             Err(error) => warn!("rename_profile: failed to persist display name: {error}"),
         }
     }

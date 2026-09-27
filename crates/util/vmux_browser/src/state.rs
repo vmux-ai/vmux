@@ -360,16 +360,12 @@ fn mark_page_state_dirty(
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     focused_stack: Res<vmux_layout::stack::FocusedStack>,
     settings: Res<AppSettings>,
-    active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
     repo_info: Option<Single<Ref<vmux_git::RepoInfoCache>>>,
     mut revision: Single<&mut StateRevision>,
 ) {
     let resource_changed = focused_window.is_changed()
         || focused_stack.is_changed()
         || settings.is_changed()
-        || active_space
-            .as_ref()
-            .is_some_and(|value| value.is_changed())
         || repo_info.as_ref().is_some_and(|value| value.is_changed());
     if resource_changed || changes.any() || removals.any() {
         revision.advance();
@@ -746,13 +742,9 @@ fn push_projects_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     layout: FocusedLayout,
-    settings: Res<AppSettings>,
-    active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
     space_projects: vmux_space::SpaceProjects,
-    expansion_changed: Query<(), Changed<vmux_space::ExpandedProjectDirs>>,
     revision: Single<&StateRevision>,
     mut cache: Local<ProjectionCache>,
-    mut listed: Local<Option<Vec<vmux_core::event::ProjectRow>>>,
     mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
@@ -764,18 +756,10 @@ fn push_projects_host_emit(
     if !cache.needs_rebuild(cef_e, revision.0, page_ready_changed) {
         return;
     }
-    let stale = listed.is_none()
-        || settings.is_changed()
-        || active_space.as_ref().is_some_and(Res::is_changed)
-        || !expansion_changed.is_empty();
-    if stale {
-        let mut rows = space_projects.active_rows();
-        for row in &mut rows {
-            row.display_path = abbreviate_project_path(std::path::Path::new(&row.path));
-        }
-        *listed = Some(rows);
+    let mut projects = space_projects.active_rows();
+    for row in &mut projects {
+        row.display_path = abbreviate_project_path(std::path::Path::new(&row.path));
     }
-    let mut projects = listed.clone().unwrap_or_default();
     let mut boundary = projects
         .iter()
         .find(|project| project.depth == 0 && project.is_active)

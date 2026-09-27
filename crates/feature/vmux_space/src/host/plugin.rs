@@ -33,7 +33,6 @@ impl Plugin for SpacePlugin {
             .add_plugins(super::SpaceToolPlugin)
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
-            .init_resource::<ActiveSpace>()
             .init_resource::<vmux_layout::window::FocusedWindow>()
             .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceAttachRequest>()
@@ -53,9 +52,7 @@ impl Plugin for SpacePlugin {
             )
             .add_systems(
                 Update,
-                (sync_active_space_record, update_effective_startup_url)
-                    .chain()
-                    .after(vmux_layout::space::CurrentSpaceSet),
+                update_effective_startup_url.after(vmux_layout::space::CurrentSpaceSet),
             )
             .add_systems(
                 Update,
@@ -145,14 +142,16 @@ impl TryFrom<&vmux_command::CommandInvocation> for OpenRequest {
 
 fn update_effective_startup_url(
     settings: Option<Res<vmux_setting::AppSettings>>,
-    active: Option<Res<ActiveSpace>>,
+    active: ActiveSpace,
     mut effective: ResMut<vmux_core::EffectiveStartupUrl>,
 ) {
-    let (Some(settings), Some(active)) = (settings, active) else {
+    let Some(settings) = settings else {
         return;
     };
-    if settings.is_changed() || active.is_changed() || effective.0.is_empty() {
-        effective.0 = settings.startup_url(&active.record.id);
+    let space_id = active.id().unwrap_or(crate::model::BOOTSTRAP_SPACE_ID);
+    let next = settings.startup_url(space_id);
+    if effective.0 != next {
+        effective.0 = next;
     }
 }
 
@@ -223,34 +222,6 @@ fn reset_spaces_sent_marker_on_page_ready(
         return;
     }
     commands.entity(entity).remove::<SpacesListSent>();
-}
-
-fn sync_active_space_record(
-    current: Query<
-        (&vmux_layout::space::SpaceId, &Name),
-        (
-            With<vmux_layout::space::Space>,
-            With<vmux_layout::space::CurrentSpace>,
-        ),
-    >,
-    spaces: Query<
-        (&vmux_layout::space::SpaceId, &Name, Has<vmux_core::Active>),
-        With<vmux_layout::space::Space>,
-    >,
-    mut active: ResMut<ActiveSpace>,
-) {
-    let selected = current.iter().next().or_else(|| {
-        spaces
-            .iter()
-            .find(|(_, _, is_active)| *is_active)
-            .map(|(id, name, _)| (id, name))
-    });
-    if let Some((id, name)) = selected
-        && (active.record.id != id.0 || active.record.name != name.as_str())
-    {
-        active.record.id = id.0.clone();
-        active.record.name = name.to_string();
-    }
 }
 
 type SpaceListQuery<'w, 's> = Query<
@@ -393,17 +364,16 @@ fn broadcast_spaces_to_views(
 
 fn on_project_activate(
     trigger: On<UiInput<ProjectActivateRequest>>,
-    active: Option<Res<ActiveSpace>>,
+    active: ActiveSpace,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
 ) {
-    let (Some(active), Some(mut settings)) = (active, settings) else {
+    let (Some(space_id), Some(mut settings)) = (active.id(), settings) else {
         return;
     };
-    let space_id = active.record.id.clone();
     let changed = settings
         .bypass_change_detection()
-        .activate_space_project(&space_id, trigger.event().payload.path.trim());
+        .activate_space_project(space_id, trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
         saves.write(vmux_setting::SettingsSaveRequest);
@@ -412,17 +382,16 @@ fn on_project_activate(
 
 fn on_project_forget(
     trigger: On<UiInput<ProjectForgetRequest>>,
-    active: Option<Res<ActiveSpace>>,
+    active: ActiveSpace,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
 ) {
-    let (Some(active), Some(mut settings)) = (active, settings) else {
+    let (Some(space_id), Some(mut settings)) = (active.id(), settings) else {
         return;
     };
-    let space_id = active.record.id.clone();
     let changed = settings
         .bypass_change_detection()
-        .forget_space_project(&space_id, trigger.event().payload.path.trim());
+        .forget_space_project(space_id, trigger.event().payload.path.trim());
     if changed {
         settings.set_changed();
         saves.write(vmux_setting::SettingsSaveRequest);
@@ -964,6 +933,7 @@ fn respond_spaces_spawn(
 mod tests {
     use super::*;
     use crate::model::{SpaceRecord, bootstrap_profile_name};
+    use crate::spaces::space_profile_bundle;
     use bevy::ecs::system::RunSystemOnce;
     use vmux_command::CommandRequest;
     use vmux_layout::settings::{
@@ -1082,10 +1052,11 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .insert_resource(settings)
-            .insert_resource(ActiveSpace {
-                record: work_space_record(),
-            })
             .add_systems(Update, update_effective_startup_url);
+        app.world_mut().spawn((
+            space_profile_bundle(&work_space_record()),
+            vmux_layout::space::CurrentSpace,
+        ));
 
         app.update();
 
@@ -1267,16 +1238,12 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(settings)
-            .insert_resource(ActiveSpace {
-                record: work_space_record(),
-            });
+        app.add_plugins(MinimalPlugins).insert_resource(settings);
         let space = app
             .world_mut()
             .spawn((
-                vmux_layout::space::Space,
-                vmux_layout::space::SpaceId("work".into()),
+                space_profile_bundle(&work_space_record()),
+                vmux_layout::space::CurrentSpace,
             ))
             .id();
         let tab = app
@@ -1375,15 +1342,16 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<vmux_setting::SettingsSaveRequest>()
             .insert_resource(settings)
-            .insert_resource(ActiveSpace {
-                record: SpaceRecord {
-                    id: "work".into(),
-                    name: "Work".into(),
-                    profile: bootstrap_profile_name(),
-                },
-            })
             .add_observer(on_project_activate)
             .add_observer(on_project_forget);
+        app.world_mut().spawn((
+            space_profile_bundle(&SpaceRecord {
+                id: "work".into(),
+                name: "Work".into(),
+                profile: bootstrap_profile_name(),
+            }),
+            vmux_layout::space::CurrentSpace,
+        ));
         app
     }
 

@@ -88,7 +88,7 @@ fn open_terminal_tab(
     mut requests: MessageReader<AgentNewTerminalTabRequest>,
     focus: Res<FocusedStack>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    active_space: Option<Res<ActiveSpace>>,
+    active_space: ActiveSpace,
     settings: Res<AppSettings>,
     mut terminal_spawn: MessageWriter<super::TerminalStackSpawnRequest>,
     mut process_spawn: MessageWriter<ProcessStackSpawnRequest>,
@@ -102,8 +102,8 @@ fn open_terminal_tab(
                 Ok(cwd) => {
                     let cwd = cwd.or_else(|| {
                         active_space
-                            .as_ref()
-                            .and_then(|space| settings.startup_dir(&space.record.id))
+                            .id()
+                            .and_then(|space_id| settings.startup_dir(space_id))
                     });
                     if request.payload.command.trim().is_empty() {
                         terminal_spawn.write(super::TerminalStackSpawnRequest {

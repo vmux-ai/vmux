@@ -24,7 +24,6 @@ use vmux_layout::{
     window::{Main, WindowGeometry},
 };
 use vmux_setting::AppSettings;
-use vmux_space::ActiveSpace;
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
@@ -322,7 +321,6 @@ fn save_space_to_path_excluding(
 }
 
 pub(crate) fn load_space_on_startup(
-    active: Res<ActiveSpace>,
     registry: Res<AppTypeRegistry>,
     mut restore: Single<(
         Entity,
@@ -331,10 +329,11 @@ pub(crate) fn load_space_on_startup(
     )>,
     mut commands: Commands,
 ) {
+    let bootstrap = vmux_space::model::bootstrap_space_record();
     if vmux_core::profile::is_test_session() {
         restore.1.0 = true;
         restore.2.0 = false;
-        commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
+        commands.spawn(vmux_space::spaces::space_profile_bundle(&bootstrap));
         return;
     }
     let path = store_path();
@@ -368,7 +367,7 @@ pub(crate) fn load_space_on_startup(
         commands.trigger_load(load);
     } else {
         restore.1.0 = true;
-        commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
+        commands.spawn(vmux_space::spaces::space_profile_bundle(&bootstrap));
     }
 }
 
@@ -1709,9 +1708,6 @@ mod tests {
             .spawn(crate::boot_status::RestoreComplete::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .insert_resource(ActiveSpace {
-                record: vmux_space::model::bootstrap_space_record(),
-            })
             .add_plugins(PersistencePlugin);
 
         let main = app.world_mut().spawn(Main).id();
@@ -1997,9 +1993,6 @@ mod tests {
             .spawn(crate::boot_status::RestoreComplete::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .insert_resource(ActiveSpace {
-                record: vmux_space::model::bootstrap_space_record(),
-            })
             .add_plugins(PersistencePlugin);
         app.world_mut().spawn(Main);
         app.world_mut().spawn(PrimaryWindow);

@@ -111,17 +111,17 @@ fn spawn_profile_labels(mut commands: Commands) {
 }
 
 fn sync_user_profile_name(
-    active_space: Option<Res<vmux_space::ActiveSpace>>,
+    active_space: vmux_space::ActiveSpace,
     mut user: Query<&mut Profile, With<User>>,
 ) {
-    let Some(active) = active_space else {
+    let Some(name) = active_space.profile() else {
         return;
     };
     let Ok(mut profile) = user.single_mut() else {
         return;
     };
-    if profile.name != active.record.profile {
-        *profile = Profile::user_named(active.record.profile.clone());
+    if profile.name != name {
+        *profile = Profile::user_named(name.to_string());
     }
 }
 
@@ -491,7 +491,6 @@ fn on_team_profile_update_request(
     trigger: On<UiInput<TeamProfileUpdateRequest>>,
     user: Query<Entity, With<User>>,
     mut space_profiles: Query<&mut vmux_layout::profile::Profile, With<Space>>,
-    mut active_record: Option<ResMut<vmux_space::ActiveSpace>>,
     mut profile_labels: Query<(&ProfileId, &mut Name), With<ProfileLabel>>,
     mut commands: Commands,
 ) {
@@ -512,9 +511,6 @@ fn on_team_profile_update_request(
     }
     for mut profile in &mut space_profiles {
         profile.name.clone_from(&name);
-    }
-    if let Some(active) = active_record.as_deref_mut() {
-        active.record.profile.clone_from(&name);
     }
     if let Ok(entity) = user.single() {
         commands.entity(entity).insert(Profile::user_named(name));
