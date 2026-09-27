@@ -1179,8 +1179,7 @@ mod tests {
     #[test]
     fn new_tab_becomes_active_in_single_update() {
         let mut app = build_app();
-        app.init_resource::<crate::pane::PendingCursorWarp>()
-            .add_plugins((crate::space::SpaceLayoutPlugin, crate::stack::StackPlugin));
+        app.add_plugins((crate::space::SpaceLayoutPlugin, crate::stack::StackPlugin));
         build_main_and_tab(&mut app);
         let old_tab = app
             .world_mut()

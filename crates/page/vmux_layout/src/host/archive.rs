@@ -1504,7 +1504,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, crate::stack::StackPlugin, ArchivePlugin))
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<crate::pane::PendingCursorWarp>()
             .init_resource::<LayoutSettings>();
         app.world_mut()
             .spawn((bevy::window::Window::default(), PrimaryWindow));

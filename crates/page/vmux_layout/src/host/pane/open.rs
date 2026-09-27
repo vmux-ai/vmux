@@ -871,7 +871,6 @@ fn handle_open_in_pane(
     effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for request in reader.read() {
         let OpenRequest {
@@ -962,7 +961,7 @@ fn handle_open_in_pane(
                 }
             }
         }
-        pending_warp.target = Some(target_pane);
+        commands.entity(target_pane).insert(PendingCursorWarp);
     }
 }
 

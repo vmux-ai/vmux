@@ -34,7 +34,7 @@ use arrangement::ArrangementPlugin;
 use close::ClosePlugin;
 pub use close::{ForcePaneClose, PendingPaneClose};
 use focus::FocusPlugin;
-pub use focus::{PaneHoverIntent, PendingCursorWarp, pane_hover_cursor_position};
+pub use focus::{PaneHoverCooldown, PendingCursorWarp, pane_hover_cursor_position};
 use identity::IdentityPlugin;
 pub use identity::{PaneId, SpawnCounter, SpawnSeq};
 use open::OpenPlugin;
@@ -2147,8 +2147,6 @@ mod tests {
     fn zoom_command_inserts_zoomed_with_correct_hidden_set() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
@@ -2213,8 +2211,6 @@ mod tests {
     fn zoom_command_on_zoomed_tab_removes_zoomed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
@@ -2278,8 +2274,6 @@ mod tests {
     fn zoom_command_on_single_pane_tab_is_noop() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
@@ -2343,8 +2337,6 @@ mod tests {
     fn split_command_auto_unzooms_first() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
@@ -2417,8 +2409,6 @@ mod tests {
     fn select_command_auto_unzooms() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
             .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
@@ -2664,7 +2654,6 @@ mod tests {
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
-            .init_resource::<PendingCursorWarp>()
             .init_resource::<InPaneCollectedSpawns>()
             .insert_resource(test_settings())
             .add_plugins(DirectionalOpenPlugin)
@@ -2929,11 +2918,7 @@ mod tests {
             .filter(|e| app.world().get::<Pane>(*e).is_some())
             .collect();
 
-        assert_eq!(
-            app.world().resource::<PendingCursorWarp>().target,
-            Some(children[1]),
-            "split should warp cursor to the newly active pane"
-        );
+        assert!(app.world().get::<PendingCursorWarp>(children[1]).is_some());
     }
 
     #[test]

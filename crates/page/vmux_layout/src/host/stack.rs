@@ -595,7 +595,6 @@ fn handle_focus_requests(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     mut commands: Commands,
-    mut pending_cursor_warp: ResMut<PendingCursorWarp>,
 ) {
     for request in reader.read() {
         let (active_tab, active_pane, active_stack) = focused_stack(
@@ -639,8 +638,9 @@ fn handle_focus_requests(
         let (target_pane, target_stack) = stacks[index];
         commands.entity(target_stack).insert(LastActivatedAt::now());
         if active_pane != Some(target_pane) {
-            commands.entity(target_pane).insert(LastActivatedAt::now());
-            pending_cursor_warp.target = Some(target_pane);
+            commands
+                .entity(target_pane)
+                .insert((LastActivatedAt::now(), PendingCursorWarp));
         }
     }
 }
@@ -1049,7 +1049,6 @@ mod tests {
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
-            .init_resource::<PendingCursorWarp>()
             .init_resource::<FocusedStack>()
             .insert_resource(test_settings())
             .add_systems(
@@ -1193,7 +1192,6 @@ mod tests {
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
-            .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,
@@ -1256,7 +1254,6 @@ mod tests {
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
-            .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,
@@ -1312,7 +1309,6 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
-            .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,
@@ -1376,7 +1372,6 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
-            .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
             .insert_resource(vmux_core::EffectiveStartupUrl(
                 "vmux://sessions/vibe/".to_string(),
@@ -1599,7 +1594,6 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<PendingLaunch>()
-            .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
             .init_resource::<CollectedSpawns>()
             .add_systems(

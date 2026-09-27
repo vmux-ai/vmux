@@ -25,7 +25,7 @@ use vmux_layout::{
     event::{
         HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
     },
-    pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed},
+    pane::{Pane, PaneHoverCooldown, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{
         SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded,
         SideSheetWidth,
@@ -537,7 +537,6 @@ fn on_side_sheet_stack_activate(
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
     mut last_activated: Query<&mut LastActivatedAt>,
-    mut hover_intent: ResMut<PaneHoverIntent>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -565,8 +564,9 @@ fn on_side_sheet_stack_activate(
             commands.entity(entity).insert(activated_at);
         }
     }
-    hover_intent.target = None;
-    hover_intent.last_activation = Some(std::time::Instant::now());
+    commands
+        .entity(target_pane)
+        .insert(PaneHoverCooldown::start());
     if let Some(proxy) = proxy {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
@@ -577,8 +577,8 @@ fn on_side_sheet_stack_close(
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
-    mut hover_intent: ResMut<PaneHoverIntent>,
     mut requests: MessageWriter<CloseStackRequest>,
+    mut commands: Commands,
 ) {
     let request = &trigger.event().payload;
     let Some(target_pane) = leaf_panes
@@ -597,8 +597,9 @@ fn on_side_sheet_stack_close(
         return;
     };
     requests.write(CloseStackRequest::by_user(target_stack));
-    hover_intent.target = None;
-    hover_intent.last_activation = Some(std::time::Instant::now());
+    commands
+        .entity(target_pane)
+        .insert(PaneHoverCooldown::start());
 }
 
 fn on_side_sheet_stack_create(
@@ -873,7 +874,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PaneHoverIntent>()
             .add_observer(on_side_sheet_stack_close);
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -1000,7 +1000,6 @@ mod tests {
             app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
                 .add_message::<vmux_layout::stack::OpenRequest>()
                 .add_message::<PageOpenRequest>()
-                .init_resource::<PaneHoverIntent>()
                 .add_observer(on_side_sheet_section);
 
             let space = app

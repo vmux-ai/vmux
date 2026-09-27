@@ -18,8 +18,6 @@ pub(super) struct FocusPlugin;
 impl Plugin for FocusPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FocusRequest>()
-            .init_resource::<PaneHoverIntent>()
-            .init_resource::<PendingCursorWarp>()
             .add_systems(Update, on_pane_select.in_set(LayoutRequestSet::Handle))
             .add_systems(PostUpdate, warp_cursor_to_active_pane);
         #[cfg(target_os = "macos")]
@@ -35,16 +33,21 @@ impl Plugin for FocusPlugin {
     }
 }
 
-#[derive(Resource, Default)]
-pub struct PaneHoverIntent {
-    pub target: Option<Entity>,
-    pub last_activation: Option<Instant>,
+#[derive(Component)]
+pub struct PaneHoverCooldown(Instant);
+
+impl PaneHoverCooldown {
+    pub fn start() -> Self {
+        Self(Instant::now())
+    }
+
+    fn active(&self) -> bool {
+        self.0.elapsed().as_millis() < HOVER_COOLDOWN_MS as u128
+    }
 }
 
-#[derive(Resource, Default)]
-pub struct PendingCursorWarp {
-    pub target: Option<Entity>,
-}
+#[derive(Component)]
+pub struct PendingCursorWarp;
 
 fn on_pane_select(
     mut reader: MessageReader<FocusRequest>,
@@ -53,8 +56,6 @@ fn on_pane_select(
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_layout: Query<&ComputedNode, With<Pane>>,
-    mut hover_intent: ResMut<PaneHoverIntent>,
-    mut pending_warp: ResMut<PendingCursorWarp>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -118,10 +119,11 @@ fn on_pane_select(
                 target
             }
         };
-        hover_intent.target = None;
-        hover_intent.last_activation = Some(Instant::now());
-        commands.entity(target).insert(LastActivatedAt::now());
-        pending_warp.target = Some(target);
+        commands.entity(target).insert((
+            LastActivatedAt::now(),
+            PaneHoverCooldown::start(),
+            PendingCursorWarp,
+        ));
     }
 }
 
@@ -152,10 +154,10 @@ fn poll_cursor_pane_focus(
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
+    pane_cooldowns: Query<&PaneHoverCooldown>,
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_activity: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut intent: ResMut<PaneHoverIntent>,
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     active_drags: Query<(), With<PaneDrag>>,
@@ -164,11 +166,6 @@ fn poll_cursor_pane_focus(
         return;
     }
     if !active_drags.is_empty() {
-        return;
-    }
-    if let Some(last) = intent.last_activation
-        && last.elapsed().as_millis() < HOVER_COOLDOWN_MS as u128
-    {
         return;
     }
     let Some(window_entity) = focused_window.0 else {
@@ -181,27 +178,34 @@ fn poll_cursor_pane_focus(
         return;
     };
 
+    let mut window_panes = Vec::new();
     let mut hovered_pane = None;
     for (entity, layout) in &leaf_panes {
-        if crate::window::host_window_of(entity, &child_of, &host_windows) == Some(window_entity)
-            && layout.contains(cursor)
-        {
-            hovered_pane = Some(entity);
-            break;
+        if crate::window::host_window_of(entity, &child_of, &host_windows) == Some(window_entity) {
+            window_panes.push(entity);
+            if layout.contains(cursor) {
+                hovered_pane = Some(entity);
+            }
         }
     }
 
     let Some(target) = hovered_pane else {
-        intent.target = None;
         return;
     };
     let current = active_among(
-        leaf_panes
+        window_panes
             .iter()
-            .filter_map(|(entity, _)| pane_activity.get(entity).ok()),
+            .filter_map(|&entity| pane_activity.get(entity).ok()),
     );
+    if let Some(current) = current
+        && let Ok(cooldown) = pane_cooldowns.get(current)
+    {
+        if cooldown.active() {
+            return;
+        }
+        commands.entity(current).remove::<PaneHoverCooldown>();
+    }
     if current == Some(target) {
-        intent.target = None;
         return;
     }
 
@@ -209,7 +213,6 @@ fn poll_cursor_pane_focus(
     if let Some(stack) = active_stack_in_pane(target, &pane_children, &stack_activity) {
         commands.entity(stack).insert(LastActivatedAt::now());
     }
-    intent.target = None;
 }
 
 pub fn pane_hover_cursor_position(window_entity: Entity, window: &Window) -> Option<Vec2> {
@@ -274,6 +277,7 @@ fn apply_pending_hover(
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
+    pane_cooldowns: Query<&PaneHoverCooldown>,
     pane_activity: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_activity: Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -291,22 +295,31 @@ fn apply_pending_hover(
         return;
     };
     let mut target = None;
+    let mut window_panes = Vec::new();
     for (entity, layout) in leaf_panes.iter() {
-        if crate::window::host_window_of(entity, &child_of, &host_windows) == Some(window_entity)
-            && layout.contains(pointer.position_px)
-        {
-            target = Some(entity);
-            break;
+        if crate::window::host_window_of(entity, &child_of, &host_windows) == Some(window_entity) {
+            window_panes.push(entity);
+            if layout.contains(pointer.position_px) {
+                target = Some(entity);
+            }
         }
     }
     let Some(target) = target else {
         return;
     };
     let current = active_among(
-        leaf_panes
+        window_panes
             .iter()
-            .filter_map(|(entity, _)| pane_activity.get(entity).ok()),
+            .filter_map(|&entity| pane_activity.get(entity).ok()),
     );
+    if let Some(current) = current
+        && let Ok(cooldown) = pane_cooldowns.get(current)
+    {
+        if cooldown.active() {
+            return;
+        }
+        commands.entity(current).remove::<PaneHoverCooldown>();
+    }
     if current == Some(target) {
         return;
     }
@@ -317,28 +330,28 @@ fn apply_pending_hover(
 }
 
 fn warp_cursor_to_active_pane(
-    mut pending: ResMut<PendingCursorWarp>,
-    pane_layout: Query<&ComputedNode, (With<Pane>, Without<PaneSplit>)>,
+    pane_layout: Query<
+        (Entity, &ComputedNode),
+        (With<Pane>, Without<PaneSplit>, With<PendingCursorWarp>),
+    >,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     mut windows: Query<&mut Window>,
+    mut commands: Commands,
 ) {
-    let Some(target) = pending.target else {
-        return;
-    };
-    let Ok(&layout) = pane_layout.get(target) else {
-        return;
-    };
-    if layout.is_empty() {
-        return;
-    }
-    pending.target = None;
-    let Some(window_entity) = crate::window::host_window_of(target, &child_of, &host_windows)
-    else {
-        return;
-    };
-    if let Ok(mut window) = windows.get_mut(window_entity) {
-        window.set_physical_cursor_position(Some(layout.center.as_dvec2()));
+    for (target, layout) in &pane_layout {
+        if layout.is_empty() {
+            continue;
+        }
+        let Some(window_entity) = crate::window::host_window_of(target, &child_of, &host_windows)
+        else {
+            commands.entity(target).remove::<PendingCursorWarp>();
+            continue;
+        };
+        if let Ok(mut window) = windows.get_mut(window_entity) {
+            window.set_physical_cursor_position(Some(layout.center.as_dvec2()));
+        }
+        commands.entity(target).remove::<PendingCursorWarp>();
     }
 }
 
@@ -358,8 +371,6 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<FocusRequest>()
-                .init_resource::<PaneHoverIntent>()
-                .init_resource::<PendingCursorWarp>()
                 .add_systems(Update, on_pane_select);
             app.world_mut().spawn(PrimaryWindow);
             Self { app }
@@ -368,7 +379,6 @@ mod tests {
         fn hover() -> Self {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
-                .init_resource::<PaneHoverIntent>()
                 .insert_resource(ButtonInput::<KeyCode>::default())
                 .add_systems(Update, poll_cursor_pane_focus);
             Self { app }
