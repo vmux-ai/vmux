@@ -25,37 +25,33 @@ impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::ShortcutPage::plugin());
-        app.add_plugins((
-            HostedPagePlugin::<Shortcuts>::default(),
-            UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
-            vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
-        ))
-        .add_message::<NativeKeyInput>()
-        .add_observer(send_shortcuts)
-        .add_observer(on_shortcut_probe_press_request)
-        .add_observer(on_shortcut_probe_clear_request)
-        .add_observer(on_shortcut_probe_press)
-        .add_systems(Startup, register_shortcut_page)
-        .add_systems(
-            Update,
-            normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
-        )
-        .add_systems(
-            Update,
-            sync_shortcut_capture
-                .in_set(ShortcutCaptureSet)
-                .after(ComputeFocusSet),
-        )
-        .add_systems(Update, capture_native_keys.after(NativeKeyInputSet))
-        .add_systems(
-            Update,
-            (expire_shortcut_probe, publish_shortcut_state).chain(),
-        );
+        app.add_plugins(PAGE_MANIFEST.plugin())
+            .add_plugins((
+                HostedPagePlugin::<Shortcuts>::default(),
+                UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
+                vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
+            ))
+            .add_message::<NativeKeyInput>()
+            .add_observer(send_shortcuts)
+            .add_observer(on_shortcut_probe_press_request)
+            .add_observer(on_shortcut_probe_clear_request)
+            .add_observer(on_shortcut_probe_press)
+            .add_systems(
+                Update,
+                normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
+            )
+            .add_systems(
+                Update,
+                sync_shortcut_capture
+                    .in_set(ShortcutCaptureSet)
+                    .after(ComputeFocusSet),
+            )
+            .add_systems(Update, capture_native_keys.after(NativeKeyInputSet))
+            .add_systems(
+                Update,
+                (expire_shortcut_probe, publish_shortcut_state).chain(),
+            );
     }
-}
-
-fn register_shortcut_page(mut commands: Commands) {
-    commands.spawn(PAGE_MANIFEST);
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {

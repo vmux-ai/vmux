@@ -55,40 +55,39 @@ impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::TerminalPage::plugin());
-        app.add_message::<ServiceRequest>()
-            .add_systems(Startup, register_terminal_page)
-            .add_plugins((
-                vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
-                super::agent::AgentTerminalPlugin,
-                crate::TerminalToolPlugin,
-                vmux_command::CommandTypePlugin::<super::command::TerminalCloseRequest>::default(),
-                vmux_command::CommandTypePlugin::<super::command::TerminalNextRequest>::default(),
-                vmux_command::CommandTypePlugin::<super::command::TerminalPrevRequest>::default(),
-                vmux_command::CommandTypePlugin::<super::command::TerminalClearRequest>::default(),
-                vmux_command::CommandTypePlugin::<super::command::CopyModeRequest>::default(),
-            ))
-            .add_plugins(crate::contract::TerminalContractPlugin)
-            .register_type::<crate::launch::TerminalLaunch>()
-            .register_type::<crate::launch::TerminalKind>()
-            .add_message::<TerminalStackSpawnRequest>()
-            .add_message::<TerminalSpawnRequest>()
-            .add_plugins((
-                crate::pid::PidPlugin,
-                crate::host::request::TerminalRequestPlugin,
-                TerminalServicePlugin,
-                TerminalInputPlugin,
-                crate::process_monitor::ProcessMonitorPlugin,
-                super::loading::LoadingPlugin,
-                super::prompt::PromptPlugin,
-                crate::snapshot_updater::SnapshotPlugin,
-                crate::theme::TerminalThemePlugin,
-            ));
+        app.add_plugins(
+            crate::PAGE_MANIFEST
+                .plugin()
+                .route(vmux_core::HostSpawnRoute::page("vmux://terminal/")),
+        )
+        .add_message::<ServiceRequest>()
+        .add_plugins((
+            vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
+            super::agent::AgentTerminalPlugin,
+            crate::TerminalToolPlugin,
+            vmux_command::CommandTypePlugin::<super::command::TerminalCloseRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::TerminalNextRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::TerminalPrevRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::TerminalClearRequest>::default(),
+            vmux_command::CommandTypePlugin::<super::command::CopyModeRequest>::default(),
+        ))
+        .add_plugins(crate::contract::TerminalContractPlugin)
+        .register_type::<crate::launch::TerminalLaunch>()
+        .register_type::<crate::launch::TerminalKind>()
+        .add_message::<TerminalStackSpawnRequest>()
+        .add_message::<TerminalSpawnRequest>()
+        .add_plugins((
+            crate::pid::PidPlugin,
+            crate::host::request::TerminalRequestPlugin,
+            TerminalServicePlugin,
+            TerminalInputPlugin,
+            crate::process_monitor::ProcessMonitorPlugin,
+            super::loading::LoadingPlugin,
+            super::prompt::PromptPlugin,
+            crate::snapshot_updater::SnapshotPlugin,
+            crate::theme::TerminalThemePlugin,
+        ));
     }
-}
-
-fn register_terminal_page(mut commands: Commands) {
-    commands.spawn(crate::PAGE_MANIFEST);
-    commands.spawn(vmux_core::HostSpawnRoute::page("vmux://terminal/"));
 }
 
 struct TerminalServicePlugin;

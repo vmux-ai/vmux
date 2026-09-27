@@ -28,65 +28,62 @@ impl Plugin for SimulatorPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::SimulatorPage::plugin());
-        app.add_plugins(UiStatePlugin::<SimulatorReady>::default())
-            .add_plugins(SimulatorToolPlugin)
-            .add_systems(Startup, register_simulator_page)
-            .configure_sets(
-                Update,
-                (
-                    SimulatorFocusSet,
-                    NativeKeyClaimSet,
-                    NativeKeyInputSet,
-                    SimulatorInputSet,
-                )
-                    .chain(),
+        app.add_plugins(
+            PAGE_MANIFEST
+                .plugin()
+                .hosted(NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title)),
+        )
+        .add_plugins(UiStatePlugin::<SimulatorReady>::default())
+        .add_plugins(SimulatorToolPlugin)
+        .configure_sets(
+            Update,
+            (
+                SimulatorFocusSet,
+                NativeKeyClaimSet,
+                NativeKeyInputSet,
+                SimulatorInputSet,
             )
-            .add_message::<HardwareButtonRequest>()
-            .add_message::<SimulatorClipboardRequest>()
-            .add_message::<SimulatorSoftwareKeyboardRequest>()
-            .add_message::<SimulatorTapRequest>()
-            .add_message::<SimulatorSwipeRequest>()
-            .add_message::<SimulatorTypeTextRequest>()
-            .add_message::<SimulatorKeyPressRequest>()
-            .add_message::<SimulatorButtonPressRequest>()
-            .add_message::<SimulatorControlResponse>()
-            .add_message::<SimulatorScreenshotRequest>()
-            .add_message::<SimulatorScreenshotResponse>()
-            .add_systems(
-                Update,
-                (
-                    start_device_attachments,
-                    finish_device_attachments,
-                    announce_simulator,
-                )
-                    .chain(),
+                .chain(),
+        )
+        .add_message::<HardwareButtonRequest>()
+        .add_message::<SimulatorClipboardRequest>()
+        .add_message::<SimulatorSoftwareKeyboardRequest>()
+        .add_message::<SimulatorTapRequest>()
+        .add_message::<SimulatorSwipeRequest>()
+        .add_message::<SimulatorTypeTextRequest>()
+        .add_message::<SimulatorKeyPressRequest>()
+        .add_message::<SimulatorButtonPressRequest>()
+        .add_message::<SimulatorControlResponse>()
+        .add_message::<SimulatorScreenshotRequest>()
+        .add_message::<SimulatorScreenshotResponse>()
+        .add_systems(
+            Update,
+            (
+                start_device_attachments,
+                finish_device_attachments,
+                announce_simulator,
             )
-            .add_systems(
-                Update,
-                (sync_active_simulator_view, ApplyDeferred)
-                    .chain()
-                    .in_set(SimulatorFocusSet)
-                    .after(ComputeFocusSet),
-            )
-            .add_systems(
-                Update,
-                sync_stream_activity
-                    .after(finish_device_attachments)
-                    .after(SimulatorFocusSet),
-            )
-            .add_systems(Update, handle_screenshot_requests.in_set(SimulatorInputSet))
-            .add_plugins(input::SimulatorInputPlugin);
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (sync_active_simulator_view, ApplyDeferred)
+                .chain()
+                .in_set(SimulatorFocusSet)
+                .after(ComputeFocusSet),
+        )
+        .add_systems(
+            Update,
+            sync_stream_activity
+                .after(finish_device_attachments)
+                .after(SimulatorFocusSet),
+        )
+        .add_systems(Update, handle_screenshot_requests.in_set(SimulatorInputSet))
+        .add_plugins(input::SimulatorInputPlugin);
 
         #[cfg(target_os = "macos")]
         app.add_plugins(core_simulator::CoreSimulatorPlugin);
     }
-}
-
-fn register_simulator_page(mut commands: Commands) {
-    commands.spawn((
-        PAGE_MANIFEST,
-        NativelyHosted::subtree(PAGE_URL, PAGE_MANIFEST.title),
-    ));
 }
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]

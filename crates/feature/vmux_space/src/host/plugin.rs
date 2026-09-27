@@ -23,100 +23,94 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::SpacesPage::plugin());
-        app.add_plugins((
-            vmux_command::CommandTypePlugin::<OpenRequest>::default(),
-            SpaceAgentPlugin,
-            super::composer::SpaceComposerPlugin,
-        ))
-        .add_plugins(super::SpaceToolPlugin)
-        .add_plugins(vmux_layout::LayoutContractPlugin)
-        .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
-        .init_resource::<ActiveSpace>()
-        .init_resource::<vmux_layout::window::FocusedWindow>()
-        .add_message::<SaveSpaceRequest>()
-        .add_message::<SpaceAttachRequest>()
-        .add_message::<SpaceCreateRequest>()
-        .add_message::<SpaceDeleteRequest>()
-        .add_message::<SpaceOpenPageRequest>()
-        .add_message::<SpaceRenameRequest>()
-        .add_systems(
-            Update,
-            (
-                relay_space_requests::<SpaceAttachRequest>,
-                relay_space_requests::<SpaceCreateRequest>,
-                relay_space_requests::<SpaceDeleteRequest>,
-                relay_space_requests::<SpaceOpenPageRequest>,
-                relay_space_requests::<SpaceRenameRequest>,
-            ),
-        )
-        .add_systems(
-            Update,
-            (sync_active_space_record, update_effective_startup_url)
-                .chain()
-                .after(vmux_layout::space::CurrentSpaceSet),
-        )
-        .add_systems(
-            Update,
-            update_effective_startup_dir
-                .in_set(vmux_layout::settings::EffectiveStartupDirSet)
-                .before(vmux_command::ReadCommandRequests),
-        )
-        .add_systems(Update, sync_space_name_to_id)
-        .add_systems(
-            Startup,
-            (
-                register_space_page,
+        app.add_plugins(crate::PAGE_MANIFEST.plugin())
+            .add_plugins((
+                vmux_command::CommandTypePlugin::<OpenRequest>::default(),
+                SpaceAgentPlugin,
+                super::composer::SpaceComposerPlugin,
+            ))
+            .add_plugins(super::SpaceToolPlugin)
+            .add_plugins(vmux_layout::LayoutContractPlugin)
+            .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
+            .init_resource::<ActiveSpace>()
+            .init_resource::<vmux_layout::window::FocusedWindow>()
+            .add_message::<SaveSpaceRequest>()
+            .add_message::<SpaceAttachRequest>()
+            .add_message::<SpaceCreateRequest>()
+            .add_message::<SpaceDeleteRequest>()
+            .add_message::<SpaceOpenPageRequest>()
+            .add_message::<SpaceRenameRequest>()
+            .add_systems(
+                Update,
+                (
+                    relay_space_requests::<SpaceAttachRequest>,
+                    relay_space_requests::<SpaceCreateRequest>,
+                    relay_space_requests::<SpaceDeleteRequest>,
+                    relay_space_requests::<SpaceOpenPageRequest>,
+                    relay_space_requests::<SpaceRenameRequest>,
+                ),
+            )
+            .add_systems(
+                Update,
+                (sync_active_space_record, update_effective_startup_url)
+                    .chain()
+                    .after(vmux_layout::space::CurrentSpaceSet),
+            )
+            .add_systems(
+                Update,
+                update_effective_startup_dir
+                    .in_set(vmux_layout::settings::EffectiveStartupDirSet)
+                    .before(vmux_command::ReadCommandRequests),
+            )
+            .add_systems(Update, sync_space_name_to_id)
+            .add_systems(
+                Startup,
                 update_effective_startup_url
                     .after(vmux_setting::SettingsLoadSet)
                     .before(vmux_layout::LayoutStartupSet::Post),
-            ),
-        )
-        .add_systems(
-            Startup,
-            update_effective_startup_dir
-                .after(vmux_setting::SettingsLoadSet)
-                .after(vmux_layout::LayoutStartupSet::Persistence)
-                .before(vmux_layout::LayoutStartupSet::DefaultTab),
-        )
-        .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
-        .add_systems(
-            Update,
-            respond_spaces_spawn.in_set(vmux_command::ReadCommandRequests),
-        )
-        .add_plugins((
-            HostedPagePlugin::<Spaces>::default(),
-            super::key::SpaceKeyPlugin,
-            super::project::SpaceProjectPlugin,
-            crate::snapshot_updater::SnapshotPlugin,
-            UiEventPlugin::<(
-                SpaceAttachRequest,
-                SpaceCreateRequest,
-                SpaceDeleteRequest,
-                SpaceOpenPageRequest,
-                SpaceRenameRequest,
-                ProjectActivateRequest,
-                ProjectForgetRequest,
-                vmux_core::event::ProjectTreeToggle,
-            )>::default(),
-        ))
-        .add_observer(on_space_attach)
-        .add_observer(on_space_create)
-        .add_observer(on_space_delete)
-        .add_observer(on_space_open_page)
-        .add_observer(on_space_rename)
-        .add_observer(on_project_activate)
-        .add_observer(on_project_forget)
-        .add_observer(reset_spaces_sent_marker_on_page_ready)
-        .add_systems(
-            Update,
-            handle_open_in_new_space.in_set(vmux_command::ReadCommandRequests),
-        )
-        .add_systems(Update, broadcast_spaces_to_views);
+            )
+            .add_systems(
+                Startup,
+                update_effective_startup_dir
+                    .after(vmux_setting::SettingsLoadSet)
+                    .after(vmux_layout::LayoutStartupSet::Persistence)
+                    .before(vmux_layout::LayoutStartupSet::DefaultTab),
+            )
+            .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
+            .add_systems(
+                Update,
+                respond_spaces_spawn.in_set(vmux_command::ReadCommandRequests),
+            )
+            .add_plugins((
+                HostedPagePlugin::<Spaces>::default(),
+                super::key::SpaceKeyPlugin,
+                super::project::SpaceProjectPlugin,
+                crate::snapshot_updater::SnapshotPlugin,
+                UiEventPlugin::<(
+                    SpaceAttachRequest,
+                    SpaceCreateRequest,
+                    SpaceDeleteRequest,
+                    SpaceOpenPageRequest,
+                    SpaceRenameRequest,
+                    ProjectActivateRequest,
+                    ProjectForgetRequest,
+                    vmux_core::event::ProjectTreeToggle,
+                )>::default(),
+            ))
+            .add_observer(on_space_attach)
+            .add_observer(on_space_create)
+            .add_observer(on_space_delete)
+            .add_observer(on_space_open_page)
+            .add_observer(on_space_rename)
+            .add_observer(on_project_activate)
+            .add_observer(on_project_forget)
+            .add_observer(reset_spaces_sent_marker_on_page_ready)
+            .add_systems(
+                Update,
+                handle_open_in_new_space.in_set(vmux_command::ReadCommandRequests),
+            )
+            .add_systems(Update, broadcast_spaces_to_views);
     }
-}
-
-fn register_space_page(mut commands: Commands) {
-    commands.spawn(crate::PAGE_MANIFEST);
 }
 
 #[derive(Message, Clone)]

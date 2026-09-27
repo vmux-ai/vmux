@@ -37,14 +37,10 @@ impl Plugin for SettingsPlugin {
             appearance::AppearancePlugin,
             vmux_layout::LayoutContractPlugin,
         ))
-        .add_systems(Startup, register_settings_page)
+        .add_plugins(crate::PAGE_MANIFEST.plugin())
         .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
         .add_systems(Update, respond_settings_spawn.in_set(ReadCommandRequests));
     }
-}
-
-fn register_settings_page(mut commands: Commands) {
-    commands.spawn(crate::PAGE_MANIFEST);
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {

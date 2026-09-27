@@ -27,7 +27,8 @@ impl Plugin for ProcessMonitorPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::monitor::ProcessMonitorPage::plugin());
-        app.add_message::<ServiceProcessSnapshot>()
+        app.add_plugins(crate::monitor::ProcessMonitorPage::MANIFEST.plugin())
+            .add_message::<ServiceProcessSnapshot>()
             .add_systems(Startup, spawn_process_monitor)
             .add_plugins(UiEventPlugin::<(
                 ProcessNavigateEvent,
@@ -251,7 +252,6 @@ struct ProcSample {
 
 fn spawn_process_monitor(mut commands: Commands) {
     commands.spawn((Name::new("Process monitor"), ProcessMonitor::default()));
-    commands.spawn(crate::monitor::ProcessMonitorPage::MANIFEST);
 }
 
 fn reconcile_service_processes(

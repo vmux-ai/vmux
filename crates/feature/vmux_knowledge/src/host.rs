@@ -7,18 +7,14 @@ pub struct KnowledgePlugin;
 
 impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            crate::KnowledgeToolPlugin,
-            agent::KnowledgeAgentPlugin,
-            index::KnowledgeIndexPlugin,
-        ))
-        .add_systems(Startup, register_knowledge_page)
-        .register_type::<ExpandedKnowledgeDirs>();
+        app.add_plugins(PAGE_MANIFEST.plugin())
+            .add_plugins((
+                crate::KnowledgeToolPlugin,
+                agent::KnowledgeAgentPlugin,
+                index::KnowledgeIndexPlugin,
+            ))
+            .register_type::<ExpandedKnowledgeDirs>();
     }
-}
-
-fn register_knowledge_page(mut commands: Commands) {
-    commands.spawn(PAGE_MANIFEST);
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {

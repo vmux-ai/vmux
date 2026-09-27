@@ -34,7 +34,14 @@ pub struct VaultPlugin;
 impl Plugin for VaultPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
-        app.add_plugins(crate::ui::VaultPage::plugin());
+        app.add_plugins(crate::ui::VaultPage::plugin()).add_plugins(
+            crate::ui::VaultPage::MANIFEST.plugin().hosted(
+                vmux_core::host::page::NativelyHosted::page(
+                    crate::ui::VaultPage::URL,
+                    crate::ui::VaultPage::NATIVE.title,
+                ),
+            ),
+        );
 
         app.add_plugins((
             UiStatePlugin::<VaultUiState>::default(),
@@ -1322,15 +1329,6 @@ fn spawn_vault_runtime(mut commands: Commands) {
         VaultOperationSequence::default(),
         VaultAutoSync::default(),
         VaultRecoveryState::default(),
-    ));
-
-    #[cfg(ui)]
-    commands.spawn((
-        crate::ui::VaultPage::MANIFEST,
-        vmux_core::host::page::NativelyHosted::page(
-            crate::ui::VaultPage::URL,
-            crate::ui::VaultPage::NATIVE.title,
-        ),
     ));
 }
 

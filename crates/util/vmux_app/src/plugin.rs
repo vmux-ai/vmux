@@ -42,10 +42,10 @@ pub enum VmuxPlugin {
     Service(vmux_service::plugin::ServicePlugin),
     #[plugin(feature = "start", desktop, requires(core))]
     Start(vmux_start::StartPlugin),
-    #[plugin(feature = "browser", desktop, requires(layout, extension))]
-    Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "tool", desktop, requires(layout))]
     Tool(vmux_tool::ToolPlugin),
+    #[plugin(feature = "browser", desktop, requires(layout, extension))]
+    Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "mobile", mobile)]
     MobilePages(crate::VmuxMobilePlugin),
 }

@@ -20,7 +20,8 @@ pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_layout::native_open::HostedPagePlugin::<LspManagerPage>::default())
+        app.add_plugins(PAGE_MANIFEST.plugin())
+            .add_plugins(vmux_layout::native_open::HostedPagePlugin::<LspManagerPage>::default())
             .add_plugins(UiStatePlugin::<LspManagerUiState>::default())
             .add_plugins(UiEventPlugin::<(
                 LspCatalogRequest,
@@ -32,7 +33,6 @@ impl Plugin for ManagerPlugin {
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_update_request)
-            .add_systems(Startup, register_lsp_manager_page)
             .add_systems(
                 Update,
                 (start_catalog_jobs, start_install_jobs, start_uninstall_jobs).chain(),
@@ -52,10 +52,6 @@ impl Plugin for ManagerPlugin {
                     .chain(),
             );
     }
-}
-
-fn register_lsp_manager_page(mut commands: Commands) {
-    commands.spawn(PAGE_MANIFEST);
 }
 
 const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {

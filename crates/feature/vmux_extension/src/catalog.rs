@@ -38,8 +38,15 @@ impl Plugin for ExtensionCatalogPlugin {
             );
 
         #[cfg(ui)]
-        app.add_systems(Startup, spawn_extension_page)
-            .add_systems(Update, open_manager);
+        app.add_plugins(
+            crate::ui::ExtensionPage::MANIFEST
+                .plugin()
+                .hosted(NativelyHosted::page(
+                    crate::ui::ExtensionPage::URL,
+                    crate::ui::ExtensionPage::NATIVE.title,
+                )),
+        )
+        .add_systems(Update, open_manager);
     }
 }
 
@@ -113,26 +120,11 @@ struct ExtensionSubscriber {
     revision: u64,
 }
 
-#[derive(Component)]
-struct ExtensionManagerPage;
-
 fn spawn_extension_catalog(mut commands: Commands) {
     let outbox = ExtensionOutbox::default();
     let loader = outbox.clone();
     std::thread::spawn(move || queue_snapshot(&loader));
     commands.spawn((ExtensionCatalog::default(), outbox));
-}
-
-#[cfg(ui)]
-fn spawn_extension_page(mut commands: Commands) {
-    commands.spawn((
-        ExtensionManagerPage,
-        crate::ui::ExtensionPage::MANIFEST,
-        NativelyHosted::page(
-            crate::ui::ExtensionPage::URL,
-            crate::ui::ExtensionPage::NATIVE.title,
-        ),
-    ));
 }
 
 fn push(outbox: &ExtensionOutbox, msg: OutMsg) {
@@ -213,7 +205,7 @@ fn spawn_install(outbox: &ExtensionOutbox, request: ExtensionInstallRequest) {
 fn on_page_ready(
     trigger: On<UiInput<vmux_api::PageReady>>,
     pages: Query<(Has<vmux_layout::LayoutCef>, Option<&PageMetadata>)>,
-    extension_pages: Query<&NativelyHosted, With<ExtensionManagerPage>>,
+    extension_pages: Query<(&NativelyHosted, &vmux_core::page::PageManifest)>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -221,9 +213,9 @@ fn on_page_ready(
         return;
     };
     let extension = metadata.is_some_and(|metadata| {
-        extension_pages
-            .iter()
-            .any(|page| page.answers_for(&metadata.url))
+        extension_pages.iter().any(|(page, manifest)| {
+            manifest.url == crate::ui::ExtensionPage::URL && page.answers_for(&metadata.url)
+        })
     });
     if layout || extension {
         commands
@@ -391,7 +383,7 @@ mod tests {
         let mut app = App::new();
         app.add_observer(on_page_ready);
         app.world_mut().spawn((
-            ExtensionManagerPage,
+            crate::ui::ExtensionPage::MANIFEST,
             NativelyHosted::page("vmux://extensions/", "Extensions"),
         ));
         let extension = app

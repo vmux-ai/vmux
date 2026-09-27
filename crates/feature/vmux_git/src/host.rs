@@ -67,16 +67,13 @@ impl Plugin for GitPlugin {
             RepositoryPlugin,
             RepositoryPickerPlugin,
         ))
-        .add_systems(Startup, register_git_pages);
+        .add_plugins(
+            PAGE_MANIFEST
+                .plugin()
+                .hosted(NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"))
+                .additional_hosted(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git")),
+        );
     }
-}
-
-fn register_git_pages(mut commands: Commands) {
-    commands.spawn((
-        PAGE_MANIFEST,
-        NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"),
-    ));
-    commands.spawn(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git"));
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

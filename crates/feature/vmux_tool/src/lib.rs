@@ -44,6 +44,14 @@ impl Plugin for ToolPlugin {
         #[cfg(ui)]
         app.add_plugins(ui::ToolsPage::plugin());
 
+        #[cfg(all(host, ui))]
+        app.add_plugins(ui::ToolsPage::MANIFEST.plugin().hosted(
+            vmux_core::host::page::NativelyHosted::subtree(
+                ui::ToolsPage::URL,
+                ui::ToolsPage::NATIVE.title,
+            ),
+        ));
+
         app.add_plugins((
             ToolRuntimePlugin,
             npm::NpmToolPlugin,
@@ -53,20 +61,8 @@ impl Plugin for ToolPlugin {
         ));
 
         #[cfg(all(host, ui))]
-        app.add_plugins(host::ToolHostPlugin)
-            .add_systems(bevy_app::Startup, spawn_tool_page);
+        app.add_plugins(host::ToolHostPlugin);
     }
-}
-
-#[cfg(all(host, ui))]
-fn spawn_tool_page(mut commands: Commands) {
-    commands.spawn((
-        ui::ToolsPage::MANIFEST,
-        vmux_core::host::page::NativelyHosted::subtree(
-            ui::ToolsPage::URL,
-            ui::ToolsPage::NATIVE.title,
-        ),
-    ));
 }
 
 pub struct ToolRuntimePlugin;

@@ -7,26 +7,22 @@ pub struct AgentChatPagePlugin;
 
 impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            vmux_chat::ChatKeyPlugin,
-            vmux_chat::ChatMediaPlugin,
-            vmux_chat::composer::ChatComposerPlugin,
-            super::model::ChatModelPlugin,
-            super::composer::AgentChatComposerPlugin,
-            super::prompt::ChatPromptPlugin,
-            super::resume::ChatResumePlugin,
-            super::tab::ChatTabPlugin,
-            super::transcript::ChatTranscriptPlugin,
-            vmux_core::host::UiStatePlugin::<vmux_chat::state::ChatUiState>::default(),
-        ))
-        .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
-        .add_observer(on_chat_open_page)
-        .add_systems(Startup, register_chat_page);
+        app.add_plugins(PAGE_MANIFEST.plugin())
+            .add_plugins((
+                vmux_chat::ChatKeyPlugin,
+                vmux_chat::ChatMediaPlugin,
+                vmux_chat::composer::ChatComposerPlugin,
+                super::model::ChatModelPlugin,
+                super::composer::AgentChatComposerPlugin,
+                super::prompt::ChatPromptPlugin,
+                super::resume::ChatResumePlugin,
+                super::tab::ChatTabPlugin,
+                super::transcript::ChatTranscriptPlugin,
+                vmux_core::host::UiStatePlugin::<vmux_chat::state::ChatUiState>::default(),
+            ))
+            .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
+            .add_observer(on_chat_open_page);
     }
-}
-
-fn register_chat_page(mut commands: Commands) {
-    commands.spawn(PAGE_MANIFEST);
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {

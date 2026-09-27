@@ -200,6 +200,10 @@ subtrees. `state.rs` owns shared UI snapshots and patches; `event.rs` owns trans
 and host-to-UI operations. Generic `page.rs`, `page_state.rs`, `ui_state.rs`, and `view.rs` modules
 are not used because their ownership is ambiguous.
 
+Page manifests are static plugin registration data. Their registration entities exist during
+plugin construction so the browser can build the complete embedded-host allowlist before CEF
+initializes. Runtime page state and behavior still initialize through ECS schedules.
+
 `vmux_app::extension` exposes the stable integration pieces: page manifests and hosted-page
 plugins, command-bar contributions and their chosen message, and typed MCP tool plugins. A custom
 MCP binary builds a Bevy `App` with `McpPlugin` and its tool plugins, then gives that app to the

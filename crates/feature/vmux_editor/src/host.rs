@@ -36,14 +36,13 @@ impl Plugin for EditorPlugin {
             explorer::ExplorerPlugin,
             vmux_core::host::UiStatePlugin::<vmux_core::event::FileUiState>::default(),
         ))
-        .add_systems(Startup, register_editor_pages);
+        .add_plugins((
+            FILES_PAGE_MANIFEST
+                .plugin()
+                .route(vmux_core::HostSpawnRoute::scheme("file")),
+            PROJECTS_PAGE_MANIFEST.plugin(),
+        ));
     }
-}
-
-fn register_editor_pages(mut commands: Commands) {
-    commands.spawn(FILES_PAGE_MANIFEST);
-    commands.spawn(PROJECTS_PAGE_MANIFEST);
-    commands.spawn(vmux_core::HostSpawnRoute::scheme("file"));
 }
 
 const FILES_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {

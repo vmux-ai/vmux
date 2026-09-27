@@ -103,6 +103,49 @@ impl NativelyHosted {
     }
 }
 
+pub struct PageManifestPlugin {
+    manifest: PageManifest,
+    hosted: Option<NativelyHosted>,
+    route: Option<super::host_spawn::HostSpawnRoute>,
+    additional_hosted: Option<NativelyHosted>,
+}
+
+impl PageManifestPlugin {
+    pub const fn hosted(mut self, hosted: NativelyHosted) -> Self {
+        self.hosted = Some(hosted);
+        self
+    }
+
+    pub const fn route(mut self, route: super::host_spawn::HostSpawnRoute) -> Self {
+        self.route = Some(route);
+        self
+    }
+
+    pub const fn additional_hosted(mut self, hosted: NativelyHosted) -> Self {
+        self.additional_hosted = Some(hosted);
+        self
+    }
+}
+
+impl Plugin for PageManifestPlugin {
+    fn build(&self, app: &mut App) {
+        if let Some(hosted) = self.additional_hosted {
+            app.world_mut().spawn(hosted);
+        }
+        let mut registration = app.world_mut().spawn(self.manifest);
+        if let Some(hosted) = self.hosted {
+            registration.insert(hosted);
+        }
+        if let Some(route) = self.route {
+            registration.insert(route);
+        }
+    }
+
+    fn is_unique(&self) -> bool {
+        false
+    }
+}
+
 pub(crate) struct HostHistoryPlugin;
 
 impl Plugin for HostHistoryPlugin {
@@ -237,6 +280,15 @@ fn step_host_history(
 }
 
 impl PageManifest {
+    pub const fn plugin(self) -> PageManifestPlugin {
+        PageManifestPlugin {
+            manifest: self,
+            hosted: None,
+            route: None,
+            additional_hosted: None,
+        }
+    }
+
     pub fn answers_for(&self, url: &str) -> bool {
         vmux_api::PageEventPermissions {
             url: self.url,
@@ -608,7 +660,7 @@ mod tests {
     #[test]
     fn page_manifest_registers_host() {
         let mut app = App::new();
-        app.world_mut().spawn(PageManifest {
+        let manifest = PageManifest {
             url: "vmux://history/",
             asset_host: "history",
             owns_subtree: false,
@@ -618,7 +670,12 @@ mod tests {
             keywords: &["recent", "visited"],
             icon: Some(crate::icon::BuiltinIcon::Clock),
             command_bar: true,
-        });
+        };
+        app.add_plugins(
+            manifest
+                .plugin()
+                .hosted(NativelyHosted::page(manifest.url, manifest.title)),
+        );
         let mut query = app.world_mut().query::<&PageManifest>();
 
         let hosts = bevy_cef_core::prelude::CefEmbeddedHosts(
@@ -629,6 +686,10 @@ mod tests {
         );
 
         assert!(hosts.entry_for_host("history").is_some());
+        let mut registration = app.world_mut().query::<(&PageManifest, &NativelyHosted)>();
+        let (registered, hosted) = registration.single(app.world()).unwrap();
+        assert_eq!(*registered, manifest);
+        assert_eq!(*hosted, NativelyHosted::page(manifest.url, manifest.title));
     }
 
     #[test]
