@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_api::bookmark::{BookmarkAddRequest, BookmarkFolderChoice, BookmarkPinUrlRequest};
+use vmux_api::bookmark::{BookmarkAddRequest, BookmarkPinUrlRequest};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
@@ -10,13 +10,13 @@ use vmux_ui::icon::PageIconView;
 use super::bookmark::{
     BookmarkDragItem, BookmarkDragState, LayoutContextMenu, SideSheetContextMenuContent,
 };
+use super::state::LayoutUi;
 use crate::event::StackNode;
 
 #[component]
 pub(super) fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
-    let folder_context: Signal<Vec<BookmarkFolderChoice>> = use_context();
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
-    let folders = folder_context();
+    let folders = LayoutUi::current().value().bookmarks.folders;
     let is_active = stack.is_active;
     let stack_id = stack.id;
     let mut hovered = use_signal(|| false);

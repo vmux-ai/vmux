@@ -1,12 +1,17 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
-use vmux_api::bookmark::{BookmarkNode, BookmarkStateEvent};
+use vmux_api::bookmark::{
+    BookmarkFolderChoice, BookmarkFolderRow, BookmarkNode, BookmarkRow, BookmarkStateEvent,
+};
 use vmux_core::event::team::{TeamEvent, TeamMemberRow};
 
 use crate::cef::LayoutCef;
 use crate::event::{
-    ActiveSession, ActiveSessionState, ActiveWorkspaceProject, HeaderState, PaneTreeState,
-    SideSheetPane, SideSheetState, StackNavigationState, StackNode, StackRevealTarget,
-    TabBoundaryState,
+    ActiveSession, ActiveSessionState, ActiveWorkspaceProject, BookmarkEntryState,
+    BookmarkFolderState, BookmarkPinState, BookmarkTreeState, BookmarkUiState, HeaderState,
+    PaneTreeState, SideSheetPane, SideSheetState, StackNavigationState, StackNode,
+    StackRevealTarget, TabBoundaryState,
 };
 
 pub struct LayoutUiProjectionPlugin;
@@ -18,7 +23,13 @@ impl Plugin for LayoutUiProjectionPlugin {
             (
                 publish_active_session,
                 publish_header,
-                (project_side_sheet, publish_side_sheet).chain(),
+                (
+                    project_side_sheet,
+                    project_bookmark_ui,
+                    publish_side_sheet,
+                    publish_bookmark_ui,
+                )
+                    .chain(),
             ),
         );
     }
@@ -44,6 +55,135 @@ pub struct SpacesProjection(pub vmux_core::event::space::SpacesListEvent);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct SideSheetProjection(SideSheetState);
+
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+struct BookmarkUiProjection(BookmarkUiState);
+
+struct BookmarkUiBuilder {
+    folders: Vec<BookmarkFolderRow>,
+    choices: Vec<BookmarkFolderChoice>,
+    rows: Vec<BookmarkTreeState>,
+    visited: HashSet<String>,
+}
+
+impl BookmarkUiBuilder {
+    fn build(bookmarks: &BookmarkStateEvent, active_page: Option<&StackNode>) -> BookmarkUiState {
+        let active_route = active_page
+            .and_then(|page| vmux_api::VmuxRoute::parse(&page.url));
+        let mut pins = Vec::with_capacity(bookmarks.pins.len());
+        for row in &bookmarks.pins {
+            let active = active_route.as_ref().is_some_and(|active| {
+                vmux_api::VmuxRoute::parse(&row.metadata.url)
+                    .is_some_and(|pin| active.same_page(&pin))
+            });
+            pins.push(BookmarkPinState {
+                row: row.clone(),
+                active,
+            });
+        }
+
+        let mut folders = Vec::new();
+        for node in &bookmarks.roots {
+            if let BookmarkNode::Folder(folder) = node {
+                folders.push(folder.clone());
+            }
+        }
+        let mut builder = Self {
+            folders,
+            choices: bookmarks.folders.clone(),
+            rows: Vec::new(),
+            visited: HashSet::new(),
+        };
+        for node in bookmarks.roots.clone() {
+            match node {
+                BookmarkNode::Folder(folder) if folder.parent.is_none() => {
+                    builder.append_folder(folder, 0);
+                }
+                BookmarkNode::Entry(row) => builder.append_entry(row, None, 0),
+                BookmarkNode::Folder(_) => {}
+            }
+        }
+
+        BookmarkUiState {
+            pins,
+            rows: builder.rows,
+            folders: bookmarks.folders.clone(),
+            active_page: active_page.map(|page| vmux_core::PageMetadata {
+                title: page.title.clone(),
+                url: page.url.clone(),
+                icon: page.icon.clone(),
+                bg_color: page.bg_color.clone(),
+            }),
+        }
+    }
+
+    fn append_folder(&mut self, folder: BookmarkFolderRow, depth: u32) {
+        if !self.visited.insert(folder.uuid.clone()) {
+            return;
+        }
+        let mut child_folders = Vec::new();
+        for candidate in &self.folders {
+            if candidate.parent.as_deref() == Some(folder.uuid.as_str()) {
+                child_folders.push(candidate.clone());
+            }
+        }
+        let child_count = child_folders.len().saturating_add(folder.children.len()) as u32;
+        let move_targets = self.folder_move_targets(&folder.uuid);
+        self.rows
+            .push(BookmarkTreeState::Folder(BookmarkFolderState {
+                uuid: folder.uuid.clone(),
+                name: folder.name.clone(),
+                collapsed: folder.collapsed,
+                depth,
+                child_count,
+                move_to_root: folder.parent.is_some(),
+                move_targets,
+            }));
+        if folder.collapsed {
+            return;
+        }
+        let child_depth = depth.saturating_add(1);
+        for child in child_folders {
+            self.append_folder(child, child_depth);
+        }
+        for row in folder.children {
+            self.append_entry(row, Some(folder.uuid.clone()), child_depth);
+        }
+    }
+
+    fn append_entry(&mut self, row: BookmarkRow, folder: Option<String>, depth: u32) {
+        let move_targets = self.entry_move_targets(folder.as_deref());
+        self.rows
+            .push(BookmarkTreeState::Entry(BookmarkEntryState {
+                row,
+                depth,
+                move_to_root: folder.is_some(),
+                move_targets,
+            }));
+    }
+
+    fn folder_move_targets(&self, uuid: &str) -> Vec<BookmarkFolderChoice> {
+        let mut targets = Vec::new();
+        for target in &self.choices {
+            if target.uuid == uuid || target.ancestors.iter().any(|ancestor| ancestor == uuid) {
+                continue;
+            }
+            targets.push(target.clone());
+        }
+        targets
+    }
+
+    fn entry_move_targets(&self, folder: Option<&str>) -> Vec<BookmarkFolderChoice> {
+        let mut targets = Vec::new();
+        for target in &self.choices {
+            if Some(target.uuid.as_str()) == folder {
+                continue;
+            }
+            targets.push(target.clone());
+        }
+        targets
+    }
+}
 
 impl ActiveWorkspaceProject {
     fn active(projects: &[vmux_core::event::ProjectRow]) -> Option<Self> {
@@ -343,8 +483,49 @@ fn project_side_sheet(
     }
 }
 
+fn project_bookmark_ui(
+    layouts: Query<
+        (
+            Entity,
+            Option<&BookmarkProjection>,
+            Option<&SideSheetProjection>,
+            Option<&BookmarkUiProjection>,
+        ),
+        With<LayoutCef>,
+    >,
+    mut commands: Commands,
+) {
+    let empty = BookmarkStateEvent::default();
+    for (entity, bookmarks, side_sheet, current) in &layouts {
+        let bookmarks = bookmarks
+            .map(|projection| &projection.0)
+            .unwrap_or(&empty);
+        let active_page = side_sheet
+            .and_then(|projection| projection.0.active_page.as_ref());
+        let next = BookmarkUiProjection(BookmarkUiBuilder::build(bookmarks, active_page));
+        if current == Some(&next) {
+            continue;
+        }
+        commands.entity(entity).insert(next);
+    }
+}
+
 fn publish_side_sheet(
     projections: Query<(Entity, &SideSheetProjection), Changed<SideSheetProjection>>,
+    mut commands: Commands,
+) {
+    for (entity, projection) in &projections {
+        commands.trigger(
+            vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
+                entity,
+                &projection.0,
+            ),
+        );
+    }
+}
+
+fn publish_bookmark_ui(
+    projections: Query<(Entity, &BookmarkUiProjection), Changed<BookmarkUiProjection>>,
     mut commands: Commands,
 ) {
     for (entity, projection) in &projections {

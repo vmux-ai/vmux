@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkStateEvent};
+use vmux_api::bookmark::BookmarkMenuEffect;
 use vmux_api::extension::{
     ExtListRequest, ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
 };
@@ -7,8 +7,8 @@ use vmux_ui::hooks::{send, use_ui_state_root};
 
 use super::update::UpdatePhase;
 use crate::event::{
-    ActiveSession, HeaderState, LayoutGeometry, RemoteUiState, SideSheetState, StackNavigationState,
-    TabBoundaryState, TabListState,
+    ActiveSession, BookmarkUiState, HeaderState, LayoutGeometry, RemoteUiState, SideSheetState,
+    StackNavigationState, TabBoundaryState, TabListState,
 };
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
 
@@ -17,7 +17,7 @@ pub(crate) struct LayoutPageState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
     pub tabs: Option<TabListState>,
-    pub bookmarks: BookmarkStateEvent,
+    pub bookmarks: BookmarkUiState,
     pub side_sheet: Option<SideSheetState>,
     pub projects: TabBoundaryState,
     pub active_session: Option<ActiveSession>,
@@ -67,7 +67,7 @@ impl LayoutPageState {
         if let Some(event) = &patch.tabs {
             self.tabs = Some(event.clone());
         }
-        if let Some(event) = &patch.bookmarks {
+        if let Some(event) = &patch.bookmark_ui {
             self.bookmarks = event.clone();
         }
         if let Some(event) = &patch.side_sheet {

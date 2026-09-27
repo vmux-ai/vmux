@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use vmux_api::bookmark::{BookmarkFolderChoice, BookmarkRow};
 use vmux_core::PageIcon;
 
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
@@ -497,6 +498,45 @@ pub struct SideSheetState {
     pub reveal: Option<StackRevealTarget>,
     #[serde(default)]
     pub panes: Vec<SideSheetPane>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct BookmarkUiState {
+    pub pins: Vec<BookmarkPinState>,
+    pub rows: Vec<BookmarkTreeState>,
+    pub folders: Vec<BookmarkFolderChoice>,
+    pub active_page: Option<vmux_core::PageMetadata>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct BookmarkPinState {
+    pub row: BookmarkRow,
+    pub active: bool,
+}
+
+#[vmux_api::contract(Eq)]
+pub enum BookmarkTreeState {
+    Folder(BookmarkFolderState),
+    Entry(BookmarkEntryState),
+}
+
+#[vmux_api::contract(Eq)]
+pub struct BookmarkFolderState {
+    pub uuid: String,
+    pub name: String,
+    pub collapsed: bool,
+    pub depth: u32,
+    pub child_count: u32,
+    pub move_to_root: bool,
+    pub move_targets: Vec<BookmarkFolderChoice>,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct BookmarkEntryState {
+    pub row: BookmarkRow,
+    pub depth: u32,
+    pub move_to_root: bool,
+    pub move_targets: Vec<BookmarkFolderChoice>,
 }
 
 #[vmux_api::contract]

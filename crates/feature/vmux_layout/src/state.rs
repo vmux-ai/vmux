@@ -1,7 +1,7 @@
 use crate::event::{
-    ActiveSessionState, HeaderState, LayoutGeometry, PaneTreeState, ReloadEffect, RemoteUiState,
-    SideSheetState, StackNavigationState, TabBoundaryState, TabListState, UpdateCleared,
-    UpdateProgress, UpdateReady,
+    ActiveSessionState, BookmarkUiState, HeaderState, LayoutGeometry, PaneTreeState, ReloadEffect,
+    RemoteUiState, SideSheetState, StackNavigationState, TabBoundaryState, TabListState,
+    UpdateCleared, UpdateProgress, UpdateReady,
 };
 use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkStateEvent};
 use vmux_api::extension::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent};
@@ -13,6 +13,7 @@ pub struct LayoutUiStatePatch {
     pub stacks: Option<StackNavigationState>,
     pub tabs: Option<TabListState>,
     pub bookmarks: Option<BookmarkStateEvent>,
+    pub bookmark_ui: Option<BookmarkUiState>,
     pub pane_tree: Option<PaneTreeState>,
     pub side_sheet: Option<SideSheetState>,
     pub spaces: Option<SpacesListEvent>,

@@ -130,14 +130,8 @@ fn SideSheetContent() -> Element {
         crate::event::url_bar_top(),
     );
     let active_pane = side_sheet.active_pane;
-    let active_page = side_sheet.active_page;
-    let folders = bookmarks.folders.clone();
-    let initial_folders = folders.clone();
-    let mut folder_context = use_signal(|| initial_folders);
     let drag_state = use_signal(|| None::<BookmarkDragState>);
-    use_context_provider(|| folder_context);
     use_context_provider(|| drag_state);
-    use_effect(move || folder_context.set(folders.clone()));
     use_drop(move || {
         BookmarkContext::set_active(false);
     });
@@ -168,7 +162,6 @@ fn SideSheetContent() -> Element {
                     if let Some(pane) = active_pane {
                         BookmarksSection {
                             bookmarks: bookmarks.clone(),
-                            active_page,
                             pane_id: pane.id,
                             expanded: pane.bookmarks_expanded,
                         }
