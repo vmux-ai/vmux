@@ -1,8 +1,7 @@
 use crate::event::{
     CommandBarFocusEffect, CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch,
     CommandPaletteActivateRequest, CommandPaletteBranchesRequest, CommandPaletteDraftRequest,
-    CommandPalettePromptHistoryRequest, CommandPaletteSelectionRequest, CommandPaletteState,
-    CommandPaletteSubmitRequest,
+    CommandPalettePromptHistoryRequest, CommandPaletteState, CommandPaletteSubmitRequest,
 };
 use crate::palette::row::ResultRow;
 use crate::palette::style::{
@@ -111,17 +110,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             query,
             start: is_start,
             target_url,
-            selected,
-            navigating,
-        });
-    });
-
-    use_effect(move || {
-        let opened = state();
-        let selected = (signals.selected)() as u32;
-        let navigating = (signals.nav_mode)();
-        let _ = send(&CommandPaletteSelectionRequest {
-            open_id: opened.open_id,
             selected,
             navigating,
         });

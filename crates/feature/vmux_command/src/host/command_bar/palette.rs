@@ -9,8 +9,8 @@ use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch, CommandPaletteActivateRequest,
     CommandPaletteBranchesRequest, CommandPaletteDraftRequest, CommandPalettePromptHistoryRequest,
-    CommandPaletteRemoveAttachmentRequest, CommandPaletteSelectionRequest, CommandPaletteState,
-    CommandPaletteSubmitRequest, OpenId,
+    CommandPaletteRemoveAttachmentRequest, CommandPaletteState, CommandPaletteSubmitRequest,
+    OpenId,
 };
 use vmux_api::mcp::{McpServerRequest, McpServers};
 use vmux_core::host::{UiState, UiStateWrite};
@@ -39,7 +39,6 @@ impl Plugin for PalettePlugin {
         app.add_plugins((
             UiEventPlugin::<(
                 CommandPaletteDraftRequest,
-                CommandPaletteSelectionRequest,
                 CommandPaletteSubmitRequest,
                 CommandPaletteActivateRequest,
                 CommandPalettePromptHistoryRequest,
@@ -56,7 +55,6 @@ impl Plugin for PalettePlugin {
         .add_observer(receive_palette_open)
         .add_observer(receive_mcp_servers)
         .add_observer(update_palette_draft)
-        .add_observer(update_palette_selection)
         .add_observer(submit_palette)
         .add_observer(activate_palette_row)
         .add_observer(apply_palette_decision)
@@ -240,21 +238,6 @@ fn update_palette_draft(
         }
         _ => {}
     }
-}
-
-fn update_palette_selection(
-    trigger: On<bevy_cef::prelude::UiInput<CommandPaletteSelectionRequest>>,
-    mut palettes: Query<(&PaletteOpen, &mut PaletteDraftInput)>,
-) {
-    let Ok((opened, mut draft)) = palettes.get_mut(trigger.event().webview) else {
-        return;
-    };
-    let request = &trigger.event().payload;
-    if request.open_id != opened.0.open_id {
-        return;
-    }
-    draft.selected = request.selected as usize;
-    draft.navigating = request.navigating;
 }
 
 fn submit_palette(

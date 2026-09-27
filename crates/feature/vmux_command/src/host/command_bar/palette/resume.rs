@@ -3,7 +3,6 @@ use bevy_cef::prelude::UiInput;
 use vmux_api::chat::{ResumableSessions, ResumeListRequest};
 use vmux_api::command_bar::{
     CommandBarUiState, CommandBarUiStatePatch, CommandPaletteDraftRequest,
-    CommandPaletteSelectionRequest,
 };
 use vmux_core::host::UiStateWrite;
 use vmux_core::launcher::{HostsLauncher, RendersLauncherPanel};
@@ -17,7 +16,6 @@ pub(super) struct PaletteResumePlugin;
 impl Plugin for PaletteResumePlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(update_palette_resume_draft)
-            .add_observer(update_palette_resume_selection)
             .add_observer(receive_palette_resume_page)
             .add_systems(PreUpdate, attach_palette_resume);
     }
@@ -70,7 +68,11 @@ fn update_palette_resume_draft(
         snapshot.0.sessions_loading = false;
     }
     let wants_resume = request.start && ResumeQuery::matches(&request.query);
+    resume.selected = request.selected;
     if wants_resume == resume.active {
+        if let Some(request) = resume.maybe_request_page(target, &mut snapshot) {
+            commands.trigger(request);
+        }
         return;
     }
     resume.active = wants_resume;
@@ -83,25 +85,6 @@ fn update_palette_resume_draft(
     snapshot.0.sessions_total = 0;
     snapshot.0.sessions_loading = true;
     if let Some(request) = resume.request_page(target, 0, &mut snapshot) {
-        commands.trigger(request);
-    }
-}
-
-fn update_palette_resume_selection(
-    trigger: On<UiInput<CommandPaletteSelectionRequest>>,
-    mut palettes: Query<(&mut PaletteResume, &mut PaletteSnapshot)>,
-    mut commands: Commands,
-) {
-    let target = trigger.event().webview;
-    let request = &trigger.event().payload;
-    let Ok((mut resume, mut snapshot)) = palettes.get_mut(target) else {
-        return;
-    };
-    if !resume.open.matches(request.open_id) {
-        return;
-    }
-    resume.selected = request.selected;
-    if let Some(request) = resume.maybe_request_page(target, &mut snapshot) {
         commands.trigger(request);
     }
 }

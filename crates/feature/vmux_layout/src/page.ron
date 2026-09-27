@@ -83,7 +83,6 @@
         "PickRequest",
         "DismissRequest",
         "CommandPaletteDraftRequest",
-        "CommandPaletteSelectionRequest",
         "CommandPaletteSubmitRequest",
         "CommandPaletteActivateRequest",
         "CommandPalettePromptHistoryRequest",
