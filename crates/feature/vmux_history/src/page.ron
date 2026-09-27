@@ -6,6 +6,7 @@
         "ThemeEvent",
         "HistoryUiState",
         "HistoryQueryRequest",
+        "HistoryLoadMoreRequest",
         "HistoryDeleteRequest",
         "HistoryClearAllRequest",
         "HistoryOpenRequest",

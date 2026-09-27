@@ -2,14 +2,13 @@ use crate::ranking::score;
 use bevy::prelude::*;
 
 use crate::event::{
-    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryOpenRequest,
-    HistoryQueryRequest, HistoryQueryResponse, HistorySuggestionsRequest,
-    HistorySuggestionsResponse,
+    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryLoadMoreRequest,
+    HistoryOpenRequest, HistoryQueryRequest, HistorySuggestionsRequest, HistorySuggestionsResponse,
 };
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_core::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
 
-use super::state::HistoryQueryState;
+use super::state::HistoryPageState;
 
 pub struct HistoryQueryPlugin;
 
@@ -18,6 +17,7 @@ impl Plugin for HistoryQueryPlugin {
         app.add_plugins((
             UiEventPlugin::<(
                 HistoryQueryRequest,
+                HistoryLoadMoreRequest,
                 HistoryDeleteRequest,
                 HistoryClearAllRequest,
                 HistoryOpenRequest,
@@ -26,6 +26,7 @@ impl Plugin for HistoryQueryPlugin {
         ))
         .add_message::<HistoryOpenIntent>()
         .add_observer(on_history_query_request)
+        .add_observer(on_history_load_more_request)
         .add_observer(on_history_delete_request)
         .add_observer(on_history_clear_all_request)
         .add_observer(on_history_open_request)
@@ -33,36 +34,36 @@ impl Plugin for HistoryQueryPlugin {
         .add_systems(
             Update,
             broadcast_history_changed.after(crate::spawn::HistoryWriteSet),
-        );
+        )
+        .add_systems(PostUpdate, publish_history_pages);
     }
 }
 
 fn on_history_query_request(
     trigger: On<UiInput<HistoryQueryRequest>>,
-    urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
-    visits: Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
-    mut pages: Query<&mut HistoryQueryState>,
-    mut commands: Commands,
+    mut pages: Query<&mut HistoryPageState>,
 ) {
-    let req = &trigger.event().payload;
     let Ok(mut state) = pages.get_mut(trigger.event().webview) else {
         return;
     };
-    *state = HistoryQueryState::from_request(req);
-    let response = history_query_response(req, &urls, &visits);
-    commands.trigger(
-        vmux_core::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
-            trigger.event().webview,
-            &response,
-        ),
-    );
+    state.search(&trigger.event().payload.query);
 }
 
-fn history_query_response(
-    request: &HistoryQueryRequest,
+fn on_history_load_more_request(
+    trigger: On<UiInput<HistoryLoadMoreRequest>>,
+    mut pages: Query<&mut HistoryPageState>,
+) {
+    let Ok(mut state) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    state.load_more(trigger.event().payload.loaded);
+}
+
+fn history_ui_state(
+    state: &HistoryPageState,
     urls: &Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     visits: &Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
-) -> HistoryQueryResponse {
+) -> crate::state::HistoryUiState {
     let url_rows: Vec<_> = urls
         .iter()
         .map(|(entity, metadata, count, last)| (entity, metadata.clone(), *count, *last))
@@ -72,21 +73,15 @@ fn history_query_response(
         .map(|(created, visited)| (*created, *visited))
         .collect();
     let entries = build_entries(
-        &request.query,
+        &state.query,
         &url_rows,
         &visit_rows,
         vmux_core::now_millis(),
     );
-    let offset = request.offset as usize;
-    let limit = request.limit as usize;
-    let total = entries.len();
-    let entries: Vec<_> = entries.into_iter().skip(offset).take(limit).collect();
-    let has_more = offset + entries.len() < total;
-    HistoryQueryResponse {
-        request_id: request.request_id,
-        offset: request.offset,
-        entries,
-        has_more,
+    let limit = state.limit as usize;
+    crate::state::HistoryUiState {
+        has_more: entries.len() > limit,
+        entries: entries.into_iter().take(limit).collect(),
     }
 }
 
@@ -149,6 +144,7 @@ fn on_history_delete_request(
     trigger: On<UiInput<HistoryDeleteRequest>>,
     mut commands: Commands,
     visits: Query<(Entity, &VisitedUrl), With<Visit>>,
+    mut pages: Query<&mut HistoryPageState>,
 ) {
     let target = Entity::from_bits(trigger.event().payload.url_entity_bits);
     for (visit_e, visited_url) in visits.iter() {
@@ -159,6 +155,9 @@ fn on_history_delete_request(
     if commands.get_entity(target).is_ok() {
         commands.entity(target).despawn();
     }
+    for mut page in &mut pages {
+        page.set_changed();
+    }
 }
 
 fn on_history_clear_all_request(
@@ -166,12 +165,16 @@ fn on_history_clear_all_request(
     mut commands: Commands,
     urls: Query<Entity, With<Url>>,
     visits: Query<Entity, With<Visit>>,
+    mut pages: Query<&mut HistoryPageState>,
 ) {
     for e in urls.iter() {
         commands.entity(e).despawn();
     }
     for e in visits.iter() {
         commands.entity(e).despawn();
+    }
+    for mut page in &mut pages {
+        page.set_changed();
     }
 }
 
@@ -194,28 +197,27 @@ fn on_history_open_request(
 
 fn broadcast_history_changed(
     changed: Query<(), (Changed<LastVisitedAt>, With<Url>)>,
-    pages: Query<(Entity, &HistoryQueryState)>,
-    urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
-    visits: Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
-    mut commands: Commands,
+    mut pages: Query<&mut HistoryPageState>,
 ) {
     if changed.iter().next().is_none() {
         return;
     }
+    for mut page in &mut pages {
+        page.set_changed();
+    }
+}
+
+fn publish_history_pages(
+    pages: Query<(Entity, &HistoryPageState), Changed<HistoryPageState>>,
+    urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
+    visits: Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
+    mut commands: Commands,
+) {
     for (entity, state) in &pages {
-        if state.request_id == 0 {
-            continue;
-        }
-        let request = HistoryQueryRequest {
-            query: state.query.clone(),
-            offset: 0,
-            limit: state.limit,
-            request_id: state.request_id,
-        };
-        let response = history_query_response(&request, &urls, &visits);
+        let snapshot = history_ui_state(state, &urls, &visits);
         commands.trigger(
             vmux_core::host::UiStateWrite::<crate::state::HistoryUiState>::from_event(
-                entity, &response,
+                entity, &snapshot,
             ),
         );
     }

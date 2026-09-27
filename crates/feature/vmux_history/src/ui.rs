@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryOpenRequest,
-    HistoryQueryRequest,
+    HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryLoadMoreRequest,
+    HistoryOpenRequest, HistoryQueryRequest,
 };
 use crate::state::HistoryUiState;
 use dioxus::prelude::*;
@@ -11,96 +11,42 @@ use vmux_ui::components::alert_dialog::{
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
 };
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{send, use_theme, use_ui_state_root};
+use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::now_millis;
 
 #[vmux_native::page(component = Page)]
 pub(crate) struct HistoryPage;
 
-fn emit_query(query: &str, offset: u32, request_id: u64) {
-    let req = HistoryQueryRequest {
-        query: if query.is_empty() {
-            None
-        } else {
-            Some(query.to_string())
-        },
-        offset,
-        limit: 50,
-        request_id,
-    };
-    let _ = send(&req);
-}
-
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut entries: Signal<Vec<HistoryEntry>> = use_signal(Vec::new);
     let mut query: Signal<String> = use_signal(String::new);
-    let mut offset: Signal<u32> = use_signal(|| 0);
-    let mut has_more: Signal<bool> = use_signal(|| true);
-    let mut request_id: Signal<u64> = use_signal(|| 0);
-    let mut last_reset_id: Signal<u64> = use_signal(|| 0);
-    let state = use_ui_state_root::<HistoryUiState>();
-    let mut handled_sequence = use_signal(|| 0);
-
-    use_effect(move || {
-        let state = state.state.read();
-        if state.sequence == 0 || state.sequence == *handled_sequence.peek() {
-            return;
-        }
-        handled_sequence.set(state.sequence);
-        for patch in &state.patches {
-            let Some(response) = &patch.query else {
-                continue;
-            };
-            if response.request_id < *last_reset_id.peek() {
-                continue;
-            }
-            if response.offset == 0 {
-                entries.set(response.entries.clone());
-                offset.set(0);
-                last_reset_id.set(response.request_id);
-            } else {
-                entries.write().extend(response.entries.clone());
-            }
-            has_more.set(response.has_more);
-        }
-    });
-
-    use_effect(move || {
-        request_id.set(1);
-        last_reset_id.set(1);
-        emit_query("", 0, 1);
-    });
+    let state = use_ui_state::<HistoryUiState>();
+    let snapshot = state();
+    let has_more = snapshot.has_more;
+    let loaded = snapshot.entries.len() as u32;
 
     let load_more = move |e: Event<VisibleData>| {
         if !e.is_intersecting().unwrap_or(false) {
             return;
         }
-        if !*has_more.read() || entries.read().is_empty() {
+        if !has_more || loaded == 0 {
             return;
         }
-        let new_offset = *offset.read() + 50;
-        offset.set(new_offset);
-        let new_id = *request_id.read() + 1;
-        request_id.set(new_id);
-        emit_query(&query.read(), new_offset, new_id);
+        let _ = send(&HistoryLoadMoreRequest { loaded });
     };
 
     let mut confirm_open = use_signal(|| Some(false));
 
     let on_input = move |e: Event<FormData>| {
-        query.set(e.value());
-        let new_id = *request_id.read() + 1;
-        request_id.set(new_id);
-        offset.set(0);
-        last_reset_id.set(new_id);
-        emit_query(&query.read(), 0, new_id);
+        let query_value = e.value();
+        query.set(query_value.clone());
+        let _ = send(&HistoryQueryRequest { query: query_value });
     };
 
-    let groups = group_by_day(&entries.read(), now_millis());
-    let entry_count = entries.read().len();
+    let groups = group_by_day(&snapshot.entries, now_millis());
+    let entry_count = snapshot.entries.len();
 
     rsx! {
         div { class: "flex h-full min-h-0 flex-col bg-background text-foreground",
@@ -177,7 +123,6 @@ pub fn Page() -> Element {
                                                 move |e: Event<MouseData>| {
                                                     e.stop_propagation();
                                                     let _ = send(&HistoryDeleteRequest { url_entity_bits: url_bits });
-                                                    entries.write().retain(|x| x.url_entity_bits != url_bits);
                                                 }
                                             },
                                             svg { class: "size-3.5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "1.8",
@@ -211,7 +156,6 @@ pub fn Page() -> Element {
                         attributes: vec![],
                         on_click: Some(EventHandler::new(move |_| {
                             let _ = send(&HistoryClearAllRequest);
-                            entries.write().clear();
                             confirm_open.set(Some(false));
                         })),
                         {translate("history-clear-all")}

@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::UiInput;
 use vmux_core::page::PageReady;
 
-use crate::event::HistoryQueryRequest;
 use crate::state::HistoryUiState;
 
 pub(super) type HistoryUiStateUpdates = vmux_core::host::UiState<HistoryUiState>;
@@ -18,28 +17,34 @@ impl Plugin for StatePlugin {
 
 #[derive(Component, Clone, Debug)]
 #[require(HistoryUiStateUpdates)]
-pub(super) struct HistoryQueryState {
+pub(super) struct HistoryPageState {
     pub(super) query: Option<String>,
     pub(super) limit: u32,
-    pub(super) request_id: u64,
 }
 
-impl Default for HistoryQueryState {
+impl Default for HistoryPageState {
     fn default() -> Self {
         Self {
             query: None,
             limit: 50,
-            request_id: 0,
         }
     }
 }
 
-impl HistoryQueryState {
-    pub(super) fn from_request(request: &HistoryQueryRequest) -> Self {
-        Self {
-            query: request.query.clone(),
-            limit: request.limit,
-            request_id: request.request_id,
+impl HistoryPageState {
+    pub(super) fn search(&mut self, query: &str) {
+        let query = query.trim();
+        self.query = if query.is_empty() {
+            None
+        } else {
+            Some(query.to_string())
+        };
+        self.limit = 50;
+    }
+
+    pub(super) fn load_more(&mut self, loaded: u32) {
+        if self.limit == loaded {
+            self.limit = self.limit.saturating_add(50);
         }
     }
 }
@@ -56,5 +61,26 @@ fn on_page_ready(
     if !vmux_api::VmuxRoute::parse(&page.url).is_some_and(|route| route.is_host("history")) {
         return;
     }
-    commands.entity(entity).insert(HistoryQueryState::default());
+    commands.entity(entity).insert(HistoryPageState::default());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_resets_pagination_and_duplicate_load_more_is_ignored() {
+        let mut state = HistoryPageState::default();
+
+        state.load_more(50);
+        state.load_more(50);
+        assert_eq!(state.limit, 100);
+
+        state.search(" git ");
+        assert_eq!(state.query.as_deref(), Some("git"));
+        assert_eq!(state.limit, 50);
+
+        state.search("  ");
+        assert_eq!(state.query, None);
+    }
 }

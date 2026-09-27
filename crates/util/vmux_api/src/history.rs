@@ -11,18 +11,12 @@ pub struct HistoryEntry {
 
 #[vmux_api::ui_event]
 pub struct HistoryQueryRequest {
-    pub query: Option<String>,
-    pub offset: u32,
-    pub limit: u32,
-    pub request_id: u64,
+    pub query: String,
 }
 
-#[vmux_api::contract]
-pub struct HistoryQueryResponse {
-    pub request_id: u64,
-    pub offset: u32,
-    pub entries: Vec<HistoryEntry>,
-    pub has_more: bool,
+#[vmux_api::ui_event(Copy, Default)]
+pub struct HistoryLoadMoreRequest {
+    pub loaded: u32,
 }
 
 #[vmux_api::ui_event]
