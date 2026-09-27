@@ -42,25 +42,24 @@ pub(crate) struct PresentPlugin;
 
 impl Plugin for PresentPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PaneFrames>()
-            .add_systems(
-                PostUpdate,
-                (
-                    sync_keyboard_target,
-                    sync_children_to_ui,
-                    sync_windowed_layout,
-                    sync_windowed_frames,
-                    sync_windowed_command_bar,
-                    sync_windowed_extension_popups,
-                    flush_native_command_bar_pointer_events,
-                    apply_repaint_nudge,
-                    sync_cef_webview_resize_after_ui,
-                    sync_osr_webview_focus,
-                )
-                    .chain()
-                    .after(LayoutSystems::Layout),
+        app.add_systems(
+            PostUpdate,
+            (
+                sync_keyboard_target,
+                sync_children_to_ui,
+                sync_windowed_layout,
+                sync_windowed_frames,
+                sync_windowed_command_bar,
+                sync_windowed_extension_popups,
+                flush_native_command_bar_pointer_events,
+                apply_repaint_nudge,
+                sync_cef_webview_resize_after_ui,
+                sync_osr_webview_focus,
             )
-            .add_systems(Last, log_windowed_view_state);
+                .chain()
+                .after(LayoutSystems::Layout),
+        )
+        .add_systems(Last, log_windowed_view_state);
     }
 }
 
@@ -453,13 +452,10 @@ pub(crate) fn sync_windowed_frames(
     queries: WindowFrameQueries,
     mut memory: Local<FrameSyncMemory>,
     mut last_windowed_pages: Local<Vec<Entity>>,
-    mut pane_frames: ResMut<PaneFrames>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     capturing: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
+    mut commands: Commands,
 ) {
-    pane_frames.frames.clear();
-    pane_frames.rings.clear();
-    pane_frames.all_corners.clear();
     let force_raise =
         !added_hidden_windows.is_empty() || removed_hidden_windows.read().next().is_some();
     let mut hidden = Vec::new();
@@ -513,6 +509,9 @@ pub(crate) fn sync_windowed_frames(
             memory.visibility_state.insert(entity, state);
         }
         if !windowed_page_is_visible(renderable, focused_stack, tab_active, stack_active) {
+            commands
+                .entity(entity)
+                .remove::<(PaneFrame, FocusRing, AllCorners)>();
             hidden.push(entity);
             continue;
         }
@@ -531,6 +530,9 @@ pub(crate) fn sync_windowed_frames(
         let visible_pane_count =
             visible_pane_count_for_windowed_sync(tab, &queries.all_children, &queries.leaf_panes);
         let Some(pane_frame) = WindowedFrameRect::from_node(computed) else {
+            commands
+                .entity(entity)
+                .remove::<(PaneFrame, FocusRing, AllCorners)>();
             continue;
         };
         let scale = computed.scale();
@@ -540,9 +542,12 @@ pub(crate) fn sync_windowed_frames(
             layout_is_hidden,
             visible_pane_count,
         );
-        if let Some(logical) = PaneFrame::from_windowed(frame, scale) {
-            pane_frames.frames.insert(entity, logical);
-        }
+        let Some(logical) = PaneFrame::from_windowed(frame, scale) else {
+            commands
+                .entity(entity)
+                .remove::<(PaneFrame, FocusRing, AllCorners)>();
+            continue;
+        };
         let became_visible = !memory.visible_pages.contains(&entity);
         let browser_ready = browsers.windowed_view_ready(&entity);
         let was_raised = memory.raised_frame.contains_key(&entity);
@@ -560,7 +565,6 @@ pub(crate) fn sync_windowed_frames(
         );
         browsers.set_windowed_z_position(&entity, windowed_page_z_position(!capturing.is_empty()));
         let all_corners = windowed_page_all_corners(layout_is_hidden, visible_pane_count);
-        pane_frames.all_corners.insert(entity, all_corners);
         browsers.set_windowed_corner_radius(
             &entity,
             settings.layout.radius * scale,
@@ -576,13 +580,14 @@ pub(crate) fn sync_windowed_frames(
             scale,
         );
         browsers.set_windowed_focus_ring(&entity, focus_ring_width, scale, focus_ring_rgb);
-        pane_frames.rings.insert(
-            entity,
+        commands.entity(entity).insert((
+            logical,
             FocusRing {
                 width: focus_ring_width / scale,
                 rgb: focus_ring_rgb,
             },
-        );
+            AllCorners(all_corners),
+        ));
         let badge = focus_ring_kind.and_then(|kind| {
             agent_logo(kind).map(|logo| {
                 (
@@ -620,6 +625,14 @@ pub(crate) fn sync_windowed_frames(
         }
     }
     let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
+    for entity in last_windowed_pages
+        .iter()
+        .filter(|entity| !current_windowed.contains(entity))
+    {
+        commands
+            .entity(*entity)
+            .try_remove::<(PaneFrame, FocusRing, AllCorners)>();
+    }
     let newly_windowed: Vec<Entity> = current_windowed
         .iter()
         .copied()
@@ -670,43 +683,22 @@ pub(crate) struct FrameSyncMemory {
     visibility_state: std::collections::HashMap<Entity, (bool, bool, bool, bool, bool)>,
 }
 
-#[derive(Resource, Default)]
-pub(crate) struct PaneFrames {
-    frames: std::collections::HashMap<Entity, PaneFrame>,
-    rings: std::collections::HashMap<Entity, FocusRing>,
-    all_corners: std::collections::HashMap<Entity, bool>,
-}
-
-impl PaneFrames {
-    #[cfg(target_os = "macos")]
-    pub(crate) fn frame(&self, page: Entity) -> Option<PaneFrame> {
-        self.frames.get(&page).copied()
-    }
-
-    #[cfg(target_os = "macos")]
-    pub(crate) fn ring_of(&self, page: Entity) -> FocusRing {
-        self.rings.get(&page).copied().unwrap_or_default()
-    }
-
-    #[cfg(target_os = "macos")]
-    pub(crate) fn all_corners(&self, page: Entity) -> bool {
-        self.all_corners.get(&page).copied().unwrap_or_default()
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Component, Clone, Copy, PartialEq, Debug, Default)]
 pub(crate) struct FocusRing {
     pub(crate) width: f32,
     pub(crate) rgb: [f32; 3],
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
 pub(crate) struct PaneFrame {
     pub(crate) left: f32,
     pub(crate) top: f32,
     pub(crate) width: f32,
     pub(crate) height: f32,
 }
+
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) struct AllCorners(pub(crate) bool);
 
 impl PaneFrame {
     fn from_windowed(frame: WindowedFrameRect, scale: f32) -> Option<Self> {

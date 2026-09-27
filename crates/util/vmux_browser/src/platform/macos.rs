@@ -26,7 +26,7 @@ use vmux_setting::{AppSettings, ColorScheme};
 use vmux_ui::hooks::EventListenerError;
 
 use crate::host::LayoutPointerCapture;
-use crate::present::PaneFrames;
+use crate::present::{AllCorners, FocusRing, PaneFrame};
 
 pub(super) struct MacosBrowserPlugin;
 
@@ -251,7 +251,9 @@ fn open_native_pages(world: &mut World) {
 
 fn place_native_pages(
     hosted: Option<NonSendMut<HostedPages>>,
-    frames: Res<PaneFrames>,
+    frames: Query<&PaneFrame>,
+    rings: Query<&FocusRing>,
+    corners: Query<&AllCorners>,
     windows: Query<&Window>,
     pages: Query<(), With<HostsPage>>,
     capturing: Query<&HostWindow, (With<LayoutCef>, LayoutPointerCapture)>,
@@ -275,9 +277,10 @@ fn place_native_pages(
             continue;
         };
         page.surface.set_bounds(bounds);
+        let all_corners = corners.get(*entity).is_ok_and(|corners| corners.0);
         page.surface
-            .set_corner_radius(settings.layout.radius as f64, frames.all_corners(*entity));
-        let ring = frames.ring_of(*entity);
+            .set_corner_radius(settings.layout.radius as f64, all_corners);
+        let ring = rings.get(*entity).copied().unwrap_or_default();
         page.surface.set_focus_ring(ring.width as f64, ring.rgb);
         page.surface.set_visible(true);
         let window_is_capturing = capturing.iter().any(|host| host.0 == page.window);
@@ -396,7 +399,7 @@ trait NativePagePlacementExt {
         self,
         entity: Entity,
         window: Option<&Window>,
-        frames: &PaneFrames,
+        frames: &Query<&PaneFrame>,
     ) -> Option<wry::Rect>;
 }
 
@@ -420,7 +423,7 @@ impl NativePagePlacementExt for NativePagePlacement {
         self,
         entity: Entity,
         window: Option<&Window>,
-        frames: &PaneFrames,
+        frames: &Query<&PaneFrame>,
     ) -> Option<wry::Rect> {
         match self {
             NativePagePlacement::Layout => {
@@ -431,7 +434,7 @@ impl NativePagePlacementExt for NativePagePlacement {
                 })
             }
             NativePagePlacement::Pane | NativePagePlacement::Modal => {
-                let frame = frames.frame(entity)?;
+                let frame = frames.get(entity).ok()?;
                 Some(wry::Rect {
                     position: wry::dpi::LogicalPosition::new(frame.left, frame.top).into(),
                     size: wry::dpi::LogicalSize::new(frame.width, frame.height).into(),
