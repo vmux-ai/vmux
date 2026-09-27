@@ -13,7 +13,9 @@ use crate::protocol::format_id;
 use crate::stack::{Stack, stack_bundle};
 use crate::tab::Tab as LayoutTab;
 use crate::{TerminalLayoutSpawnRequest, event::PANE_GAP_PX};
-use bevy::ecs::message::{MessageReader, MessageWriter, Messages};
+#[cfg(test)]
+use bevy::ecs::message::Messages;
+use bevy::ecs::message::{MessageReader, MessageWriter};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
@@ -191,19 +193,41 @@ fn plan_layout_requests(
     }
 }
 
-fn apply_layout_plans(world: &mut World) {
-    let plans: Vec<LayoutApplyPlan> = world
-        .resource_mut::<Messages<LayoutApplyPlan>>()
-        .drain()
-        .collect();
-    for plan in plans {
-        apply_layout_plan(world, &plan.snapshot, &plan.diff);
-        world
-            .resource_mut::<Messages<LayoutApplyResult>>()
-            .write(LayoutApplyResult {
-                request_id: plan.request_id,
-                result: Ok(()),
-            });
+fn apply_layout_plans(
+    mut plans: MessageReader<LayoutApplyPlan>,
+    children: Query<&Children>,
+    child_of: Query<&ChildOf>,
+    activated: Query<&LastActivatedAt>,
+    mut tabs: Query<&mut LayoutTab>,
+    mut splits: Query<(Entity, &mut PaneSplit, &mut Node)>,
+    mut pane_sizes: Query<&mut PaneSize>,
+    mut metadata: Query<&mut PageMetadata>,
+    mut focused: ResMut<crate::stack::FocusedStack>,
+    mut terminal_spawn: MessageWriter<TerminalLayoutSpawnRequest>,
+    mut page_open: MessageWriter<PageOpenRequest>,
+    mut results: MessageWriter<LayoutApplyResult>,
+    mut commands: Commands,
+) {
+    for plan in plans.read() {
+        apply_layout_plan(
+            &plan.snapshot,
+            &plan.diff,
+            &children,
+            &child_of,
+            &activated,
+            &mut tabs,
+            &mut splits,
+            &mut pane_sizes,
+            &mut metadata,
+            &mut focused,
+            &mut terminal_spawn,
+            &mut page_open,
+            &mut commands,
+        );
+        results.write(LayoutApplyResult {
+            request_id: plan.request_id,
+            result: Ok(()),
+        });
     }
 }
 
@@ -239,61 +263,87 @@ fn respond_to_layout_apply(
     }
 }
 
-fn apply_layout_plan(world: &mut World, snapshot: &LayoutSnapshot, plan: &DiffPlan) {
+fn apply_layout_plan(
+    snapshot: &LayoutSnapshot,
+    plan: &DiffPlan,
+    children_q: &Query<&Children>,
+    child_of: &Query<&ChildOf>,
+    activated: &Query<&LastActivatedAt>,
+    tabs: &mut Query<&mut LayoutTab>,
+    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    pane_sizes: &mut Query<&mut PaneSize>,
+    metadata: &mut Query<&mut PageMetadata>,
+    focused: &mut crate::stack::FocusedStack,
+    terminal_spawn: &mut MessageWriter<TerminalLayoutSpawnRequest>,
+    page_open: &mut MessageWriter<PageOpenRequest>,
+    commands: &mut Commands,
+) {
     let mut new_entities: std::collections::HashMap<*const proto::LayoutNode, Entity> =
         std::collections::HashMap::new();
-    let mut materialized: Vec<(&proto::Tab, Entity)> = Vec::with_capacity(snapshot.tabs.len());
+    let mut materialized: Vec<(&proto::Tab, Entity, i64)> = Vec::with_capacity(snapshot.tabs.len());
     let tab_parent: Option<Entity> = snapshot
         .tabs
         .iter()
         .filter_map(|t| t.id.as_deref())
         .filter_map(|id| parse_id(id).ok())
         .map(|(_, v)| Entity::from_bits(v))
-        .find_map(|e| world.get::<ChildOf>(e).map(|c| c.parent()));
+        .find_map(|entity| child_of.get(entity).ok().map(|parent| parent.parent()));
     for tab in &snapshot.tabs {
-        let tab_entity = match &tab.id {
+        let (tab_entity, activated_at) = match &tab.id {
             Some(id) => match parse_id(id) {
-                Ok((_, value)) => Entity::from_bits(value),
+                Ok((_, value)) => {
+                    let entity = Entity::from_bits(value);
+                    let activated_at = activated.get(entity).map_or(0, |value| value.0);
+                    (entity, activated_at)
+                }
                 Err(_) => continue,
             },
             None => {
-                let entity = world
-                    .spawn((
-                        crate::tab::tab_bundle(),
-                        LastActivatedAt::now(),
-                        CreatedAt::now(),
-                    ))
+                let activated_at = LastActivatedAt::now();
+                let entity = commands
+                    .spawn((crate::tab::tab_bundle(), activated_at, CreatedAt::now()))
                     .id();
                 if let Some(parent) = tab_parent {
-                    world.entity_mut(entity).insert(ChildOf(parent));
+                    commands.entity(entity).insert(ChildOf(parent));
                 }
-                if !tab.name.is_empty()
-                    && let Some(mut layout_tab) = world.get_mut::<LayoutTab>(entity)
-                {
-                    layout_tab.name = tab.name.clone();
+                if !tab.name.is_empty() {
+                    commands.entity(entity).insert(LayoutTab {
+                        name: tab.name.clone(),
+                        ..default()
+                    });
                 }
-                entity
+                (entity, activated_at.0)
             }
         };
-        materialize_descendants(world, tab_entity, &tab.root, &mut new_entities);
-        materialized.push((tab, tab_entity));
+        materialize_descendants(
+            tab_entity,
+            true,
+            &tab.root,
+            &mut new_entities,
+            children,
+            splits,
+            terminal_spawn,
+            page_open,
+            commands,
+        );
+        materialized.push((tab, tab_entity, activated_at));
     }
 
-    for (tab, tab_entity) in &materialized {
-        apply_structure(world, Some(*tab_entity), &tab.root, &new_entities);
+    for (tab, tab_entity, _) in &materialized {
+        apply_structure(Some(*tab_entity), &tab.root, &new_entities, commands);
     }
     for tab in &snapshot.tabs {
-        apply_tab(world, tab);
+        apply_tab(tab, tabs, splits, pane_sizes, metadata);
     }
-    if let Some((_, active_entity)) = materialized.iter().find(|(t, _)| t.is_active) {
+    if let Some((_, active_entity, _)) = materialized.iter().find(|(tab, _, _)| tab.is_active) {
         let newest = materialized
             .iter()
-            .filter_map(|(_, e)| world.get::<LastActivatedAt>(*e).map(|l| l.0))
+            .map(|(_, _, activated_at)| *activated_at)
             .max()
             .unwrap_or(0);
-        if let Ok(mut e) = world.get_entity_mut(*active_entity) {
-            e.insert(LastActivatedAt(newest + 1));
-        }
+        commands
+            .entity(*active_entity)
+            .insert(LastActivatedAt(newest + 1));
     }
     let rescued: ApplyHashSet<String> = new_entities
         .iter()
@@ -311,16 +361,21 @@ fn apply_layout_plan(world: &mut World, snapshot: &LayoutSnapshot, plan: &DiffPl
         if rescued.contains(id) {
             continue;
         }
-        apply_close(world, id);
+        apply_close(id, commands);
     }
-    apply_focus(world, &snapshot.focused);
+    apply_focus(focused, &snapshot.focused);
 }
 
 fn materialize_descendants(
-    world: &mut World,
     parent: Entity,
+    parent_is_tab: bool,
     node: &proto::LayoutNode,
     new_entities: &mut std::collections::HashMap<*const proto::LayoutNode, Entity>,
+    children: &Query<&Children>,
+    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    terminal_spawn: &mut MessageWriter<TerminalLayoutSpawnRequest>,
+    page_open: &mut MessageWriter<PageOpenRequest>,
+    commands: &mut Commands,
 ) {
     let node_entity = match node {
         proto::LayoutNode::Split { id, direction, .. } => match id {
@@ -329,10 +384,10 @@ fn materialize_descendants(
                 Err(_) => return,
             },
             None => {
-                if world.get::<LayoutTab>(parent).is_some()
-                    && let Some(existing_root) = find_root_split_child(world, parent)
+                if parent_is_tab
+                    && let Some(existing_root) = find_root_split_child(children_q, splits, parent)
                 {
-                    set_split_direction(world, existing_root, *direction);
+                    set_split_direction(splits, existing_root, *direction);
                     new_entities.insert(node as *const _, existing_root);
                     existing_root
                 } else {
@@ -340,7 +395,7 @@ fn materialize_descendants(
                         proto::SplitDirection::Row => PaneSplitDirection::Row,
                         proto::SplitDirection::Column => PaneSplitDirection::Column,
                     };
-                    let entity = world
+                    let entity = commands
                         .spawn((
                             split_root_bundle(pane_split_dir),
                             LastActivatedAt::now(),
@@ -358,7 +413,7 @@ fn materialize_descendants(
                 Err(_) => return,
             },
             None => {
-                let entity = world
+                let entity = commands
                     .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
                     .id();
                 new_entities.insert(node as *const _, entity);
@@ -369,30 +424,36 @@ fn materialize_descendants(
 
     match node {
         proto::LayoutNode::Split { children, .. } => {
-            for c in children {
-                materialize_descendants(world, node_entity, c, new_entities);
+            for child in children {
+                materialize_descendants(
+                    node_entity,
+                    false,
+                    child,
+                    new_entities,
+                    children_q,
+                    splits,
+                    terminal_spawn,
+                    page_open,
+                    commands,
+                );
             }
         }
         proto::LayoutNode::Pane { stacks, .. } => {
             for t in stacks {
                 if t.id.is_none() {
-                    let stack = world
+                    let stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(node_entity)))
                         .id();
                     match t.kind.as_str() {
                         "terminal" => {
-                            world
-                                .resource_mut::<Messages<TerminalLayoutSpawnRequest>>()
-                                .write(TerminalLayoutSpawnRequest { stack });
+                            terminal_spawn.write(TerminalLayoutSpawnRequest { stack });
                         }
                         _ => {
-                            world.resource_mut::<Messages<PageOpenRequest>>().write(
-                                PageOpenRequest {
-                                    target: PageOpenTarget::Stack(stack),
-                                    url: t.url.clone(),
-                                    request_id: None,
-                                },
-                            );
+                            page_open.write(PageOpenRequest {
+                                target: PageOpenTarget::Stack(stack),
+                                url: t.url.clone(),
+                                request_id: None,
+                            });
                         }
                     }
                 }
@@ -401,22 +462,29 @@ fn materialize_descendants(
     }
 }
 
-fn find_root_split_child(world: &World, tab: Entity) -> Option<Entity> {
-    world
-        .get::<Children>(tab)?
+fn find_root_split_child(
+    children: &Query<&Children>,
+    splits: &Query<(Entity, &mut PaneSplit, &mut Node)>,
+    tab: Entity,
+) -> Option<Entity> {
+    children
+        .get(tab)
+        .ok()?
         .iter()
-        .find(|&e| world.get::<PaneSplit>(e).is_some())
+        .find(|&entity| splits.contains(entity))
 }
 
-fn set_split_direction(world: &mut World, entity: Entity, direction: proto::SplitDirection) {
+fn set_split_direction(
+    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    entity: Entity,
+    direction: proto::SplitDirection,
+) {
     let pane_split_dir = match direction {
         proto::SplitDirection::Row => PaneSplitDirection::Row,
         proto::SplitDirection::Column => PaneSplitDirection::Column,
     };
-    if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
+    if let Ok((_, mut split, mut node)) = splits.get_mut(entity) {
         split.direction = pane_split_dir;
-    }
-    if let Some(mut node) = world.get_mut::<Node>(entity) {
         node.flex_direction = match pane_split_dir {
             PaneSplitDirection::Row => FlexDirection::Row,
             PaneSplitDirection::Column => FlexDirection::Column,
@@ -427,14 +495,11 @@ fn set_split_direction(world: &mut World, entity: Entity, direction: proto::Spli
     }
 }
 
-fn apply_close(world: &mut World, id: &str) {
+fn apply_close(id: &str, commands: &mut Commands) {
     let Ok((_kind, value)) = parse_id(id) else {
         return;
     };
-    let entity = Entity::from_bits(value);
-    if let Ok(entity_ref) = world.get_entity_mut(entity) {
-        entity_ref.despawn();
-    }
+    commands.entity(Entity::from_bits(value)).try_despawn();
 }
 
 fn collect_ids_recursive(
@@ -489,44 +554,48 @@ fn collect_existing_ids(
     out
 }
 
-fn apply_tab(world: &mut World, tab: &proto::Tab) {
+fn apply_tab(
+    tab: &proto::Tab,
+    tabs: &mut Query<&mut LayoutTab>,
+    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    pane_sizes: &mut Query<&mut PaneSize>,
+    metadata: &mut Query<&mut PageMetadata>,
+) {
     if let Some(id) = &tab.id
         && let Ok((_, value)) = parse_id(id)
     {
         let entity = Entity::from_bits(value);
-        if let Some(mut layout_tab) = world.get_mut::<LayoutTab>(entity) {
+        if let Ok(mut layout_tab) = tabs.get_mut(entity) {
             layout_tab.name = tab.name.clone();
         }
     }
-    apply_node(world, &tab.root);
+    apply_node(&tab.root, splits, pane_sizes, metadata);
 }
 
 fn apply_structure(
-    world: &mut World,
     parent: Option<Entity>,
     node: &proto::LayoutNode,
     new_entities: &std::collections::HashMap<*const proto::LayoutNode, Entity>,
+    commands: &mut Commands,
 ) {
     let Some(entity) = resolve_node_entity(node, new_entities) else {
         match node {
             proto::LayoutNode::Split { children, .. } => {
                 for c in children {
-                    apply_structure(world, parent, c, new_entities);
+                    apply_structure(parent, c, new_entities, commands);
                 }
             }
             proto::LayoutNode::Pane { .. } => {}
         }
         return;
     };
-    if let Some(parent) = parent
-        && let Ok(mut e) = world.get_entity_mut(entity)
-    {
-        e.insert(ChildOf(parent));
+    if let Some(parent) = parent {
+        commands.entity(entity).insert(ChildOf(parent));
     }
     match node {
         proto::LayoutNode::Split { children, .. } => {
             for c in children {
-                apply_structure(world, Some(entity), c, new_entities);
+                apply_structure(Some(entity), c, new_entities, commands);
             }
         }
         proto::LayoutNode::Pane { stacks, .. } => {
@@ -534,10 +603,9 @@ fn apply_structure(
                 if let Some(tid) = t.id.as_deref()
                     && let Ok((_, value)) = parse_id(tid)
                 {
-                    let tab_entity = Entity::from_bits(value);
-                    if let Ok(mut e) = world.get_entity_mut(tab_entity) {
-                        e.insert(ChildOf(entity));
-                    }
+                    commands
+                        .entity(Entity::from_bits(value))
+                        .insert(ChildOf(entity));
                 }
             }
         }
@@ -558,8 +626,13 @@ fn resolve_node_entity(
     }
 }
 
-fn apply_node(world: &mut World, node: &proto::LayoutNode) {
-    match node {
+fn apply_node(
+    layout: &proto::LayoutNode,
+    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    pane_sizes: &mut Query<&mut PaneSize>,
+    metadata: &mut Query<&mut PageMetadata>,
+) {
+    match layout {
         proto::LayoutNode::Split {
             id,
             direction,
@@ -574,10 +647,8 @@ fn apply_node(world: &mut World, node: &proto::LayoutNode) {
                     proto::SplitDirection::Row => PaneSplitDirection::Row,
                     proto::SplitDirection::Column => PaneSplitDirection::Column,
                 };
-                if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
+                if let Ok((_, mut split, mut node)) = splits.get_mut(entity) {
                     split.direction = pane_split_dir;
-                }
-                if let Some(mut node) = world.get_mut::<Node>(entity) {
                     node.flex_direction = match pane_split_dir {
                         PaneSplitDirection::Row => FlexDirection::Row,
                         PaneSplitDirection::Column => FlexDirection::Column,
@@ -590,14 +661,14 @@ fn apply_node(world: &mut World, node: &proto::LayoutNode) {
             if !flex_weights.is_empty() && flex_weights.len() == children.len() {
                 for (child_dto, weight) in children.iter().zip(flex_weights.iter()) {
                     if let Some(child_entity) = node_entity(child_dto)
-                        && let Some(mut size) = world.get_mut::<PaneSize>(child_entity)
+                        && let Ok(mut size) = pane_sizes.get_mut(child_entity)
                     {
                         size.flex_grow = *weight;
                     }
                 }
             }
             for c in children {
-                apply_node(world, c);
+                apply_node(c, splits, pane_sizes, metadata);
             }
         }
         proto::LayoutNode::Pane { stacks, .. } => {
@@ -607,7 +678,7 @@ fn apply_node(world: &mut World, node: &proto::LayoutNode) {
                 {
                     let entity = Entity::from_bits(value);
                     if !t.title.is_empty()
-                        && let Some(mut page) = world.get_mut::<PageMetadata>(entity)
+                        && let Ok(mut page) = metadata.get_mut(entity)
                     {
                         page.title = t.title.clone();
                     }
@@ -617,10 +688,7 @@ fn apply_node(world: &mut World, node: &proto::LayoutNode) {
     }
 }
 
-fn apply_focus(world: &mut World, focus: &proto::Focus) {
-    let Some(mut focused) = world.get_resource_mut::<crate::stack::FocusedStack>() else {
-        return;
-    };
+fn apply_focus(focused: &mut crate::stack::FocusedStack, focus: &proto::Focus) {
     if let Some(id) = focus.tab.as_deref() {
         focused.tab = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
     }
@@ -1531,7 +1599,6 @@ mod tests {
             .iter(app.world())
             .count();
 
-        let mut new_entities = std::collections::HashMap::new();
         let bad_node = proto::LayoutNode::Pane {
             id: Some("pane:not_a_number".into()),
             is_zoomed: false,
@@ -1542,7 +1609,18 @@ mod tests {
                 ..Default::default()
             }],
         };
-        materialize_descendants(app.world_mut(), tab, &bad_node, &mut new_entities);
+        let _ = ApplyHarness::apply(
+            &mut app,
+            LayoutSnapshot {
+                tabs: vec![TabDto {
+                    id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                    name: "S".into(),
+                    is_active: true,
+                    root: bad_node,
+                }],
+                focused: Default::default(),
+            },
+        );
 
         let pane_count_after = app
             .world_mut()
@@ -1583,7 +1661,6 @@ mod tests {
             .iter(app.world())
             .count();
 
-        let mut new_entities = std::collections::HashMap::new();
         let bad_node = proto::LayoutNode::Split {
             id: Some("split:garbage".into()),
             direction: proto::SplitDirection::Row,
@@ -1594,7 +1671,18 @@ mod tests {
                 stacks: vec![],
             }],
         };
-        materialize_descendants(app.world_mut(), tab, &bad_node, &mut new_entities);
+        let _ = ApplyHarness::apply(
+            &mut app,
+            LayoutSnapshot {
+                tabs: vec![TabDto {
+                    id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                    name: "S".into(),
+                    is_active: true,
+                    root: bad_node,
+                }],
+                focused: Default::default(),
+            },
+        );
 
         let split_count_after = app
             .world_mut()
