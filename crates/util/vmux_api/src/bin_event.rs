@@ -13,6 +13,8 @@ pub trait HostEvent: BinEvent {}
 
 pub trait UiEvent: BinEvent {}
 
+pub trait AgentRequestContract: BinEvent {}
+
 #[vmux_api::ui_event(Copy, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy_ecs::component::Component))]
 pub struct PageReady;
@@ -35,6 +37,9 @@ mod tests {
 
     #[vmux_api::host_event]
     struct SecondEvent;
+
+    #[vmux_api::agent_request]
+    struct OpenAgentRequest;
 
     #[test]
     fn event_id_includes_its_protocol_version() {
@@ -59,5 +64,11 @@ mod tests {
     fn derive_accepts_explicit_event_contract() {
         assert_eq!(ExplicitOpenRequest::id(), "explicit_open@2");
         assert_eq!(ExplicitOpenRequest::NAME, "explicit_open");
+    }
+
+    #[test]
+    fn agent_request_uses_the_same_typed_id_contract() {
+        assert_eq!(OpenAgentRequest::id(), "open_agent@1");
+        assert_eq!(OpenAgentRequest::PERMISSION, "OpenAgentRequest");
     }
 }

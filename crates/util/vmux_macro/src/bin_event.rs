@@ -12,6 +12,7 @@ pub(crate) enum Direction {
     Host,
     Ui,
     Both,
+    Agent,
 }
 
 struct Args {
@@ -97,6 +98,9 @@ fn implementation(
         Direction::Both => quote! {
             impl #impl_generics ::vmux_api::HostEvent for #ident #type_generics #where_clause {}
             impl #impl_generics ::vmux_api::UiEvent for #ident #type_generics #where_clause {}
+        },
+        Direction::Agent => quote! {
+            impl #impl_generics ::vmux_api::AgentRequestContract for #ident #type_generics #where_clause {}
         },
     };
 

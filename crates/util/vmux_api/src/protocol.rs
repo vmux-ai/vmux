@@ -115,6 +115,21 @@ mod tests {
     }
 
     #[test]
+    fn typed_agent_request_routes_and_decodes_without_an_enum() {
+        let payload = AgentSearchKnowledge {
+            anchor: ProcessId::new(),
+            query: "typed boundaries".to_string(),
+            limit: 20,
+        };
+        let request = AgentRequest::encode(&payload).unwrap();
+        let decoded = request.decode::<AgentSearchKnowledge>().unwrap();
+
+        assert_eq!(request.id, "agent_search_knowledge@1");
+        assert_eq!(decoded, Some(payload));
+        assert!(request.decode::<AgentReadKnowledge>().unwrap().is_none());
+    }
+
+    #[test]
     fn agent_cancel_and_interrupted_roundtrip() {
         let msg = ClientMessage::Shared(SharedMessage::AgentCancel { sid: "s1".into() });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();

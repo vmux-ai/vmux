@@ -48,6 +48,15 @@ pub fn ui_event(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
+pub fn agent_request(args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match bin_event::expand(args.into(), input, bin_event::Direction::Agent) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
 pub fn ui_event_variants(args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match ui_event_variants::expand(args.into(), input) {
