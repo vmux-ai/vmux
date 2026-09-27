@@ -14,6 +14,7 @@ use vmux_api::protocol::{
 };
 
 use super::query::{ProcessQueries, ProcessQueryPlugin};
+use crate::acp::{AcpSessionPlugin, AcpSessions};
 use crate::agent::{AgentSessionPlugin, AgentSessions};
 use crate::remote::client_operation::{ClientOperationPlugin, ClientOperations};
 
@@ -88,6 +89,8 @@ pub(crate) struct ServiceDaemonPlugin {
     client_operation_plugin: std::sync::Mutex<Option<ClientOperationPlugin>>,
     agent_sessions: AgentSessions,
     agent_session_plugin: std::sync::Mutex<Option<AgentSessionPlugin>>,
+    acp_sessions: AcpSessions,
+    acp_session_plugin: std::sync::Mutex<Option<AcpSessionPlugin>>,
 }
 
 impl ServiceDaemonPlugin {
@@ -100,7 +103,9 @@ impl ServiceDaemonPlugin {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
         let (query_plugin, queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
         let (client_operation_plugin, client_operations) = ClientOperationPlugin::new(wake.clone());
-        let (agent_session_plugin, agent_sessions) = AgentSessionPlugin::new(runtime.clone(), wake);
+        let (agent_session_plugin, agent_sessions) =
+            AgentSessionPlugin::new(runtime.clone(), wake.clone());
+        let (acp_session_plugin, acp_sessions) = AcpSessionPlugin::new(runtime.clone(), wake);
         Self {
             listener: std::sync::Mutex::new(Some(listener)),
             manager,
@@ -112,6 +117,8 @@ impl ServiceDaemonPlugin {
             client_operation_plugin: std::sync::Mutex::new(Some(client_operation_plugin)),
             agent_sessions,
             agent_session_plugin: std::sync::Mutex::new(Some(agent_session_plugin)),
+            acp_sessions,
+            acp_session_plugin: std::sync::Mutex::new(Some(acp_session_plugin)),
         }
     }
 }
@@ -148,8 +155,20 @@ impl Plugin for ServiceDaemonPlugin {
             .unwrap()
             .take()
             .expect("service daemon plugin can only be built once");
+        let acp_sessions = self.acp_sessions.clone();
+        let acp_session_plugin = self
+            .acp_session_plugin
+            .lock()
+            .unwrap()
+            .take()
+            .expect("service daemon plugin can only be built once");
         let started_at = ServiceStartedAt(Instant::now());
-        app.add_plugins((query_plugin, client_operation_plugin, agent_session_plugin));
+        app.add_plugins((
+            query_plugin,
+            client_operation_plugin,
+            agent_session_plugin,
+            acp_session_plugin,
+        ));
         let task = self.runtime.spawn(async move {
             run_server(
                 listener,
@@ -157,6 +176,7 @@ impl Plugin for ServiceDaemonPlugin {
                 queries,
                 client_operations,
                 agent_sessions,
+                acp_sessions,
                 started_at,
             )
             .await;
@@ -249,7 +269,7 @@ fn page_agent_prompt(text: String, attachments: &[AgentAttachment]) -> String {
 }
 
 async fn route_agent_input(
-    acp_manager: &Arc<Mutex<crate::acp::AcpSessionManager>>,
+    acp_sessions: &AcpSessions,
     agent_sessions: &AgentSessions,
     sid: String,
     text: String,
@@ -257,20 +277,20 @@ async fn route_agent_input(
     attachments: Vec<AgentAttachment>,
     preferred_mode: Option<String>,
 ) {
-    let acp = acp_manager.lock().await;
-    if acp.contains(&sid) {
-        acp.input(
-            &sid,
+    if acp_sessions
+        .input(
+            sid.clone(),
             crate::acp::AcpInput::User {
-                text,
-                context,
-                attachments,
+                text: text.clone(),
+                context: context.clone(),
+                attachments: attachments.clone(),
                 preferred_mode,
             },
-        );
+        )
+        .await
+    {
         return;
     }
-    drop(acp);
     let text = compose_agent_prompt(&page_agent_prompt(text, &attachments), context.as_deref());
     agent_sessions
         .input(sid, crate::agent::SessionInput::User { text, attachments })
@@ -295,13 +315,13 @@ async fn run_server(
     process_queries: ProcessQueries,
     client_operations: ClientOperations,
     agent_sessions: AgentSessions,
+    acp_sessions: AcpSessions,
     started_at: ServiceStartedAt,
 ) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries = PendingQueries::default();
     let pending_commands = PendingCommands::default();
     let pending_tool_calls = crate::agent::AgentToolResponses::default();
-    let acp_manager = Arc::new(Mutex::new(crate::acp::AcpSessionManager::default()));
     let remote_broker = crate::agent::AgentBroker::new(
         agent_tx.clone(),
         pending_commands.clone(),
@@ -310,7 +330,7 @@ async fn run_server(
     );
     let remote_handle = crate::remote::server::spawn(
         agent_sessions.clone(),
-        Arc::clone(&acp_manager),
+        acp_sessions.clone(),
         remote_broker,
         client_operations,
     );
@@ -332,7 +352,7 @@ async fn run_server(
                 let pending_commands = pending_commands.clone();
                 let pending_tool_calls = pending_tool_calls.clone();
                 let agent_sessions = agent_sessions.clone();
-                let acp_manager = Arc::clone(&acp_manager);
+                let acp_sessions = acp_sessions.clone();
                 let process_queries = process_queries.clone();
                 let shutdown_tx = shutdown_tx.clone();
                 tokio::spawn(async move {
@@ -344,7 +364,7 @@ async fn run_server(
                         pending_commands,
                         pending_tool_calls,
                         agent_sessions,
-                        acp_manager,
+                        acp_sessions,
                         process_queries,
                         shutdown_tx,
                         started_at,
@@ -507,7 +527,7 @@ async fn handle_client(
     pending_commands: PendingCommands,
     pending_tool_calls: crate::agent::AgentToolResponses,
     agent_sessions: AgentSessions,
-    acp_manager: Arc<Mutex<crate::acp::AcpSessionManager>>,
+    acp_sessions: AcpSessions,
     process_queries: ProcessQueries,
     shutdown_tx: mpsc::Sender<()>,
     started_at: ServiceStartedAt,
@@ -1151,7 +1171,7 @@ async fn handle_client(
                 preferred_mode,
             }) => {
                 route_agent_input(
-                    &acp_manager,
+                    &acp_sessions,
                     &agent_sessions,
                     sid,
                     text,
@@ -1163,10 +1183,9 @@ async fn handle_client(
             }
 
             ClientMessage::RebindAcpWorkspace { sid, cwd } => {
-                if let Err(message) = acp_manager
-                    .lock()
+                if let Err(message) = acp_sessions
+                    .rebind_cwd(sid, std::path::PathBuf::from(cwd))
                     .await
-                    .rebind_cwd(&sid, std::path::PathBuf::from(cwd))
                 {
                     let resp = ServiceMessage::Error { message };
                     let mut w = writer.lock().await;
@@ -1180,14 +1199,16 @@ async fn handle_client(
                 config_id,
                 model_id,
             } => {
-                acp_manager.lock().await.input(
-                    &sid,
-                    crate::acp::AcpInput::SetModel {
-                        request_id,
-                        config_id,
-                        model_id,
-                    },
-                );
+                acp_sessions
+                    .input(
+                        sid,
+                        crate::acp::AcpInput::SetModel {
+                            request_id,
+                            config_id,
+                            model_id,
+                        },
+                    )
+                    .await;
             }
 
             ClientMessage::AcpSetMode {
@@ -1196,23 +1217,23 @@ async fn handle_client(
                 config_id,
                 mode_id,
             } => {
-                acp_manager.lock().await.input(
-                    &sid,
-                    crate::acp::AcpInput::SetMode {
-                        request_id,
-                        config_id,
-                        mode_id,
-                    },
-                );
+                acp_sessions
+                    .input(
+                        sid,
+                        crate::acp::AcpInput::SetMode {
+                            request_id,
+                            config_id,
+                            mode_id,
+                        },
+                    )
+                    .await;
             }
 
             ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
-                if acp_manager.lock().await.contains(&sid) {
-                    acp_manager
-                        .lock()
-                        .await
-                        .input(&sid, crate::acp::AcpInput::Cancel);
-                } else {
+                if !acp_sessions
+                    .input(sid.clone(), crate::acp::AcpInput::Cancel)
+                    .await
+                {
                     agent_sessions
                         .input(sid, crate::agent::SessionInput::Cancel)
                         .await;
@@ -1224,12 +1245,16 @@ async fn handle_client(
                 call_id,
                 decision,
             }) => {
-                if acp_manager.lock().await.contains(&sid) {
-                    acp_manager
-                        .lock()
-                        .await
-                        .input(&sid, crate::acp::AcpInput::Approve { call_id, decision });
-                } else {
+                if !acp_sessions
+                    .input(
+                        sid.clone(),
+                        crate::acp::AcpInput::Approve {
+                            call_id: call_id.clone(),
+                            decision,
+                        },
+                    )
+                    .await
+                {
                     agent_sessions
                         .input(
                             sid,
@@ -1240,9 +1265,7 @@ async fn handle_client(
             }
 
             ClientMessage::ClosePageAgent { sid } => {
-                if acp_manager.lock().await.contains(&sid) {
-                    acp_manager.lock().await.close(&sid);
-                } else {
+                if !acp_sessions.close(sid.clone()).await {
                     agent_sessions.close(sid.clone()).await;
                 }
                 if let Some(handle) = page_agent_forwarders.remove(&sid) {
@@ -1288,34 +1311,42 @@ async fn handle_client(
                         .into_iter()
                         .filter_map(to_acp_mcp_server),
                 );
-                acp_manager.lock().await.spawn(
-                    sid.clone(),
-                    agent_id,
-                    command,
-                    args,
-                    env,
-                    std::path::PathBuf::from(cwd),
-                    anchor,
-                    Arc::clone(&manager),
-                    mcp_servers,
-                    resume_acp_session_id,
-                    effort,
-                );
-                let rx = acp_manager.lock().await.subscribe(&sid);
+                if let Err(message) = acp_sessions
+                    .spawn(
+                        sid.clone(),
+                        agent_id,
+                        command,
+                        args,
+                        env,
+                        std::path::PathBuf::from(cwd),
+                        anchor,
+                        Arc::clone(&manager),
+                        mcp_servers,
+                        resume_acp_session_id,
+                        effort,
+                    )
+                    .await
+                {
+                    let response = ServiceMessage::Error { message };
+                    let mut writer = writer.lock().await;
+                    crate::framing::write_service_message(&mut *writer, &response).await?;
+                    continue;
+                }
+                let rx = acp_sessions.subscribe(sid.clone()).await;
                 if let Some(mut rx) = rx {
-                    if let Some(snapshot) = acp_manager.lock().await.snapshot(&sid) {
+                    if let Some(snapshot) = acp_sessions.snapshot(sid.clone()).await {
                         let mut w = writer.lock().await;
                         crate::framing::write_service_message(&mut *w, &snapshot).await?;
                     }
-                    if let Some(agent_info) = acp_manager.lock().await.agent_info(&sid) {
+                    if let Some(agent_info) = acp_sessions.agent_info(sid.clone()).await {
                         let mut w = writer.lock().await;
                         crate::framing::write_service_message(&mut *w, &agent_info).await?;
                     }
-                    if let Some(model_info) = acp_manager.lock().await.model_info(&sid) {
+                    if let Some(model_info) = acp_sessions.model_info(sid.clone()).await {
                         let mut w = writer.lock().await;
                         crate::framing::write_service_message(&mut *w, &model_info).await?;
                     }
-                    if let Some(mode_info) = acp_manager.lock().await.mode_info(&sid) {
+                    if let Some(mode_info) = acp_sessions.mode_info(sid.clone()).await {
                         let mut w = writer.lock().await;
                         crate::framing::write_service_message(&mut *w, &mode_info).await?;
                     }
@@ -1386,12 +1417,14 @@ mod tests {
             ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
         let (_agent_plugin, agent_sessions) =
             crate::agent::AgentSessionPlugin::new(tokio::runtime::Handle::current(), wake);
+        let acp_sessions = crate::acp::AcpSessions::closed();
         let mut server = Box::pin(super::run_server(
             listener,
             Arc::clone(&manager),
             process_queries,
             ClientOperations::closed(),
             agent_sessions,
+            acp_sessions,
             ServiceStartedAt(Instant::now()),
         ));
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));

@@ -5,7 +5,7 @@ use base64::Engine;
 use tokio::sync::Mutex;
 
 use crate::RemotePaths;
-use crate::acp::AcpSessionManager;
+use crate::acp::AcpSessions;
 use crate::agent::{AgentBroker, AgentSessions};
 use crate::message::Message;
 use crate::remote::client_operation::ClientOperations;
@@ -27,14 +27,14 @@ pub(crate) struct RemoteState {
     pub(crate) relay_token: Arc<str>,
     pub(crate) authorizations: Arc<Mutex<RemoteAuthorizationStore>>,
     pub(crate) agents: AgentSessions,
-    pub(crate) acp: Arc<Mutex<AcpSessionManager>>,
+    pub(crate) acp: AcpSessions,
     pub(crate) broker: AgentBroker,
     pub(crate) client_ops: ClientOperations,
 }
 
 pub(crate) fn spawn(
     agents: AgentSessions,
-    acp: Arc<Mutex<AcpSessionManager>>,
+    acp: AcpSessions,
     broker: AgentBroker,
     client_ops: ClientOperations,
 ) -> tokio::task::JoinHandle<()> {
@@ -85,20 +85,14 @@ pub(crate) async fn broker_result(
 }
 
 pub(crate) async fn session_messages(state: &RemoteState, sid: &str) -> Option<Vec<Message>> {
-    {
-        let acp = state.acp.lock().await;
-        if let Some(messages) = acp.remote_messages(sid) {
-            return Some(messages);
-        }
+    if let Some(messages) = state.acp.remote_messages(sid.to_string()).await {
+        return Some(messages);
     }
     state.agents.remote_messages(sid.to_string()).await
 }
 
 pub(crate) async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession> {
-    let acp_session = {
-        let acp = state.acp.lock().await;
-        acp.remote_session(sid)
-    };
+    let acp_session = state.acp.remote_session(sid.to_string()).await;
     let mut session = if let Some(session) = acp_session {
         session
     } else {

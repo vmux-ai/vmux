@@ -112,7 +112,7 @@ async fn media(state: &RemoteState, sid: &str, query: String) -> SharedResponse 
 
 async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
     let mut sessions = state.agents.remote_sessions().await;
-    sessions.extend(state.acp.lock().await.remote_sessions());
+    sessions.extend(state.acp.remote_sessions().await);
     for session in &mut sessions {
         if let Some(messages) = super::super::server::session_messages(state, &session.sid).await {
             session.title = vmux_api::room::Message::conversation_title(&messages, &session.name);
@@ -123,7 +123,7 @@ async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
 }
 
 async fn session_exists(state: &RemoteState, sid: &str) -> bool {
-    state.acp.lock().await.contains(sid)
+    state.acp.remote_session(sid.to_string()).await.is_some()
         || state.agents.remote_session(sid.to_string()).await.is_some()
 }
 
@@ -133,8 +133,7 @@ async fn push_input(
     acp: AcpInput,
     page: SessionInput,
 ) -> SharedResponse {
-    if state.acp.lock().await.contains(sid) {
-        state.acp.lock().await.input(sid, acp);
+    if state.acp.input(sid.to_string(), acp).await {
         return SharedResponse::Ok;
     }
     if state.agents.input(sid.to_string(), page).await {
@@ -216,7 +215,7 @@ mod tests {
                     .join("authorizations.json"),
             ))),
             agents: crate::agent::AgentSessions::closed(),
-            acp: Arc::new(Mutex::new(Default::default())),
+            acp: crate::acp::AcpSessions::closed(),
             broker: crate::agent::AgentBroker::new(
                 agent_tx,
                 Default::default(),

@@ -403,7 +403,7 @@ async fn subscribe(
     state: &super::server::RemoteState,
     sid: &str,
 ) -> Option<tokio::sync::broadcast::Receiver<ServiceMessage>> {
-    if let Some(receiver) = state.acp.lock().await.subscribe(sid) {
+    if let Some(receiver) = state.acp.subscribe(sid.to_string()).await {
         return Some(receiver);
     }
     state.agents.subscribe(sid.to_string()).await
@@ -413,8 +413,8 @@ async fn session_snapshot(
     state: &super::server::RemoteState,
     sid: &str,
 ) -> Option<vmux_api::protocol::SharedEvent> {
-    let snapshot = if state.acp.lock().await.contains(sid) {
-        state.acp.lock().await.snapshot(sid)
+    let snapshot = if let Some(snapshot) = state.acp.snapshot(sid.to_string()).await {
+        Some(snapshot)
     } else {
         state.agents.snapshot(sid.to_string()).await
     }?;
@@ -521,7 +521,7 @@ mod live {
                 relay_token: Arc::from("relay-token"),
                 authorizations: Arc::new(Mutex::new(authorizations.clone())),
                 agents: crate::agent::AgentSessions::closed(),
-                acp: Arc::new(Mutex::new(Default::default())),
+                acp: crate::acp::AcpSessions::closed(),
                 broker: crate::agent::AgentBroker::new(
                     agent_tx,
                     Default::default(),
