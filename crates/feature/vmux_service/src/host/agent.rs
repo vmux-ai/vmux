@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use crate::message::{AssistantBlock, Message};
 use crate::providers::{anthropic, mistral, openai};
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
-use crate::request::PendingRequests;
+use super::request::PendingRequests;
 use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
 use vmux_api::protocol::{
     AGENT_COMMAND_TIMEOUT, AGENT_QUERY_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentAttachment, AgentCommand,
