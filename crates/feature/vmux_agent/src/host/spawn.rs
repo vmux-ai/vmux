@@ -177,8 +177,8 @@ fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
     strategies: Option<Single<&AgentStrategies>>,
-    models: Option<Res<crate::host::model::AgentModelSelections>>,
-    exec_override: Option<Res<AgentExecutableOverride>>,
+    models: Option<Single<&crate::host::model::AgentModelSelections>>,
+    exec_override: Option<Single<&AgentExecutableOverride>>,
     mut metadata: Query<&mut PageMetadata>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -190,7 +190,8 @@ fn handle_spawn_agent_requests(
             attach_agent_spawn_error_to_stack(req.stack, req.kind, message, &mut commands);
             continue;
         };
-        let Some(exe_path) = resolve_agent_executable(req.kind, exec_override.as_deref()) else {
+        let exec_override = exec_override.as_ref().map(|override_| **override_);
+        let Some(exe_path) = resolve_agent_executable(req.kind, exec_override) else {
             attach_cli_setup_to_stack(req.kind, req.stack, &mut commands);
             continue;
         };

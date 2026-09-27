@@ -26,7 +26,7 @@ impl Plugin for ChatResumePlugin {
             ResumeSession,
             PromptHistoryRequest,
         )>::default())
-            .init_resource::<ResumableScan>()
+            .add_systems(Startup, spawn_resumable_scan)
             .add_observer(on_resume_list_request)
             .add_observer(on_chat_resume_query_request)
             .add_observer(on_chat_resume_query)
@@ -182,11 +182,15 @@ fn resume_agent_name(
         .unwrap_or_default()
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct ResumableScan {
     sessions: Vec<crate::host::cli::ResumableSession>,
     labels: RepoLabels,
     read_at: Option<std::time::Instant>,
+}
+
+fn spawn_resumable_scan(mut commands: Commands) {
+    commands.spawn((Name::new("Resumable agent scan"), ResumableScan::default()));
 }
 
 impl ResumableScan {
@@ -310,7 +314,7 @@ fn on_resume_list_request(
     strategies: Option<Single<&AgentStrategies>>,
     ask: ResumeAsk,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    scan: Res<ResumableScan>,
+    scan: Single<&ResumableScan>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -404,7 +408,7 @@ fn on_chat_resume_query(
 fn drain_resume_list_tasks(
     mut tasks: Query<(Entity, &mut ResumeListTask)>,
     mut projections: Query<&mut ChatResumeProjection, With<ChatView>>,
-    mut scan: ResMut<ResumableScan>,
+    mut scan: Single<&mut ResumableScan>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {

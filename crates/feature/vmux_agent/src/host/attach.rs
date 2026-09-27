@@ -285,10 +285,11 @@ fn handle_resume_in_acp(
         With<Terminal>,
     >,
     settings: Res<AppSettings>,
-    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
+    catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
     mut swap: MessageWriter<vmux_core::agent::SwapStackSession>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
+    let catalog = catalog.as_ref().map(|catalog| **catalog);
     for request in reader.read() {
         let Ok(Some(command)) = request.decode::<AgentResumeInAcp>() else {
             continue;
@@ -313,7 +314,7 @@ fn handle_resume_in_acp(
                 ))
             } else if let Some(session_id) = session_id {
                 if let Some(agent_id) =
-                    acp_target_id_for_kind(session.kind, &settings.agent.acp, catalog.as_deref())
+                    acp_target_id_for_kind(session.kind, &settings.agent.acp, catalog)
                 {
                     swap.write(vmux_core::agent::SwapStackSession {
                         stack: child_of.parent(),

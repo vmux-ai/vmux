@@ -22,7 +22,6 @@ impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
             .add_plugins(crate::acp_tool::AcpToolPlugin)
-            .init_resource::<AcpCatalog>()
             .add_message::<crate::event::PageAgentInfo>()
             .add_message::<crate::event::PageAgentWorkspaceChanged>()
             .add_message::<crate::event::PageAgentModelInfo>()
@@ -31,7 +30,7 @@ impl Plugin for AcpAgentPlugin {
             .add_message::<crate::event::PageAgentModeSelectionResult>()
             .add_message::<crate::event::PageAgentSessionCreated>()
             .add_message::<crate::event::PageAgentAcpTerminalCreated>()
-            .add_systems(Startup, start_catalog_fetch)
+            .add_systems(Startup, (spawn_acp_catalog, start_catalog_fetch))
             .add_systems(
                 Update,
                 (
@@ -174,7 +173,7 @@ impl AcpModelState {
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct AcpCatalog {
     pub agents: Vec<crate::acp_registry::RegistryAgent>,
 }
@@ -182,6 +181,10 @@ pub struct AcpCatalog {
 #[derive(Component)]
 struct AcpCatalogFetch {
     rx: Receiver<Vec<crate::acp_registry::RegistryAgent>>,
+}
+
+fn spawn_acp_catalog(mut commands: Commands) {
+    commands.spawn((Name::new("ACP catalog"), AcpCatalog::default()));
 }
 
 fn start_catalog_fetch(mut commands: Commands) {
@@ -199,7 +202,7 @@ fn start_catalog_fetch(mut commands: Commands) {
 
 fn receive_catalog(
     fetches: Query<(Entity, &AcpCatalogFetch)>,
-    mut catalog: ResMut<AcpCatalog>,
+    mut catalog: Single<&mut AcpCatalog>,
     mut commands: Commands,
 ) {
     for (entity, fetch) in &fetches {
@@ -566,7 +569,7 @@ fn send_acp_input(
     workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
     pending_projects: Query<(), With<crate::host::PendingAgentProject>>,
     repositories_needing_worktrees: Query<(), With<crate::host::RepositoryNeedsWorktree>>,
-    modes: Option<Res<crate::host::model::AgentModeSelections>>,
+    modes: Option<Single<&crate::host::model::AgentModeSelections>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for (entity, session, mut state, mut queue, install_started, mut pending, mut imported) in
@@ -598,7 +601,7 @@ fn send_acp_input(
         );
         let context = acp_prompt_context(handoff, workspace_state);
         let preferred_mode = modes
-            .as_deref()
+            .as_ref()
             .map(|modes| modes.selected_for(&session.agent_id).to_string())
             .filter(|mode| !mode.is_empty());
         service_requests.write(ServiceRequest(ClientMessage::agent_input_with_mode(
@@ -696,8 +699,8 @@ mod tests {
     #[test]
     fn catalog_fetch_entity_is_consumed_after_delivery() {
         let mut app = App::new();
-        app.init_resource::<AcpCatalog>()
-            .add_systems(Update, receive_catalog);
+        let catalog = app.world_mut().spawn(AcpCatalog::default()).id();
+        app.add_systems(Update, receive_catalog);
         let (tx, rx) = crossbeam_channel::unbounded();
         let fetch = app.world_mut().spawn(AcpCatalogFetch { rx }).id();
         tx.send(vec![crate::acp_registry::RegistryAgent {
@@ -714,7 +717,10 @@ mod tests {
         app.update();
 
         assert!(app.world().get_entity(fetch).is_err());
-        assert_eq!(app.world().resource::<AcpCatalog>().agents[0].id, "agent");
+        assert_eq!(
+            app.world().get::<AcpCatalog>(catalog).unwrap().agents[0].id,
+            "agent"
+        );
     }
 
     #[test]

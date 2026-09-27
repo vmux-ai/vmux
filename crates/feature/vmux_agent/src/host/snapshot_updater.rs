@@ -52,7 +52,7 @@ fn update_agents_snapshot(
     >,
     mut removed_provider_strategies: RemovedComponents<Strategy>,
     mut removed_provider_keys: RemovedComponents<StrategyKey>,
-    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
+    catalog: Option<Single<Ref<crate::runtime::acp::AcpCatalog>>>,
     mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
     mut state: ResMut<CommandBarProjection>,
 ) {

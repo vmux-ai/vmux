@@ -488,9 +488,10 @@ fn handle_agent_page_open(
     mut commands: Commands,
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
-    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
+    catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
     transitions: Query<&vmux_start::StartInlineTransition>,
 ) {
+    let catalog = catalog.as_ref().map(|catalog| **catalog);
     let tasks: Vec<(Entity, PageOpenTask)> = open_q
         .p0()
         .iter()
@@ -560,7 +561,7 @@ fn handle_agent_page_open(
             &mut commands,
             &default_cwd,
             &settings.agent.acp,
-            catalog.as_deref(),
+            catalog,
         ) {
             Ok(()) => {
                 commands.entity(entity).insert(PageOpenHandled);
@@ -581,10 +582,11 @@ fn handle_agent_page_open(
 fn handle_swap_stack_session(
     mut reader: MessageReader<vmux_core::agent::SwapStackSession>,
     settings: Res<AppSettings>,
-    catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
+    catalog: Option<Single<&crate::runtime::acp::AcpCatalog>>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
 ) {
+    let catalog = catalog.as_ref().map(|catalog| **catalog);
     for ev in reader.read() {
         let target = match crate::AgentUrl::parse(&ev.target_url) {
             Some(target @ crate::AgentUrl::Cli { .. }) => target,
@@ -600,7 +602,7 @@ fn handle_swap_stack_session(
                 .acp
                 .iter()
                 .any(|cfg| crate::acp_tool::agent_ids_match(&cfg.id, id))
-            && acp_registry_agent_for_id(catalog.as_deref(), id).is_none()
+            && acp_registry_agent_for_id(catalog, id).is_none()
         {
             bevy::log::warn!("swap: ACP agent unavailable for '{id}'");
             continue;
@@ -660,8 +662,8 @@ fn handle_swap_stack_session(
                     .iter()
                     .find(|cfg| crate::acp_tool::agent_ids_match(&cfg.id, &id));
                 let routing_sid = uuid::Uuid::new_v4().to_string();
-                let icon = acp_icon_for_id(catalog.as_deref(), &id);
-                let name = acp_profile_name_for_id(&id, cfg, catalog.as_deref());
+                let icon = acp_icon_for_id(catalog, &id);
+                let name = acp_profile_name_for_id(&id, cfg, catalog);
                 attach_acp_agent_to_stack(
                     ev.stack,
                     &id,
@@ -1114,12 +1116,13 @@ mod tests {
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
         app.world_mut().spawn(strategies);
+        app.world_mut()
+            .spawn(AgentExecutableOverride(std::collections::HashMap::from([
+                (AgentKind::Vibe, false),
+            ])));
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .add_plugins(SpawnRequestsPlugin)
-            .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
-                (AgentKind::Vibe, false),
-            ])))
             .insert_resource(test_settings())
             .add_systems(Update, handle_agent_page_open.before(SpawnRequestSet));
 
@@ -1162,12 +1165,13 @@ mod tests {
             settings.agent.acp.clear();
             let mut app = App::new();
             app.world_mut().spawn(AgentStrategies::default());
+            app.world_mut()
+                .spawn(AgentExecutableOverride(std::collections::HashMap::from([
+                    (kind, false),
+                ])));
             app.add_plugins(MinimalPlugins)
                 .add_message::<SpawnAgentInStackRequest>()
                 .add_plugins(SpawnRequestsPlugin)
-                .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
-                    (kind, false),
-                ])))
                 .insert_resource(settings)
                 .add_systems(Update, handle_agent_page_open.before(SpawnRequestSet));
 
@@ -1201,20 +1205,20 @@ mod tests {
         let mut settings = test_settings();
         settings.agent.acp.clear();
         let mut app = App::new();
+        app.world_mut().spawn(crate::runtime::acp::AcpCatalog {
+            agents: vec![RegistryAgent {
+                id: "custom-acp".to_string(),
+                name: "Custom ACP".to_string(),
+                version: None,
+                description: None,
+                icon: Some("https://cdn.example/custom.svg".to_string()),
+                repository: None,
+                distribution: Distribution::default(),
+            }],
+        });
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .insert_resource(crate::runtime::acp::AcpCatalog {
-                agents: vec![RegistryAgent {
-                    id: "custom-acp".to_string(),
-                    name: "Custom ACP".to_string(),
-                    version: None,
-                    description: None,
-                    icon: Some("https://cdn.example/custom.svg".to_string()),
-                    repository: None,
-                    distribution: Distribution::default(),
-                }],
-            })
             .add_systems(Update, handle_agent_page_open);
 
         let stack = app
@@ -2180,6 +2184,10 @@ mod tests {
         strategies.register_cli(Box::new(crate::host::cli::codex::CodexStrategy));
         let mut app = App::new();
         app.world_mut().spawn(strategies);
+        app.world_mut()
+            .spawn(AgentExecutableOverride(std::collections::HashMap::from([
+                (AgentKind::Codex, true),
+            ])));
         app.add_plugins((MinimalPlugins, SpawnPlugin))
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<crate::session::AgentSessionExited>()
@@ -2188,9 +2196,6 @@ mod tests {
             .add_message::<vmux_core::agent::PageAgentSpawnStackRequest>()
             .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
             .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
-            .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
-                (AgentKind::Codex, true),
-            ])))
             .insert_resource(test_settings());
         let stack = app
             .world_mut()

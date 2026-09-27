@@ -22,8 +22,8 @@ impl Plugin for ProviderPlugin {
 pub(crate) const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
 
-#[derive(Resource, Clone, Default)]
-pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
+#[derive(Component, Clone, Default)]
+pub(crate) struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
 
 pub(crate) fn resolve_agent_executable(
     kind: AgentKind,
