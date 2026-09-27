@@ -120,7 +120,7 @@ struct TerminalInputPlugin;
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreUpdate, initialize_terminal_state)
-            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
+            .add_systems(Update, format_terminal_url.after(pid::PidIndexSet))
             .add_plugins((
                 super::mouse::MousePlugin,
                 super::link::LinkPlugin,
@@ -325,7 +325,7 @@ type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
 fn handle_terminal_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    pid_to_entity: Option<Res<pid::PidToEntity>>,
+    pid_indexes: Query<&pid::PidToEntity>,
     child_of_q: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
     settings: Res<AppSettings>,
@@ -333,84 +333,85 @@ fn handle_terminal_page_open(
     mut commands: Commands,
 ) {
     for (entity, task) in &tasks {
-        if task.url == TERMINAL_PAGE_URL.trim_end_matches('/')
-            || task.url.starts_with(TERMINAL_PAGE_URL)
+        if task.url != TERMINAL_PAGE_URL.trim_end_matches('/')
+            && !task.url.starts_with(TERMINAL_PAGE_URL)
         {
-            match open_terminal_page(
-                task,
-                pid_to_entity.as_deref(),
-                &child_of_q,
-                &tabs,
-                &settings,
-                &active_space,
-                &mut commands,
-            ) {
-                Ok(()) => {
-                    commands.entity(entity).insert(PageOpenHandled);
+            continue;
+        }
+        let parsed = match url::Url::parse(&task.url) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                commands.entity(entity).insert(PageOpenError {
+                    message: format!("invalid terminal URL '{}': {error}", task.url),
+                });
+                continue;
+            }
+        };
+        let path = parsed.path().trim_start_matches('/');
+        if !path.is_empty() {
+            let Ok(pid) = path.parse::<u32>() else {
+                commands.entity(entity).insert(PageOpenError {
+                    message: format!("malformed terminal URL '{}'", task.url),
+                });
+                continue;
+            };
+            let mut existing = None;
+            for index in &pid_indexes {
+                if let Some(terminal) = index.get(pid) {
+                    existing = Some(terminal);
+                    break;
                 }
+            }
+            if let Some(terminal) = existing {
+                commands.trigger(vmux_core::ActivateRequest { entity: terminal });
+                commands.entity(entity).insert(PageOpenHandled);
+                continue;
+            }
+            warn!("no terminal pane for pid {pid}; spawning new");
+        }
+        let cwd_param = parsed
+            .query_pairs()
+            .find(|(key, _)| key == "cwd")
+            .map(|(_, value)| value.into_owned());
+        let cwd = if let Some(cwd) = cwd_param.as_deref() {
+            match vmux_space::cwd::valid_cwd(cwd) {
+                Ok(cwd) => cwd,
                 Err(message) => {
                     commands.entity(entity).insert(PageOpenError { message });
+                    continue;
                 }
             }
-        }
-    }
-}
-
-fn open_terminal_page(
-    task: &PageOpenTask,
-    pid_to_entity: Option<&pid::PidToEntity>,
-    child_of_q: &Query<&ChildOf>,
-    tabs: &Query<&vmux_layout::tab::Tab>,
-    settings: &AppSettings,
-    active_space: &vmux_space::spaces::ActiveSpace,
-    commands: &mut Commands,
-) -> Result<(), String> {
-    let parsed = url::Url::parse(&task.url)
-        .map_err(|e| format!("invalid terminal URL '{}': {e}", task.url))?;
-    let path = parsed.path().trim_start_matches('/');
-    if !path.is_empty() {
-        match path.parse::<u32>() {
-            Ok(pid) => {
-                if let Some(map) = pid_to_entity
-                    && let Some(entity) = map.get(pid)
-                {
-                    commands.trigger(vmux_core::ActivateRequest { entity });
-                    return Ok(());
+        } else {
+            let tab_dir =
+                vmux_layout::tab::ancestor_tab_startup_dir(task.stack, &child_of_q, &tabs);
+            match settings.workspace_dir(&active_space.record.id, tab_dir.as_deref()) {
+                Ok(cwd) => cwd,
+                Err(message) => {
+                    commands.entity(entity).insert(PageOpenError { message });
+                    continue;
                 }
-                warn!("no terminal pane for pid {pid}; spawning new");
             }
-            Err(_) => return Err(format!("malformed terminal URL '{}'", task.url)),
-        }
+        };
+        commands.entity(task.stack).despawn_children();
+        let title = cwd
+            .as_ref()
+            .map(|cwd| format!("Terminal ({})", cwd.display()))
+            .unwrap_or_else(|| "Terminal".to_string());
+        commands.entity(task.stack).insert(PageMetadata {
+            url: TERMINAL_PAGE_URL.to_string(),
+            title,
+            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+            ..default()
+        });
+        let terminal = commands
+            .spawn((
+                new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
+                ChildOf(task.stack),
+            ))
+            .id();
+        commands.entity(terminal).insert(KeyboardOwner);
+        commands.entity(entity).insert(PageOpenHandled);
     }
-    let cwd_param = parsed
-        .query_pairs()
-        .find(|(k, _)| k == "cwd")
-        .map(|(_, v)| v.into_owned());
-    let cwd = if let Some(cwd) = cwd_param.as_deref() {
-        vmux_space::cwd::valid_cwd(cwd)?
-    } else {
-        let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, child_of_q, tabs);
-        settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())?
-    };
-    commands.entity(task.stack).despawn_children();
-    let title = cwd
-        .as_ref()
-        .map(|cwd| format!("Terminal ({})", cwd.display()))
-        .unwrap_or_else(|| "Terminal".to_string());
-    commands.entity(task.stack).insert(PageMetadata {
-        url: TERMINAL_PAGE_URL.to_string(),
-        title,
-        bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-        ..default()
-    });
-    let terminal = commands
-        .spawn((
-            new_terminal_bundle_with_cwd(settings, cwd.as_deref()),
-            ChildOf(task.stack),
-        ))
-        .id();
-    commands.entity(terminal).insert(KeyboardOwner);
-    Ok(())
 }
 
 fn respond_terminal_spawn(

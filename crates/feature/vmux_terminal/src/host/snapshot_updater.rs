@@ -17,18 +17,18 @@ impl Plugin for SnapshotPlugin {
 }
 
 fn update_terminals_snapshot(
-    pid_map: Option<Res<PidToEntity>>,
+    pid_maps: Query<Ref<PidToEntity>>,
     mut state: ResMut<CommandBarProjection>,
 ) {
+    let pid_map = pid_maps.iter().next();
     let changed = pid_map
         .as_ref()
-        .map(|r| r.is_changed() || r.is_added())
-        .unwrap_or(false);
+        .is_some_and(|map| map.is_changed() || map.is_added());
     if !changed && !state.terminals.terminal_page_url.is_empty() {
         return;
     }
     let mut running = HashMap::new();
-    if let Some(pid_map) = pid_map.as_deref() {
+    if let Some(pid_map) = pid_map {
         for (pid, entity) in pid_map.iter() {
             running.insert(Pid(pid).page_url(), entity);
         }
@@ -59,7 +59,7 @@ mod tests {
             .add_systems(Update, update_terminals_snapshot);
         let pane = app.world_mut().spawn_empty().id();
         app.world_mut()
-            .insert_resource([(4321, pane)].into_iter().collect::<PidToEntity>());
+            .spawn([(4321, pane)].into_iter().collect::<PidToEntity>());
 
         app.update();
 

@@ -38,15 +38,6 @@ pub(crate) struct AgentLoading {
     pub(crate) announced: bool,
 }
 
-impl AgentLoading {
-    fn armed(announced: bool) -> Self {
-        Self {
-            since: Instant::now(),
-            announced,
-        }
-    }
-}
-
 fn set_terminal_shell_icon(
     mut terminals: Query<
         (&crate::launch::TerminalLaunch, &mut vmux_core::PageMetadata),
@@ -93,9 +84,10 @@ fn arm_agent_loading(
             continue;
         }
         let announced = session.is_some();
-        commands
-            .entity(entity)
-            .insert(AgentLoading::armed(announced));
+        commands.entity(entity).insert(AgentLoading {
+            since: Instant::now(),
+            announced,
+        });
         if session.is_some() && capture.is_none() {
             commands.entity(entity).insert(PromptCapture::default());
         }
@@ -175,9 +167,10 @@ fn arm_agent_loading_on_restart(
 ) {
     for (entity, session, capture) in &restarted {
         let announced = session.is_some();
-        commands
-            .entity(entity)
-            .insert(AgentLoading::armed(announced));
+        commands.entity(entity).insert(AgentLoading {
+            since: Instant::now(),
+            announced,
+        });
         if session.is_some() && capture.is_none() {
             commands.entity(entity).insert(PromptCapture::default());
         }

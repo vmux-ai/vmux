@@ -6,10 +6,17 @@ pub struct PidPlugin;
 
 impl Plugin for PidPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PidToEntity>()
-            .add_systems(Update, (track_pid_inserts, track_pid_removals).chain());
+        app.add_systems(Startup, spawn_pid_index).add_systems(
+            Update,
+            (track_pid_inserts, track_pid_removals)
+                .chain()
+                .in_set(PidIndexSet),
+        );
     }
 }
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct PidIndexSet;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pid(pub u32);
@@ -20,7 +27,7 @@ impl Pid {
     }
 }
 
-#[derive(Resource, Default, Debug)]
+#[derive(Component, Default, Debug)]
 pub struct PidToEntity {
     by_pid: HashMap<u32, Entity>,
     by_entity: EntityHashMap<u32>,
@@ -34,55 +41,53 @@ impl PidToEntity {
     pub fn iter(&self) -> impl Iterator<Item = (u32, Entity)> + '_ {
         self.by_pid.iter().map(|(pid, entity)| (*pid, *entity))
     }
-
-    fn insert(&mut self, entity: Entity, pid: u32) {
-        if let Some(previous_pid) = self.by_entity.insert(entity, pid) {
-            self.by_pid.remove(&previous_pid);
-        }
-        if let Some(previous_entity) = self.by_pid.insert(pid, entity)
-            && previous_entity != entity
-        {
-            self.by_entity.remove(&previous_entity);
-        }
-    }
-
-    fn remove(&mut self, entity: Entity) {
-        let Some(pid) = self.by_entity.remove(&entity) else {
-            return;
-        };
-        if self.by_pid.get(&pid) == Some(&entity) {
-            self.by_pid.remove(&pid);
-        }
-    }
 }
 
 impl FromIterator<(u32, Entity)> for PidToEntity {
     fn from_iter<T: IntoIterator<Item = (u32, Entity)>>(iter: T) -> Self {
         let mut index = Self::default();
         for (pid, entity) in iter {
-            index.insert(entity, pid);
+            index.by_pid.insert(pid, entity);
+            index.by_entity.insert(entity, pid);
         }
         index
     }
 }
 
-pub(crate) fn track_pid_inserts(
-    mut map: ResMut<PidToEntity>,
+fn spawn_pid_index(mut commands: Commands) {
+    commands.spawn((Name::new("Terminal PID index"), PidToEntity::default()));
+}
+
+fn track_pid_inserts(
+    mut map: Single<&mut PidToEntity>,
     inserted: Query<(Entity, &Pid), Changed<Pid>>,
 ) {
     for (entity, Pid(pid)) in &inserted {
-        map.insert(entity, *pid);
+        if let Some(previous_pid) = map.by_entity.insert(entity, *pid) {
+            map.by_pid.remove(&previous_pid);
+        }
+        if let Some(previous_entity) = map.by_pid.insert(*pid, entity)
+            && previous_entity != entity
+        {
+            map.by_entity.remove(&previous_entity);
+        }
     }
 }
 
 fn track_pid_removals(
-    mut map: ResMut<PidToEntity>,
+    mut map: Single<&mut PidToEntity>,
     mut removed: RemovedComponents<Pid>,
     survivors: Query<&Pid>,
 ) {
     for entity in removed.read() {
-        if survivors.get(entity).is_err() {
-            map.remove(entity);
+        if survivors.get(entity).is_ok() {
+            continue;
+        }
+        let Some(pid) = map.by_entity.remove(&entity) else {
+            continue;
+        };
+        if map.by_pid.get(&pid) == Some(&entity) {
+            map.by_pid.remove(&pid);
         }
     }
 }
@@ -102,7 +107,8 @@ mod tests {
         let mut app = make_app();
         let e = app.world_mut().spawn(Pid(7777)).id();
         app.update();
-        let map = app.world().resource::<PidToEntity>();
+        let mut query = app.world_mut().query::<&PidToEntity>();
+        let map = query.single(app.world()).unwrap();
         assert_eq!(map.get(7777), Some(e));
     }
 
@@ -113,7 +119,8 @@ mod tests {
         app.update();
         app.world_mut().despawn(e);
         app.update();
-        let map = app.world().resource::<PidToEntity>();
+        let mut query = app.world_mut().query::<&PidToEntity>();
+        let map = query.single(app.world()).unwrap();
         assert_eq!(map.get(8888), None);
     }
 
@@ -124,7 +131,8 @@ mod tests {
         app.update();
         app.world_mut().entity_mut(e).insert(Pid(9001));
         app.update();
-        let map = app.world().resource::<PidToEntity>();
+        let mut query = app.world_mut().query::<&PidToEntity>();
+        let map = query.single(app.world()).unwrap();
         assert_eq!(map.get(9001), Some(e));
         assert_eq!(map.get(9000), None);
     }
