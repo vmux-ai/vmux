@@ -6,7 +6,9 @@ use bevy::winit::EventLoopProxyWrapper;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 use vmux_core::host::UiStateWrite;
 
-use crate::command_bar::project_files::{MAX_RESULTS, ProjectCompletions, ProjectIndex, RankBias};
+use crate::command_bar::project_files::{
+    MAX_RESULTS, PendingProjectCompletion, ProjectCompletions, ProjectIndex, RankBias,
+};
 use crate::event::{CommandBarUiState, PathCompleteRequest, PathEntry};
 use crate::snapshot::{CommandBarProjection, WriteCommandBarSnapshots};
 
@@ -33,6 +35,7 @@ fn on_path_complete_request(
     trigger: On<UiInput<PathCompleteRequest>>,
     state: Res<CommandBarProjection>,
     browsers: NonSend<Browsers>,
+    pending: Query<&PendingProjectCompletion>,
     mut index: ResMut<ProjectIndex>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -48,13 +51,21 @@ fn on_path_complete_request(
     let request_id = trigger.event().payload.request_id;
     let roots = ProjectQuery::roots_for(query, workspace.project_root.as_deref(), &projects.roots);
     if roots.is_empty() {
-        index.forget(asking);
-        commands.entity(asking).insert(PathCompletionRequest {
-            request_id,
-            query: query.to_string(),
-        });
+        commands
+            .entity(asking)
+            .remove::<PendingProjectCompletion>()
+            .insert(PathCompletionRequest {
+                request_id,
+                query: query.to_string(),
+            });
         return;
     }
+    let mut wanted = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
+    for request in &pending {
+        ProjectQuery::include(&mut wanted, &request.roots);
+    }
+    ProjectQuery::include(&mut wanted, &roots);
+    index.warm(&wanted, proxy.as_deref());
     let bias = RankBias::new(
         ProjectQuery::favoured(
             projects.active.as_deref(),
@@ -62,9 +73,17 @@ fn on_path_complete_request(
         ),
         &work.recent_files,
     );
-    let Some(completions) =
-        index.matches(&roots, &bias, request_id, query, asking, proxy.as_deref())
-    else {
+    if index.walking(&roots) {
+        commands.entity(asking).insert(PendingProjectCompletion {
+            request_id,
+            query: query.to_string(),
+            roots: roots.clone(),
+            answered_with: index.generation(),
+        });
+    } else {
+        commands.entity(asking).remove::<PendingProjectCompletion>();
+    }
+    let Some(completions) = index.matches(&roots, &bias, query) else {
         commands.entity(asking).insert(PathCompletionRequest {
             request_id,
             query: query.to_string(),
@@ -84,6 +103,7 @@ fn on_path_complete_request(
 fn warm_project_index(
     state: Res<CommandBarProjection>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
+    pending: Query<&PendingProjectCompletion>,
     mut index: ResMut<ProjectIndex>,
 ) {
     if !state.is_changed() {
@@ -91,7 +111,10 @@ fn warm_project_index(
     }
     let workspace = &state.workspace;
     let projects = &state.projects;
-    let roots = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
+    let mut roots = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
+    for request in &pending {
+        ProjectQuery::include(&mut roots, &request.roots);
+    }
     if roots.is_empty() {
         return;
     }
@@ -103,15 +126,20 @@ fn answer_settled_project_index(
     browsers: NonSend<Browsers>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut index: ResMut<ProjectIndex>,
+    mut pending: Query<(Entity, &mut PendingProjectCompletion)>,
     mut commands: Commands,
 ) {
     let workspace = &state.workspace;
     let projects = &state.projects;
     let work = &state.work;
-    let pending = index.pending();
     if pending.is_empty() {
         return;
     }
+    let mut wanted = ProjectQuery::all(workspace.project_root.as_deref(), &projects.roots);
+    for (_, request) in pending.iter() {
+        ProjectQuery::include(&mut wanted, &request.roots);
+    }
+    index.warm(&wanted, proxy.as_deref());
     let bias = RankBias::new(
         ProjectQuery::favoured(
             projects.active.as_deref(),
@@ -119,34 +147,43 @@ fn answer_settled_project_index(
         ),
         &work.recent_files,
     );
-    for asked in pending {
-        if !browsers.can_emit_to(&asked.webview) {
-            index.forget(asked.webview);
+    for (webview, mut request) in &mut pending {
+        if !browsers.can_emit_to(&webview) {
             commands
-                .entity(asked.webview)
+                .entity(webview)
+                .remove::<PendingProjectCompletion>()
                 .remove::<PathCompletionRequest>()
                 .remove::<PathCompletionOperation>();
             continue;
         }
         let roots = ProjectQuery::roots_for(
-            &asked.query,
+            &request.query,
             workspace.project_root.as_deref(),
             &projects.roots,
         );
         if roots.is_empty() {
+            commands
+                .entity(webview)
+                .remove::<PendingProjectCompletion>();
             continue;
         }
-        let Some(completions) = index.settled_for(asked.webview, &roots, &bias, proxy.as_deref())
-        else {
+        request.roots.clone_from(&roots);
+        let completions = index.settled_for(&mut request, &roots, &bias);
+        if !index.walking(&roots) {
+            commands
+                .entity(webview)
+                .remove::<PendingProjectCompletion>();
+        }
+        let Some(completions) = completions else {
             continue;
         };
         commands
-            .entity(asked.webview)
+            .entity(webview)
             .remove::<PathCompletionRequest>()
             .remove::<PathCompletionOperation>();
         commands.trigger(UiStateWrite::<CommandBarUiState>::from_event(
-            asked.webview,
-            &completions.response(asked.request_id),
+            webview,
+            &completions.response(request.request_id),
         ));
     }
 }
@@ -229,6 +266,14 @@ impl ProjectQuery {
             roots.push(root);
         }
         roots
+    }
+
+    fn include(roots: &mut Vec<PathBuf>, additional: &[PathBuf]) {
+        for root in additional {
+            if !roots.contains(root) {
+                roots.push(root.clone());
+            }
+        }
     }
 
     fn names_a_location(query: &str) -> bool {

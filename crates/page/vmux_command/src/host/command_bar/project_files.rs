@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use bevy::prelude::Entity;
+use bevy::prelude::Component;
 use bevy::tasks::{IoTaskPool, Task, block_on, futures_lite::future};
 use bevy::winit::EventLoopProxyWrapper;
 use ignore::WalkBuilder;
@@ -15,15 +15,12 @@ const INDEX_TTL: Duration = Duration::from_secs(60);
 const ACTIVE_PROJECT_LIFT: i32 = 40;
 const RECENT_FILE_LIFT: i32 = 16;
 
-const MAX_PENDING_ASKS: usize = 8;
-
-#[derive(Clone)]
-pub struct Asked {
-    pub webview: Entity,
+#[derive(Component, Clone)]
+pub struct PendingProjectCompletion {
     pub request_id: u64,
     pub query: String,
-    roots: Vec<PathBuf>,
-    answered_with: u64,
+    pub roots: Vec<PathBuf>,
+    pub answered_with: u64,
 }
 
 pub struct ProjectCompletions {
@@ -54,84 +51,44 @@ impl ProjectCompletions {
 #[derive(bevy::prelude::Resource, Default)]
 pub struct ProjectIndex {
     roots: Vec<RootIndex>,
-    asked: Vec<Asked>,
     generation: u64,
 }
 
 impl ProjectIndex {
     pub fn matches(
-        &mut self,
+        &self,
         roots: &[PathBuf],
         bias: &RankBias,
-        request_id: u64,
         query: &str,
-        webview: Entity,
-        proxy: Option<&EventLoopProxyWrapper>,
     ) -> Option<ProjectCompletions> {
-        self.remember(webview, request_id, query, roots);
-        self.sync(roots, proxy);
         self.rank(roots, query, bias)
-    }
-
-    fn remember(&mut self, webview: Entity, request_id: u64, query: &str, roots: &[PathBuf]) {
-        let asked = Asked {
-            webview,
-            request_id,
-            query: query.to_string(),
-            roots: roots.to_vec(),
-            answered_with: self.generation,
-        };
-        for held in &mut self.asked {
-            if held.webview == webview {
-                *held = asked;
-                return;
-            }
-        }
-        if self.asked.len() == MAX_PENDING_ASKS {
-            self.asked.remove(0);
-        }
-        self.asked.push(asked);
     }
 
     pub fn warm(&mut self, roots: &[PathBuf], proxy: Option<&EventLoopProxyWrapper>) {
         self.sync(roots, proxy);
     }
 
-    pub fn pending(&self) -> Vec<Asked> {
-        self.asked.clone()
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn settled_for(
-        &mut self,
-        webview: Entity,
+        &self,
+        pending: &mut PendingProjectCompletion,
         roots: &[PathBuf],
         bias: &RankBias,
-        proxy: Option<&EventLoopProxyWrapper>,
     ) -> Option<ProjectCompletions> {
-        let at = self.asked.iter().position(|ask| ask.webview == webview)?;
-        let query = self.asked[at].query.clone();
-        self.sync(roots, proxy);
-        if self.asked[at].answered_with == self.generation {
-            self.forget_once_complete(webview);
+        if pending.answered_with == self.generation {
             return None;
         }
-        self.asked[at].answered_with = self.generation;
-        let ranked = self.rank(roots, &query, bias);
-        self.forget_once_complete(webview);
-        ranked
+        pending.answered_with = self.generation;
+        self.rank(roots, &pending.query, bias)
     }
 
-    fn forget_once_complete(&mut self, webview: Entity) {
-        for index in &self.roots {
-            if index.walking() {
-                return;
-            }
-        }
-        self.forget(webview);
-    }
-
-    pub fn forget(&mut self, webview: Entity) {
-        self.asked.retain(|ask| ask.webview != webview);
+    pub fn walking(&self, roots: &[PathBuf]) -> bool {
+        self.roots
+            .iter()
+            .any(|index| roots.contains(&index.root) && index.walking())
     }
 
     fn rank(&self, roots: &[PathBuf], query: &str, bias: &RankBias) -> Option<ProjectCompletions> {
@@ -158,20 +115,7 @@ impl ProjectIndex {
         })
     }
 
-    fn wanted(&self, roots: &[PathBuf]) -> Vec<PathBuf> {
-        let mut wanted = roots.to_vec();
-        for ask in &self.asked {
-            for root in &ask.roots {
-                if !wanted.contains(root) {
-                    wanted.push(root.clone());
-                }
-            }
-        }
-        wanted
-    }
-
     fn sync(&mut self, roots: &[PathBuf], proxy: Option<&EventLoopProxyWrapper>) {
-        let roots = &self.wanted(roots);
         let held = self.roots.len();
         self.roots.retain(|index| roots.contains(&index.root));
         if self.roots.len() != held {
@@ -1049,15 +993,21 @@ mod tests {
     }
 
     impl ProjectIndex {
-        fn answer(&mut self, webview: Entity, roots: &[PathBuf]) -> ProjectCompletions {
+        fn answer(
+            &mut self,
+            pending: &mut PendingProjectCompletion,
+            roots: &[PathBuf],
+        ) -> ProjectCompletions {
             let bias = RankBias::after_visiting(&[]);
             for _ in 0..500 {
-                if let Some(answered) = self.settled_for(webview, roots, &bias, None) {
+                self.warm(roots, None);
+                let requested = pending.roots.clone();
+                if let Some(answered) = self.settled_for(pending, &requested, &bias) {
                     return answered;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            panic!("the index never settled for {webview}");
+            panic!("the index never settled");
         }
     }
 
@@ -1071,17 +1021,25 @@ mod tests {
         let roots_one = vec![one.dir.path().to_path_buf()];
         let roots_two = vec![two.dir.path().to_path_buf()];
 
-        let mut world = bevy::prelude::World::new();
-        let first = world.spawn_empty().id();
-        let second = world.spawn_empty().id();
-
         let mut index = ProjectIndex::default();
-        let bias = RankBias::after_visiting(&[]);
-        index.matches(&roots_one, &bias, 1, "marker", first, None);
-        index.matches(&roots_two, &bias, 2, "marker", second, None);
+        let mut roots = roots_one.clone();
+        roots.extend(roots_two.clone());
+        index.warm(&roots, None);
+        let mut first = PendingProjectCompletion {
+            request_id: 1,
+            query: "marker".to_string(),
+            roots: roots_one,
+            answered_with: index.generation(),
+        };
+        let mut second = PendingProjectCompletion {
+            request_id: 2,
+            query: "marker".to_string(),
+            roots: roots_two,
+            answered_with: index.generation(),
+        };
 
-        let answered_one = index.answer(first, &roots_one);
-        let answered_two = index.answer(second, &roots_two);
+        let answered_one = index.answer(&mut first, &roots);
+        let answered_two = index.answer(&mut second, &roots);
 
         let named = |completions: &ProjectCompletions| {
             let mut names = Vec::new();
