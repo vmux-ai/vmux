@@ -62,7 +62,7 @@ fn push_composer_context_to_page(
         Option<&vmux_layout::tab::TabWorktree>,
     )>,
     browsers: NonSend<Browsers>,
-    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
+    mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     space_projects: SpaceProjects,
     mut cache: Local<ComposerContextCache>,
     mut commands: Commands,

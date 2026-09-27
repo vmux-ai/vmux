@@ -266,7 +266,6 @@ mod browser_navigate_flow {
     use bevy::prelude::*;
     use vmux_agent::event::AgentRequestInput;
     use vmux_agent::host::AgentSessionPlugin;
-    use vmux_agent::strategy::AgentStrategies;
     use vmux_api::protocol::{AgentBrowserNavigate, AgentRequest, AgentRequestId};
     use vmux_core::{
         LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
@@ -366,8 +365,7 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.init_resource::<AgentStrategies>()
-            .insert_resource(FocusedStack::default())
+        app.insert_resource(FocusedStack::default())
             .insert_resource(test_settings())
             .init_resource::<CapturedNavigateUrls>();
 
@@ -418,8 +416,7 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.init_resource::<AgentStrategies>()
-            .insert_resource(FocusedStack::default())
+        app.insert_resource(FocusedStack::default())
             .insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -571,8 +568,7 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.init_resource::<AgentStrategies>()
-            .insert_resource(FocusedStack::default())
+        app.insert_resource(FocusedStack::default())
             .insert_resource(test_settings());
 
         let pane_a = app.world_mut().spawn(Pane).id();
@@ -618,8 +614,7 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.init_resource::<AgentStrategies>()
-            .insert_resource(FocusedStack::default())
+        app.insert_resource(FocusedStack::default())
             .insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -820,8 +815,7 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.init_resource::<AgentStrategies>()
-            .insert_resource(FocusedStack::default())
+        app.insert_resource(FocusedStack::default())
             .insert_resource(test_settings());
 
         let pane_a = app.world_mut().spawn(Pane).id();
@@ -872,8 +866,7 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.init_resource::<AgentStrategies>()
-            .insert_resource(FocusedStack::default())
+        app.insert_resource(FocusedStack::default())
             .insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -998,11 +991,7 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.init_resource::<AgentStrategies>()
-            .insert_resource(vmux_agent::host::AgentExecutableOverride(
-                std::collections::HashMap::from([(vmux_core::agent::AgentKind::Claude, true)]),
-            ))
-            .insert_resource(FocusedStack::default())
+        app.insert_resource(FocusedStack::default())
             .insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
@@ -1045,11 +1034,7 @@ mod browser_navigate_flow {
             AgentSessionPlugin,
             ConsumerPlugin,
         ));
-        app.init_resource::<AgentStrategies>()
-            .insert_resource(vmux_agent::host::AgentExecutableOverride(
-                std::collections::HashMap::from([(vmux_core::agent::AgentKind::Codex, true)]),
-            ))
-            .insert_resource(FocusedStack::default())
+        app.insert_resource(FocusedStack::default())
             .insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();

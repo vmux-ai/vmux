@@ -42,13 +42,16 @@ impl Plugin for WatchPlugin {
             .world()
             .get_resource::<EventLoopProxyWrapper>()
             .map(|wrapper| (**wrapper).clone());
-        app.insert_resource(RepoInfoCache {
-            entries: HashMap::new(),
-            canonical: HashMap::new(),
-            guessed: HashMap::new(),
-            wake,
-        })
-        .add_systems(
+        app.world_mut().spawn((
+            Name::new("Repository info cache"),
+            RepoInfoCache {
+                entries: HashMap::new(),
+                canonical: HashMap::new(),
+                guessed: HashMap::new(),
+                wake,
+            },
+        ));
+        app.add_systems(
             Update,
             (
                 drain_git_watch,
@@ -121,7 +124,7 @@ impl GuessedPath {
     }
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct RepoInfoCache {
     entries: HashMap<PathBuf, RepoInfoCacheEntry>,
     canonical: HashMap<PathBuf, PathBuf>,
@@ -535,7 +538,7 @@ impl GitWatch {
 
 fn drain_git_watch(
     watch: Option<NonSendMut<GitWatch>>,
-    mut repo_info: ResMut<RepoInfoCache>,
+    mut repo_info: Single<&mut RepoInfoCache>,
     mut views: Query<&mut super::state::GitState>,
     mut files: Query<&mut super::status::FileGit>,
     wake: Option<Res<EventLoopProxyWrapper>>,
@@ -609,7 +612,7 @@ fn drain_git_watch(
     }
 }
 
-fn poll_repo_info_cache(mut repo_info: ResMut<RepoInfoCache>) {
+fn poll_repo_info_cache(mut repo_info: Single<&mut RepoInfoCache>) {
     let changed = repo_info.bypass_change_detection().poll();
     if changed {
         repo_info.set_changed();
@@ -618,7 +621,7 @@ fn poll_repo_info_cache(mut repo_info: ResMut<RepoInfoCache>) {
 
 fn sync_repo_info_watches(
     watch: Option<NonSendMut<GitWatch>>,
-    mut repo_info: ResMut<RepoInfoCache>,
+    mut repo_info: Single<&mut RepoInfoCache>,
 ) {
     let repo_info = repo_info.bypass_change_detection();
     let Some(mut watch) = watch else {

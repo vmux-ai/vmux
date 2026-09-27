@@ -486,7 +486,7 @@ fn sync_live_start_pages(
     >,
     added_keyboard_targets: Query<(), Added<KeyboardOwner>>,
     browsers: NonSend<Browsers>,
-    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
+    mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     space_projects: vmux_space::SpaceProjects,
     definitions: Query<&vmux_command::CommandDefinition>,
@@ -615,7 +615,7 @@ fn on_start_data_request(
     locale: Option<Res<ResolvedLocale>>,
     space_projects: vmux_space::SpaceProjects,
     definitions: Query<&vmux_command::CommandDefinition>,
-    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
+    mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;

@@ -360,7 +360,7 @@ fn mark_page_state_dirty(
     focused_stack: Res<vmux_layout::stack::FocusedStack>,
     settings: Res<AppSettings>,
     active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
-    repo_info: Option<Res<vmux_git::RepoInfoCache>>,
+    repo_info: Option<Single<Ref<vmux_git::RepoInfoCache>>>,
     mut revision: ResMut<StateRevision>,
 ) {
     let resource_changed = focused_window.is_changed()
@@ -518,7 +518,7 @@ fn push_stacks_host_emit(
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
-    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
+    mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
     revision: Res<StateRevision>,
     mut cache: Local<ProjectionCache>,
 ) {
@@ -752,7 +752,7 @@ fn push_projects_host_emit(
     revision: Res<StateRevision>,
     mut cache: Local<ProjectionCache>,
     mut listed: Local<Option<Vec<vmux_core::event::ProjectRow>>>,
-    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
+    mut repo_info: Option<Single<&mut vmux_git::RepoInfoCache>>,
 ) {
     let Some((cef_e, page_ready_changed)) = layout.get() else {
         return;
