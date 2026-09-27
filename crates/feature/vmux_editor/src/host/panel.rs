@@ -18,8 +18,11 @@ impl Plugin for PanelPlugin {
         app.add_plugins(UiEventPlugin::<(FilePanelPick,)>::default())
             .add_observer(receive_completion)
             .add_observer(receive_references)
-            .add_observer(apply_panel_request)
-            .add_observer(pick_panel_item)
+            .add_observer(select_next_panel_item)
+            .add_observer(select_previous_panel_item)
+            .add_observer(choose_panel_item)
+            .add_observer(dismiss_panel)
+            .add_observer(receive_panel_pick)
             .add_systems(PostUpdate, (clear_navigated_panels, refresh_changed_panels));
     }
 }
@@ -141,7 +144,7 @@ impl FilePanel {
         true
     }
 
-    fn move_selection(&mut self, movement: FilePanelMovement) -> bool {
+    fn select_next(&mut self) -> bool {
         let Some(content) = self.state.content.as_ref() else {
             return false;
         };
@@ -152,10 +155,26 @@ impl FilePanel {
         if len == 0 {
             return false;
         }
-        let selected = match movement {
-            FilePanelMovement::Next => (self.state.selected as usize + 1) % len,
-            FilePanelMovement::Previous => (self.state.selected as usize + len - 1) % len,
-        } as u32;
+        let selected = ((self.state.selected as usize + 1) % len) as u32;
+        if selected == self.state.selected {
+            return false;
+        }
+        self.state.selected = selected;
+        true
+    }
+
+    fn select_previous(&mut self) -> bool {
+        let Some(content) = self.state.content.as_ref() else {
+            return false;
+        };
+        let len = match content {
+            FilePanelContent::References { items } => items.len(),
+            FilePanelContent::Completion { items, .. } => items.len(),
+        };
+        if len == 0 {
+            return false;
+        }
+        let selected = ((self.state.selected as usize + len - 1) % len) as u32;
         if selected == self.state.selected {
             return false;
         }
@@ -229,31 +248,29 @@ enum FilePanelChoice {
     },
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum FilePanelMovement {
-    Next,
-    Previous,
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum FilePanelOperation {
-    Move(FilePanelMovement),
-    Choose,
-    ChooseAt(u32),
-    Dismiss,
+#[derive(EntityEvent)]
+pub(super) struct FilePanelNextRequest {
+    #[event_target]
+    pub(super) entity: Entity,
 }
 
 #[derive(EntityEvent)]
-pub(super) struct FilePanelRequest {
+pub(super) struct FilePanelPreviousRequest {
     #[event_target]
-    entity: Entity,
-    operation: FilePanelOperation,
+    pub(super) entity: Entity,
 }
 
-impl FilePanelRequest {
-    pub(super) fn new(entity: Entity, operation: FilePanelOperation) -> Self {
-        Self { entity, operation }
-    }
+#[derive(EntityEvent)]
+pub(super) struct FilePanelChooseRequest {
+    #[event_target]
+    pub(super) entity: Entity,
+    pub(super) index: Option<u32>,
+}
+
+#[derive(EntityEvent)]
+pub(super) struct FilePanelDismissRequest {
+    #[event_target]
+    pub(super) entity: Entity,
 }
 
 #[derive(EntityEvent)]
@@ -360,15 +377,51 @@ fn clear_navigated_panels(
     }
 }
 
-fn pick_panel_item(trigger: On<UiInput<FilePanelPick>>, mut commands: Commands) {
-    commands.trigger(FilePanelRequest::new(
-        trigger.event().webview,
-        FilePanelOperation::ChooseAt(trigger.event().payload.index),
+fn receive_panel_pick(trigger: On<UiInput<FilePanelPick>>, mut commands: Commands) {
+    commands.trigger(FilePanelChooseRequest {
+        entity: trigger.event().webview,
+        index: Some(trigger.event().payload.index),
+    });
+}
+
+fn select_next_panel_item(
+    trigger: On<FilePanelNextRequest>,
+    mut panels: Query<&mut FilePanel>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(mut panel) = panels.get_mut(entity) else {
+        return;
+    };
+    if !panel.select_next() {
+        return;
+    }
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &panel.state(),
     ));
 }
 
-fn apply_panel_request(
-    trigger: On<FilePanelRequest>,
+fn select_previous_panel_item(
+    trigger: On<FilePanelPreviousRequest>,
+    mut panels: Query<&mut FilePanel>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(mut panel) = panels.get_mut(entity) else {
+        return;
+    };
+    if !panel.select_previous() {
+        return;
+    }
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &panel.state(),
+    ));
+}
+
+fn choose_panel_item(
+    trigger: On<FilePanelChooseRequest>,
     mut panels: Query<(&mut FilePanel, &mut Editor)>,
     mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
     mut commands: Commands,
@@ -377,23 +430,8 @@ fn apply_panel_request(
     let Ok((mut panel, mut edit)) = panels.get_mut(entity) else {
         return;
     };
-    let mut changed = false;
-    let choice = match trigger.event().operation {
-        FilePanelOperation::Move(movement) => {
-            changed = panel.move_selection(movement);
-            None
-        }
-        FilePanelOperation::Choose => panel.choice(None),
-        FilePanelOperation::ChooseAt(index) => panel.choice(Some(index)),
-        FilePanelOperation::Dismiss => {
-            changed = panel.dismiss();
-            None
-        }
-    };
-    if choice.is_some() {
-        changed = true;
-    }
-    let state = changed.then(|| panel.state());
+    let choice = panel.choice(trigger.event().index);
+    let state = choice.as_ref().map(|_| panel.state());
     match choice {
         Some(FilePanelChoice::Reference(item)) => {
             let path = PathBuf::from(item.path);
@@ -431,6 +469,24 @@ fn apply_panel_request(
             entity, &state,
         ));
     }
+}
+
+fn dismiss_panel(
+    trigger: On<FilePanelDismissRequest>,
+    mut panels: Query<&mut FilePanel>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(mut panel) = panels.get_mut(entity) else {
+        return;
+    };
+    if !panel.dismiss() {
+        return;
+    }
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &panel.state(),
+    ));
 }
 
 #[cfg(test)]
@@ -517,7 +573,7 @@ mod tests {
         let mut fixture = CompletionFixture::new("p", 1);
         fixture.show();
 
-        assert!(fixture.panel.move_selection(FilePanelMovement::Previous));
+        assert!(fixture.panel.select_previous());
         assert_eq!(fixture.panel.state.selected, 2);
         assert!(matches!(
             fixture.panel.choice(None),

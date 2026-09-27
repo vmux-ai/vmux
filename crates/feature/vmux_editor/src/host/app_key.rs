@@ -12,7 +12,10 @@ use vmux_core::event::{
 };
 
 use crate::host::editor::{Editor, FileView};
-use crate::host::panel::{FilePanelMovement, FilePanelOperation, FilePanelRequest};
+use crate::host::panel::{
+    FilePanelChooseRequest, FilePanelDismissRequest, FilePanelNextRequest,
+    FilePanelPreviousRequest,
+};
 use crate::host::shape::BufferShape;
 
 pub(crate) struct KeyPlugin;
@@ -26,7 +29,10 @@ impl Plugin for KeyPlugin {
             .add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
             .add_systems(Update, apply_status_picks)
             .add_observer(echo_key_command)
-            .add_observer(dispatch_panel_command)
+            .add_observer(dispatch_panel_next_command)
+            .add_observer(dispatch_panel_previous_command)
+            .add_observer(dispatch_panel_choose_command)
+            .add_observer(dispatch_panel_dismiss_command)
             .add_observer(open_status_picker);
     }
 }
@@ -35,7 +41,16 @@ impl Plugin for KeyPlugin {
 struct FileKeyBinding(FileKey);
 
 #[derive(Component)]
-struct FilePanelKeyBinding(FilePanelOperation);
+struct FilePanelNextKeyBinding;
+
+#[derive(Component)]
+struct FilePanelPreviousKeyBinding;
+
+#[derive(Component)]
+struct FilePanelChooseKeyBinding;
+
+#[derive(Component)]
+struct FilePanelDismissKeyBinding;
 
 fn spawn_commands(mut commands: Commands) {
     let mut definitions = CommandDefinitions::from_ron(include_str!("app_key.ron"));
@@ -57,19 +72,19 @@ fn spawn_commands(mut commands: Commands) {
     ));
     commands.spawn((
         definitions.take("file_panel_next"),
-        FilePanelKeyBinding(FilePanelOperation::Move(FilePanelMovement::Next)),
+        FilePanelNextKeyBinding,
     ));
     commands.spawn((
         definitions.take("file_panel_previous"),
-        FilePanelKeyBinding(FilePanelOperation::Move(FilePanelMovement::Previous)),
+        FilePanelPreviousKeyBinding,
     ));
     commands.spawn((
         definitions.take("file_panel_choose"),
-        FilePanelKeyBinding(FilePanelOperation::Choose),
+        FilePanelChooseKeyBinding,
     ));
     commands.spawn((
         definitions.take("file_panel_dismiss"),
-        FilePanelKeyBinding(FilePanelOperation::Dismiss),
+        FilePanelDismissKeyBinding,
     ));
     definitions.assert_all_registered();
 }
@@ -90,18 +105,57 @@ fn echo_key_command(
     );
 }
 
-fn dispatch_panel_command(
+fn dispatch_panel_next_command(
     trigger: On<CommandDispatch>,
-    keys: Query<&FilePanelKeyBinding>,
+    keys: Query<(), With<FilePanelNextKeyBinding>>,
     mut commands: Commands,
 ) {
-    let Ok(key) = keys.get(trigger.event().command()) else {
+    if !keys.contains(trigger.event().command()) {
         return;
-    };
-    commands.trigger(FilePanelRequest::new(
-        trigger.event().invocation().caller,
-        key.0,
-    ));
+    }
+    commands.trigger(FilePanelNextRequest {
+        entity: trigger.event().invocation().caller,
+    });
+}
+
+fn dispatch_panel_previous_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<(), With<FilePanelPreviousKeyBinding>>,
+    mut commands: Commands,
+) {
+    if !keys.contains(trigger.event().command()) {
+        return;
+    }
+    commands.trigger(FilePanelPreviousRequest {
+        entity: trigger.event().invocation().caller,
+    });
+}
+
+fn dispatch_panel_choose_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<(), With<FilePanelChooseKeyBinding>>,
+    mut commands: Commands,
+) {
+    if !keys.contains(trigger.event().command()) {
+        return;
+    }
+    commands.trigger(FilePanelChooseRequest {
+        entity: trigger.event().invocation().caller,
+        index: None,
+    });
+}
+
+fn dispatch_panel_dismiss_command(
+    trigger: On<CommandDispatch>,
+    keys: Query<(), With<FilePanelDismissKeyBinding>>,
+    mut commands: Commands,
+) {
+    if !keys.contains(trigger.event().command()) {
+        return;
+    }
+    commands.trigger(FilePanelDismissRequest {
+        entity: trigger.event().invocation().caller,
+    });
 }
 
 fn open_status_picker(
@@ -228,7 +282,7 @@ mod tests {
     }
 
     impl PanelRequests {
-        fn record(trigger: On<FilePanelRequest>, mut seen: ResMut<Self>) {
+        fn record(trigger: On<FilePanelChooseRequest>, mut seen: ResMut<Self>) {
             seen.0.push(trigger.event_target());
         }
     }
