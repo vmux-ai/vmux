@@ -10,15 +10,17 @@ use vmux_setting::{
 
 impl Plugin for UpdatePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(UpdateConfig {
+        let config = UpdateConfig {
             stable_endpoint: self.updater.stable_endpoint.clone(),
             preview_endpoint: self.updater.preview_endpoint.clone(),
             pubkey: self.updater.pubkey.clone(),
             initial_delay: self.updater.initial_delay,
             poll_interval: self.updater.poll_interval,
-        })
-        .add_systems(Startup, init_update_checker)
-        .add_systems(Update, poll_update_result);
+        };
+        let checker = UpdateChecker::new(config.initial_delay);
+        app.world_mut()
+            .spawn((Name::new("Update checker"), config, checker));
+        app.add_systems(Update, poll_update_result);
     }
 }
 
@@ -120,7 +122,7 @@ pub struct UpdatePlugin {
     updater: VmuxUpdater,
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 struct UpdateConfig {
     stable_endpoint: String,
     preview_endpoint: String,
@@ -138,7 +140,7 @@ impl UpdateConfig {
     }
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 struct UpdateChecker {
     rx: Mutex<mpsc::Receiver<UpdateResult>>,
     tx: mpsc::Sender<UpdateResult>,
@@ -164,22 +166,23 @@ enum UpdateResult {
     Failed(String),
 }
 
-fn init_update_checker(mut commands: Commands, config: Res<UpdateConfig>) {
-    let (tx, rx) = mpsc::channel();
-
-    commands.insert_resource(UpdateChecker {
-        rx: Mutex::new(rx),
-        tx,
-        timer: Timer::from_seconds(config.initial_delay.as_secs_f32(), TimerMode::Once),
-        done: false,
-        in_flight: false,
-        channel: None,
-    });
+impl UpdateChecker {
+    fn new(initial_delay: Duration) -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            rx: Mutex::new(rx),
+            tx,
+            timer: Timer::from_seconds(initial_delay.as_secs_f32(), TimerMode::Once),
+            done: false,
+            in_flight: false,
+            channel: None,
+        }
+    }
 }
 
 fn poll_update_result(
-    mut checker: ResMut<UpdateChecker>,
-    config: Res<UpdateConfig>,
+    mut checker: Single<&mut UpdateChecker>,
+    config: Single<&UpdateConfig>,
     settings: Res<AppSettings>,
     time: Res<Time>,
     mut state: ResMut<vmux_layout::UpdateState>,

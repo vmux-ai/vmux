@@ -1082,9 +1082,10 @@ mod tests {
     #[test]
     fn persisted_terminal_tab_reattaches_saved_process() {
         let mut app = App::new();
+        app.world_mut()
+            .spawn(vmux_agent::strategy::AgentStrategies::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .init_resource::<vmux_agent::strategy::AgentStrategies>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_systems(Update, rebuild_space_views);
 
@@ -1132,9 +1133,10 @@ mod tests {
             "vmux://vault/?provider=github",
         ] {
             let mut app = App::new();
+            app.world_mut()
+                .spawn(vmux_agent::strategy::AgentStrategies::default());
             app.add_plugins(MinimalPlugins)
                 .insert_resource(test_settings())
-                .init_resource::<vmux_agent::strategy::AgentStrategies>()
                 .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
                 .add_systems(Update, rebuild_space_views);
 
@@ -1181,9 +1183,10 @@ mod tests {
     #[test]
     fn a_restored_web_page_is_still_rebuilt_as_a_cef_browser() {
         let mut app = App::new();
+        app.world_mut()
+            .spawn(vmux_agent::strategy::AgentStrategies::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .init_resource::<vmux_agent::strategy::AgentStrategies>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_systems(Update, rebuild_space_views);
 
@@ -1650,12 +1653,13 @@ mod tests {
     fn runtime_loaded_space_rebuilds_browser_views() {
         let _home = HomeEnvGuard::use_temp_home("runtime-loaded-space-rebuilds-browser-views");
         let mut app = App::new();
+        app.world_mut()
+            .spawn(vmux_agent::strategy::AgentStrategies::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .insert_resource(ActiveSpace {
                 record: vmux_space::model::bootstrap_space_record(),
             })
-            .init_resource::<vmux_agent::strategy::AgentStrategies>()
             .add_plugins(PersistencePlugin);
 
         let main = app.world_mut().spawn(Main).id();
@@ -1935,12 +1939,13 @@ mod tests {
             .expect("write version");
 
         let mut app = App::new();
+        app.world_mut()
+            .spawn(vmux_agent::strategy::AgentStrategies::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .insert_resource(ActiveSpace {
                 record: vmux_space::model::bootstrap_space_record(),
             })
-            .init_resource::<vmux_agent::strategy::AgentStrategies>()
             .add_plugins(PersistencePlugin);
         app.world_mut().spawn(Main);
         app.world_mut().spawn(PrimaryWindow);

@@ -8,7 +8,7 @@ pub struct PermissionsPlugin;
 
 impl Plugin for PermissionsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(MediaPermissionStore::load())
+        app.add_systems(Startup, spawn_media_permission_store)
             .add_systems(Update, drain_media_permission_requests);
     }
 }
@@ -29,10 +29,14 @@ pub struct OriginPermissions {
     pub screen: Option<PermissionDecision>,
 }
 
-#[derive(Resource, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MediaPermissionStore {
     #[serde(default)]
     origins: HashMap<String, OriginPermissions>,
+}
+
+fn spawn_media_permission_store(mut commands: Commands) {
+    commands.spawn((Name::new("Media permissions"), MediaPermissionStore::load()));
 }
 
 fn store_path() -> PathBuf {
@@ -166,7 +170,7 @@ enum Resolution {
 
 fn drain_media_permission_requests(
     receiver: Res<MediaPermissionReceiver>,
-    mut store: ResMut<MediaPermissionStore>,
+    mut store: Single<&mut MediaPermissionStore>,
     _main_thread: NonSend<Browsers>,
 ) {
     while let Ok(request) = receiver.0.try_recv() {
