@@ -1084,7 +1084,12 @@ async fn handle_client(
 
             ClientMessage::Shared(
                 SharedMessage::ListSessions
-                | SharedMessage::AgentCommand(_)
+                | SharedMessage::AgentNewChat { .. }
+                | SharedMessage::AgentListAgents
+                | SharedMessage::AgentListTeam
+                | SharedMessage::AgentListModels { .. }
+                | SharedMessage::AgentSelectModel { .. }
+                | SharedMessage::AgentSetEffort { .. }
                 | SharedMessage::AgentListMedia { .. },
             ) => {
                 tracing::warn!("local socket: ignoring a remote-only request");

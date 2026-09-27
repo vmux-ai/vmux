@@ -1,18 +1,21 @@
-use vmux_api::protocol::{
-    AgentAttachment, ApprovalDecision, ClientMessage, SharedAgentCommand, SharedMessage,
-};
+use vmux_api::protocol::{AgentAttachment, ApprovalDecision, ClientMessage, SharedMessage};
 
 const FROZEN_PREFIX: usize = 48;
 
 #[rustfmt::skip]
-const FROZEN: [(&str, &str); 7] = [
-    ("AgentAttach",    "320000000000000073ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000"),
-    ("AgentInput",     "320000000100000073ffffffffffffff74ffffffffffffff000000000000000000000000dcffffff0000000000000000"),
-    ("AgentCancel",    "320000000200000073ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000"),
-    ("AgentApprove",   "320000000300000073ffffffffffffff63ffffffffffffff000000000000000000000000000000000000000000000000"),
-    ("AgentListMedia", "320000000400000073ffffffffffffff71ffffffffffffff000000000000000000000000000000000000000000000000"),
-    ("ListSessions",   "320000000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-    ("AgentCommand",   "320000000600000001000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+const FROZEN: [(&str, &str); 12] = [
+    ("AgentAttach",      "320000000000000073ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentInput",       "320000000100000073ffffffffffffff74ffffffffffffff000000000000000000000000dcffffff0000000000000000"),
+    ("AgentCancel",      "320000000200000073ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentApprove",     "320000000300000073ffffffffffffff63ffffffffffffff000000000000000000000000000000000000000000000000"),
+    ("AgentListMedia",   "320000000400000073ffffffffffffff71ffffffffffffff000000000000000000000000000000000000000000000000"),
+    ("ListSessions",     "320000000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentNewChat",     "32000000060000006fffffffffffffff70ffffffffffffff000000000000000000000000000000000000000000000000"),
+    ("AgentListAgents",  "320000000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentListTeam",    "320000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentListModels",  "320000000900000073ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000"),
+    ("AgentSelectModel", "320000000a00000073ffffffffffffff6dffffffffffffff000000000000000000000000000000000000000000000000"),
+    ("AgentSetEffort",   "320000000b00000073ffffffffffffff6cffffffffffffff000000000000000000000000000000000000000000000000"),
 ];
 
 fn samples() -> Vec<SharedMessage> {
@@ -36,7 +39,22 @@ fn samples() -> Vec<SharedMessage> {
             query: "q".into(),
         },
         SharedMessage::ListSessions,
-        SharedMessage::AgentCommand(SharedAgentCommand::ListAgents),
+        SharedMessage::AgentNewChat {
+            client_op_id: vmux_api::room::ClientOpId::new("o"),
+            prompt: "p".into(),
+            agent_url: None,
+        },
+        SharedMessage::AgentListAgents,
+        SharedMessage::AgentListTeam,
+        SharedMessage::AgentListModels { sid: "s".into() },
+        SharedMessage::AgentSelectModel {
+            sid: "s".into(),
+            model_id: "m".into(),
+        },
+        SharedMessage::AgentSetEffort {
+            sid: "s".into(),
+            level: "l".into(),
+        },
     ]
 }
 
@@ -48,7 +66,12 @@ fn name_of(message: &SharedMessage) -> &'static str {
         SharedMessage::AgentApprove { .. } => "AgentApprove",
         SharedMessage::AgentListMedia { .. } => "AgentListMedia",
         SharedMessage::ListSessions => "ListSessions",
-        SharedMessage::AgentCommand(_) => "AgentCommand",
+        SharedMessage::AgentNewChat { .. } => "AgentNewChat",
+        SharedMessage::AgentListAgents => "AgentListAgents",
+        SharedMessage::AgentListTeam => "AgentListTeam",
+        SharedMessage::AgentListModels { .. } => "AgentListModels",
+        SharedMessage::AgentSelectModel { .. } => "AgentSelectModel",
+        SharedMessage::AgentSetEffort { .. } => "AgentSetEffort",
     }
 }
 

@@ -1,4 +1,7 @@
-use vmux_api::protocol::{SharedAgentCommand, SharedFailure, SharedMessage, SharedResponse};
+use vmux_api::protocol::{
+    AgentListAgents, AgentListModels, AgentListTeam, AgentNewChat, AgentRequest, AgentSelectModel,
+    AgentSetEffort, SharedFailure, SharedMessage, SharedResponse,
+};
 use vmux_api::room::{ClientOpId, RemoteSession};
 
 use super::super::server::{MAX_PROMPT_BYTES, RemoteState};
@@ -42,21 +45,44 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
 
         SharedMessage::AgentListMedia { sid, query } => media(state, &sid, query).await,
 
-        SharedMessage::AgentCommand(command) => {
-            let Some(client_op_id) = new_chat_op_id(&command) else {
-                return broker(state, command).await;
-            };
+        SharedMessage::AgentNewChat {
+            client_op_id,
+            prompt,
+            agent_url,
+        } => {
             if !super::super::server::valid_client_op_id(&client_op_id) {
                 return SharedResponse::Failed(SharedFailure::Invalid);
             }
             if !claim_once(state, &client_op_id).await {
                 return SharedResponse::AlreadyApplied;
             }
-            let response = broker(state, command).await;
+            let response = broker(
+                state,
+                AgentNewChat {
+                    client_op_id: client_op_id.clone(),
+                    prompt,
+                    agent_url,
+                },
+            )
+            .await;
             if matches!(response, SharedResponse::Failed(_)) {
                 release(state, &client_op_id).await;
             }
             response
+        }
+
+        SharedMessage::AgentListAgents => broker(state, AgentListAgents).await,
+
+        SharedMessage::AgentListTeam => broker(state, AgentListTeam).await,
+
+        SharedMessage::AgentListModels { sid } => broker(state, AgentListModels { sid }).await,
+
+        SharedMessage::AgentSelectModel { sid, model_id } => {
+            broker(state, AgentSelectModel { sid, model_id }).await
+        }
+
+        SharedMessage::AgentSetEffort { sid, level } => {
+            broker(state, AgentSetEffort { sid, level }).await
         }
     }
 }
@@ -146,20 +172,12 @@ async fn prompt(
     .await
 }
 
-fn new_chat_op_id(command: &SharedAgentCommand) -> Option<ClientOpId> {
-    match command {
-        SharedAgentCommand::NewAgentChat { client_op_id, .. } => Some(client_op_id.clone()),
-        SharedAgentCommand::ListAgents
-        | SharedAgentCommand::ListTeam
-        | SharedAgentCommand::ListModels { .. }
-        | SharedAgentCommand::SelectModel { .. }
-        | SharedAgentCommand::SetEffort { .. } => None,
-    }
-}
-
-async fn broker(state: &RemoteState, command: SharedAgentCommand) -> SharedResponse {
+async fn broker<T>(state: &RemoteState, payload: T) -> SharedResponse
+where
+    T: vmux_api::AgentRequestContract + serde::Serialize,
+{
     use vmux_api::protocol::AgentCommandResult;
-    let Ok(request) = command.try_into() else {
+    let Ok(request) = AgentRequest::encode(&payload) else {
         return SharedResponse::Failed(SharedFailure::Invalid);
     };
     match super::super::server::broker_result(state, request).await {
@@ -262,11 +280,7 @@ mod tests {
     async fn a_broker_request_with_no_desktop_attached_says_so() {
         let state = empty_state();
 
-        let response = dispatch(
-            &state,
-            SharedMessage::AgentCommand(SharedAgentCommand::ListAgents),
-        )
-        .await;
+        let response = dispatch(&state, SharedMessage::AgentListAgents).await;
 
         assert!(matches!(
             response,
@@ -307,11 +321,11 @@ mod tests {
 
         let response = dispatch(
             &state,
-            SharedMessage::AgentCommand(SharedAgentCommand::NewAgentChat {
+            SharedMessage::AgentNewChat {
                 client_op_id: oversized.clone(),
                 prompt: "hello".into(),
                 agent_url: None,
-            }),
+            },
         )
         .await;
 

@@ -4,7 +4,7 @@ pub use layout::{
     Focus, LayoutIdParseError, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack, Tab,
     format_id, parse_id,
 };
-pub use shared::{SharedAgentCommand, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
+pub use shared::{SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 
 pub use crate::ProcessId;
 pub use crate::json::JsonValue;
@@ -65,22 +65,12 @@ mod tests {
                 "AgentApprove",
                 "AgentListMedia",
                 "ListSessions",
-                "AgentCommand",
-            ]
-        );
-    }
-
-    #[test]
-    fn shared_agent_command_variants_are_the_whole_remote_surface() {
-        assert_eq!(
-            SharedAgentCommand::VARIANT_NAMES,
-            [
-                "NewAgentChat",
-                "ListAgents",
-                "ListTeam",
-                "ListModels",
-                "SelectModel",
-                "SetEffort",
+                "AgentNewChat",
+                "AgentListAgents",
+                "AgentListTeam",
+                "AgentListModels",
+                "AgentSelectModel",
+                "AgentSetEffort",
             ]
         );
     }

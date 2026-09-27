@@ -1,7 +1,7 @@
 use crate::pairing::Credentials;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use vmux_api::protocol::{SharedAgentCommand, SharedMessage, SharedResponse};
+use vmux_api::protocol::{SharedMessage, SharedResponse};
 use vmux_api::room::{
     ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteAgent, RemoteApproval,
     RemoteEvent, RemoteMediaEntry, RemoteModelState, RemoteSession, RemoteStatus,
@@ -74,7 +74,7 @@ impl Api {
     }
 
     pub(crate) async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
-        broker_json(&self.quic, SharedAgentCommand::ListAgents).await
+        broker_json(&self.quic, SharedMessage::AgentListAgents).await
     }
 
     pub(crate) async fn sessions(&self) -> Result<Vec<RemoteSession>, ApiError> {
@@ -90,7 +90,7 @@ impl Api {
     pub(crate) async fn models(&self, sid: &str) -> Result<RemoteModelState, ApiError> {
         broker_json(
             &self.quic,
-            SharedAgentCommand::ListModels {
+            SharedMessage::AgentListModels {
                 sid: sid.to_string(),
             },
         )
@@ -98,7 +98,7 @@ impl Api {
     }
 
     pub(crate) async fn select_model(&self, sid: &str, model_id: &str) -> Result<(), ApiError> {
-        self.command(SharedAgentCommand::SelectModel {
+        self.apply(SharedMessage::AgentSelectModel {
             sid: sid.to_string(),
             model_id: model_id.to_string(),
         })
@@ -106,23 +106,19 @@ impl Api {
     }
 
     pub(crate) async fn set_effort(&self, sid: &str, level: &str) -> Result<(), ApiError> {
-        self.command(SharedAgentCommand::SetEffort {
+        self.apply(SharedMessage::AgentSetEffort {
             sid: sid.to_string(),
             level: level.to_string(),
         })
         .await
     }
 
-    pub(crate) async fn command(&self, command: SharedAgentCommand) -> Result<(), ApiError> {
-        self.applied(
-            self.quic
-                .request(SharedMessage::AgentCommand(command))
-                .await,
-        )
+    pub(crate) async fn apply(&self, request: SharedMessage) -> Result<(), ApiError> {
+        self.applied(self.quic.request(request).await)
     }
 
     pub(crate) async fn team(&self) -> Result<Vec<vmux_api::team::TeamMemberRow>, ApiError> {
-        broker_json(&self.quic, SharedAgentCommand::ListTeam).await
+        broker_json(&self.quic, SharedMessage::AgentListTeam).await
     }
 
     pub(crate) async fn subscribe(&self, sid: &str) -> Result<crate::quic::Subscription, ApiError> {
@@ -145,16 +141,12 @@ impl Api {
     }
 
     pub(crate) async fn create_chat(&self, request: &NewChatRequest) -> Result<(), ApiError> {
-        let command = SharedAgentCommand::NewAgentChat {
+        let request = SharedMessage::AgentNewChat {
             client_op_id: request.client_op_id.clone(),
             prompt: request.text.clone(),
             agent_url: request.agent_url.clone(),
         };
-        self.applied(
-            self.quic
-                .request(SharedMessage::AgentCommand(command))
-                .await,
-        )
+        self.applied(self.quic.request(request).await)
     }
 
     pub(crate) async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
@@ -252,9 +244,9 @@ pub(crate) fn remote_event_from_shared(
 
 async fn broker_json<T: serde::de::DeserializeOwned>(
     quic: &crate::quic::QuicApi,
-    command: SharedAgentCommand,
+    request: SharedMessage,
 ) -> Result<T, ApiError> {
-    match quic.request(SharedMessage::AgentCommand(command)).await {
+    match quic.request(request).await {
         Ok(SharedResponse::BrokerJson(json)) => {
             serde_json::from_str(&json).map_err(|error| ApiError::Message(error.to_string()))
         }

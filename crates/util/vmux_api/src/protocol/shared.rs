@@ -1,7 +1,6 @@
 use super::{
-    AcpModelOption, AgentAttachment, AgentListAgents, AgentListModels, AgentListTeam, AgentNewChat,
-    AgentRequest, AgentRunStatus, AgentSelectModel, AgentSetEffort, ApprovalDecision,
-    ClientMessage, ServiceMessage,
+    AcpModelOption, AgentAttachment, AgentRunStatus, ApprovalDecision, ClientMessage,
+    ServiceMessage,
 };
 use crate::json::JsonValue;
 use crate::room::{ClientOpId, Message, RemoteAgent, RemoteMediaEntry, RemoteSession};
@@ -31,73 +30,29 @@ pub enum SharedMessage {
         query: String,
     },
     ListSessions,
-    AgentCommand(SharedAgentCommand),
-}
-
-impl From<SharedMessage> for ClientMessage {
-    fn from(message: SharedMessage) -> Self {
-        Self::Shared(message)
-    }
-}
-
-#[vmux_macro::variant_names]
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum SharedAgentCommand {
-    NewAgentChat {
+    AgentNewChat {
         client_op_id: ClientOpId,
         prompt: String,
         agent_url: Option<String>,
     },
-    ListAgents,
-    ListTeam,
-    ListModels {
+    AgentListAgents,
+    AgentListTeam,
+    AgentListModels {
         sid: String,
     },
-    SelectModel {
+    AgentSelectModel {
         sid: String,
         model_id: String,
     },
-    SetEffort {
+    AgentSetEffort {
         sid: String,
         level: String,
     },
 }
 
-impl TryFrom<SharedAgentCommand> for AgentRequest {
-    type Error = String;
-
-    fn try_from(command: SharedAgentCommand) -> Result<Self, Self::Error> {
-        match command {
-            SharedAgentCommand::NewAgentChat {
-                client_op_id,
-                prompt,
-                agent_url,
-            } => AgentRequest::encode(&AgentNewChat {
-                client_op_id,
-                prompt,
-                agent_url,
-            }),
-            SharedAgentCommand::ListAgents => AgentRequest::encode(&AgentListAgents),
-            SharedAgentCommand::ListTeam => AgentRequest::encode(&AgentListTeam),
-            SharedAgentCommand::ListModels { sid } => {
-                AgentRequest::encode(&AgentListModels { sid })
-            }
-            SharedAgentCommand::SelectModel { sid, model_id } => {
-                AgentRequest::encode(&AgentSelectModel { sid, model_id })
-            }
-            SharedAgentCommand::SetEffort { sid, level } => {
-                AgentRequest::encode(&AgentSetEffort { sid, level })
-            }
-        }
+impl From<SharedMessage> for ClientMessage {
+    fn from(message: SharedMessage) -> Self {
+        Self::Shared(message)
     }
 }
 
