@@ -94,7 +94,7 @@ pub struct ExtensionPopupSizeEvent {
     pub height: f32,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq)]
+#[vmux_api::ui_event]
 pub struct ExtensionPopupCloseRequest;
 
 #[vmux_api::ui_event(Eq)]
@@ -103,10 +103,10 @@ pub struct ExtPinRequest {
     pub pinned: bool,
 }
 
-#[vmux_api::ui_event(Eq)]
+#[vmux_api::ui_event]
 pub struct ExtOpenManagerRequest;
 
-#[vmux_api::ui_event(Eq)]
+#[vmux_api::ui_event]
 pub struct ExtListRequest;
 
 #[vmux_api::ui_event(Eq)]

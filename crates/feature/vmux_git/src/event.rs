@@ -110,7 +110,7 @@ pub struct GitRepositoryPickerRequest {
 pub struct GitConfigEditRequest {
     pub repo_root: String,
 }
-#[vmux_api::ui_event(Eq)]
+#[vmux_api::ui_event]
 pub struct GitUpdateCheckRequest;
 #[vmux_api::ui_event(Eq)]
 pub struct GitBranchLogRequest {
@@ -133,7 +133,7 @@ pub struct GitDirectoryAscendRequest {
 pub struct GitDirectoryDescendRequest {
     pub target: String,
 }
-#[vmux_api::ui_event(Copy, Eq, Default)]
+#[vmux_api::ui_event]
 pub struct GitDirectoryToggleHiddenRequest;
 #[vmux_api::ui_event(Eq)]
 pub struct GitDiffRequest {

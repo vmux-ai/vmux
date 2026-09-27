@@ -4,7 +4,7 @@ use crate::history::{HistoryEntry, HistorySuggestionsResponse};
 use crate::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry};
 use crate::space::ProjectBranch;
 
-#[vmux_api::contract(Copy, Default, Eq)]
+#[vmux_api::contract]
 pub struct CommandBarFocusInput;
 
 #[vmux_api::ui_state_patch(Default)]

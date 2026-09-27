@@ -72,7 +72,7 @@ pub struct PickRequest {
     pub pick: CommandBarPick,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq)]
+#[vmux_api::ui_event]
 pub struct DismissRequest;
 
 #[vmux_api::ui_event(Default, Eq)]

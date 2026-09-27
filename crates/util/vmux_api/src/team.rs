@@ -54,7 +54,7 @@ pub struct TeamMemberRow {
     pub is_done_unseen: bool,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq)]
+#[vmux_api::ui_event]
 pub struct TeamOpenRequest;
 
 #[vmux_api::ui_event(Default, Eq)]

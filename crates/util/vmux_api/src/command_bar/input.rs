@@ -1,6 +1,6 @@
 use super::OpenId;
 
-#[vmux_api::ui_event(Copy, Default, Eq)]
+#[vmux_api::ui_event]
 pub struct CommandBarReadyEvent;
 
 #[vmux_api::ui_event(Copy, Default, Eq)]

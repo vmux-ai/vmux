@@ -97,10 +97,10 @@ pub struct ChatMediaEntries {
     pub entries: Vec<ChatMediaEntry>,
 }
 
-#[vmux_api::ui_event(Default)]
+#[vmux_api::ui_event]
 pub struct ChatPickFiles;
 
-#[vmux_api::ui_event(Default)]
+#[vmux_api::ui_event]
 pub struct ChatPasteMedia;
 
 #[vmux_api::ui_event(Default)]

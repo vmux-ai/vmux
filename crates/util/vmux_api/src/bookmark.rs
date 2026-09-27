@@ -38,10 +38,10 @@ pub struct BookmarkFolderChoice {
     pub ancestors: Vec<String>,
 }
 
-#[vmux_api::ui_event(Copy, Eq, Default)]
+#[vmux_api::ui_event]
 pub struct BookmarkToggleRequest;
 
-#[vmux_api::ui_event(Eq)]
+#[vmux_api::ui_event]
 pub struct BookmarkMenuRootRequest;
 
 #[vmux_api::ui_event(Eq)]

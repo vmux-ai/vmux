@@ -25,7 +25,7 @@ pub struct McpServers {
     pub result: Option<McpServerResult>,
 }
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct McpServersRequest;
 
 #[vmux_api::contract(Copy, Default, Eq)]

@@ -205,7 +205,7 @@ pub struct ToolUnlinkRequest {
     pub id: String,
 }
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct ToolApplyRequest;
 
 #[vmux_api::ui_event(Eq)]

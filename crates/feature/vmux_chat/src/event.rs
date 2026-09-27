@@ -208,16 +208,16 @@ pub struct ChatApproval {
     pub decision: ApprovalDecision,
 }
 
-#[vmux_api::ui_event(Default)]
+#[vmux_api::ui_event]
 pub struct ChatCancel;
 
-#[vmux_api::ui_event(Default)]
+#[vmux_api::ui_event]
 pub struct ChatStop;
 
-#[vmux_api::ui_event(Default)]
+#[vmux_api::ui_event]
 pub struct ChatResume;
 
-#[vmux_api::ui_event(Default)]
+#[vmux_api::ui_event]
 pub struct ChatClearQueue;
 
 #[vmux_api::ui_event(Default)]
@@ -225,7 +225,7 @@ pub struct ChatCancelQueuedPrompt {
     pub id: u64,
 }
 
-#[vmux_api::ui_event(Default)]
+#[vmux_api::ui_event]
 pub struct ChatEscape;
 
 #[vmux_api::ui_event(Default)]
@@ -240,7 +240,7 @@ pub struct ChatComposerEffect {
     pub focus: bool,
 }
 
-#[vmux_api::ui_event(Default)]
+#[vmux_api::ui_event]
 pub struct ChatSelectWorkspace;
 
 #[vmux_api::ui_event(Default)]

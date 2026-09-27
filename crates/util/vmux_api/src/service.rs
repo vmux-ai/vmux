@@ -57,7 +57,7 @@ pub struct ProcessKillAllEvent {
     pub kill_all: bool,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq)]
+#[vmux_api::ui_event]
 pub struct RelaunchRequest;
 
 #[cfg(test)]

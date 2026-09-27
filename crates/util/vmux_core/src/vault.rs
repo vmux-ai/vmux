@@ -246,19 +246,19 @@ pub struct VaultConnectRequest {
     pub repository: String,
 }
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct VaultSyncRequest;
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct VaultConnectGithubRequest;
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct VaultConnectFolderRequest;
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct VaultGenerateRecoveryKeyRequest;
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct VaultCreateRecoveryKeyRequest;
 
 #[vmux_api::ui_event(Eq)]
@@ -312,10 +312,10 @@ pub struct VaultPrivacyRequest {
     pub private: bool,
 }
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct VaultWorkflowCreateRequest;
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct VaultWorkflowConnectRequest;
 
 #[vmux_api::ui_event(Eq)]

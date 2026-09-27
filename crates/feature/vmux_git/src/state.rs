@@ -133,7 +133,7 @@ pub struct GitSelectionReveal {
     pub id: String,
 }
 
-#[vmux_api::contract(Copy, Eq, Default)]
+#[vmux_api::contract]
 pub struct GitShortcutHelpToggle;
 
 #[vmux_api::contract]

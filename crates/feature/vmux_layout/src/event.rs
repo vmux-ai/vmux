@@ -333,16 +333,16 @@ mod tests {
         assert_eq!(TabDropPlacement::After.destination(0, 2, 3), 2);
     }
 }
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct HeaderBackRequest;
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct HeaderForwardRequest;
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct HeaderReloadRequest;
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct HeaderAddressFocusRequest;
 
 #[vmux_api::contract(Default, Eq)]
@@ -440,7 +440,7 @@ pub struct TabRow {
     pub is_done_unseen: bool,
 }
 
-#[vmux_api::ui_event(Eq)]
+#[vmux_api::ui_event]
 pub struct TabCreateRequest;
 
 #[vmux_api::ui_event(Eq)]
@@ -612,10 +612,10 @@ pub struct RemoteRequest {
     pub enabled: bool,
 }
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct RemotePairingShowRequest;
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct RemotePairingDismissRequest;
 
 #[vmux_api::ui_event(Default, Eq)]
@@ -624,7 +624,7 @@ pub struct LayoutOverlayEvent {
     pub active: bool,
 }
 
-#[vmux_api::ui_event(Copy, Default, Eq)]
+#[vmux_api::ui_event]
 pub struct RemoteCopyEvent;
 
 #[vmux_api::ui_event(Default, Eq)]
@@ -720,7 +720,7 @@ pub struct UpdateProgress {
     pub installing: bool,
 }
 
-#[vmux_api::contract(Copy, Default, Eq)]
+#[vmux_api::contract]
 pub struct UpdateCleared;
 
 #[cfg(test)]

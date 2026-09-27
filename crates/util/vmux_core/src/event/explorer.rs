@@ -96,10 +96,10 @@ pub struct ExplorerTreeRefresh {
     pub path: String,
 }
 
-#[vmux_api::ui_event(Default, Eq)]
+#[vmux_api::ui_event]
 pub struct ExplorerRevealCurrent;
 
-#[vmux_api::ui_event(Copy, Default, Eq)]
+#[vmux_api::ui_event]
 pub struct ExplorerCollapseAll;
 
 #[vmux_api::ui_event(Eq)]

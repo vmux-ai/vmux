@@ -1,5 +1,5 @@
 pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
-#[vmux_api::ui_event(Copy, Default, Eq)]
+#[vmux_api::ui_event]
 pub struct CheckForUpdatesEvent;
 
 #[vmux_api::contract(Default, Eq)]

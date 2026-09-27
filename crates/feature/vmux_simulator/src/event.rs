@@ -70,19 +70,19 @@ pub enum SimulatorClipboardOperation {
     SelectAll,
 }
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct SimulatorClipboardCopyRequest;
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct SimulatorClipboardCutRequest;
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct SimulatorClipboardPasteRequest;
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct SimulatorClipboardSelectAllRequest;
 
-#[vmux_api::ui_event(Copy, Eq)]
+#[vmux_api::ui_event]
 pub struct SimulatorSoftwareKeyboard;
 
 impl HardwareButton {
