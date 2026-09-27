@@ -1,9 +1,9 @@
 use crate::events::{
-    AgentCommandRequest, AgentToolCallRequest, CommandOrigin, PageAgentAcpTerminalCreated,
-    PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentInfo,
-    PageAgentModeInfo, PageAgentModeSelectionResult, PageAgentModelInfo,
-    PageAgentModelSelectionResult, PageAgentRunStatus, PageAgentSessionCreated, PageAgentSnapshot,
-    PageAgentWorkspaceChanged,
+    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin,
+    PageAgentAcpTerminalCreated, PageAgentApprovalResolved, PageAgentAwaitingApproval,
+    PageAgentDelta, PageAgentInfo, PageAgentModeInfo, PageAgentModeSelectionResult,
+    PageAgentModelInfo, PageAgentModelSelectionResult, PageAgentRunStatus, PageAgentSessionCreated,
+    PageAgentSnapshot, PageAgentWorkspaceChanged,
 };
 use bevy::prelude::*;
 use vmux_api::protocol::{ServiceMessage, SharedEvent};
@@ -16,6 +16,7 @@ impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceInbound>()
             .add_message::<AgentCommandRequest>()
+            .add_message::<AgentQueryRequest>()
             .add_message::<AgentToolCallRequest>()
             .add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
@@ -37,6 +38,7 @@ impl Plugin for AgentIngressPlugin {
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentIngressWriters<'w> {
     commands: MessageWriter<'w, AgentCommandRequest>,
+    queries: MessageWriter<'w, AgentQueryRequest>,
     tool_calls: MessageWriter<'w, AgentToolCallRequest>,
     deltas: MessageWriter<'w, PageAgentDelta>,
     run_statuses: MessageWriter<'w, PageAgentRunStatus>,
@@ -71,6 +73,12 @@ fn route_service_messages(
                         anchor: *anchor,
                     },
                     command: command.clone(),
+                });
+            }
+            ServiceMessage::AgentQuery { request_id, query } => {
+                writers.queries.write(AgentQueryRequest {
+                    request_id: *request_id,
+                    query: query.clone(),
                 });
             }
             ServiceMessage::AgentToolCall {
@@ -238,7 +246,7 @@ fn route_service_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::{AgentCommand, AgentRequestId};
+    use vmux_api::protocol::{AgentCommand, AgentQuery, AgentRequestId};
 
     #[test]
     fn routes_agent_messages_without_terminal_ownership() {
@@ -260,6 +268,11 @@ mod tests {
                     text: "hello".into(),
                 },
             )));
+        app.world_mut()
+            .write_message(ServiceInbound(ServiceMessage::AgentQuery {
+                request_id,
+                query: AgentQuery::VaultStatus,
+            }));
 
         app.update();
 
@@ -273,10 +286,18 @@ mod tests {
             .resource_mut::<Messages<PageAgentDelta>>()
             .drain()
             .collect::<Vec<_>>();
+        let queries = app
+            .world_mut()
+            .resource_mut::<Messages<AgentQueryRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].request_id, request_id);
         assert_eq!(deltas.len(), 1);
         assert_eq!(deltas[0].sid, "session");
         assert_eq!(deltas[0].text, "hello");
+        assert_eq!(queries.len(), 1);
+        assert_eq!(queries[0].request_id, request_id);
+        assert!(matches!(queries[0].query, AgentQuery::VaultStatus));
     }
 }
