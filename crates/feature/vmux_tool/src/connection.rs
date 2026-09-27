@@ -32,8 +32,6 @@ impl Plugin for McpConnectionPlugin {
             UiStatePlugin::<McpServers>::default(),
         ))
         .add_message::<PageOpenRequest>()
-        .add_message::<McpSnapshotWork>()
-        .add_systems(Startup, spawn_mcp_runtime)
         .add_observer(request_mcp_connections)
         .add_observer(begin_mcp_snapshot)
         .add_observer(request_mcp_server)
@@ -51,10 +49,6 @@ impl Plugin for McpConnectionPlugin {
     }
 }
 
-fn spawn_mcp_runtime(mut commands: Commands) {
-    commands.spawn(McpRuntime);
-}
-
 fn request_mcp_connections(trigger: On<UiInput<McpServersRequest>>, mut commands: Commands) {
     commands.trigger(McpSnapshotRequest {
         target: trigger.event().webview,
@@ -65,7 +59,6 @@ fn begin_mcp_snapshot(
     trigger: On<McpSnapshotRequest>,
     browsers: NonSend<Browsers>,
     mut states: Query<&mut McpPageState>,
-    mut requests: MessageWriter<McpSnapshotWork>,
     mut commands: Commands,
 ) {
     let target = trigger.event().target;
@@ -95,8 +88,7 @@ fn begin_mcp_snapshot(
             generation
         }
     };
-    requests.write(McpSnapshotWork {
-        target,
+    commands.entity(target).insert(PendingMcpSnapshot {
         generation,
         result: None,
     });
@@ -104,7 +96,6 @@ fn begin_mcp_snapshot(
 
 fn request_mcp_server(
     trigger: On<UiInput<McpServerRequest>>,
-    runtime: Single<Entity, With<McpRuntime>>,
     mut states: Query<&mut McpPageState>,
     mut commands: Commands,
 ) {
@@ -133,83 +124,64 @@ fn request_mcp_server(
         operation,
     });
     state.snapshot.result = None;
-    commands.spawn((
-        McpOperation { runtime: *runtime },
-        PendingMcpOperation {
-            target,
-            generation,
-            id,
-            operation,
-        },
-    ));
+    commands.entity(target).insert(PendingMcpOperation {
+        generation,
+        id,
+        operation,
+    });
 }
 
 fn start_mcp_operation(
-    runtime: Query<&McpOperations, With<McpRuntime>>,
-    pending: Query<&PendingMcpOperation>,
-    running: Query<(), With<McpOperationTask>>,
+    pending: Query<(Entity, &PendingMcpOperation), Without<McpOperationTask>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    let Ok(runtime) = runtime.single() else {
-        return;
-    };
-    let Some(entity) = runtime.iter().next() else {
-        return;
-    };
-    if running.contains(entity) {
-        return;
-    }
-    let Ok(pending) = pending.get(entity) else {
-        return;
-    };
-    let target = pending.target;
-    let generation = pending.generation;
-    let id = pending.id.clone();
-    let operation = pending.operation;
-    let task_id = id.clone();
-    let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let progress_wake = completion_wake.clone();
-    let (progress_sender, progress_receiver) = mpsc::channel();
-    let task = IoTaskPool::get().spawn(async move {
-        let result = match operation {
-            McpServerOperation::Connect => McpConnection::connect(&task_id, |url| {
-                if progress_sender.send(url).is_ok()
-                    && let Some(wake) = &progress_wake
-                {
-                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                }
-            }),
-            McpServerOperation::Disconnect => McpConnection::disconnect(&task_id),
-        };
-        if let Some(wake) = completion_wake {
-            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-        }
-        result
-    });
-    commands
-        .entity(entity)
-        .remove::<PendingMcpOperation>()
-        .insert(McpOperationTask {
-            target,
-            generation,
-            id,
-            operation,
-            task,
-            progress: Mutex::new(progress_receiver),
+    for (entity, pending) in &pending {
+        let generation = pending.generation;
+        let id = pending.id.clone();
+        let operation = pending.operation;
+        let task_id = id.clone();
+        let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let progress_wake = completion_wake.clone();
+        let (progress_sender, progress_receiver) = mpsc::channel();
+        let task = IoTaskPool::get().spawn(async move {
+            let result = match operation {
+                McpServerOperation::Connect => McpConnection::connect(&task_id, |url| {
+                    if progress_sender.send(url).is_ok()
+                        && let Some(wake) = &progress_wake
+                    {
+                        let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                    }
+                }),
+                McpServerOperation::Disconnect => McpConnection::disconnect(&task_id),
+            };
+            if let Some(wake) = completion_wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
         });
+        commands
+            .entity(entity)
+            .remove::<PendingMcpOperation>()
+            .insert(McpOperationTask {
+                generation,
+                id,
+                operation,
+                task,
+                progress: Mutex::new(progress_receiver),
+            });
+    }
 }
 
 fn drain_mcp_operations(
     mut tasks: Query<(Entity, &mut McpOperationTask)>,
     browsers: NonSend<Browsers>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut snapshot_requests: MessageWriter<McpSnapshotWork>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
         while let Ok(url) = task.progress.get_mut().try_recv() {
-            if browsers.can_emit_to(&task.target) {
+            if browsers.can_emit_to(&entity) {
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::NewStack,
                     url,
@@ -220,16 +192,15 @@ fn drain_mcp_operations(
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
-        commands.entity(entity).despawn();
+        commands.entity(entity).remove::<McpOperationTask>();
         let (success, message) = match result {
             Ok(()) => (true, String::new()),
             Err(message) => (false, message),
         };
-        if !browsers.can_emit_to(&task.target) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
-        snapshot_requests.write(McpSnapshotWork {
-            target: task.target,
+        commands.entity(entity).insert(PendingMcpSnapshot {
             generation: task.generation,
             result: Some(McpServerResult {
                 id: task.id.clone(),
@@ -242,26 +213,27 @@ fn drain_mcp_operations(
 }
 
 fn start_mcp_snapshots(
-    mut requests: MessageReader<McpSnapshotWork>,
+    requests: Query<(Entity, &PendingMcpSnapshot), Without<McpSnapshotTask>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
-    for request in requests.read() {
-        let target = request.target;
+    for (target, request) in &requests {
         let generation = request.generation;
         let result = request.result.clone();
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-        commands.spawn(McpSnapshotTask {
-            target,
-            generation,
-            task: IoTaskPool::get().spawn(async move {
-                let snapshot = McpCatalog::snapshot(result);
-                if let Some(wake) = wake {
-                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                }
-                snapshot
-            }),
-        });
+        commands
+            .entity(target)
+            .remove::<PendingMcpSnapshot>()
+            .insert(McpSnapshotTask {
+                generation,
+                task: IoTaskPool::get().spawn(async move {
+                    let snapshot = McpCatalog::snapshot(result);
+                    if let Some(wake) = wake {
+                        let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                    }
+                    snapshot
+                }),
+            });
     }
 }
 
@@ -274,8 +246,8 @@ fn drain_mcp_snapshots(
         let Some(snapshot) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
-        commands.entity(entity).despawn();
-        let Ok(mut state) = states.get_mut(task.target) else {
+        commands.entity(entity).remove::<McpSnapshotTask>();
+        let Ok(mut state) = states.get_mut(entity) else {
             continue;
         };
         if task.generation == state.generation {
@@ -299,9 +271,6 @@ fn publish_mcp_connections(
     }
 }
 
-#[derive(Component)]
-struct McpRuntime;
-
 #[derive(EntityEvent)]
 pub struct McpSnapshotRequest {
     #[event_target]
@@ -315,34 +284,20 @@ struct McpPageState {
 }
 
 #[derive(Component)]
-#[relationship(relationship_target = McpOperations)]
-struct McpOperation {
-    #[relationship]
-    runtime: Entity,
-}
-
-#[derive(Component)]
-#[relationship_target(relationship = McpOperation)]
-struct McpOperations(Vec<Entity>);
-
-#[derive(Component)]
 struct PendingMcpOperation {
-    target: Entity,
     generation: u64,
     id: String,
     operation: McpServerOperation,
 }
 
-#[derive(Clone, Message)]
-struct McpSnapshotWork {
-    target: Entity,
+#[derive(Component, Clone)]
+struct PendingMcpSnapshot {
     generation: u64,
     result: Option<McpServerResult>,
 }
 
 #[derive(Component)]
 struct McpOperationTask {
-    target: Entity,
     generation: u64,
     id: String,
     operation: McpServerOperation,
@@ -352,7 +307,6 @@ struct McpOperationTask {
 
 #[derive(Component)]
 struct McpSnapshotTask {
-    target: Entity,
     generation: u64,
     task: Task<McpServers>,
 }
@@ -849,8 +803,8 @@ fn base64_url(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        McpCallback, McpConnection, McpOperation, McpOperations, McpPageState, McpRuntime,
-        PendingMcpOperation, base64_url, request_mcp_server,
+        McpCallback, McpConnection, McpPageState, PendingMcpOperation, base64_url,
+        request_mcp_server,
     };
     use bevy::prelude::*;
     use bevy_cef::prelude::UiInput;
@@ -894,7 +848,6 @@ mod tests {
     fn server_request_queues_one_operation_on_the_page_entity() {
         let mut app = App::new();
         app.add_observer(request_mcp_server);
-        app.world_mut().spawn(McpRuntime);
         let target = app
             .world_mut()
             .spawn(McpPageState {
@@ -935,22 +888,9 @@ mod tests {
                 operation: McpServerOperation::Connect,
             })
         );
-        let operations = app
-            .world_mut()
-            .query::<&PendingMcpOperation>()
-            .iter(app.world())
-            .count();
-        assert_eq!(operations, 1);
-    }
-
-    #[test]
-    fn mcp_actions_keep_entity_insertion_order() {
-        let mut world = World::new();
-        let runtime = world.spawn(McpRuntime).id();
-        let first = world.spawn(McpOperation { runtime }).id();
-        let second = world.spawn(McpOperation { runtime }).id();
-
-        let operations = world.get::<McpOperations>(runtime).unwrap();
-        assert_eq!(operations.0, [first, second]);
+        let operation = app.world().get::<PendingMcpOperation>(target).unwrap();
+        assert_eq!(operation.generation, 2);
+        assert_eq!(operation.id, "linear");
+        assert_eq!(operation.operation, McpServerOperation::Connect);
     }
 }
