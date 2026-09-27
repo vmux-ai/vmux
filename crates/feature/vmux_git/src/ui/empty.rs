@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_ui::components::skeleton::Skeleton;
-use vmux_ui::directory::{DirectoryNavigator, DirectoryNavigatorEvent};
+use vmux_ui::directory::DirectoryNavigator;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
@@ -66,27 +66,25 @@ pub(super) fn EmptyRepository() -> Element {
                 selected,
                 thumbs: HashMap::new(),
                 preview: rsx! { div { class: "text-xs text-muted-foreground opacity-60", "" } },
-                on_event: move |event| match event {
-                    DirectoryNavigatorEvent::Select { index, .. } => {
-                        let Ok(index) = u32::try_from(index) else {
-                            return;
-                        };
-                        let _ = send(&GitDirectorySelectRequest { index });
+                on_select: move |(index, _)| {
+                    let Ok(index) = u32::try_from(index) else {
+                        return;
+                    };
+                    let _ = send(&GitDirectorySelectRequest { index });
+                },
+                on_ascend: move |target| {
+                    let _ = send(&GitDirectoryAscendRequest { target });
+                },
+                on_descend: move |target| {
+                    let _ = send(&GitDirectoryDescendRequest { target });
+                },
+                on_open: move |entry: vmux_core::event::FileDirEntry| {
+                    if entry.is_dir {
+                        let _ = send(&GitDirectoryOpenRequest { path: entry.path });
                     }
-                    DirectoryNavigatorEvent::Ascend { target } => {
-                        let _ = send(&GitDirectoryAscendRequest { target });
-                    }
-                    DirectoryNavigatorEvent::Descend { target } => {
-                        let _ = send(&GitDirectoryDescendRequest { target });
-                    }
-                    DirectoryNavigatorEvent::Open { entry } => {
-                        if entry.is_dir {
-                            let _ = send(&GitDirectoryOpenRequest { path: entry.path });
-                        }
-                    }
-                    DirectoryNavigatorEvent::ToggleHidden => {
-                        let _ = send(&GitDirectoryToggleHiddenRequest);
-                    }
+                },
+                on_toggle_hidden: move |_| {
+                    let _ = send(&GitDirectoryToggleHiddenRequest);
                 },
             }
         }

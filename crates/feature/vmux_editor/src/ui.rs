@@ -1964,8 +1964,6 @@ const SCROLL_ID: &str = "file-scroll";
 const LSP_NOTICE_DONE_MS: u32 = 2_500;
 const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
-std::thread_local! {}
-
 fn file_mode_class(active: bool) -> &'static str {
     if active {
         "rounded bg-primary/15 px-1.5 py-0.5 text-primary transition-[background-color,color,box-shadow] duration-200 ease-out"
