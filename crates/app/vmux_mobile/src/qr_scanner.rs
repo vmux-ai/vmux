@@ -393,20 +393,9 @@ mod platform {
             let Some(runtime) = installed else {
                 return;
             };
-            let Ok(mut runtime) = runtime.try_borrow_mut() else {
-                tracing::error!("QR result arrived while ECS was running");
-                return;
-            };
             match result {
-                Ok(value) => {
-                    runtime.app.world_mut().write_message(PairRequest(value));
-                }
-                Err(message) => {
-                    runtime
-                        .app
-                        .world_mut()
-                        .write_message(PairingFailure(message));
-                }
+                Ok(value) => runtime.send(PairRequest(value)),
+                Err(message) => runtime.send(PairingFailure(message)),
             }
         });
     }

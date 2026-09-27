@@ -2,11 +2,12 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use bevy_app::{App, Plugin, Startup, Update};
+use bevy_ecs::change_detection::{DetectChanges, Ref};
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::message::{Message, MessageReader, MessageWriter};
 use bevy_ecs::schedule::IntoScheduleConfigs;
-use bevy_ecs::system::{Commands, Query};
+use bevy_ecs::system::{Commands, NonSendMut, Query};
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
 use vmux_api::room::{NewChatRequest, RemoteEvent, RemoteSession};
@@ -26,6 +27,7 @@ impl Plugin for SessionPlugin {
             .add_message::<LeaveSession>()
             .add_message::<RestartSession>()
             .add_message::<StartChatRequest>()
+            .insert_non_send(SessionSubscribers::default())
             .add_systems(Startup, spawn_session_state)
             .add_systems(
                 Update,
@@ -37,11 +39,15 @@ impl Plugin for SessionPlugin {
                     restart_session_streams,
                     poll_session_streams,
                     synchronize_remote_sessions,
+                    publish_session,
                 )
                     .chain(),
             );
     }
 }
+
+#[derive(Default)]
+struct SessionSubscribers(Vec<Box<dyn FnMut(SessionView)>>);
 
 fn spawn_session_state(mut commands: Commands) {
     commands.spawn(SessionState::default());
@@ -76,27 +82,14 @@ pub(crate) struct Session {
 
 pub(crate) fn use_session(runtime: RuntimeHandle) -> Session {
     let mut view = use_signal(SessionView::default);
-    use_future(move || {
-        let runtime = runtime.clone();
-        async move {
-            loop {
-                let projected = {
-                    if let Ok(mut runtime) = runtime.try_borrow_mut() {
-                        let world = runtime.app.world_mut();
-                        let mut query = world.query::<&SessionState>();
-                        query.single(world).ok().map(|state| state.view.clone())
-                    } else {
-                        None
-                    }
-                };
-                if let Some(next) = projected
-                    && *view.peek() != next
-                {
+    use_hook(move || {
+        runtime.configure_non_send(|subscribers: &mut SessionSubscribers| {
+            subscribers.0.push(Box::new(move |next| {
+                if *view.peek() != next {
                     view.set(next);
                 }
-                vmux_ui::platform::sleep_ms(50).await;
-            }
-        }
+            }));
+        });
     });
     Session { view }
 }
@@ -119,6 +112,18 @@ impl Session {
 #[derive(Component, Default)]
 struct SessionState {
     view: SessionView,
+}
+
+fn publish_session(
+    state: Single<Ref<SessionState>>,
+    mut subscribers: NonSendMut<SessionSubscribers>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    for subscriber in &mut subscribers.0 {
+        subscriber(state.view.clone());
+    }
 }
 
 #[derive(Component)]

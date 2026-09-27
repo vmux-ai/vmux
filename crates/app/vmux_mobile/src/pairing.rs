@@ -1,10 +1,11 @@
 use std::time::{Duration, Instant};
 
 use bevy_app::{App, Plugin, Startup, Update};
+use bevy_ecs::change_detection::{DetectChanges, Ref};
 use bevy_ecs::component::Component;
 use bevy_ecs::message::{Message, MessageReader, MessageWriter};
 use bevy_ecs::schedule::IntoScheduleConfigs;
-use bevy_ecs::system::{Commands, Query};
+use bevy_ecs::system::{Commands, NonSendMut, Query};
 use bevy_tasks::{IoTaskPool, Task, futures_lite::future};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,7 @@ impl Plugin for PairingPlugin {
             .add_message::<PairRequest>()
             .add_message::<PairingFailure>()
             .add_message::<DisconnectRequest>()
+            .insert_non_send(ConnectionSubscribers::default())
             .add_systems(Startup, (spawn_connection_state, restore_connection).chain())
             .add_systems(
                 Update,
@@ -39,11 +41,22 @@ impl Plugin for PairingPlugin {
                     poll_connection_attempts,
                     begin_refresh,
                     poll_refreshes,
+                    publish_connection,
                 )
                     .chain(),
             );
     }
 }
+
+#[derive(Clone)]
+struct ConnectionSnapshot {
+    view: ConnectionView,
+    api: Option<Api>,
+    api_generation: u64,
+}
+
+#[derive(Default)]
+struct ConnectionSubscribers(Vec<Box<dyn FnMut(ConnectionSnapshot)>>);
 
 fn spawn_connection_state(mut commands: Commands) {
     commands.spawn(ConnectionState::default());
@@ -83,33 +96,20 @@ pub(crate) fn use_connection(runtime: RuntimeHandle) -> ConnectionProjection {
     let mut agents = use_signal(Vec::new);
     let mut api_generation = use_signal(|| u64::MAX);
 
-    use_future(move || {
-        let runtime = runtime.clone();
-        async move {
-            loop {
-                let projected = {
-                    if let Ok(mut runtime) = runtime.try_borrow_mut() {
-                        let world = runtime.app.world_mut();
-                        let mut query = world.query::<&ConnectionState>();
-                        query.single(world).ok().map(ConnectionState::projected)
-                    } else {
-                        None
-                    }
-                };
-                if let Some((next, next_api, next_generation)) = projected {
-                    if *view.peek() != next {
-                        sessions.set(next.sessions.clone());
-                        agents.set(next.agents.clone());
-                        view.set(next);
-                    }
-                    if *api_generation.peek() != next_generation {
-                        api.set(next_api);
-                        api_generation.set(next_generation);
-                    }
+    use_hook(move || {
+        runtime.configure_non_send(|subscribers: &mut ConnectionSubscribers| {
+            subscribers.0.push(Box::new(move |snapshot| {
+                if *view.peek() != snapshot.view {
+                    sessions.set(snapshot.view.sessions.clone());
+                    agents.set(snapshot.view.agents.clone());
+                    view.set(snapshot.view);
                 }
-                vmux_ui::platform::sleep_ms(50).await;
-            }
-        }
+                if *api_generation.peek() != snapshot.api_generation {
+                    api.set(snapshot.api);
+                    api_generation.set(snapshot.api_generation);
+                }
+            }));
+        });
     });
 
     ConnectionProjection {
@@ -168,8 +168,12 @@ impl ConnectionState {
         self.view.error.clear();
     }
 
-    fn projected(&self) -> (ConnectionView, Option<Api>, u64) {
-        (self.view.clone(), self.api.clone(), self.api_generation)
+    fn projected(&self) -> ConnectionSnapshot {
+        ConnectionSnapshot {
+            view: self.view.clone(),
+            api: self.api.clone(),
+            api_generation: self.api_generation,
+        }
     }
 
     fn replace_api(&mut self, api: Option<Api>) {
@@ -186,6 +190,19 @@ impl ConnectionState {
             auth: AuthState::Unpaired,
             ..ConnectionView::default()
         };
+    }
+}
+
+fn publish_connection(
+    state: Single<Ref<ConnectionState>>,
+    mut subscribers: NonSendMut<ConnectionSubscribers>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    let snapshot = state.projected();
+    for subscriber in &mut subscribers.0 {
+        subscriber(snapshot.clone());
     }
 }
 

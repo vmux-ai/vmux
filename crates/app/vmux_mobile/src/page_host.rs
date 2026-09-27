@@ -16,7 +16,7 @@ use vmux_start::event::StartDataRequest;
 use vmux_start::roster::RepublishLauncher;
 use vmux_team::roster::{Members, RepublishTeam};
 
-use crate::runtime::{PageListeners, RuntimeHandle};
+use crate::runtime::RuntimeHandle;
 use vmux_api::BinEvent;
 use vmux_api::command_bar::{
     CommandBarUiState, DismissRequest as CommandBarDismissRequest,
@@ -189,32 +189,16 @@ impl PageHost for MobileHost {
             ChatUiState::ID => {
                 poll_models(self);
                 poll_media(self);
-                let mut runtime = self.runtime.borrow_mut();
-                let world = runtime.app.world_mut();
-                world
-                    .non_send_mut::<PageListeners>()
-                    .0
-                    .insert(ChatUiState::ID.to_string(), on_bytes);
-                world.write_message(RepublishChatUiState);
+                self.runtime
+                    .listen(ChatUiState::ID, on_bytes, RepublishChatUiState);
             }
             CommandBarUiState::ID => {
-                let mut runtime = self.runtime.borrow_mut();
-                let world = runtime.app.world_mut();
-                world
-                    .non_send_mut::<PageListeners>()
-                    .0
-                    .insert(CommandBarUiState::ID.to_string(), on_bytes);
-                world.write_message(RepublishLauncher);
+                self.runtime
+                    .listen(CommandBarUiState::ID, on_bytes, RepublishLauncher);
             }
             TeamEvent::ID => {
                 poll_team(self);
-                let mut runtime = self.runtime.borrow_mut();
-                let world = runtime.app.world_mut();
-                world
-                    .non_send_mut::<PageListeners>()
-                    .0
-                    .insert(TeamEvent::ID.to_string(), on_bytes);
-                world.write_message(RepublishTeam);
+                self.runtime.listen(TeamEvent::ID, on_bytes, RepublishTeam);
             }
             _ => return Err(EventListenerError::Unsupported),
         }
@@ -226,14 +210,7 @@ fn submit(host: &MobileHost, payload: ChatSubmit) -> Result<(), EventListenerErr
     if host.session.sid().is_empty() {
         return Err(EventListenerError::Unsupported);
     }
-    let attachments = host
-        .runtime
-        .borrow()
-        .app
-        .world()
-        .iter_entities()
-        .find_map(|entity| entity.get::<Attachments>())
-        .map(|selected| {
+    let attachments = host.runtime.project(|selected: &Attachments| {
             selected
                 .0
                 .iter()
@@ -247,13 +224,10 @@ fn submit(host: &MobileHost, payload: ChatSubmit) -> Result<(), EventListenerErr
         })
         .unwrap_or_default();
     let effect = host.composer.clear_effect();
-    let mut runtime = host.runtime.borrow_mut();
-    let world = runtime.app.world_mut();
-    world.write_message(Submitted);
+    host.runtime.send(Submitted);
     if let Some(effect) = effect {
-        world.write_message(PublishComposerEffect(effect));
+        host.runtime.send(PublishComposerEffect(effect));
     }
-    drop(runtime);
     let runtime = host.runtime.clone();
     agent_call(host, move |api, sid| async move {
         let request = PromptRequest {
@@ -271,20 +245,12 @@ fn remove_attachment(
     host: &MobileHost,
     payload: ChatRemoveAttachment,
 ) -> Result<(), EventListenerError> {
-    host.runtime
-        .borrow_mut()
-        .app
-        .world_mut()
-        .write_message(RemoveAttachment(payload.path));
+    host.runtime.send(RemoveAttachment(payload.path));
     Ok(())
 }
 
 fn report(runtime: &RuntimeHandle, status: RemoteStatus) {
-    runtime
-        .borrow_mut()
-        .app
-        .world_mut()
-        .write_message(Reported(RemoteEvent::Status { status }));
+    runtime.send(Reported(RemoteEvent::Status { status }));
 }
 
 fn cancel(host: &MobileHost) -> Result<(), EventListenerError> {
@@ -298,28 +264,19 @@ fn cancel(host: &MobileHost) -> Result<(), EventListenerError> {
 fn escape(host: &MobileHost) -> Result<(), EventListenerError> {
     let running = host
         .runtime
-        .borrow()
-        .app
-        .world()
-        .iter_entities()
-        .find_map(|entity| entity.get::<Conversation>())
-        .is_some_and(|conversation| matches!(&conversation.status, RemoteStatus::Streaming));
+        .project(|conversation: &Conversation| {
+            matches!(&conversation.status, RemoteStatus::Streaming)
+        })
+        .unwrap_or_default();
     if !running && let Some(effect) = host.composer.clear_effect() {
-        host.runtime
-            .borrow_mut()
-            .app
-            .world_mut()
-            .write_message(PublishComposerEffect(effect));
+        host.runtime.send(PublishComposerEffect(effect));
     }
     cancel(host)
 }
 
 fn approve(host: &MobileHost, payload: ChatApproval) -> Result<(), EventListenerError> {
     host.runtime
-        .borrow_mut()
-        .app
-        .world_mut()
-        .write_message(Reported(RemoteEvent::Approval { approval: None }));
+        .send(Reported(RemoteEvent::Approval { approval: None }));
     agent_call(host, move |api, sid| async move {
         let request = ApprovalRequest {
             call_id: payload.call_id,
@@ -349,23 +306,15 @@ fn attach(host: &MobileHost, payload: ChatAttachPaths) -> Result<(), EventListen
             break;
         }
     }
-    host.runtime
-        .borrow_mut()
-        .app
-        .world_mut()
-        .write_message(Attach(resolved));
+    host.runtime.send(Attach(resolved));
     Ok(())
 }
 
 fn prompt(host: &MobileHost, request: CommandBarPromptRequest) -> Result<(), EventListenerError> {
-    host.runtime
-        .borrow_mut()
-        .app
-        .world_mut()
-        .write_message(crate::session::StartChatRequest {
-            text: request.text,
-            agent_url: request.target_url,
-        });
+    host.runtime.send(crate::session::StartChatRequest {
+        text: request.text,
+        agent_url: request.target_url,
+    });
     Ok(())
 }
 
@@ -373,11 +322,7 @@ fn switch_tab(host: &MobileHost, request: SwitchTabRequest) -> Result<(), EventL
     let Some(session) = host.sessions.read().get(request.index).cloned() else {
         return Err(EventListenerError::Unsupported);
     };
-    host.runtime
-        .borrow_mut()
-        .app
-        .world_mut()
-        .write_message(crate::session::OpenSession(session));
+    host.runtime.send(crate::session::OpenSession(session));
     Ok(())
 }
 
@@ -415,11 +360,7 @@ fn poll_models(host: &MobileHost) {
                 }
                 match fetched {
                     Ok(state) => {
-                        runtime
-                            .borrow_mut()
-                            .app
-                            .world_mut()
-                            .write_message(Models(state));
+                        runtime.send(Models(state));
                         break;
                     }
                     Err(ApiError::Unauthorized | ApiError::NotFound) => return,
@@ -450,7 +391,7 @@ fn poll_media(host: &MobileHost) {
             if let Some(request) = asked {
                 if request.query.is_empty() {
                     offered.set(Vec::new());
-                    runtime.borrow_mut().app.world_mut().write_message(Browsed {
+                    runtime.send(Browsed {
                         request_id: request.request_id,
                         query: request.query,
                         entries: Vec::new(),
@@ -481,7 +422,7 @@ fn poll_media(host: &MobileHost) {
                 }
                 if let Ok(found) = fetched {
                     offered.set(found.clone());
-                    runtime.borrow_mut().app.world_mut().write_message(Browsed {
+                    runtime.send(Browsed {
                         request_id: request.request_id,
                         query: request.query,
                         entries: found,
@@ -508,11 +449,7 @@ fn poll_team(host: &MobileHost) {
                 return;
             }
             match fetched {
-                Ok(members) => runtime
-                    .borrow_mut()
-                    .app
-                    .world_mut()
-                    .write_message(Members(members)),
+                Ok(members) => runtime.send(Members(members)),
                 Err(ApiError::Unauthorized | ApiError::NotFound) => return,
                 Err(ApiError::Message(_)) => {}
             }

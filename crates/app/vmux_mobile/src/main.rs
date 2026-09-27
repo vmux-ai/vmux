@@ -19,6 +19,7 @@ use crate::pairing::{
 };
 use crate::runtime::RuntimeHandle;
 use crate::session::{LeaveSession, RestartSession, SessionPlugin, use_session};
+use bevy_app::{App as BevyApp, AppExit, Plugin};
 use vmux_chat::room::Agents;
 use vmux_start::roster::Roster;
 
@@ -52,53 +53,60 @@ fn webview_background() -> (u8, u8, u8, u8) {
 
 fn main() {
     Logs::start();
-
-    let runtime = runtime::create(|app| {
-        app.add_plugins((
+    BevyApp::new()
+        .add_plugins((
             vmux_app::VmuxPlugin::builder().mobile().build(),
-            PairingPlugin,
-            SessionPlugin,
-        ));
-    });
-    runtime::install_ui(runtime.clone());
-    lifecycle::install(runtime.clone());
+            MobilePlugin,
+        ))
+        .run();
+}
 
-    let event_runtime = runtime.clone();
-    let config = dioxus::mobile::Config::new()
-        .with_background_color(webview_background())
-        .with_custom_event_handler(move |event, _| {
-            use dioxus::mobile::tao::event::Event;
-            match event {
-                Event::Opened { urls } => {
-                    let Ok(mut runtime) = event_runtime.try_borrow_mut() else {
-                        return;
-                    };
-                    for url in urls {
-                        if url.scheme() == "vmux" && url.host_str() == Some("pair") {
-                            runtime
-                                .app
-                                .world_mut()
-                                .write_message(PairRequest(url.to_string()));
+struct MobilePlugin;
+
+impl Plugin for MobilePlugin {
+    fn build(&self, app: &mut BevyApp) {
+        app.add_plugins((runtime::MobileRuntimePlugin, PairingPlugin, SessionPlugin))
+            .set_runner(MobileRunner::run);
+    }
+}
+
+struct MobileRunner;
+
+impl MobileRunner {
+    fn run(app: BevyApp) -> AppExit {
+        let runtime = RuntimeHandle::from_app(app);
+        lifecycle::install(runtime.clone());
+
+        let event_runtime = runtime.clone();
+        let config = dioxus::mobile::Config::new()
+            .with_background_color(webview_background())
+            .with_custom_event_handler(move |event, _| {
+                use dioxus::mobile::tao::event::Event;
+                match event {
+                    Event::Opened { urls } => {
+                        for url in urls {
+                            if url.scheme() == "vmux" && url.host_str() == Some("pair") {
+                                event_runtime.send(PairRequest(url.to_string()));
+                            }
                         }
                     }
-                }
-                Event::Resumed => {
-                    if let Ok(mut runtime) = event_runtime.try_borrow_mut() {
-                        runtime.app.world_mut().write_message(RestartSession);
+                    Event::Resumed => {
+                        event_runtime.send(RestartSession);
                     }
+                    Event::MainEventsCleared => event_runtime.update(),
+                    _ => {}
                 }
-                Event::MainEventsCleared => {
-                    runtime::update(&event_runtime);
-                }
-                _ => {}
-            }
-        });
-    dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
+            });
+        dioxus::LaunchBuilder::mobile()
+            .with_cfg(config)
+            .launch(MobileApp);
+        AppExit::Success
+    }
 }
 
 #[component]
-fn App() -> Element {
-    use_context_provider(runtime::ui);
+fn MobileApp() -> Element {
+    use_context_provider(RuntimeHandle::ui);
     rsx! {
         AppHead {}
         AppBody {}
@@ -122,11 +130,7 @@ fn AppBody() -> Element {
     use_context_provider(|| {
         PageBack::new(EventHandler::new(move |()| {
             team_open.set(false);
-            page_back_runtime
-                .borrow_mut()
-                .app
-                .world_mut()
-                .write_message(LeaveSession);
+            page_back_runtime.send(LeaveSession);
         }))
     });
 
@@ -143,14 +147,12 @@ fn AppBody() -> Element {
             sessions: sessions(),
             agents: agents(),
         };
-        let mut runtime = roster_runtime.borrow_mut();
-        runtime.app.world_mut().write_message(roster);
+        roster_runtime.send(roster);
     });
 
     let agents_runtime = runtime.clone();
     use_effect(move || {
-        let mut runtime = agents_runtime.borrow_mut();
-        runtime.app.world_mut().write_message(Agents(agents()));
+        agents_runtime.send(Agents(agents()));
     });
 
     let view = (connection.view)();
@@ -174,26 +176,14 @@ fn AppBody() -> Element {
                 error: view.error,
                 pairing: view.pairing,
                 on_value: move |value| {
-                    value_runtime
-                        .borrow_mut()
-                        .app
-                        .world_mut()
-                        .write_message(PairLinkChanged(value));
+                    value_runtime.send(PairLinkChanged(value));
                 },
                 on_pair: move |_| {
-                    pair_runtime
-                        .borrow_mut()
-                        .app
-                        .world_mut()
-                        .write_message(PairRequest(pair_url.clone()));
+                    pair_runtime.send(PairRequest(pair_url.clone()));
                 },
                 on_scan: move |_| {
                     if let Err(message) = qr_scanner::open() {
-                        scan_runtime
-                            .borrow_mut()
-                            .app
-                            .world_mut()
-                            .write_message(PairingFailure(message));
+                        scan_runtime.send(PairingFailure(message));
                     }
                 },
             }
@@ -231,11 +221,7 @@ fn AppBody() -> Element {
                 reachable: view.reachable,
                 on_team: move |_| team_open.set(true),
                 on_disconnect: move |_| {
-                    runtime
-                        .borrow_mut()
-                        .app
-                        .world_mut()
-                        .write_message(DisconnectRequest);
+                    runtime.send(DisconnectRequest);
                 },
             }
         }

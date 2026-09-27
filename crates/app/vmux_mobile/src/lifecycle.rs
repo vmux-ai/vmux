@@ -11,7 +11,7 @@ mod platform {
 
     use bevy_window::AppLifecycle;
 
-    use crate::runtime::{RuntimeHandle, report_lifecycle};
+    use crate::runtime::RuntimeHandle;
 
     pub fn install(runtime: RuntimeHandle) {
         let Some(mtm) = MainThreadMarker::new() else {
@@ -54,17 +54,17 @@ mod platform {
         impl LifecycleObserver {
             #[unsafe(method(didEnterBackground:))]
             fn did_enter_background(&self, _notification: &NSNotification) {
-                report_lifecycle(self.ivars(), AppLifecycle::WillSuspend);
+                self.ivars().report_lifecycle(AppLifecycle::WillSuspend);
             }
 
             #[unsafe(method(willEnterForeground:))]
             fn will_enter_foreground(&self, _notification: &NSNotification) {
-                report_lifecycle(self.ivars(), AppLifecycle::WillResume);
+                self.ivars().report_lifecycle(AppLifecycle::WillResume);
             }
 
             #[unsafe(method(didBecomeActive:))]
             fn did_become_active(&self, _notification: &NSNotification) {
-                report_lifecycle(self.ivars(), AppLifecycle::Running);
+                self.ivars().report_lifecycle(AppLifecycle::Running);
             }
         }
 
@@ -83,10 +83,10 @@ mod platform {
 mod platform {
     use bevy_window::AppLifecycle;
 
-    use crate::runtime::{RuntimeHandle, report_lifecycle};
+    use crate::runtime::RuntimeHandle;
 
     pub fn install(runtime: RuntimeHandle) {
-        report_lifecycle(&runtime, AppLifecycle::Running);
+        runtime.report_lifecycle(AppLifecycle::Running);
     }
 }
 
