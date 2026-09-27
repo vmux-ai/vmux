@@ -1532,9 +1532,7 @@ impl Process {
                         ProcessCommandLifecycle::Ended { exit_code }
                     }
                 };
-                let _ = self
-                    .update_tx
-                    .send(ProcessUpdate::CommandLifecycle(kind));
+                let _ = self.update_tx.send(ProcessUpdate::CommandLifecycle(kind));
             }
             for marker in self.run_marker.feed(&data) {
                 self.last_run_completion = Some((marker.token, marker.exit));
@@ -2660,11 +2658,9 @@ mod tests {
 
         let (changed_lines, first_row, total_rows) = std::iter::from_fn(|| patches.try_recv().ok())
             .find_map(|msg| match msg {
-                ProcessUpdate::Viewport(patch) => Some((
-                    patch.changed_lines,
-                    patch.first_row,
-                    patch.total_rows,
-                )),
+                ProcessUpdate::Viewport(patch) => {
+                    Some((patch.changed_lines, patch.first_row, patch.total_rows))
+                }
                 _ => None,
             })
             .expect("scroll must broadcast a viewport patch");

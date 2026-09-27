@@ -235,8 +235,8 @@ fn project_terminal_modes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::message::Messages;
     use crate::process_index::TerminalProcessIndexPlugin;
+    use bevy::ecs::message::Messages;
 
     #[test]
     fn transport_envelopes_become_terminal_messages() {
@@ -246,12 +246,12 @@ mod tests {
             TerminalProcessIndexPlugin,
             ServiceIngressPlugin,
         ))
-            .add_message::<ServiceInbound>()
-            .add_message::<ProcessExitedEvent>()
-            .add_message::<crate::processes_monitor::ServiceProcessSnapshot>()
-            .add_message::<CommandLifecycleEvent>()
-            .add_message::<OscTitleChanged>()
-            .add_message::<vmux_core::notify::BellReceived>();
+        .add_message::<ServiceInbound>()
+        .add_message::<ProcessExitedEvent>()
+        .add_message::<crate::processes_monitor::ServiceProcessSnapshot>()
+        .add_message::<CommandLifecycleEvent>()
+        .add_message::<OscTitleChanged>()
+        .add_message::<vmux_core::notify::BellReceived>();
         let process_id = ProcessId([7; 16]);
         let terminal = app
             .world_mut()

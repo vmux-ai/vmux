@@ -435,7 +435,6 @@ mod platform {
     pub fn open() -> Result<(), String> {
         Err(translate("mobile-qr-unsupported-platform"))
     }
-
 }
 
 pub use platform::*;

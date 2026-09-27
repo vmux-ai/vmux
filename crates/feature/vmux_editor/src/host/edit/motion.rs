@@ -62,8 +62,7 @@ impl<'a> MotionResolver<'a> {
             Motion::Column(column) => {
                 let (line, _) = self.buffer.char_to_coords(from);
                 let start = self.buffer.line_to_char(line);
-                (start + column.saturating_sub(1))
-                    .min(start + self.buffer.line_len_chars(line))
+                (start + column.saturating_sub(1)).min(start + self.buffer.line_len_chars(line))
             }
             Motion::HalfPageUp => self.vertical(from, -((self.rows.max(2) / 2) as i64)),
             Motion::HalfPageDown => self.vertical(from, (self.rows.max(2) / 2) as i64),
@@ -73,11 +72,9 @@ impl<'a> MotionResolver<'a> {
             Motion::NextLineStart => self.first_non_blank(self.vertical(from, 1)),
             Motion::PrevLineStart => self.first_non_blank(self.vertical(from, -1)),
             Motion::MatchPair => self.match_pair(from).unwrap_or(from),
-            Motion::FindChar {
-                ch,
-                forward,
-                till,
-            } => self.find_char(from, ch, forward, till).unwrap_or(from),
+            Motion::FindChar { ch, forward, till } => {
+                self.find_char(from, ch, forward, till).unwrap_or(from)
+            }
             Motion::SearchNext { .. } => return None,
         })
     }

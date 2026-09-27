@@ -675,7 +675,10 @@ mod tests {
         assert_eq!(projection.0.drag_region_revision, "tab-1");
         assert_eq!(projection.0.tabs[0].display_title, "Workspace");
         assert_eq!(projection.0.tabs[0].metadata.title, "Workspace");
-        assert_eq!(projection.0.tabs[0].tab.bg_color.as_deref(), Some("#123456"));
+        assert_eq!(
+            projection.0.tabs[0].tab.bg_color.as_deref(),
+            Some("#123456")
+        );
     }
 
     #[test]

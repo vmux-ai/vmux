@@ -4,8 +4,8 @@ use bevy_cef_core::prelude::NativeMouseButtons;
 use std::sync::{LazyLock, Mutex};
 
 use super::NativeBridge;
-use crate::present::WindowedFrameRect;
 use crate::host::{command_bar_windowed_frame_contains, native_command_bar_route};
+use crate::present::WindowedFrameRect;
 
 static WINDOWED_PAGE_FRAMES: LazyLock<Mutex<Vec<WindowedFrameRect>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));

@@ -70,13 +70,7 @@ fn HeaderContent() -> Element {
     let reload_key = ui.reload_revision;
     let stacks_error = layout.error();
     let tabs_error = stacks_error.clone();
-    let tab_order = use_memo(move || {
-        layout
-            .value()
-            .tab_strip
-            .unwrap_or_default()
-            .order
-    });
+    let tab_order = use_memo(move || layout.value().tab_strip.unwrap_or_default().order);
     let tab_drag = TabDrag::use_state(tab_order);
     let StackNavigationState {
         stacks: _,

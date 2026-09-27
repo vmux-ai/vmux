@@ -339,12 +339,9 @@ fn restart_session_streams(
     let sid = current.sid.clone();
     state.view.connected = false;
     state.view.generation = state.view.generation.wrapping_add(1);
-    commands.entity(entity).insert(SessionStream::spawn(
-        api,
-        sid,
-        state.view.generation,
-        true,
-    ));
+    commands
+        .entity(entity)
+        .insert(SessionStream::spawn(api, sid, state.view.generation, true));
 }
 
 fn poll_session_streams(

@@ -16,6 +16,7 @@ use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::{Header, LayoutCef, side_sheet::SideSheet, state::LayoutUiState};
 
+use crate::NativeLayout;
 #[cfg(not(target_os = "macos"))]
 use crate::host::{
     CefPointerRegionQuery, LayoutHoverRefreshState, LayoutPointerCapture,
@@ -25,7 +26,6 @@ use crate::host::{
     LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE,
     WindowedHoverRefreshState, native_left_mouse_down,
 };
-use crate::NativeLayout;
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 pub(crate) struct FrameRatePlugin;
