@@ -1,7 +1,16 @@
 use bevy_ecs::prelude::*;
 use vmux_api::prompt_media::inline_media_query;
 
+#[cfg(host)]
+use bevy_app::{App, Plugin};
+#[cfg(host)]
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+
 use crate::event::ChatComposerEffect;
+#[cfg(host)]
+use crate::event::ChatDraftChanged;
+#[cfg(host)]
+use crate::host::ChatView;
 use crate::selector::{SelectorMode, selector_mode};
 
 #[derive(Component, Default)]
@@ -122,6 +131,45 @@ impl ComposerQueriesChanged {
     pub fn opens_mcp(&self) -> bool {
         self.changes.opens_mcp()
     }
+}
+
+#[cfg(host)]
+pub struct ChatComposerPlugin;
+
+#[cfg(host)]
+impl Plugin for ChatComposerPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(UiEventPlugin::<(ChatDraftChanged,)>::default())
+            .add_observer(on_draft_changed)
+            .add_observer(on_queries_changed);
+    }
+}
+
+#[cfg(host)]
+fn on_draft_changed(
+    trigger: On<UiInput<ChatDraftChanged>>,
+    mut composers: Query<&mut ComposerState, With<ChatView>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(mut composer) = composers.get_mut(webview) else {
+        return;
+    };
+    let changes = composer.update(trigger.event().payload.text.clone());
+    if let Some(changed) = ComposerQueriesChanged::new(webview, changes) {
+        commands.trigger(changed);
+    }
+}
+
+#[cfg(host)]
+fn on_queries_changed(trigger: On<ComposerQueriesChanged>, mut commands: Commands) {
+    let Some(query) = trigger.event().media() else {
+        return;
+    };
+    commands.trigger(crate::media::ChatMediaQuery::new(
+        trigger.event_target(),
+        query.to_string(),
+    ));
 }
 
 #[cfg(test)]

@@ -24,8 +24,9 @@ impl Plugin for AgentChatPagePlugin {
         app.add_plugins((
             vmux_chat::ChatKeyPlugin,
             vmux_chat::ChatMediaPlugin,
+            vmux_chat::composer::ChatComposerPlugin,
             model::ChatModelPlugin,
-            composer::ChatComposerPlugin,
+            composer::AgentChatComposerPlugin,
             prompt::ChatPromptPlugin,
             resume::ChatResumePlugin,
             tab::ChatTabPlugin,

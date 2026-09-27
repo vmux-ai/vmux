@@ -6,33 +6,17 @@ use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_api::chat::SlashCommand;
 use vmux_api::mcp::McpServersRequest;
 use vmux_chat::composer::{ComposerQueriesChanged, ComposerState};
-use vmux_chat::event::{ChatDraftChanged, ChatPickFiles, ChatSlashCommandRequest};
+use vmux_chat::event::{ChatPickFiles, ChatSlashCommandRequest};
 use vmux_core::agent::SwapStackSession;
 use vmux_session::AcpSession;
 
-pub(super) struct ChatComposerPlugin;
+pub(super) struct AgentChatComposerPlugin;
 
-impl Plugin for ChatComposerPlugin {
+impl Plugin for AgentChatComposerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(ChatDraftChanged, ChatSlashCommandRequest)>::default())
-            .add_observer(on_draft_changed)
+        app.add_plugins(UiEventPlugin::<(ChatSlashCommandRequest,)>::default())
             .add_observer(on_slash_command)
             .add_observer(dispatch_composer_queries);
-    }
-}
-
-fn on_draft_changed(
-    trigger: On<UiInput<ChatDraftChanged>>,
-    mut composers: Query<&mut ComposerState, With<AgentChatView>>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let Ok(mut composer) = composers.get_mut(webview) else {
-        return;
-    };
-    let changes = composer.update(trigger.event().payload.text.clone());
-    if let Some(changed) = ComposerQueriesChanged::new(webview, changes) {
-        commands.trigger(changed);
     }
 }
 
@@ -70,12 +54,6 @@ fn on_slash_command(
 
 fn dispatch_composer_queries(trigger: On<ComposerQueriesChanged>, mut commands: Commands) {
     let webview = trigger.event_target();
-    if let Some(query) = trigger.event().media() {
-        commands.trigger(vmux_chat::media::ChatMediaQuery::new(
-            webview,
-            query.to_string(),
-        ));
-    }
     if let Some(query) = trigger.event().resume() {
         commands.trigger(super::resume::ChatResumeQuery::new(
             webview,
