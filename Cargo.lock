@@ -10731,6 +10731,7 @@ dependencies = [
  "bevy_tasks",
  "bevy_window",
  "block2 0.6.2",
+ "crossbeam-channel",
  "dioxus",
  "dispatch2",
  "futures-util",
