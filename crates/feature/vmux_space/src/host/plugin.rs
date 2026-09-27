@@ -649,7 +649,7 @@ fn on_space_open_page(
         metadata.url == SPACES_PAGE_URL
             && vmux_layout::window::host_window_of(*stack, &child_of, &host_windows) == Some(window)
     }) {
-        vmux_core::focus_pane_entity(existing, &mut commands, &child_of);
+        commands.trigger(vmux_core::ActivateRequest { entity: existing });
         return;
     }
     let Some(pane) = focus.as_deref().and_then(|focus| focus.pane) else {

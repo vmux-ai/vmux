@@ -4,6 +4,7 @@ use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 use vmux_agent::AgentRunState;
 use vmux_agent::event::AgentRequestInput;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
+use vmux_core::PageMetadata;
 use vmux_core::agent::{AgentCommandResponse, AgentReply, SessionId};
 use vmux_core::event::team::{
     ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
@@ -12,7 +13,6 @@ use vmux_core::event::team::{
 use vmux_core::host::{UiStatePlugin, UiStateWrite};
 use vmux_core::profile::{ProfileId, ProfileLabel};
 use vmux_core::team::{Agent, Profile, User};
-use vmux_core::{PageMetadata, focus_pane_entity};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
@@ -445,7 +445,7 @@ fn on_team_open_request(
     if let Some(space) = current_space.iter().next()
         && let Some(stack) = open_team_stack_in_space(space, &stacks, &child_of, &spaces)
     {
-        focus_pane_entity(stack, &mut commands, &child_of);
+        commands.trigger(vmux_core::ActivateRequest { entity: stack });
         return;
     }
 
@@ -457,14 +457,13 @@ fn on_team_open_request(
 fn on_team_member_focus_request(
     trigger: On<UiInput<TeamMemberFocusRequest>>,
     agents: Query<Entity, With<Agent>>,
-    child_of: Query<&ChildOf>,
     mut commands: Commands,
 ) {
     let Some(entity) = parse_member_entity(&trigger.event().payload.member_id) else {
         return;
     };
     if agents.get(entity).is_ok() {
-        focus_pane_entity(entity, &mut commands, &child_of);
+        commands.trigger(vmux_core::ActivateRequest { entity });
     }
 }
 

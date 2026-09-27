@@ -49,7 +49,6 @@ fn focus_chosen_stack_in_pane(
     leaf_panes: Query<Entity, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>,
     pane_children: Query<&Children, With<crate::pane::Pane>>,
     stack_q: Query<Entity, With<Stack>>,
-    child_of_q: Query<&ChildOf>,
     mut commands: Commands,
 ) {
     for event in chosen.read() {
@@ -62,6 +61,8 @@ fn focus_chosen_stack_in_pane(
                 .filter(|&e| stack_q.contains(e))
                 .nth(event.index)
         });
-        vmux_core::focus_pane_entity(stack.unwrap_or(pane), &mut commands, &child_of_q);
+        commands.trigger(vmux_core::ActivateRequest {
+            entity: stack.unwrap_or(pane),
+        });
     }
 }

@@ -78,15 +78,10 @@ impl LastActivatedAt {
     }
 }
 
-pub fn focus_pane_entity(entity: Entity, commands: &mut Commands, child_of_q: &Query<&ChildOf>) {
-    use bevy::ecs::relationship::Relationship;
-    commands.entity(entity).insert(LastActivatedAt::now());
-    let mut current = entity;
-    while let Ok(parent_rel) = child_of_q.get(current) {
-        let parent = parent_rel.get();
-        commands.entity(parent).insert(LastActivatedAt::now());
-        current = parent;
-    }
+#[derive(EntityEvent, Clone, Copy, Debug)]
+pub struct ActivateRequest {
+    #[event_target]
+    pub entity: Entity,
 }
 
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]

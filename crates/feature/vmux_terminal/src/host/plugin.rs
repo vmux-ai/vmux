@@ -377,7 +377,7 @@ fn open_terminal_page(
                 if let Some(map) = pid_to_entity
                     && let Some(entity) = map.get(pid)
                 {
-                    pid::focus_pane_entity(entity, commands, child_of_q);
+                    commands.trigger(vmux_core::ActivateRequest { entity });
                     return Ok(());
                 }
                 warn!("no terminal pane for pid {pid}; spawning new");

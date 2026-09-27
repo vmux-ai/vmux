@@ -778,7 +778,7 @@ fn handle_agent_page_open_task(
                 .iter()
                 .find(|(_, session, id)| session.kind == kind && id.0 == sid)
             {
-                vmux_terminal::pid::focus_pane_entity(entity, commands, child_of_q);
+                commands.trigger(vmux_core::ActivateRequest { entity });
                 return Ok(());
             }
             spawn_agent.write(SpawnAgentInStackRequest {

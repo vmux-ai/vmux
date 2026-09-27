@@ -207,16 +207,14 @@ fn request_focus(
     }
 }
 
-fn focus_pane(
-    mut requests: MessageReader<FocusPaneRequest>,
-    child_of: Query<&ChildOf>,
-    mut commands: Commands,
-) {
+fn focus_pane(mut requests: MessageReader<FocusPaneRequest>, mut commands: Commands) {
     for request in requests.read() {
         let Ok((_, bits)) = crate::protocol::parse_id(&request.pane) else {
             continue;
         };
-        vmux_core::focus_pane_entity(Entity::from_bits(bits), &mut commands, &child_of);
+        commands.trigger(vmux_core::ActivateRequest {
+            entity: Entity::from_bits(bits),
+        });
     }
 }
 

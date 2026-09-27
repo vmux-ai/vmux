@@ -2,8 +2,9 @@ use bevy::prelude::*;
 
 use crate::archive::{ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PaneStep, SplitAxis};
 use crate::component::{
-    Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Folder, LastActivatedAt, LastVisitedAt,
-    Order, Pin, TransitionType, Url, Uuid, Visit, VisitCount, VisitedUrl,
+    ActivateRequest, Active, Bookmark, BookmarkOrder, Collapsed, CreatedAt, Folder,
+    LastActivatedAt, LastVisitedAt, Order, Pin, TransitionType, Url, Uuid, Visit, VisitCount,
+    VisitedUrl,
 };
 use crate::icon::{BuiltinIcon, PageIcon};
 use crate::{PageMetadata, SmartBookmarkFolder};
@@ -40,7 +41,20 @@ impl Plugin for CorePlugin {
             .register_type::<Uuid>()
             .register_type::<Children>()
             .register_type::<ChildOf>()
+            .add_observer(activate)
             .add_plugins(crate::page::HostHistoryPlugin);
+    }
+}
+
+fn activate(trigger: On<ActivateRequest>, child_of: Query<&ChildOf>, mut commands: Commands) {
+    use bevy::ecs::relationship::Relationship;
+
+    let activated_at = LastActivatedAt::now();
+    let mut current = trigger.event_target();
+    commands.entity(current).insert(activated_at);
+    while let Ok(parent_rel) = child_of.get(current) {
+        current = parent_rel.get();
+        commands.entity(current).insert(activated_at);
     }
 }
 
@@ -98,5 +112,28 @@ mod tests {
 
         let registry = app.world().resource::<AppTypeRegistry>().read();
         assert!(registry.get(std::any::TypeId::of::<Active>()).is_some());
+    }
+
+    #[test]
+    fn activation_propagates_through_ancestors() {
+        let mut app = App::new();
+        app.add_plugins(CorePlugin);
+
+        let root = app.world_mut().spawn(LastActivatedAt(1)).id();
+        let child = app
+            .world_mut()
+            .spawn((LastActivatedAt(1), ChildOf(root)))
+            .id();
+        let leaf = app
+            .world_mut()
+            .spawn((LastActivatedAt(1), ChildOf(child)))
+            .id();
+
+        app.world_mut().trigger(ActivateRequest { entity: leaf });
+        app.update();
+
+        assert!(app.world().get::<LastActivatedAt>(root).unwrap().0 > 1);
+        assert!(app.world().get::<LastActivatedAt>(child).unwrap().0 > 1);
+        assert!(app.world().get::<LastActivatedAt>(leaf).unwrap().0 > 1);
     }
 }

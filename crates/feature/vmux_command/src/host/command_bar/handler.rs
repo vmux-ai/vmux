@@ -47,8 +47,6 @@ use crate::ResolvedLocale;
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 
-pub(crate) use vmux_core::focus_pane_entity;
-
 pub(crate) struct InputPlugin;
 
 impl Plugin for InputPlugin {
@@ -992,7 +990,6 @@ fn on_page_open_request(
 
 fn on_terminal_request(
     trigger: On<UiInput<TerminalRequest>>,
-    child_of: Query<&ChildOf>,
     command_bar: Res<CommandBarProjection>,
     locale: Option<Res<ResolvedLocale>>,
     mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
@@ -1010,7 +1007,7 @@ fn on_terminal_request(
         .unwrap_or_else(Locale::preferred);
     let mut custom_keyboard_restore = false;
     if let Some(entity) = command_bar.terminals.running.get(value).copied() {
-        focus_pane_entity(entity, &mut commands, &child_of);
+        commands.trigger(vmux_core::ActivateRequest { entity });
         custom_keyboard_restore = true;
     } else {
         if value.starts_with(&command_bar.terminals.terminal_page_url) {

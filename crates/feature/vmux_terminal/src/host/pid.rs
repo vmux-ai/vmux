@@ -2,8 +2,6 @@ use bevy::ecs::entity::EntityHashMap;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-pub use vmux_core::focus_pane_entity;
-
 pub struct PidPlugin;
 
 impl Plugin for PidPlugin {
