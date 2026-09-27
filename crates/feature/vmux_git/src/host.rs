@@ -71,7 +71,7 @@ impl Plugin for GitPlugin {
             PAGE_MANIFEST
                 .plugin()
                 .hosted(NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"))
-                .additional_hosted(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git")),
+                .alias(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git")),
         );
     }
 }

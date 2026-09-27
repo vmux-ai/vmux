@@ -107,7 +107,7 @@ pub struct PageManifestPlugin {
     manifest: PageManifest,
     hosted: Option<NativelyHosted>,
     route: Option<super::host_spawn::HostSpawnRoute>,
-    additional_hosted: Option<NativelyHosted>,
+    alias: Option<NativelyHosted>,
 }
 
 impl PageManifestPlugin {
@@ -121,15 +121,15 @@ impl PageManifestPlugin {
         self
     }
 
-    pub const fn additional_hosted(mut self, hosted: NativelyHosted) -> Self {
-        self.additional_hosted = Some(hosted);
+    pub const fn alias(mut self, hosted: NativelyHosted) -> Self {
+        self.alias = Some(hosted);
         self
     }
 }
 
 impl Plugin for PageManifestPlugin {
     fn build(&self, app: &mut App) {
-        if let Some(hosted) = self.additional_hosted {
+        if let Some(hosted) = self.alias {
             app.world_mut().spawn(hosted);
         }
         let mut registration = app.world_mut().spawn(self.manifest);
@@ -285,7 +285,7 @@ impl PageManifest {
             manifest: self,
             hosted: None,
             route: None,
-            additional_hosted: None,
+            alias: None,
         }
     }
 
