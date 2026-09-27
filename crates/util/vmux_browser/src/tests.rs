@@ -313,6 +313,7 @@ mod browser_navigate_flow {
                 vmux_layout::LayoutContractPlugin,
                 vmux_terminal::TerminalRequestPlugin,
                 crate::page::PagePlugin,
+                crate::host::AgentBrowserPlugin,
             ))
             .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_message::<vmux_space::SpaceAttachRequest>()
