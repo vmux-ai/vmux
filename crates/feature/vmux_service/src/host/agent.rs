@@ -254,7 +254,7 @@ impl Plugin for AgentSessionPlugin {
         app.world_mut().spawn((
             Name::new("agent session runtime"),
             AgentSessionRuntime(self.runtime.clone()),
-            AgentSessionInbox(StdMutex::new(inbox)),
+            AgentSessionInbox(inbox),
         ));
         app.add_systems(
             Update,
@@ -468,7 +468,7 @@ struct AgentSessionReceivers {
 }
 
 #[derive(Component)]
-struct AgentSessionInbox(StdMutex<AgentSessionReceivers>);
+struct AgentSessionInbox(AgentSessionReceivers);
 
 #[derive(Component)]
 struct AgentSessionRuntime(Handle);
@@ -566,32 +566,32 @@ struct AgentSessionApproval(Arc<StdMutex<Option<RemoteApproval>>>);
 #[derive(Component)]
 struct AgentSessionCreatedAt(u64);
 
-fn receive_agent_session_requests(inbox: Single<&AgentSessionInbox>, mut commands: Commands) {
-    let Ok(mut inbox) = inbox.0.lock() else {
-        return;
-    };
-    while let Ok(request) = inbox.spawns.try_recv() {
+fn receive_agent_session_requests(
+    mut inbox: Single<&mut AgentSessionInbox>,
+    mut commands: Commands,
+) {
+    while let Ok(request) = inbox.0.spawns.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = inbox.inputs.try_recv() {
+    while let Ok(request) = inbox.0.inputs.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = inbox.subscriptions.try_recv() {
+    while let Ok(request) = inbox.0.subscriptions.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = inbox.snapshots.try_recv() {
+    while let Ok(request) = inbox.0.snapshots.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = inbox.messages.try_recv() {
+    while let Ok(request) = inbox.0.messages.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = inbox.lists.try_recv() {
+    while let Ok(request) = inbox.0.lists.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = inbox.lookups.try_recv() {
+    while let Ok(request) = inbox.0.lookups.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = inbox.closes.try_recv() {
+    while let Ok(request) = inbox.0.closes.try_recv() {
         commands.spawn(request);
     }
 }

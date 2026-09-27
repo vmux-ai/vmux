@@ -40,7 +40,7 @@ impl Plugin for ClientOperationPlugin {
             .expect("client operation plugin can only be built once");
         app.world_mut().spawn((
             Name::new("remote client operations"),
-            ClientOperationInbox(Mutex::new(inbox)),
+            ClientOperationInbox(inbox),
         ));
         app.add_systems(
             Update,
@@ -120,7 +120,7 @@ struct ClientOperationReceivers {
 }
 
 #[derive(Component)]
-struct ClientOperationInbox(Mutex<ClientOperationReceivers>);
+struct ClientOperationInbox(ClientOperationReceivers);
 
 #[derive(Component)]
 struct ClaimClientOperation {
@@ -140,14 +140,14 @@ struct ClientOperationId(ClientOpId);
 #[derive(Component, Clone, Copy)]
 struct ClientOperationSequence(u64);
 
-fn receive_client_operation_requests(inbox: Single<&ClientOperationInbox>, mut commands: Commands) {
-    let Ok(mut inbox) = inbox.0.lock() else {
-        return;
-    };
-    while let Ok(request) = inbox.releases.try_recv() {
+fn receive_client_operation_requests(
+    mut inbox: Single<&mut ClientOperationInbox>,
+    mut commands: Commands,
+) {
+    while let Ok(request) = inbox.0.releases.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = inbox.claims.try_recv() {
+    while let Ok(request) = inbox.0.claims.try_recv() {
         commands.spawn(request);
     }
 }

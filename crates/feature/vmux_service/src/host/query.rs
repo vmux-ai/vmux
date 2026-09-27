@@ -38,7 +38,7 @@ struct ProcessQueryReceivers {
 }
 
 #[derive(Component)]
-struct ProcessQueryInbox(Mutex<ProcessQueryReceivers>);
+struct ProcessQueryInbox(ProcessQueryReceivers);
 
 #[derive(Component)]
 struct ProcessRuntime(Arc<AsyncMutex<ProcessManager>>);
@@ -178,7 +178,7 @@ impl Plugin for ProcessQueryPlugin {
         app.world_mut().spawn((
             Name::new("vmux service process runtime"),
             ProcessRuntime(Arc::clone(&self.manager)),
-            ProcessQueryInbox(Mutex::new(receivers)),
+            ProcessQueryInbox(receivers),
         ));
         app.add_systems(
             Update,
@@ -196,20 +196,17 @@ impl Plugin for ProcessQueryPlugin {
     }
 }
 
-fn receive_process_queries(inbox: Single<&ProcessQueryInbox>, mut commands: Commands) {
-    let Ok(mut receivers) = inbox.0.lock() else {
-        return;
-    };
-    while let Ok(request) = receivers.output.try_recv() {
+fn receive_process_queries(mut inbox: Single<&mut ProcessQueryInbox>, mut commands: Commands) {
+    while let Ok(request) = inbox.0.output.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = receivers.transcript.try_recv() {
+    while let Ok(request) = inbox.0.transcript.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = receivers.command_exit.try_recv() {
+    while let Ok(request) = inbox.0.command_exit.try_recv() {
         commands.spawn(request);
     }
-    while let Ok(request) = receivers.run_completion.try_recv() {
+    while let Ok(request) = inbox.0.run_completion.try_recv() {
         commands.spawn(request);
     }
 }
