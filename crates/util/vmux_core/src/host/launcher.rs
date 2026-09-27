@@ -7,16 +7,8 @@ pub struct ContributedCommandChosen {
     pub pane: Option<Entity>,
 }
 
-#[derive(Resource, Default, Debug)]
-pub struct PendingLaunch {
-    pub dismiss_modal: bool,
-}
-
-impl PendingLaunch {
-    pub fn opened_elsewhere(&mut self) {
-        self.dismiss_modal = true;
-    }
-}
+#[derive(Message, Clone, Copy, Debug, Default)]
+pub struct LauncherDismissRequest;
 #[derive(Component, Clone, Copy, Debug)]
 pub struct HostsLauncher;
 

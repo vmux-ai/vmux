@@ -505,10 +505,10 @@ fn edit_menu_items_enabled(intent: HostFocusIntent, binds_chords: bool) -> bool 
 #[cfg(target_os = "macos")]
 fn sync_edit_menu_items(
     menu: Option<NonSend<OsMenuResource>>,
-    intent: Option<Res<HostFocusIntent>>,
+    intent: Query<Ref<HostFocusIntent>>,
     chord_panes: Query<(), With<vmux_core::host::page::BindsEditingChords>>,
 ) {
-    let Some(intent) = intent else {
+    let Ok(intent) = intent.single() else {
         return;
     };
     if !intent.is_changed() {

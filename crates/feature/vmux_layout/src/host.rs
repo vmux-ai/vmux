@@ -51,7 +51,7 @@ pub use pane::OpenBesideRequest;
 pub use plugin::LayoutPlugin;
 pub use stack::{CloseStackReason, CloseStackRequest};
 pub use vmux_core::ContributedCommandChosen;
-pub use vmux_core::launcher::PendingLaunch;
+pub use vmux_core::launcher::LauncherDismissRequest;
 pub use webview_reveal::PendingWebviewReveal;
 pub use window::fit_window_to_screen;
 

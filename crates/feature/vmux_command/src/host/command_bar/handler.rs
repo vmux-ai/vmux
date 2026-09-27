@@ -7,10 +7,9 @@ use vmux_api::command_bar::{
     InvokeRequest, OpenRequest as CommandBarPageOpenRequest, PickRequest, PromptRequest,
     SwitchSpaceRequest, SwitchTabRequest, TerminalRequest,
 };
-pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
-    HostsLauncher, InlineTransitionRequested, RendersLauncherPanel, RestoreKeyboardToStack,
-    StackInPaneChosen,
+    HostsLauncher, InlineTransitionRequested, LauncherDismissRequest, RendersLauncherPanel,
+    RestoreKeyboardToStack, StackInPaneChosen,
 };
 
 use crate::command_bar::CloseCommandBar;
@@ -60,7 +59,7 @@ impl Plugin for InputPlugin {
             CommandTypePlugin::<CommandBarPickerRequest>::default(),
             CommandTypePlugin::<SpaceOpenRequest>::default(),
         ))
-        .init_resource::<PendingLaunch>()
+        .add_message::<LauncherDismissRequest>()
         .add_message::<vmux_core::ContributedCommandChosen>()
         .add_message::<InlineTransitionRequested>()
         .add_message::<StackInPaneChosen>()
@@ -1187,7 +1186,7 @@ fn close_command_bar(
 }
 
 fn deferred_dismiss_modal(
-    mut pending_launch: ResMut<PendingLaunch>,
+    mut requests: MessageReader<LauncherDismissRequest>,
     mut modal_q: Query<
         (
             Entity,
@@ -1200,10 +1199,9 @@ fn deferred_dismiss_modal(
     panel_q: Query<Entity, (With<RendersLauncherPanel>, With<CommandBarPanelActive>)>,
     mut commands: Commands,
 ) {
-    if !pending_launch.dismiss_modal {
+    if requests.read().next().is_none() {
         return;
     }
-    pending_launch.dismiss_modal = false;
     for layout_e in &panel_q {
         close_command_bar_panel(layout_e, &mut commands);
     }
@@ -2062,7 +2060,7 @@ mod tests {
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
             .init_resource::<CommandBarProjection>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
             .add_systems(Update, handle_open_command_bar);
@@ -2185,9 +2183,7 @@ mod tests {
             .world_mut()
             .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
-        app.world_mut()
-            .resource_mut::<PendingLaunch>()
-            .dismiss_modal = true;
+        app.world_mut().write_message(LauncherDismissRequest);
 
         app.update();
 

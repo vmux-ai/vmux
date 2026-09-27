@@ -89,13 +89,10 @@ fn dismiss_launcher_over_new_surfaces(
             Added<crate::stack::Stack>,
         )>,
     >,
-    pending_launch: Option<ResMut<vmux_core::launcher::PendingLaunch>>,
+    mut dismiss_launcher: MessageWriter<vmux_core::launcher::LauncherDismissRequest>,
 ) {
-    let Some(mut pending_launch) = pending_launch else {
-        return;
-    };
     if !opened.is_empty() {
-        pending_launch.opened_elsewhere();
+        dismiss_launcher.write(vmux_core::launcher::LauncherDismissRequest);
     }
 }
 
@@ -961,7 +958,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .init_resource::<crate::PendingLaunch>()
+            .add_message::<crate::LauncherDismissRequest>()
             .init_resource::<crate::window::FocusedWindow>()
             .insert_resource(test_settings())
             .init_resource::<CollectedSpawns>()

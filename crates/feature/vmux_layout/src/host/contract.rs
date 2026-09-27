@@ -16,7 +16,7 @@ use crate::stack::{CloseStackRequest, FocusedStack};
 use crate::worktree::TabDirectoryObserved;
 use crate::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest,
-    ContributedCommandChosen, NewTabRequest, OpenInNewStackRequest, PendingLaunch,
+    ContributedCommandChosen, LauncherDismissRequest, NewTabRequest, OpenInNewStackRequest,
 };
 
 pub struct LayoutContractPlugin;
@@ -26,7 +26,7 @@ impl Plugin for LayoutContractPlugin {
         app.init_resource::<EffectiveStartupDir>()
             .init_resource::<EffectiveStartupUrl>()
             .init_resource::<FocusedStack>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<SpawnCounter>()
             .add_message::<ActivatePane>()
             .add_message::<AddRequest>()

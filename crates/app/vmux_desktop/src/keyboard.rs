@@ -107,14 +107,15 @@ fn spawn_application_key_bindings(mut commands: Commands) {
 }
 
 fn sync_application_key_bindings(
-    browser: Option<Res<vmux_browser::KeyboardContext>>,
+    browser: Query<&vmux_browser::KeyboardContext>,
     focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
     fullscreen: Query<&crate::window_state::WindowFullscreen>,
     bindings: Query<(Entity, Has<vmux_core::Active>), With<ExitFullscreenKey>>,
     mut commands: Commands,
 ) {
     let page_owns_escape = browser
-        .as_deref()
+        .single()
+        .ok()
         .is_some_and(|context| context.page_owns_escape);
     let enabled = focused_window
         .as_deref()
@@ -499,7 +500,7 @@ fn install_monitor(
 fn sync_keyboard_context(
     keyboard: Single<&KeyboardBridge>,
     keymap: Res<Keymap>,
-    browser: Option<Res<vmux_browser::KeyboardContext>>,
+    browser: Query<&vmux_browser::KeyboardContext>,
     capture: Query<(), With<NativeKeyCapture>>,
     claims: Query<
         (
@@ -536,7 +537,8 @@ fn sync_keyboard_context(
         }
     }
     context.text_entry_owns_keys = browser
-        .as_deref()
+        .single()
+        .ok()
         .is_some_and(|context| context.text_entry_owns_keys);
 }
 
@@ -693,7 +695,7 @@ mod tests {
             1
         );
 
-        app.insert_resource(vmux_browser::KeyboardContext {
+        app.world_mut().spawn(vmux_browser::KeyboardContext {
             page_owns_escape: true,
             text_entry_owns_keys: false,
         });

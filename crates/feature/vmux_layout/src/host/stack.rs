@@ -755,7 +755,7 @@ fn entity_tree_contains_stack(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PendingLaunch;
+    use crate::LauncherDismissRequest;
     use crate::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -801,7 +801,7 @@ mod tests {
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .add_systems(Update, handle_close_stack_requests);
         app
     }
@@ -1016,7 +1016,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<FocusedStack>()
             .insert_resource(test_settings())
             .add_systems(
@@ -1159,7 +1159,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,
@@ -1221,7 +1221,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,
@@ -1276,7 +1276,7 @@ mod tests {
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
             .add_systems(
                 Update,
@@ -1339,7 +1339,7 @@ mod tests {
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
             .insert_resource(vmux_core::EffectiveStartupUrl(
                 "vmux://sessions/vibe/".to_string(),
@@ -1431,7 +1431,7 @@ mod tests {
     fn empty_active_pane_opens_the_start_page_even_when_other_tabs_have_stacks() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
             .add_systems(Update, open_startup_url_if_no_stacks);
 
@@ -1479,7 +1479,7 @@ mod tests {
     fn empty_active_pane_does_not_open_a_page_when_tab_has_stacks() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
             .add_systems(Update, open_startup_url_if_no_stacks);
 
@@ -1515,7 +1515,7 @@ mod tests {
     fn a_pane_that_already_holds_a_stack_is_not_filled_again() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .add_message::<PageOpenRequest>()
             .add_systems(Update, open_startup_url_if_no_stacks);
 
@@ -1561,7 +1561,7 @@ mod tests {
             .add_message::<CloseStackRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .insert_resource(test_settings())
             .init_resource::<CollectedSpawns>()
             .add_systems(

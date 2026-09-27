@@ -26,7 +26,7 @@ pub use archive::{
 pub use file_ui_state::{FileUiStateUpdates, FileUiStateWrite};
 pub use host_spawn::HostSpawnRoute;
 pub use launcher::{
-    ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, PendingLaunch,
+    ContributedCommandChosen, HostsLauncher, InlineTransitionRequested, LauncherDismissRequest,
     RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,
 };
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};

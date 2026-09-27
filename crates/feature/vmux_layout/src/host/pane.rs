@@ -317,7 +317,7 @@ pub fn first_stack_in_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PendingLaunch;
+    use crate::LauncherDismissRequest;
     use crate::{
         settings::ConfirmCloseSettings,
         settings::{
@@ -342,7 +342,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
 
@@ -405,7 +405,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
 
@@ -499,7 +499,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
         app
@@ -2147,7 +2147,7 @@ mod tests {
     fn zoom_command_inserts_zoomed_with_correct_hidden_set() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_plugins(PaneZoomPlugin);
@@ -2211,7 +2211,7 @@ mod tests {
     fn zoom_command_on_zoomed_tab_removes_zoomed() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_plugins(PaneZoomPlugin);
@@ -2274,7 +2274,7 @@ mod tests {
     fn zoom_command_on_single_pane_tab_is_noop() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_plugins(PaneZoomPlugin);
@@ -2337,7 +2337,7 @@ mod tests {
     fn split_command_auto_unzooms_first() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_plugins(PaneZoomPlugin);
@@ -2409,7 +2409,7 @@ mod tests {
     fn select_command_auto_unzooms() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_plugins(PaneZoomPlugin);
@@ -2653,7 +2653,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin, LayoutRequestPlugin))
             .add_message::<crate::TerminalLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<InPaneCollectedSpawns>()
             .insert_resource(test_settings())
             .add_plugins(DirectionalOpenPlugin)
@@ -2719,7 +2719,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
         let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
@@ -2753,7 +2753,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
         let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
@@ -2790,7 +2790,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<PendingLaunch>()
+            .add_message::<LauncherDismissRequest>()
             .init_resource::<SpawnCounter>()
             .add_plugins(BesideOpenPlugin);
         let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();

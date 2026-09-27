@@ -22,9 +22,12 @@ pub(crate) struct HostFocusPlugin;
 
 impl Plugin for HostFocusPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HostFocusIntent>()
-            .init_resource::<KeyboardContext>()
-            .add_systems(Update, sync_keyboard_context.in_set(KeyboardContextSet))
+        app.world_mut().spawn((
+            Name::new("Host focus"),
+            HostFocusIntent::default(),
+            KeyboardContext::default(),
+        ));
+        app.add_systems(Update, sync_keyboard_context.in_set(KeyboardContextSet))
             .add_systems(
                 PostUpdate,
                 (compute_host_focus_intent, apply_windowed_host_focus)
@@ -44,16 +47,16 @@ fn page_owns_escape(terminal_focused: bool, overlay_open: bool) -> bool {
 fn sync_keyboard_context(
     terminal_focus_q: Query<(), (With<Terminal>, With<KeyboardOwner>)>,
     overlay_q: OverlayStateQuery,
-    mut context: ResMut<KeyboardContext>,
+    mut context: Single<&mut KeyboardContext>,
 ) {
     let overlay_owns_input = OverlayState::from_query(&overlay_q).owns_input();
-    *context = KeyboardContext {
+    **context = KeyboardContext {
         page_owns_escape: page_owns_escape(!terminal_focus_q.is_empty(), overlay_owns_input),
         text_entry_owns_keys: overlay_owns_input,
     };
 }
 
-#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyboardContext {
     pub page_owns_escape: bool,
     pub text_entry_owns_keys: bool,
@@ -62,7 +65,7 @@ pub struct KeyboardContext {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct KeyboardContextSet;
 
-#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostFocusIntent {
     Windowed(Entity),
     LayoutView,
@@ -100,7 +103,7 @@ pub(crate) fn compute_host_focus_intent(
     layout_keyboard_q: Query<(Entity, Option<&HostWindow>), crate::present::LayoutKeyboardHost>,
     focused_window: Option<Res<vmux_layout::window::FocusedWindow>>,
     native_q: Query<(), With<vmux_core::host::page::HostsPage>>,
-    mut intent: ResMut<HostFocusIntent>,
+    mut intent: Single<&mut HostFocusIntent>,
 ) {
     let next = if let Some((modal, windowed, shown_inline)) = modal_q.iter().find_map(
         |(entity, node, visibility, keyboard_target, windowed, shown_inline)| {
@@ -143,9 +146,9 @@ pub(crate) fn compute_host_focus_intent(
     set_intent(&mut intent, next);
 }
 
-fn set_intent(intent: &mut ResMut<HostFocusIntent>, next: HostFocusIntent) {
-    if **intent != next {
-        **intent = next;
+fn set_intent(intent: &mut HostFocusIntent, next: HostFocusIntent) {
+    if *intent != next {
+        *intent = next;
     }
 }
 
@@ -173,14 +176,15 @@ fn windowed_focus_target(
 }
 
 pub(crate) fn apply_windowed_host_focus(
-    intent: Res<HostFocusIntent>,
+    intent: Single<&HostFocusIntent>,
     browsers: NonSend<Browsers>,
     mut focused: Local<Option<Entity>>,
     mut was_layout_view: Local<bool>,
 ) {
-    let reclaiming = *was_layout_view && *intent != HostFocusIntent::LayoutView;
-    *was_layout_view = *intent == HostFocusIntent::LayoutView;
-    let (has_browser, has_native_focus) = match *intent {
+    let intent = **intent;
+    let reclaiming = *was_layout_view && intent != HostFocusIntent::LayoutView;
+    *was_layout_view = intent == HostFocusIntent::LayoutView;
+    let (has_browser, has_native_focus) = match intent {
         HostFocusIntent::Windowed(webview) => (
             browsers.has_browser(webview),
             browsers.windowed_has_native_focus(&webview),
@@ -188,7 +192,7 @@ pub(crate) fn apply_windowed_host_focus(
         _ => (false, None),
     };
     if let Some(webview) = windowed_focus_target(
-        *intent,
+        intent,
         has_browser,
         has_native_focus,
         &mut focused,
@@ -208,15 +212,25 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<HostFocusIntent>()
-            .init_resource::<KeyboardContext>()
             .insert_resource(FocusedStack::default())
             .add_systems(Update, (sync_keyboard_context, compute_host_focus_intent));
+        app.world_mut()
+            .spawn((HostFocusIntent::default(), KeyboardContext::default()));
         app
     }
 
     fn intent(app: &App) -> HostFocusIntent {
-        *app.world().resource::<HostFocusIntent>()
+        app.world()
+            .iter_entities()
+            .find_map(|entity| entity.get::<HostFocusIntent>().copied())
+            .unwrap()
+    }
+
+    fn keyboard_context(app: &App) -> KeyboardContext {
+        app.world()
+            .iter_entities()
+            .find_map(|entity| entity.get::<KeyboardContext>().copied())
+            .unwrap()
     }
 
     #[test]
@@ -275,7 +289,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            *app.world().resource::<KeyboardContext>(),
+            keyboard_context(&app),
             KeyboardContext {
                 page_owns_escape: true,
                 text_entry_owns_keys: true,
@@ -291,7 +305,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            *app.world().resource::<KeyboardContext>(),
+            keyboard_context(&app),
             KeyboardContext {
                 page_owns_escape: true,
                 text_entry_owns_keys: false,

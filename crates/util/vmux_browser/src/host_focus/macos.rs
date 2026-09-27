@@ -12,12 +12,12 @@ impl Plugin for HostFocusPlatformPlugin {
 
 fn apply_winit_host_focus(
     _non_send: NonSendMarker,
-    intent: Res<HostFocusIntent>,
+    intent: Single<&HostFocusIntent>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut pending_key_window: Local<bool>,
 ) {
-    if *intent != HostFocusIntent::WinitHost {
+    if **intent != HostFocusIntent::WinitHost {
         *pending_key_window = false;
         return;
     }
