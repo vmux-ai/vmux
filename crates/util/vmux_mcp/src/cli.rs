@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::name::Name;
 use bevy_ecs::prelude::*;
 use vmux_api::protocol::ProcessId;
@@ -23,12 +23,16 @@ impl Plugin for McpCliPlugin {
             .add_systems(
                 Update,
                 (write_stdio, finish_stdio).chain().in_set(McpSet::Output),
-            );
-        app.world_mut().spawn((
-            Name::new("MCP async runtime"),
-            McpRuntime(tokio::runtime::Handle::current()),
-        ));
+            )
+            .add_systems(Startup, spawn_mcp_runtime);
     }
+}
+
+fn spawn_mcp_runtime(mut commands: Commands) {
+    commands.spawn((
+        Name::new("MCP async runtime"),
+        McpRuntime(tokio::runtime::Handle::current()),
+    ));
 }
 
 struct McpCliOptions {

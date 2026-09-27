@@ -44,12 +44,6 @@ impl Plugin for GitPlugin {
             crate::ui::GitPage::plugin(),
             crate::ui::LegacyGitPage::plugin(),
         ));
-        app.world_mut().spawn((
-            PAGE_MANIFEST,
-            NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"),
-        ));
-        app.world_mut()
-            .spawn(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git"));
         app.configure_sets(
             Update,
             (
@@ -72,8 +66,17 @@ impl Plugin for GitPlugin {
             DirectoryPlugin,
             RepositoryPlugin,
             RepositoryPickerPlugin,
-        ));
+        ))
+        .add_systems(Startup, register_git_pages);
     }
+}
+
+fn register_git_pages(mut commands: Commands) {
+    commands.spawn((
+        PAGE_MANIFEST,
+        NativelyHosted::subtree(crate::GIT_PAGE_URL, "Git"),
+    ));
+    commands.spawn(NativelyHosted::page(crate::GIT_DOCUMENT_URL, "Git"));
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

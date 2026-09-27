@@ -13,15 +13,18 @@ pub(crate) struct ScreenshotPlugin;
 
 impl Plugin for ScreenshotPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Name::new("Screenshot capture"), ScreenshotBridge::default()));
-        app.add_systems(
-            Update,
-            (start_screenshots, drain_screenshots)
-                .chain()
-                .after(vmux_command::WriteCommandRequests),
-        );
+        app.add_systems(Startup, spawn_screenshot_bridge)
+            .add_systems(
+                Update,
+                (start_screenshots, drain_screenshots)
+                    .chain()
+                    .after(vmux_command::WriteCommandRequests),
+            );
     }
+}
+
+fn spawn_screenshot_bridge(mut commands: Commands) {
+    commands.spawn((Name::new("Screenshot capture"), ScreenshotBridge::default()));
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

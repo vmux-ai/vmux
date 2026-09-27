@@ -200,7 +200,7 @@ pub enum SessionInput {
 }
 
 pub(crate) struct AgentSessionPlugin {
-    inbox: StdMutex<Option<AgentSessionReceivers>>,
+    inbox: Arc<StdMutex<Option<AgentSessionReceivers>>>,
     runtime: Handle,
 }
 
@@ -216,7 +216,7 @@ impl AgentSessionPlugin {
         let (closes, close_inbox) = mpsc::unbounded_channel();
         (
             Self {
-                inbox: StdMutex::new(Some(AgentSessionReceivers {
+                inbox: Arc::new(StdMutex::new(Some(AgentSessionReceivers {
                     spawns: spawn_inbox,
                     inputs: input_inbox,
                     subscriptions: subscription_inbox,
@@ -225,7 +225,7 @@ impl AgentSessionPlugin {
                     lists: list_inbox,
                     lookups: lookup_inbox,
                     closes: close_inbox,
-                })),
+                }))),
                 runtime,
             },
             AgentSessions {
@@ -245,18 +245,21 @@ impl AgentSessionPlugin {
 
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
-        let inbox = self
-            .inbox
-            .lock()
-            .unwrap()
-            .take()
-            .expect("agent session plugin can only be built once");
-        app.world_mut().spawn((
-            Name::new("agent session runtime"),
-            AgentSessionRuntime(self.runtime.clone()),
-            AgentSessionInbox(StdMutex::new(inbox)),
-        ));
-        app.add_systems(
+        let inbox = Arc::clone(&self.inbox);
+        let runtime = self.runtime.clone();
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let inbox = inbox
+                .lock()
+                .unwrap()
+                .take()
+                .expect("agent session plugin can only be built once");
+            commands.spawn((
+                Name::new("agent session runtime"),
+                AgentSessionRuntime(runtime.clone()),
+                AgentSessionInbox(StdMutex::new(inbox)),
+            ));
+        })
+        .add_systems(
             Update,
             (
                 receive_agent_session_requests,

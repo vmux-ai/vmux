@@ -13,11 +13,10 @@ pub struct RoomPlugin;
 
 impl Plugin for RoomPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Name::new("Chat room registry"), RoomRegistry::default()));
         app.add_message::<RoomOpReceived>()
             .add_message::<RoomOpCommitted>()
             .add_message::<CrdtChangeReceived>()
+            .add_systems(Startup, spawn_room_registry)
             .add_systems(
                 PostUpdate,
                 (
@@ -29,6 +28,10 @@ impl Plugin for RoomPlugin {
                     .chain(),
             );
     }
+}
+
+fn spawn_room_registry(mut commands: Commands) {
+    commands.spawn((Name::new("Chat room registry"), RoomRegistry::default()));
 }
 
 #[derive(Component, Clone, Debug, Eq, PartialEq)]

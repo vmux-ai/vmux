@@ -74,7 +74,14 @@ impl Plugin for ToolManifestPlugin {
         if !app.is_plugin_added::<ToolRegistryPlugin>() {
             app.add_plugins(ToolRegistryPlugin);
         }
-        app.world_mut().spawn(ToolManifestSource(self.manifest));
+        let manifest = self.manifest;
+        app.add_systems(
+            Startup,
+            (move |mut commands: Commands| {
+                commands.spawn(ToolManifestSource(manifest));
+            })
+            .in_set(ToolStartupSet::Registry),
+        );
     }
 
     fn is_unique(&self) -> bool {
@@ -96,11 +103,17 @@ impl ToolAppExt for App {
         if !self.is_plugin_added::<ToolRegistryPlugin>() {
             self.add_plugins(ToolRegistryPlugin);
         }
-        self.world_mut().spawn(ToolBindingSource::<T> {
-            name,
-            marker: PhantomData,
-        });
-        self.add_systems(Startup, bind_tool::<T>.in_set(ToolStartupSet::Binding))
+        self.add_systems(
+            Startup,
+            (move |mut commands: Commands| {
+                commands.spawn(ToolBindingSource::<T> {
+                    name,
+                    marker: PhantomData,
+                });
+            })
+            .in_set(ToolStartupSet::Registry),
+        )
+        .add_systems(Startup, bind_tool::<T>.in_set(ToolStartupSet::Binding))
             .add_systems(Update, parse_tool::<T>.in_set(ToolRequestSet))
     }
 }

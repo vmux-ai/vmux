@@ -28,12 +28,11 @@ pub(crate) struct AgentSessionLifecyclePlugin;
 
 impl Plugin for AgentSessionLifecyclePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            Name::new("Agent session discovery"),
-            AgentSessionDiscovery::default(),
-        ));
         app.add_message::<AgentSessionExited>()
-            .add_systems(Startup, start_agent_session_watchers)
+            .add_systems(
+                Startup,
+                (spawn_agent_session_discovery, start_agent_session_watchers).chain(),
+            )
             .add_systems(
                 Update,
                 (mark_dirty_on_fs_change, mark_dirty_on_pending_added),
@@ -52,6 +51,13 @@ impl Plugin for AgentSessionLifecyclePlugin {
             )
             .add_systems(Update, format_agent_url);
     }
+}
+
+fn spawn_agent_session_discovery(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Agent session discovery"),
+        AgentSessionDiscovery::default(),
+    ));
 }
 
 #[allow(clippy::type_complexity)]

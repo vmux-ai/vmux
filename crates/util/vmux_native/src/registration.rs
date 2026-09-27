@@ -1,4 +1,4 @@
-use bevy_app::{App, Plugin};
+use bevy_app::{App, Plugin, PreStartup};
 use bevy_ecs::prelude::*;
 
 use crate::{Instance, NativePage, PageScope};
@@ -51,8 +51,10 @@ pub struct NativePagePlugin {
 
 impl Plugin for NativePagePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((self.registration, self.registration.page.page_permissions()));
+        let registration = self.registration;
+        app.add_systems(PreStartup, move |mut commands: Commands| {
+            commands.spawn((registration, registration.page.page_permissions()));
+        });
     }
 
     fn is_unique(&self) -> bool {

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
-use bevy::app::{App, Plugin};
+use bevy::app::{App, Plugin, Startup};
 use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
@@ -17,9 +17,12 @@ impl CliManifestPlugin {
 
 impl Plugin for CliManifestPlugin {
     fn build(&self, app: &mut App) {
-        let manifest = ron::from_str::<CliManifest>(self.source)
-            .expect("embedded CLI manifest must be valid RON");
-        app.world_mut().spawn(manifest);
+        let source = self.source;
+        app.add_systems(Startup, move |mut commands: Commands| {
+            let manifest = ron::from_str::<CliManifest>(source)
+                .expect("embedded CLI manifest must be valid RON");
+            commands.spawn(manifest);
+        });
     }
 
     fn is_unique(&self) -> bool {

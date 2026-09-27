@@ -17,16 +17,21 @@ pub(crate) struct ApprovalSyncSet;
 
 impl Plugin for ApprovalPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>();
-        app.world_mut().spawn((
-            Name::new("Agent approval store"),
-            AgentApprovalStore::load(),
-        ));
-        app.add_observer(handle_approval_reply).add_systems(
-            Update,
-            sync_persisted_acp_approval_policy.in_set(ApprovalSyncSet),
-        );
+        app.add_message::<ServiceRequest>()
+            .add_systems(Startup, spawn_agent_approval_store)
+            .add_observer(handle_approval_reply)
+            .add_systems(
+                Update,
+                sync_persisted_acp_approval_policy.in_set(ApprovalSyncSet),
+            );
     }
+}
+
+fn spawn_agent_approval_store(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Agent approval store"),
+        AgentApprovalStore::load(),
+    ));
 }
 
 #[derive(Default, Deserialize, Serialize)]
