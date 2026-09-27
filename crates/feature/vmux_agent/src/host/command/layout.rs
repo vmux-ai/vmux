@@ -2,14 +2,13 @@ use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkPin, AgentBookmarkPinUrl,
     AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommand as ServiceAgentCommand,
-    AgentCommandResult, AgentRequestId, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
-    ClientMessage,
+    AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
 use vmux_service::client::ServiceRequest;
 
 use crate::event::AgentCommandRequest;
 
-use super::CommandSet;
+use super::{AgentReply, CommandSet};
 
 pub(super) struct LayoutCommandPlugin;
 
@@ -27,36 +26,22 @@ impl Plugin for LayoutCommandPlugin {
             .add_systems(
                 Update,
                 (
-                    route_layout_commands,
-                    (
-                        create_space,
-                        rename_space,
-                        delete_space,
-                        add_bookmark,
-                        remove_bookmark,
-                        pin_bookmark,
-                        pin_bookmark_url,
-                        unpin_bookmark,
-                        create_bookmark_folder,
-                    ),
+                    create_space,
+                    rename_space,
+                    delete_space,
+                    add_bookmark,
+                    remove_bookmark,
+                    pin_bookmark,
+                    pin_bookmark_url,
+                    unpin_bookmark,
+                    create_bookmark_folder,
                 )
-                    .chain()
                     .in_set(CommandSet::Commands),
+            )
+            .add_systems(
+                Update,
+                route_layout_commands.in_set(CommandSet::Dispatch),
             );
-    }
-}
-
-#[derive(Clone, Copy)]
-struct AgentReply {
-    request_id: AgentRequestId,
-}
-
-impl AgentReply {
-    fn ok(self) -> ServiceRequest {
-        ServiceRequest(ClientMessage::AgentCommandResponse {
-            request_id: self.request_id,
-            result: AgentCommandResult::Ok,
-        })
     }
 }
 
@@ -128,9 +113,7 @@ fn route_layout_commands(
     mut bookmark_folder_create: MessageWriter<AgentBookmarkFolderCreateRequest>,
 ) {
     for request in commands.read() {
-        let reply = AgentReply {
-            request_id: request.request_id,
-        };
+        let reply = AgentReply::new(request.request_id);
         match &request.command {
             ServiceAgentCommand::SpaceCreate(payload) => {
                 space_create.write(AgentSpaceCreateRequest {

@@ -25,7 +25,7 @@ impl Plugin for ToolCallPlugin {
                     fail_agent_tool_calls,
                 )
                     .after(vmux_tool::ToolDispatchFlush)
-                    .before(CommandSet::Commands),
+                    .before(CommandSet::Dispatch),
             );
     }
 }
