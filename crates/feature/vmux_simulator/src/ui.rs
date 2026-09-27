@@ -1,7 +1,10 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    HardwareButton, SimulatorClipboardOperation, SimulatorInputOperation, SimulatorKeyModifiers,
+    HardwareButton, SimulatorClipboardCopyRequest, SimulatorClipboardCutRequest,
+    SimulatorClipboardPasteRequest, SimulatorClipboardSelectAllRequest,
+    SimulatorInputHardwareButtonRequest, SimulatorInputKeyRequest,
+    SimulatorInputModifiedKeyRequest, SimulatorInputTextRequest, SimulatorKeyModifiers,
     SimulatorReady, SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase,
 };
 use crate::url::SimulatorRoute;
@@ -113,16 +116,14 @@ fn Mirror(
                     let _ = send(&SimulatorSoftwareKeyboard);
                     return;
                 }
-                if let Some(operation) = ClipboardShortcut::from_event(&event) {
+                if ClipboardShortcut::send(&event) {
                     event.prevent_default();
-                    operation.send();
                     return;
                 }
-                let Some(operation) = Keystroke::from_event(&event) else {
+                if !Keystroke::send(&event) {
                     return;
-                };
+                }
                 event.prevent_default();
-                operation.send();
             },
             onpointermove: move |event: Event<PointerData>| {
                 let Some(current) = press() else {
@@ -338,56 +339,66 @@ impl SoftwareKeyboardShortcut {
 struct ClipboardShortcut;
 
 impl ClipboardShortcut {
-    fn from_event(event: &Event<KeyboardData>) -> Option<SimulatorClipboardOperation> {
+    fn send(event: &Event<KeyboardData>) -> bool {
         let modifiers = event.modifiers();
         if !modifiers.meta() || modifiers.ctrl() || modifiers.alt() || modifiers.shift() {
-            return None;
+            return false;
         }
-        Self::for_key(&event.key().to_string())
-    }
-
-    fn for_key(key: &str) -> Option<SimulatorClipboardOperation> {
-        match key.to_ascii_lowercase().as_str() {
-            "a" => Some(SimulatorClipboardOperation::SelectAll),
-            "c" => Some(SimulatorClipboardOperation::Copy),
-            "x" => Some(SimulatorClipboardOperation::Cut),
-            "v" => Some(SimulatorClipboardOperation::Paste),
-            _ => None,
+        match event.key().to_string().to_ascii_lowercase().as_str() {
+            "a" => {
+                let _ = send(&SimulatorClipboardSelectAllRequest);
+            }
+            "c" => {
+                let _ = send(&SimulatorClipboardCopyRequest);
+            }
+            "x" => {
+                let _ = send(&SimulatorClipboardCutRequest);
+            }
+            "v" => {
+                let _ = send(&SimulatorClipboardPasteRequest);
+            }
+            _ => return false,
         }
+        true
     }
 }
 
 struct Keystroke;
 
 impl Keystroke {
-    fn from_event(event: &Event<KeyboardData>) -> Option<SimulatorInputOperation> {
+    fn send(event: &Event<KeyboardData>) -> bool {
         let modifiers = event.modifiers();
         let key = event.key().to_string();
         if modifiers.meta() && !modifiers.ctrl() && !modifiers.alt() && !modifiers.shift() {
-            return match key.to_ascii_lowercase().as_str() {
-                "h" => Some(SimulatorInputOperation::HardwareButton {
-                    button: HardwareButton::Home,
-                }),
-                "l" => Some(SimulatorInputOperation::HardwareButton {
-                    button: HardwareButton::Lock,
-                }),
-                "s" => Some(SimulatorInputOperation::HardwareButton {
-                    button: HardwareButton::Siri,
-                }),
-                _ => SimulatorInputOperation::modified_browser_code(
-                    &event.code().to_string(),
-                    Self::modifiers(event),
-                ),
+            let button = match key.to_ascii_lowercase().as_str() {
+                "h" => Some(HardwareButton::Home),
+                "l" => Some(HardwareButton::Lock),
+                "s" => Some(HardwareButton::Siri),
+                _ => None,
             };
+            if let Some(button) = button {
+                let _ = send(&SimulatorInputHardwareButtonRequest { button });
+                return true;
+            }
         }
         let modifiers = Self::modifiers(event);
         if !modifiers.is_empty() {
-            return SimulatorInputOperation::modified_browser_code(
-                &event.code().to_string(),
-                modifiers,
-            );
+            let Some(code) = BrowserCode::new(event.code().to_string()).hid_code() else {
+                return false;
+            };
+            let _ = send(&SimulatorInputModifiedKeyRequest { code, modifiers });
+            return true;
         }
-        SimulatorInputOperation::try_from(key.as_str()).ok()
+        let browser_key = BrowserKey::new(key);
+        if let Some(code) = browser_key.hid_code() {
+            let _ = send(&SimulatorInputKeyRequest { code });
+            return true;
+        }
+        let Some(text) = browser_key.text() else {
+            return false;
+        };
+        let _ = send(&SimulatorInputTextRequest { text });
+        true
     }
 
     fn modifiers(event: &Event<KeyboardData>) -> SimulatorKeyModifiers {
@@ -397,6 +408,125 @@ impl Keystroke {
             shift: modifiers.shift(),
             alt: modifiers.alt(),
             meta: modifiers.meta(),
+        }
+    }
+}
+
+struct BrowserKey(String);
+
+impl BrowserKey {
+    fn new(key: impl Into<String>) -> Self {
+        Self(key.into())
+    }
+
+    fn hid_code(&self) -> Option<u16> {
+        match self.0.as_str() {
+            "Enter" => Some(40),
+            "Escape" => Some(41),
+            "Backspace" => Some(42),
+            "Tab" => Some(43),
+            "ArrowRight" => Some(79),
+            "ArrowLeft" => Some(80),
+            "ArrowDown" => Some(81),
+            "ArrowUp" => Some(82),
+            _ => None,
+        }
+    }
+
+    fn text(&self) -> Option<String> {
+        let mut chars = self.0.chars();
+        let character = chars.next()?;
+        if chars.next().is_some() {
+            return None;
+        }
+        Some(character.to_string())
+    }
+}
+
+struct BrowserCode(String);
+
+impl BrowserCode {
+    fn new(code: impl Into<String>) -> Self {
+        Self(code.into())
+    }
+
+    fn hid_code(&self) -> Option<u16> {
+        match self.0.as_str() {
+            "KeyA" => Some(4),
+            "KeyB" => Some(5),
+            "KeyC" => Some(6),
+            "KeyD" => Some(7),
+            "KeyE" => Some(8),
+            "KeyF" => Some(9),
+            "KeyG" => Some(10),
+            "KeyH" => Some(11),
+            "KeyI" => Some(12),
+            "KeyJ" => Some(13),
+            "KeyK" => Some(14),
+            "KeyL" => Some(15),
+            "KeyM" => Some(16),
+            "KeyN" => Some(17),
+            "KeyO" => Some(18),
+            "KeyP" => Some(19),
+            "KeyQ" => Some(20),
+            "KeyR" => Some(21),
+            "KeyS" => Some(22),
+            "KeyT" => Some(23),
+            "KeyU" => Some(24),
+            "KeyV" => Some(25),
+            "KeyW" => Some(26),
+            "KeyX" => Some(27),
+            "KeyY" => Some(28),
+            "KeyZ" => Some(29),
+            "Digit1" => Some(30),
+            "Digit2" => Some(31),
+            "Digit3" => Some(32),
+            "Digit4" => Some(33),
+            "Digit5" => Some(34),
+            "Digit6" => Some(35),
+            "Digit7" => Some(36),
+            "Digit8" => Some(37),
+            "Digit9" => Some(38),
+            "Digit0" => Some(39),
+            "Enter" => Some(40),
+            "Escape" => Some(41),
+            "Backspace" => Some(42),
+            "Tab" => Some(43),
+            "Space" => Some(44),
+            "Minus" => Some(45),
+            "Equal" => Some(46),
+            "BracketLeft" => Some(47),
+            "BracketRight" => Some(48),
+            "Backslash" => Some(49),
+            "Semicolon" => Some(51),
+            "Quote" => Some(52),
+            "Backquote" => Some(53),
+            "Comma" => Some(54),
+            "Period" => Some(55),
+            "Slash" => Some(56),
+            "CapsLock" => Some(57),
+            "F1" => Some(58),
+            "F2" => Some(59),
+            "F3" => Some(60),
+            "F4" => Some(61),
+            "F5" => Some(62),
+            "F6" => Some(63),
+            "F7" => Some(64),
+            "F8" => Some(65),
+            "F9" => Some(66),
+            "F10" => Some(67),
+            "F11" => Some(68),
+            "F12" => Some(69),
+            "Home" => Some(74),
+            "PageUp" => Some(75),
+            "Delete" => Some(76),
+            "End" => Some(77),
+            "PageDown" => Some(78),
+            "ArrowRight" => Some(79),
+            "ArrowLeft" => Some(80),
+            "ArrowDown" => Some(81),
+            "ArrowUp" => Some(82),
+            _ => None,
         }
     }
 }
@@ -649,10 +779,9 @@ impl PointerRelease {
             }
             Self::Home => {
                 home_progress.set(1.0);
-                SimulatorInputOperation::HardwareButton {
+                let _ = send(&SimulatorInputHardwareButtonRequest {
                     button: HardwareButton::Home,
-                }
-                .send();
+                });
                 spawn(async move {
                     sleep_ms(300).await;
                     home_progress.set(0.0);
@@ -702,22 +831,25 @@ mod tests {
     }
 
     #[test]
-    fn command_edit_shortcuts_are_forwarded_to_the_simulator() {
-        assert_eq!(
-            ClipboardShortcut::for_key("a"),
-            Some(SimulatorClipboardOperation::SelectAll)
-        );
-        assert_eq!(
-            ClipboardShortcut::for_key("x"),
-            Some(SimulatorClipboardOperation::Cut)
-        );
-        assert_eq!(
-            ClipboardShortcut::for_key("c"),
-            Some(SimulatorClipboardOperation::Copy)
-        );
-        assert_eq!(
-            ClipboardShortcut::for_key("v"),
-            Some(SimulatorClipboardOperation::Paste)
-        );
+    fn browser_keys_map_to_hid_codes_or_text() {
+        assert_eq!(BrowserKey::new("Enter").hid_code(), Some(40));
+        assert_eq!(BrowserKey::new("ArrowUp").hid_code(), Some(82));
+        assert_eq!(BrowserKey::new("a").text().as_deref(), Some("a"));
+        assert_eq!(BrowserKey::new("あ").text().as_deref(), Some("あ"));
+        assert_eq!(BrowserKey::new("Shift").text(), None);
+    }
+
+    #[test]
+    fn browser_codes_map_to_modified_hid_keys() {
+        assert_eq!(BrowserCode::new("KeyA").hid_code(), Some(4));
+        assert_eq!(BrowserCode::new("ArrowLeft").hid_code(), Some(80));
+        assert_eq!(BrowserCode::new("F13").hid_code(), None);
+
+        let modifiers = SimulatorKeyModifiers {
+            shift: true,
+            meta: true,
+            ..Default::default()
+        };
+        assert_eq!(modifiers.hid_codes(), vec![225, 227]);
     }
 }

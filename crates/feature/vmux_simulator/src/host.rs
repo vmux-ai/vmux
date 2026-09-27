@@ -212,6 +212,7 @@ struct AttachmentFailed;
 
 struct AttachedDevice {
     axe: Axe,
+    clipboard: input::SimulatorClipboard,
     hid: HidBroker,
     keyboard: input::SimulatorKeyboard,
     device: SimulatorDevice,
@@ -246,6 +247,7 @@ fn start_device_attachments(
             AttachmentFailed,
             Axe,
             HidBroker,
+            input::SimulatorClipboard,
             input::SimulatorKeyboard,
             SimulatorDevice,
             DevicePoints,
@@ -303,6 +305,7 @@ fn finish_device_attachments(
             attached.server,
             attached.device,
             attached.hid,
+            attached.clipboard,
             attached.keyboard,
             attached.axe,
             input::DeviceTouchSession::default(),
@@ -442,12 +445,15 @@ impl AttachedDevice {
         let pixels = device.pixel_size(&axe);
         let hid = HidBroker::start(&axe, &device)
             .map_err(|error| format!("could not start simulator input: {error}"))?;
+        let clipboard = input::SimulatorClipboard::start(&axe, &device)
+            .map_err(|error| format!("could not start simulator clipboard: {error}"))?;
         let keyboard = input::SimulatorKeyboard::start(&axe, &device)
             .map_err(|error| format!("could not start simulator keyboard: {error}"))?;
         let server = StreamServer::start(&axe, device.clone(), pixels)
             .map_err(|error| format!("could not serve the simulator stream: {error}"))?;
         Ok(Self {
             axe,
+            clipboard,
             hid,
             keyboard,
             device,
