@@ -5,6 +5,62 @@ use bevy::prelude::*;
 
 use crate::terminal::TerminalKind;
 pub use vmux_api::agent::AgentKind;
+use vmux_api::protocol::{AgentCommand, AgentCommandResult, AgentRequestId};
+
+#[derive(Clone, Debug, Default)]
+pub enum CommandOrigin {
+    #[default]
+    User,
+    Agent {
+        sid: Option<String>,
+        anchor: Option<vmux_api::ProcessId>,
+    },
+}
+
+impl CommandOrigin {
+    pub fn is_agent(&self) -> bool {
+        matches!(self, Self::Agent { .. })
+    }
+
+    pub fn allows_focus(&self, requested: bool) -> bool {
+        requested && !self.is_agent()
+    }
+}
+
+#[derive(Message)]
+pub struct AgentCommandRequest {
+    pub request_id: AgentRequestId,
+    pub origin: CommandOrigin,
+    pub command: AgentCommand,
+}
+
+#[derive(Clone, Message)]
+pub struct AgentCommandResponse {
+    pub request_id: AgentRequestId,
+    pub result: AgentCommandResult,
+}
+
+#[derive(Clone, Copy)]
+pub struct AgentReply {
+    pub request_id: AgentRequestId,
+}
+
+impl AgentReply {
+    pub fn new(request_id: AgentRequestId) -> Self {
+        Self { request_id }
+    }
+
+    pub fn response(self, result: AgentCommandResult) -> AgentCommandResponse {
+        AgentCommandResponse {
+            request_id: self.request_id,
+            result,
+        }
+    }
+
+    pub fn ok(self) -> AgentCommandResponse {
+        self.response(AgentCommandResult::Ok)
+    }
+}
 
 pub fn effort_levels(agent_key: &str) -> &'static [&'static str] {
     match agent_key {

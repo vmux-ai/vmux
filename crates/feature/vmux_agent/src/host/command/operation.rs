@@ -3,7 +3,7 @@ use vmux_api::protocol::{
     AgentCommandResult, AgentFileSearch, AgentFileTouched, AgentInvokeCommand, AgentTurnEnded,
 };
 use vmux_command::{CommandDefinition, CommandInvocation};
-use vmux_service::client::ServiceRequest;
+use vmux_core::agent::AgentCommandResponse;
 
 use crate::host::event::CommandOrigin;
 
@@ -81,7 +81,7 @@ fn invoke(
         Option<&vmux_api::protocol::ProcessId>,
     )>,
     user: Query<Entity, With<vmux_core::team::User>>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let args = match vmux_core::JsonArguments::try_from(&request.payload.args) {
@@ -134,7 +134,7 @@ fn invoke(
 
 fn acknowledge_file_touched(
     mut requests: MessageReader<AgentFileTouchedRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         responses.write(request.reply.ok());
@@ -143,7 +143,7 @@ fn acknowledge_file_touched(
 
 fn acknowledge_file_search(
     mut requests: MessageReader<AgentFileSearchRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         responses.write(request.reply.ok());
@@ -152,7 +152,7 @@ fn acknowledge_file_search(
 
 fn acknowledge_turn_ended(
     mut requests: MessageReader<AgentTurnEndedRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         responses.write(request.reply.ok());
@@ -163,7 +163,7 @@ fn new_chat(
     mut requests: MessageReader<AgentNewChatRequest>,
     contributed_pages: Query<&vmux_command::snapshot::ContributedPage>,
     mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let result = match vmux_command::snapshot::ContributedPage::prompt_url(
@@ -186,7 +186,7 @@ fn new_chat(
 fn list_agents(
     mut requests: MessageReader<AgentListRequest>,
     command_bar: Res<vmux_command::snapshot::CommandBarProjection>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let mut agents = Vec::new();

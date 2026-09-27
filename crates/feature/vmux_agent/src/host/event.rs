@@ -2,47 +2,11 @@ use bevy::prelude::*;
 use serde_json::Value;
 use vmux_api::ProcessId;
 use vmux_api::protocol::{
-    AcpModeOption, AcpModelOption, AgentCommand, AgentCommandResult, AgentQuery, AgentRequestId,
-    AgentRunStatus, ClientMessage, JsonValue,
+    AcpModeOption, AcpModelOption, AgentQuery, AgentRequestId, AgentRunStatus, JsonValue,
 };
 
 pub use vmux_api::protocol::ApprovalDecision;
-
-#[derive(Clone, Debug, Default)]
-pub enum CommandOrigin {
-    #[default]
-    User,
-    Agent {
-        sid: Option<String>,
-        anchor: Option<ProcessId>,
-    },
-}
-
-impl CommandOrigin {
-    pub fn is_agent(&self) -> bool {
-        matches!(self, Self::Agent { .. })
-    }
-
-    pub fn allows_focus(&self, requested: bool) -> bool {
-        requested && !self.is_agent()
-    }
-}
-
-#[derive(Message)]
-pub struct AgentCommandRequest {
-    pub request_id: AgentRequestId,
-    pub origin: CommandOrigin,
-    pub command: AgentCommand,
-}
-
-impl AgentCommandRequest {
-    pub fn response(&self, result: AgentCommandResult) -> ClientMessage {
-        ClientMessage::AgentCommandResponse {
-            request_id: self.request_id,
-            result,
-        }
-    }
-}
+pub use vmux_core::agent::{AgentCommandRequest, CommandOrigin};
 
 #[derive(Message)]
 pub struct AgentQueryRequest {

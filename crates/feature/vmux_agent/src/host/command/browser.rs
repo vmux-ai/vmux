@@ -3,7 +3,7 @@ use vmux_api::protocol::{
     AgentBrowserHistorySearch, AgentBrowserHistoryStep, AgentBrowserInstallExtension,
     AgentBrowserNavigate, AgentCommandResult, AgentOpenInNewStack, AgentRequestId,
 };
-use vmux_service::client::ServiceRequest;
+use vmux_core::agent::AgentCommandResponse;
 
 use crate::host::browser_pane::AgentBrowserResolve;
 use crate::host::event::CommandOrigin;
@@ -109,7 +109,7 @@ fn navigate(
     mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
     browse: AgentBrowserResolve,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let mut pane = request.payload.pane.clone();
@@ -155,7 +155,7 @@ fn navigate(
 fn install_extension(
     mut requests: MessageReader<AgentBrowserInstallExtensionRequest>,
     mut install: MessageWriter<vmux_extension::ExtensionInstallRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         install.write(vmux_extension::ExtensionInstallRequest {
@@ -171,7 +171,7 @@ fn go_back(
     mut go_back: MessageWriter<vmux_layout::BrowserGoBackRequest>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
     browse: AgentBrowserResolve,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let resolved = browse.command_pane(&request.payload.pane, &request.origin);
@@ -190,7 +190,7 @@ fn go_forward(
     mut go_forward: MessageWriter<vmux_layout::BrowserGoForwardRequest>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
     browse: AgentBrowserResolve,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let resolved = browse.command_pane(&request.payload.pane, &request.origin);
@@ -206,7 +206,7 @@ fn go_forward(
 
 fn search_history(
     mut requests: MessageReader<AgentBrowserHistorySearchRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         bevy::log::info!(
@@ -221,7 +221,7 @@ fn search_history(
 fn open_in_new_stack(
     mut requests: MessageReader<AgentOpenInNewStackRequest>,
     mut open: MessageWriter<vmux_layout::OpenInNewStackRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         open.write(vmux_layout::OpenInNewStackRequest {

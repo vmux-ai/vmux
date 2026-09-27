@@ -1,3 +1,4 @@
+mod agent;
 pub mod cwd;
 mod key;
 pub mod plugin;

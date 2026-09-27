@@ -3,8 +3,8 @@ use vmux_api::protocol::{
     AgentCommandResult, AgentFocusPane, AgentNotify, AgentRenameProfile, AgentUpdateLayout,
     AgentUpdateSettings,
 };
+use vmux_core::agent::AgentCommandResponse;
 use vmux_layout::stack::FocusedStack;
-use vmux_service::client::ServiceRequest;
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 
@@ -130,7 +130,7 @@ fn notify(
     )>,
     user: Query<Entity, With<vmux_core::team::User>>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let caller = match &request.origin {
@@ -165,7 +165,7 @@ fn notify(
 fn request_focus(
     mut requests: MessageReader<AgentFocusPaneRequest>,
     mut focus: MessageWriter<FocusPaneRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let result = if request.allowed {
@@ -196,7 +196,7 @@ fn focus_pane(
 fn request_profile_rename(
     mut requests: MessageReader<AgentRenameProfileRequest>,
     mut rename: MessageWriter<RenameProfileRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         rename.write(RenameProfileRequest {
@@ -229,7 +229,7 @@ fn update_settings(
     mut requests: MessageReader<AgentUpdateSettingsRequest>,
     mut settings: ResMut<AppSettings>,
     mut write: MessageWriter<vmux_setting::SettingsWriteRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let result = match serde_json::Value::try_from(&request.payload.value) {

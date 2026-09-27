@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommand as ServiceAgentCommand, SharedAgentCommand};
-use vmux_service::client::ServiceRequest;
 
 use crate::host::event::AgentCommandRequest;
 
@@ -23,20 +22,19 @@ pub(super) struct DispatchPlugin;
 
 impl Plugin for DispatchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>()
-            .add_systems(
-                Update,
-                (
-                    route_terminal_operations,
-                    route_browser_operations,
-                    route_application_operations,
-                )
-                    .in_set(CommandSet::Dispatch),
+        app.add_systems(
+            Update,
+            (
+                route_terminal_operations,
+                route_browser_operations,
+                route_application_operations,
             )
-            .add_systems(
-                Update,
-                route_remaining_operations.in_set(CommandSet::Dispatch),
-            );
+                .in_set(CommandSet::Dispatch),
+        )
+        .add_systems(
+            Update,
+            route_remaining_operations.in_set(CommandSet::Dispatch),
+        );
     }
 }
 

@@ -4,11 +4,11 @@ use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentCommandResult, AgentNewTerminalTab, AgentRunShell, AgentTerminalSend,
 };
+use vmux_core::agent::AgentCommandResponse;
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
 };
-use vmux_service::client::ServiceRequest;
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 use vmux_terminal::TerminalStackSpawnRequest;
@@ -68,7 +68,7 @@ fn open_terminal_tab(
     settings: Res<AppSettings>,
     mut terminal_spawn: MessageWriter<TerminalStackSpawnRequest>,
     mut process_spawn: MessageWriter<ProcessStackSpawnRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let result = match focus.pane.filter(|pane| panes.contains(*pane)) {
@@ -117,7 +117,7 @@ fn open_terminal_tab(
 fn run_shell(
     mut requests: MessageReader<AgentRunShellRequest>,
     mut run: MessageWriter<vmux_terminal::RunShellRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         let mode = match request.payload.mode {
@@ -136,7 +136,7 @@ fn run_shell(
 fn send_to_terminal(
     mut requests: MessageReader<AgentTerminalSendRequest>,
     mut send: MessageWriter<vmux_terminal::TerminalSendRequest>,
-    mut responses: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
         send.write(vmux_terminal::TerminalSendRequest {
