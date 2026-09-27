@@ -82,7 +82,6 @@ fn handle_registered_page_open(
     pages: Query<&PrewarmPage>,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     spares: Query<(Entity, &WarmPageSpare), With<PageReady>>,
-    children_q: Query<&Children>,
     mut commands: Commands,
 ) {
     let pages: HashMap<&str, &PrewarmPage> = pages.iter().map(|page| (page.url, page)).collect();
@@ -97,7 +96,7 @@ fn handle_registered_page_open(
             continue;
         };
         if handled_stacks.insert((task.stack, page.url)) {
-            crate::stack::clear_stack_children(task.stack, &children_q, &mut commands);
+            commands.entity(task.stack).despawn_children();
             commands.entity(task.stack).insert(PageMetadata {
                 url: page.url.to_string(),
                 title: page.title.to_string(),

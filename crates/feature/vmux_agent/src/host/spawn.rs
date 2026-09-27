@@ -179,7 +179,6 @@ fn handle_spawn_agent_requests(
     strategies: Option<Res<AgentStrategies>>,
     models: Option<Res<crate::chat::model::AgentModelSelections>>,
     exec_override: Option<Res<AgentExecutableOverride>>,
-    children_q: Query<&Children>,
     mut metadata: Query<&mut PageMetadata>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
@@ -188,17 +187,11 @@ fn handle_spawn_agent_requests(
         let Some(strategies) = strategies.as_deref() else {
             let message = "agent strategies not registered; cannot spawn agent";
             bevy::log::warn!("{message}");
-            attach_agent_spawn_error_to_stack(
-                req.stack,
-                req.kind,
-                message,
-                &children_q,
-                &mut commands,
-            );
+            attach_agent_spawn_error_to_stack(req.stack, req.kind, message, &mut commands);
             continue;
         };
         let Some(exe_path) = resolve_agent_executable(req.kind, exec_override.as_deref()) else {
-            attach_cli_setup_to_stack(req.kind, req.stack, &children_q, &mut commands);
+            attach_cli_setup_to_stack(req.kind, req.stack, &mut commands);
             continue;
         };
         let process_id = ProcessId::new();
@@ -252,7 +245,6 @@ fn handle_spawn_agent_requests(
 fn drain_agent_launches(
     mut pending: Query<(Entity, &mut PendingAgentLaunch)>,
     settings: Res<AppSettings>,
-    children_q: Query<&Children>,
     entities: Query<()>,
     stacks: Query<(&AgentLaunchGeneration, Option<&PageMetadata>)>,
     mut spawn_requests: MessageWriter<SpawnAgentInStackRequest>,
@@ -281,7 +273,6 @@ fn drain_agent_launches(
                     request.stack,
                     request.kind,
                     &error,
-                    &children_q,
                     &mut commands,
                 );
                 commands
@@ -293,7 +284,7 @@ fn drain_agent_launches(
         let validation = vmux_core::profile::mcp_credentials::McpCredentialAccess::with_revision(
             prepared.mcp_revision,
             || {
-                vmux_layout::stack::clear_stack_children(request.stack, &children_q, &mut commands);
+                commands.entity(request.stack).despawn_children();
                 let terminal = commands
                     .spawn((
                         new_terminal_bundle_with_cwd(&settings, Some(&request.cwd)),
@@ -349,7 +340,6 @@ fn drain_agent_launches(
                     request.stack,
                     request.kind,
                     &error,
-                    &children_q,
                     &mut commands,
                 );
                 commands

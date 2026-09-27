@@ -273,11 +273,10 @@ fn classify_unclaimed_page_open_tasks(
 
 fn attach_cef_pages(
     attachments: Query<(Entity, &CefPageAttachment, Option<&PageOpenTask>)>,
-    children: Query<&Children>,
     mut commands: Commands,
 ) {
     for (entity, attachment, task) in &attachments {
-        vmux_layout::stack::clear_stack_children(attachment.stack, &children, &mut commands);
+        commands.entity(attachment.stack).despawn_children();
         commands.entity(attachment.stack).insert(PageMetadata {
             url: attachment.url.clone(),
             title: attachment.title.clone(),
@@ -304,11 +303,10 @@ fn attach_cef_pages(
 
 fn attach_error_pages(
     attachments: Query<(Entity, &ErrorPageAttachment, Option<&PageOpenTask>)>,
-    children: Query<&Children>,
     mut commands: Commands,
 ) {
     for (entity, attachment, task) in &attachments {
-        vmux_layout::stack::clear_stack_children(attachment.stack, &children, &mut commands);
+        commands.entity(attachment.stack).despawn_children();
         commands.entity(attachment.stack).insert(PageMetadata {
             url: attachment.failure.url.clone(),
             title: attachment.failure.title.clone(),

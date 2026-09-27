@@ -58,7 +58,6 @@ type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 fn handle_native_page_open(
     pages: Query<(&NativelyHosted, Option<&PageManifest>)>,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    children_q: Query<&Children>,
     mut commands: Commands,
 ) {
     let mut opened = std::collections::HashSet::new();
@@ -69,7 +68,7 @@ fn handle_native_page_open(
             continue;
         };
         if opened.insert(task.stack) {
-            crate::stack::clear_stack_children(task.stack, &children_q, &mut commands);
+            commands.entity(task.stack).despawn_children();
             let metadata = manifest.map_or_else(
                 || PageMetadata {
                     url: task.url.clone(),

@@ -583,7 +583,6 @@ fn handle_swap_stack_session(
     mut reader: MessageReader<vmux_core::agent::SwapStackSession>,
     settings: Res<AppSettings>,
     catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
-    children_q: Query<&Children>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
 ) {
@@ -641,7 +640,7 @@ fn handle_swap_stack_session(
             .remove::<vmux_core::AgentWorkingDir>()
             .remove::<vmux_core::team::Agent>()
             .remove::<vmux_core::team::Profile>();
-        vmux_layout::stack::clear_stack_children(ev.stack, &children_q, &mut commands);
+        commands.entity(ev.stack).despawn_children();
 
         match target {
             crate::AgentUrl::Cli { kind, sid } => {
@@ -708,7 +707,7 @@ fn handle_agent_page_open_task(
         .into_iter()
         .find(|kind| kind.is_setup_url(&task.url))
     {
-        attach_cli_setup_to_stack(kind, task.stack, children_q, commands);
+        attach_cli_setup_to_stack(kind, task.stack, commands);
         return Ok(());
     }
     match crate::AgentUrl::parse(&task.url) {
@@ -718,7 +717,7 @@ fn handle_agent_page_open_task(
             sid,
         }) => {
             if transition_webview.is_none() {
-                vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
+                commands.entity(task.stack).despawn_children();
             }
             attach_page_agent_to_stack_with_webview(
                 task.stack,
@@ -740,7 +739,7 @@ fn handle_agent_page_open_task(
             })?;
             let sid = uuid::Uuid::new_v4().to_string();
             if transition_webview.is_none() {
-                vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
+                commands.entity(task.stack).despawn_children();
             }
             attach_page_agent_to_stack_with_webview(
                 task.stack,
@@ -820,7 +819,7 @@ fn handle_agent_page_open_task(
                 return Ok(());
             }
             if transition_webview.is_none() {
-                vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
+                commands.entity(task.stack).despawn_children();
             }
             let routing_sid = uuid::Uuid::new_v4().to_string();
             let icon = acp_icon_for_id(catalog, &id);
@@ -909,10 +908,9 @@ pub(crate) fn attach_agent_spawn_error_to_stack(
     stack: Entity,
     kind: AgentKind,
     message: &str,
-    children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
-    vmux_layout::stack::clear_stack_children(stack, children_q, commands);
+    commands.entity(stack).despawn_children();
     let title = "Agent failed to start";
     let url = format!("vmux://error/agent/{}/", kind.as_url_segment());
     let message = html_escape(message);
@@ -940,10 +938,9 @@ pub(crate) fn attach_agent_spawn_error_to_stack(
 pub(crate) fn attach_cli_setup_to_stack(
     kind: AgentKind,
     stack: Entity,
-    children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
-    vmux_layout::stack::clear_stack_children(stack, children_q, commands);
+    commands.entity(stack).despawn_children();
     commands
         .entity(stack)
         .remove::<crate::setup::AgentSetupNavigated>();

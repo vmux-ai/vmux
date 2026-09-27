@@ -327,7 +327,6 @@ fn handle_terminal_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     pid_to_entity: Option<Res<pid::PidToEntity>>,
     child_of_q: Query<&ChildOf>,
-    children_q: Query<&Children>,
     tabs: Query<&vmux_layout::tab::Tab>,
     settings: Res<AppSettings>,
     active_space: Res<vmux_space::spaces::ActiveSpace>,
@@ -341,7 +340,6 @@ fn handle_terminal_page_open(
                 task,
                 pid_to_entity.as_deref(),
                 &child_of_q,
-                &children_q,
                 &tabs,
                 &settings,
                 &active_space,
@@ -362,7 +360,6 @@ fn open_terminal_page(
     task: &PageOpenTask,
     pid_to_entity: Option<&pid::PidToEntity>,
     child_of_q: &Query<&ChildOf>,
-    children_q: &Query<&Children>,
     tabs: &Query<&vmux_layout::tab::Tab>,
     settings: &AppSettings,
     active_space: &vmux_space::spaces::ActiveSpace,
@@ -395,7 +392,7 @@ fn open_terminal_page(
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, child_of_q, tabs);
         settings.workspace_dir(&active_space.record.id, tab_dir.as_deref())?
     };
-    vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
+    commands.entity(task.stack).despawn_children();
     let title = cwd
         .as_ref()
         .map(|cwd| format!("Terminal ({})", cwd.display()))

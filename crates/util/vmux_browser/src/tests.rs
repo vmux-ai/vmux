@@ -336,16 +336,15 @@ mod browser_navigate_flow {
 
     fn handle_test_known_page_open(
         tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-        children_q: Query<&Children>,
         mut commands: Commands,
     ) {
         for (entity, task) in &tasks {
             if task.url.starts_with("vmux://terminal/") {
-                vmux_layout::stack::clear_stack_children(task.stack, &children_q, &mut commands);
+                commands.entity(task.stack).despawn_children();
                 commands.spawn((Browser, Terminal, ChildOf(task.stack)));
                 commands.entity(entity).insert(PageOpenHandled);
             } else if task.url.starts_with("vmux://sessions/") {
-                vmux_layout::stack::clear_stack_children(task.stack, &children_q, &mut commands);
+                commands.entity(task.stack).despawn_children();
                 commands.entity(entity).insert(PageOpenHandled);
             }
         }
