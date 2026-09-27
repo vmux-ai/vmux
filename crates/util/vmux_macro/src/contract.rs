@@ -55,18 +55,36 @@ pub(crate) fn expand_with_derives<'a>(
     input: DeriveInput,
     derives: impl IntoIterator<Item = &'a Path>,
 ) -> TokenStream {
-    let derives = derives
-        .into_iter()
-        .filter(|derive| {
-            let Some(name) = derive.segments.last() else {
-                return true;
-            };
-            !matches!(
-                name.ident.to_string().as_str(),
-                "Debug" | "Clone" | "PartialEq" | "Serialize" | "Deserialize" | "Archive"
-            )
-        })
-        .collect::<Vec<_>>();
+    let unit = matches!(&input.data, Data::Struct(item) if matches!(item.fields, syn::Fields::Unit));
+    let mut extra_derives = Vec::<Path>::new();
+    if unit {
+        extra_derives.extend([
+            parse_quote!(Copy),
+            parse_quote!(Default),
+            parse_quote!(Eq),
+        ]);
+    }
+    for derive in derives {
+        let Some(name) = derive.segments.last() else {
+            extra_derives.push(derive.clone());
+            continue;
+        };
+        if matches!(
+            name.ident.to_string().as_str(),
+            "Debug" | "Clone" | "PartialEq" | "Serialize" | "Deserialize" | "Archive"
+        ) {
+            continue;
+        }
+        if extra_derives.iter().any(|existing| {
+            existing
+                .segments
+                .last()
+                .is_some_and(|existing| existing.ident == name.ident)
+        }) {
+            continue;
+        }
+        extra_derives.push(derive.clone());
+    }
     quote! {
         #[derive(
             Debug,
@@ -77,7 +95,7 @@ pub(crate) fn expand_with_derives<'a>(
             ::rkyv::Archive,
             ::rkyv::Serialize,
             ::rkyv::Deserialize,
-            #(#derives),*
+            #(#extra_derives),*
         )]
         #input
     }
@@ -90,7 +108,11 @@ mod tests {
 
     #[test]
     fn contract_adds_serialization_derives_and_requested_extras() {
-        let output = expand(quote! { Copy, Eq }, parse_quote! { pub struct Event; }).unwrap();
+        let output = expand(
+            quote! { Copy, Eq },
+            parse_quote! { pub struct Event { value: u32 } },
+        )
+        .unwrap();
         let file = parse2::<syn::File>(output).unwrap();
         let Item::Struct(item) = &file.items[0] else {
             panic!("expected struct");
@@ -121,6 +143,49 @@ mod tests {
                 "rkyv::Serialize",
                 "rkyv::Deserialize",
                 "Copy",
+                "Eq",
+            ]
+        );
+    }
+
+    #[test]
+    fn unit_contract_adds_value_derives_without_duplicates() {
+        let output = expand(
+            quote! { Copy, Eq },
+            parse_quote! { pub struct Event; },
+        )
+        .unwrap();
+        let file = parse2::<syn::File>(output).unwrap();
+        let Item::Struct(item) = &file.items[0] else {
+            panic!("expected struct");
+        };
+        let mut derives = Vec::new();
+        item.attrs[0]
+            .parse_nested_meta(|meta| {
+                derives.push(
+                    meta.path
+                        .segments
+                        .iter()
+                        .map(|segment| segment.ident.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::"),
+                );
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            derives,
+            [
+                "Debug",
+                "Clone",
+                "PartialEq",
+                "serde::Serialize",
+                "serde::Deserialize",
+                "rkyv::Archive",
+                "rkyv::Serialize",
+                "rkyv::Deserialize",
+                "Copy",
+                "Default",
                 "Eq",
             ]
         );
