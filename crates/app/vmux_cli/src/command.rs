@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::num::NonZero;
 use std::time::Duration;
 
-use bevy_app::{App, AppExit};
+use bevy_app::{App, AppExit, Plugin};
 use bevy_ecs::prelude::*;
 use clap::builder::{OsStringValueParser, PossibleValuesParser};
 use clap::error::ErrorKind;
@@ -12,37 +12,49 @@ use vmux_core::cli::{
     CliArgumentManifest, CliCommandManifest, CliInvocation, CliManifest, CliResult,
 };
 
-pub async fn run(mut app: App) -> AppExit {
-    let catalog = CliCatalog::from_app(&mut app);
-    let invocation = match catalog.parse(std::env::args_os()) {
-        Ok(invocation) => invocation,
-        Err(error) => {
-            let success = matches!(
-                error.kind(),
-                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
-            );
-            let _ = error.print();
-            return if success {
-                AppExit::Success
-            } else {
-                AppExit::error()
-            };
+pub struct CliRunnerPlugin;
+
+impl Plugin for CliRunnerPlugin {
+    fn build(&self, app: &mut App) {
+        app.set_runner(CliRunner::run);
+    }
+}
+
+struct CliRunner;
+
+impl CliRunner {
+    fn run(mut app: App) -> AppExit {
+        let catalog = CliCatalog::from_app(&mut app);
+        let invocation = match catalog.parse(std::env::args_os()) {
+            Ok(invocation) => invocation,
+            Err(error) => {
+                let success = matches!(
+                    error.kind(),
+                    ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+                );
+                let _ = error.print();
+                return if success {
+                    AppExit::Success
+                } else {
+                    AppExit::error()
+                };
+            }
+        };
+        app.finish();
+        app.cleanup();
+        let invocation = app.world_mut().spawn(invocation).id();
+        loop {
+            app.update();
+            let result = app
+                .world_mut()
+                .get_entity_mut(invocation)
+                .ok()
+                .and_then(|mut entity| entity.take::<CliResult>());
+            if let Some(result) = result {
+                return exit(result);
+            }
+            std::thread::park_timeout(Duration::from_millis(1));
         }
-    };
-    app.finish();
-    app.cleanup();
-    let invocation = app.world_mut().spawn(invocation).id();
-    loop {
-        app.update();
-        let result = app
-            .world_mut()
-            .get_entity_mut(invocation)
-            .ok()
-            .and_then(|mut entity| entity.take::<CliResult>());
-        if let Some(result) = result {
-            return exit(result);
-        }
-        std::thread::park_timeout(Duration::from_millis(1));
     }
 }
 
