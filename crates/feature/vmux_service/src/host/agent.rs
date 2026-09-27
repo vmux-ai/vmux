@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::{
     App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin, Query,
@@ -8,6 +7,8 @@ use bevy::prelude::{
 };
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use vmux_core::agent::SessionId;
+use vmux_core::{AgentWorkingDir, CreatedAt};
 
 use super::request::PendingRequests;
 use crate::message::{AssistantBlock, Message};
@@ -527,9 +528,6 @@ struct CloseAgentSession {
     response: Option<oneshot::Sender<bool>>,
 }
 
-#[derive(Component, Clone, PartialEq, Eq)]
-struct AgentSessionId(String);
-
 #[derive(Component)]
 struct AgentSessionInput(mpsc::UnboundedSender<SessionInput>);
 
@@ -555,16 +553,10 @@ struct AgentSessionProvider(String);
 struct AgentSessionModel(String);
 
 #[derive(Component)]
-struct AgentSessionWorkingDirectory(String);
-
-#[derive(Component)]
 struct AgentSessionStatus(Arc<StdMutex<AgentRunStatus>>);
 
 #[derive(Component)]
 struct AgentSessionApproval(Arc<StdMutex<Option<RemoteApproval>>>);
-
-#[derive(Component)]
-struct AgentSessionCreatedAt(u64);
 
 fn receive_agent_session_requests(
     mut inbox: Single<&mut AgentSessionInbox>,
@@ -598,7 +590,7 @@ fn receive_agent_session_requests(
 
 fn spawn_agent_sessions(
     runtime: Single<&AgentSessionRuntime>,
-    sessions: Query<&AgentSessionId>,
+    sessions: Query<&SessionId>,
     mut requests: Query<(Entity, &mut SpawnAgentSession)>,
     mut commands: Commands,
 ) {
@@ -627,17 +619,17 @@ fn spawn_agent_sessions(
             ));
             commands.spawn((
                 Name::new(format!("agent session {}", request.sid)),
-                AgentSessionId(request.sid.clone()),
+                SessionId(request.sid.clone()),
                 AgentSessionInput(input_tx),
                 AgentSessionStream(stream_tx),
                 AgentSessionHistory(messages),
                 AgentSessionTask(task),
                 AgentSessionProvider(request.provider.clone()),
                 AgentSessionModel(request.model.clone()),
-                AgentSessionWorkingDirectory(request.cwd.clone()),
+                AgentWorkingDir(request.cwd.clone()),
                 AgentSessionStatus(status),
                 AgentSessionApproval(approval),
-                AgentSessionCreatedAt(now_ms()),
+                CreatedAt::now(),
             ));
             session_ids.insert(request.sid.clone());
             Ok(())
@@ -653,7 +645,7 @@ fn spawn_agent_sessions(
 
 fn route_agent_session_inputs(
     sessions: Query<(
-        &AgentSessionId,
+        &SessionId,
         &AgentSessionInput,
         &AgentSessionStream,
         &AgentSessionApproval,
@@ -696,7 +688,7 @@ fn route_agent_session_inputs(
 }
 
 fn subscribe_agent_sessions(
-    sessions: Query<(&AgentSessionId, &AgentSessionStream)>,
+    sessions: Query<(&SessionId, &AgentSessionStream)>,
     mut requests: Query<(Entity, &mut SubscribeAgentSession)>,
     mut commands: Commands,
 ) {
@@ -713,7 +705,7 @@ fn subscribe_agent_sessions(
 }
 
 fn snapshot_agent_sessions(
-    sessions: Query<(&AgentSessionId, &AgentSessionHistory)>,
+    sessions: Query<(&SessionId, &AgentSessionHistory)>,
     mut requests: Query<(Entity, &mut SnapshotAgentSession)>,
     mut commands: Commands,
 ) {
@@ -745,7 +737,7 @@ fn snapshot_agent_sessions(
 }
 
 fn read_agent_session_messages(
-    sessions: Query<(&AgentSessionId, &AgentSessionHistory)>,
+    sessions: Query<(&SessionId, &AgentSessionHistory)>,
     mut requests: Query<(Entity, &mut AgentSessionMessages)>,
     mut commands: Commands,
 ) {
@@ -777,13 +769,13 @@ type AgentSessionQuery<'w, 's> = Query<
     'w,
     's,
     (
-        &'static AgentSessionId,
+        &'static SessionId,
         &'static AgentSessionProvider,
         &'static AgentSessionModel,
-        &'static AgentSessionWorkingDirectory,
+        &'static AgentWorkingDir,
         &'static AgentSessionStatus,
         &'static AgentSessionApproval,
-        &'static AgentSessionCreatedAt,
+        &'static CreatedAt,
     ),
 >;
 
@@ -819,7 +811,7 @@ fn find_agent_sessions(
 }
 
 fn close_agent_sessions(
-    sessions: Query<(Entity, &AgentSessionId, &AgentSessionInput)>,
+    sessions: Query<(Entity, &SessionId, &AgentSessionInput)>,
     mut requests: Query<(Entity, &mut CloseAgentSession)>,
     mut commands: Commands,
 ) {
@@ -841,22 +833,15 @@ fn close_agent_sessions(
     }
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 fn remote_session(
     (sid, provider, model, cwd, status, approval, created_at): (
-        &AgentSessionId,
+        &SessionId,
         &AgentSessionProvider,
         &AgentSessionModel,
-        &AgentSessionWorkingDirectory,
+        &AgentWorkingDir,
         &AgentSessionStatus,
         &AgentSessionApproval,
-        &AgentSessionCreatedAt,
+        &CreatedAt,
     ),
 ) -> RemoteSession {
     RemoteSession {
@@ -869,7 +854,7 @@ fn remote_session(
         cwd: cwd.0.clone(),
         status: RemoteStatus::from(&*status.0.lock().unwrap()),
         approval: approval.0.lock().unwrap().clone(),
-        created_at_ms: created_at.0,
+        created_at_ms: created_at.0.max(0) as u64,
     }
 }
 
@@ -1238,7 +1223,7 @@ mod tests {
         app.update();
 
         assert_eq!(spawn_result.try_recv().unwrap(), Ok(()));
-        let mut sessions = app.world_mut().query::<&AgentSessionId>();
+        let mut sessions = app.world_mut().query::<&SessionId>();
         assert_eq!(sessions.iter(app.world()).count(), 1);
 
         let (close_response, mut close_result) = oneshot::channel();

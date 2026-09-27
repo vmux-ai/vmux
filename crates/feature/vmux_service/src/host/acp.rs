@@ -6,7 +6,6 @@ pub use driver::{AcpInput, AcpShared};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::{
     App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin, Query,
@@ -14,7 +13,8 @@ use bevy::prelude::{
 };
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc, oneshot};
-use vmux_core::ProcessId;
+use vmux_core::agent::SessionId;
+use vmux_core::{CreatedAt, ProcessId};
 
 use crate::message::Message;
 use crate::process::ProcessManager;
@@ -471,9 +471,6 @@ struct CloseAcpSession {
     response: Option<oneshot::Sender<bool>>,
 }
 
-#[derive(Component, Clone, PartialEq, Eq)]
-struct AcpSessionId(String);
-
 #[derive(Component)]
 struct AcpSessionInput(mpsc::UnboundedSender<AcpInput>);
 
@@ -482,9 +479,6 @@ struct AcpSessionShared(Arc<AcpShared>);
 
 #[derive(Component)]
 struct AcpSessionAgent(String);
-
-#[derive(Component)]
-struct AcpSessionCreatedAt(u64);
 
 #[derive(Component)]
 struct AcpSessionTask(tokio::task::JoinHandle<()>);
@@ -533,7 +527,7 @@ fn receive_acp_session_requests(mut inbox: Single<&mut AcpSessionInbox>, mut com
 
 fn spawn_acp_sessions(
     runtime: Single<&AcpSessionRuntime>,
-    sessions: Query<&AcpSessionId>,
+    sessions: Query<&SessionId>,
     mut requests: Query<(Entity, &mut SpawnAcpSession)>,
     mut commands: Commands,
 ) {
@@ -565,11 +559,11 @@ fn spawn_acp_sessions(
             ));
             commands.spawn((
                 Name::new(format!("ACP session {}", request.sid)),
-                AcpSessionId(request.sid.clone()),
+                SessionId(request.sid.clone()),
                 AcpSessionInput(input_tx),
                 AcpSessionShared(shared),
                 AcpSessionAgent(request.agent_id.clone()),
-                AcpSessionCreatedAt(now_ms()),
+                CreatedAt::now(),
                 AcpSessionTask(task),
             ));
             session_ids.insert(request.sid.clone());
@@ -582,7 +576,7 @@ fn spawn_acp_sessions(
 }
 
 fn route_acp_session_inputs(
-    sessions: Query<(&AcpSessionId, &AcpSessionInput, &AcpSessionShared)>,
+    sessions: Query<(&SessionId, &AcpSessionInput, &AcpSessionShared)>,
     mut requests: Query<(Entity, &mut AcpSessionInputRequest)>,
     mut commands: Commands,
 ) {
@@ -608,7 +602,7 @@ fn route_acp_session_inputs(
 }
 
 fn subscribe_acp_sessions(
-    sessions: Query<(&AcpSessionId, &AcpSessionShared)>,
+    sessions: Query<(&SessionId, &AcpSessionShared)>,
     mut requests: Query<(Entity, &mut SubscribeAcpSession)>,
     mut commands: Commands,
 ) {
@@ -628,7 +622,7 @@ fn subscribe_acp_sessions(
 }
 
 fn read_acp_session_state(
-    sessions: Query<(&AcpSessionId, &AcpSessionShared)>,
+    sessions: Query<(&SessionId, &AcpSessionShared)>,
     mut snapshots: Query<(Entity, &mut SnapshotAcpSession)>,
     mut agent_infos: Query<(Entity, &mut AcpSessionAgentInfo)>,
     mut model_infos: Query<(Entity, &mut AcpSessionModelInfo)>,
@@ -704,12 +698,7 @@ fn read_acp_session_state(
 }
 
 fn list_acp_sessions(
-    sessions: Query<(
-        &AcpSessionId,
-        &AcpSessionShared,
-        &AcpSessionAgent,
-        &AcpSessionCreatedAt,
-    )>,
+    sessions: Query<(&SessionId, &AcpSessionShared, &AcpSessionAgent, &CreatedAt)>,
     mut lists: Query<(Entity, &mut ListAcpSessions)>,
     mut lookups: Query<(Entity, &mut FindAcpSession)>,
     mut commands: Commands,
@@ -717,7 +706,11 @@ fn list_acp_sessions(
     for (request_entity, mut request) in &mut lists {
         let mut result = Vec::new();
         for (_, shared, agent, created_at) in &sessions {
-            result.push(shared.0.remote_session(&agent.0, created_at.0));
+            result.push(
+                shared
+                    .0
+                    .remote_session(&agent.0, created_at.0.max(0) as u64),
+            );
         }
         if let Some(response) = request.response.take() {
             let _ = response.send(result);
@@ -728,7 +721,11 @@ fn list_acp_sessions(
         let mut result = None;
         for (sid, shared, agent, created_at) in &sessions {
             if sid.0 == request.sid {
-                result = Some(shared.0.remote_session(&agent.0, created_at.0));
+                result = Some(
+                    shared
+                        .0
+                        .remote_session(&agent.0, created_at.0.max(0) as u64),
+                );
                 break;
             }
         }
@@ -740,7 +737,7 @@ fn list_acp_sessions(
 }
 
 fn rebind_acp_sessions(
-    sessions: Query<(&AcpSessionId, &AcpSessionShared)>,
+    sessions: Query<(&SessionId, &AcpSessionShared)>,
     mut requests: Query<(Entity, &mut RebindAcpSession)>,
     mut commands: Commands,
 ) {
@@ -760,7 +757,7 @@ fn rebind_acp_sessions(
 }
 
 fn close_acp_sessions(
-    sessions: Query<(Entity, &AcpSessionId, &AcpSessionInput)>,
+    sessions: Query<(Entity, &SessionId, &AcpSessionInput)>,
     mut requests: Query<(Entity, &mut CloseAcpSession)>,
     mut commands: Commands,
 ) {
@@ -773,7 +770,7 @@ fn close_acp_sessions(
             let _ = input.0.send(AcpInput::Close);
             commands
                 .entity(session_entity)
-                .remove::<AcpSessionId>()
+                .remove::<SessionId>()
                 .insert(AcpSessionClosing);
             closed = true;
             break;
@@ -794,11 +791,4 @@ fn reap_closed_acp_sessions(
             commands.entity(entity).despawn();
         }
     }
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
