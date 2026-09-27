@@ -10652,6 +10652,7 @@ dependencies = [
  "vmux_core",
  "vmux_git",
  "vmux_layout",
+ "vmux_native",
  "vmux_tool",
 ]
 
@@ -10970,6 +10971,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vmux_api",
+ "vmux_chat",
  "vmux_command",
  "vmux_core",
  "vmux_flex",
@@ -10977,6 +10979,7 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_native",
+ "vmux_session",
  "vmux_setting",
  "vmux_tool",
  "vmux_ui",
