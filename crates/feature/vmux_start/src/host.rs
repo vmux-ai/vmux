@@ -50,6 +50,7 @@ impl Plugin for StartPlugin {
             .add_observer(on_start_branches_request)
             .add_observer(on_start_go_to_branch)
             .add_observer(apply_chosen_project)
+            .add_observer(publish_command_bar_focus)
             .add_systems(
                 Update,
                 (
@@ -64,6 +65,22 @@ impl Plugin for StartPlugin {
 
 #[derive(Component)]
 struct StartWorkSynced;
+
+#[derive(Component, Default)]
+struct CommandBarFocusRevision(u64);
+
+impl CommandBarFocusRevision {
+    fn next(&mut self) -> vmux_api::command_bar::CommandBarFocusEffect {
+        self.0 = self.0.wrapping_add(1).max(1);
+        vmux_api::command_bar::CommandBarFocusEffect { revision: self.0 }
+    }
+}
+
+#[derive(EntityEvent)]
+struct CommandBarFocusRequested {
+    #[event_target]
+    webview: Entity,
+}
 
 #[derive(Component)]
 struct PendingStartWorkspacePicker {
@@ -565,11 +582,7 @@ fn sync_live_start_pages(
             vmux_api::command_bar::CommandBarUiState,
         >::from_event(e, &payload));
         if focus_requested {
-            commands.trigger(vmux_core::host::UiStateWrite::<
-                vmux_api::command_bar::CommandBarUiState,
-            >::from_event(
-                e, &vmux_api::command_bar::CommandBarFocusInput
-            ));
+            commands.trigger(CommandBarFocusRequested { webview: e });
         }
         commands.entity(e).try_insert(StartWorkSynced);
     }
@@ -638,12 +651,28 @@ fn on_start_data_request(
         vmux_api::command_bar::CommandBarUiState,
     >::from_event(webview, &payload));
     if keyboard_targets.contains(webview) {
-        commands.trigger(vmux_core::host::UiStateWrite::<
-            vmux_api::command_bar::CommandBarUiState,
-        >::from_event(
-            webview, &vmux_api::command_bar::CommandBarFocusInput
-        ));
+        commands.trigger(CommandBarFocusRequested { webview });
     }
+}
+
+fn publish_command_bar_focus(
+    trigger: On<CommandBarFocusRequested>,
+    mut revisions: Query<&mut CommandBarFocusRevision>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let effect = match revisions.get_mut(webview) {
+        Ok(mut revision) => revision.next(),
+        Err(_) => {
+            let mut revision = CommandBarFocusRevision::default();
+            let effect = revision.next();
+            commands.entity(webview).insert(revision);
+            effect
+        }
+    };
+    commands.trigger(vmux_core::host::UiStateWrite::<
+        vmux_api::command_bar::CommandBarUiState,
+    >::from_event(webview, &effect));
 }
 
 fn build_start_payload(
@@ -743,21 +772,21 @@ mod tests {
     use vmux_core::page::PageManifest;
 
     #[derive(Resource, Default)]
-    struct EmittedIds(Vec<&'static str>);
+    struct EmittedIds(Vec<(&'static str, u64)>);
 
     fn capture_state(
         trigger: On<UiStateWrite<CommandBarUiState>>,
         mut emitted: ResMut<EmittedIds>,
     ) {
         let patch = trigger.event().patch();
-        let kind = if patch.snapshot.is_some() {
-            "snapshot"
-        } else if patch.focus_input.is_some() {
-            "focus"
+        let entry = if patch.snapshot.is_some() {
+            ("snapshot", 0)
+        } else if let Some(effect) = &patch.focus {
+            ("focus", effect.revision)
         } else {
-            "other"
+            ("other", 0)
         };
-        emitted.0.push(kind);
+        emitted.0.push(entry);
     }
 
     fn start_ready_app() -> App {
@@ -765,6 +794,7 @@ mod tests {
         app.init_resource::<CommandBarProjection>()
             .init_resource::<EmittedIds>()
             .add_observer(on_start_data_request)
+            .add_observer(publish_command_bar_focus)
             .add_observer(capture_state);
         app
     }
@@ -836,6 +866,21 @@ mod tests {
         emit_start_ready(&mut app, webview);
 
         let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(emitted, &["snapshot", "focus"]);
+        assert_eq!(emitted, &[("snapshot", 0), ("focus", 1)]);
+    }
+
+    #[test]
+    fn repeated_focus_effects_advance_the_revision() {
+        let mut app = start_ready_app();
+        let webview = app.world_mut().spawn(KeyboardOwner).id();
+
+        emit_start_ready(&mut app, webview);
+        emit_start_ready(&mut app, webview);
+
+        let emitted = &app.world().resource::<EmittedIds>().0;
+        assert_eq!(
+            emitted,
+            &[("snapshot", 0), ("focus", 1), ("snapshot", 0), ("focus", 2),]
+        );
     }
 }

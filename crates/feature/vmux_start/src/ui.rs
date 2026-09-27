@@ -6,7 +6,7 @@ use vmux_ui::hooks::{send, use_theme};
 
 use crate::event::StartDataRequest;
 use vmux_command::palette::PaletteSurface;
-use vmux_command::ui::{CommandPalette, focus_prompt_input, use_command_bar_ui};
+use vmux_command::ui::{CommandPalette, use_command_bar_ui};
 
 #[vmux_native::page(
     component = Page,
@@ -26,7 +26,6 @@ pub fn Page() -> Element {
     });
 
     use_effect(move || {
-        focus_prompt_input();
         mounted.set(true);
     });
 

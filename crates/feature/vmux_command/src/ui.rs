@@ -1,5 +1,5 @@
 use crate::event::{
-    CommandBarFocusInput, CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch,
+    CommandBarFocusEffect, CommandBarOpenEvent, CommandBarUiState, CommandBarUiStatePatch,
     CommandPaletteActivateRequest, CommandPaletteBranchesRequest, CommandPaletteDraftRequest,
     CommandPalettePromptHistoryRequest, CommandPaletteSelectionRequest, CommandPaletteState,
     CommandPaletteSubmitRequest,
@@ -40,6 +40,7 @@ pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
     let root = vmux_ui::hooks::use_ui_state_root::<CommandBarUiState>();
     let mut state = use_signal(CommandBarOpenEvent::default);
     let mut handled_sequence = use_signal(|| 0);
+    let mut handled_focus_revision = use_signal(|| 0);
     use_effect(move || {
         let event = root.state.read();
         if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
@@ -54,11 +55,16 @@ pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
                 state.set(snapshot.clone());
                 continue;
             }
-            if <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarFocusInput>>::payload(
-                patch,
-            )
-            .is_some()
-            {
+            let Some(effect) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
+                CommandBarFocusEffect,
+            >>::payload(patch) else {
+                continue;
+            };
+            if effect.revision <= *handled_focus_revision.peek() {
+                continue;
+            }
+            handled_focus_revision.set(effect.revision);
+            if effect.revision != 0 {
                 focus_prompt_input();
             }
         }

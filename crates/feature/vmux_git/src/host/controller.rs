@@ -11,13 +11,14 @@ use crate::event::{
     GitDiscardFileRequest, GitDiscardRequest, GitFastForwardRequest, GitFileSelectRequest,
     GitKeyRequest, GitMergeRequest, GitPanelSelectRequest, GitRebaseRequest,
     GitRepositoryPickerRequest, GitRepositoryRequest, GitRepositorySnapshot, GitRevertRequest,
-    GitStageAllRequest, GitStageRequest, GitStashDropRequest, GitStashPopRequest,
-    GitStashPushRequest, GitStashSelectRequest, GitUnstageRequest, GitUpdateCheckRequest,
+    GitShortcutHelpRequest, GitStageAllRequest, GitStageRequest, GitStashDropRequest,
+    GitStashPopRequest, GitStashPushRequest, GitStashSelectRequest, GitUnstageRequest,
+    GitUpdateCheckRequest,
 };
 use crate::state::{
     GitBranchCollection, GitBranchPrompt, GitBranchPromptRequested, GitOperationEligibility,
     GitPageContext, GitPageControllerState, GitPanel, GitRepositoryPicked, GitSelectionReveal,
-    GitShortcutHelpToggle, GitUiState, GitWorkspaceChanged,
+    GitUiState, GitWorkspaceChanged,
 };
 
 use super::directory::GitDirectoryNavigation;
@@ -30,6 +31,7 @@ impl Plugin for ControllerPlugin {
         app.add_plugins(UiEventPlugin::<(
             GitKeyRequest,
             GitPanelSelectRequest,
+            GitShortcutHelpRequest,
             GitFileSelectRequest,
             GitBranchCollectionSelectRequest,
             GitBranchSelectRequest,
@@ -40,6 +42,7 @@ impl Plugin for ControllerPlugin {
             .add_observer(on_git_ui_state_write)
             .add_observer(on_key_request)
             .add_observer(on_panel_select_request)
+            .add_observer(on_shortcut_help_request)
             .add_observer(on_file_select_request)
             .add_observer(on_branch_collection_select_request)
             .add_observer(on_branch_select_request)
@@ -53,6 +56,7 @@ impl Plugin for ControllerPlugin {
 pub(super) struct GitController {
     state: GitPageControllerState,
     pending_branch_checkout: String,
+    selection_reveal_revision: u64,
 }
 
 impl GitController {
@@ -231,16 +235,20 @@ impl GitController {
         &mut self,
         direction: SelectionDirection,
         repository: &GitRepositorySnapshot,
-    ) -> Option<String> {
-        let reveal = match self.state.focused_panel {
+    ) -> Option<GitSelectionReveal> {
+        let id = match self.state.focused_panel {
             GitPanel::Status => return None,
             GitPanel::Files => self.move_file_selection(direction, repository),
             GitPanel::Branches => self.move_branch_selection(direction, repository),
             GitPanel::Commits => self.move_commit_selection(direction, repository),
             GitPanel::Stash => self.move_stash_selection(direction, repository),
-        };
+        }?;
         self.refresh_operations(repository);
-        reveal
+        self.selection_reveal_revision = self.selection_reveal_revision.wrapping_add(1).max(1);
+        Some(GitSelectionReveal {
+            id,
+            revision: self.selection_reveal_revision,
+        })
     }
 
     fn move_file_selection(
@@ -370,11 +378,8 @@ fn dispatch_git_key(
         let Some(repository) = state.repository() else {
             return;
         };
-        if let Some(id) = controller.move_selection(direction, repository) {
-            commands.trigger(UiStateWrite::<GitUiState>::from_event(
-                webview,
-                &GitSelectionReveal { id },
-            ));
+        if let Some(effect) = controller.move_selection(direction, repository) {
+            commands.trigger(UiStateWrite::<GitUiState>::from_event(webview, &effect));
             request_branch_log(controller, webview, state, commands);
         }
         return;
@@ -387,10 +392,7 @@ fn dispatch_git_key(
         return;
     }
     if request.key == "?" {
-        commands.trigger(UiStateWrite::<GitUiState>::from_event(
-            webview,
-            &GitShortcutHelpToggle,
-        ));
+        controller.state.shortcut_help_visible = !controller.state.shortcut_help_visible;
         return;
     }
     if request.key == "Tab" {
@@ -799,6 +801,16 @@ fn on_panel_select_request(
     };
     controller.select_panel(trigger.event().payload.panel, state.repository());
     request_branch_log(&controller, webview, state, &mut commands);
+}
+
+fn on_shortcut_help_request(
+    trigger: On<UiInput<GitShortcutHelpRequest>>,
+    mut pages: Query<&mut GitController>,
+) {
+    let Ok(mut controller) = pages.get_mut(trigger.event().webview) else {
+        return;
+    };
+    controller.state.shortcut_help_visible = trigger.event().payload.visible;
 }
 
 fn on_file_select_request(

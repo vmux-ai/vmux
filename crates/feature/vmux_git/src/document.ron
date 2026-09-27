@@ -8,6 +8,7 @@
         "PageContextRequest",
         "GitKeyRequest",
         "GitPanelSelectRequest",
+        "GitShortcutHelpRequest",
         "GitFileSelectRequest",
         "GitBranchCollectionSelectRequest",
         "GitBranchSelectRequest",

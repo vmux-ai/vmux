@@ -10,7 +10,7 @@ use super::branches::BranchPromptDialog;
 use super::dashboard::GitDashboard;
 use super::empty::EmptyRepository;
 use super::state::GitPageState;
-use crate::event::GitKeyRequest;
+use crate::event::{GitKeyRequest, GitShortcutHelpRequest};
 
 #[component]
 pub fn Page() -> Element {
@@ -20,7 +20,6 @@ pub fn Page() -> Element {
     let GitPageState {
         snapshot,
         branch_prompt,
-        mut shortcut_help,
         ..
     } = state;
 
@@ -34,10 +33,10 @@ pub fn Page() -> Element {
             tabindex: "-1",
             autofocus: true,
             onkeydown: move |event: KeyboardEvent| {
-                if event.key() == Key::Escape && shortcut_help() {
+                if event.key() == Key::Escape && (state.controller)().shortcut_help_visible {
                     event.prevent_default();
                     event.stop_propagation();
-                    shortcut_help.set(false);
+                    let _ = send(&GitShortcutHelpRequest { visible: false });
                     return;
                 }
                 let modifiers = event.modifiers();

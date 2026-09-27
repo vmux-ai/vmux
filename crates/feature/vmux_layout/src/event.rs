@@ -502,6 +502,7 @@ pub struct PaneTreeState {
 pub struct StackRevealTarget {
     pub pane_id: u64,
     pub stack_id: u64,
+    pub revision: u64,
 }
 
 #[vmux_api::contract(Default)]

@@ -4,7 +4,9 @@ use dioxus::prelude::*;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-use crate::event::{GitConfigEditRequest, GitRepositoryPickerRequest, GitUpdateCheckRequest};
+use crate::event::{
+    GitConfigEditRequest, GitRepositoryPickerRequest, GitShortcutHelpRequest, GitUpdateCheckRequest,
+};
 use crate::state::{GitBranchCollection, GitPanel};
 
 #[component]
@@ -12,7 +14,6 @@ pub(super) fn GitShortcutBar(
     repo_root: String,
     focused_panel: GitPanel,
     branch_collection: GitBranchCollection,
-    mut shortcut_help: Signal<bool>,
 ) -> Element {
     let panel_shortcuts = match focused_panel {
         GitPanel::Status => Vec::new(),
@@ -87,7 +88,9 @@ pub(super) fn GitShortcutBar(
             button {
                 r#type: "button",
                 class: "ml-auto flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
-                onclick: move |_| shortcut_help.set(true),
+                onclick: move |_| {
+                    let _ = send(&GitShortcutHelpRequest { visible: true });
+                },
                 kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[9px] font-semibold text-foreground", "?" }
                 span { {translate("git-keybindings")} }
             }
@@ -123,11 +126,13 @@ fn ShortcutHint(keycap: &'static str, label: String) -> Element {
 }
 
 #[component]
-pub(super) fn GitShortcutHelp(shortcut_help: Signal<bool>) -> Element {
+pub(super) fn GitShortcutHelp() -> Element {
     rsx! {
         div {
             class: "absolute inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm",
-            onclick: move |_| shortcut_help.set(false),
+            onclick: move |_| {
+                let _ = send(&GitShortcutHelpRequest { visible: false });
+            },
             div {
                 class: "max-h-[min(42rem,calc(100vh-2rem))] w-full max-w-2xl overflow-y-auto rounded-2xl border border-foreground/10 bg-card p-4 shadow-2xl sm:p-5",
                 onclick: move |event| event.stop_propagation(),
@@ -139,7 +144,9 @@ pub(super) fn GitShortcutHelp(shortcut_help: Signal<bool>) -> Element {
                     button {
                         r#type: "button",
                         class: "rounded-lg border border-foreground/10 bg-foreground/[0.04] px-2 py-1 font-mono text-[10px] text-muted-foreground hover:text-foreground",
-                        onclick: move |_| shortcut_help.set(false),
+                        onclick: move |_| {
+                            let _ = send(&GitShortcutHelpRequest { visible: false });
+                        },
                         "esc"
                     }
                 }

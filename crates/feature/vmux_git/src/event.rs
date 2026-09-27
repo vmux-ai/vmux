@@ -68,6 +68,11 @@ pub struct GitPanelSelectRequest {
     pub panel: GitPanel,
 }
 
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct GitShortcutHelpRequest {
+    pub visible: bool,
+}
+
 #[vmux_api::ui_event(Eq)]
 pub struct GitFileSelectRequest {
     pub path_bytes: Vec<u8>,

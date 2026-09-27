@@ -21,7 +21,6 @@ pub(super) fn GitDashboard() -> Element {
         branch_draft,
         commit_message,
         pending_commit_message,
-        shortcut_help,
         ..
     } = use_context::<GitPageState>();
     let ui = snapshot();
@@ -113,10 +112,9 @@ pub(super) fn GitDashboard() -> Element {
             repo_root: repository.repo_root,
             focused_panel: controller_state.focused_panel,
             branch_collection: controller_state.branch_collection,
-            shortcut_help,
         }
-        if shortcut_help() {
-            GitShortcutHelp { shortcut_help }
+        if controller_state.shortcut_help_visible {
+            GitShortcutHelp {}
         }
     }
 }

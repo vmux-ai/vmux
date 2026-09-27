@@ -1185,7 +1185,10 @@ mod tests {
             })
             .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let stack = app.world_mut().spawn(ChildOf(pane)).id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(pane)))
+            .id();
 
         let snap = LayoutSnapshot {
             tabs: vec![

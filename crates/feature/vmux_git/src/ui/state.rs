@@ -16,8 +16,8 @@ pub(super) struct GitPageState {
     pub(super) branch_draft: Signal<String>,
     pub(super) commit_message: Signal<String>,
     pub(super) pending_commit_message: Signal<String>,
-    pub(super) shortcut_help: Signal<bool>,
     handled_result_sequence: Signal<u64>,
+    handled_selection_reveal: Signal<u64>,
 }
 
 impl GitPageState {
@@ -30,8 +30,8 @@ impl GitPageState {
             branch_draft: use_signal(String::new),
             commit_message: use_signal(String::new),
             pending_commit_message: use_signal(String::new),
-            shortcut_help: use_signal(|| false),
             handled_result_sequence: use_signal(|| 0),
+            handled_selection_reveal: use_signal(|| 0),
         };
         state.subscribe();
         state
@@ -67,11 +67,12 @@ impl GitPageState {
                     prompt.set(Some(request.prompt.clone()));
                 }
                 if let Some(request) = &patch.selection_reveal {
+                    if request.revision <= (self.handled_selection_reveal)() {
+                        continue;
+                    }
+                    let mut handled = self.handled_selection_reveal;
+                    handled.set(request.revision);
                     ScrollIntoView::nearest(&request.id);
-                }
-                if patch.shortcut_help_toggle.is_some() {
-                    let mut help = self.shortcut_help;
-                    help.toggle();
                 }
                 if patch.context.is_some() {
                     self.reset_local_render_state();

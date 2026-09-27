@@ -120,6 +120,7 @@ pub struct GitPageControllerState {
     pub selected_stash: String,
     pub confirm_discard: Vec<u8>,
     pub focused_panel: GitPanel,
+    pub shortcut_help_visible: bool,
     pub operations: GitOperationEligibility,
 }
 
@@ -131,10 +132,8 @@ pub struct GitBranchPromptRequested {
 #[vmux_api::contract(Eq)]
 pub struct GitSelectionReveal {
     pub id: String,
+    pub revision: u64,
 }
-
-#[vmux_api::contract]
-pub struct GitShortcutHelpToggle;
 
 #[vmux_api::contract]
 pub struct GitPageContext {
@@ -229,7 +228,6 @@ pub struct GitUiStatePatch {
     pub controller: Option<Box<GitPageControllerState>>,
     pub branch_prompt: Option<GitBranchPromptRequested>,
     pub selection_reveal: Option<GitSelectionReveal>,
-    pub shortcut_help_toggle: Option<GitShortcutHelpToggle>,
 }
 
 #[vmux_api::ui_state(Default)]

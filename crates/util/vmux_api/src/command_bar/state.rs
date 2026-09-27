@@ -4,8 +4,10 @@ use crate::history::{HistoryEntry, HistorySuggestionsResponse};
 use crate::prompt_media::{ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry};
 use crate::space::ProjectBranch;
 
-#[vmux_api::contract]
-pub struct CommandBarFocusInput;
+#[vmux_api::contract(Copy, Eq)]
+pub struct CommandBarFocusEffect {
+    pub revision: u64,
+}
 
 #[vmux_api::ui_state_patch(Default)]
 pub struct CommandBarUiStatePatch {
@@ -17,7 +19,7 @@ pub struct CommandBarUiStatePatch {
     pub resumable_sessions: Option<Box<ResumableSessions>>,
     pub attachments: Option<Box<ChatAttachments>>,
     pub media_entries: Option<Box<ChatMediaEntries>>,
-    pub focus_input: Option<CommandBarFocusInput>,
+    pub focus: Option<CommandBarFocusEffect>,
 }
 
 #[vmux_api::ui_state(Default)]

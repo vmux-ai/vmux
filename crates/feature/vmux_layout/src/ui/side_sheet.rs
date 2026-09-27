@@ -58,11 +58,7 @@ impl StackReveal {
     }
 
     pub(super) fn follow(mut self, target: StackRevealTarget) {
-        let Some(settled) = (self.settled)() else {
-            self.settled.set(Some(target));
-            return;
-        };
-        if settled == target {
+        if (self.settled)().is_some_and(|settled| settled.revision >= target.revision) {
             return;
         }
         if ScrollIntoView::nearest(&format!(

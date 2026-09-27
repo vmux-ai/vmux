@@ -88,7 +88,7 @@ impl PaletteSignals {
         navigating: bool,
         input_id: &'static str,
     ) {
-        if revision == 0 || revision == (self.last_input_revision)() {
+        if revision == 0 || revision <= (self.last_input_revision)() {
             return;
         }
         self.last_input_revision.set(revision);

@@ -70,7 +70,10 @@ struct HeaderProjection(HeaderState);
 struct TabStripProjection(TabStripState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
-struct SideSheetProjection(SideSheetState);
+struct SideSheetProjection {
+    state: SideSheetState,
+    reveal_revision: u64,
+}
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct BookmarkUiProjection(BookmarkUiState);
@@ -369,6 +372,7 @@ impl SideSheetProjection {
     fn from_sources(
         panes: &PaneTreeState,
         spaces: &vmux_core::event::space::SpacesListEvent,
+        current: Option<&Self>,
     ) -> Self {
         let active_space = spaces.spaces.iter().find(|space| space.is_active).cloned();
         let mut side_sheet_panes = Vec::with_capacity(panes.panes.len());
@@ -406,35 +410,49 @@ impl SideSheetProjection {
                 .find(|stack| stack.is_active && !stack.url.is_empty())
                 .cloned()
         });
-        let reveal = active_pane
+        let reveal_location = active_pane
             .as_ref()
             .and_then(|pane| {
                 pane.stacks
                     .iter()
                     .find(|stack| stack.is_active)
-                    .map(|stack| StackRevealTarget {
-                        pane_id: pane.id,
-                        stack_id: stack.id,
-                    })
+                    .map(|stack| (pane.id, stack.id))
             })
             .or_else(|| {
                 side_sheet_panes.iter().find_map(|pane| {
                     pane.stacks
                         .iter()
                         .find(|stack| stack.is_active)
-                        .map(|stack| StackRevealTarget {
-                            pane_id: pane.id,
-                            stack_id: stack.id,
-                        })
+                        .map(|stack| (pane.id, stack.id))
                 })
             });
-        Self(SideSheetState {
-            active_space,
-            active_pane,
-            active_page,
-            reveal,
-            panes: side_sheet_panes,
-        })
+        let previous_reveal = current.and_then(|projection| projection.state.reveal.as_ref());
+        let mut reveal_revision = current
+            .map(|projection| projection.reveal_revision)
+            .unwrap_or_default();
+        let reveal = reveal_location.map(|(pane_id, stack_id)| {
+            let unchanged = previous_reveal.is_some_and(|previous| {
+                previous.pane_id == pane_id && previous.stack_id == stack_id
+            });
+            if !unchanged {
+                reveal_revision = reveal_revision.wrapping_add(1).max(1);
+            }
+            StackRevealTarget {
+                pane_id,
+                stack_id,
+                revision: reveal_revision,
+            }
+        });
+        Self {
+            state: SideSheetState {
+                active_space,
+                active_pane,
+                active_page,
+                reveal,
+                panes: side_sheet_panes,
+            },
+            reveal_revision,
+        }
     }
 }
 
@@ -579,7 +597,7 @@ fn project_side_sheet(
     mut commands: Commands,
 ) {
     for (entity, panes, spaces, current) in &layouts {
-        let next = SideSheetProjection::from_sources(&panes.0, &spaces.0);
+        let next = SideSheetProjection::from_sources(&panes.0, &spaces.0, current);
         if current == Some(&next) {
             continue;
         }
@@ -602,7 +620,7 @@ fn project_bookmark_ui(
     let empty = BookmarkStateEvent::default();
     for (entity, bookmarks, side_sheet, current) in &layouts {
         let bookmarks = bookmarks.map(|projection| &projection.0).unwrap_or(&empty);
-        let active_page = side_sheet.and_then(|projection| projection.0.active_page.as_ref());
+        let active_page = side_sheet.and_then(|projection| projection.state.active_page.as_ref());
         let next = BookmarkUiProjection(BookmarkUiBuilder::build(bookmarks, active_page));
         if current == Some(&next) {
             continue;
@@ -619,7 +637,7 @@ fn publish_side_sheet(
         commands.trigger(
             vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
                 entity,
-                &projection.0,
+                &projection.state,
             ),
         );
     }
@@ -810,7 +828,8 @@ mod tests {
             selected: 1,
         };
 
-        let state = SideSheetProjection::from_sources(&panes, &spaces).0;
+        let projection = SideSheetProjection::from_sources(&panes, &spaces, None);
+        let state = &projection.state;
 
         assert_eq!(
             state.active_space.as_ref().map(|space| space.id.as_str()),
@@ -833,7 +852,17 @@ mod tests {
             Some(StackRevealTarget {
                 pane_id: 2,
                 stack_id: 22,
+                revision: 1,
             })
         );
+
+        let unchanged = SideSheetProjection::from_sources(&panes, &spaces, Some(&projection));
+        assert_eq!(unchanged.state.reveal.as_ref().unwrap().revision, 1);
+
+        let mut changed_panes = panes;
+        changed_panes.panes[0].is_active = true;
+        changed_panes.panes[1].is_active = false;
+        let changed = SideSheetProjection::from_sources(&changed_panes, &spaces, Some(&unchanged));
+        assert_eq!(changed.state.reveal.as_ref().unwrap().revision, 2);
     }
 }

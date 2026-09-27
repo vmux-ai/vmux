@@ -50,7 +50,7 @@ pub(super) fn BookmarksSection(
     let mut handled_menu_revision = use_signal(|| initial_menu_revision);
     use_effect(move || {
         let effect = bookmark_menu();
-        if effect.revision == handled_menu_revision() {
+        if effect.revision <= handled_menu_revision() {
             return;
         }
         handled_menu_revision.set(effect.revision);
@@ -682,7 +682,7 @@ fn BookmarkFolder(folder: BookmarkFolderState, active_page: Option<PageMetadata>
     let menu_name = folder.name.clone();
     use_effect(move || {
         let effect = bookmark_menu();
-        if effect.revision == handled_menu_revision() {
+        if effect.revision <= handled_menu_revision() {
             return;
         }
         handled_menu_revision.set(effect.revision);
@@ -964,7 +964,7 @@ fn BookmarkEntry(entry: BookmarkEntryState) -> Element {
     let menu_name = title.clone();
     use_effect(move || {
         let effect = bookmark_menu();
-        if effect.revision == handled_menu_revision() {
+        if effect.revision <= handled_menu_revision() {
             return;
         }
         handled_menu_revision.set(effect.revision);
