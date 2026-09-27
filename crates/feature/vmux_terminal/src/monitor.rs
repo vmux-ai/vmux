@@ -15,41 +15,65 @@ use vmux_ui::icon::{LineIcon, LineIconView};
 #[vmux_native::page(file = "src/monitor.ron", component = Page)]
 pub struct ProcessMonitorPage;
 
-#[component]
-pub fn Page() -> Element {
+#[derive(Clone, Copy)]
+struct ProcessMonitorUi {
+    snapshot: Signal<ProcessesUiState>,
+    history: Signal<ServiceHistory>,
+    search: Signal<String>,
+    processes: Memo<Vec<ProcessEntry>>,
+}
+
+fn use_process_monitor_ui() -> ProcessMonitorUi {
     use_theme();
-    let state = use_ui_state::<ProcessesUiState>();
+    let snapshot = use_ui_state::<ProcessesUiState>();
     let mut history = use_signal(ServiceHistory::default);
-    let mut search = use_signal(String::new);
+    let search = use_signal(String::new);
 
-    use_effect(move || history.write().push(&state.read()));
+    use_effect(move || history.write().push(&snapshot.read()));
 
-    let state = state.read();
-    let query = search.read().to_lowercase();
-    let mut processes = Vec::new();
-    for process in &state.processes {
-        if query.is_empty()
-            || process.id.to_lowercase().contains(&query)
-            || process.shell.to_lowercase().contains(&query)
-            || process.cwd.to_lowercase().contains(&query)
-            || process.pid.to_string().contains(&query)
-        {
-            processes.push(process.clone());
+    let processes = use_memo(move || {
+        let snapshot = snapshot.read();
+        let query = search.read().trim().to_lowercase();
+        let mut processes = Vec::new();
+        for process in &snapshot.processes {
+            if query.is_empty()
+                || process.id.to_lowercase().contains(&query)
+                || process.shell.to_lowercase().contains(&query)
+                || process.cwd.to_lowercase().contains(&query)
+                || process.pid.to_string().contains(&query)
+            {
+                processes.push(process.clone());
+            }
         }
-    }
-    processes.sort_by(|left, right| {
-        right
-            .cpu_percent
-            .total_cmp(&left.cpu_percent)
-            .then_with(|| right.mem_bytes.cmp(&left.mem_bytes))
-            .then_with(|| left.pid.cmp(&right.pid))
+        processes.sort_by(|left, right| {
+            right
+                .cpu_percent
+                .total_cmp(&left.cpu_percent)
+                .then_with(|| right.mem_bytes.cmp(&left.mem_bytes))
+                .then_with(|| left.pid.cmp(&right.pid))
+        });
+        processes
     });
 
-    let connected = state.connected;
-    let has_processes = !state.processes.is_empty();
-    let has_managed_processes = state.processes.iter().any(|process| process.managed);
-    let process_count = state.processes.len();
-    let history = history.read().clone();
+    ProcessMonitorUi {
+        snapshot,
+        history,
+        search,
+        processes,
+    }
+}
+
+#[component]
+pub fn Page() -> Element {
+    let ui = use_process_monitor_ui();
+    let snapshot = (ui.snapshot)();
+    let processes = (ui.processes)();
+    let history = (ui.history)();
+    let mut search = ui.search;
+    let connected = snapshot.connected;
+    let has_processes = !snapshot.processes.is_empty();
+    let has_managed_processes = snapshot.processes.iter().any(|process| process.managed);
+    let process_count = snapshot.processes.len();
 
     let empty_detail = format!(
         "{} {}",
