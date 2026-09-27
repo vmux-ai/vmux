@@ -215,7 +215,9 @@ actual Bevy world commands. `Message` is reserved for protocol envelopes and con
 content.
 
 Shared API values use `#[vmux_api::contract]`, which supplies the serde and rkyv representation
-plus the common value derives. Binary events use one directional attribute instead:
+plus the common value derives. Unit contracts infer `Copy`, `Default`, and `Eq`; contracts with
+fields opt into only the additional traits their fields and semantics support. Binary events use
+one directional attribute instead:
 `#[vmux_api::ui_event]` marks an event emitted by Dioxus and consumed by the Bevy host, while
 `#[vmux_api::host_event]` marks the reverse direction. Both event attributes include the contract
 derives and define the complete wire name, version, and allowed page hosts. `BookmarkMenuPinRequest`
