@@ -36,9 +36,8 @@ use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, HostPayload, PageHost, install_host};
 use vmux_ui::platform::sleep_ms;
 
-use crate::remote::next_client_op_id;
+use crate::remote::{Api, ApiError, next_client_op_id};
 use crate::session::Session;
-use crate::{Api, ApiError};
 
 const TEAM_POLL_INTERVAL_MS: u32 = 3_000;
 

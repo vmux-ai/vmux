@@ -158,7 +158,7 @@ fn AppBody() -> Element {
         }
     });
 
-    let view = connection.view();
+    let view = (connection.view)();
 
     if view.auth == AuthState::Loading {
         return rsx! {

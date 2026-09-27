@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::Credentials;
+use crate::pairing::Credentials;
 
 pub struct StoredCredentials;
 

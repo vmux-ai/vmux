@@ -141,14 +141,6 @@ impl AgentBroker {
         self.commands.resolve(request_id, result).await
     }
 
-    pub(crate) async fn resolve_query(
-        &self,
-        request_id: AgentRequestId,
-        response: ServiceMessage,
-    ) -> bool {
-        self.queries.resolve(request_id, response).await
-    }
-
     pub(crate) async fn resolve_tool(
         &self,
         request_id: AgentRequestId,

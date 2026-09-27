@@ -357,7 +357,9 @@ fn poll_session_streams(
         while let Ok(output) = stream.receiver.try_recv() {
             match output {
                 SessionStreamOutput::Connected(connected) => state.view.connected = connected,
-                SessionStreamOutput::Event(event) => reported.write(Reported(event)),
+                SessionStreamOutput::Event(event) => {
+                    reported.write(Reported(event));
+                }
             }
         }
         if future::block_on(future::poll_once(&mut stream.task)).is_some() {

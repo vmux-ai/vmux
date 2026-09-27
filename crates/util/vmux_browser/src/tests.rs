@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::appearance::sync_appearance_to_cef;
 use crate::host::*;
