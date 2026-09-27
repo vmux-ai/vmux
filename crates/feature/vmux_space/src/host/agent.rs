@@ -1,5 +1,7 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommand, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename};
+use vmux_api::protocol::{
+    AgentCommand, AgentRenameProfile, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+};
 use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply};
 
 pub(super) struct SpaceAgentPlugin;
@@ -11,11 +13,19 @@ impl Plugin for SpaceAgentPlugin {
             .add_message::<AgentSpaceCreateRequest>()
             .add_message::<AgentSpaceRenameRequest>()
             .add_message::<AgentSpaceDeleteRequest>()
+            .add_message::<AgentRenameProfileRequest>()
+            .add_message::<RenameProfileRequest>()
             .add_systems(
                 Update,
                 (
                     route_space_commands,
-                    (create_space, rename_space, delete_space),
+                    (
+                        create_space,
+                        rename_space,
+                        delete_space,
+                        request_profile_rename,
+                    ),
+                    rename_profile,
                 )
                     .chain(),
             );
@@ -40,11 +50,23 @@ struct AgentSpaceDeleteRequest {
     payload: AgentSpaceDelete,
 }
 
+#[derive(Message, Clone)]
+struct AgentRenameProfileRequest {
+    reply: AgentReply,
+    payload: AgentRenameProfile,
+}
+
+#[derive(Message, Clone)]
+struct RenameProfileRequest {
+    name: String,
+}
+
 fn route_space_commands(
     mut commands: MessageReader<AgentCommandRequest>,
     mut create: MessageWriter<AgentSpaceCreateRequest>,
     mut rename: MessageWriter<AgentSpaceRenameRequest>,
     mut delete: MessageWriter<AgentSpaceDeleteRequest>,
+    mut rename_profile: MessageWriter<AgentRenameProfileRequest>,
 ) {
     for request in commands.read() {
         let reply = AgentReply::new(request.request_id);
@@ -63,6 +85,12 @@ fn route_space_commands(
             }
             AgentCommand::SpaceDelete(payload) => {
                 delete.write(AgentSpaceDeleteRequest {
+                    reply,
+                    payload: payload.clone(),
+                });
+            }
+            AgentCommand::RenameProfile(payload) => {
+                rename_profile.write(AgentRenameProfileRequest {
                     reply,
                     payload: payload.clone(),
                 });
@@ -109,5 +137,37 @@ fn delete_space(
             space_id: request.payload.space_id.clone(),
         });
         responses.write(request.reply.ok());
+    }
+}
+
+fn request_profile_rename(
+    mut requests: MessageReader<AgentRenameProfileRequest>,
+    mut rename: MessageWriter<RenameProfileRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+) {
+    for request in requests.read() {
+        rename.write(RenameProfileRequest {
+            name: request.payload.name.clone(),
+        });
+        responses.write(request.reply.ok());
+    }
+}
+
+fn rename_profile(
+    mut requests: MessageReader<RenameProfileRequest>,
+    active_space: Option<ResMut<crate::ActiveSpace>>,
+) {
+    let Some(mut active) = active_space else {
+        return;
+    };
+    for request in requests.read() {
+        let name = request.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        match vmux_core::profile::set_display_name(name) {
+            Ok(()) => active.record.profile = name.to_string(),
+            Err(error) => warn!("rename_profile: failed to persist display name: {error}"),
+        }
     }
 }

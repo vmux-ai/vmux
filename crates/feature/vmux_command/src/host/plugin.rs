@@ -16,6 +16,7 @@ impl Plugin for CommandPlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_plugins((
+            super::agent::AgentCommandPlugin,
             KeyPlugin,
             UiStatePlugin,
             SurfacePlugin,

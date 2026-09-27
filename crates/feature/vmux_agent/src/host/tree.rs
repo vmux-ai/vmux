@@ -20,7 +20,6 @@ use crate::runtime::cli::vibe::VibeStrategy;
 use crate::session;
 use crate::strategy::AgentStrategies;
 
-use super::command::RenameProfileRequest;
 pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
@@ -80,7 +79,6 @@ impl Plugin for AgentSessionPlugin {
                 super::workspace::WorkspacePlugin,
             ))
             .add_message::<AgentCommandRequest>()
-            .add_message::<RenameProfileRequest>()
             .add_message::<AgentQueryRequest>()
             .add_message::<ScreenshotRequest>()
             .add_message::<ScreenshotResponse>()

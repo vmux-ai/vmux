@@ -1,6 +1,7 @@
 pub mod plugin;
 pub use plugin::CommandPlugin;
 
+mod agent;
 pub mod bundle;
 pub mod command_bar;
 pub mod definition;

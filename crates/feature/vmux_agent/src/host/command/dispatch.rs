@@ -3,14 +3,14 @@ use vmux_api::protocol::{AgentCommand as ServiceAgentCommand, SharedAgentCommand
 
 use crate::host::event::AgentCommandRequest;
 
-use super::application::{AgentNotifyRequest, AgentRenameProfileRequest};
+use super::application::AgentNotifyRequest;
 use super::browser::{
     AgentBrowserGoBackRequest, AgentBrowserGoForwardRequest, AgentBrowserHistorySearchRequest,
     AgentBrowserInstallExtensionRequest, AgentBrowserNavigateRequest, AgentOpenInNewStackRequest,
 };
 use super::operation::{
-    AgentFileSearchRequest, AgentFileTouchedRequest, AgentInvokeCommandRequest, AgentListRequest,
-    AgentNewChatRequest, AgentTurnEndedRequest,
+    AgentFileSearchRequest, AgentFileTouchedRequest, AgentListRequest, AgentNewChatRequest,
+    AgentTurnEndedRequest,
 };
 use super::{AgentReply, CommandSet};
 
@@ -89,7 +89,6 @@ fn route_browser_operations(
 fn route_application_operations(
     mut commands: MessageReader<AgentCommandRequest>,
     mut notify: MessageWriter<AgentNotifyRequest>,
-    mut rename_profile: MessageWriter<AgentRenameProfileRequest>,
 ) {
     for request in commands.read() {
         let reply = AgentReply::new(request.request_id);
@@ -101,12 +100,6 @@ fn route_application_operations(
                     payload: payload.clone(),
                 });
             }
-            ServiceAgentCommand::RenameProfile(payload) => {
-                rename_profile.write(AgentRenameProfileRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
             _ => {}
         }
     }
@@ -115,7 +108,6 @@ fn route_application_operations(
 #[allow(clippy::too_many_arguments)]
 fn route_remaining_operations(
     mut requests: MessageReader<AgentCommandRequest>,
-    mut invoke: MessageWriter<AgentInvokeCommandRequest>,
     mut file_touched: MessageWriter<AgentFileTouchedRequest>,
     mut file_search: MessageWriter<AgentFileSearchRequest>,
     mut turn_ended: MessageWriter<AgentTurnEndedRequest>,
@@ -125,13 +117,6 @@ fn route_remaining_operations(
     for request in requests.read() {
         let reply = AgentReply::new(request.request_id);
         match &request.command {
-            ServiceAgentCommand::InvokeCommand(payload) => {
-                invoke.write(AgentInvokeCommandRequest {
-                    reply,
-                    origin: request.origin.clone(),
-                    payload: payload.clone(),
-                });
-            }
             ServiceAgentCommand::FileTouched(payload) => {
                 file_touched.write(AgentFileTouchedRequest {
                     reply,
