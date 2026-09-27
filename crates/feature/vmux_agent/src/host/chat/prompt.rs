@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use super::composer::{ChatComposerProjection, ChatComposerQueriesChanged};
 use super::{AgentChatView, ChatAttachmentProjection};
 use crate::events::{AgentApprovalReply, AgentChoiceSelected};
 use crate::run_state::AgentRunState;
 use vmux_api::protocol::{AgentAttachment, ClientMessage, SharedMessage};
+use vmux_chat::composer::{ComposerQueriesChanged, ComposerState};
 use vmux_chat::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
     ChatEscape, ChatResume, ChatStop, ChatSubmit,
@@ -49,7 +49,7 @@ fn on_chat_submit(
         (
             &ChildOf,
             &mut ChatAttachmentProjection,
-            &mut ChatComposerProjection,
+            &mut ComposerState,
         ),
         With<AgentChatView>,
     >,
@@ -96,7 +96,7 @@ fn on_chat_submit(
                 webview, &effect,
             ),
         );
-        if let Some(changed) = ChatComposerQueriesChanged::new(webview, queries) {
+        if let Some(changed) = ComposerQueriesChanged::new(webview, queries) {
             commands.trigger(changed);
         }
         if selected.clear_selected() {
@@ -194,7 +194,7 @@ fn cancel_session(
 fn on_chat_escape(
     trigger: On<UiInput<ChatEscape>>,
     child_of: Query<&ChildOf>,
-    mut composers: Query<&mut ChatComposerProjection, With<AgentChatView>>,
+    mut composers: Query<&mut ComposerState, With<AgentChatView>>,
     mut sessions: Query<(
         &mut PromptQueue,
         &mut AgentRunState,
@@ -239,7 +239,7 @@ fn on_chat_escape(
                 webview, &effect,
             ),
         );
-        if let Some(changed) = ChatComposerQueriesChanged::new(webview, queries) {
+        if let Some(changed) = ComposerQueriesChanged::new(webview, queries) {
             commands.trigger(changed);
         }
     }
@@ -502,7 +502,7 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn((ChildOf(stack), AgentChatView)).id();
         app.world_mut()
-            .get_mut::<ChatComposerProjection>(webview)
+            .get_mut::<ComposerState>(webview)
             .unwrap()
             .effect("draft", false);
 
@@ -514,7 +514,7 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .get::<ChatComposerProjection>(webview)
+                .get::<ComposerState>(webview)
                 .unwrap()
                 .draft(),
             ""

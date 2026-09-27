@@ -5,11 +5,8 @@ use super::AgentChatView;
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_api::chat::SlashCommand;
 use vmux_api::mcp::McpServersRequest;
-use vmux_api::prompt_media::inline_media_query;
-use vmux_chat::event::{
-    ChatComposerEffect, ChatDraftChanged, ChatPickFiles, ChatSlashCommandRequest,
-};
-use vmux_chat::selector::{SelectorMode, selector_mode};
+use vmux_chat::composer::{ComposerQueriesChanged, ComposerState};
+use vmux_chat::event::{ChatDraftChanged, ChatPickFiles, ChatSlashCommandRequest};
 use vmux_core::agent::SwapStackSession;
 use vmux_session::AcpSession;
 
@@ -24,111 +21,24 @@ impl Plugin for ChatComposerPlugin {
     }
 }
 
-#[derive(Component, Default)]
-pub(super) struct ChatComposerProjection {
-    revision: u64,
-    draft: String,
-    media_query: String,
-    resume_active: bool,
-    resume_query: String,
-    mcp_open: bool,
-}
-
-impl ChatComposerProjection {
-    fn update(&mut self, draft: String) -> ChatComposerQueries {
-        self.draft = draft;
-        let media_query = inline_media_query(&self.draft)
-            .map(|query| query.query.to_string())
-            .unwrap_or_default();
-        let (resume_active, resume_query) = match selector_mode(&self.draft) {
-            SelectorMode::Resume(query) => (true, query.to_string()),
-            SelectorMode::Commands(query)
-                if !query.is_empty() && "resume".starts_with(&query.to_lowercase()) =>
-            {
-                (true, String::new())
-            }
-            _ => (false, String::new()),
-        };
-        let mcp_open = matches!(selector_mode(&self.draft), SelectorMode::Mcp(_));
-        let queries = ChatComposerQueries {
-            media: (self.media_query != media_query).then_some(media_query.clone()),
-            resume: (self.resume_active != resume_active || self.resume_query != resume_query)
-                .then_some((resume_active, resume_query.clone())),
-            open_mcp: !self.mcp_open && mcp_open,
-        };
-        self.media_query = media_query;
-        self.resume_active = resume_active;
-        self.resume_query = resume_query;
-        self.mcp_open = mcp_open;
-        queries
-    }
-
-    pub(super) fn effect(
-        &mut self,
-        draft: impl Into<String>,
-        focus: bool,
-    ) -> (ChatComposerEffect, ChatComposerQueries) {
-        let queries = self.update(draft.into());
-        self.revision = self.revision.wrapping_add(1).max(1);
-        (
-            ChatComposerEffect {
-                revision: self.revision,
-                draft: self.draft.clone(),
-                focus,
-            },
-            queries,
-        )
-    }
-
-    pub(super) fn draft(&self) -> &str {
-        &self.draft
-    }
-}
-
-#[derive(Clone, Default, PartialEq, Eq)]
-pub(super) struct ChatComposerQueries {
-    media: Option<String>,
-    resume: Option<(bool, String)>,
-    open_mcp: bool,
-}
-
-impl ChatComposerQueries {
-    fn changed(&self) -> bool {
-        self.media.is_some() || self.resume.is_some() || self.open_mcp
-    }
-}
-
-#[derive(EntityEvent)]
-pub(super) struct ChatComposerQueriesChanged {
-    #[event_target]
-    webview: Entity,
-    queries: ChatComposerQueries,
-}
-
-impl ChatComposerQueriesChanged {
-    pub(super) fn new(webview: Entity, queries: ChatComposerQueries) -> Option<Self> {
-        queries.changed().then_some(Self { webview, queries })
-    }
-}
-
 fn on_draft_changed(
     trigger: On<UiInput<ChatDraftChanged>>,
-    mut projections: Query<&mut ChatComposerProjection, With<AgentChatView>>,
+    mut composers: Query<&mut ComposerState, With<AgentChatView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let Ok(mut projection) = projections.get_mut(webview) else {
+    let Ok(mut composer) = composers.get_mut(webview) else {
         return;
     };
-    let queries = projection.update(trigger.event().payload.text.clone());
-    if let Some(changed) = ChatComposerQueriesChanged::new(webview, queries) {
+    let changes = composer.update(trigger.event().payload.text.clone());
+    if let Some(changed) = ComposerQueriesChanged::new(webview, changes) {
         commands.trigger(changed);
     }
 }
 
 fn on_slash_command(
     trigger: On<UiInput<ChatSlashCommandRequest>>,
-    mut projections: Query<&mut ChatComposerProjection, With<AgentChatView>>,
+    mut composers: Query<&mut ComposerState, With<AgentChatView>>,
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     mut swap: MessageWriter<SwapStackSession>,
@@ -136,16 +46,16 @@ fn on_slash_command(
 ) {
     let webview = trigger.event().webview;
     let command = trigger.event().payload.command;
-    let Ok(mut projection) = projections.get_mut(webview) else {
+    let Ok(mut composer) = composers.get_mut(webview) else {
         return;
     };
-    let (effect, queries) = projection.effect(command.draft(), true);
+    let (effect, changes) = composer.effect(command.draft(), true);
     commands.trigger(
         vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
             webview, &effect,
         ),
     );
-    if let Some(changed) = ChatComposerQueriesChanged::new(webview, queries) {
+    if let Some(changed) = ComposerQueriesChanged::new(webview, changes) {
         commands.trigger(changed);
     }
     match command {
@@ -158,20 +68,22 @@ fn on_slash_command(
     }
 }
 
-fn dispatch_composer_queries(trigger: On<ChatComposerQueriesChanged>, mut commands: Commands) {
+fn dispatch_composer_queries(trigger: On<ComposerQueriesChanged>, mut commands: Commands) {
     let webview = trigger.event_target();
-    let queries = &trigger.event().queries;
-    if let Some(query) = &queries.media {
-        commands.trigger(super::media::ChatMediaQuery::new(webview, query.clone()));
-    }
-    if let Some((active, query)) = &queries.resume {
-        commands.trigger(super::resume::ChatResumeQuery::new(
+    if let Some(query) = trigger.event().media() {
+        commands.trigger(super::media::ChatMediaQuery::new(
             webview,
-            *active,
-            query.clone(),
+            query.to_string(),
         ));
     }
-    if queries.open_mcp {
+    if let Some(query) = trigger.event().resume() {
+        commands.trigger(super::resume::ChatResumeQuery::new(
+            webview,
+            query.active,
+            query.query.clone(),
+        ));
+    }
+    if trigger.event().opens_mcp() {
         commands.trigger(UiInput {
             webview,
             payload: McpServersRequest,
@@ -256,35 +168,5 @@ mod tests {
     fn cli_switch_requires_shared_session() {
         assert_eq!(cli_target("claude", None, Path::new("/w")), None);
         assert_eq!(cli_target("custom", Some("s"), Path::new("/w")), None);
-    }
-
-    #[test]
-    fn composer_effects_are_revisioned() {
-        let mut projection = ChatComposerProjection::default();
-        let (resume, resume_queries) = projection.effect(SlashCommand::Resume.draft(), true);
-        let (upload, upload_queries) = projection.effect(SlashCommand::Upload.draft(), true);
-        assert_eq!(resume.revision, 1);
-        assert_eq!(resume.draft, "/resume ");
-        assert_eq!(resume_queries.resume, Some((true, String::new())));
-        assert_eq!(upload.revision, 2);
-        assert!(upload.draft.is_empty());
-        assert!(upload.focus);
-        assert_eq!(upload_queries.resume, Some((false, String::new())));
-    }
-
-    #[test]
-    fn draft_changes_drive_media_resume_and_mcp_queries() {
-        let mut projection = ChatComposerProjection::default();
-
-        let resume = projection.update("/res".into());
-        assert_eq!(resume.resume, Some((true, String::new())));
-
-        let media = projection.update("show @src".into());
-        assert_eq!(media.media, Some("src".into()));
-        assert_eq!(media.resume, Some((false, String::new())));
-
-        let mcp = projection.update("/mcp ".into());
-        assert!(mcp.open_mcp);
-        assert_eq!(mcp.media, Some(String::new()));
     }
 }

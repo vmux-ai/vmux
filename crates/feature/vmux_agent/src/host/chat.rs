@@ -59,7 +59,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     ChatMediaProjection,
     ChatResumeProjection,
     ChatBranchesProjection,
-    composer::ChatComposerProjection
+    vmux_chat::composer::ComposerState
 )]
 pub struct AgentChatView;
 

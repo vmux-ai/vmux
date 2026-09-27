@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 pub mod activity;
+pub mod composer;
 pub mod event;
 pub mod state;
 pub mod tab;
