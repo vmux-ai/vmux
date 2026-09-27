@@ -40,10 +40,12 @@ impl ShortcutProbePress {
 }
 
 #[vmux_api::ui_event(Eq)]
-pub enum ShortcutProbeRequest {
-    Press(ShortcutStroke),
-    Clear,
+pub struct ShortcutProbePressRequest {
+    pub stroke: ShortcutStroke,
 }
+
+#[vmux_api::ui_event]
+pub struct ShortcutProbeClearRequest;
 
 #[vmux_api::contract(Default, Eq)]
 pub struct ShortcutCatalog {

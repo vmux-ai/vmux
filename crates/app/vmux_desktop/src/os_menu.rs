@@ -24,9 +24,16 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .spawn((Name::new("OS menu runtime"), OsMenuState::default()));
         app.add_plugins(crate::bookmark::BookmarkMenuPlugin)
+            .insert_non_send(OsMenuResource {
+                menu: Menu::new(),
+                #[cfg(target_os = "macos")]
+                context_menu: None,
+                locale: Locale::preferred(),
+                close_window: None,
+                #[cfg(target_os = "macos")]
+                edit_items: Vec::new(),
+            })
             .add_message::<OsMenuSelection>()
             .add_message::<crate::window_manager::CloseVmuxWindow>()
             .add_message::<CloseRequest>()
@@ -40,7 +47,8 @@ impl Plugin for OsMenuPlugin {
             )
             .add_systems(
                 Startup,
-                setup
+                (spawn_runtime, setup)
+                    .chain()
                     .after(vmux_setting::SettingsLoadSet)
                     .after(vmux_command::RegisterCommandDefinitions),
             )
@@ -189,20 +197,38 @@ struct OsMenuResource {
     edit_items: Vec<Retained<NSMenuItem>>,
 }
 
-fn setup(world: &mut World) {
-    let definitions = {
-        let mut query = world.query::<&CommandDefinition>();
-        query.iter(world).cloned().collect::<Vec<_>>()
-    };
+fn spawn_runtime(mut commands: Commands) {
+    commands.spawn((Name::new("OS menu runtime"), OsMenuState::default()));
+}
+
+fn setup(
+    mut commands: Commands,
+    definitions: Query<(Entity, &CommandDefinition)>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    runtime: Single<Entity, With<OsMenuState>>,
+    mut menu_resource: NonSendMut<OsMenuResource>,
+) {
+    let mut menu_definitions = Vec::new();
+    let mut command_entries = Vec::new();
+    for (entity, definition) in &definitions {
+        menu_definitions.push(definition.clone());
+        command_entries.push((entity, definition.id.clone()));
+    }
     let mut menu = Menu::new();
     append_application_menu(&menu).unwrap();
-    CommandDefinition::append_native_menus(&definitions, &mut menu).unwrap();
+    CommandDefinition::append_native_menus(&menu_definitions, &mut menu).unwrap();
     append_standard_edit_menu(&menu);
-    let locale = world
-        .get_resource::<vmux_setting::AppSettings>()
+    let locale = settings
+        .as_deref()
         .map(|settings| Locale::requested(Some(&settings.appearance.locale)))
         .unwrap_or_else(Locale::preferred);
-    localize_root_menu(&menu, &Locale::from(DEFAULT_LOCALE), &locale, &definitions);
+    localize_root_menu(
+        &menu,
+        &Locale::from(DEFAULT_LOCALE),
+        &locale,
+        &menu_definitions,
+    );
     let close_window = find_menu_item(menu.items(), "app_quit");
 
     #[cfg(target_os = "macos")]
@@ -210,9 +236,7 @@ fn setup(world: &mut World) {
     #[cfg(target_os = "macos")]
     let edit_items = collect_edit_menu_items();
 
-    let proxy = world
-        .get_resource::<bevy::winit::EventLoopProxyWrapper>()
-        .map(|w| (**w).clone());
+    let proxy = proxy.as_deref().map(|proxy| (**proxy).clone());
 
     let (menu_events, inbox) = crossbeam_channel::unbounded();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
@@ -222,25 +246,16 @@ fn setup(world: &mut World) {
         }
     }));
 
-    let mut runtime = world.query_filtered::<Entity, With<OsMenuState>>();
-    let runtime = runtime.single(world).unwrap();
-    world.entity_mut(runtime).insert(OsMenuInbox(inbox));
-    world.spawn((
+    commands.entity(*runtime).insert(OsMenuInbox(inbox));
+    commands.spawn((
         Name::new("Close Vmux menu item"),
         OsMenuEntry::identified("app_quit".to_string()),
         HideWindowsMenuEntry,
     ));
-    let command_entries = {
-        let mut query = world.query::<(Entity, &CommandDefinition)>();
-        query
-            .iter(world)
-            .map(|(entity, definition)| (entity, definition.id.clone()))
-            .collect::<Vec<_>>()
-    };
     for (entity, id) in command_entries {
-        world.entity_mut(entity).insert(OsMenuEntry::identified(id));
+        commands.entity(entity).insert(OsMenuEntry::identified(id));
     }
-    world.insert_non_send(OsMenuResource {
+    *menu_resource = OsMenuResource {
         menu,
         #[cfg(target_os = "macos")]
         context_menu: None,
@@ -248,7 +263,7 @@ fn setup(world: &mut World) {
         close_window,
         #[cfg(target_os = "macos")]
         edit_items,
-    });
+    };
 }
 
 #[cfg(target_os = "macos")]

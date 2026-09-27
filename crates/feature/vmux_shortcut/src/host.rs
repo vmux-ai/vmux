@@ -1,7 +1,7 @@
 use crate::{
-    PAGE_URL, ShortcutBinding, ShortcutCatalog, ShortcutEntry, ShortcutGroup, ShortcutProbePress,
-    ShortcutProbeRequest, ShortcutProbeStatus, ShortcutProbeView, ShortcutStroke, ShortcutUiState,
-    ShortcutUiStateUpdates, ShortcutUrl,
+    PAGE_URL, ShortcutBinding, ShortcutCatalog, ShortcutEntry, ShortcutGroup,
+    ShortcutProbeClearRequest, ShortcutProbePress, ShortcutProbePressRequest, ShortcutProbeStatus,
+    ShortcutProbeView, ShortcutStroke, ShortcutUiState, ShortcutUiStateUpdates, ShortcutUrl,
 };
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -25,16 +25,17 @@ impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::ShortcutPage::plugin());
-        app.world_mut().spawn(PAGE_MANIFEST);
         app.add_plugins((
             HostedPagePlugin::<Shortcuts>::default(),
-            UiEventPlugin::<(ShortcutProbeRequest,)>::default(),
+            UiEventPlugin::<(ShortcutProbePressRequest, ShortcutProbeClearRequest)>::default(),
             vmux_core::host::UiStatePlugin::<ShortcutUiState>::default(),
         ))
         .add_message::<NativeKeyInput>()
         .add_observer(send_shortcuts)
-        .add_observer(on_shortcut_probe_request)
+        .add_observer(on_shortcut_probe_press_request)
+        .add_observer(on_shortcut_probe_clear_request)
         .add_observer(on_shortcut_probe_press)
+        .add_systems(Startup, register_shortcut_page)
         .add_systems(
             Update,
             normalize_shortcut_alias.in_set(PageOpenSet::ResolveTarget),
@@ -51,6 +52,10 @@ impl Plugin for ShortcutPlugin {
             (expire_shortcut_probe, publish_shortcut_state).chain(),
         );
     }
+}
+
+fn register_shortcut_page(mut commands: Commands) {
+    commands.spawn(PAGE_MANIFEST);
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -358,24 +363,30 @@ fn send_shortcuts(
     view.catalog = ShortcutCatalog::build(&keymap, context, &locale, &definitions);
 }
 
-fn on_shortcut_probe_request(
-    trigger: On<UiInput<ShortcutProbeRequest>>,
+fn on_shortcut_probe_press_request(
+    trigger: On<UiInput<ShortcutProbePressRequest>>,
     mut views: Query<&mut Shortcuts>,
 ) {
     let webview = trigger.event_target();
     let Ok(mut view) = views.get_mut(webview) else {
         return;
     };
-    match &trigger.event().payload {
-        ShortcutProbeRequest::Press(stroke) => {
-            let catalog = view.catalog.clone();
-            view.probe
-                .capture(stroke.clone(), &catalog, vmux_core::now_millis());
-        }
-        ShortcutProbeRequest::Clear => {
-            view.probe.clear();
-        }
-    }
+    let catalog = view.catalog.clone();
+    view.probe.capture(
+        trigger.event().payload.stroke.clone(),
+        &catalog,
+        vmux_core::now_millis(),
+    );
+}
+
+fn on_shortcut_probe_clear_request(
+    trigger: On<UiInput<ShortcutProbeClearRequest>>,
+    mut views: Query<&mut Shortcuts>,
+) {
+    let Ok(mut view) = views.get_mut(trigger.event_target()) else {
+        return;
+    };
+    view.probe.clear();
 }
 
 fn on_shortcut_probe_press(trigger: On<ShortcutProbePress>, mut views: Query<&mut Shortcuts>) {

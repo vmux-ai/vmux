@@ -5,6 +5,7 @@
         "PageReady",
         "ThemeEvent",
         "ShortcutUiState",
-        "ShortcutProbeRequest",
+        "ShortcutProbePressRequest",
+        "ShortcutProbeClearRequest",
     ],
 )

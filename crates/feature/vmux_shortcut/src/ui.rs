@@ -1,6 +1,9 @@
 #![allow(non_snake_case)]
 
-use crate::{ShortcutProbeRequest, ShortcutProbeStatus, ShortcutStroke, ShortcutUiState};
+use crate::{
+    ShortcutProbeClearRequest, ShortcutProbePressRequest, ShortcutProbeStatus, ShortcutStroke,
+    ShortcutUiState,
+};
 use dioxus::prelude::*;
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -47,7 +50,7 @@ pub fn Page() -> Element {
                 let Some(stroke) = ShortcutStroke::from_keyboard_event(&event) else {
                     return;
                 };
-                let _ = send(&ShortcutProbeRequest::Press(stroke));
+                let _ = send(&ShortcutProbePressRequest { stroke });
             },
             div { class: "pointer-events-none absolute inset-0 opacity-70 [background:radial-gradient(circle_at_14%_8%,color-mix(in_oklab,var(--primary)_12%,transparent),transparent_34%),radial-gradient(circle_at_88%_18%,color-mix(in_oklab,var(--primary)_10%,transparent),transparent_30%)]" }
             header { class: "relative z-10 shrink-0 border-b border-border/70 bg-background/75 px-5 py-4 backdrop-blur-xl",
@@ -80,7 +83,7 @@ pub fn Page() -> Element {
                                 onpointerdown: move |event| event.prevent_default(),
                                 onclick: move |event| {
                                     event.stop_propagation();
-                                    let _ = send(&ShortcutProbeRequest::Clear);
+                                    let _ = send(&ShortcutProbeClearRequest);
                                 },
                                 kbd { class: "rounded border border-foreground/10 bg-foreground/[0.055] px-1.5 py-0.5 font-mono text-[10px]", "Esc" }
                                 {translate("shortcuts-clear")}
