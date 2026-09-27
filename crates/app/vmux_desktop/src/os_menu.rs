@@ -154,7 +154,7 @@ impl OsContextMenu {
 pub(crate) struct OsMenuSeparator;
 
 #[derive(Component)]
-struct TransientOsMenuEntry;
+pub(crate) struct TransientOsMenuEntry;
 
 #[derive(Component)]
 struct HideWindowsMenuEntry;

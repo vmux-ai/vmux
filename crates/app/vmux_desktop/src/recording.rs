@@ -230,7 +230,7 @@ fn start_recording(
     mut start_reader: MessageReader<RecordStartRequest>,
     mut stop_reader: MessageReader<RecordStopRequest>,
     mut start_responses: MessageWriter<RecordStartResponse>,
-    runtime: Query<(&RecordingBridge, &mut RecordingStatus)>,
+    mut runtime: Query<(&RecordingBridge, &mut RecordingStatus)>,
     settings: Res<AppSettings>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     window_q: Query<(Entity, &Window)>,

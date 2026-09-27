@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use vmux_api::protocol::{AgentCommand as ServiceAgentCommand, SharedAgentCommand};
 use vmux_service::client::ServiceRequest;
 
-use crate::host::event::{AgentCommandRequest, CommandOrigin};
+use crate::host::event::AgentCommandRequest;
 
 use super::application::{
     AgentFocusPaneRequest, AgentNotifyRequest, AgentRenameProfileRequest, AgentUpdateLayoutRequest,
