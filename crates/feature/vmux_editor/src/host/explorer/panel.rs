@@ -9,15 +9,18 @@ pub(super) struct PanelPlugin;
 
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ExplorerPanelDefaults {
-            default_visible: false,
-            width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
-        })
-        .register_type::<StackExplorerVisibility>()
-        .init_resource::<ExplorerPanelDefaultsLoaded>()
-        .add_systems(Update, (load_explorer_panel_defaults, emit_explorer_panel))
-        .add_observer(on_explorer_panel_set_visible)
-        .add_observer(on_explorer_panel_width);
+        app.world_mut().spawn((
+            Name::new("Explorer panel defaults"),
+            ExplorerPanelDefaults {
+                default_visible: false,
+                width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
+                loaded: false,
+            },
+        ));
+        app.register_type::<StackExplorerVisibility>()
+            .add_systems(Update, (load_explorer_panel_defaults, emit_explorer_panel))
+            .add_observer(on_explorer_panel_set_visible)
+            .add_observer(on_explorer_panel_width);
     }
 }
 
@@ -28,9 +31,6 @@ pub struct StackExplorerVisibility {
     pub visible: bool,
 }
 
-#[derive(Resource, Default)]
-struct ExplorerPanelDefaultsLoaded(bool);
-
 type PanelUnsentReady = (
     With<FileView>,
     Without<ExplorerPanelSent>,
@@ -39,12 +39,11 @@ type PanelUnsentReady = (
 
 fn load_explorer_panel_defaults(
     settings: Option<Res<vmux_setting::AppSettings>>,
-    mut panel: ResMut<ExplorerPanelDefaults>,
-    mut loaded: ResMut<ExplorerPanelDefaultsLoaded>,
+    mut panel: Single<&mut ExplorerPanelDefaults>,
     views: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {
-    if loaded.0 {
+    if panel.loaded {
         return;
     }
     let Some(settings) = settings else {
@@ -52,7 +51,7 @@ fn load_explorer_panel_defaults(
     };
     panel.default_visible = settings.editor.explorer.visible();
     panel.width = settings.editor.explorer.width();
-    loaded.0 = true;
+    panel.loaded = true;
     for entity in &views {
         commands.entity(entity).remove::<ExplorerPanelSent>();
     }
@@ -62,7 +61,7 @@ fn emit_explorer_panel(
     views: Query<(Entity, Option<&ChildOf>), PanelUnsentReady>,
     visibility: Query<&StackExplorerVisibility>,
     revisions: Query<&StackExplorerRevision>,
-    panel: Res<ExplorerPanelDefaults>,
+    panel: Single<&ExplorerPanelDefaults>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
@@ -179,7 +178,7 @@ fn on_explorer_panel_set_visible(
 
 fn on_explorer_panel_width(
     trigger: On<UiInput<ExplorerPanelWidth>>,
-    mut panel: ResMut<ExplorerPanelDefaults>,
+    mut panel: Single<&mut ExplorerPanelDefaults>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
     views: Query<Entity, With<FileView>>,

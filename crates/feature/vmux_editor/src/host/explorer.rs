@@ -53,10 +53,11 @@ struct StackExplorerRevision {
     request_id: u64,
 }
 
-#[derive(Resource, Clone, Copy)]
+#[derive(Component, Clone, Copy)]
 struct ExplorerPanelDefaults {
     default_visible: bool,
     width: u32,
+    loaded: bool,
 }
 
 #[derive(Component)]

@@ -267,7 +267,7 @@ fn reveal_on_file_change(
     mut views: Query<(Entity, &FileView, &mut ExplorerState, &UsesExplorerTree), Changed<FileView>>,
     child_of: Query<&ChildOf>,
     visibility: Query<&StackExplorerVisibility>,
-    panel: Res<ExplorerPanelDefaults>,
+    panel: Single<&ExplorerPanelDefaults>,
     mut trees: Query<&mut ExplorerTree>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,

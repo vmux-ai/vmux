@@ -86,11 +86,12 @@ impl ExplorerApp {
 
     fn with(default_visible: bool) -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, TreePlugin))
-            .insert_resource(ExplorerPanelDefaults {
-                default_visible,
-                width: 240,
-            });
+        app.world_mut().spawn(ExplorerPanelDefaults {
+            default_visible,
+            width: 240,
+            loaded: true,
+        });
+        app.add_plugins((MinimalPlugins, TreePlugin));
         app
     }
 }
@@ -213,11 +214,12 @@ fn expansion_outlives_the_page_that_made_it() {
 #[test]
 fn pruning_drops_the_stalest_idle_trees_and_never_a_live_one() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, TreePlugin))
-        .insert_resource(ExplorerPanelDefaults {
-            default_visible: false,
-            width: 240,
-        });
+    app.world_mut().spawn(ExplorerPanelDefaults {
+        default_visible: false,
+        width: 240,
+        loaded: true,
+    });
+    app.add_plugins((MinimalPlugins, TreePlugin));
     let roots: Vec<PathBuf> = (0..IDLE_TREE_CAPACITY + 2)
         .map(|n| PathBuf::from(format!("/project{n}")))
         .collect();
@@ -565,11 +567,7 @@ fn collapse_all_leaves_the_root_expanded_and_nothing_else() {
 #[test]
 fn showing_the_panel_reveals_without_taking_the_caret() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, TreePlugin, PanelPlugin))
-        .insert_resource(ExplorerPanelDefaults {
-            default_visible: false,
-            width: 240,
-        });
+    app.add_plugins((MinimalPlugins, TreePlugin, PanelPlugin));
     let stack = app
         .world_mut()
         .spawn(StackExplorerVisibility { visible: false })
@@ -732,11 +730,7 @@ fn panel_open_reveals_current_file() {
 #[test]
 fn panel_width_clamps() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, PanelPlugin))
-        .insert_resource(ExplorerPanelDefaults {
-            default_visible: true,
-            width: 240,
-        });
+    app.add_plugins((MinimalPlugins, PanelPlugin));
     let e = app
         .world_mut()
         .spawn(FileView {
@@ -747,7 +741,8 @@ fn panel_width_clamps() {
         webview: e,
         payload: ExplorerPanelWidth { px: 9000 },
     });
-    assert_eq!(app.world().resource::<ExplorerPanelDefaults>().width, 600);
+    let mut defaults = app.world_mut().query::<&ExplorerPanelDefaults>();
+    assert_eq!(defaults.single(app.world()).unwrap().width, 600);
 }
 
 #[test]

@@ -100,7 +100,7 @@ fn apply_pending_global_search(
     mut pending: Query<(Entity, &mut PendingGlobalSearch)>,
     views: Query<(Entity, &FileView, Option<&ChildOf>)>,
     visibility: Query<&StackExplorerVisibility>,
-    panel: Res<ExplorerPanelDefaults>,
+    panel: Single<&ExplorerPanelDefaults>,
     mut commands: Commands,
 ) {
     for (pending_entity, mut pending_request) in &mut pending {
@@ -184,12 +184,13 @@ mod tests {
     #[test]
     fn global_search_opens_only_the_target_stack_explorer() {
         let mut app = App::new();
+        app.world_mut().spawn(ExplorerPanelDefaults {
+            default_visible: false,
+            width: 240,
+            loaded: true,
+        });
         app.add_plugins((MinimalPlugins, ContractPlugin, SearchPlugin))
-            .init_resource::<BinIpcEventRawBuffer>()
-            .insert_resource(ExplorerPanelDefaults {
-                default_visible: false,
-                width: 240,
-            });
+            .init_resource::<BinIpcEventRawBuffer>();
         app.world_mut().insert_non_send(Browsers::default());
         let first_stack = app
             .world_mut()
@@ -255,12 +256,13 @@ mod tests {
     #[test]
     fn global_search_waits_as_a_request_entity_for_its_target() {
         let mut app = App::new();
+        app.world_mut().spawn(ExplorerPanelDefaults {
+            default_visible: false,
+            width: 240,
+            loaded: true,
+        });
         app.add_plugins((MinimalPlugins, ContractPlugin, SearchPlugin))
-            .init_resource::<BinIpcEventRawBuffer>()
-            .insert_resource(ExplorerPanelDefaults {
-                default_visible: false,
-                width: 240,
-            });
+            .init_resource::<BinIpcEventRawBuffer>();
         app.world_mut().insert_non_send(Browsers::default());
         let target = PathBuf::from("/project/later.rs");
         app.world_mut()
