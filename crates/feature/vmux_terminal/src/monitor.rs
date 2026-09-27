@@ -17,62 +17,12 @@ pub struct ProcessMonitorPage;
 
 #[component]
 pub fn Page() -> Element {
-    let (view, mut search) = use_process_monitor();
-
-    let empty_detail = format!(
-        "{} {}",
-        translate("services-start-with"),
-        translate("services-command")
-    );
-
-    rsx! {
-        ManagerPage {
-            ManagerHeader {
-                title: translate("services-title"),
-                count: view.process_count,
-                search_value: search(),
-                search_placeholder: translate("services-filter"),
-                onsearch: move |event: FormEvent| search.set(event.value()),
-                onkeydown: None,
-                actions: rsx! {
-                    StatusBadge { connected: view.connected }
-                    if view.has_managed_processes {
-                        ManagerButton {
-                            variant: ManagerButtonVariant::Danger,
-                            onclick: move |event: Event<MouseData>| {
-                                event.stop_propagation();
-                                let _ = send(&ProcessKillAllEvent { kill_all: true });
-                            },
-                            {translate("services-kill-all")}
-                        }
-                    }
-                },
-            }
-            ManagerList {
-                class: "mx-auto flex w-full max-w-7xl flex-col gap-3".to_string(),
-                if !view.connected && !view.has_processes {
-                    ManagerEmpty { title: translate("services-not-running"), detail: empty_detail }
-                } else if !view.has_processes {
-                    ManagerEmpty { title: translate("services-empty"), detail: String::new() }
-                } else if view.processes.is_empty() {
-                    ManagerEmpty { title: translate("services-no-match"), detail: String::new() }
-                } else {
-                    ServiceDashboard {
-                        processes: view.processes,
-                        history: view.history,
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn use_process_monitor() -> (ProcessMonitorView, Signal<String>) {
     use_theme();
     let state = use_ui_state::<ProcessesUiState>();
     let mut history = use_signal(ServiceHistory::default);
+    let mut search = use_signal(String::new);
+
     use_effect(move || history.write().push(&state.read()));
-    let search = use_signal(String::new);
 
     let state = state.read();
     let query = search.read().to_lowercase();
@@ -94,26 +44,59 @@ fn use_process_monitor() -> (ProcessMonitorView, Signal<String>) {
             .then_with(|| right.mem_bytes.cmp(&left.mem_bytes))
             .then_with(|| left.pid.cmp(&right.pid))
     });
-    (
-        ProcessMonitorView {
-            connected: state.connected,
-            has_processes: !state.processes.is_empty(),
-            has_managed_processes: state.processes.iter().any(|process| process.managed),
-            process_count: state.processes.len(),
-            processes,
-            history: history.read().clone(),
-        },
-        search,
-    )
-}
 
-struct ProcessMonitorView {
-    connected: bool,
-    has_processes: bool,
-    has_managed_processes: bool,
-    process_count: usize,
-    processes: Vec<ProcessEntry>,
-    history: ServiceHistory,
+    let connected = state.connected;
+    let has_processes = !state.processes.is_empty();
+    let has_managed_processes = state.processes.iter().any(|process| process.managed);
+    let process_count = state.processes.len();
+    let history = history.read().clone();
+
+    let empty_detail = format!(
+        "{} {}",
+        translate("services-start-with"),
+        translate("services-command")
+    );
+
+    rsx! {
+        ManagerPage {
+            ManagerHeader {
+                title: translate("services-title"),
+                count: process_count,
+                search_value: search(),
+                search_placeholder: translate("services-filter"),
+                onsearch: move |event: FormEvent| search.set(event.value()),
+                onkeydown: None,
+                actions: rsx! {
+                    StatusBadge { connected }
+                    if has_managed_processes {
+                        ManagerButton {
+                            variant: ManagerButtonVariant::Danger,
+                            onclick: move |event: Event<MouseData>| {
+                                event.stop_propagation();
+                                let _ = send(&ProcessKillAllEvent { kill_all: true });
+                            },
+                            {translate("services-kill-all")}
+                        }
+                    }
+                },
+            }
+            ManagerList {
+                class: "mx-auto flex w-full max-w-7xl flex-col gap-3".to_string(),
+                if !connected && !has_processes {
+                    ManagerEmpty { title: translate("services-not-running"), detail: empty_detail }
+                } else if !has_processes {
+                    ManagerEmpty { title: translate("services-empty"), detail: String::new() }
+                } else if processes.is_empty() {
+                    ManagerEmpty { title: translate("services-no-match"), detail: String::new() }
+                } else {
+                    ServiceDashboard {
+                        processes,
+                        history,
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Default, PartialEq)]
