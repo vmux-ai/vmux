@@ -215,7 +215,7 @@ fn route_remaining_operations(
             ServiceAgentCommand::TurnEnded(payload) => {
                 turn_ended.write(AgentTurnEndedRequest {
                     reply,
-                    _payload: payload.clone(),
+                    _payload: *payload,
                 });
             }
             ServiceAgentCommand::Shared(SharedAgentCommand::NewAgentChat {

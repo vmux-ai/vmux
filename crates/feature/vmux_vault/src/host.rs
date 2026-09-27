@@ -953,7 +953,7 @@ fn on_vault_connect_request(
 fn on_vault_sync_request(trigger: On<UiInput<VaultSyncRequest>>, mut queue: VaultOperationQueue) {
     queue.push(
         trigger.event().webview,
-        trigger.event().payload.clone(),
+        trigger.event().payload,
         VaultOperationKind::Sync,
     );
 }
@@ -964,7 +964,7 @@ fn on_vault_connect_github_request(
 ) {
     queue.push(
         trigger.event().webview,
-        trigger.event().payload.clone(),
+        trigger.event().payload,
         VaultOperationKind::ConnectGithub,
     );
 }
@@ -975,7 +975,7 @@ fn on_vault_connect_folder_request(
 ) {
     queue.push(
         trigger.event().webview,
-        trigger.event().payload.clone(),
+        trigger.event().payload,
         VaultOperationKind::ConnectFolder,
     );
 }
@@ -986,7 +986,7 @@ fn on_vault_generate_recovery_key_request(
 ) {
     queue.push(
         trigger.event().webview,
-        trigger.event().payload.clone(),
+        trigger.event().payload,
         VaultOperationKind::GenerateRecoveryKey,
     );
 }
@@ -997,7 +997,7 @@ fn on_vault_create_recovery_key_request(
 ) {
     queue.push(
         trigger.event().webview,
-        trigger.event().payload.clone(),
+        trigger.event().payload,
         VaultOperationKind::CreateRecoveryKey,
     );
 }
