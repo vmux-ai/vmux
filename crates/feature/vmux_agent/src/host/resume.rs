@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use super::{AgentChatView, ChatResumeProjection};
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
 use crate::strategy::{AgentStrategies, acp_agent_kind};
@@ -11,6 +10,7 @@ use vmux_chat::event::{
     ChatResumeQueryRequest, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
     ResumeSession,
 };
+use vmux_chat::host::{ChatResumeProjection, ChatView};
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
 use vmux_session::AcpSession;
@@ -51,7 +51,7 @@ struct ResumeListTask {
 
 struct ResumeListAnswer {
     sessions: ResumableSessions,
-    scanned: Option<Vec<crate::runtime::cli::strategy::ResumableSession>>,
+    scanned: Option<Vec<crate::cli::ResumableSession>>,
     labels: RepoLabels,
 }
 
@@ -108,7 +108,7 @@ impl RepoLabels {
 }
 
 fn resume_entries(
-    sessions: Vec<crate::runtime::cli::strategy::ResumableSession>,
+    sessions: Vec<crate::cli::ResumableSession>,
     active_kind: Option<AgentKind>,
     active_name: &str,
     labels: &mut RepoLabels,
@@ -184,7 +184,7 @@ fn resume_agent_name(
 
 #[derive(Resource, Default)]
 struct ResumableScan {
-    sessions: Vec<crate::runtime::cli::strategy::ResumableSession>,
+    sessions: Vec<crate::cli::ResumableSession>,
     labels: RepoLabels,
     read_at: Option<std::time::Instant>,
 }
@@ -244,10 +244,10 @@ struct Preferred;
 
 impl Preferred {
     fn first(
-        sessions: &[crate::runtime::cli::strategy::ResumableSession],
+        sessions: &[crate::cli::ResumableSession],
         kind: Option<AgentKind>,
         project: Option<&std::path::Path>,
-    ) -> Vec<crate::runtime::cli::strategy::ResumableSession> {
+    ) -> Vec<crate::cli::ResumableSession> {
         if kind.is_none() && project.is_none() {
             return sessions.to_vec();
         }
@@ -371,7 +371,7 @@ fn on_chat_resume_query_request(
 
 fn on_chat_resume_query(
     trigger: On<ChatResumeQuery>,
-    mut projections: Query<&mut ChatResumeProjection, With<AgentChatView>>,
+    mut projections: Query<&mut ChatResumeProjection, With<ChatView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event_target();
@@ -403,7 +403,7 @@ fn on_chat_resume_query(
 
 fn drain_resume_list_tasks(
     mut tasks: Query<(Entity, &mut ResumeListTask)>,
-    mut projections: Query<&mut ChatResumeProjection, With<AgentChatView>>,
+    mut projections: Query<&mut ChatResumeProjection, With<ChatView>>,
     mut scan: ResMut<ResumableScan>,
     mut commands: Commands,
 ) {
@@ -550,7 +550,7 @@ mod tests {
 
     #[test]
     fn resume_results_include_all_agent_kinds_with_source_labels() {
-        use crate::runtime::cli::strategy::ResumableSession;
+        use crate::cli::ResumableSession;
         use std::time::SystemTime;
 
         let session = |kind, sid: &str| ResumableSession {

@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use super::{AgentChatView, ChatAttachmentProjection};
 use crate::event::{AgentApprovalReply, AgentChoiceSelected};
 use crate::run_state::AgentRunState;
 use vmux_api::protocol::{AgentAttachment, ClientMessage, SharedMessage};
@@ -10,6 +9,7 @@ use vmux_chat::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
     ChatEscape, ChatResume, ChatStop, ChatSubmit,
 };
+use vmux_chat::host::{ChatAttachmentProjection, ChatView};
 use vmux_service::client::ServiceRequest;
 use vmux_session::AcpSession;
 use vmux_session::{
@@ -47,7 +47,7 @@ fn on_chat_submit(
     trigger: On<UiInput<ChatSubmit>>,
     mut views: Query<
         (&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState),
-        With<AgentChatView>,
+        With<ChatView>,
     >,
     mut sessions: Query<(
         &mut PromptQueue,
@@ -190,7 +190,7 @@ fn cancel_session(
 fn on_chat_escape(
     trigger: On<UiInput<ChatEscape>>,
     child_of: Query<&ChildOf>,
-    mut composers: Query<&mut ComposerState, With<AgentChatView>>,
+    mut composers: Query<&mut ComposerState, With<ChatView>>,
     mut sessions: Query<(
         &mut PromptQueue,
         &mut AgentRunState,
@@ -324,7 +324,7 @@ mod tests {
             .id();
         let webview = app
             .world_mut()
-            .spawn((ChildOf(session), AgentChatView))
+            .spawn((ChildOf(session), ChatView))
             .id();
 
         app.world_mut().trigger(UiInput {
@@ -496,7 +496,7 @@ mod tests {
             .world_mut()
             .spawn((PromptQueue::default(), AgentRunState::Idle))
             .id();
-        let webview = app.world_mut().spawn((ChildOf(stack), AgentChatView)).id();
+        let webview = app.world_mut().spawn((ChildOf(stack), ChatView)).id();
         app.world_mut()
             .get_mut::<ComposerState>(webview)
             .unwrap()

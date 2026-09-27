@@ -1,4 +1,5 @@
 mod agent;
+mod composer;
 pub mod cwd;
 mod key;
 pub mod plugin;

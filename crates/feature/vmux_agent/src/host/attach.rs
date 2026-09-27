@@ -93,7 +93,7 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
                     bg_color: None,
                     ..default()
                 },
-                crate::host::chat::AgentChatView,
+                vmux_chat::host::ChatView,
             ))
             .remove::<(
                 vmux_start::StartInlineTransitionView,
@@ -103,7 +103,7 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
     } else {
         commands.spawn((
             vmux_layout::Browser::native_page(&url, &format!("{provider}/{model}")),
-            crate::host::chat::AgentChatView,
+            vmux_chat::host::ChatView,
             ChildOf(stack),
         ));
     }
@@ -180,7 +180,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
         commands
             .spawn((
                 vmux_layout::Browser::native_page(&url, name),
-                crate::host::chat::AgentChatView,
+                vmux_chat::host::ChatView,
                 ChildOf(stack),
                 anchor,
             ))
@@ -194,7 +194,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
             icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
         },
         anchor,
-        crate::host::chat::AgentChatView,
+        vmux_chat::host::ChatView,
     ));
     if webview.is_some() {
         commands.entity(view).remove::<(

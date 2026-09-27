@@ -26,6 +26,7 @@ impl Plugin for SpacePlugin {
         app.add_plugins((
             vmux_command::CommandTypePlugin::<OpenRequest>::default(),
             SpaceAgentPlugin,
+            super::composer::SpaceComposerPlugin,
         ))
         .add_plugins(super::SpaceToolPlugin)
         .add_plugins(vmux_layout::LayoutContractPlugin)

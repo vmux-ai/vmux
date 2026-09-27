@@ -81,7 +81,7 @@ pub(crate) struct PendingWorkspacePicker {
 pub(crate) struct WorkspacePickerContext<'w, 's> {
     pub(crate) pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     pub(crate) choices: Query<'w, 's, &'static PendingAgentChoice>,
-    pub(crate) chat_views: Query<'w, 's, (), With<crate::host::chat::AgentChatView>>,
+    pub(crate) chat_views: Query<'w, 's, (), With<vmux_chat::host::ChatView>>,
     pub(crate) page_sessions: Query<'w, 's, &'static vmux_session::AgentSession>,
     pub(crate) cli_sessions: Query<'w, 's, &'static AgentSession>,
     pub(crate) conversation_titles:
@@ -111,7 +111,7 @@ fn resume_agent_choice(
     commands
         .entity(event.webview)
         .remove::<(PendingAgentChoice, ResumeAgentChoice)>()
-        .remove::<crate::host::chat::ChatSynced>();
+        .remove::<vmux_chat::host::ChatSynced>();
 }
 
 fn initialize_git_agent_choice(
@@ -143,7 +143,7 @@ fn initialize_git_agent_choice(
     commands
         .entity(event.webview)
         .remove::<(PendingAgentChoice, InitializeGitAgentChoice)>()
-        .remove::<crate::host::chat::ChatSynced>();
+        .remove::<vmux_chat::host::ChatSynced>();
 }
 
 pub(crate) fn workspace_picker_task(
@@ -452,7 +452,7 @@ pub(crate) fn ambiguous_worktree_message(candidates: &[ExistingWorktreeCandidate
 
 fn drain_workspace_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
-    chat_views: Query<(), With<crate::host::chat::AgentChatView>>,
+    chat_views: Query<(), With<vmux_chat::host::ChatView>>,
     mut tabs: Query<&mut vmux_layout::tab::Tab>,
     mut acp_sessions: Query<&mut vmux_session::AcpSession>,
     child_of: Query<&ChildOf>,
@@ -514,7 +514,7 @@ fn drain_workspace_picker_tasks(
                                                     workspace: execution_dir,
                                                 },
                                             ))
-                                            .remove::<crate::host::chat::ChatSynced>();
+                                            .remove::<vmux_chat::host::ChatSynced>();
                                         None
                                     }
                                     SelectedWorkspaceKind::Plain => Some(format!(
@@ -792,7 +792,7 @@ mod tests {
             .id();
         let view = app
             .world_mut()
-            .spawn((crate::host::chat::AgentChatView, anchor, ChildOf(stack)))
+            .spawn((vmux_chat::host::ChatView, anchor, ChildOf(stack)))
             .id();
 
         let project_for_system = project_dir.clone();
@@ -859,7 +859,7 @@ mod tests {
         assert_eq!(app.world().get::<ChildOf>(view).unwrap().parent(), stack);
         assert!(
             app.world()
-                .get::<crate::host::chat::AgentChatView>(view)
+                .get::<vmux_chat::host::ChatView>(view)
                 .is_some()
         );
         assert!(matches!(

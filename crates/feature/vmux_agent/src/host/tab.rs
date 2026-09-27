@@ -1,7 +1,7 @@
-use super::AgentChatView;
 use crate::host::run_state::AgentRunState;
 use bevy::prelude::*;
 use vmux_chat::activity::ActivityIcon;
+use vmux_chat::host::ChatView;
 use vmux_chat::tab::Accent;
 use vmux_core::chat::group_turns_tail;
 use vmux_core::team::Profile;
@@ -35,7 +35,7 @@ fn report_tab_identity(
             Changed<Profile>,
         )>,
     >,
-    views: Query<Option<&PageIdentity>, With<AgentChatView>>,
+    views: Query<Option<&PageIdentity>, With<ChatView>>,
     mut commands: Commands,
 ) {
     for (children, title, messages, state, profile, session) in &sessions {
@@ -95,7 +95,7 @@ mod tests {
                 .id();
             let view = app
                 .world_mut()
-                .spawn((AgentChatView, ChildOf(session)))
+                .spawn((ChatView, ChildOf(session)))
                 .id();
             Conversation { view, session }
         }

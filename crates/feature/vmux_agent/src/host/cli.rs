@@ -1,3 +1,7 @@
+pub mod claude;
+pub mod codex;
+pub mod vibe;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;

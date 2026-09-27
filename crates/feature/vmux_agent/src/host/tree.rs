@@ -14,9 +14,9 @@ use crate::event::{
     RecordStartResponse, RecordStopRequest, RecordStopResponse, ScreenshotRequest,
     ScreenshotResponse,
 };
-use crate::runtime::cli::claude::ClaudeStrategy;
-use crate::runtime::cli::codex::CodexStrategy;
-use crate::runtime::cli::vibe::VibeStrategy;
+use crate::cli::claude::ClaudeStrategy;
+use crate::cli::codex::CodexStrategy;
+use crate::cli::vibe::VibeStrategy;
 use crate::session;
 use crate::strategy::AgentStrategies;
 

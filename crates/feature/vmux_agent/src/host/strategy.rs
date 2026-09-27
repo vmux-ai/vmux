@@ -6,7 +6,7 @@ use bevy::prelude::Resource;
 use crate::AgentKind;
 use crate::AgentVariant;
 use crate::message::Message;
-use crate::runtime::cli::strategy::{CliAgentStrategy, ResumableSession};
+use crate::cli::{CliAgentStrategy, ResumableSession};
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;

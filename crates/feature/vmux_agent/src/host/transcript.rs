@@ -2,10 +2,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::model::{ModeProjection, ModelProjection};
-use super::{
-    AgentChatView, ChatAttachmentProjection, ChatSnapshotProjection, ChatSynced,
-    ChatTranscriptProjection,
-};
 use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::runtime::acp::{AcpModeState, AcpModelState};
@@ -16,7 +12,10 @@ use vmux_chat::event::{
     CHAT_INITIAL_ITEM_LIMIT, ChatHistoryRequest, ChatSnapshot, PendingApproval,
     QueuedPromptSnapshot,
 };
-use vmux_chat::host::{ChatHistoryQuery, ChatHistoryResult, TranscriptPage, TranscriptTail};
+use vmux_chat::host::{
+    ChatAttachmentProjection, ChatHistoryQuery, ChatHistoryResult, ChatSnapshotProjection,
+    ChatSynced, ChatTranscriptProjection, ChatView, TranscriptPage, TranscriptTail,
+};
 use vmux_chat::media::ChatAttachmentHydrationRequest;
 use vmux_core::PageMetadata;
 use vmux_core::chat::{group_turns_before, group_turns_tail, grouped_item_count};
@@ -93,7 +92,7 @@ fn push_chat_to_page(
             &mut ChatSnapshotProjection,
             &ChatAttachmentProjection,
         ),
-        With<AgentChatView>,
+        With<ChatView>,
     >,
     choices: Query<&crate::host::PendingAgentChoice>,
     user_profiles: Query<Ref<Profile>, With<User>>,
@@ -345,7 +344,7 @@ fn sync_chat_to_ready_views(
             &ChatAttachmentProjection,
         ),
         (
-            With<AgentChatView>,
+            With<ChatView>,
             With<vmux_core::page::PageReady>,
             Without<ChatSynced>,
         ),
@@ -461,7 +460,7 @@ fn sync_chat_to_ready_views(
 
 fn reset_chat_synced_on_page_ready(
     trigger: On<UiInput<vmux_core::page::PageReady>>,
-    chat_views: Query<(), With<AgentChatView>>,
+    chat_views: Query<(), With<ChatView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -472,7 +471,7 @@ fn reset_chat_synced_on_page_ready(
 
 fn on_chat_history_request(
     trigger: On<UiInput<ChatHistoryRequest>>,
-    mut views: Query<(&ChildOf, &mut ChatTranscriptProjection), With<AgentChatView>>,
+    mut views: Query<(&ChildOf, &mut ChatTranscriptProjection), With<ChatView>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -554,7 +553,7 @@ fn apply_chat_history_results(
             &ChatSnapshotProjection,
             &ChatAttachmentProjection,
         ),
-        With<AgentChatView>,
+        With<ChatView>,
     >,
     mut commands: Commands,
 ) {
@@ -833,7 +832,7 @@ mod tests {
         let mut app = App::new();
         app.add_observer(reset_chat_synced_on_page_ready);
 
-        let chat = app.world_mut().spawn((AgentChatView, ChatSynced)).id();
+        let chat = app.world_mut().spawn((ChatView, ChatSynced)).id();
         let other = app.world_mut().spawn(ChatSynced).id();
 
         app.world_mut().trigger(UiInput::<PageReady> {

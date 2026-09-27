@@ -249,7 +249,7 @@ fn prepare_agent_tab_worktrees(
                         bg_color: None,
                         ..default()
                     },
-                    crate::host::chat::AgentChatView,
+                    vmux_chat::host::ChatView,
                     PreparingAgentChatView,
                 ))
                 .remove::<(
@@ -993,7 +993,7 @@ mod tests {
     use crate::host::provider::AgentExecutableOverride;
     use crate::host::spawn::{SpawnPlugin, SpawnRequestSet, SpawnRequestsPlugin};
     use crate::host::test_support::{init_worktree_test_repo, test_settings};
-    use crate::runtime::cli::vibe::VibeStrategy;
+    use crate::cli::vibe::VibeStrategy;
     use crate::strategy::AgentStrategies;
     use vmux_terminal::Terminal;
 
@@ -1458,7 +1458,7 @@ mod tests {
         assert_eq!(
             app.world_mut()
                 .query_filtered::<Entity, (
-                    With<crate::host::chat::AgentChatView>,
+                    With<vmux_chat::host::ChatView>,
                     With<PreparingAgentChatView>,
                 )>()
                 .iter(app.world())
@@ -1486,7 +1486,7 @@ mod tests {
         );
         assert_eq!(
             app.world_mut()
-                .query_filtered::<Entity, With<crate::host::chat::AgentChatView>>()
+                .query_filtered::<Entity, With<vmux_chat::host::ChatView>>()
                 .iter(app.world())
                 .collect::<Vec<_>>(),
             [start]
@@ -1568,7 +1568,7 @@ mod tests {
         assert_eq!(
             app.world_mut()
                 .query_filtered::<Entity, (
-                    With<crate::host::chat::AgentChatView>,
+                    With<vmux_chat::host::ChatView>,
                     With<PreparingAgentChatView>,
                 )>()
                 .iter(app.world())
@@ -1859,7 +1859,7 @@ mod tests {
         );
         assert_eq!(
             app.world_mut()
-                .query_filtered::<&ChildOf, With<crate::host::chat::AgentChatView>>()
+                .query_filtered::<&ChildOf, With<vmux_chat::host::ChatView>>()
                 .iter(app.world())
                 .filter(|child_of| child_of.parent() == stack)
                 .count(),
@@ -1920,7 +1920,7 @@ mod tests {
                 Entity,
                 &PageMetadata,
                 &ChildOf,
-            ), With<crate::host::chat::AgentChatView>>();
+            ), With<vmux_chat::host::ChatView>>();
         let opened: Vec<_> = views.iter(app.world()).collect();
         let [(entity, meta, parent)] = opened.as_slice() else {
             panic!("expected exactly one chat view, got {}", opened.len());
@@ -2190,7 +2190,7 @@ mod tests {
     #[test]
     pub(crate) fn cli_initial_prompt_waits_for_terminal_readiness() {
         let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(crate::runtime::cli::codex::CodexStrategy));
+        strategies.register_cli(Box::new(crate::cli::codex::CodexStrategy));
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SpawnPlugin))
             .add_message::<SpawnAgentInStackRequest>()

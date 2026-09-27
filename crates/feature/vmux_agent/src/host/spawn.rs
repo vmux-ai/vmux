@@ -498,7 +498,7 @@ fn respond_page_agent_attach_default(
 
 fn rebuilt_args_env_for_restart(
     launch: &TerminalLaunch,
-    strategy: &dyn crate::runtime::cli::strategy::CliAgentStrategy,
+    strategy: &dyn crate::cli::CliAgentStrategy,
     session_id: Option<&str>,
     new_id: ProcessId,
 ) -> Result<(Vec<String>, Vec<(String, String)>, u64), String> {
@@ -718,7 +718,7 @@ mod tests {
         let new_id = ProcessId::new();
         let (args, _env, _) = rebuilt_args_env_for_restart(
             &launch,
-            &crate::runtime::cli::claude::ClaudeStrategy,
+            &crate::cli::claude::ClaudeStrategy,
             None,
             new_id,
         )
@@ -750,7 +750,7 @@ mod tests {
 
         let (_, env, _) = rebuilt_args_env_for_restart(
             &launch,
-            &crate::runtime::cli::codex::CodexStrategy,
+            &crate::cli::codex::CodexStrategy,
             None,
             ProcessId::new(),
         )
@@ -776,7 +776,7 @@ mod tests {
         assert!(
             rebuilt_args_env_for_restart(
                 &launch,
-                &crate::runtime::cli::codex::CodexStrategy,
+                &crate::cli::codex::CodexStrategy,
                 None,
                 ProcessId::new(),
             )

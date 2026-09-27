@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use super::{AgentChatView, ChatBranchesProjection};
-use crate::event::{AgentRequestInput, CommandOrigin};
+use super::project::SpaceProjects;
+use vmux_chat::host::{ChatBranchesProjection, ChatView};
+use vmux_core::agent::{AgentRequestInput, CommandOrigin};
 use vmux_api::protocol::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentRequest,
     AgentRequestId,
@@ -13,15 +14,16 @@ use vmux_chat::event::{
 use vmux_session::AcpSession;
 use vmux_session::AgentApprovalPolicy;
 
-pub(super) struct ChatWorkspacePlugin;
+pub(super) struct SpaceComposerPlugin;
 
-impl Plugin for ChatWorkspacePlugin {
+impl Plugin for SpaceComposerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(UiEventPlugin::<(
-            ChatSelectWorkspace,
-            ChatBranchesRequest,
-            ChatGoToBranch,
-        )>::default())
+        app.add_message::<AgentRequestInput>()
+            .add_plugins(UiEventPlugin::<(
+                ChatSelectWorkspace,
+                ChatBranchesRequest,
+                ChatGoToBranch,
+            )>::default())
             .add_observer(on_chat_select_workspace)
             .add_observer(on_chat_branches_request)
             .add_observer(on_chat_go_to_branch)
@@ -39,8 +41,6 @@ struct ComposerContextInput {
     projects: Vec<vmux_core::event::ProjectRow>,
 }
 
-use vmux_space::SpaceProjects;
-
 #[derive(Default)]
 struct ComposerContextCache {
     entries: std::collections::HashMap<Entity, ComposerContextCacheEntry>,
@@ -53,7 +53,7 @@ struct ComposerContextCacheEntry {
 
 #[allow(clippy::too_many_arguments)]
 fn push_composer_context_to_page(
-    views: Query<(Entity, &ChildOf, Ref<vmux_core::page::PageReady>), With<AgentChatView>>,
+    views: Query<(Entity, &ChildOf, Ref<vmux_core::page::PageReady>), With<ChatView>>,
     sessions: Query<(Option<&AcpSession>, Option<&AgentApprovalPolicy>)>,
     child_of: Query<&ChildOf>,
     tabs: Query<(
@@ -205,7 +205,7 @@ struct BranchRead {
 fn on_chat_branches_request(
     trigger: On<UiInput<ChatBranchesRequest>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut projections: Query<&mut ChatBranchesProjection, With<AgentChatView>>,
+    mut projections: Query<&mut ChatBranchesProjection, With<ChatView>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -255,7 +255,7 @@ fn on_chat_branches_request(
 
 fn drain_branch_reads(
     mut reads: Query<(Entity, &mut BranchRead)>,
-    mut projections: Query<&mut ChatBranchesProjection, With<AgentChatView>>,
+    mut projections: Query<&mut ChatBranchesProjection, With<ChatView>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {

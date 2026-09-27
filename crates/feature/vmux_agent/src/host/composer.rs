@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
-use super::AgentChatView;
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_api::chat::SlashCommand;
 use vmux_api::mcp::McpServersRequest;
 use vmux_chat::composer::{ComposerQueriesChanged, ComposerState};
 use vmux_chat::event::{ChatPickFiles, ChatSlashCommandRequest};
+use vmux_chat::host::ChatView;
 use vmux_core::agent::SwapStackSession;
 use vmux_session::AcpSession;
 
@@ -22,7 +22,7 @@ impl Plugin for AgentChatComposerPlugin {
 
 fn on_slash_command(
     trigger: On<UiInput<ChatSlashCommandRequest>>,
-    mut composers: Query<&mut ComposerState, With<AgentChatView>>,
+    mut composers: Query<&mut ComposerState, With<ChatView>>,
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     mut swap: MessageWriter<SwapStackSession>,

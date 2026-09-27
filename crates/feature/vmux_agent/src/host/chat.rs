@@ -1,20 +1,7 @@
-mod composer;
-pub(crate) mod model;
-mod prompt;
-mod resume;
-mod tab;
-mod transcript;
-mod workspace;
-
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use vmux_chat::event::ChatOpenPage;
-pub use vmux_chat::host::ChatView as AgentChatView;
-pub(crate) use vmux_chat::host::{ChatAttachmentProjection, ChatSnapshotProjection};
-pub(crate) use vmux_chat::host::{
-    ChatBranchesProjection, ChatResumeProjection, ChatSynced, ChatTranscriptProjection,
-};
 
 pub struct AgentChatPagePlugin;
 
@@ -24,14 +11,13 @@ impl Plugin for AgentChatPagePlugin {
             vmux_chat::ChatKeyPlugin,
             vmux_chat::ChatMediaPlugin,
             vmux_chat::composer::ChatComposerPlugin,
-            model::ChatModelPlugin,
-            composer::AgentChatComposerPlugin,
-            prompt::ChatPromptPlugin,
-            resume::ChatResumePlugin,
-            tab::ChatTabPlugin,
-            transcript::ChatTranscriptPlugin,
+            super::model::ChatModelPlugin,
+            super::composer::AgentChatComposerPlugin,
+            super::prompt::ChatPromptPlugin,
+            super::resume::ChatResumePlugin,
+            super::tab::ChatTabPlugin,
+            super::transcript::ChatTranscriptPlugin,
             vmux_core::host::UiStatePlugin::<vmux_chat::state::ChatUiState>::default(),
-            workspace::ChatWorkspacePlugin,
         ))
         .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
         .add_observer(on_chat_open_page)

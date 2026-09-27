@@ -584,7 +584,7 @@ fn handle_agent_self_commands(
                                 },
                                 ResumeAgentChoice,
                             ))
-                            .remove::<crate::host::chat::ChatSynced>();
+                            .remove::<vmux_chat::host::ChatSynced>();
                         AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
                     } else {
                         AgentCommandResult::Error(
