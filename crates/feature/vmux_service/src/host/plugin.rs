@@ -5,6 +5,8 @@ use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
 use crate::client::{ServiceClient, ServiceHandle, ServiceInbound, ServiceRequest, ServiceWake};
+use crate::registry::Backend;
+use crate::DaemonBinary;
 use vmux_api::protocol::ClientMessage;
 
 #[derive(Component)]
@@ -41,6 +43,15 @@ struct PendingServiceRequests(VecDeque<ClientMessage>);
 #[derive(Component)]
 struct ServiceDisconnected;
 
+#[derive(Component)]
+struct ServiceRegistration(Backend);
+
+#[derive(Component)]
+struct DetachedServiceLaunch;
+
+#[derive(Component)]
+struct ServiceLaunchCompleted;
+
 pub struct ServicePlugin;
 
 impl Plugin for ServicePlugin {
@@ -50,7 +61,16 @@ impl Plugin for ServicePlugin {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_message::<ServiceRequest>()
             .add_message::<ServiceInbound>()
-            .add_systems(Startup, start_service)
+            .add_systems(
+                Startup,
+                (
+                    start_service,
+                    ApplyDeferred,
+                    register_service,
+                    launch_detached_service,
+                )
+                    .chain(),
+            )
             .add_systems(
                 Update,
                 (
@@ -74,7 +94,7 @@ fn start_service(mut commands: Commands, proxy: Option<Res<EventLoopProxyWrapper
             let _ = proxy.send_event(WinitUserEvent::WakeUp);
         }) as ServiceWake
     });
-    commands.spawn((
+    let mut service = commands.spawn((
         Name::new("vmux service"),
         ServiceConnectRetry::default(),
         ServiceWakeCallback(wake),
@@ -84,53 +104,67 @@ fn start_service(mut commands: Commands, proxy: Option<Res<EventLoopProxyWrapper
         tracing::info!("service already running");
         return;
     }
-    let binary = match crate::DaemonBinary::current() {
-        Ok(binary) => binary.into_path(),
+    let binary = match DaemonBinary::current() {
+        Ok(binary) => binary,
         Err(error) => {
             tracing::error!(%error, "could not locate vmux_service binary");
+            service.insert(ServiceUnavailable(error.to_string()));
             return;
         }
     };
-    match crate::registry::start_mode_for(&binary) {
-        crate::registry::StartMode::Register => {
-            let profile = crate::ServicePaths::build_profile();
-            if let Err(error) = crate::registry::ensure_running(profile, &binary) {
-                tracing::error!(?error, "service registration failed");
+    if binary.requires_registration(crate::ServicePaths::build_profile()) {
+        let backend = Backend::for_binary(&binary);
+        service.insert((binary, ServiceRegistration(backend)));
+    } else {
+        service.insert((binary, DetachedServiceLaunch));
+    }
+}
+
+fn register_service(
+    registrations: Query<(Entity, &DaemonBinary, &ServiceRegistration)>,
+    mut commands: Commands,
+) {
+    for (entity, binary, registration) in &registrations {
+        let result = registration
+            .0
+            .ensure_running(crate::ServicePaths::build_profile(), binary);
+        let mut service = commands.entity(entity);
+        service.remove::<ServiceRegistration>();
+        match result {
+            Ok(()) => {
+                service.insert(ServiceLaunchCompleted);
             }
-        }
-        crate::registry::StartMode::SpawnDetached => {
-            crate::registry::prepare_spawn_detached(&binary);
-            spawn_detached_service(&binary);
+            Err(error) => {
+                tracing::error!(?error, "service registration failed");
+                service.insert(ServiceUnavailable(format!(
+                    "service registration failed: {error:?}"
+                )));
+            }
         }
     }
 }
 
 #[cfg(unix)]
-fn spawn_detached_service(binary: &std::path::Path) {
-    use std::os::unix::process::CommandExt;
-
-    let log_dir = crate::ServicePaths::log_dir();
-    let _ = std::fs::create_dir_all(&log_dir);
-    let stderr = match std::fs::File::create(crate::ServicePaths::current().log()) {
-        Ok(file) => std::process::Stdio::from(file),
-        Err(error) => {
-            tracing::warn!(%error, "could not create service log; stderr will be discarded");
-            std::process::Stdio::null()
+fn launch_detached_service(
+    launches: Query<(Entity, &DaemonBinary), With<DetachedServiceLaunch>>,
+    mut commands: Commands,
+) {
+    for (entity, binary) in &launches {
+        binary.prepare_detached_spawn();
+        let result = binary.spawn_detached();
+        let mut service = commands.entity(entity);
+        service.remove::<DetachedServiceLaunch>();
+        match result {
+            Ok(()) => {
+                service.insert(ServiceLaunchCompleted);
+            }
+            Err(error) => {
+                tracing::error!(%error, "failed to spawn vmux_service");
+                service.insert(ServiceUnavailable(format!(
+                    "failed to spawn vmux_service: {error}"
+                )));
+            }
         }
-    };
-    let result = unsafe {
-        std::process::Command::new(binary)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(stderr)
-            .pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            })
-            .spawn()
-    };
-    if let Err(error) = result {
-        tracing::error!(%error, "failed to spawn vmux_service");
     }
 }
 

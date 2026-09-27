@@ -1,19 +1,25 @@
 use std::path::PathBuf;
+
 use vmux_service::bundle::{EMBEDDED_AGENT_LABEL, EMBEDDED_AGENT_PLIST};
-use vmux_service::registry::{Backend, RegistrationStep, choose_backend};
+use vmux_service::registry::{Backend, RegistrationStep};
+use vmux_service::DaemonBinary;
 
 #[test]
 fn bundled_path_chooses_sm_app_service() {
     let exe = PathBuf::from(
         "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service",
     );
-    assert!(matches!(choose_backend(&exe), Backend::SmAppService { .. }));
+    let binary = DaemonBinary::beside(&exe);
+
+    assert!(matches!(Backend::for_binary(&binary), Backend::SmAppService));
 }
 
 #[test]
 fn unbundled_path_chooses_launchctl() {
     let exe = PathBuf::from("/Users/x/repo/target/debug/vmux_service");
-    assert!(matches!(choose_backend(&exe), Backend::Launchctl));
+    let binary = DaemonBinary::beside(&exe);
+
+    assert!(matches!(Backend::for_binary(&binary), Backend::Launchctl));
 }
 
 #[test]
@@ -22,8 +28,10 @@ fn sm_app_service_registration_plan_is_complete_and_ordered() {
         "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service",
     );
 
+    let binary = DaemonBinary::beside(&exe);
+
     assert_eq!(
-        choose_backend(&exe).registration_steps(),
+        Backend::for_binary(&binary).registration_steps(),
         [
             RegistrationStep::CleanupLegacy,
             RegistrationStep::UnregisterMainApp,
@@ -38,8 +46,10 @@ fn sm_app_service_registration_plan_is_complete_and_ordered() {
 fn launchctl_registration_plan_uses_profile_agent() {
     let exe = PathBuf::from("/Users/x/repo/target/debug/vmux_service");
 
+    let binary = DaemonBinary::beside(&exe);
+
     assert_eq!(
-        choose_backend(&exe).registration_steps(),
+        Backend::for_binary(&binary).registration_steps(),
         [RegistrationStep::EnsureLaunchAgent]
     );
 }

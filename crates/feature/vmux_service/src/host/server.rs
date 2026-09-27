@@ -2,7 +2,6 @@ use crate::process::{Process, ProcessManager};
 use bevy::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::OnceLock;
 use std::time::Instant;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
@@ -13,12 +12,6 @@ use vmux_api::protocol::{
 };
 
 use super::query::{ProcessQueries, ProcessQueryPlugin};
-
-static SERVICE_STARTED: OnceLock<Instant> = OnceLock::new();
-
-pub(crate) fn init_started_at() {
-    SERVICE_STARTED.get_or_init(Instant::now);
-}
 
 type PendingQueries = Arc<
     Mutex<
@@ -73,14 +66,16 @@ impl Plugin for ServiceDaemonPlugin {
             .unwrap()
             .take()
             .expect("service daemon plugin can only be built once");
+        let started_at = ServiceStartedAt(Instant::now());
         app.add_plugins(query_plugin);
         let task = self.runtime.spawn(async move {
-            run_server(listener, server_manager, queries).await;
+            run_server(listener, server_manager, queries, started_at).await;
             let _ = exit.send(()).await;
         });
         app.world_mut().spawn((
             Name::new("vmux service daemon"),
             ServiceDaemon,
+            started_at,
             ServiceServerTask(task),
         ));
     }
@@ -88,6 +83,9 @@ impl Plugin for ServiceDaemonPlugin {
 
 #[derive(Component)]
 struct ServiceDaemon;
+
+#[derive(Component, Clone, Copy)]
+struct ServiceStartedAt(Instant);
 
 #[derive(Component)]
 struct ServiceServerTask(tokio::task::JoinHandle<()>);
@@ -213,6 +211,7 @@ async fn run_server(
     listener: UnixListener,
     manager: Arc<Mutex<ProcessManager>>,
     process_queries: ProcessQueries,
+    started_at: ServiceStartedAt,
 ) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
@@ -233,8 +232,6 @@ async fn run_server(
         remote_broker,
     );
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-
-    init_started_at();
 
     loop {
         tokio::select! {
@@ -267,6 +264,7 @@ async fn run_server(
                         acp_manager,
                         process_queries,
                         shutdown_tx,
+                        started_at,
                     )
                     .await
                     {
@@ -431,6 +429,7 @@ async fn handle_client(
     acp_manager: Arc<Mutex<crate::acp::AcpSessionManager>>,
     process_queries: ProcessQueries,
     shutdown_tx: mpsc::Sender<()>,
+    started_at: ServiceStartedAt,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -762,10 +761,7 @@ async fn handle_client(
             }
 
             ClientMessage::Status => {
-                let uptime_secs = SERVICE_STARTED
-                    .get()
-                    .map(|t| t.elapsed().as_secs())
-                    .unwrap_or(0);
+                let uptime_secs = started_at.0.elapsed().as_secs();
                 let process_count = {
                     let mgr = manager.lock().await;
                     mgr.processes.len() as u32
@@ -1323,6 +1319,7 @@ mod tests {
             listener,
             Arc::clone(&manager),
             process_queries,
+            ServiceStartedAt(Instant::now()),
         ));
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
-use vmux_service::registry::{StartMode, start_mode_for_profile};
+
+use vmux_service::DaemonBinary;
 
 #[test]
 fn start_mode_depends_on_profile_and_bundle_location() {
@@ -11,13 +12,15 @@ fn start_mode_depends_on_profile_and_bundle_location() {
     let plain_binary = PathBuf::from("/usr/local/bin/vmux_service");
 
     for (profile, exe, expected) in [
-        ("release", &service_app, StartMode::Register),
-        ("release", &main_app, StartMode::Register),
-        ("local", &service_app, StartMode::SpawnDetached),
-        ("dev", &main_app, StartMode::SpawnDetached),
-        ("release", &dev_binary, StartMode::SpawnDetached),
-        ("release", &plain_binary, StartMode::SpawnDetached),
+        ("release", &service_app, true),
+        ("release", &main_app, true),
+        ("local", &service_app, false),
+        ("dev", &main_app, false),
+        ("release", &dev_binary, false),
+        ("release", &plain_binary, false),
     ] {
-        assert_eq!(start_mode_for_profile(profile, exe), expected);
+        let binary = DaemonBinary::beside(exe);
+
+        assert_eq!(binary.requires_registration(profile), expected);
     }
 }

@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use bevy::prelude::Component;
+
 use super::paths::ServicePaths;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Component, Clone, Debug, Eq, PartialEq)]
 pub struct DaemonBinary(PathBuf);
 
 impl DaemonBinary {
@@ -43,6 +45,33 @@ impl DaemonBinary {
 
     pub fn into_path(self) -> PathBuf {
         self.0
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn spawn_detached(&self) -> std::io::Result<()> {
+        use std::os::unix::process::CommandExt;
+
+        let log_dir = ServicePaths::log_dir();
+        let _ = std::fs::create_dir_all(&log_dir);
+        let stderr = match std::fs::File::create(ServicePaths::current().log()) {
+            Ok(file) => std::process::Stdio::from(file),
+            Err(error) => {
+                tracing::warn!(%error, "could not create service log; stderr will be discarded");
+                std::process::Stdio::null()
+            }
+        };
+        unsafe {
+            std::process::Command::new(self.path())
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(stderr)
+                .pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                })
+                .spawn()?;
+        }
+        Ok(())
     }
 
     pub fn identity(&self) -> std::io::Result<DaemonIdentity> {
