@@ -166,15 +166,44 @@ pub struct AgentSpaceCreate {
     pub name: Option<String>,
 }
 
+impl AgentSpaceCreate {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        match &self.name {
+            Some(name) if name.trim().is_empty() => {
+                Err(AgentCommandValidationError::EmptySpaceName)
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 #[vmux_api::contract]
 pub struct AgentSpaceRename {
     pub space_id: String,
     pub name: String,
 }
 
+impl AgentSpaceRename {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        if self.space_id.trim().is_empty() || self.name.trim().is_empty() {
+            return Err(AgentCommandValidationError::InvalidSpaceRename);
+        }
+        Ok(())
+    }
+}
+
 #[vmux_api::contract]
 pub struct AgentSpaceDelete {
     pub space_id: String,
+}
+
+impl AgentSpaceDelete {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        if self.space_id.trim().is_empty() {
+            return Err(AgentCommandValidationError::EmptySpaceId);
+        }
+        Ok(())
+    }
 }
 
 #[vmux_api::contract]
@@ -247,7 +276,17 @@ pub struct AgentBookmarkAdd {
 }
 
 #[vmux_api::contract]
-pub struct AgentBookmarkId {
+pub struct AgentBookmarkRemove {
+    pub uuid: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentBookmarkPin {
+    pub uuid: String,
+}
+
+#[vmux_api::contract]
+pub struct AgentBookmarkUnpin {
     pub uuid: String,
 }
 
@@ -259,6 +298,63 @@ pub struct AgentBookmarkPinUrl {
 #[vmux_api::contract]
 pub struct AgentBookmarkFolderCreate {
     pub name: String,
+}
+
+impl AgentBookmarkPage {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        if self.url.trim().is_empty() {
+            return Err(AgentCommandValidationError::EmptyBookmarkUrl);
+        }
+        Ok(())
+    }
+}
+
+impl AgentBookmarkAdd {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        self.page.validate()
+    }
+}
+
+impl AgentBookmarkRemove {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        if self.uuid.trim().is_empty() {
+            return Err(AgentCommandValidationError::EmptyBookmarkId);
+        }
+        Ok(())
+    }
+}
+
+impl AgentBookmarkPin {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        if self.uuid.trim().is_empty() {
+            return Err(AgentCommandValidationError::EmptyBookmarkId);
+        }
+        Ok(())
+    }
+}
+
+impl AgentBookmarkPinUrl {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        self.page.validate()
+    }
+}
+
+impl AgentBookmarkUnpin {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        if self.uuid.trim().is_empty() {
+            return Err(AgentCommandValidationError::EmptyBookmarkId);
+        }
+        Ok(())
+    }
+}
+
+impl AgentBookmarkFolderCreate {
+    fn validate(&self) -> Result<(), AgentCommandValidationError> {
+        if self.name.trim().is_empty() {
+            return Err(AgentCommandValidationError::EmptyBookmarkFolderName);
+        }
+        Ok(())
+    }
 }
 
 #[vmux_api::contract]
@@ -349,10 +445,10 @@ pub enum AgentCommand {
     ChooseWorkspace(AgentChooseWorkspace),
     CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch),
     BookmarkAdd(AgentBookmarkAdd),
-    BookmarkRemove(AgentBookmarkId),
-    BookmarkPin(AgentBookmarkId),
+    BookmarkRemove(AgentBookmarkRemove),
+    BookmarkPin(AgentBookmarkPin),
     BookmarkPinUrl(AgentBookmarkPinUrl),
-    BookmarkUnpin(AgentBookmarkId),
+    BookmarkUnpin(AgentBookmarkUnpin),
     BookmarkFolderCreate(AgentBookmarkFolderCreate),
     RequestUserChoice(AgentRequestUserChoice),
     ChooseWorkspaceAtPath(AgentChooseWorkspaceAtPath),
@@ -503,37 +599,15 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), AgentCommand
         AgentCommand::OpenInNewStack(request) if request.url.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyStackUrl)
         }
-        AgentCommand::SpaceCreate(AgentSpaceCreate { name: Some(name) })
-            if name.trim().is_empty() =>
-        {
-            Err(AgentCommandValidationError::EmptySpaceName)
-        }
-        AgentCommand::SpaceRename(AgentSpaceRename { space_id, name })
-            if space_id.trim().is_empty() || name.trim().is_empty() =>
-        {
-            Err(AgentCommandValidationError::InvalidSpaceRename)
-        }
-        AgentCommand::SpaceDelete(AgentSpaceDelete { space_id }) if space_id.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptySpaceId)
-        }
-        AgentCommand::BookmarkAdd(AgentBookmarkAdd { page, .. })
-        | AgentCommand::BookmarkPinUrl(AgentBookmarkPinUrl { page })
-            if page.url.trim().is_empty() =>
-        {
-            Err(AgentCommandValidationError::EmptyBookmarkUrl)
-        }
-        AgentCommand::BookmarkRemove(AgentBookmarkId { uuid })
-        | AgentCommand::BookmarkPin(AgentBookmarkId { uuid })
-        | AgentCommand::BookmarkUnpin(AgentBookmarkId { uuid })
-            if uuid.trim().is_empty() =>
-        {
-            Err(AgentCommandValidationError::EmptyBookmarkId)
-        }
-        AgentCommand::BookmarkFolderCreate(AgentBookmarkFolderCreate { name })
-            if name.trim().is_empty() =>
-        {
-            Err(AgentCommandValidationError::EmptyBookmarkFolderName)
-        }
+        AgentCommand::SpaceCreate(command) => command.validate(),
+        AgentCommand::SpaceRename(command) => command.validate(),
+        AgentCommand::SpaceDelete(command) => command.validate(),
+        AgentCommand::BookmarkAdd(command) => command.validate(),
+        AgentCommand::BookmarkRemove(command) => command.validate(),
+        AgentCommand::BookmarkPin(command) => command.validate(),
+        AgentCommand::BookmarkPinUrl(command) => command.validate(),
+        AgentCommand::BookmarkUnpin(command) => command.validate(),
+        AgentCommand::BookmarkFolderCreate(command) => command.validate(),
         AgentCommand::OpenBeside(request) if request.url.trim().is_empty() => {
             Err(AgentCommandValidationError::EmptyBesideUrl)
         }

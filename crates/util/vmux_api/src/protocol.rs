@@ -766,6 +766,73 @@ mod tests {
     }
 
     #[test]
+    fn space_and_bookmark_commands_roundtrip_and_validate() {
+        let page = AgentBookmarkPage {
+            url: "https://example.com".into(),
+            title: Some("Example".into()),
+            favicon_url: Some("https://example.com/favicon.ico".into()),
+        };
+        let commands = [
+            AgentCommand::SpaceCreate(AgentSpaceCreate {
+                name: Some("Work".into()),
+            }),
+            AgentCommand::SpaceRename(AgentSpaceRename {
+                space_id: "space-1".into(),
+                name: "Personal".into(),
+            }),
+            AgentCommand::SpaceDelete(AgentSpaceDelete {
+                space_id: "space-2".into(),
+            }),
+            AgentCommand::BookmarkAdd(AgentBookmarkAdd {
+                page: page.clone(),
+                folder: Some("folder-1".into()),
+            }),
+            AgentCommand::BookmarkRemove(AgentBookmarkRemove {
+                uuid: "bookmark-1".into(),
+            }),
+            AgentCommand::BookmarkPin(AgentBookmarkPin {
+                uuid: "bookmark-2".into(),
+            }),
+            AgentCommand::BookmarkPinUrl(AgentBookmarkPinUrl { page }),
+            AgentCommand::BookmarkUnpin(AgentBookmarkUnpin {
+                uuid: "bookmark-3".into(),
+            }),
+            AgentCommand::BookmarkFolderCreate(AgentBookmarkFolderCreate {
+                name: "Reading".into(),
+            }),
+        ];
+        for command in commands {
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
+            let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+            assert_eq!(decoded, command);
+            assert!(validate_agent_command(&command).is_ok());
+        }
+    }
+
+    #[test]
+    fn space_and_bookmark_payloads_reject_empty_identifiers() {
+        let commands = [
+            AgentCommand::SpaceRename(AgentSpaceRename {
+                space_id: String::new(),
+                name: "Work".into(),
+            }),
+            AgentCommand::SpaceDelete(AgentSpaceDelete {
+                space_id: " ".into(),
+            }),
+            AgentCommand::BookmarkRemove(AgentBookmarkRemove {
+                uuid: String::new(),
+            }),
+            AgentCommand::BookmarkPin(AgentBookmarkPin { uuid: " ".into() }),
+            AgentCommand::BookmarkUnpin(AgentBookmarkUnpin {
+                uuid: String::new(),
+            }),
+        ];
+        for command in commands {
+            assert!(validate_agent_command(&command).is_err());
+        }
+    }
+
+    #[test]
     fn write_knowledge_rkyv_roundtrip() {
         let command = AgentCommand::WriteKnowledge(AgentWriteKnowledge {
             anchor: ProcessId::new(),

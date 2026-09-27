@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkId, AgentBookmarkPage,
-    AgentBookmarkPinUrl, AgentCommand, AgentQuery,
+    AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkPage, AgentBookmarkPin,
+    AgentBookmarkPinUrl, AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommand, AgentQuery,
 };
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
@@ -112,7 +112,7 @@ fn remove(
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_remove.uuid is required")
-            .map(|uuid| AgentCommand::BookmarkRemove(AgentBookmarkId { uuid }));
+            .map(|uuid| AgentCommand::BookmarkRemove(AgentBookmarkRemove { uuid }));
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -125,7 +125,7 @@ fn pin(
         let command = match args {
             BookmarkPinArgs::Existing(args) => {
                 RequiredText::get(args.uuid.clone(), "bookmark_pin.uuid is required")
-                    .map(|uuid| AgentCommand::BookmarkPin(AgentBookmarkId { uuid }))
+                    .map(|uuid| AgentCommand::BookmarkPin(AgentBookmarkPin { uuid }))
             }
             BookmarkPinArgs::Page(args) => {
                 RequiredText::get(args.url.clone(), "bookmark_pin.url is required").map(|url| {
@@ -149,7 +149,7 @@ fn unpin(
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_unpin.uuid is required")
-            .map(|uuid| AgentCommand::BookmarkUnpin(AgentBookmarkId { uuid }));
+            .map(|uuid| AgentCommand::BookmarkUnpin(AgentBookmarkUnpin { uuid }));
         commands.entity(entity).insert(ToolCommand(command));
     }
 }

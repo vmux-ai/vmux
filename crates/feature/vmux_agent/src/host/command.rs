@@ -1,4 +1,5 @@
 mod dispatch;
+mod layout;
 mod tool_call;
 
 use bevy::prelude::*;
@@ -29,6 +30,10 @@ impl Plugin for CommandPlugin {
                 .in_set(WriteCommandRequests)
                 .after(ServiceMessageSet),
         )
-        .add_plugins((dispatch::DispatchPlugin, tool_call::ToolCallPlugin));
+        .add_plugins((
+            dispatch::DispatchPlugin,
+            layout::LayoutCommandPlugin,
+            tool_call::ToolCallPlugin,
+        ));
     }
 }

@@ -37,8 +37,6 @@ impl Plugin for DispatchPlugin {
                         handle_terminal_commands,
                         handle_browser_commands,
                         handle_desktop_commands,
-                        handle_space_commands,
-                        handle_bookmark_commands,
                         handle_shared_commands,
                     )
                         .in_set(CommandSet::Commands),
@@ -509,104 +507,6 @@ fn handle_desktop_commands(
             _ => continue,
         };
         service_requests.write(ServiceRequest(request.response(result)));
-    }
-}
-
-fn handle_space_commands(
-    mut reader: MessageReader<AgentCommandRequest>,
-    mut create_requests: MessageWriter<vmux_space::SpaceCreateRequest>,
-    mut rename_requests: MessageWriter<vmux_space::SpaceRenameRequest>,
-    mut delete_requests: MessageWriter<vmux_space::SpaceDeleteRequest>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for request in reader.read() {
-        let result = match &request.command {
-            ServiceAgentCommand::SpaceCreate(command) => {
-                create_requests.write(vmux_core::event::space::SpaceCreateRequest {
-                    name: command.name.clone().unwrap_or_default(),
-                });
-                AgentCommandResult::Ok
-            }
-            ServiceAgentCommand::SpaceRename(command) => {
-                rename_requests.write(vmux_core::event::space::SpaceRenameRequest {
-                    space_id: command.space_id.clone(),
-                    name: command.name.clone(),
-                });
-                AgentCommandResult::Ok
-            }
-            ServiceAgentCommand::SpaceDelete(command) => {
-                delete_requests.write(vmux_core::event::space::SpaceDeleteRequest {
-                    space_id: command.space_id.clone(),
-                });
-                AgentCommandResult::Ok
-            }
-            _ => continue,
-        };
-        service_requests.write(ServiceRequest(request.response(result)));
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn handle_bookmark_commands(
-    mut reader: MessageReader<AgentCommandRequest>,
-    mut add_requests: MessageWriter<vmux_layout::bookmark::AddRequest>,
-    mut remove_requests: MessageWriter<vmux_layout::bookmark::RemoveRequest>,
-    mut pin_requests: MessageWriter<vmux_layout::bookmark::PinRequest>,
-    mut pin_url_requests: MessageWriter<vmux_layout::bookmark::PinUrlRequest>,
-    mut unpin_requests: MessageWriter<vmux_layout::bookmark::UnpinRequest>,
-    mut create_folder_requests: MessageWriter<vmux_layout::bookmark::CreateFolderRequest>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for request in reader.read() {
-        match &request.command {
-            ServiceAgentCommand::BookmarkAdd(command) => {
-                add_requests.write(vmux_layout::bookmark::AddRequest {
-                    metadata: vmux_core::PageMetadata {
-                        title: command.page.title.clone().unwrap_or_default(),
-                        url: command.page.url.clone(),
-                        icon: vmux_core::PageIcon::favicon(
-                            command.page.favicon_url.clone().unwrap_or_default(),
-                        ),
-                        bg_color: None,
-                    },
-                    folder: command.folder.clone(),
-                });
-            }
-            ServiceAgentCommand::BookmarkRemove(command) => {
-                remove_requests.write(vmux_layout::bookmark::RemoveRequest {
-                    uuid: command.uuid.clone(),
-                });
-            }
-            ServiceAgentCommand::BookmarkPin(command) => {
-                pin_requests.write(vmux_layout::bookmark::PinRequest {
-                    uuid: command.uuid.clone(),
-                });
-            }
-            ServiceAgentCommand::BookmarkPinUrl(command) => {
-                pin_url_requests.write(vmux_layout::bookmark::PinUrlRequest {
-                    metadata: vmux_core::PageMetadata {
-                        title: command.page.title.clone().unwrap_or_default(),
-                        url: command.page.url.clone(),
-                        icon: vmux_core::PageIcon::favicon(
-                            command.page.favicon_url.clone().unwrap_or_default(),
-                        ),
-                        bg_color: None,
-                    },
-                });
-            }
-            ServiceAgentCommand::BookmarkUnpin(command) => {
-                unpin_requests.write(vmux_layout::bookmark::UnpinRequest {
-                    uuid: command.uuid.clone(),
-                });
-            }
-            ServiceAgentCommand::BookmarkFolderCreate(command) => {
-                create_folder_requests.write(vmux_layout::bookmark::CreateFolderRequest::root(
-                    command.name.clone(),
-                ));
-            }
-            _ => continue,
-        }
-        service_requests.write(ServiceRequest(request.response(AgentCommandResult::Ok)));
     }
 }
 
