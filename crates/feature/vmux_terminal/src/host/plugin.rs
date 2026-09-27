@@ -109,6 +109,7 @@ impl Plugin for TerminalServicePlugin {
                 Update,
                 prewarm_login_shell_env.run_if(resource_added::<AppSettings>),
             )
+            .add_observer(on_terminal_restart)
             .add_observer(on_restart_pty)
             .add_observer(on_terminal_removed);
     }
@@ -636,17 +637,26 @@ fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
 #[derive(Component)]
 pub struct AwaitingProcessCreated;
 
-pub fn mark_terminal_restarting(commands: &mut Commands, entity: Entity) {
-    commands.entity(entity).remove::<ShellOutputSeen>().insert((
-        AwaitingProcessCreated,
-        TerminalMode::default(),
-        TerminalCopyMode::default(),
-        TerminalShortcutState::default(),
-        TerminalMouseState::default(),
-    ));
+#[derive(EntityEvent)]
+pub struct TerminalRestartRequest {
+    #[event_target]
+    pub terminal: Entity,
 }
 
-pub fn apply_process_created(
+fn on_terminal_restart(trigger: On<TerminalRestartRequest>, mut commands: Commands) {
+    commands
+        .entity(trigger.event_target())
+        .remove::<ShellOutputSeen>()
+        .insert((
+            AwaitingProcessCreated,
+            TerminalMode::default(),
+            TerminalCopyMode::default(),
+            TerminalShortcutState::default(),
+            TerminalMouseState::default(),
+        ));
+}
+
+fn apply_process_created(
     commands: &mut Commands,
     entity: Entity,
     process_id: ProcessId,
@@ -1065,7 +1075,9 @@ fn apply_service_errors(
             restarted_missing_processes.push(stale_pid);
             service_requests.write(ServiceRequest(restart.command));
             commands.entity(restart.entity).insert(restart.new_id);
-            mark_terminal_restarting(&mut commands, restart.entity);
+            commands.trigger(TerminalRestartRequest {
+                terminal: restart.entity,
+            });
             if let Some(kind) = restart.agent_kind {
                 commands
                     .entity(restart.entity)
@@ -1829,7 +1841,7 @@ fn on_restart_pty(
     }));
 
     *pid = new_id;
-    mark_terminal_restarting(&mut commands, entity);
+    commands.trigger(TerminalRestartRequest { terminal: entity });
     if let Some(l) = launch.as_mut() {
         l.args = args;
     } else {
@@ -2889,7 +2901,8 @@ mod tests {
     #[test]
     fn restart_state_clears_shell_output_seen_and_preserves_pending_input() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, InputQueuePlugin));
+        app.add_plugins((MinimalPlugins, InputQueuePlugin))
+            .add_observer(on_terminal_restart);
         let entity = app.world_mut().spawn((Terminal, ShellOutputSeen)).id();
         app.world_mut()
             .run_system_cached_with(
@@ -2905,7 +2918,7 @@ mod tests {
         app.world_mut()
             .run_system_cached_with(
                 |In(entity): In<Entity>, mut commands: Commands| {
-                    mark_terminal_restarting(&mut commands, entity);
+                    commands.trigger(TerminalRestartRequest { terminal: entity });
                 },
                 entity,
             )

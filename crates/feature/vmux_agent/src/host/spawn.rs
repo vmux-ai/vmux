@@ -648,7 +648,7 @@ fn drain_agent_restarts(
             launch.args = args;
             launch.env = env;
         }
-        vmux_terminal::plugin::mark_terminal_restarting(&mut commands, entity);
+        commands.trigger(vmux_terminal::TerminalRestartRequest { terminal: entity });
         commands
             .entity(entity)
             .remove::<ProcessExited>()
