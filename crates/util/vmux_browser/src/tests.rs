@@ -206,6 +206,7 @@ fn appearance_change_updates_cef_color_scheme() {
 fn every_cef_browser_is_windowed_with_no_overlay_markers() {
     let mut app = App::new();
     app.world_mut().insert_non_send(Browsers::default());
+    configure_cef_backend_sync(&mut app);
     let page = app
         .world_mut()
         .spawn((Browser, WebviewSource::new("https://example.com")))
@@ -219,7 +220,7 @@ fn every_cef_browser_is_windowed_with_no_overlay_markers() {
         ))
         .id();
 
-    sync_cef_backend(app.world_mut());
+    app.update();
 
     for entity in [page, modal] {
         assert!(app.world().get::<WebviewWindowed>(entity).is_some());

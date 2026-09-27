@@ -213,15 +213,23 @@ pub(crate) fn tab_of(
     }
 }
 
-pub(crate) fn sync_cef_backend(world: &mut World) {
-    let mut browser_entities = world.query_filtered::<Entity, With<Browser>>();
-    let browser_entities: Vec<Entity> = browser_entities.iter(world).collect();
+fn sync_cef_backend(
+    browser_entities: Query<Entity, With<Browser>>,
+    webviews: Query<
+        (Entity, Has<WebviewNativeOverlay>, Has<WebviewWindowed>),
+        (With<Browser>, With<WebviewSource>),
+    >,
+    child_of: Query<&ChildOf>,
+    host_windows: Query<&HostWindow>,
+    mut browsers: NonSendMut<Browsers>,
+    mut commands: Commands,
+) {
     let mut moved = Vec::new();
-    for entity in browser_entities {
+    for entity in &browser_entities {
         let mut current = entity;
         let mut inherited = None;
-        while let Some(parent) = world.get::<ChildOf>(current).map(Relationship::get) {
-            if let Some(host) = world.get::<HostWindow>(parent) {
+        while let Ok(parent) = child_of.get(current).map(Relationship::get) {
+            if let Ok(host) = host_windows.get(parent) {
                 inherited = Some(*host);
                 break;
             }
@@ -230,51 +238,37 @@ pub(crate) fn sync_cef_backend(world: &mut World) {
         let Some(inherited) = inherited else {
             continue;
         };
-        if world.get::<HostWindow>(entity) != Some(&inherited) {
-            world.entity_mut(entity).insert(inherited);
+        if host_windows.get(entity).ok() != Some(&inherited) {
+            commands.entity(entity).insert(inherited);
             moved.push(entity);
         }
     }
 
-    let mut query = world.query_filtered::<(
-        Entity,
-        Has<WebviewNativeOverlay>,
-    ), (With<Browser>, With<WebviewSource>)>();
-    let entities: Vec<(Entity, bool)> = query.iter(world).collect();
     let mut recreate = Vec::new();
-    {
-        let browsers = world.non_send::<Browsers>();
-        for &(entity, native_overlay) in &entities {
-            let stale_backend = browsers
-                .is_windowed(&entity)
-                .is_some_and(|windowed| !windowed);
-            let stale_overlay = browsers.has_browser(entity) && native_overlay;
-            if stale_backend || stale_overlay || moved.contains(&entity) {
-                recreate.push(entity);
-            }
+    for (entity, native_overlay, _) in &webviews {
+        let stale_backend = browsers
+            .is_windowed(&entity)
+            .is_some_and(|windowed| !windowed);
+        let stale_overlay = browsers.has_browser(entity) && native_overlay;
+        if stale_backend || stale_overlay || moved.contains(&entity) {
+            recreate.push(entity);
         }
     }
-    if !recreate.is_empty() {
-        let mut browsers = world.non_send_mut::<Browsers>();
-        for entity in &recreate {
-            browsers.close(entity);
-        }
+    for entity in &recreate {
+        browsers.close(entity);
     }
-    for (entity, native_overlay) in entities {
+    for (entity, native_overlay, windowed) in &webviews {
         let needs_recreate = recreate.contains(&entity);
-        let settled =
-            world.get::<WebviewWindowed>(entity).is_some() && !native_overlay && !needs_recreate;
+        let settled = windowed && !native_overlay && !needs_recreate;
         if settled {
             continue;
         }
-        let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
-            continue;
-        };
-        entity_mut
+        let mut entity = commands.entity(entity);
+        entity
             .insert(WebviewWindowed)
             .remove::<WebviewNativeOverlay>();
         if needs_recreate {
-            entity_mut
+            entity
                 .remove::<PageReady>()
                 .remove::<PendingWebviewReveal>()
                 .remove::<PendingCommandBarReveal>();
