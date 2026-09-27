@@ -10643,6 +10643,7 @@ dependencies = [
  "vmux_api",
  "vmux_core",
  "vmux_git",
+ "vmux_layout",
  "vmux_tool",
 ]
 

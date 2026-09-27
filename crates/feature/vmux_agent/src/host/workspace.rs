@@ -249,7 +249,6 @@ pub(crate) struct AgentTabWorktreeContext<'w, 's> {
     pub(crate) workspaces: Query<'w, 's, &'static vmux_layout::tab::TabWorkspace>,
     pub(crate) pending_projects: Query<'w, 's, &'static PendingAgentProject>,
     pub(crate) managed_root: Option<Res<'w, vmux_layout::worktree::ManagedWorktreeRoot>>,
-    pub(crate) knowledge_index: Option<Res<'w, vmux_core::knowledge::KnowledgeIndex>>,
 }
 
 pub(crate) fn activate_agent_worktree(

@@ -1,3 +1,5 @@
+#[cfg(host)]
+use std::path::Path;
 use std::path::PathBuf;
 
 pub struct FileUrl<'a>(&'a str);
@@ -28,6 +30,25 @@ impl<'a> FileUrl<'a> {
             .ok()?;
         let path = PathBuf::from(decoded.as_ref());
         path.is_absolute().then_some(path)
+    }
+
+    #[cfg(host)]
+    pub fn from_path(
+        path: &Path,
+        line: Option<u32>,
+        col: Option<u32>,
+        end_col: Option<u32>,
+    ) -> String {
+        let mut url = url::Url::from_file_path(path)
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
+        if let Some(line) = line {
+            url.push_str(&format!("#L{line}"));
+            if let (Some(col), Some(end_col)) = (col, end_col) {
+                url.push_str(&format!(":{col}-{end_col}"));
+            }
+        }
+        url
     }
 }
 

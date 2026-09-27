@@ -16,7 +16,6 @@ use vmux_terminal::{
 use crate::event::AgentCommandRequest;
 use crate::session::AgentSession;
 
-use super::follow::file_touch_url;
 use super::run_terminal::{
     AgentCwd, AgentPane, AgentTerminalRegion, NextPaneSpawnSequence, PagerEnv,
     PendingRunTerminalSpawn, PendingRunTerminalSpawns, ProjectsDirectory, RunCommand,
@@ -139,9 +138,6 @@ fn self_command_anchor(command: &ServiceAgentCommand) -> Option<ProcessId> {
         ServiceAgentCommand::PrepareWorktree(command) => Some(command.anchor),
         ServiceAgentCommand::RequestUserChoice(command) => Some(command.anchor),
         ServiceAgentCommand::SetConversationTitle(command) => Some(command.anchor),
-        ServiceAgentCommand::SearchKnowledge(command) => Some(command.anchor),
-        ServiceAgentCommand::ReadKnowledge(command) => Some(command.anchor),
-        ServiceAgentCommand::WriteKnowledge(command) => Some(command.anchor),
         ServiceAgentCommand::CreateWorktreeOnBranch(command) => Some(command.anchor),
         _ => None,
     }
@@ -156,9 +152,6 @@ fn self_command_priority(command: &ServiceAgentCommand) -> u8 {
             | ServiceAgentCommand::PrepareWorktree(_)
             | ServiceAgentCommand::RequestUserChoice(_)
             | ServiceAgentCommand::SetConversationTitle(_)
-            | ServiceAgentCommand::SearchKnowledge(_)
-            | ServiceAgentCommand::ReadKnowledge(_)
-            | ServiceAgentCommand::WriteKnowledge(_)
             | ServiceAgentCommand::CreateWorktreeOnBranch(_)
     ) {
         0
@@ -179,9 +172,6 @@ fn self_command_blocked_by_worktree_failure(
             | ServiceAgentCommand::PrepareWorktree(_)
             | ServiceAgentCommand::RequestUserChoice(_)
             | ServiceAgentCommand::SetConversationTitle(_)
-            | ServiceAgentCommand::SearchKnowledge(_)
-            | ServiceAgentCommand::ReadKnowledge(_)
-            | ServiceAgentCommand::WriteKnowledge(_)
             | ServiceAgentCommand::CreateWorktreeOnBranch(_)
     ) && self_command_anchor(command).is_some_and(|anchor| failed.contains(&anchor))
 }
@@ -587,139 +577,6 @@ fn handle_agent_self_commands(
                                 .entity(session_entity)
                                 .insert(vmux_session::AgentConversationTitle(title));
                             AgentCommandResult::Ok
-                        }
-                    }
-                }
-            }
-            ServiceAgentCommand::SearchKnowledge(command) => {
-                let anchor = &command.anchor;
-                let query = &command.query;
-                let limit = &command.limit;
-                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                    None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some(_) => match tab_worktree.knowledge_index.as_deref() {
-                        Some(index) if index.loaded() => {
-                            let matches = index.search(query, usize::from(*limit));
-                            if matches.is_empty() {
-                                AgentCommandResult::Text(format!(
-                                    "No Knowledge matches for: {}",
-                                    query.trim()
-                                ))
-                            } else {
-                                let root = index.root();
-                                let text = matches
-                                    .into_iter()
-                                    .map(|item| {
-                                        let path = item
-                                            .path
-                                            .strip_prefix(root)
-                                            .unwrap_or(&item.path)
-                                            .to_string_lossy()
-                                            .replace('\\', "/");
-                                        format!(
-                                            "{}:{}: {} — {}",
-                                            path,
-                                            item.line + 1,
-                                            item.title,
-                                            item.preview
-                                        )
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-                                AgentCommandResult::Text(text)
-                            }
-                        }
-                        Some(_) => AgentCommandResult::Error(
-                            "Knowledge index is still loading; retry shortly.".to_string(),
-                        ),
-                        None => AgentCommandResult::Error(
-                            "Knowledge is unavailable in this vmux session.".to_string(),
-                        ),
-                    },
-                }
-            }
-            ServiceAgentCommand::ReadKnowledge(command) => {
-                let anchor = &command.anchor;
-                let path = &command.path;
-                let line = &command.line;
-                let limit = &command.limit;
-                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                    None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some(_) => match tab_worktree.knowledge_index.as_deref() {
-                        Some(index) if index.loaded() => match index.note_by_query(path) {
-                            Some((note_path, title, text)) => {
-                                let lines = text.lines().collect::<Vec<_>>();
-                                let start = line.saturating_sub(1) as usize;
-                                if start >= lines.len() && !lines.is_empty() {
-                                    AgentCommandResult::Error(format!(
-                                        "Knowledge line {} exceeds note length {}",
-                                        line,
-                                        lines.len()
-                                    ))
-                                } else {
-                                    let end =
-                                        start.saturating_add(*limit as usize).min(lines.len());
-                                    let source = note_path
-                                        .strip_prefix(index.root())
-                                        .unwrap_or(&note_path)
-                                        .to_string_lossy()
-                                        .replace('\\', "/");
-                                    let body = lines[start..end]
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(offset, value)| {
-                                            format!("{} | {}", start + offset + 1, value)
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    AgentCommandResult::Text(format!(
-                                        "Source: {source}\nTitle: {title}\nLines {}-{}\n\n{body}",
-                                        start + 1,
-                                        end
-                                    ))
-                                }
-                            }
-                            None => AgentCommandResult::Error(format!(
-                                "Knowledge note not found: {}",
-                                path.trim()
-                            )),
-                        },
-                        Some(_) => AgentCommandResult::Error(
-                            "Knowledge index is still loading; retry shortly.".to_string(),
-                        ),
-                        None => AgentCommandResult::Error(
-                            "Knowledge is unavailable in this vmux session.".to_string(),
-                        ),
-                    },
-                }
-            }
-            ServiceAgentCommand::WriteKnowledge(command) => {
-                let anchor = &command.anchor;
-                let path = &command.path;
-                let title = &command.title;
-                let content = &command.content;
-                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
-                    None => AgentCommandResult::Error("agent pane not found".to_string()),
-                    Some((_, pane, _)) => {
-                        match vmux_core::knowledge::KnowledgeVault::user().write_note(
-                            path.as_deref(),
-                            title,
-                            content,
-                        ) {
-                            Ok(path) => {
-                                writers.open_beside.write(vmux_layout::OpenBesideRequest {
-                                    pane,
-                                    direction: None,
-                                    url: file_touch_url(&path.to_string_lossy(), None, None, None),
-                                    request_id: request.request_id.0,
-                                    focus: false,
-                                });
-                                AgentCommandResult::Text(format!(
-                                    "Knowledge saved: {}",
-                                    path.display()
-                                ))
-                            }
-                            Err(error) => AgentCommandResult::Error(error),
                         }
                     }
                 }

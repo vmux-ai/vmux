@@ -244,24 +244,6 @@ impl AgentFileLayout<'_, '_> {
     }
 }
 
-pub(crate) fn file_touch_url(
-    path: &str,
-    line: Option<u32>,
-    col: Option<u32>,
-    end_col: Option<u32>,
-) -> String {
-    let mut url = url::Url::from_file_path(path)
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| format!("file://{path}"));
-    if let Some(l) = line {
-        url.push_str(&format!("#L{l}"));
-        if let (Some(c), Some(e)) = (col, end_col) {
-            url.push_str(&format!(":{c}-{e}"));
-        }
-    }
-    url
-}
-
 fn handle_agent_file_touch(
     mut reader: MessageReader<AgentCommandRequest>,
     mut resolve: AgentFileResolve,
@@ -324,7 +306,12 @@ fn handle_agent_file_touch(
             .push(PendingFilePreview {
                 anchor: *anchor,
                 agent_pane,
-                url: file_touch_url(path, *line, *col, *end_col),
+                url: vmux_core::file_url::FileUrl::from_path(
+                    std::path::Path::new(path),
+                    *line,
+                    *col,
+                    *end_col,
+                ),
                 request_id: request.request_id.0,
                 user_origin: !request.origin.is_agent(),
                 kind: *kind,
@@ -464,15 +451,30 @@ mod tests {
     #[test]
     pub(crate) fn file_touch_url_builds_goto_fragment() {
         assert_eq!(
-            file_touch_url("/a/b.rs", None, None, None),
+            vmux_core::file_url::FileUrl::from_path(
+                std::path::Path::new("/a/b.rs"),
+                None,
+                None,
+                None,
+            ),
             "file:///a/b.rs"
         );
         assert_eq!(
-            file_touch_url("/a/b.rs", Some(10), None, None),
+            vmux_core::file_url::FileUrl::from_path(
+                std::path::Path::new("/a/b.rs"),
+                Some(10),
+                None,
+                None,
+            ),
             "file:///a/b.rs#L10"
         );
         assert_eq!(
-            file_touch_url("/a/b.rs", Some(10), Some(5), Some(12)),
+            vmux_core::file_url::FileUrl::from_path(
+                std::path::Path::new("/a/b.rs"),
+                Some(10),
+                Some(5),
+                Some(12),
+            ),
             "file:///a/b.rs#L10:5-12"
         );
     }

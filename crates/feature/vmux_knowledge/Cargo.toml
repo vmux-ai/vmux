@@ -21,6 +21,7 @@ bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
 notify = { workspace = true }
 vmux_git = { path = "../vmux_git" }
+vmux_layout = { path = "../vmux_layout" }
 vmux_tool = { path = "../vmux_tool" }
 
 [dev-dependencies]
