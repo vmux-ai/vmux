@@ -456,11 +456,11 @@ fn request_default_layout(
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    space_file: Option<Res<SpaceFilePresent>>,
+    space_file: Query<&SpaceFilePresent>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
-    if !tab_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
+    if !tab_q.is_empty() || space_file.single().is_ok_and(|space_file| space_file.0) {
         return;
     }
 

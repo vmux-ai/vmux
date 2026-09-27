@@ -14,6 +14,7 @@ impl Plugin for BootStatusPlugin {
             Name::new("Boot status"),
             SplashStatus::default(),
             RestoreComplete::default(),
+            SpaceFilePresent::default(),
         ));
         app.add_systems(
             Update,
@@ -76,6 +77,7 @@ impl Default for SplashStatus {
 }
 
 #[derive(Component, Default)]
+#[require(SpaceFilePresent)]
 pub struct RestoreComplete(pub bool);
 
 pub struct BootInputs {
@@ -106,15 +108,14 @@ pub fn compute(i: BootInputs) -> (BootPhase, bool) {
 }
 
 fn compute_boot_status(
-    mut status: Single<&mut SplashStatus>,
-    space_present: Res<SpaceFilePresent>,
-    restore: Single<&RestoreComplete>,
+    mut status: Single<(&mut SplashStatus, &SpaceFilePresent, &RestoreComplete)>,
     layout_q: Query<(), (With<LayoutCef>, With<PageReady>)>,
     stacks_q: Query<(Entity, Option<&Children>), With<Stack>>,
     ready_q: Query<(), With<PageReady>>,
     child_of_q: Query<&ChildOf>,
     space_active_q: Query<Has<vmux_core::Active>, With<Space>>,
 ) {
+    let (status, space_present, restore) = &mut *status;
     let layout_ready = !layout_q.is_empty();
 
     let mut total_pages = 0usize;
@@ -254,10 +255,13 @@ mod tests {
         let mut app = App::new();
         let status = app
             .world_mut()
-            .spawn((SplashStatus::default(), RestoreComplete::default()))
+            .spawn((
+                SplashStatus::default(),
+                RestoreComplete::default(),
+                SpaceFilePresent(true),
+            ))
             .id();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(SpaceFilePresent(true))
             .add_systems(Update, compute_boot_status);
 
         app.world_mut().spawn((LayoutCef, PageReady {}));
@@ -276,10 +280,13 @@ mod tests {
         let mut app = App::new();
         let status = app
             .world_mut()
-            .spawn((SplashStatus::default(), RestoreComplete::default()))
+            .spawn((
+                SplashStatus::default(),
+                RestoreComplete::default(),
+                SpaceFilePresent(true),
+            ))
             .id();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(SpaceFilePresent(true))
             .add_systems(Update, compute_boot_status);
 
         app.update();

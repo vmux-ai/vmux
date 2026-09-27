@@ -324,12 +324,16 @@ fn save_space_to_path_excluding(
 pub(crate) fn load_space_on_startup(
     active: Res<ActiveSpace>,
     registry: Res<AppTypeRegistry>,
-    mut restore: Single<&mut crate::boot_status::RestoreComplete>,
+    mut restore: Single<(
+        Entity,
+        &mut crate::boot_status::RestoreComplete,
+        &mut SpaceFilePresent,
+    )>,
     mut commands: Commands,
 ) {
     if vmux_core::profile::is_test_session() {
-        commands.insert_resource(SpaceFilePresent(false));
-        restore.0 = true;
+        restore.1.0 = true;
+        restore.2.0 = false;
         commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
         return;
     }
@@ -348,7 +352,7 @@ pub(crate) fn load_space_on_startup(
         let _ = std::fs::remove_file(store_version_path());
     }
     let exists = path.exists() && !removed_stale && !removed_incompatible && !schema_outdated;
-    commands.insert_resource(SpaceFilePresent(exists));
+    restore.2.0 = exists;
     if exists {
         info!("Loading space from {:?}", path);
         let load = match std::fs::read_to_string(&path)
@@ -363,7 +367,7 @@ pub(crate) fn load_space_on_startup(
         };
         commands.trigger_load(load);
     } else {
-        restore.0 = true;
+        restore.1.0 = true;
         commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
     }
 }

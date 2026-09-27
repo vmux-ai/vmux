@@ -15,25 +15,14 @@ pub struct PrewarmPagesPlugin;
 
 impl Plugin for PrewarmPagesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WarmPageSpawnBudget>()
-            .configure_sets(
-                Update,
-                (WarmPageSet::Reset, WarmPageSet::Fill)
-                    .chain()
-                    .before(CefSystems::CreateAndResize),
-            )
-            .add_systems(
-                Update,
-                reset_warm_page_spawn_budget.in_set(WarmPageSet::Reset),
-            )
-            .add_systems(
-                Update,
-                handle_registered_page_open.in_set(PageOpenSet::HandleKnownPages),
-            )
-            .add_systems(
-                Update,
-                maintain_registered_page_pools.in_set(WarmPageSet::Fill),
-            );
+        app.add_systems(
+            Update,
+            handle_registered_page_open.in_set(PageOpenSet::HandleKnownPages),
+        )
+        .add_systems(
+            Update,
+            maintain_registered_page_pools.before(CefSystems::CreateAndResize),
+        );
     }
 }
 
@@ -48,35 +37,6 @@ struct WarmPagePoolNode {
 }
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
-
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum WarmPageSet {
-    Reset,
-    Fill,
-}
-
-#[derive(Resource)]
-struct WarmPageSpawnBudget(usize);
-
-impl Default for WarmPageSpawnBudget {
-    fn default() -> Self {
-        Self(1)
-    }
-}
-
-impl WarmPageSpawnBudget {
-    fn take(&mut self) -> bool {
-        if self.0 == 0 {
-            return false;
-        }
-        self.0 -= 1;
-        true
-    }
-}
-
-fn reset_warm_page_spawn_budget(mut budget: ResMut<WarmPageSpawnBudget>) {
-    budget.0 = 1;
-}
 
 fn handle_registered_page_open(
     pages: Query<&PrewarmPage>,
@@ -128,7 +88,6 @@ fn maintain_registered_page_pools(
     layout_ready: Query<(), (With<LayoutCef>, With<PageReady>)>,
     spares: Query<&WarmPageSpare>,
     mut commands: Commands,
-    mut budget: ResMut<WarmPageSpawnBudget>,
 ) {
     if layout_ready.is_empty() {
         return;
@@ -144,6 +103,7 @@ fn maintain_registered_page_pools(
     else {
         return;
     };
+    let mut remaining = 1;
     for page in &pages {
         if page.pool_size == 0 || page.url.is_empty() {
             continue;
@@ -151,9 +111,10 @@ fn maintain_registered_page_pools(
         let node = pool_node_for(page.url, window, &pool_nodes, &mut commands);
         let count = spares.iter().filter(|spare| spare.url == page.url).count();
         for _ in count..page.pool_size {
-            if !budget.take() {
+            if remaining == 0 {
                 return;
             }
+            remaining -= 1;
             let webview = commands
                 .spawn(crate::cef::Browser::new_with_title(page.url, page.title))
                 .id();
@@ -278,7 +239,6 @@ mod tests {
     fn registered_pools_fill_for_every_page() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<WarmPageSpawnBudget>()
             .init_resource::<crate::window::FocusedWindow>()
             .add_systems(Update, maintain_registered_page_pools);
         let window = app.world_mut().spawn_empty().id();
@@ -298,7 +258,6 @@ mod tests {
         }
 
         app.update();
-        app.world_mut().resource_mut::<WarmPageSpawnBudget>().0 = 1;
         app.update();
 
         assert_eq!(

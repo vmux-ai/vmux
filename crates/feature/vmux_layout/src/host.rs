@@ -73,7 +73,7 @@ pub struct Open;
 #[derive(Component)]
 pub struct CloseRequiresConfirmation;
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct SpaceFilePresent(pub bool);
 
 #[derive(Resource, Default, Clone, PartialEq, Debug)]
