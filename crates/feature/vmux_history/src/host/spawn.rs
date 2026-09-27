@@ -7,12 +7,17 @@ use vmux_core::{
 
 pub struct HistorySpawnPlugin;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct HistoryWriteSet;
+
 impl Plugin for HistorySpawnPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_core::event::RecordVisitRequest>()
             .add_systems(
                 Update,
-                (spawn_visits, record_requested_visits, record_vmux_pages).chain(),
+                (spawn_visits, record_requested_visits, record_vmux_pages)
+                    .chain()
+                    .in_set(HistoryWriteSet),
             );
     }
 }
@@ -77,7 +82,7 @@ pub(crate) fn record_visit(
     }
 }
 
-pub(crate) fn record_requested_visits(
+fn record_requested_visits(
     mut reader: bevy::ecs::message::MessageReader<vmux_core::event::RecordVisitRequest>,
     mut commands: Commands,
     mut urls: Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,

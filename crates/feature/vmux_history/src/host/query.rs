@@ -32,7 +32,7 @@ impl Plugin for HistoryQueryPlugin {
         .add_observer(on_history_suggestions_request)
         .add_systems(
             Update,
-            broadcast_history_changed.after(crate::spawn::record_requested_visits),
+            broadcast_history_changed.after(crate::spawn::HistoryWriteSet),
         );
     }
 }
