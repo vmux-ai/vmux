@@ -6,7 +6,7 @@ use vmux_command::snapshot::{
 use vmux_core::agent::AgentProviderTargetKind;
 use vmux_core::{ArchivedPage, LastActivatedAt, Ready};
 
-use crate::runtime::provider::index::ProviderStrategyIndex;
+use crate::runtime::provider::strategy::{Strategy, StrategyKey};
 
 pub(super) struct SnapshotPlugin;
 
@@ -42,23 +42,31 @@ fn update_agents_snapshot(
             Or<(Added<Ready>, Added<AgentProviderTargetKind>)>,
         ),
     >,
-    provider_idx: Option<Res<ProviderStrategyIndex>>,
+    provider_strategies: Query<&StrategyKey, With<Strategy>>,
+    changed_provider_strategies: Query<
+        (),
+        (
+            With<Strategy>,
+            Or<(Added<Strategy>, Added<StrategyKey>, Changed<StrategyKey>)>,
+        ),
+    >,
+    mut removed_provider_strategies: RemovedComponents<Strategy>,
+    mut removed_provider_keys: RemovedComponents<StrategyKey>,
     catalog: Option<Res<crate::runtime::acp::AcpCatalog>>,
     mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
     mut state: ResMut<CommandBarProjection>,
 ) {
     let providers_changed = !changed_q.is_empty();
-    let idx_changed = provider_idx
-        .as_ref()
-        .map(|r| r.is_changed() || r.is_added())
-        .unwrap_or(false);
+    let strategies_changed = !changed_provider_strategies.is_empty()
+        || removed_provider_strategies.read().next().is_some()
+        || removed_provider_keys.read().next().is_some();
     let catalog_changed = catalog
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
     let installs_changed = package_changes.read().next().is_some();
     if !providers_changed
-        && !idx_changed
+        && !strategies_changed
         && !catalog_changed
         && !installs_changed
         && (!state.agents.providers.is_empty()
@@ -86,17 +94,13 @@ fn update_agents_snapshot(
         })
         .collect();
     providers.sort_by(|a, b| a.id.cmp(&b.id));
-    let strategies = provider_idx
-        .as_ref()
-        .map(|idx| {
-            idx.keys()
-                .map(|key| AgentStrategySummary {
-                    provider: key.provider.clone(),
-                    model: key.model.clone(),
-                })
-                .collect()
+    let strategies = provider_strategies
+        .iter()
+        .map(|key| AgentStrategySummary {
+            provider: key.provider.clone(),
+            model: key.model.clone(),
         })
-        .unwrap_or_default();
+        .collect();
     let next = vmux_command::snapshot::CommandBarAgentsSnapshot {
         providers,
         strategies,

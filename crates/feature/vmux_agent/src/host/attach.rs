@@ -15,6 +15,7 @@ use vmux_terminal::launch::TerminalLaunch;
 
 use crate::AgentVariant;
 use crate::event::{AgentCommandRequest, CommandOrigin};
+use crate::runtime::provider::strategy::{Strategy, StrategyKey, StrategyKind};
 use crate::session::{AgentSession, SessionId};
 
 pub(super) struct AttachPlugin;
@@ -38,11 +39,10 @@ pub fn attach_page_agent_to_stack(
     model: &str,
     sid: &str,
     commands: &mut Commands,
-    idx: &crate::runtime::provider::index::ProviderStrategyIndex,
-    kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
+    strategies: &Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
 ) -> Option<()> {
     attach_page_agent_to_stack_with_webview(
-        stack, provider, model, sid, None, commands, idx, kind_q,
+        stack, provider, model, sid, None, commands, strategies,
     )
 }
 
@@ -54,11 +54,12 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
     sid: &str,
     webview: Option<Entity>,
     commands: &mut Commands,
-    idx: &crate::runtime::provider::index::ProviderStrategyIndex,
-    kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
+    strategies: &Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
 ) -> Option<()> {
-    let entity = idx.get_by_strs(provider, model)?;
-    let kind = kind_q.get(entity).ok()?.0;
+    let (_, kind) = strategies
+        .iter()
+        .find(|(key, _)| key.provider == provider && key.model == model)?;
+    let kind = kind.0;
     let url = format!("{}{sid}", crate::url::page_url_prefix(provider, model));
     commands.entity(stack).insert(PageMetadata {
         url: url.clone(),

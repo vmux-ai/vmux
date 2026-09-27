@@ -1,5 +1,3 @@
-pub mod index;
-pub mod indexer;
 pub mod strategy;
 
 use bevy::prelude::*;
@@ -53,16 +51,7 @@ impl Plugin for ProviderAgentPlugin {
                 ),
             );
 
-        if app
-            .world()
-            .get_resource::<crate::runtime::provider::index::ProviderStrategyIndex>()
-            .is_none()
-        {
-            app.insert_resource(crate::runtime::provider::index::ProviderStrategyIndex::default());
-        }
-        app.add_observer(crate::runtime::provider::indexer::on_strategy_added)
-            .add_observer(crate::runtime::provider::indexer::on_strategy_removed)
-            .add_plugins(crate::providers::anthropic_plugin::AnthropicPlugin)
+        app.add_plugins(crate::providers::anthropic_plugin::AnthropicPlugin)
             .add_plugins(crate::providers::mistral_plugin::MistralPlugin)
             .add_plugins(crate::providers::openai_plugin::OpenAiPlugin)
             .add_plugins(crate::echo_plugin::EchoPlugin);

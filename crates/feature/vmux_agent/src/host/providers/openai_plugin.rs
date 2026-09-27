@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use vmux_setting::SettingsLoadSet;
 
-use crate::runtime::provider::index::ProviderStrategyIndex;
 use crate::runtime::provider::strategy::{
     BuildRequestFn, Endpoint, EnvVarName, ParseSseFn, Strategy, StrategyKey, StrategyKind,
     StrategyVariant,
@@ -19,7 +18,10 @@ impl Plugin for OpenAiPlugin {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct OpenAiProvider;
 
-fn register_openai_strategy(mut commands: Commands, idx: Option<Res<ProviderStrategyIndex>>) {
+fn register_openai_strategy(
+    mut commands: Commands,
+    strategies: Query<&StrategyKey, With<Strategy>>,
+) {
     if std::env::var(super::openai::ENV_VAR).is_err() {
         return;
     }
@@ -27,9 +29,7 @@ fn register_openai_strategy(mut commands: Commands, idx: Option<Res<ProviderStra
         provider: super::openai::PROVIDER.to_string(),
         model: super::openai::DEFAULT_MODEL.to_string(),
     };
-    if let Some(idx) = idx.as_deref()
-        && idx.get(&key).is_some()
-    {
+    if strategies.iter().any(|registered| registered == &key) {
         return;
     }
     commands.spawn((
@@ -48,15 +48,11 @@ fn register_openai_strategy(mut commands: Commands, idx: Option<Res<ProviderStra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::provider::indexer::{on_strategy_added, on_strategy_removed};
     use serial_test::serial;
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.insert_resource(ProviderStrategyIndex::default())
-            .add_observer(on_strategy_added)
-            .add_observer(on_strategy_removed)
-            .add_plugins(OpenAiPlugin);
+        app.add_plugins(OpenAiPlugin);
         app
     }
 
@@ -66,8 +62,13 @@ mod tests {
         unsafe { std::env::set_var(super::super::openai::ENV_VAR, "x") };
         let mut app = test_app();
         app.update();
-        let idx = app.world().resource::<ProviderStrategyIndex>();
-        assert!(idx.get_by_strs("openai", "gpt-5").is_some());
+        let count = app
+            .world_mut()
+            .query::<(&StrategyKey, &OpenAiProvider)>()
+            .iter(app.world())
+            .filter(|(key, _)| key.provider == "openai" && key.model == "gpt-5")
+            .count();
+        assert_eq!(count, 1);
         unsafe { std::env::remove_var(super::super::openai::ENV_VAR) };
     }
 
@@ -77,7 +78,11 @@ mod tests {
         unsafe { std::env::remove_var(super::super::openai::ENV_VAR) };
         let mut app = test_app();
         app.update();
-        let idx = app.world().resource::<ProviderStrategyIndex>();
-        assert!(idx.get_by_strs("openai", "gpt-5").is_none());
+        let count = app
+            .world_mut()
+            .query::<&OpenAiProvider>()
+            .iter(app.world())
+            .count();
+        assert_eq!(count, 0);
     }
 }

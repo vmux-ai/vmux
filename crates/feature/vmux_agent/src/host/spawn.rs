@@ -412,22 +412,22 @@ fn drain_agent_launches(
 fn respond_page_agent_attach(
     mut reader: MessageReader<PageAgentAttachRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
+    strategies: Query<
+        (
+            &crate::runtime::provider::strategy::StrategyKey,
+            &crate::runtime::provider::strategy::StrategyKind,
+        ),
+        With<crate::runtime::provider::strategy::Strategy>,
+    >,
 ) {
     for req in reader.read() {
-        let Some(idx) = idx.as_deref() else {
-            bevy::log::warn!("page strategy index not registered; skipping page attach");
-            continue;
-        };
         let _ = attach_page_agent_to_stack(
             req.stack,
             &req.provider,
             &req.model,
             &req.sid,
             &mut commands,
-            idx,
-            &kind_q,
+            &strategies,
         );
     }
 }
@@ -435,14 +435,15 @@ fn respond_page_agent_attach(
 fn respond_page_agent_spawn_stack(
     mut reader: MessageReader<PageAgentSpawnStackRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
+    strategies: Query<
+        (
+            &crate::runtime::provider::strategy::StrategyKey,
+            &crate::runtime::provider::strategy::StrategyKind,
+        ),
+        With<crate::runtime::provider::strategy::Strategy>,
+    >,
 ) {
     for req in reader.read() {
-        let Some(idx) = idx.as_deref() else {
-            bevy::log::warn!("page strategy index not registered; skipping page spawn");
-            continue;
-        };
         let stack = commands
             .spawn((
                 vmux_layout::stack::stack_bundle(),
@@ -456,8 +457,7 @@ fn respond_page_agent_spawn_stack(
             &req.model,
             &req.sid,
             &mut commands,
-            idx,
-            &kind_q,
+            &strategies,
         );
     }
 }
@@ -465,14 +465,15 @@ fn respond_page_agent_spawn_stack(
 fn respond_page_agent_spawn_default(
     mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
+    strategies: Query<
+        (
+            &crate::runtime::provider::strategy::StrategyKey,
+            &crate::runtime::provider::strategy::StrategyKind,
+        ),
+        With<crate::runtime::provider::strategy::Strategy>,
+    >,
 ) {
     for req in reader.read() {
-        let Some(idx) = idx.as_deref() else {
-            bevy::log::warn!("page strategy index not registered; skipping default page spawn");
-            continue;
-        };
         let Some(p) = crate::providers::resolve_default_app_provider() else {
             bevy::log::warn!(
                 "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
@@ -493,8 +494,7 @@ fn respond_page_agent_spawn_default(
             p.default_model,
             &sid,
             &mut commands,
-            idx,
-            &kind_q,
+            &strategies,
         )
         .is_none()
         {
@@ -510,14 +510,15 @@ fn respond_page_agent_spawn_default(
 fn respond_page_agent_attach_default(
     mut reader: MessageReader<PageAgentAttachDefaultRequest>,
     mut commands: Commands,
-    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
+    strategies: Query<
+        (
+            &crate::runtime::provider::strategy::StrategyKey,
+            &crate::runtime::provider::strategy::StrategyKind,
+        ),
+        With<crate::runtime::provider::strategy::Strategy>,
+    >,
 ) {
     for req in reader.read() {
-        let Some(idx) = idx.as_deref() else {
-            bevy::log::warn!("page strategy index not registered; skipping default page attach");
-            continue;
-        };
         let Some(p) = crate::providers::resolve_default_app_provider() else {
             bevy::log::warn!(
                 "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
@@ -531,8 +532,7 @@ fn respond_page_agent_attach_default(
             p.default_model,
             &sid,
             &mut commands,
-            idx,
-            &kind_q,
+            &strategies,
         )
         .is_none()
         {

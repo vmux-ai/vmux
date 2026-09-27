@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use vmux_setting::SettingsLoadSet;
 
 use crate::echo;
-use crate::runtime::provider::index::ProviderStrategyIndex;
 use crate::runtime::provider::strategy::{
     BuildRequestFn, Endpoint, EnvVarName, ParseSseFn, Strategy, StrategyKey, StrategyKind,
     StrategyVariant,
@@ -20,14 +19,12 @@ impl Plugin for EchoPlugin {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct EchoProvider;
 
-fn register_echo_strategy(mut commands: Commands, idx: Option<Res<ProviderStrategyIndex>>) {
+fn register_echo_strategy(mut commands: Commands, strategies: Query<&StrategyKey, With<Strategy>>) {
     let key = StrategyKey {
         provider: echo::PROVIDER.to_string(),
         model: echo::DEFAULT_MODEL.to_string(),
     };
-    if let Some(idx) = idx.as_deref()
-        && idx.get(&key).is_some()
-    {
+    if strategies.iter().any(|registered| registered == &key) {
         return;
     }
     commands.spawn((
@@ -46,14 +43,10 @@ fn register_echo_strategy(mut commands: Commands, idx: Option<Res<ProviderStrate
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::provider::indexer::{on_strategy_added, on_strategy_removed};
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.insert_resource(ProviderStrategyIndex::default())
-            .add_observer(on_strategy_added)
-            .add_observer(on_strategy_removed)
-            .add_plugins(EchoPlugin);
+        app.add_plugins(EchoPlugin);
         app
     }
 
@@ -61,8 +54,13 @@ mod tests {
     fn spawns_echo_entity_without_any_env_var() {
         let mut app = test_app();
         app.update();
-        let idx = app.world().resource::<ProviderStrategyIndex>();
-        assert!(idx.get_by_strs("echo", "echo").is_some());
+        let count = app
+            .world_mut()
+            .query::<(&StrategyKey, &EchoProvider)>()
+            .iter(app.world())
+            .filter(|(key, _)| key.provider == "echo" && key.model == "echo")
+            .count();
+        assert_eq!(count, 1);
     }
 
     #[test]
@@ -76,7 +74,5 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(count, 1);
-        let idx = app.world().resource::<ProviderStrategyIndex>();
-        assert!(idx.get_by_strs("echo", "echo").is_some());
     }
 }

@@ -17,6 +17,7 @@ use super::attach::{
 };
 use super::run_terminal::AgentCwd;
 use super::spawn::PendingPageOpen;
+use crate::runtime::provider::strategy::{Strategy, StrategyKey, StrategyKind};
 
 pub(super) struct PageOpenPlugin;
 
@@ -482,8 +483,7 @@ fn handle_agent_page_open(
     )>,
     acp_sessions: Query<&vmux_session::AcpSession>,
     child_of_q: Query<&ChildOf>,
-    idx: Option<Res<crate::runtime::provider::index::ProviderStrategyIndex>>,
-    kind_q: Query<&crate::runtime::provider::strategy::StrategyKind>,
+    strategies: Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
     settings: Res<AppSettings>,
@@ -556,8 +556,7 @@ fn handle_agent_page_open(
             &cli_sessions,
             &acp_sessions,
             &child_of_q,
-            idx.as_deref(),
-            &kind_q,
+            &strategies,
             &mut spawn_agent,
             &mut commands,
             &default_cwd,
@@ -698,8 +697,7 @@ fn handle_agent_page_open_task(
     )>,
     acp_sessions: &Query<&vmux_session::AcpSession>,
     child_of_q: &Query<&ChildOf>,
-    idx: Option<&crate::runtime::provider::index::ProviderStrategyIndex>,
-    kind_q: &Query<&crate::runtime::provider::strategy::StrategyKind>,
+    strategies: &Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
     commands: &mut Commands,
     default_cwd: &std::path::Path,
@@ -722,7 +720,6 @@ fn handle_agent_page_open_task(
             if transition_webview.is_none() {
                 vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
             }
-            let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
             attach_page_agent_to_stack_with_webview(
                 task.stack,
                 &provider,
@@ -730,8 +727,7 @@ fn handle_agent_page_open_task(
                 &sid,
                 transition_webview,
                 commands,
-                idx,
-                kind_q,
+                strategies,
             )
             .ok_or_else(|| format!("no Page agent strategy registered for {provider}/{model}"))?;
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
@@ -742,7 +738,6 @@ fn handle_agent_page_open_task(
                 "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
                     .to_string()
             })?;
-            let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
             let sid = uuid::Uuid::new_v4().to_string();
             if transition_webview.is_none() {
                 vmux_layout::stack::clear_stack_children(task.stack, children_q, commands);
@@ -754,8 +749,7 @@ fn handle_agent_page_open_task(
                 &sid,
                 transition_webview,
                 commands,
-                idx,
-                kind_q,
+                strategies,
             )
             .ok_or_else(|| {
                 format!(
