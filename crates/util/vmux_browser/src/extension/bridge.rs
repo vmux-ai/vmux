@@ -1,4 +1,4 @@
-use bevy::prelude::Resource;
+use bevy::prelude::Component;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use polling::{Event, Events, Poller};
 use std::collections::{HashMap, HashSet};
@@ -125,7 +125,7 @@ struct QueuedServerMessage {
     bytes: usize,
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct ExtensionBridgeServer {
     endpoint: String,
     identities: HashMap<String, BridgeIdentity>,

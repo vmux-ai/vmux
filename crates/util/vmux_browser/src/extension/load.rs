@@ -1,11 +1,11 @@
 use vmux_extension::{manifest, store};
 
-use bevy::prelude::Resource;
+use bevy::prelude::Component;
 
 use super::runtime::{self, PreparedRuntime};
 use super::service_worker_cache::ServiceWorkerCache;
 
-#[derive(Resource, Clone, Debug, Default)]
+#[derive(Component, Clone, Debug, Default)]
 pub struct PreparedExtensions(pub Vec<PreparedRuntime>);
 
 pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {

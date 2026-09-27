@@ -22,27 +22,35 @@ pub(crate) struct ExtensionBrokerPlugin;
 
 impl Plugin for ExtensionBrokerPlugin {
     fn build(&self, app: &mut App) {
+        let entity = app
+            .world_mut()
+            .spawn((
+                Name::new("Extension broker"),
+                BridgeSubscriptions::default(),
+                BridgeResponseCache::default(),
+                PendingBridgeEvents::default(),
+            ))
+            .id();
         if extension_conformance_enabled() {
-            app.init_resource::<ConformanceWakeTimer>();
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(ConformanceWakeTimer::default());
         }
-        app.init_resource::<BridgeSubscriptions>()
-            .init_resource::<BridgeResponseCache>()
-            .init_resource::<PendingBridgeEvents>()
-            .add_systems(
-                Update,
-                drain_bridge_requests.after(super::windows::sync_extension_windows),
-            )
-            .add_systems(
-                Update,
-                forward_extension_model_events.after(super::project::ExtensionProjectionSet),
-            )
-            .add_systems(Update, fire_conformance_wake_timer)
-            .add_systems(Update, arm_bridge_wake);
+        app.add_systems(
+            Update,
+            drain_bridge_requests.after(super::windows::sync_extension_windows),
+        )
+        .add_systems(
+            Update,
+            forward_extension_model_events.after(super::project::ExtensionProjectionSet),
+        )
+        .add_systems(Update, fire_conformance_wake_timer)
+        .add_systems(Update, arm_bridge_wake);
     }
 }
 
 fn arm_bridge_wake(
-    server: Res<ExtensionBridgeServer>,
+    server: Single<&ExtensionBridgeServer>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut armed: Local<bool>,
 ) {
@@ -79,16 +87,16 @@ pub struct BridgeSubscription {
     pub event: String,
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct BridgeSubscriptions(pub HashMap<String, Vec<BridgeSubscription>>);
 
 #[derive(Default)]
 pub(crate) struct SeenBridgeRequests(HashMap<(String, u64), VecDeque<String>>);
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct BridgeResponseCache(HashMap<String, VecDeque<(String, BridgeServerMessage)>>);
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct PendingBridgeEvents {
     next_sequence: u64,
     events: HashMap<String, BTreeMap<u64, ApiEvent>>,
@@ -103,7 +111,7 @@ impl Default for PendingBridgeEvents {
     }
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct ConformanceWakeTimer {
     delay: Duration,
     deadlines: HashMap<String, Instant>,
@@ -123,14 +131,16 @@ impl Default for ConformanceWakeTimer {
 }
 
 pub fn drain_bridge_requests(
-    server: Res<ExtensionBridgeServer>,
-    mut subscriptions: ResMut<BridgeSubscriptions>,
-    mut pending: ResMut<PendingBridgeEvents>,
+    server: Single<&ExtensionBridgeServer>,
+    broker: Single<(
+        &mut BridgeSubscriptions,
+        &mut PendingBridgeEvents,
+        &mut BridgeResponseCache,
+        Option<&mut ConformanceWakeTimer>,
+    )>,
     model: Single<&ExtensionModel>,
-    mut wake_timer: Option<ResMut<ConformanceWakeTimer>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    mut response_cache: ResMut<BridgeResponseCache>,
-    mut extension_windows: ResMut<ExtensionWindows>,
+    mut extension_windows: Single<&mut ExtensionWindows>,
     mut seen: Local<SeenBridgeRequests>,
     mut stack_requests: MessageWriter<vmux_layout::stack::OpenRequest>,
     mut open_window_requests: MessageWriter<OpenExtensionWindowRequest>,
@@ -138,6 +148,7 @@ pub fn drain_bridge_requests(
     mut update_host_window_requests: MessageWriter<UpdateHostWindowRequest>,
     mut model_events: MessageWriter<ExtensionModelEvent>,
 ) {
+    let (mut subscriptions, mut pending, mut response_cache, mut wake_timer) = broker.into_inner();
     for _ in 0..MAX_BRIDGE_MESSAGES_PER_UPDATE {
         let Ok(inbound) = server.try_recv() else {
             break;
@@ -693,9 +704,9 @@ fn collect_request_targets(
 
 pub fn forward_extension_model_events(
     mut events: MessageReader<ExtensionModelEvent>,
-    subscriptions: Res<BridgeSubscriptions>,
-    server: Res<ExtensionBridgeServer>,
-    mut pending: ResMut<PendingBridgeEvents>,
+    subscriptions: Single<&BridgeSubscriptions>,
+    server: Single<&ExtensionBridgeServer>,
+    mut pending: Single<&mut PendingBridgeEvents>,
 ) {
     for event in events.read() {
         for (extension_id, entries) in &subscriptions.0 {
@@ -734,10 +745,10 @@ pub fn forward_extension_model_events(
 }
 
 pub fn fire_conformance_wake_timer(
-    timer: Option<ResMut<ConformanceWakeTimer>>,
+    timer: Option<Single<&mut ConformanceWakeTimer>>,
     model: Single<&ExtensionModel>,
-    server: Res<ExtensionBridgeServer>,
-    mut pending: ResMut<PendingBridgeEvents>,
+    server: Single<&ExtensionBridgeServer>,
+    mut pending: Single<&mut PendingBridgeEvents>,
 ) {
     let Some(mut timer) = timer else {
         return;
@@ -1085,6 +1096,32 @@ mod tests {
         .unwrap()
     }
 
+    fn install_runtime(
+        app: &mut App,
+        server: ExtensionBridgeServer,
+        pending: PendingBridgeEvents,
+        timer: Option<ConformanceWakeTimer>,
+    ) {
+        app.world_mut().spawn(server);
+        let entity = app
+            .world_mut()
+            .spawn((
+                BridgeSubscriptions::default(),
+                BridgeResponseCache::default(),
+                pending,
+            ))
+            .id();
+        if let Some(timer) = timer {
+            app.world_mut().entity_mut(entity).insert(timer);
+        }
+        app.world_mut().spawn(ExtensionWindows::default());
+    }
+
+    fn component<T: Component>(world: &mut World) -> &T {
+        let mut query = world.query::<&T>();
+        query.single(world).unwrap()
+    }
+
     fn connect_bridge(
         server: &ExtensionBridgeServer,
     ) -> WebSocket<MaybeTlsStream<std::net::TcpStream>> {
@@ -1246,12 +1283,8 @@ mod tests {
             .unwrap();
 
         let mut app = App::new();
-        app.insert_resource(server)
-            .init_resource::<BridgeSubscriptions>()
-            .init_resource::<BridgeResponseCache>()
-            .init_resource::<PendingBridgeEvents>()
-            .init_resource::<ExtensionWindows>()
-            .add_message::<vmux_layout::stack::OpenRequest>()
+        install_runtime(&mut app, server, PendingBridgeEvents::default(), None);
+        app.add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
@@ -1284,7 +1317,7 @@ mod tests {
         socket.close(None).unwrap();
         drop(socket);
         std::thread::sleep(Duration::from_millis(50));
-        let mut restarted = connect_bridge(app.world().resource::<ExtensionBridgeServer>());
+        let mut restarted = connect_bridge(component::<ExtensionBridgeServer>(app.world_mut()));
         send_client(
             &mut restarted,
             &BridgeClientMessage::ApiRequest(ApiRequest {
@@ -1299,7 +1332,7 @@ mod tests {
 
         assert_eq!(read_server(&mut restarted), response);
         assert_eq!(
-            app.world().resource::<BridgeResponseCache>().0[EXTENSION_ID].len(),
+            component::<BridgeResponseCache>(app.world_mut()).0[EXTENSION_ID].len(),
             1
         );
     }
@@ -1501,13 +1534,13 @@ mod tests {
             }),
         );
         let mut app = App::new();
-        app.insert_resource(server)
-            .insert_resource(pending)
-            .init_resource::<BridgeSubscriptions>()
-            .init_resource::<BridgeResponseCache>()
-            .init_resource::<ConformanceWakeTimer>()
-            .init_resource::<ExtensionWindows>()
-            .add_message::<vmux_layout::stack::OpenRequest>()
+        install_runtime(
+            &mut app,
+            server,
+            pending,
+            Some(ConformanceWakeTimer::default()),
+        );
+        app.add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
@@ -1526,8 +1559,7 @@ mod tests {
         );
         pump(&mut app);
         assert!(
-            app.world()
-                .resource::<PendingBridgeEvents>()
+            component::<PendingBridgeEvents>(app.world_mut())
                 .events
                 .get(EXTENSION_ID)
                 .is_none_or(BTreeMap::is_empty)
@@ -1572,12 +1604,8 @@ mod tests {
             }),
         );
         let mut app = App::new();
-        app.insert_resource(server)
-            .init_resource::<BridgeSubscriptions>()
-            .init_resource::<BridgeResponseCache>()
-            .init_resource::<PendingBridgeEvents>()
-            .init_resource::<ExtensionWindows>()
-            .add_message::<vmux_layout::stack::OpenRequest>()
+        install_runtime(&mut app, server, PendingBridgeEvents::default(), None);
+        app.add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
@@ -1592,7 +1620,7 @@ mod tests {
         app.world_mut().spawn(ExtensionModel::default());
         pump(&mut app);
         assert!(
-            app.world().resource::<BridgeSubscriptions>().0[EXTENSION_ID]
+            component::<BridgeSubscriptions>(app.world_mut()).0[EXTENSION_ID]
                 .iter()
                 .any(|entry| entry.namespace == "windows" && entry.event == "onRemoved")
         );
@@ -1624,16 +1652,16 @@ mod tests {
         send_client(&mut socket, &subscribe());
         let (scheduler, scheduled) = crossbeam_channel::unbounded();
         let mut app = App::new();
-        app.insert_resource(server)
-            .init_resource::<BridgeSubscriptions>()
-            .init_resource::<BridgeResponseCache>()
-            .init_resource::<PendingBridgeEvents>()
-            .insert_resource(ConformanceWakeTimer {
+        install_runtime(
+            &mut app,
+            server,
+            PendingBridgeEvents::default(),
+            Some(ConformanceWakeTimer {
                 scheduler: Some(scheduler),
                 ..Default::default()
-            })
-            .init_resource::<ExtensionWindows>()
-            .add_message::<vmux_layout::stack::OpenRequest>()
+            }),
+        );
+        app.add_message::<vmux_layout::stack::OpenRequest>()
             .add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
@@ -1641,13 +1669,14 @@ mod tests {
             .add_systems(Update, drain_bridge_requests);
         app.world_mut().spawn(ExtensionModel::default());
         pump(&mut app);
-        let first_deadline = app.world().resource::<ConformanceWakeTimer>().deadlines[EXTENSION_ID];
+        let first_deadline =
+            component::<ConformanceWakeTimer>(app.world_mut()).deadlines[EXTENSION_ID];
         assert_eq!(scheduled.try_recv().unwrap(), first_deadline);
 
         send_client(&mut socket, &subscribe());
         pump(&mut app);
 
-        let timer = app.world().resource::<ConformanceWakeTimer>();
+        let timer = component::<ConformanceWakeTimer>(app.world_mut());
         assert_eq!(timer.scheduled.len(), 1);
         assert_eq!(timer.deadlines.len(), 1);
         assert_eq!(timer.deadlines[EXTENSION_ID], first_deadline);
@@ -1670,10 +1699,13 @@ mod tests {
         };
         timer.deadlines.insert(EXTENSION_ID.into(), Instant::now());
         let mut app = App::new();
-        app.insert_resource(server)
-            .insert_resource(timer)
-            .init_resource::<PendingBridgeEvents>()
-            .add_systems(Update, fire_conformance_wake_timer);
+        install_runtime(
+            &mut app,
+            server,
+            PendingBridgeEvents::default(),
+            Some(timer),
+        );
+        app.add_systems(Update, fire_conformance_wake_timer);
         app.world_mut().spawn(model.clone());
 
         app.update();

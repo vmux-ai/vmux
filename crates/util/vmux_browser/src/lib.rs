@@ -107,11 +107,12 @@ impl Plugin for BrowserPlugin {
                 .collect(),
         );
         let cef_command_line = host::cef_command_line_config();
+        app.world_mut().spawn((
+            Name::new("Extension bridge"),
+            crate::extension::load::PreparedExtensions(prepared_extensions),
+            extension_bridge,
+        ));
         host::configure_cef_backend_sync(app)
-            .insert_resource(crate::extension::load::PreparedExtensions(
-                prepared_extensions,
-            ))
-            .insert_resource(extension_bridge)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<host::WebviewLoadCompleted>()
             .add_plugins(vmux_layout::LayoutContractPlugin)

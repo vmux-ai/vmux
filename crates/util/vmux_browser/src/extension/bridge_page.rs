@@ -73,8 +73,7 @@ fn stop_extension_bridge_pages(
 
 fn spawn_extension_bridge_pages(
     mut commands: Commands,
-    prepared: Res<PreparedExtensions>,
-    server: Res<ExtensionBridgeServer>,
+    runtime: Single<(Ref<PreparedExtensions>, &ExtensionBridgeServer)>,
     primary_window: Query<(), With<PrimaryWindow>>,
     added_primary_window: Query<(), Added<PrimaryWindow>>,
     pages: Query<(Entity, &ExtensionBridgeWebview)>,
@@ -83,6 +82,7 @@ fn spawn_extension_bridge_pages(
     stopping: Query<(), With<ExtensionBridgeStopping>>,
     mut initialized: Local<bool>,
 ) {
+    let (prepared, server) = runtime.into_inner();
     let should_reconcile = !*initialized
         || prepared.is_changed()
         || !added_primary_window.is_empty()
@@ -216,13 +216,13 @@ mod tests {
         };
         let bridge = ExtensionBridgeServer::start("personal", [EXTENSION_ID]).unwrap();
         let identity = bridge.identity(EXTENSION_ID).unwrap().clone();
-        app.insert_resource(PreparedExtensions(vec![runtime]))
-            .insert_resource(bridge)
-            .add_message::<AppExit>()
-            .add_systems(
-                Update,
-                (stop_extension_bridge_pages, spawn_extension_bridge_pages).chain(),
-            );
+        let endpoint = bridge.endpoint().to_string();
+        app.world_mut()
+            .spawn((PreparedExtensions(vec![runtime]), bridge));
+        app.add_message::<AppExit>().add_systems(
+            Update,
+            (stop_extension_bridge_pages, spawn_extension_bridge_pages).chain(),
+        );
 
         app.update();
         assert!(
@@ -257,7 +257,7 @@ mod tests {
             panic!("expected one bridge preload script");
         };
         assert!(!config.contains("globalThis.__vmuxBridgeConfig"));
-        assert!(config.contains(app.world().resource::<ExtensionBridgeServer>().endpoint()));
+        assert!(config.contains(&endpoint));
         assert!(config.contains(&identity.extension_id));
         assert!(config.contains(&identity.profile_id));
         assert!(config.contains(&identity.token));

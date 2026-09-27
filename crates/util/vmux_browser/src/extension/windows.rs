@@ -20,8 +20,9 @@ pub(crate) struct ExtensionWindowsPlugin;
 
 impl Plugin for ExtensionWindowsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ExtensionWindows>()
-            .add_message::<OpenExtensionWindowRequest>()
+        app.world_mut()
+            .spawn((Name::new("Extension windows"), ExtensionWindows::default()));
+        app.add_message::<OpenExtensionWindowRequest>()
             .add_message::<CloseExtensionWindowRequest>()
             .add_message::<UpdateHostWindowRequest>()
             .add_systems(
@@ -52,7 +53,7 @@ struct ExtensionWindow {
     tab_ids: Vec<i32>,
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct ExtensionWindows {
     next_id: i32,
     windows: BTreeMap<i32, ExtensionWindow>,
@@ -207,7 +208,7 @@ fn route_close_extension_windows(
 
 pub fn sync_extension_windows(
     model: Single<Ref<ExtensionModel>>,
-    mut windows: ResMut<ExtensionWindows>,
+    mut windows: Single<&mut ExtensionWindows>,
 ) {
     if !model.is_changed() {
         return;
