@@ -41,7 +41,6 @@ pub mod session;
 pub mod snapshot_updater;
 pub mod spawn;
 pub mod strategy;
-mod tab;
 pub mod toast;
 mod tool;
 mod transcript;
