@@ -71,10 +71,7 @@ pub(super) fn sync_paths<K: KeyStore>(
         git.run(&["fetch", "origin"])?;
         if let Some(remote_branch) = git.remote_branch() {
             vault.validate_remote_history(&remote_branch)?;
-            if git
-                .run(&["merge-base", "HEAD", &remote_branch])
-                .is_err()
-            {
+            if git.run(&["merge-base", "HEAD", &remote_branch]).is_err() {
                 return Err("Vault remote has unrelated history".to_string());
             }
             git.run(&["reset", "--hard", &remote_branch])?;

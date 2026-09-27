@@ -68,8 +68,7 @@ struct BookmarkUiBuilder {
 
 impl BookmarkUiBuilder {
     fn build(bookmarks: &BookmarkStateEvent, active_page: Option<&StackNode>) -> BookmarkUiState {
-        let active_route = active_page
-            .and_then(|page| vmux_api::VmuxRoute::parse(&page.url));
+        let active_route = active_page.and_then(|page| vmux_api::VmuxRoute::parse(&page.url));
         let mut pins = Vec::with_capacity(bookmarks.pins.len());
         for row in &bookmarks.pins {
             let active = active_route.as_ref().is_some_and(|active| {
@@ -153,13 +152,12 @@ impl BookmarkUiBuilder {
 
     fn append_entry(&mut self, row: BookmarkRow, folder: Option<String>, depth: u32) {
         let move_targets = self.entry_move_targets(folder.as_deref());
-        self.rows
-            .push(BookmarkTreeState::Entry(BookmarkEntryState {
-                row,
-                depth,
-                move_to_root: folder.is_some(),
-                move_targets,
-            }));
+        self.rows.push(BookmarkTreeState::Entry(BookmarkEntryState {
+            row,
+            depth,
+            move_to_root: folder.is_some(),
+            move_targets,
+        }));
     }
 
     fn folder_move_targets(&self, uuid: &str) -> Vec<BookmarkFolderChoice> {
@@ -497,11 +495,8 @@ fn project_bookmark_ui(
 ) {
     let empty = BookmarkStateEvent::default();
     for (entity, bookmarks, side_sheet, current) in &layouts {
-        let bookmarks = bookmarks
-            .map(|projection| &projection.0)
-            .unwrap_or(&empty);
-        let active_page = side_sheet
-            .and_then(|projection| projection.0.active_page.as_ref());
+        let bookmarks = bookmarks.map(|projection| &projection.0).unwrap_or(&empty);
+        let active_page = side_sheet.and_then(|projection| projection.0.active_page.as_ref());
         let next = BookmarkUiProjection(BookmarkUiBuilder::build(bookmarks, active_page));
         if current == Some(&next) {
             continue;

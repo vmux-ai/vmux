@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkPin, AgentBookmarkPinUrl,
-    AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommand as ServiceAgentCommand,
-    AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+    AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommand as ServiceAgentCommand, AgentSpaceCreate,
+    AgentSpaceDelete, AgentSpaceRename,
 };
 use vmux_service::client::ServiceRequest;
 
@@ -38,10 +38,7 @@ impl Plugin for LayoutCommandPlugin {
                 )
                     .in_set(CommandSet::Commands),
             )
-            .add_systems(
-                Update,
-                route_layout_commands.in_set(CommandSet::Dispatch),
-            );
+            .add_systems(Update, route_layout_commands.in_set(CommandSet::Dispatch));
     }
 }
 

@@ -10,10 +10,9 @@ use super::{
 use crate::event::{
     HardwareButton, SimulatorClipboardCopyRequest, SimulatorClipboardCutRequest,
     SimulatorClipboardOperation, SimulatorClipboardPasteRequest,
-    SimulatorClipboardSelectAllRequest,
-    SimulatorInputHardwareButtonRequest, SimulatorInputKeyRequest,
-    SimulatorInputModifiedKeyRequest, SimulatorInputTextRequest, SimulatorKeyModifiers,
-    SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase,
+    SimulatorClipboardSelectAllRequest, SimulatorInputHardwareButtonRequest,
+    SimulatorInputKeyRequest, SimulatorInputModifiedKeyRequest, SimulatorInputTextRequest,
+    SimulatorKeyModifiers, SimulatorSoftwareKeyboard, SimulatorTouch, SimulatorTouchPhase,
 };
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
@@ -795,12 +794,7 @@ fn control_coordinates(
 fn send_clipboard_requests(
     mut requests: MessageReader<SimulatorClipboardInputRequest>,
     active: Query<Entity, With<ActiveSimulatorView>>,
-    attachments: Query<(
-        Entity,
-        &SimulatorClipboard,
-        &HidBroker,
-        &DeviceTouchSession,
-    )>,
+    attachments: Query<(Entity, &SimulatorClipboard, &HidBroker, &DeviceTouchSession)>,
 ) {
     let active = active.iter().next();
     for request in requests.read() {

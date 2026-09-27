@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
+use vmux_service::DaemonBinary;
 use vmux_service::bundle::{EMBEDDED_AGENT_LABEL, EMBEDDED_AGENT_PLIST};
 use vmux_service::registry::{Backend, RegistrationStep};
-use vmux_service::DaemonBinary;
 
 #[test]
 fn bundled_path_chooses_sm_app_service() {
@@ -11,7 +11,10 @@ fn bundled_path_chooses_sm_app_service() {
     );
     let binary = DaemonBinary::beside(&exe);
 
-    assert!(matches!(Backend::for_binary(&binary), Backend::SmAppService));
+    assert!(matches!(
+        Backend::for_binary(&binary),
+        Backend::SmAppService
+    ));
 }
 
 #[test]

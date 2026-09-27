@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommandResult, AgentNewTerminalTab, AgentRunShell, AgentTerminalSend};
+use vmux_api::protocol::{
+    AgentCommandResult, AgentNewTerminalTab, AgentRunShell, AgentTerminalSend,
+};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,

@@ -46,11 +46,7 @@ impl Plugin for ChatPromptPlugin {
 fn on_chat_submit(
     trigger: On<UiInput<ChatSubmit>>,
     mut views: Query<
-        (
-            &ChildOf,
-            &mut ChatAttachmentProjection,
-            &mut ComposerState,
-        ),
+        (&ChildOf, &mut ChatAttachmentProjection, &mut ComposerState),
         With<AgentChatView>,
     >,
     mut sessions: Query<(
@@ -513,10 +509,7 @@ mod tests {
         app.world_mut().flush();
 
         assert_eq!(
-            app.world()
-                .get::<ComposerState>(webview)
-                .unwrap()
-                .draft(),
+            app.world().get::<ComposerState>(webview).unwrap().draft(),
             ""
         );
     }

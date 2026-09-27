@@ -34,11 +34,7 @@ impl Plugin for OsMenuPlugin {
             .add_observer(remember_tab_close)
             .configure_sets(
                 Update,
-                (
-                    OsMenuSet::Forward,
-                    OsMenuSet::Dispatch,
-                    OsMenuSet::Cleanup,
-                )
+                (OsMenuSet::Forward, OsMenuSet::Dispatch, OsMenuSet::Cleanup)
                     .chain()
                     .in_set(WriteCommandRequests),
             )
@@ -781,8 +777,7 @@ mod tests {
             ))
             .id();
 
-        app.world_mut()
-            .write_message(OsMenuSelection::new(command));
+        app.world_mut().write_message(OsMenuSelection::new(command));
         app.world_mut().run_schedule(Update);
 
         let invocations = app
@@ -803,8 +798,7 @@ mod tests {
             .insert_resource(test_settings());
         let close = app.world_mut().spawn(HideWindowsMenuEntry).id();
 
-        app.world_mut()
-            .write_message(OsMenuSelection::new(close));
+        app.world_mut().write_message(OsMenuSelection::new(close));
         app.world_mut().run_schedule(Update);
 
         let requests = app

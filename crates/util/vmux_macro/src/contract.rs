@@ -55,14 +55,11 @@ pub(crate) fn expand_with_derives<'a>(
     input: DeriveInput,
     derives: impl IntoIterator<Item = &'a Path>,
 ) -> TokenStream {
-    let unit = matches!(&input.data, Data::Struct(item) if matches!(item.fields, syn::Fields::Unit));
+    let unit =
+        matches!(&input.data, Data::Struct(item) if matches!(item.fields, syn::Fields::Unit));
     let mut extra_derives = Vec::<Path>::new();
     if unit {
-        extra_derives.extend([
-            parse_quote!(Copy),
-            parse_quote!(Default),
-            parse_quote!(Eq),
-        ]);
+        extra_derives.extend([parse_quote!(Copy), parse_quote!(Default), parse_quote!(Eq)]);
     }
     for derive in derives {
         let Some(name) = derive.segments.last() else {
@@ -150,11 +147,7 @@ mod tests {
 
     #[test]
     fn unit_contract_adds_value_derives_without_duplicates() {
-        let output = expand(
-            quote! { Copy, Eq },
-            parse_quote! { pub struct Event; },
-        )
-        .unwrap();
+        let output = expand(quote! { Copy, Eq }, parse_quote! { pub struct Event; }).unwrap();
         let file = parse2::<syn::File>(output).unwrap();
         let Item::Struct(item) = &file.items[0] else {
             panic!("expected struct");

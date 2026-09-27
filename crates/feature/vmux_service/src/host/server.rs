@@ -39,10 +39,8 @@ impl ServiceDaemonPlugin {
         exit: mpsc::Sender<()>,
     ) -> Self {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
-        let (query_plugin, queries) =
-            ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
-        let (client_operation_plugin, client_operations) =
-            ClientOperationPlugin::new(wake);
+        let (query_plugin, queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
+        let (client_operation_plugin, client_operations) = ClientOperationPlugin::new(wake);
         Self {
             listener: std::sync::Mutex::new(Some(listener)),
             manager,

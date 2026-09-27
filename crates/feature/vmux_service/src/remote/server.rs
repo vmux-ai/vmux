@@ -396,5 +396,4 @@ mod tests {
             .collect();
         assert!(validate_remote_attachments(attachments).is_none());
     }
-
 }

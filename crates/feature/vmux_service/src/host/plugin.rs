@@ -4,9 +4,9 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 
+use crate::DaemonBinary;
 use crate::client::{ServiceClient, ServiceHandle, ServiceInbound, ServiceRequest, ServiceWake};
 use crate::registry::Backend;
-use crate::DaemonBinary;
 use vmux_api::protocol::ClientMessage;
 
 #[derive(Component)]

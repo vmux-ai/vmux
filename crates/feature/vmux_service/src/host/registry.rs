@@ -1,5 +1,5 @@
-use crate::bundle;
 use crate::DaemonBinary;
+use crate::bundle;
 
 #[derive(Debug)]
 pub enum Backend {

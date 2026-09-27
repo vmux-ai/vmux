@@ -135,8 +135,7 @@ fn notify(
     for request in requests.read() {
         let caller = match &request.origin {
             CommandOrigin::Agent {
-                anchor: Some(pid),
-                ..
+                anchor: Some(pid), ..
             } => agents
                 .iter()
                 .find(|(_, _, process)| process.is_some_and(|process| process == pid))
@@ -255,9 +254,9 @@ fn update_settings(
                     Err(message) => AgentCommandResult::Error(message),
                 }
             }
-            Err(error) => AgentCommandResult::Error(format!(
-                "update_settings: invalid JSON value: {error}"
-            )),
+            Err(error) => {
+                AgentCommandResult::Error(format!("update_settings: invalid JSON value: {error}"))
+            }
         };
         responses.write(request.reply.response(result));
     }

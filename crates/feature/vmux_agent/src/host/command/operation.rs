@@ -93,8 +93,7 @@ fn invoke(
         };
         let caller = match &request.origin {
             CommandOrigin::Agent {
-                anchor: Some(pid),
-                ..
+                anchor: Some(pid), ..
             } => agents
                 .iter()
                 .find(|(_, _, process)| process.is_some_and(|process| process == pid))

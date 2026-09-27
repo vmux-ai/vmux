@@ -388,9 +388,7 @@ impl InputSchemaParser {
         schema.description = self.string("description")?;
         schema.required = self.strings("required")?;
         schema.properties = self.schemas("properties")?;
-        schema.additional_properties = self
-            .boolean("additionalProperties")?
-            .unwrap_or_default();
+        schema.additional_properties = self.boolean("additionalProperties")?.unwrap_or_default();
         schema.definitions = self.schemas("$defs")?;
         schema.values = self.strings("enum")?;
         schema.min_length = self.unsigned_integer("minLength")?;
@@ -434,7 +432,10 @@ impl InputSchemaParser {
             return Ok(None);
         };
         let Some(value) = value.as_str() else {
-            return Err(format!("input schema {} must be a string", Self::label(name)));
+            return Err(format!(
+                "input schema {} must be a string",
+                Self::label(name)
+            ));
         };
         Ok(Some(value.to_string()))
     }
@@ -510,9 +511,7 @@ impl InputSchemaParser {
             return Ok(None);
         };
         let Some(value) = value.as_u64() else {
-            return Err(format!(
-                "input schema {name} must be an unsigned integer"
-            ));
+            return Err(format!("input schema {name} must be an unsigned integer"));
         };
         Ok(Some(value))
     }

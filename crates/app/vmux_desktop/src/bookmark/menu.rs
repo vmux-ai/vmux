@@ -28,9 +28,7 @@ mod macos {
     use vmux_layout::state::LayoutUiState;
     use vmux_ui::i18n::{Locale, TranslationValue};
 
-    use crate::os_menu::{
-        OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet,
-    };
+    use crate::os_menu::{OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet};
 
     impl Plugin for super::BookmarkMenuPlugin {
         fn build(&self, app: &mut App) {
@@ -638,7 +636,12 @@ mod macos {
                 .drain()
                 .collect::<Vec<_>>();
             assert_eq!(pins, vec![PinRequest { uuid: "pin".into() }]);
-            assert_eq!(removes, vec![RemoveRequest { uuid: "remove".into() }]);
+            assert_eq!(
+                removes,
+                vec![RemoveRequest {
+                    uuid: "remove".into()
+                }]
+            );
             assert!(app.world().get_entity(selected).is_err());
             assert!(app.world().get_entity(disabled).is_ok());
         }

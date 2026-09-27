@@ -211,7 +211,8 @@ fn search_history(
     for request in requests.read() {
         bevy::log::info!(
             "browser_history_search: query={:?} limit={}",
-            request.payload.query, request.payload.limit
+            request.payload.query,
+            request.payload.limit
         );
         responses.write(request.reply.ok());
     }

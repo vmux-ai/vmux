@@ -5,8 +5,8 @@ use vmux_service::client::ServiceRequest;
 use crate::host::event::{AgentCommandRequest, CommandOrigin};
 
 use super::application::{
-    AgentFocusPaneRequest, AgentNotifyRequest, AgentRenameProfileRequest,
-    AgentUpdateLayoutRequest, AgentUpdateSettingsRequest,
+    AgentFocusPaneRequest, AgentNotifyRequest, AgentRenameProfileRequest, AgentUpdateLayoutRequest,
+    AgentUpdateSettingsRequest,
 };
 use super::browser::{
     AgentBrowserGoBackRequest, AgentBrowserGoForwardRequest, AgentBrowserHistorySearchRequest,
@@ -16,9 +16,7 @@ use super::operation::{
     AgentFileSearchRequest, AgentFileTouchedRequest, AgentInvokeCommandRequest, AgentListRequest,
     AgentNewChatRequest, AgentTurnEndedRequest,
 };
-use super::terminal::{
-    AgentNewTerminalTabRequest, AgentRunShellRequest, AgentTerminalSendRequest,
-};
+use super::terminal::{AgentNewTerminalTabRequest, AgentRunShellRequest, AgentTerminalSendRequest};
 use super::{AgentReply, CommandSet};
 
 pub(super) struct DispatchPlugin;

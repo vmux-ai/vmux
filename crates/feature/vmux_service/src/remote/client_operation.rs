@@ -140,10 +140,7 @@ struct ClientOperationId(ClientOpId);
 #[derive(Component, Clone, Copy)]
 struct ClientOperationSequence(u64);
 
-fn receive_client_operation_requests(
-    inbox: Single<&ClientOperationInbox>,
-    mut commands: Commands,
-) {
+fn receive_client_operation_requests(inbox: Single<&ClientOperationInbox>, mut commands: Commands) {
     let Ok(mut inbox) = inbox.0.lock() else {
         return;
     };

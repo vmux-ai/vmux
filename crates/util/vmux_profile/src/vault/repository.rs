@@ -43,11 +43,7 @@ impl VaultRepositoryPath {
     }
 
     pub(super) fn validate_empty(&self) -> Result<(), String> {
-        if self
-            .git()
-            .run(&["rev-parse", "--verify", "HEAD"])
-            .is_ok()
-        {
+        if self.git().run(&["rev-parse", "--verify", "HEAD"]).is_ok() {
             return Err("Vault staging repository contains unsupported history".to_string());
         }
         let unexpected = std::fs::read_dir(&self.root)
@@ -210,13 +206,7 @@ impl GitRepository {
         if self.optional(&["status", "--porcelain"]).is_empty() {
             return Ok(());
         }
-        self.run(&[
-            "-c",
-            "commit.gpgSign=false",
-            "commit",
-            "-m",
-            message,
-        ])?;
+        self.run(&["-c", "commit.gpgSign=false", "commit", "-m", message])?;
         Ok(())
     }
 
@@ -229,11 +219,7 @@ impl GitRepository {
     }
 
     pub(super) fn remote_branch(&self) -> Option<String> {
-        let symbolic = self.optional(&[
-            "symbolic-ref",
-            "--short",
-            "refs/remotes/origin/HEAD",
-        ]);
+        let symbolic = self.optional(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
         if symbolic.starts_with("origin/")
             && self.run(&["rev-parse", "--verify", &symbolic]).is_ok()
         {
@@ -373,7 +359,9 @@ impl TryFrom<&[u8]> for RemoteManifest {
             || manifest.index != INDEX_FILE
             || manifest.vault_id.is_empty()
         {
-            return Err("selected repository uses an unsupported Vault encryption format".to_string());
+            return Err(
+                "selected repository uses an unsupported Vault encryption format".to_string(),
+            );
         }
         Ok(manifest)
     }

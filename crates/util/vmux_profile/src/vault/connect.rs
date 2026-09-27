@@ -312,8 +312,8 @@ pub(super) fn create_remote_paths<K: KeyStore>(
     GitHubCli::command()?
         .current_dir(vault_repository)
         .args([
-            "repo", "create", repository, visibility, "--source", &root_arg, "--remote",
-            "origin", "--push",
+            "repo", "create", repository, visibility, "--source", &root_arg, "--remote", "origin",
+            "--push",
         ])
         .output()
         .map_err(|error| format!("failed to run gh: {error}"))?
@@ -351,9 +351,7 @@ pub(super) fn connect_remote_paths<K: KeyStore>(
                 let manifest = vault.manifest_at(&remote_branch)?;
                 let key = match keys.load(&manifest.vault_id) {
                     Ok(key) => Some(key),
-                    Err(_error) if vault.remote_has_key_recipients(&remote_branch)? => {
-                        None
-                    }
+                    Err(_error) if vault.remote_has_key_recipients(&remote_branch)? => None,
                     Err(error) => return Err(error),
                 };
                 let branch = remote_branch

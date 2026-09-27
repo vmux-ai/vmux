@@ -227,15 +227,12 @@ fn configure_identity(root: &Path) {
     git.run(&["config", "user.name", "Vmux Test"]).unwrap();
     git.run(&["config", "user.email", "vmux@example.com"])
         .unwrap();
-    git.run(&["config", "commit.gpgSign", "false"])
-        .unwrap();
+    git.run(&["config", "commit.gpgSign", "false"]).unwrap();
 }
 
 fn prepare_repository(root: &Path) -> PathBuf {
     let repository = repository(root);
-    VaultRepositoryPath::at(&repository)
-        .ensure()
-        .unwrap();
+    VaultRepositoryPath::at(&repository).ensure().unwrap();
     configure_identity(&repository);
     repository
 }
@@ -484,9 +481,7 @@ fn initialization_commits_only_encrypted_paths_and_content() {
             .windows(7)
             .any(|window| window == b"Private")
     );
-    let manifest = VaultRepositoryPath::at(&repository)
-        .manifest()
-        .unwrap();
+    let manifest = VaultRepositoryPath::at(&repository).manifest().unwrap();
     let key = keys.load(&manifest.vault_id).unwrap();
     let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
     assert_eq!(files["settings.ron"].data, b"(secret: true)\n");
@@ -578,14 +573,11 @@ fn stale_encrypted_commit_is_discarded_and_regenerated_from_plaintext() {
     std::fs::write(repository.join(INDEX_FILE), b"stale encrypted commit").unwrap();
     let git = GitRepository::at(&repository);
     git.run(&["add", INDEX_FILE]).unwrap();
-    git.run(&["commit", "-m", "Stale local snapshot"])
-        .unwrap();
+    git.run(&["commit", "-m", "Stale local snapshot"]).unwrap();
 
     sync_paths(root.path(), &repository, &keys).unwrap();
 
-    let manifest = VaultRepositoryPath::at(&repository)
-        .manifest()
-        .unwrap();
+    let manifest = VaultRepositoryPath::at(&repository).manifest().unwrap();
     let key = keys.load(&manifest.vault_id).unwrap();
     let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
     assert_eq!(files["settings.ron"].data, b"(value: 2)\n");
@@ -625,9 +617,7 @@ fn existing_encrypted_vault_merges_non_conflicting_local_files() {
         std::fs::read_to_string(root.path().join("settings.ron")).unwrap(),
         "(remote: true)\n"
     );
-    let manifest = VaultRepositoryPath::at(&repository)
-        .manifest()
-        .unwrap();
+    let manifest = VaultRepositoryPath::at(&repository).manifest().unwrap();
     let key = keys.load(&manifest.vault_id).unwrap();
     let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
     assert!(files.contains_key("settings.ron"));
@@ -885,13 +875,8 @@ fn plaintext_remote_history_is_rejected() {
     std::fs::write(seed.path().join("settings.ron"), "()\n").unwrap();
     git.run(&["add", "--all"]).unwrap();
     git.run(&["commit", "-m", "Plaintext"]).unwrap();
-    git.run(&[
-        "remote",
-        "add",
-        "origin",
-        remote.to_string_lossy().as_ref(),
-    ])
-    .unwrap();
+    git.run(&["remote", "add", "origin", remote.to_string_lossy().as_ref()])
+        .unwrap();
     git.run(&["push", "-u", "origin", "main"]).unwrap();
     let repository = prepare_repository(root.path());
 
@@ -919,13 +904,8 @@ fn existing_vault_uses_the_remote_default_branch() {
     initialize_paths(seed.path(), &seed_repository, &keys).unwrap();
     let git = GitRepository::at(&seed_repository);
     git.run(&["branch", "--move", "trunk"]).unwrap();
-    git.run(&[
-        "remote",
-        "add",
-        "origin",
-        remote.to_string_lossy().as_ref(),
-    ])
-    .unwrap();
+    git.run(&["remote", "add", "origin", remote.to_string_lossy().as_ref()])
+        .unwrap();
     git.run(&["push", "-u", "origin", "trunk"]).unwrap();
     Command::new("git")
         .args([
@@ -952,8 +932,7 @@ fn existing_vault_uses_the_remote_default_branch() {
     let git = GitRepository::at(&repository);
     assert_eq!(git.current_branch().unwrap(), "trunk");
     assert_eq!(
-        git.run(&["rev-list", "--count", "origin/trunk"])
-            .unwrap(),
+        git.run(&["rev-list", "--count", "origin/trunk"]).unwrap(),
         "1"
     );
 }

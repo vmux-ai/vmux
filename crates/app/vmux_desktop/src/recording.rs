@@ -20,18 +20,17 @@ impl Plugin for RecordingPlugin {
             RecordingBridge::default(),
             RecordingStatus::default(),
         ));
-        app.add_message::<RecordingControl>()
-            .add_systems(
-                Update,
-                (
-                    start_recording,
-                    handle_recording_control,
-                    auto_stop_recordings,
-                    drain_recordings,
-                )
-                    .chain()
-                    .after(vmux_command::WriteCommandRequests),
-            );
+        app.add_message::<RecordingControl>().add_systems(
+            Update,
+            (
+                start_recording,
+                handle_recording_control,
+                auto_stop_recordings,
+                drain_recordings,
+            )
+                .chain()
+                .after(vmux_command::WriteCommandRequests),
+        );
     }
 }
 

@@ -162,12 +162,8 @@ pub(super) fn status_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K
         status.branch = git.optional(&["branch", "--show-current"]);
         status.dirty = local_change_count(root, repository).unwrap_or(0);
         if !status.remote.is_empty() {
-            let counts = git.optional(&[
-                "rev-list",
-                "--left-right",
-                "--count",
-                "HEAD...@{upstream}",
-            ]);
+            let counts =
+                git.optional(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
             let mut values = counts.split_whitespace();
             status.ahead = values
                 .next()
