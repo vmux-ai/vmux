@@ -10870,7 +10870,6 @@ dependencies = [
  "uuid",
  "vmux_api",
  "vmux_core",
- "vmux_git",
  "vmux_native",
  "vmux_path",
  "vmux_profile",

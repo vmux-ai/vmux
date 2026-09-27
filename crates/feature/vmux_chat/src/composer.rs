@@ -93,7 +93,7 @@ impl ComposerQueryChanges {
     }
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResumeQuery {
     pub active: bool,
     pub query: String,

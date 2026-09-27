@@ -33,7 +33,7 @@ pub(crate) struct RemoteState {
     pub(crate) client_ops: ClientOperations,
 }
 
-pub fn spawn(
+pub(crate) fn spawn(
     agents: Arc<Mutex<AgentSessionManager>>,
     acp: Arc<Mutex<AcpSessionManager>>,
     broker: AgentBroker,
