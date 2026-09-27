@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::WindowCloseRequested;
+use crossbeam_channel::Receiver;
 #[cfg(target_os = "macos")]
 use muda::ContextMenu;
 use muda::{Menu, MenuEvent, MenuItem, MenuItemKind};
@@ -11,8 +12,6 @@ use objc2::{runtime::Sel, sel};
 use objc2_app_kit::{NSApplication, NSMenuItem};
 #[cfg(target_os = "macos")]
 use objc2_foundation::MainThreadMarker;
-use parking_lot::Mutex;
-use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use vmux_browser::HostFocusIntent;
 #[cfg(target_os = "macos")]
@@ -28,12 +27,21 @@ impl Plugin for OsMenuPlugin {
         app.world_mut()
             .spawn((Name::new("OS menu runtime"), OsMenuState::default()));
         app.add_plugins(crate::bookmark::BookmarkMenuPlugin)
+            .add_message::<OsMenuSelection>()
             .add_message::<crate::window_manager::CloseVmuxWindow>()
             .add_message::<CloseRequest>()
             .add_message::<vmux_browser::OpenRequest>()
-            .add_observer(dispatch_command_menu_selection)
-            .add_observer(hide_windows_from_menu)
             .add_observer(remember_tab_close)
+            .configure_sets(
+                Update,
+                (
+                    OsMenuSet::Forward,
+                    OsMenuSet::Dispatch,
+                    OsMenuSet::Cleanup,
+                )
+                    .chain()
+                    .in_set(WriteCommandRequests),
+            )
             .add_systems(
                 Startup,
                 setup
@@ -43,7 +51,6 @@ impl Plugin for OsMenuPlugin {
             .add_systems(
                 Update,
                 (
-                    forward_menu_events.in_set(WriteCommandRequests),
                     sync_menu_locale,
                     remember_stack_close_commands.after(vmux_command::DispatchCommandInvocations),
                     remember_native_page_open_requests
@@ -53,11 +60,27 @@ impl Plugin for OsMenuPlugin {
                         .after(remember_native_page_open_requests),
                     sync_close_menu_item.after(hide_window_on_close_request),
                 ),
+            )
+            .add_systems(
+                Update,
+                (
+                    forward_menu_events.in_set(OsMenuSet::Forward),
+                    (dispatch_command_menu_selection, hide_windows_from_menu)
+                        .in_set(OsMenuSet::Dispatch),
+                    cleanup_transient_menu_entries.in_set(OsMenuSet::Cleanup),
+                ),
             );
         #[cfg(target_os = "macos")]
         app.add_systems(Update, sync_edit_menu_items.after(ReadCommandRequests))
             .add_systems(PostUpdate, present_context_menus);
     }
+}
+
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum OsMenuSet {
+    Forward,
+    Dispatch,
+    Cleanup,
 }
 
 #[derive(Component)]
@@ -140,17 +163,21 @@ struct TransientOsMenuEntry;
 #[derive(Component)]
 struct HideWindowsMenuEntry;
 
-#[derive(EntityEvent)]
-pub(crate) struct OsMenuSelect(#[event_target] Entity);
+#[derive(Message, Clone, Copy)]
+pub(crate) struct OsMenuSelection(Entity);
 
-impl OsMenuSelect {
+impl OsMenuSelection {
     pub(crate) fn new(entity: Entity) -> Self {
         Self(entity)
+    }
+
+    pub(crate) fn target(&self) -> Entity {
+        self.0
     }
 }
 
 #[derive(Component, Clone)]
-struct OsMenuInbox(Arc<Mutex<Vec<String>>>);
+struct OsMenuInbox(Receiver<String>);
 
 const WINDOW_CLOSE_SUPPRESSION_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
@@ -191,10 +218,9 @@ fn setup(world: &mut World) {
         .get_resource::<bevy::winit::EventLoopProxyWrapper>()
         .map(|w| (**w).clone());
 
-    let inbox = OsMenuInbox(Arc::new(Mutex::new(Vec::new())));
-    let callback_inbox = inbox.clone();
+    let (menu_events, inbox) = crossbeam_channel::unbounded();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        callback_inbox.0.lock().push(event.id.0.clone());
+        let _ = menu_events.send(event.id.0.clone());
         if let Some(proxy) = &proxy {
             let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
         }
@@ -202,7 +228,7 @@ fn setup(world: &mut World) {
 
     let mut runtime = world.query_filtered::<Entity, With<OsMenuState>>();
     let runtime = runtime.single(world).unwrap();
-    world.entity_mut(runtime).insert(inbox);
+    world.entity_mut(runtime).insert(OsMenuInbox(inbox));
     world.spawn((
         Name::new("Close Vmux menu item"),
         OsMenuEntry::identified("app_quit".to_string()),
@@ -524,58 +550,66 @@ fn sync_close_menu_item(
 }
 
 fn forward_menu_events(
-    mut commands: Commands,
     inbox: Option<Single<&OsMenuInbox>>,
-    menu_entries: Query<(Entity, &OsMenuEntry, Has<TransientOsMenuEntry>)>,
+    menu_entries: Query<(Entity, &OsMenuEntry)>,
     mut state: Single<&mut OsMenuState>,
+    mut selections: MessageWriter<OsMenuSelection>,
 ) {
-    let drained = {
-        let Some(inbox) = inbox else {
-            return;
-        };
-        let mut events = inbox.0.lock();
-        if events.is_empty() {
-            return;
-        }
-        std::mem::take(&mut *events)
+    let Some(inbox) = inbox else {
+        return;
     };
-
-    if !drained.is_empty() {
-        state.last_menu_command_at = Some(std::time::Instant::now());
+    let drained = inbox.0.try_iter().collect::<Vec<_>>();
+    if drained.is_empty() {
+        return;
     }
+
+    state.last_menu_command_at = Some(std::time::Instant::now());
     for event_id in drained {
-        let selected = menu_entries.iter().find_map(|(entity, entry, transient)| {
-            entry.matches(&event_id).then_some((entity, transient))
-        });
-        if let Some((entity, transient)) = selected {
-            commands.trigger(OsMenuSelect::new(entity));
-            if transient {
-                commands.entity(entity).despawn();
-            }
+        let selected = menu_entries
+            .iter()
+            .find_map(|(entity, entry)| entry.matches(&event_id).then_some(entity));
+        if let Some(entity) = selected {
+            selections.write(OsMenuSelection::new(entity));
         }
     }
 }
 
 fn dispatch_command_menu_selection(
-    trigger: On<OsMenuSelect>,
+    mut selections: MessageReader<OsMenuSelection>,
     definitions: Query<&CommandDefinition>,
     users: Query<Entity, With<vmux_core::team::User>>,
     mut invocations: MessageWriter<CommandInvocation>,
 ) {
-    let Ok(definition) = definitions.get(trigger.event_target()) else {
-        return;
-    };
     let caller = users.iter().next().unwrap_or(Entity::PLACEHOLDER);
-    invocations.write(CommandInvocation::new(caller, definition.id.clone()));
+    for selection in selections.read() {
+        let Ok(definition) = definitions.get(selection.target()) else {
+            continue;
+        };
+        invocations.write(CommandInvocation::new(caller, definition.id.clone()));
+    }
 }
 
 fn hide_windows_from_menu(
-    trigger: On<OsMenuSelect>,
+    mut selections: MessageReader<OsMenuSelection>,
     menu_items: Query<(), With<HideWindowsMenuEntry>>,
     mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
 ) {
-    if menu_items.contains(trigger.event_target()) {
-        hide_windows.write(crate::runtime::HideAllWindowsRequest);
+    for selection in selections.read() {
+        if menu_items.contains(selection.target()) {
+            hide_windows.write(crate::runtime::HideAllWindowsRequest);
+        }
+    }
+}
+
+fn cleanup_transient_menu_entries(
+    mut selections: MessageReader<OsMenuSelection>,
+    transient: Query<(), With<TransientOsMenuEntry>>,
+    mut commands: Commands,
+) {
+    for selection in selections.read() {
+        if transient.contains(selection.target()) {
+            commands.entity(selection.target()).despawn();
+        }
     }
 }
 
@@ -736,8 +770,8 @@ mod tests {
     #[test]
     fn command_menu_selection_emits_command_invocation() {
         let mut app = App::new();
-        app.add_message::<CommandInvocation>()
-            .add_observer(dispatch_command_menu_selection);
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .insert_resource(test_settings());
         let command = app
             .world_mut()
             .spawn(CommandDefinition::new(
@@ -747,7 +781,9 @@ mod tests {
             ))
             .id();
 
-        app.world_mut().trigger(OsMenuSelect::new(command));
+        app.world_mut()
+            .write_message(OsMenuSelection::new(command));
+        app.world_mut().run_schedule(Update);
 
         let invocations = app
             .world_mut()
@@ -763,11 +799,13 @@ mod tests {
     #[test]
     fn close_menu_selection_emits_hide_windows_request() {
         let mut app = App::new();
-        app.add_message::<crate::runtime::HideAllWindowsRequest>()
-            .add_observer(hide_windows_from_menu);
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .insert_resource(test_settings());
         let close = app.world_mut().spawn(HideWindowsMenuEntry).id();
 
-        app.world_mut().trigger(OsMenuSelect::new(close));
+        app.world_mut()
+            .write_message(OsMenuSelection::new(close));
+        app.world_mut().run_schedule(Update);
 
         let requests = app
             .world_mut()

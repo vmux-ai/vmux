@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
-use crate::os_menu::{OsMenuEntry, OsMenuSelect};
+use crate::os_menu::{OsMenuEntry, OsMenuSelection, OsMenuSet};
 #[cfg(feature = "recording")]
 use crate::recording::{RecordingControl, RecordingStatus};
 use crate::runtime::{HideAllWindowsRequest, QuitRequest, ShowAllWindowsRequest};
@@ -15,9 +15,15 @@ impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
         app.insert_non_send(TrayRuntime(None))
             .add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
-            .add_observer(toggle_tray_visibility)
-            .add_observer(quit_from_tray)
-            .add_observer(control_recording_from_tray)
+            .add_systems(
+                Update,
+                (
+                    toggle_tray_visibility,
+                    quit_from_tray,
+                    control_recording_from_tray,
+                )
+                    .in_set(OsMenuSet::Dispatch),
+            )
             .add_systems(Update, (sync_tray_menu_state, sync_tray_recording));
     }
 }
@@ -160,13 +166,16 @@ fn setup_tray(
 }
 
 fn toggle_tray_visibility(
-    trigger: On<OsMenuSelect>,
+    mut selections: MessageReader<OsMenuSelection>,
     menu_items: Query<(), With<ToggleTrayVisibility>>,
     windows: Query<&Window>,
     mut hide_windows: MessageWriter<HideAllWindowsRequest>,
     mut show_windows: MessageWriter<ShowAllWindowsRequest>,
 ) {
-    if !menu_items.contains(trigger.event_target()) {
+    if !selections
+        .read()
+        .any(|selection| menu_items.contains(selection.target()))
+    {
         return;
     }
     let any_visible = windows.iter().any(|w| w.visible);
@@ -178,35 +187,42 @@ fn toggle_tray_visibility(
 }
 
 fn quit_from_tray(
-    trigger: On<OsMenuSelect>,
+    mut selections: MessageReader<OsMenuSelection>,
     menu_items: Query<(), With<QuitFromTray>>,
     mut quit: MessageWriter<QuitRequest>,
 ) {
-    if menu_items.contains(trigger.event_target()) {
+    if selections
+        .read()
+        .any(|selection| menu_items.contains(selection.target()))
+    {
         quit.write(QuitRequest);
     }
 }
 
 #[cfg(feature = "recording")]
 fn control_recording_from_tray(
-    trigger: On<OsMenuSelect>,
+    mut selections: MessageReader<OsMenuSelection>,
     pause: Query<(), With<PauseRecordingFromTray>>,
     resume: Query<(), With<ResumeRecordingFromTray>>,
     finish: Query<(), With<FinishRecordingFromTray>>,
     mut controls: MessageWriter<RecordingControl>,
 ) {
-    let target = trigger.event_target();
-    if pause.contains(target) {
-        controls.write(RecordingControl::Pause);
-    } else if resume.contains(target) {
-        controls.write(RecordingControl::Resume);
-    } else if finish.contains(target) {
-        controls.write(RecordingControl::Done);
+    for selection in selections.read() {
+        let target = selection.target();
+        if pause.contains(target) {
+            controls.write(RecordingControl::Pause);
+        } else if resume.contains(target) {
+            controls.write(RecordingControl::Resume);
+        } else if finish.contains(target) {
+            controls.write(RecordingControl::Done);
+        }
     }
 }
 
 #[cfg(not(feature = "recording"))]
-fn control_recording_from_tray(_trigger: On<OsMenuSelect>) {}
+fn control_recording_from_tray(mut selections: MessageReader<OsMenuSelection>) {
+    for _ in selections.read() {}
+}
 
 fn sync_tray_menu_state(
     mut runtime: NonSendMut<TrayRuntime>,

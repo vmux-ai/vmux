@@ -28,7 +28,9 @@ mod macos {
     use vmux_layout::state::LayoutUiState;
     use vmux_ui::i18n::{Locale, TranslationValue};
 
-    use crate::os_menu::{OsContextMenu, OsMenuEntry, OsMenuSelect, OsMenuSeparator};
+    use crate::os_menu::{
+        OsContextMenu, OsMenuEntry, OsMenuSelection, OsMenuSeparator, OsMenuSet,
+    };
 
     impl Plugin for super::BookmarkMenuPlugin {
         fn build(&self, app: &mut App) {
@@ -37,17 +39,23 @@ mod macos {
                 .add_message::<NewFolderInputRequest>()
                 .add_message::<RenameInputRequest>()
                 .add_systems(Startup, spawn_bookmark_menu_input_revision)
-                .add_observer(forward_message::<OpenRequest>)
-                .add_observer(forward_message::<AddRequest>)
-                .add_observer(forward_message::<MoveRequest>)
-                .add_observer(forward_message::<MoveFolderRequest>)
-                .add_observer(forward_message::<PinRequest>)
-                .add_observer(forward_message::<RemoveRequest>)
-                .add_observer(forward_message::<RemoveFolderRequest>)
-                .add_observer(forward_message::<ToggleFolderRequest>)
-                .add_observer(forward_message::<UnpinRequest>)
-                .add_observer(forward_message::<NewFolderInputRequest>)
-                .add_observer(forward_message::<RenameInputRequest>)
+                .add_systems(
+                    Update,
+                    (
+                        forward_message::<OpenRequest>,
+                        forward_message::<AddRequest>,
+                        forward_message::<MoveRequest>,
+                        forward_message::<MoveFolderRequest>,
+                        forward_message::<PinRequest>,
+                        forward_message::<RemoveRequest>,
+                        forward_message::<RemoveFolderRequest>,
+                        forward_message::<ToggleFolderRequest>,
+                        forward_message::<UnpinRequest>,
+                        forward_message::<NewFolderInputRequest>,
+                        forward_message::<RenameInputRequest>,
+                    )
+                        .in_set(OsMenuSet::Dispatch),
+                )
                 .add_systems(Update, show_bookmark_menu)
                 .add_systems(
                     Update,
@@ -530,14 +538,16 @@ mod macos {
     }
 
     fn forward_message<M: Message + Clone>(
-        trigger: On<OsMenuSelect>,
+        mut selections: MessageReader<OsMenuSelection>,
         menu_messages: Query<&BookmarkMenuMessage<M>>,
         mut messages: MessageWriter<M>,
     ) {
-        let Ok(message) = menu_messages.get(trigger.event_target()) else {
-            return;
-        };
-        messages.write(message.0.clone());
+        for selection in selections.read() {
+            let Ok(message) = menu_messages.get(selection.target()) else {
+                continue;
+            };
+            messages.write(message.0.clone());
+        }
     }
 
     fn spawn_bookmark_menu_input_revision(mut commands: Commands) {
@@ -579,66 +589,56 @@ mod macos {
     #[cfg(test)]
     mod tests {
         use super::*;
-
-        #[derive(Message, Clone)]
-        struct FirstRequest(u32);
-
-        #[derive(Message, Clone)]
-        struct SecondRequest(&'static str);
-
-        #[derive(Resource, Default)]
-        struct Received {
-            first: Vec<u32>,
-            second: Vec<&'static str>,
-        }
-
-        fn receive(
-            mut first: MessageReader<FirstRequest>,
-            mut second: MessageReader<SecondRequest>,
-            mut received: ResMut<Received>,
-        ) {
-            for request in first.read() {
-                received.first.push(request.0);
-            }
-            for request in second.read() {
-                received.second.push(request.0);
-            }
-        }
+        use bevy::ecs::message::Messages;
 
         #[test]
         fn selected_menu_entity_forwards_each_typed_message() {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .add_message::<FirstRequest>()
-                .add_message::<SecondRequest>()
-                .add_observer(forward_message::<FirstRequest>)
-                .add_observer(forward_message::<SecondRequest>)
-                .init_resource::<Received>()
-                .add_systems(Update, receive);
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                crate::os_menu::OsMenuPlugin,
+            ));
 
             let selected = app
                 .world_mut()
                 .spawn((
                     OsMenuEntry::new("selected".to_string(), true),
-                    BookmarkMenuMessage(FirstRequest(7)),
-                    BookmarkMenuMessage(SecondRequest("second")),
+                    BookmarkMenuMessage(PinRequest {
+                        uuid: "pin".to_string(),
+                    }),
+                    BookmarkMenuMessage(RemoveRequest {
+                        uuid: "remove".to_string(),
+                    }),
+                    crate::os_menu::TransientOsMenuEntry,
                 ))
                 .id();
             let disabled = app
                 .world_mut()
                 .spawn((
                     OsMenuEntry::new("disabled".to_string(), false),
-                    BookmarkMenuMessage(FirstRequest(9)),
+                    BookmarkMenuMessage(PinRequest {
+                        uuid: "disabled".to_string(),
+                    }),
                 ))
                 .id();
 
-            app.world_mut().trigger(OsMenuSelect::new(selected));
-            app.world_mut().despawn(selected);
-            app.update();
+            app.world_mut()
+                .write_message(OsMenuSelection::new(selected));
+            app.world_mut().run_schedule(Update);
 
-            let received = app.world().resource::<Received>();
-            assert_eq!(received.first, vec![7]);
-            assert_eq!(received.second, vec!["second"]);
+            let pins = app
+                .world_mut()
+                .resource_mut::<Messages<PinRequest>>()
+                .drain()
+                .collect::<Vec<_>>();
+            let removes = app
+                .world_mut()
+                .resource_mut::<Messages<RemoveRequest>>()
+                .drain()
+                .collect::<Vec<_>>();
+            assert_eq!(pins, vec![PinRequest { uuid: "pin".into() }]);
+            assert_eq!(removes, vec![RemoveRequest { uuid: "remove".into() }]);
             assert!(app.world().get_entity(selected).is_err());
             assert!(app.world().get_entity(disabled).is_ok());
         }
