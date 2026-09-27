@@ -406,7 +406,7 @@ async fn subscribe(
     if let Some(receiver) = state.acp.lock().await.subscribe(sid) {
         return Some(receiver);
     }
-    state.agents.lock().await.subscribe(sid)
+    state.agents.subscribe(sid.to_string()).await
 }
 
 async fn session_snapshot(
@@ -416,7 +416,7 @@ async fn session_snapshot(
     let snapshot = if state.acp.lock().await.contains(sid) {
         state.acp.lock().await.snapshot(sid)
     } else {
-        state.agents.lock().await.snapshot(sid).await
+        state.agents.snapshot(sid.to_string()).await
     }?;
     match snapshot {
         ServiceMessage::Shared(event) => Some(event),
@@ -520,7 +520,7 @@ mod live {
             let state = super::super::server::RemoteState {
                 relay_token: Arc::from("relay-token"),
                 authorizations: Arc::new(Mutex::new(authorizations.clone())),
-                agents: Arc::new(Mutex::new(Default::default())),
+                agents: crate::agent::AgentSessions::closed(),
                 acp: Arc::new(Mutex::new(Default::default())),
                 broker: crate::agent::AgentBroker::new(
                     agent_tx,

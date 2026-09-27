@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::RemotePaths;
 use crate::acp::AcpSessionManager;
-use crate::agent::{AgentBroker, AgentSessionManager};
+use crate::agent::{AgentBroker, AgentSessions};
 use crate::message::Message;
 use crate::remote::client_operation::ClientOperations;
 use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
@@ -26,14 +26,14 @@ const MAX_CLIENT_OP_ID_BYTES: usize = 256;
 pub(crate) struct RemoteState {
     pub(crate) relay_token: Arc<str>,
     pub(crate) authorizations: Arc<Mutex<RemoteAuthorizationStore>>,
-    pub(crate) agents: Arc<Mutex<AgentSessionManager>>,
+    pub(crate) agents: AgentSessions,
     pub(crate) acp: Arc<Mutex<AcpSessionManager>>,
     pub(crate) broker: AgentBroker,
     pub(crate) client_ops: ClientOperations,
 }
 
 pub(crate) fn spawn(
-    agents: Arc<Mutex<AgentSessionManager>>,
+    agents: AgentSessions,
     acp: Arc<Mutex<AcpSessionManager>>,
     broker: AgentBroker,
     client_ops: ClientOperations,
@@ -91,7 +91,7 @@ pub(crate) async fn session_messages(state: &RemoteState, sid: &str) -> Option<V
             return Some(messages);
         }
     }
-    state.agents.lock().await.remote_messages(sid).await
+    state.agents.remote_messages(sid.to_string()).await
 }
 
 pub(crate) async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession> {
@@ -102,7 +102,7 @@ pub(crate) async fn current_session(state: &RemoteState, sid: &str) -> Option<Re
     let mut session = if let Some(session) = acp_session {
         session
     } else {
-        state.agents.lock().await.remote_session(sid)?
+        state.agents.remote_session(sid.to_string()).await?
     };
     if let Some(messages) = session_messages(state, sid).await {
         session.title = vmux_api::room::Message::conversation_title(&messages, &session.name);

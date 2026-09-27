@@ -85,7 +85,7 @@ async fn media(state: &RemoteState, sid: &str, query: String) -> SharedResponse 
 }
 
 async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
-    let mut sessions = state.agents.lock().await.remote_sessions();
+    let mut sessions = state.agents.remote_sessions().await;
     sessions.extend(state.acp.lock().await.remote_sessions());
     for session in &mut sessions {
         if let Some(messages) = super::super::server::session_messages(state, &session.sid).await {
@@ -97,7 +97,12 @@ async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
 }
 
 async fn session_exists(state: &RemoteState, sid: &str) -> bool {
-    state.acp.lock().await.contains(sid) || state.agents.lock().await.remote_session(sid).is_some()
+    state.acp.lock().await.contains(sid)
+        || state
+            .agents
+            .remote_session(sid.to_string())
+            .await
+            .is_some()
 }
 
 async fn push_input(
@@ -110,12 +115,11 @@ async fn push_input(
         state.acp.lock().await.input(sid, acp);
         return SharedResponse::Ok;
     }
-    let agents = state.agents.lock().await;
-    if agents.remote_session(sid).is_none() {
-        return SharedResponse::Failed(SharedFailure::NotFound);
+    if state.agents.input(sid.to_string(), page).await {
+        SharedResponse::Ok
+    } else {
+        SharedResponse::Failed(SharedFailure::NotFound)
     }
-    agents.input(sid, page);
-    SharedResponse::Ok
 }
 
 async fn prompt(
@@ -194,7 +198,7 @@ mod tests {
                     .keep()
                     .join("authorizations.json"),
             ))),
-            agents: Arc::new(Mutex::new(Default::default())),
+            agents: crate::agent::AgentSessions::closed(),
             acp: Arc::new(Mutex::new(Default::default())),
             broker: crate::agent::AgentBroker::new(
                 agent_tx,

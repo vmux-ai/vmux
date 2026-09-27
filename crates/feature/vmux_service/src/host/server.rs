@@ -14,6 +14,7 @@ use vmux_api::protocol::{
 };
 
 use super::query::{ProcessQueries, ProcessQueryPlugin};
+use crate::agent::{AgentSessionPlugin, AgentSessions};
 use crate::remote::client_operation::{ClientOperationPlugin, ClientOperations};
 
 type PendingQueries = crate::agent::AgentQueryResponses;
@@ -85,6 +86,8 @@ pub(crate) struct ServiceDaemonPlugin {
     query_plugin: std::sync::Mutex<Option<ProcessQueryPlugin>>,
     client_operations: ClientOperations,
     client_operation_plugin: std::sync::Mutex<Option<ClientOperationPlugin>>,
+    agent_sessions: AgentSessions,
+    agent_session_plugin: std::sync::Mutex<Option<AgentSessionPlugin>>,
 }
 
 impl ServiceDaemonPlugin {
@@ -96,7 +99,10 @@ impl ServiceDaemonPlugin {
     ) -> Self {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
         let (query_plugin, queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
-        let (client_operation_plugin, client_operations) = ClientOperationPlugin::new(wake);
+        let (client_operation_plugin, client_operations) =
+            ClientOperationPlugin::new(wake.clone());
+        let (agent_session_plugin, agent_sessions) =
+            AgentSessionPlugin::new(runtime.clone(), wake);
         Self {
             listener: std::sync::Mutex::new(Some(listener)),
             manager,
@@ -106,6 +112,8 @@ impl ServiceDaemonPlugin {
             query_plugin: std::sync::Mutex::new(Some(query_plugin)),
             client_operations,
             client_operation_plugin: std::sync::Mutex::new(Some(client_operation_plugin)),
+            agent_sessions,
+            agent_session_plugin: std::sync::Mutex::new(Some(agent_session_plugin)),
         }
     }
 }
@@ -135,14 +143,26 @@ impl Plugin for ServiceDaemonPlugin {
             .unwrap()
             .take()
             .expect("service daemon plugin can only be built once");
+        let agent_sessions = self.agent_sessions.clone();
+        let agent_session_plugin = self
+            .agent_session_plugin
+            .lock()
+            .unwrap()
+            .take()
+            .expect("service daemon plugin can only be built once");
         let started_at = ServiceStartedAt(Instant::now());
-        app.add_plugins((query_plugin, client_operation_plugin));
+        app.add_plugins((
+            query_plugin,
+            client_operation_plugin,
+            agent_session_plugin,
+        ));
         let task = self.runtime.spawn(async move {
             run_server(
                 listener,
                 server_manager,
                 queries,
                 client_operations,
+                agent_sessions,
                 started_at,
             )
             .await;
@@ -236,7 +256,7 @@ fn page_agent_prompt(text: String, attachments: &[AgentAttachment]) -> String {
 
 async fn route_agent_input(
     acp_manager: &Arc<Mutex<crate::acp::AcpSessionManager>>,
-    agent_manager: &Arc<Mutex<crate::agent::AgentSessionManager>>,
+    agent_sessions: &AgentSessions,
     sid: String,
     text: String,
     context: Option<String>,
@@ -258,10 +278,12 @@ async fn route_agent_input(
     }
     drop(acp);
     let text = compose_agent_prompt(&page_agent_prompt(text, &attachments), context.as_deref());
-    agent_manager
-        .lock()
-        .await
-        .input(&sid, crate::agent::SessionInput::User { text, attachments });
+    agent_sessions
+        .input(
+            sid,
+            crate::agent::SessionInput::User { text, attachments },
+        )
+        .await;
 }
 
 async fn with_process_mut<F, R>(
@@ -281,13 +303,13 @@ async fn run_server(
     manager: Arc<Mutex<ProcessManager>>,
     process_queries: ProcessQueries,
     client_operations: ClientOperations,
+    agent_sessions: AgentSessions,
     started_at: ServiceStartedAt,
 ) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries = PendingQueries::default();
     let pending_commands = PendingCommands::default();
     let pending_tool_calls = crate::agent::AgentToolResponses::default();
-    let agent_manager = Arc::new(Mutex::new(crate::agent::AgentSessionManager::default()));
     let acp_manager = Arc::new(Mutex::new(crate::acp::AcpSessionManager::default()));
     let remote_broker = crate::agent::AgentBroker::new(
         agent_tx.clone(),
@@ -296,7 +318,7 @@ async fn run_server(
         pending_tool_calls.clone(),
     );
     let remote_handle = crate::remote::server::spawn(
-        Arc::clone(&agent_manager),
+        agent_sessions.clone(),
         Arc::clone(&acp_manager),
         remote_broker,
         client_operations,
@@ -318,7 +340,7 @@ async fn run_server(
                 let pending_queries = pending_queries.clone();
                 let pending_commands = pending_commands.clone();
                 let pending_tool_calls = pending_tool_calls.clone();
-                let agent_manager = Arc::clone(&agent_manager);
+                let agent_sessions = agent_sessions.clone();
                 let acp_manager = Arc::clone(&acp_manager);
                 let process_queries = process_queries.clone();
                 let shutdown_tx = shutdown_tx.clone();
@@ -330,7 +352,7 @@ async fn run_server(
                         pending_queries,
                         pending_commands,
                         pending_tool_calls,
-                        agent_manager,
+                        agent_sessions,
                         acp_manager,
                         process_queries,
                         shutdown_tx,
@@ -493,7 +515,7 @@ async fn handle_client(
     pending_queries: PendingQueries,
     pending_commands: PendingCommands,
     pending_tool_calls: crate::agent::AgentToolResponses,
-    agent_manager: Arc<Mutex<crate::agent::AgentSessionManager>>,
+    agent_sessions: AgentSessions,
     acp_manager: Arc<Mutex<crate::acp::AcpSessionManager>>,
     process_queries: ProcessQueries,
     shutdown_tx: mpsc::Sender<()>,
@@ -1068,15 +1090,15 @@ async fn handle_client(
                 let tools: Vec<crate::stream::ToolDef> =
                     serde_json::from_str(&tools_json).unwrap_or_default();
                 let auto: std::collections::HashSet<String> = auto_tools.into_iter().collect();
-                let result = agent_manager.lock().await.spawn(
+                let result = agent_sessions.spawn(
                     sid,
-                    &provider,
+                    provider,
                     model,
                     cwd,
                     tools,
                     auto,
                     broker.clone(),
-                );
+                ).await;
                 if let Err(message) = result {
                     let resp = ServiceMessage::Error { message };
                     let mut w = writer.lock().await;
@@ -1093,9 +1115,9 @@ async fn handle_client(
             }
 
             ClientMessage::Shared(SharedMessage::AgentAttach { sid }) => {
-                let rx = agent_manager.lock().await.subscribe(&sid);
+                let rx = agent_sessions.subscribe(sid.clone()).await;
                 if let Some(mut rx) = rx {
-                    if let Some(snapshot) = agent_manager.lock().await.snapshot(&sid).await {
+                    if let Some(snapshot) = agent_sessions.snapshot(sid.clone()).await {
                         let mut w = writer.lock().await;
                         crate::framing::write_service_message(&mut *w, &snapshot).await?;
                     }
@@ -1149,7 +1171,7 @@ async fn handle_client(
             }) => {
                 route_agent_input(
                     &acp_manager,
-                    &agent_manager,
+                    &agent_sessions,
                     sid,
                     text,
                     context,
@@ -1210,10 +1232,9 @@ async fn handle_client(
                         .await
                         .input(&sid, crate::acp::AcpInput::Cancel);
                 } else {
-                    agent_manager
-                        .lock()
-                        .await
-                        .input(&sid, crate::agent::SessionInput::Cancel);
+                    agent_sessions
+                        .input(sid, crate::agent::SessionInput::Cancel)
+                        .await;
                 }
             }
 
@@ -1228,10 +1249,12 @@ async fn handle_client(
                         .await
                         .input(&sid, crate::acp::AcpInput::Approve { call_id, decision });
                 } else {
-                    agent_manager.lock().await.input(
-                        &sid,
-                        crate::agent::SessionInput::Approve { call_id, decision },
-                    );
+                    agent_sessions
+                        .input(
+                            sid,
+                            crate::agent::SessionInput::Approve { call_id, decision },
+                        )
+                        .await;
                 }
             }
 
@@ -1239,7 +1262,7 @@ async fn handle_client(
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager.lock().await.close(&sid);
                 } else {
-                    agent_manager.lock().await.close(&sid);
+                    agent_sessions.close(sid.clone()).await;
                 }
                 if let Some(handle) = page_agent_forwarders.remove(&sid) {
                     handle.abort();

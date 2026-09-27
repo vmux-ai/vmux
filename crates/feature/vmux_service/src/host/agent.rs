@@ -1,8 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tokio::sync::{Mutex, broadcast, mpsc};
+use bevy::prelude::{
+    App, ApplyDeferred, Commands, Component, Entity, IntoScheduleConfigs, Name, Plugin, Query,
+    Single, Update,
+};
+use tokio::runtime::Handle;
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 
 use super::request::PendingRequests;
 use crate::message::{AssistantBlock, Message};
@@ -191,130 +196,650 @@ pub enum SessionInput {
     Close,
 }
 
-pub struct SessionHandle {
-    pub input_tx: mpsc::UnboundedSender<SessionInput>,
-    pub stream_tx: broadcast::Sender<ServiceMessage>,
-    pub messages: Arc<Mutex<Vec<Message>>>,
-    pub task: tokio::task::JoinHandle<()>,
-    provider: String,
-    model: String,
-    cwd: String,
-    status: Arc<StdMutex<AgentRunStatus>>,
-    approval: Arc<StdMutex<Option<RemoteApproval>>>,
-    created_at_ms: u64,
+pub(crate) struct AgentSessionPlugin {
+    inbox: StdMutex<Option<AgentSessionReceivers>>,
+    runtime: Handle,
 }
 
-#[derive(Default)]
-pub struct AgentSessionManager {
-    sessions: HashMap<String, SessionHandle>,
+impl AgentSessionPlugin {
+    pub(crate) fn new(
+        runtime: Handle,
+        wake: mpsc::UnboundedSender<()>,
+    ) -> (Self, AgentSessions) {
+        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
+        let (inputs, input_inbox) = mpsc::unbounded_channel();
+        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
+        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
+        let (messages, message_inbox) = mpsc::unbounded_channel();
+        let (lists, list_inbox) = mpsc::unbounded_channel();
+        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
+        let (closes, close_inbox) = mpsc::unbounded_channel();
+        (
+            Self {
+                inbox: StdMutex::new(Some(AgentSessionReceivers {
+                    spawns: spawn_inbox,
+                    inputs: input_inbox,
+                    subscriptions: subscription_inbox,
+                    snapshots: snapshot_inbox,
+                    messages: message_inbox,
+                    lists: list_inbox,
+                    lookups: lookup_inbox,
+                    closes: close_inbox,
+                })),
+                runtime,
+            },
+            AgentSessions {
+                spawns,
+                inputs,
+                subscriptions,
+                snapshots,
+                messages,
+                lists,
+                lookups,
+                closes,
+                wake,
+            },
+        )
+    }
 }
 
-impl AgentSessionManager {
+impl Plugin for AgentSessionPlugin {
+    fn build(&self, app: &mut App) {
+        let inbox = self
+            .inbox
+            .lock()
+            .unwrap()
+            .take()
+            .expect("agent session plugin can only be built once");
+        app.world_mut().spawn((
+            Name::new("agent session runtime"),
+            AgentSessionRuntime(self.runtime.clone()),
+            AgentSessionInbox(StdMutex::new(inbox)),
+        ));
+        app.add_systems(
+            Update,
+            (
+                receive_agent_session_requests,
+                ApplyDeferred,
+                spawn_agent_sessions,
+                route_agent_session_inputs,
+                subscribe_agent_sessions,
+                snapshot_agent_sessions,
+                read_agent_session_messages,
+                list_agent_sessions,
+                find_agent_sessions,
+                close_agent_sessions,
+            )
+                .chain(),
+        );
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct AgentSessions {
+    spawns: mpsc::UnboundedSender<SpawnAgentSession>,
+    inputs: mpsc::UnboundedSender<AgentSessionInputRequest>,
+    subscriptions: mpsc::UnboundedSender<SubscribeAgentSession>,
+    snapshots: mpsc::UnboundedSender<SnapshotAgentSession>,
+    messages: mpsc::UnboundedSender<AgentSessionMessages>,
+    lists: mpsc::UnboundedSender<ListAgentSessions>,
+    lookups: mpsc::UnboundedSender<FindAgentSession>,
+    closes: mpsc::UnboundedSender<CloseAgentSession>,
+    wake: mpsc::UnboundedSender<()>,
+}
+
+impl AgentSessions {
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn(
-        &mut self,
+    pub(crate) async fn spawn(
+        &self,
         sid: String,
-        provider_name: &str,
+        provider: String,
         model: String,
         cwd: String,
         tools: Vec<ToolDef>,
         auto_tools: HashSet<String>,
         broker: AgentBroker,
     ) -> Result<(), String> {
-        if self.sessions.contains_key(&sid) {
-            return Ok(());
-        }
-        let provider = resolve_provider(provider_name)
-            .ok_or_else(|| format!("unknown page-agent provider: {provider_name}"))?;
-        let (input_tx, input_rx) = mpsc::unbounded_channel();
-        let (stream_tx, _) = broadcast::channel(256);
-        let messages = Arc::new(Mutex::new(Vec::new()));
-        let status = Arc::new(StdMutex::new(AgentRunStatus::Idle));
-        let approval = Arc::new(StdMutex::new(None));
-        let task = tokio::spawn(run_session(
-            sid.clone(),
-            provider,
-            model.clone(),
-            tools,
-            auto_tools,
-            input_rx,
-            stream_tx.clone(),
-            broker,
-            messages.clone(),
-            status.clone(),
-            approval.clone(),
-        ));
-        self.sessions.insert(
-            sid,
-            SessionHandle {
-                input_tx,
-                stream_tx,
-                messages,
-                task,
-                provider: provider_name.to_string(),
+        let (response, receiver) = oneshot::channel();
+        self.spawns
+            .send(SpawnAgentSession {
+                sid,
+                provider,
                 model,
                 cwd,
-                status,
-                approval,
-                created_at_ms: now_ms(),
-            },
-        );
-        Ok(())
+                tools,
+                auto_tools,
+                broker,
+                response: Some(response),
+            })
+            .map_err(|_| "agent session runtime unavailable".to_string())?;
+        self.wake
+            .send(())
+            .map_err(|_| "agent session runtime unavailable".to_string())?;
+        receiver
+            .await
+            .map_err(|_| "agent session spawn was cancelled".to_string())?
     }
 
-    pub fn input(&self, sid: &str, input: SessionInput) {
-        if let Some(handle) = self.sessions.get(sid) {
-            if let SessionInput::Approve { call_id, .. } = &input {
-                let mut approval = handle.approval.lock().unwrap();
-                if approval
+    pub(crate) async fn input(&self, sid: String, input: SessionInput) -> bool {
+        let (response, receiver) = oneshot::channel();
+        if self
+            .inputs
+            .send(AgentSessionInputRequest {
+                sid,
+                input: Some(input),
+                response: Some(response),
+            })
+            .is_err()
+            || self.wake.send(()).is_err()
+        {
+            return false;
+        }
+        receiver.await.unwrap_or(false)
+    }
+
+    pub(crate) async fn subscribe(
+        &self,
+        sid: String,
+    ) -> Option<broadcast::Receiver<ServiceMessage>> {
+        let (response, receiver) = oneshot::channel();
+        self.subscriptions
+            .send(SubscribeAgentSession {
+                sid,
+                response: Some(response),
+            })
+            .ok()?;
+        self.wake.send(()).ok()?;
+        receiver.await.ok().flatten()
+    }
+
+    pub(crate) async fn snapshot(&self, sid: String) -> Option<ServiceMessage> {
+        let (response, receiver) = oneshot::channel();
+        self.snapshots
+            .send(SnapshotAgentSession {
+                sid,
+                response: Some(response),
+            })
+            .ok()?;
+        self.wake.send(()).ok()?;
+        receiver.await.ok().flatten()
+    }
+
+    pub(crate) async fn remote_messages(&self, sid: String) -> Option<Vec<Message>> {
+        let (response, receiver) = oneshot::channel();
+        self.messages
+            .send(AgentSessionMessages {
+                sid,
+                response: Some(response),
+            })
+            .ok()?;
+        self.wake.send(()).ok()?;
+        receiver.await.ok().flatten()
+    }
+
+    pub(crate) async fn remote_sessions(&self) -> Vec<RemoteSession> {
+        let (response, receiver) = oneshot::channel();
+        if self
+            .lists
+            .send(ListAgentSessions {
+                response: Some(response),
+            })
+            .is_err()
+            || self.wake.send(()).is_err()
+        {
+            return Vec::new();
+        }
+        receiver.await.unwrap_or_default()
+    }
+
+    pub(crate) async fn remote_session(&self, sid: String) -> Option<RemoteSession> {
+        let (response, receiver) = oneshot::channel();
+        self.lookups
+            .send(FindAgentSession {
+                sid,
+                response: Some(response),
+            })
+            .ok()?;
+        self.wake.send(()).ok()?;
+        receiver.await.ok().flatten()
+    }
+
+    pub(crate) async fn close(&self, sid: String) -> bool {
+        let (response, receiver) = oneshot::channel();
+        if self
+            .closes
+            .send(CloseAgentSession {
+                sid,
+                response: Some(response),
+            })
+            .is_err()
+            || self.wake.send(()).is_err()
+        {
+            return false;
+        }
+        receiver.await.unwrap_or(false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn closed() -> Self {
+        let (spawns, spawn_inbox) = mpsc::unbounded_channel();
+        let (inputs, input_inbox) = mpsc::unbounded_channel();
+        let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
+        let (snapshots, snapshot_inbox) = mpsc::unbounded_channel();
+        let (messages, message_inbox) = mpsc::unbounded_channel();
+        let (lists, list_inbox) = mpsc::unbounded_channel();
+        let (lookups, lookup_inbox) = mpsc::unbounded_channel();
+        let (closes, close_inbox) = mpsc::unbounded_channel();
+        let (wake, wake_inbox) = mpsc::unbounded_channel();
+        drop((
+            spawn_inbox,
+            input_inbox,
+            subscription_inbox,
+            snapshot_inbox,
+            message_inbox,
+            list_inbox,
+            lookup_inbox,
+            close_inbox,
+            wake_inbox,
+        ));
+        Self {
+            spawns,
+            inputs,
+            subscriptions,
+            snapshots,
+            messages,
+            lists,
+            lookups,
+            closes,
+            wake,
+        }
+    }
+}
+
+struct AgentSessionReceivers {
+    spawns: mpsc::UnboundedReceiver<SpawnAgentSession>,
+    inputs: mpsc::UnboundedReceiver<AgentSessionInputRequest>,
+    subscriptions: mpsc::UnboundedReceiver<SubscribeAgentSession>,
+    snapshots: mpsc::UnboundedReceiver<SnapshotAgentSession>,
+    messages: mpsc::UnboundedReceiver<AgentSessionMessages>,
+    lists: mpsc::UnboundedReceiver<ListAgentSessions>,
+    lookups: mpsc::UnboundedReceiver<FindAgentSession>,
+    closes: mpsc::UnboundedReceiver<CloseAgentSession>,
+}
+
+#[derive(Component)]
+struct AgentSessionInbox(StdMutex<AgentSessionReceivers>);
+
+#[derive(Component)]
+struct AgentSessionRuntime(Handle);
+
+#[derive(Component)]
+struct SpawnAgentSession {
+    sid: String,
+    provider: String,
+    model: String,
+    cwd: String,
+    tools: Vec<ToolDef>,
+    auto_tools: HashSet<String>,
+    broker: AgentBroker,
+    response: Option<oneshot::Sender<Result<(), String>>>,
+}
+
+#[derive(Component)]
+struct AgentSessionInputRequest {
+    sid: String,
+    input: Option<SessionInput>,
+    response: Option<oneshot::Sender<bool>>,
+}
+
+#[derive(Component)]
+struct SubscribeAgentSession {
+    sid: String,
+    response: Option<oneshot::Sender<Option<broadcast::Receiver<ServiceMessage>>>>,
+}
+
+#[derive(Component)]
+struct SnapshotAgentSession {
+    sid: String,
+    response: Option<oneshot::Sender<Option<ServiceMessage>>>,
+}
+
+#[derive(Component)]
+struct AgentSessionMessages {
+    sid: String,
+    response: Option<oneshot::Sender<Option<Vec<Message>>>>,
+}
+
+#[derive(Component)]
+struct ListAgentSessions {
+    response: Option<oneshot::Sender<Vec<RemoteSession>>>,
+}
+
+#[derive(Component)]
+struct FindAgentSession {
+    sid: String,
+    response: Option<oneshot::Sender<Option<RemoteSession>>>,
+}
+
+#[derive(Component)]
+struct CloseAgentSession {
+    sid: String,
+    response: Option<oneshot::Sender<bool>>,
+}
+
+#[derive(Component, Clone, PartialEq, Eq)]
+struct AgentSessionId(String);
+
+#[derive(Component)]
+struct AgentSessionInput(mpsc::UnboundedSender<SessionInput>);
+
+#[derive(Component)]
+struct AgentSessionStream(broadcast::Sender<ServiceMessage>);
+
+#[derive(Component)]
+struct AgentSessionHistory(Arc<Mutex<Vec<Message>>>);
+
+#[derive(Component)]
+struct AgentSessionTask(tokio::task::JoinHandle<()>);
+
+impl Drop for AgentSessionTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+#[derive(Component)]
+struct AgentSessionProvider(String);
+
+#[derive(Component)]
+struct AgentSessionModel(String);
+
+#[derive(Component)]
+struct AgentSessionWorkingDirectory(String);
+
+#[derive(Component)]
+struct AgentSessionStatus(Arc<StdMutex<AgentRunStatus>>);
+
+#[derive(Component)]
+struct AgentSessionApproval(Arc<StdMutex<Option<RemoteApproval>>>);
+
+#[derive(Component)]
+struct AgentSessionCreatedAt(u64);
+
+fn receive_agent_session_requests(inbox: Single<&AgentSessionInbox>, mut commands: Commands) {
+    let Ok(mut inbox) = inbox.0.lock() else {
+        return;
+    };
+    while let Ok(request) = inbox.spawns.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.inputs.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.subscriptions.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.snapshots.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.messages.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.lists.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.lookups.try_recv() {
+        commands.spawn(request);
+    }
+    while let Ok(request) = inbox.closes.try_recv() {
+        commands.spawn(request);
+    }
+}
+
+fn spawn_agent_sessions(
+    runtime: Single<&AgentSessionRuntime>,
+    sessions: Query<&AgentSessionId>,
+    mut requests: Query<(Entity, &mut SpawnAgentSession)>,
+    mut commands: Commands,
+) {
+    let mut session_ids: HashSet<String> = sessions.iter().map(|sid| sid.0.clone()).collect();
+    for (request_entity, mut request) in &mut requests {
+        let result = if session_ids.contains(&request.sid) {
+            Ok(())
+        } else if let Some(provider) = resolve_provider(&request.provider) {
+            let (input_tx, input_rx) = mpsc::unbounded_channel();
+            let (stream_tx, _) = broadcast::channel(256);
+            let messages = Arc::new(Mutex::new(Vec::new()));
+            let status = Arc::new(StdMutex::new(AgentRunStatus::Idle));
+            let approval = Arc::new(StdMutex::new(None));
+            let task = runtime.0.spawn(run_session(
+                request.sid.clone(),
+                provider,
+                request.model.clone(),
+                std::mem::take(&mut request.tools),
+                std::mem::take(&mut request.auto_tools),
+                input_rx,
+                stream_tx.clone(),
+                request.broker.clone(),
+                messages.clone(),
+                status.clone(),
+                approval.clone(),
+            ));
+            commands.spawn((
+                Name::new(format!("agent session {}", request.sid)),
+                AgentSessionId(request.sid.clone()),
+                AgentSessionInput(input_tx),
+                AgentSessionStream(stream_tx),
+                AgentSessionHistory(messages),
+                AgentSessionTask(task),
+                AgentSessionProvider(request.provider.clone()),
+                AgentSessionModel(request.model.clone()),
+                AgentSessionWorkingDirectory(request.cwd.clone()),
+                AgentSessionStatus(status),
+                AgentSessionApproval(approval),
+                AgentSessionCreatedAt(now_ms()),
+            ));
+            session_ids.insert(request.sid.clone());
+            Ok(())
+        } else {
+            Err(format!(
+                "unknown page-agent provider: {}",
+                request.provider
+            ))
+        };
+        if let Some(response) = request.response.take() {
+            let _ = response.send(result);
+        }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+fn route_agent_session_inputs(
+    sessions: Query<(
+        &AgentSessionId,
+        &AgentSessionInput,
+        &AgentSessionStream,
+        &AgentSessionApproval,
+    )>,
+    mut requests: Query<(Entity, &mut AgentSessionInputRequest)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let mut accepted = false;
+        for (sid, input, stream, approval) in &sessions {
+            if sid.0 != request.sid {
+                continue;
+            }
+            if let Some(SessionInput::Approve { call_id, .. }) = &request.input {
+                let mut pending = approval.0.lock().unwrap();
+                if pending
                     .as_ref()
                     .is_some_and(|pending| pending.call_id == *call_id)
                 {
-                    *approval = None;
-                    let _ = handle.stream_tx.send(ServiceMessage::Shared(
+                    *pending = None;
+                    let _ = stream.0.send(ServiceMessage::Shared(
                         SharedEvent::AgentApprovalResolved {
-                            sid: sid.to_string(),
+                            sid: request.sid.clone(),
                             call_id: call_id.clone(),
                         },
                     ));
                 }
             }
-            let _ = handle.input_tx.send(input);
+            if let Some(session_input) = request.input.take() {
+                accepted = input.0.send(session_input).is_ok();
+            }
+            break;
         }
+        if let Some(response) = request.response.take() {
+            let _ = response.send(accepted);
+        }
+        commands.entity(request_entity).despawn();
     }
+}
 
-    pub fn subscribe(&self, sid: &str) -> Option<broadcast::Receiver<ServiceMessage>> {
-        self.sessions.get(sid).map(|h| h.stream_tx.subscribe())
-    }
-
-    pub async fn snapshot(&self, sid: &str) -> Option<ServiceMessage> {
-        let handle = self.sessions.get(sid)?;
-        Some(snapshot_message(sid, &handle.messages).await)
-    }
-
-    pub async fn remote_messages(&self, sid: &str) -> Option<Vec<Message>> {
-        let handle = self.sessions.get(sid)?;
-        Some(handle.messages.lock().await.clone())
-    }
-
-    pub fn remote_sessions(&self) -> Vec<RemoteSession> {
-        self.sessions
+fn subscribe_agent_sessions(
+    sessions: Query<(&AgentSessionId, &AgentSessionStream)>,
+    mut requests: Query<(Entity, &mut SubscribeAgentSession)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let receiver = sessions
             .iter()
-            .map(|(sid, handle)| remote_session(sid, handle))
-            .collect()
-    }
-
-    pub fn remote_session(&self, sid: &str) -> Option<RemoteSession> {
-        self.sessions
-            .get(sid)
-            .map(|handle| remote_session(sid, handle))
-    }
-
-    pub fn close(&mut self, sid: &str) {
-        if let Some(handle) = self.sessions.remove(sid) {
-            let _ = handle.input_tx.send(SessionInput::Close);
-            handle.task.abort();
+            .find(|(sid, _)| sid.0 == request.sid)
+            .map(|(_, stream)| stream.0.subscribe());
+        if let Some(response) = request.response.take() {
+            let _ = response.send(receiver);
         }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+fn snapshot_agent_sessions(
+    sessions: Query<(&AgentSessionId, &AgentSessionHistory)>,
+    mut requests: Query<(Entity, &mut SnapshotAgentSession)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let mut snapshot = None;
+        let mut pending = false;
+        for (sid, history) in &sessions {
+            if sid.0 != request.sid {
+                continue;
+            }
+            let Ok(messages) = history.0.try_lock() else {
+                pending = true;
+                break;
+            };
+            snapshot = Some(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
+                sid: request.sid.clone(),
+                messages: messages.clone(),
+            }));
+            break;
+        }
+        if pending {
+            continue;
+        }
+        if let Some(response) = request.response.take() {
+            let _ = response.send(snapshot);
+        }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+fn read_agent_session_messages(
+    sessions: Query<(&AgentSessionId, &AgentSessionHistory)>,
+    mut requests: Query<(Entity, &mut AgentSessionMessages)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let mut result = None;
+        let mut pending = false;
+        for (sid, history) in &sessions {
+            if sid.0 != request.sid {
+                continue;
+            }
+            let Ok(messages) = history.0.try_lock() else {
+                pending = true;
+                break;
+            };
+            result = Some(messages.clone());
+            break;
+        }
+        if pending {
+            continue;
+        }
+        if let Some(response) = request.response.take() {
+            let _ = response.send(result);
+        }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+type AgentSessionQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static AgentSessionId,
+        &'static AgentSessionProvider,
+        &'static AgentSessionModel,
+        &'static AgentSessionWorkingDirectory,
+        &'static AgentSessionStatus,
+        &'static AgentSessionApproval,
+        &'static AgentSessionCreatedAt,
+    ),
+>;
+
+fn list_agent_sessions(
+    sessions: AgentSessionQuery<'_, '_>,
+    mut requests: Query<(Entity, &mut ListAgentSessions)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let result = sessions.iter().map(remote_session).collect();
+        if let Some(response) = request.response.take() {
+            let _ = response.send(result);
+        }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+fn find_agent_sessions(
+    sessions: AgentSessionQuery<'_, '_>,
+    mut requests: Query<(Entity, &mut FindAgentSession)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let result = sessions
+            .iter()
+            .find(|(sid, ..)| sid.0 == request.sid)
+            .map(remote_session);
+        if let Some(response) = request.response.take() {
+            let _ = response.send(result);
+        }
+        commands.entity(request_entity).despawn();
+    }
+}
+
+fn close_agent_sessions(
+    sessions: Query<(Entity, &AgentSessionId, &AgentSessionInput)>,
+    mut requests: Query<(Entity, &mut CloseAgentSession)>,
+    mut commands: Commands,
+) {
+    for (request_entity, mut request) in &mut requests {
+        let mut closed = false;
+        for (session_entity, sid, input) in &sessions {
+            if sid.0 != request.sid {
+                continue;
+            }
+            let _ = input.0.send(SessionInput::Close);
+            commands.entity(session_entity).despawn();
+            closed = true;
+            break;
+        }
+        if let Some(response) = request.response.take() {
+            let _ = response.send(closed);
+        }
+        commands.entity(request_entity).despawn();
     }
 }
 
@@ -325,26 +850,36 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn remote_session(sid: &str, handle: &SessionHandle) -> RemoteSession {
+fn remote_session(
+    (sid, provider, model, cwd, status, approval, created_at): (
+        &AgentSessionId,
+        &AgentSessionProvider,
+        &AgentSessionModel,
+        &AgentSessionWorkingDirectory,
+        &AgentSessionStatus,
+        &AgentSessionApproval,
+        &AgentSessionCreatedAt,
+    ),
+) -> RemoteSession {
     RemoteSession {
-        sid: sid.to_string(),
-        room_id: vmux_api::room::RoomId::for_session(sid),
-        title: handle.provider.clone(),
-        name: handle.provider.clone(),
+        sid: sid.0.clone(),
+        room_id: vmux_api::room::RoomId::for_session(&sid.0),
+        title: provider.0.clone(),
+        name: provider.0.clone(),
         runtime: "page".to_string(),
-        model: Some(handle.model.clone()),
-        cwd: handle.cwd.clone(),
-        status: RemoteStatus::from(&*handle.status.lock().unwrap()),
-        approval: handle.approval.lock().unwrap().clone(),
-        created_at_ms: handle.created_at_ms,
+        model: Some(model.0.clone()),
+        cwd: cwd.0.clone(),
+        status: RemoteStatus::from(&*status.0.lock().unwrap()),
+        approval: approval.0.lock().unwrap().clone(),
+        created_at_ms: created_at.0,
     }
 }
 
 async fn snapshot_message(sid: &str, messages: &Arc<Mutex<Vec<Message>>>) -> ServiceMessage {
-    let msgs = messages.lock().await;
+    let messages = messages.lock().await;
     ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
         sid: sid.to_string(),
-        messages: msgs.clone(),
+        messages: messages.clone(),
     })
 }
 
@@ -665,9 +1200,9 @@ mod tests {
         let (agent_tx, _) = broadcast::channel::<ServiceMessage>(16);
         AgentBroker::new(
             agent_tx,
-            Arc::new(Mutex::new(HashMap::new())),
-            Arc::new(Mutex::new(HashMap::new())),
-            Arc::new(Mutex::new(HashMap::new())),
+            Default::default(),
+            Default::default(),
+            Default::default(),
         )
     }
 
@@ -679,132 +1214,43 @@ mod tests {
         assert!(resolve_provider("nope").is_none());
     }
 
-    #[tokio::test]
-    async fn spawn_then_snapshot_empty_then_close() {
-        let mut mgr = AgentSessionManager::default();
-        mgr.spawn(
-            "s".to_string(),
-            "anthropic",
-            "m".to_string(),
-            "/tmp/project".to_string(),
-            Vec::new(),
-            HashSet::new(),
-            test_broker(),
-        )
-        .unwrap();
-        match mgr.snapshot("s").await {
-            Some(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
-                messages, ..
-            })) => {
-                assert!(messages.is_empty());
-            }
-            other => panic!("expected snapshot, got {other:?}"),
-        }
-        mgr.close("s");
-        assert!(mgr.snapshot("s").await.is_none());
-    }
-
-    #[tokio::test]
-    async fn spawn_is_idempotent_per_sid() {
-        let mut mgr = AgentSessionManager::default();
-        mgr.spawn(
-            "s".into(),
-            "openai",
-            "m".into(),
-            "/tmp/project".into(),
-            Vec::new(),
-            HashSet::new(),
-            test_broker(),
-        )
-        .unwrap();
-        mgr.spawn(
-            "s".into(),
-            "openai",
-            "m".into(),
-            "/tmp/project".into(),
-            Vec::new(),
-            HashSet::new(),
-            test_broker(),
-        )
-        .unwrap();
-        assert!(mgr.snapshot("s").await.is_some());
-        mgr.close("s");
-    }
-
-    #[tokio::test]
-    async fn unknown_provider_is_rejected() {
-        let mut mgr = AgentSessionManager::default();
-        let err = mgr
-            .spawn(
-                "s".into(),
-                "bogus",
-                "m".into(),
-                "/tmp/project".into(),
-                Vec::new(),
-                HashSet::new(),
-                test_broker(),
-            )
-            .unwrap_err();
-        assert!(err.contains("bogus"));
-    }
-
-    #[tokio::test]
-    async fn remote_summary_exposes_active_session() {
-        let mut mgr = AgentSessionManager::default();
-        mgr.spawn(
-            "s".into(),
-            "openai",
-            "gpt-test".into(),
-            "/tmp/project".into(),
-            Vec::new(),
-            HashSet::new(),
-            test_broker(),
-        )
-        .unwrap();
-
-        let session = mgr.remote_session("s").unwrap();
-
-        assert_eq!(session.name, "openai");
-        assert_eq!(session.model.as_deref(), Some("gpt-test"));
-        assert_eq!(session.cwd, "/tmp/project");
-        mgr.close("s");
-    }
-
-    #[tokio::test]
-    async fn approval_resolution_is_broadcast_immediately() {
-        let mut mgr = AgentSessionManager::default();
-        mgr.spawn(
-            "s".into(),
-            "openai",
-            "gpt-test".into(),
-            "/tmp/project".into(),
-            Vec::new(),
-            HashSet::new(),
-            test_broker(),
-        )
-        .unwrap();
-        let handle = mgr.sessions.get("s").unwrap();
-        *handle.approval.lock().unwrap() = Some(RemoteApproval {
-            call_id: "call-1".into(),
-            name: "run".into(),
-            args: vmux_api::json::JsonValue::Object(Vec::new()),
+    #[test]
+    fn session_lifecycle_is_entity_owned() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let (wake, _wake_inbox) = mpsc::unbounded_channel();
+        let (plugin, _sessions) = AgentSessionPlugin::new(runtime.handle().clone(), wake);
+        let mut app = App::new();
+        app.add_plugins(plugin);
+        let (spawn_response, mut spawn_result) = oneshot::channel();
+        app.world_mut().spawn(SpawnAgentSession {
+            sid: "s".into(),
+            provider: "openai".into(),
+            model: "gpt-test".into(),
+            cwd: "/tmp/project".into(),
+            tools: Vec::new(),
+            auto_tools: HashSet::new(),
+            broker: test_broker(),
+            response: Some(spawn_response),
         });
-        let mut receiver = mgr.subscribe("s").unwrap();
 
-        mgr.input(
-            "s",
-            SessionInput::Approve {
-                call_id: "call-1".into(),
-                decision: ApprovalDecision::Allow,
-            },
-        );
+        app.update();
 
-        assert!(matches!(
-            receiver.try_recv(),
-            Ok(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }))
-                if sid == "s" && call_id == "call-1"
-        ));
-        assert!(mgr.remote_session("s").unwrap().approval.is_none());
-        mgr.close("s");
+        assert_eq!(spawn_result.try_recv().unwrap(), Ok(()));
+        let mut sessions = app.world_mut().query::<&AgentSessionId>();
+        assert_eq!(sessions.iter(app.world()).count(), 1);
+
+        let (close_response, mut close_result) = oneshot::channel();
+        app.world_mut().spawn(CloseAgentSession {
+            sid: "s".into(),
+            response: Some(close_response),
+        });
+        app.update();
+
+        assert!(close_result.try_recv().unwrap());
+        assert_eq!(sessions.iter(app.world()).count(), 0);
     }
 }
