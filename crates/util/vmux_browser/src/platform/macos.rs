@@ -33,9 +33,12 @@ pub(super) struct MacosBrowserPlugin;
 impl Plugin for MacosBrowserPlugin {
     fn build(&self, app: &mut App) {
         let (metadata_tx, metadata_rx) = async_channel::unbounded();
-        app.insert_resource(NativePageMetadataSender(metadata_tx))
-            .insert_resource(NativePageMetadataReceiver(metadata_rx))
-            .add_systems(First, accept_page_wakes)
+        app.world_mut().spawn((
+            Name::new("Native page metadata"),
+            NativePageMetadataSender(metadata_tx),
+            NativePageMetadataReceiver(metadata_rx),
+        ));
+        app.add_systems(First, accept_page_wakes)
             .add_systems(
                 Update,
                 (
@@ -77,14 +80,14 @@ struct NativePageMetadata {
     favicon: Option<String>,
 }
 
-#[derive(Resource, Clone)]
+#[derive(Component, Clone)]
 struct NativePageMetadataSender(async_channel::Sender<NativePageMetadata>);
 
-#[derive(Resource)]
+#[derive(Component)]
 struct NativePageMetadataReceiver(async_channel::Receiver<NativePageMetadata>);
 
 fn apply_native_page_metadata(
-    receiver: Res<NativePageMetadataReceiver>,
+    receiver: Single<&NativePageMetadataReceiver>,
     mut pages: Query<&mut PageMetadata>,
 ) {
     while let Ok(update) = receiver.0.try_recv() {
@@ -497,20 +500,27 @@ impl PageEmbedder {
     }
 }
 
-fn load_page_embedder(world: &World) -> Result<PageEmbedder, &'static str> {
+fn load_page_embedder(world: &mut World) -> Result<PageEmbedder, &'static str> {
     let Some(requester) = world.get_resource::<Requester>().cloned() else {
         return Err("no Requester resource, the CEF custom scheme plugin has not built yet");
     };
-    let Some(bin_ipc) = world.get_resource::<BinIpcEventRawSender>() else {
+    let Some(bin_ipc) = world
+        .get_resource::<BinIpcEventRawSender>()
+        .map(|sender| sender.0.clone())
+    else {
         return Err("no BinIpcEventRawSender resource, the cef ipc plugin has not built yet");
     };
-    let Some(metadata) = world.get_resource::<NativePageMetadataSender>() else {
-        return Err("no native page metadata sender");
+    let metadata = {
+        let mut senders = world.query::<&NativePageMetadataSender>();
+        senders
+            .single(world)
+            .map_err(|_| "no native page metadata sender")?
+            .clone()
     };
 
     Ok(PageEmbedder {
-        bin_ipc: bin_ipc.0.clone(),
-        metadata: metadata.clone(),
+        bin_ipc,
+        metadata,
         requester,
         waker: PageWaker::from_proxy(world.get_resource::<EventLoopProxyWrapper>()),
     })
@@ -901,7 +911,8 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, super::apply_native_page_metadata);
         let (metadata_tx, metadata_rx) = async_channel::unbounded();
-        app.insert_resource(NativePageMetadataReceiver(metadata_rx));
+        app.world_mut()
+            .spawn(NativePageMetadataReceiver(metadata_rx));
         let page = app
             .world_mut()
             .spawn(vmux_core::PageMetadata {
