@@ -10174,6 +10174,7 @@ dependencies = [
  "url",
  "uuid",
  "vmux_api",
+ "vmux_browser",
  "vmux_chat",
  "vmux_clipboard",
  "vmux_command",
