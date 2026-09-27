@@ -2,6 +2,7 @@ mod application;
 mod browser;
 mod dispatch;
 mod layout;
+mod operation;
 mod terminal;
 mod tool_call;
 
@@ -43,6 +44,7 @@ impl Plugin for CommandPlugin {
             browser::BrowserCommandPlugin,
             dispatch::DispatchPlugin,
             layout::LayoutCommandPlugin,
+            operation::AgentOperationPlugin,
             terminal::TerminalCommandPlugin,
             tool_call::ToolCallPlugin,
         ));

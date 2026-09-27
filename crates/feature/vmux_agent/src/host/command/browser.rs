@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentBrowserHistorySearch, AgentBrowserHistoryStep, AgentBrowserInstallExtension,
-    AgentBrowserNavigate, AgentCommandResult, AgentOpenInNewStack,
+    AgentBrowserNavigate, AgentCommandResult, AgentOpenInNewStack, AgentRequestId,
 };
 use vmux_service::client::ServiceRequest;
 
@@ -21,6 +21,7 @@ impl Plugin for BrowserCommandPlugin {
             .add_message::<AgentBrowserHistorySearchRequest>()
             .add_message::<AgentOpenInNewStackRequest>()
             .add_message::<vmux_extension::ExtensionInstallRequest>()
+            .add_systems(Update, open_history.in_set(CommandSet::History))
             .add_systems(
                 Update,
                 (
@@ -33,6 +34,33 @@ impl Plugin for BrowserCommandPlugin {
                 )
                     .in_set(CommandSet::Commands),
             );
+    }
+}
+
+fn open_history(
+    mut intents: MessageReader<vmux_history::query::HistoryOpenIntent>,
+    mut navigate: MessageWriter<AgentBrowserNavigateRequest>,
+    mut open_in_new_stack: MessageWriter<AgentOpenInNewStackRequest>,
+) {
+    for intent in intents.read() {
+        let reply = AgentReply::new(AgentRequestId::new());
+        if intent.in_new_stack {
+            open_in_new_stack.write(AgentOpenInNewStackRequest {
+                reply,
+                payload: AgentOpenInNewStack {
+                    url: intent.url.clone(),
+                },
+            });
+        } else {
+            navigate.write(AgentBrowserNavigateRequest {
+                reply,
+                origin: CommandOrigin::User,
+                payload: AgentBrowserNavigate {
+                    url: intent.url.clone(),
+                    pane: None,
+                },
+            });
+        }
     }
 }
 

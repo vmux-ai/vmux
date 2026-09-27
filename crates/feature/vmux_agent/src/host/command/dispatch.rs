@@ -1,9 +1,5 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{
-    AgentBrowserNavigate, AgentCommand as ServiceAgentCommand, AgentCommandResult,
-    AgentOpenInNewStack, AgentRequestId, SharedAgentCommand,
-};
-use vmux_command::{CommandDefinition, CommandInvocation};
+use vmux_api::protocol::{AgentCommand as ServiceAgentCommand, SharedAgentCommand};
 use vmux_service::client::ServiceRequest;
 
 use crate::host::event::{AgentCommandRequest, CommandOrigin};
@@ -15,6 +11,10 @@ use super::application::{
 use super::browser::{
     AgentBrowserGoBackRequest, AgentBrowserGoForwardRequest, AgentBrowserHistorySearchRequest,
     AgentBrowserInstallExtensionRequest, AgentBrowserNavigateRequest, AgentOpenInNewStackRequest,
+};
+use super::operation::{
+    AgentFileSearchRequest, AgentFileTouchedRequest, AgentInvokeCommandRequest, AgentListRequest,
+    AgentNewChatRequest, AgentTurnEndedRequest,
 };
 use super::terminal::{
     AgentNewTerminalTabRequest, AgentRunShellRequest, AgentTerminalSendRequest,
@@ -28,10 +28,6 @@ impl Plugin for DispatchPlugin {
         app.add_message::<ServiceRequest>()
             .add_systems(
                 Update,
-                forward_history_open_intent.in_set(CommandSet::History),
-            )
-            .add_systems(
-                Update,
                 (
                     route_terminal_operations,
                     route_browser_operations,
@@ -41,7 +37,7 @@ impl Plugin for DispatchPlugin {
             )
             .add_systems(
                 Update,
-                (invoke_commands, handle_shared_commands).in_set(CommandSet::Commands),
+                route_remaining_operations.in_set(CommandSet::Dispatch),
             );
     }
 }
@@ -186,161 +182,60 @@ fn route_application_operations(
     }
 }
 
-fn invoke_commands(
+#[allow(clippy::too_many_arguments)]
+fn route_remaining_operations(
     mut requests: MessageReader<AgentCommandRequest>,
-    command_definitions: Query<&CommandDefinition>,
-    mut command_invocations: MessageWriter<CommandInvocation>,
-    agents: Query<(
-        Entity,
-        &vmux_core::team::Agent,
-        Option<&vmux_api::protocol::ProcessId>,
-    )>,
-    user: Query<Entity, With<vmux_core::team::User>>,
-    mut service_requests: MessageWriter<ServiceRequest>,
+    mut invoke: MessageWriter<AgentInvokeCommandRequest>,
+    mut file_touched: MessageWriter<AgentFileTouchedRequest>,
+    mut file_search: MessageWriter<AgentFileSearchRequest>,
+    mut turn_ended: MessageWriter<AgentTurnEndedRequest>,
+    mut new_chat: MessageWriter<AgentNewChatRequest>,
+    mut list_agents: MessageWriter<AgentListRequest>,
 ) {
     for request in requests.read() {
-        let result = match &request.command {
-            ServiceAgentCommand::FileTouched(_)
-            | ServiceAgentCommand::FileSearch(_)
-            | ServiceAgentCommand::TurnEnded(_) => AgentCommandResult::Ok,
-            ServiceAgentCommand::InvokeCommand(command) => {
-                let args = match vmux_core::JsonArguments::try_from(&command.args) {
-                    Ok(args) => args.0,
-                    Err(message) => {
-                        service_requests.write(ServiceRequest(
-                            request.response(AgentCommandResult::Error(message)),
-                        ));
-                        continue;
-                    }
-                };
-                let caller = match &request.origin {
-                    CommandOrigin::Agent {
-                        anchor: Some(pid),
-                        ..
-                    } => agents
-                        .iter()
-                        .find(|(_, _, process)| process.is_some_and(|process| process == pid))
-                        .map(|(entity, _, _)| entity),
-                    CommandOrigin::Agent { sid: Some(sid), .. } if !sid.is_empty() => agents
-                        .iter()
-                        .find(|(_, agent, _)| &agent.sid == sid)
-                        .map(|(entity, _, _)| entity),
-                    CommandOrigin::User => user.single().ok(),
-                    _ => None,
-                }
-                .unwrap_or(Entity::PLACEHOLDER);
-                let Some(definition) = command_definitions
-                    .iter()
-                    .find(|definition| definition.matches(&command.id))
-                else {
-                    service_requests.write(ServiceRequest(request.response(
-                        AgentCommandResult::Error(format!("unknown app command: {}", command.id)),
-                    )));
-                    continue;
-                };
-                let invocation = if request.origin.is_agent() {
-                    definition.agent_invocation(caller, args)
-                } else {
-                    definition.user_invocation(caller, args)
-                };
-                match invocation {
-                    Ok(invocation) => {
-                        command_invocations.write(invocation);
-                        AgentCommandResult::Ok
-                    }
-                    Err(message) => AgentCommandResult::Error(message),
-                }
+        let reply = AgentReply::new(request.request_id);
+        match &request.command {
+            ServiceAgentCommand::InvokeCommand(payload) => {
+                invoke.write(AgentInvokeCommandRequest {
+                    reply,
+                    origin: request.origin.clone(),
+                    payload: payload.clone(),
+                });
             }
-            _ => continue,
-        };
-        service_requests.write(ServiceRequest(request.response(result)));
-    }
-}
-
-fn handle_shared_commands(
-    mut requests: MessageReader<AgentCommandRequest>,
-    command_bar: Res<vmux_command::snapshot::CommandBarProjection>,
-    contributed_pages: Query<&vmux_command::snapshot::ContributedPage>,
-    mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
-    mut service_requests: MessageWriter<ServiceRequest>,
-) {
-    for request in requests.read() {
-        let result = match &request.command {
+            ServiceAgentCommand::FileTouched(payload) => {
+                file_touched.write(AgentFileTouchedRequest {
+                    reply,
+                    _payload: payload.clone(),
+                });
+            }
+            ServiceAgentCommand::FileSearch(payload) => {
+                file_search.write(AgentFileSearchRequest {
+                    reply,
+                    _payload: payload.clone(),
+                });
+            }
+            ServiceAgentCommand::TurnEnded(payload) => {
+                turn_ended.write(AgentTurnEndedRequest {
+                    reply,
+                    _payload: payload.clone(),
+                });
+            }
             ServiceAgentCommand::Shared(SharedAgentCommand::NewAgentChat {
                 prompt,
                 agent_url,
                 ..
-            }) => match vmux_command::snapshot::ContributedPage::prompt_url(
-                &contributed_pages,
-                agent_url.as_deref(),
-            ) {
-                Some(url) => {
-                    new_tabs.write(vmux_layout::NewTabRequest {
-                        url,
-                        pending_prompt: Some(prompt.clone()),
-                    });
-                    AgentCommandResult::Ok
-                }
-                None => AgentCommandResult::Error("no agent is installed".to_string()),
-            },
-            ServiceAgentCommand::Shared(SharedAgentCommand::ListAgents) => {
-                match serde_json::to_string(&remote_agents(&command_bar.agents)) {
-                    Ok(json) => AgentCommandResult::Text(json),
-                    Err(error) => AgentCommandResult::Error(format!("list_agents: {error}")),
-                }
+            }) => {
+                new_chat.write(AgentNewChatRequest {
+                    reply,
+                    prompt: prompt.clone(),
+                    agent_url: agent_url.clone(),
+                });
             }
-            _ => continue,
-        };
-        service_requests.write(ServiceRequest(request.response(result)));
-    }
-}
-
-fn remote_agents(
-    snapshot: &vmux_command::snapshot::CommandBarAgentsSnapshot,
-) -> Vec<vmux_api::room::RemoteAgent> {
-    snapshot
-        .acp
-        .iter()
-        .map(|agent| vmux_api::room::RemoteAgent {
-            id: agent.id.clone(),
-            name: agent.name.clone(),
-            url: agent.url.clone(),
-            icon: agent.icon.clone(),
-        })
-        .chain(
-            snapshot
-                .providers
-                .iter()
-                .map(|agent| vmux_api::room::RemoteAgent {
-                    id: agent.id.clone(),
-                    name: format!("{} (CLI)", agent.name),
-                    url: agent.url.clone(),
-                    icon: agent.icon.clone(),
-                }),
-        )
-        .collect()
-}
-
-fn forward_history_open_intent(
-    mut intents: MessageReader<vmux_history::query::HistoryOpenIntent>,
-    mut requests: MessageWriter<AgentCommandRequest>,
-) {
-    for intent in intents.read() {
-        let command = if intent.in_new_stack {
-            ServiceAgentCommand::OpenInNewStack(AgentOpenInNewStack {
-                url: intent.url.clone(),
-            })
-        } else {
-            ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
-                url: intent.url.clone(),
-                pane: None,
-            })
-        };
-        requests.write(AgentCommandRequest {
-            request_id: AgentRequestId::new(),
-            origin: CommandOrigin::User,
-            command,
-        });
+            ServiceAgentCommand::Shared(SharedAgentCommand::ListAgents) => {
+                list_agents.write(AgentListRequest { reply });
+            }
+            _ => {}
+        }
     }
 }
 
