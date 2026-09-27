@@ -5,7 +5,8 @@ use vmux_core::event::team::{TeamEvent, TeamMemberRow};
 use crate::cef::LayoutCef;
 use crate::event::{
     ActiveSession, ActiveSessionState, ActiveWorkspaceProject, HeaderState, PaneTreeState,
-    SideSheetState, StackNavigationState, StackNode, StackRevealTarget, TabBoundaryState,
+    SideSheetPane, SideSheetState, StackNavigationState, StackNode, StackRevealTarget,
+    TabBoundaryState,
 };
 
 pub struct LayoutUiProjectionPlugin;
@@ -14,7 +15,11 @@ impl Plugin for LayoutUiProjectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (publish_active_session, publish_header, publish_side_sheet),
+            (
+                publish_active_session,
+                publish_header,
+                (project_side_sheet, publish_side_sheet).chain(),
+            ),
         );
     }
 }
@@ -36,6 +41,9 @@ pub struct BookmarkProjection(pub BookmarkStateEvent);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct SpacesProjection(pub vmux_core::event::space::SpacesListEvent);
+
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+struct SideSheetProjection(SideSheetState);
 
 impl ActiveWorkspaceProject {
     fn active(projects: &[vmux_core::event::ProjectRow]) -> Option<Self> {
@@ -165,17 +173,40 @@ impl HeaderState {
     }
 }
 
-impl SideSheetState {
-    fn from_projections(
+impl SideSheetProjection {
+    fn from_sources(
         panes: &PaneTreeState,
         spaces: &vmux_core::event::space::SpacesListEvent,
     ) -> Self {
         let active_space = spaces.spaces.iter().find(|space| space.is_active).cloned();
-        let active_pane = panes
-            .panes
+        let mut side_sheet_panes = Vec::with_capacity(panes.panes.len());
+        for pane in &panes.panes {
+            let mut stacks = Vec::with_capacity(pane.stacks.len());
+            for stack in &pane.stacks {
+                if stack.url.is_empty() && stack.title == "New Stack" {
+                    continue;
+                }
+                stacks.push(stack.clone());
+            }
+            let collapsed_stack = stacks
+                .iter()
+                .find(|stack| stack.is_active)
+                .or_else(|| stacks.first())
+                .cloned();
+            side_sheet_panes.push(SideSheetPane {
+                id: pane.id,
+                is_active: pane.is_active,
+                collapsed: pane.collapsed,
+                bookmarks_expanded: pane.bookmarks_expanded,
+                any_loading: stacks.iter().any(|stack| stack.is_loading),
+                collapsed_stack,
+                stacks,
+            });
+        }
+        let active_pane = side_sheet_panes
             .iter()
             .find(|pane| pane.is_active)
-            .or_else(|| panes.panes.first())
+            .or_else(|| side_sheet_panes.first())
             .cloned();
         let active_page = active_pane.as_ref().and_then(|pane| {
             pane.stacks
@@ -195,7 +226,7 @@ impl SideSheetState {
                     })
             })
             .or_else(|| {
-                panes.panes.iter().find_map(|pane| {
+                side_sheet_panes.iter().find_map(|pane| {
                     pane.stacks
                         .iter()
                         .find(|stack| stack.is_active)
@@ -205,12 +236,13 @@ impl SideSheetState {
                         })
                 })
             });
-        Self {
+        Self(SideSheetState {
             active_space,
             active_pane,
             active_page,
             reveal,
-        }
+            panes: side_sheet_panes,
+        })
     }
 }
 
@@ -290,37 +322,38 @@ fn publish_header(
     }
 }
 
-fn publish_side_sheet(
+fn project_side_sheet(
     layouts: Query<
         (
             Entity,
-            Option<&PaneTreeProjection>,
-            Option<&SpacesProjection>,
+            &PaneTreeProjection,
+            &SpacesProjection,
+            Option<&SideSheetProjection>,
         ),
         With<LayoutCef>,
     >,
-    mut last: Local<std::collections::HashMap<Entity, SideSheetState>>,
     mut commands: Commands,
 ) {
-    let empty_panes = PaneTreeState::default();
-    let empty_spaces = vmux_core::event::space::SpacesListEvent::default();
-    for (entity, panes, spaces) in &layouts {
-        let panes = panes
-            .map(|projection| &projection.0)
-            .unwrap_or(&empty_panes);
-        let spaces = spaces
-            .map(|projection| &projection.0)
-            .unwrap_or(&empty_spaces);
-        let state = SideSheetState::from_projections(panes, spaces);
-        if last.get(&entity) == Some(&state) {
+    for (entity, panes, spaces, current) in &layouts {
+        let next = SideSheetProjection::from_sources(&panes.0, &spaces.0);
+        if current == Some(&next) {
             continue;
         }
+        commands.entity(entity).insert(next);
+    }
+}
+
+fn publish_side_sheet(
+    projections: Query<(Entity, &SideSheetProjection), Changed<SideSheetProjection>>,
+    mut commands: Commands,
+) {
+    for (entity, projection) in &projections {
         commands.trigger(
             vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
-                entity, &state,
+                entity,
+                &projection.0,
             ),
         );
-        last.insert(entity, state);
     }
 }
 
@@ -413,19 +446,32 @@ mod tests {
                 crate::event::PaneNode {
                     id: 2,
                     is_active: true,
-                    collapsed: false,
+                    collapsed: true,
                     bookmarks_expanded: true,
-                    stacks: vec![StackNode {
-                        id: 22,
-                        agent_id: None,
-                        title: "Active".into(),
-                        url: "vmux://active/".into(),
-                        icon: Default::default(),
-                        is_active: true,
-                        is_loading: false,
-                        is_dirty: false,
-                        bg_color: None,
-                    }],
+                    stacks: vec![
+                        StackNode {
+                            id: 21,
+                            agent_id: None,
+                            title: "New Stack".into(),
+                            url: String::new(),
+                            icon: Default::default(),
+                            is_active: false,
+                            is_loading: false,
+                            is_dirty: false,
+                            bg_color: None,
+                        },
+                        StackNode {
+                            id: 22,
+                            agent_id: None,
+                            title: "Active".into(),
+                            url: "vmux://active/".into(),
+                            icon: Default::default(),
+                            is_active: true,
+                            is_loading: true,
+                            is_dirty: false,
+                            bg_color: None,
+                        },
+                    ],
                 },
             ],
         };
@@ -444,7 +490,7 @@ mod tests {
             selected: 1,
         };
 
-        let state = SideSheetState::from_projections(&panes, &spaces);
+        let state = SideSheetProjection::from_sources(&panes, &spaces).0;
 
         assert_eq!(
             state.active_space.as_ref().map(|space| space.id.as_str()),
@@ -452,6 +498,16 @@ mod tests {
         );
         assert_eq!(state.active_pane.as_ref().map(|pane| pane.id), Some(2));
         assert_eq!(state.active_page.as_ref().map(|page| page.id), Some(22));
+        assert_eq!(state.panes.len(), 2);
+        assert_eq!(state.panes[1].stacks.len(), 1);
+        assert!(state.panes[1].any_loading);
+        assert_eq!(
+            state.panes[1]
+                .collapsed_stack
+                .as_ref()
+                .map(|stack| stack.id),
+            Some(22)
+        );
         assert_eq!(
             state.reveal,
             Some(StackRevealTarget {

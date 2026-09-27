@@ -492,9 +492,22 @@ pub struct StackRevealTarget {
 #[vmux_api::contract(Default)]
 pub struct SideSheetState {
     pub active_space: Option<vmux_core::event::space::SpaceRow>,
-    pub active_pane: Option<PaneNode>,
+    pub active_pane: Option<SideSheetPane>,
     pub active_page: Option<StackNode>,
     pub reveal: Option<StackRevealTarget>,
+    #[serde(default)]
+    pub panes: Vec<SideSheetPane>,
+}
+
+#[vmux_api::contract]
+pub struct SideSheetPane {
+    pub id: u64,
+    pub is_active: bool,
+    pub collapsed: bool,
+    pub bookmarks_expanded: bool,
+    pub any_loading: bool,
+    pub collapsed_stack: Option<StackNode>,
+    pub stacks: Vec<StackNode>,
 }
 
 #[vmux_api::contract]

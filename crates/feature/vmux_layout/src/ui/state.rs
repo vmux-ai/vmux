@@ -3,13 +3,12 @@ use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkStateEvent};
 use vmux_api::extension::{
     ExtListRequest, ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
 };
-use vmux_core::event::space::SpacesListEvent;
 use vmux_ui::hooks::{send, use_ui_state_root};
 
 use super::update::UpdatePhase;
 use crate::event::{
-    ActiveSession, HeaderState, LayoutGeometry, PaneTreeState, RemoteUiState, SideSheetState,
-    StackNavigationState, TabBoundaryState, TabListState,
+    ActiveSession, HeaderState, LayoutGeometry, RemoteUiState, SideSheetState, StackNavigationState,
+    TabBoundaryState, TabListState,
 };
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
 
@@ -19,9 +18,7 @@ pub(crate) struct LayoutPageState {
     pub stacks: Option<StackNavigationState>,
     pub tabs: Option<TabListState>,
     pub bookmarks: BookmarkStateEvent,
-    pub pane_tree: Option<PaneTreeState>,
     pub side_sheet: Option<SideSheetState>,
-    pub spaces: Option<SpacesListEvent>,
     pub projects: TabBoundaryState,
     pub active_session: Option<ActiveSession>,
     pub header: HeaderState,
@@ -73,14 +70,8 @@ impl LayoutPageState {
         if let Some(event) = &patch.bookmarks {
             self.bookmarks = event.clone();
         }
-        if let Some(event) = &patch.pane_tree {
-            self.pane_tree = Some(event.clone());
-        }
         if let Some(event) = &patch.side_sheet {
             self.side_sheet = Some(event.clone());
-        }
-        if let Some(event) = &patch.spaces {
-            self.spaces = Some(event.clone());
         }
         if let Some(event) = &patch.projects {
             self.projects = event.clone();
@@ -125,14 +116,12 @@ impl LayoutPageState {
         let layout_ready = received(self.layout.is_some());
         let stacks_ready = received(self.stacks.is_some());
         let tabs_ready = received(self.tabs.is_some());
-        let pane_tree_ready = received(self.pane_tree.is_some());
         let side_sheet_ready = received(self.side_sheet.is_some());
-        let spaces_ready = received(self.spaces.is_some());
         let layout = self.layout.unwrap_or_default();
 
         layout_ready
             && (!layout.header_visible() || (stacks_ready && tabs_ready))
-            && (!layout.side_sheet_open || (pane_tree_ready && side_sheet_ready && spaces_ready))
+            && (!layout.side_sheet_open || side_sheet_ready)
     }
 }
 
@@ -233,11 +222,7 @@ mod tests {
         let mut state = state(false, true);
 
         assert!(!state.overlay_ready(&None));
-        state.pane_tree = Some(Default::default());
-        assert!(!state.overlay_ready(&None));
         state.side_sheet = Some(Default::default());
-        assert!(!state.overlay_ready(&None));
-        state.spaces = Some(Default::default());
         assert!(state.overlay_ready(&None));
     }
 

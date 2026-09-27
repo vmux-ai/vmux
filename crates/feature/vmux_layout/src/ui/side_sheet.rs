@@ -1,4 +1,4 @@
-use crate::event::{PaneNode, PaneTreeState, StackRevealTarget};
+use crate::event::{SideSheetPane, StackRevealTarget};
 use dioxus::prelude::*;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
 use vmux_ui::components::icon::Icon;
@@ -91,12 +91,12 @@ fn SideSheetContent() -> Element {
     let layout = LayoutUi::current();
     let ui = layout.value();
     let state = ui.layout.unwrap_or_default();
-    let PaneTreeState { panes } = ui.pane_tree.unwrap_or_default();
     let side_sheet = ui.side_sheet.unwrap_or_default();
     let active_space = side_sheet.active_space;
+    let panes = side_sheet.panes;
     let bookmarks = ui.bookmarks;
     let active_session = ui.active_session;
-    let pane_tree_error = layout.error();
+    let side_sheet_error = layout.error();
     let update_phase = ui.update;
     let reveal = StackReveal {
         settled: use_signal(|| None::<StackRevealTarget>),
@@ -173,7 +173,7 @@ fn SideSheetContent() -> Element {
                             expanded: pane.bookmarks_expanded,
                         }
                     }
-                    if let Some(err) = pane_tree_error {
+                    if let Some(err) = side_sheet_error {
                         div { class: "flex shrink-0 items-center px-2 py-1",
                             span { class: "text-ui text-destructive", "{err}" }
                         }
@@ -277,30 +277,20 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
 }
 
 #[component]
-fn PaneSection(pane: PaneNode, index: usize) -> Element {
+fn PaneSection(pane: SideSheetPane, index: usize) -> Element {
     let label = translate_with(
         "layout-stack-number",
         &[("number", TranslationValue::Number((index + 1) as i64))],
     );
     let pane_id = pane.id;
-    let any_loading = pane.stacks.iter().any(|s| s.is_loading);
+    let any_loading = pane.any_loading;
     let expanded = !pane.collapsed;
     let fold_title = if expanded {
         translate("layout-fold-stack")
     } else {
         translate("layout-unfold-stack")
     };
-    let visible_stacks = pane
-        .stacks
-        .iter()
-        .filter(|stack| !(stack.url.is_empty() && stack.title == "New Stack"))
-        .cloned()
-        .collect::<Vec<_>>();
-    let active_stack = visible_stacks
-        .iter()
-        .find(|stack| stack.is_active)
-        .or_else(|| visible_stacks.first())
-        .cloned();
+    let collapsed_stack = pane.collapsed_stack.clone();
     rsx! {
         div { class: if pane.is_active && any_loading {
                 "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg pane-loading-ring"
@@ -352,7 +342,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
             }
             div { class: "border-t border-foreground/10 p-1.5",
                 div { class: "flex flex-col gap-1",
-                    if !expanded && let Some(stack) = active_stack {
+                    if !expanded && let Some(stack) = collapsed_stack {
                         SideSheetStackRow { stack, pane_id }
                     }
                     div { class: if expanded {
@@ -362,7 +352,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                         },
                         div { class: "min-h-0 overflow-hidden",
                             div { class: "flex flex-col gap-1",
-                                for stack in visible_stacks.iter() {
+                                for stack in pane.stacks.iter() {
                                     SideSheetStackRow { stack: stack.clone(), pane_id }
                                 }
                                 NewStackRow { pane_id }
