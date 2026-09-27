@@ -651,7 +651,7 @@ fn handle_open_command_bar(
     windows: Query<&Window>,
     all_children: Query<&Children>,
     browser_meta: Query<&PageMetadata, Or<(With<WebviewSource>, With<HostsPage>)>>,
-    state: Res<CommandBarProjection>,
+    state: Single<&CommandBarProjection>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     contributed_pages: Query<&ContributedPage>,
     contributed_commands: Query<&ContributedCommand>,
@@ -843,7 +843,7 @@ fn on_prompt_request(
     launcher_hosts: Query<(), With<HostsLauncher>>,
     child_of: Query<&ChildOf>,
     contributed_pages: Query<&ContributedPage>,
-    command_bar: Res<CommandBarProjection>,
+    command_bar: Single<&CommandBarProjection>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -905,7 +905,7 @@ fn on_page_open_request(
     child_of: Query<&ChildOf>,
     launcher_hosts: Query<(), With<HostsLauncher>>,
     claimed_urls: Query<&ClaimedUrl>,
-    command_bar: Res<CommandBarProjection>,
+    command_bar: Single<&CommandBarProjection>,
     locale: Option<Res<ResolvedLocale>>,
     mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
     mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
@@ -989,7 +989,7 @@ fn on_page_open_request(
 
 fn on_terminal_request(
     trigger: On<UiInput<TerminalRequest>>,
-    command_bar: Res<CommandBarProjection>,
+    command_bar: Single<&CommandBarProjection>,
     locale: Option<Res<ResolvedLocale>>,
     mut terminal_spawn_requests: MessageWriter<TerminalSpawnRequest>,
     mut command_invocations: MessageWriter<CommandInvocation>,
@@ -1053,7 +1053,7 @@ fn on_invoke_request(
     trigger: On<UiInput<InvokeRequest>>,
     contributed_pages: Query<&ContributedPage>,
     contributed_commands: Query<&ContributedCommand>,
-    command_bar: Res<CommandBarProjection>,
+    command_bar: Single<&CommandBarProjection>,
     users: Query<Entity, With<vmux_core::team::User>>,
     mut chosen: MessageWriter<vmux_core::ContributedCommandChosen>,
     mut invocations: MessageWriter<CommandInvocation>,
@@ -1114,7 +1114,7 @@ fn on_switch_tab_request(
 
 fn on_ex_request(
     trigger: On<UiInput<ExRequest>>,
-    command_bar: Res<CommandBarProjection>,
+    command_bar: Single<&CommandBarProjection>,
     mut lines: MessageWriter<crate::host::ExLineSubmitted>,
     mut commands: Commands,
 ) {
@@ -1128,7 +1128,7 @@ fn on_ex_request(
 
 fn on_pick_request(
     trigger: On<UiInput<PickRequest>>,
-    command_bar: Res<CommandBarProjection>,
+    command_bar: Single<&CommandBarProjection>,
     users: Query<Entity, With<vmux_core::team::User>>,
     mut picked: MessageWriter<crate::host::FileStatusPicked>,
     mut invocations: MessageWriter<CommandInvocation>,
@@ -1156,7 +1156,7 @@ fn on_dismiss_request(trigger: On<UiInput<DismissRequest>>, mut commands: Comman
 
 fn close_command_bar(
     trigger: On<CloseCommandBar>,
-    command_bar: Res<CommandBarProjection>,
+    command_bar: Single<&CommandBarProjection>,
     mut modal_q: Query<
         (
             Entity,
@@ -1318,7 +1318,7 @@ fn retry_pending_command_bar_open(
     }
 }
 
-fn mirror_project_roots(mut state: ResMut<CommandBarProjection>) {
+fn mirror_project_roots(mut state: Single<&mut CommandBarProjection>) {
     if !state.is_changed() || state.work.projects == state.projects.roots {
         return;
     }
@@ -2059,11 +2059,11 @@ mod tests {
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
             .add_message::<RestoreKeyboardToStack>()
-            .init_resource::<CommandBarProjection>()
             .add_message::<LauncherDismissRequest>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
             .add_systems(Update, handle_open_command_bar);
+        app.world_mut().spawn(CommandBarProjection::default());
         app
     }
 
@@ -2151,9 +2151,10 @@ mod tests {
             ChildOf(stack),
         ));
         app.world_mut()
-            .resource_mut::<CommandBarProjection>()
-            .workspace
-            .stack = Some(stack);
+            .run_system_once(move |mut state: Single<&mut CommandBarProjection>| {
+                state.workspace.stack = Some(stack);
+            })
+            .unwrap();
 
         send(&mut app, "browser_open_command_bar");
 

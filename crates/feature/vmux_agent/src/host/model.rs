@@ -20,7 +20,6 @@ pub(super) struct ChatModelPlugin;
 impl Plugin for ChatModelPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
-            .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_message::<AcpSetModelRequest>()
             .add_message::<AcpSetModeRequest>()
             .add_message::<ModeSelectRequest>()
@@ -513,7 +512,7 @@ fn remember_acp_mode_lists(
 
 fn publish_agent_models(
     last_used: Single<Ref<AgentModelSelections>>,
-    mut state: ResMut<vmux_command::snapshot::CommandBarProjection>,
+    mut state: Single<&mut vmux_command::snapshot::CommandBarProjection>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -537,7 +536,7 @@ fn publish_agent_models(
 
 fn publish_agent_modes(
     last_used: Single<Ref<AgentModeSelections>>,
-    mut state: ResMut<vmux_command::snapshot::CommandBarProjection>,
+    mut state: Single<&mut vmux_command::snapshot::CommandBarProjection>,
 ) {
     if !last_used.is_changed() {
         return;
@@ -1228,14 +1227,17 @@ mod tests {
         );
         let mut app = App::new();
         app.world_mut().spawn(selections);
-        app.init_resource::<vmux_command::snapshot::CommandBarProjection>()
-            .add_systems(Update, publish_agent_models);
+        app.world_mut()
+            .spawn(vmux_command::snapshot::CommandBarProjection::default());
+        app.add_systems(Update, publish_agent_models);
 
         app.update();
 
         let published = app
             .world()
-            .resource::<vmux_command::snapshot::CommandBarProjection>();
+            .iter_entities()
+            .find_map(|entity| entity.get::<vmux_command::snapshot::CommandBarProjection>())
+            .unwrap();
         let published = &published.agent_models;
         assert_eq!(published.agents.len(), 1);
         assert_eq!(published.agents[0].agent_key, "cli:codex");
@@ -1247,14 +1249,15 @@ mod tests {
     fn acp_mode_catalog_uses_the_canonical_launcher_identity() {
         let mut app = App::new();
         let registry = app.world_mut().spawn(AgentModeSelections::default()).id();
-        app.init_resource::<vmux_command::snapshot::CommandBarProjection>()
-            .add_systems(
-                Update,
-                (
-                    remember_acp_mode_lists,
-                    publish_agent_modes.after(remember_acp_mode_lists),
-                ),
-            );
+        app.world_mut()
+            .spawn(vmux_command::snapshot::CommandBarProjection::default());
+        app.add_systems(
+            Update,
+            (
+                remember_acp_mode_lists,
+                publish_agent_modes.after(remember_acp_mode_lists),
+            ),
+        );
         app.world_mut().spawn((
             AcpSession {
                 agent_id: "codex-acp".into(),
@@ -1279,7 +1282,9 @@ mod tests {
 
         let published = app
             .world()
-            .resource::<vmux_command::snapshot::CommandBarProjection>();
+            .iter_entities()
+            .find_map(|entity| entity.get::<vmux_command::snapshot::CommandBarProjection>())
+            .unwrap();
         let published = &published.agent_modes;
         assert_eq!(published.agents.len(), 1);
         assert_eq!(published.agents[0].agent_key, "codex");

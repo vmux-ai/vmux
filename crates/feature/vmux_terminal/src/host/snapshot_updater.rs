@@ -18,7 +18,7 @@ impl Plugin for SnapshotPlugin {
 
 fn update_terminals_snapshot(
     pid_maps: Query<Ref<PidToEntity>>,
-    mut state: ResMut<CommandBarProjection>,
+    mut state: Single<&mut CommandBarProjection>,
 ) {
     let pid_map = pid_maps.iter().next();
     let changed = pid_map
@@ -41,13 +41,20 @@ fn update_terminals_snapshot(
 mod tests {
     use super::*;
 
+    fn projection(app: &App) -> &CommandBarProjection {
+        app.world()
+            .iter_entities()
+            .find_map(|entity| entity.get::<CommandBarProjection>())
+            .unwrap()
+    }
+
     #[test]
     fn writes_url_and_no_running_terminals() {
         let mut app = App::new();
-        app.init_resource::<CommandBarProjection>()
-            .add_systems(Update, update_terminals_snapshot);
+        app.add_systems(Update, update_terminals_snapshot);
+        app.world_mut().spawn(CommandBarProjection::default());
         app.update();
-        let snap = &app.world().resource::<CommandBarProjection>().terminals;
+        let snap = &projection(&app).terminals;
         assert_eq!(snap.terminal_page_url, TERMINAL_PAGE_URL);
         assert!(snap.running.is_empty());
     }
@@ -55,15 +62,15 @@ mod tests {
     #[test]
     fn running_terminals_are_keyed_by_the_url_the_row_carries() {
         let mut app = App::new();
-        app.init_resource::<CommandBarProjection>()
-            .add_systems(Update, update_terminals_snapshot);
+        app.add_systems(Update, update_terminals_snapshot);
+        app.world_mut().spawn(CommandBarProjection::default());
         let pane = app.world_mut().spawn_empty().id();
         app.world_mut()
             .spawn([(4321, pane)].into_iter().collect::<PidToEntity>());
 
         app.update();
 
-        let snap = &app.world().resource::<CommandBarProjection>().terminals;
+        let snap = &projection(&app).terminals;
         assert_eq!(snap.running.get("vmux://terminal/4321"), Some(&pane));
     }
 }

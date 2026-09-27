@@ -18,7 +18,6 @@ pub(crate) enum SnapshotSet {
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<crate::acp_tool::AcpPackageChanged>()
-            .init_resource::<CommandBarProjection>()
             .add_systems(
                 Update,
                 (
@@ -54,7 +53,7 @@ fn update_agents_snapshot(
     mut removed_provider_keys: RemovedComponents<StrategyKey>,
     catalog: Option<Single<Ref<crate::runtime::acp::AcpCatalog>>>,
     mut package_changes: MessageReader<crate::acp_tool::AcpPackageChanged>,
-    mut state: ResMut<CommandBarProjection>,
+    mut state: Single<&mut CommandBarProjection>,
 ) {
     let providers_changed = !changed_q.is_empty();
     let strategies_changed = !changed_provider_strategies.is_empty()
@@ -138,7 +137,7 @@ fn update_recent_agents(
     cli_sessions: Query<(&vmux_core::agent::AgentSession, &ChildOf)>,
     stack_times: Query<&LastActivatedAt>,
     archived_pages: Query<&ArchivedPage>,
-    mut state: ResMut<CommandBarProjection>,
+    mut state: Single<&mut CommandBarProjection>,
     mut remembered: Local<std::collections::HashMap<AgentPromptTarget, i64>>,
 ) {
     let mut consider = |timestamp: i64, target: AgentPromptTarget| {
@@ -211,7 +210,7 @@ fn update_agent_sessions_snapshot(
         &vmux_core::agent::AgentSession,
         &vmux_core::agent::SessionId,
     )>,
-    mut state: ResMut<CommandBarProjection>,
+    mut state: Single<&mut CommandBarProjection>,
 ) {
     let mut next = std::collections::HashMap::with_capacity(sessions.iter().len());
     for (entity, session, id) in &sessions {
@@ -225,6 +224,20 @@ fn update_agent_sessions_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn projection(app: &App) -> &CommandBarProjection {
+        app.world()
+            .iter_entities()
+            .find_map(|entity| entity.get::<CommandBarProjection>())
+            .unwrap()
+    }
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.world_mut().spawn(CommandBarProjection::default());
+        app.add_plugins(SnapshotPlugin);
+        app
+    }
 
     fn registry_agent(id: &str, name: &str) -> crate::acp_registry::RegistryAgent {
         crate::acp_registry::RegistryAgent {
@@ -240,27 +253,24 @@ mod tests {
 
     #[test]
     fn writes_empty_snapshot_when_no_resources() {
-        let mut app = App::new();
-        app.add_plugins(SnapshotPlugin);
+        let mut app = app();
         app.update();
-        let snap = &app.world().resource::<CommandBarProjection>().agents;
+        let snap = &projection(&app).agents;
         assert!(snap.providers.is_empty());
         assert!(snap.strategies.is_empty());
     }
 
     #[test]
     fn agent_sessions_snapshot_starts_empty() {
-        let mut app = App::new();
-        app.add_plugins(SnapshotPlugin);
+        let mut app = app();
         app.update();
-        let snap = &app.world().resource::<CommandBarProjection>().terminals;
+        let snap = &projection(&app).terminals;
         assert!(snap.agent_session_to_entity.is_empty());
     }
 
     #[test]
     fn agent_sessions_snapshot_tracks_live_session_entities() {
-        let mut app = App::new();
-        app.add_plugins(SnapshotPlugin);
+        let mut app = app();
         let entity = app
             .world_mut()
             .spawn((
@@ -273,11 +283,7 @@ mod tests {
 
         app.update();
 
-        let sessions = &app
-            .world()
-            .resource::<CommandBarProjection>()
-            .terminals
-            .agent_session_to_entity;
+        let sessions = &projection(&app).terminals.agent_session_to_entity;
         assert_eq!(
             sessions.get(&(vmux_core::agent::AgentKind::Codex, "session-1".to_string())),
             Some(&entity)
@@ -287,8 +293,7 @@ mod tests {
         app.update();
 
         assert!(
-            app.world()
-                .resource::<CommandBarProjection>()
+            projection(&app)
                 .terminals
                 .agent_session_to_entity
                 .is_empty()
@@ -297,8 +302,7 @@ mod tests {
 
     #[test]
     fn cli_snapshot_only_contains_ready_providers() {
-        let mut app = App::new();
-        app.add_plugins(SnapshotPlugin);
+        let mut app = app();
         app.world_mut().spawn((
             AgentProviderTargetKind(vmux_core::agent::AgentKind::Codex),
             Name::new("Codex"),
@@ -311,11 +315,7 @@ mod tests {
 
         app.update();
 
-        let providers = &app
-            .world()
-            .resource::<CommandBarProjection>()
-            .agents
-            .providers;
+        let providers = &projection(&app).agents.providers;
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, "codex");
     }
@@ -346,8 +346,7 @@ mod tests {
 
     #[test]
     fn recent_agents_are_deduped_and_sorted_by_last_use() {
-        let mut app = App::new();
-        app.add_plugins(SnapshotPlugin);
+        let mut app = app();
         let cli_stack = app.world_mut().spawn(LastActivatedAt(20)).id();
         app.world_mut().spawn((
             vmux_core::agent::AgentSession {
@@ -379,7 +378,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<CommandBarProjection>().agents.recent,
+            projection(&app).agents.recent,
             vec![
                 AgentPromptTarget::Acp {
                     id: "claude".to_string(),
@@ -398,7 +397,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<CommandBarProjection>().agents.recent,
+            projection(&app).agents.recent,
             vec![
                 AgentPromptTarget::Acp {
                     id: "claude".to_string(),
@@ -410,8 +409,7 @@ mod tests {
 
     #[test]
     fn closed_codex_acp_stays_ahead_of_older_claude_cli() {
-        let mut app = App::new();
-        app.add_plugins(SnapshotPlugin);
+        let mut app = app();
         let cli_stack = app.world_mut().spawn(LastActivatedAt(20)).id();
         app.world_mut().spawn((
             vmux_core::agent::AgentSession {
@@ -428,7 +426,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<CommandBarProjection>().agents.recent,
+            projection(&app).agents.recent,
             vec![
                 AgentPromptTarget::Acp {
                     id: "codex".to_string(),
@@ -440,8 +438,7 @@ mod tests {
 
     #[test]
     fn equal_recent_agent_times_fall_back_to_name() {
-        let mut app = App::new();
-        app.add_plugins(SnapshotPlugin);
+        let mut app = app();
         app.world_mut().spawn((
             vmux_session::AcpSession {
                 agent_id: "claude-acp".to_string(),
@@ -463,7 +460,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().resource::<CommandBarProjection>().agents.recent,
+            projection(&app).agents.recent,
             vec![
                 AgentPromptTarget::Acp {
                     id: "claude".to_string(),

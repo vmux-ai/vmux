@@ -30,7 +30,6 @@ impl Plugin for StartPlugin {
         app.add_plugins(Self::MANIFEST.plugin().hosted(
             vmux_core::host::page::NativelyHosted::page(START_PAGE_URL, "Start"),
         ))
-        .init_resource::<CommandBarProjection>()
         .add_message::<InlineTransitionRequested>()
         .add_systems(
             Update,
@@ -99,7 +98,7 @@ struct StartPromptContextParams<'w, 's> {
             Option<Ref<'static, TabWorktree>>,
         ),
     >,
-    command_bar: Res<'w, CommandBarProjection>,
+    command_bar: Single<'w, 's, Ref<'static, CommandBarProjection>>,
     warmed_branches_for: Local<'s, String>,
 }
 
@@ -791,11 +790,11 @@ mod tests {
 
     fn start_ready_app() -> App {
         let mut app = App::new();
-        app.init_resource::<CommandBarProjection>()
-            .init_resource::<EmittedIds>()
+        app.init_resource::<EmittedIds>()
             .add_observer(on_start_data_request)
             .add_observer(publish_command_bar_focus)
             .add_observer(capture_state);
+        app.world_mut().spawn(CommandBarProjection::default());
         app
     }
 

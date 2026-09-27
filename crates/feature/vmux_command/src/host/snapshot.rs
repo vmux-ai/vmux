@@ -12,10 +12,13 @@ pub struct UiStatePlugin;
 
 impl Plugin for UiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CommandBarProjection>()
-            .add_plugins(vmux_core::host::UiStatePlugin::<
-                vmux_api::command_bar::CommandBarUiState,
-            >::default())
+        app.world_mut().spawn((
+            Name::new("Command bar projection"),
+            CommandBarProjection::default(),
+        ));
+        app.add_plugins(vmux_core::host::UiStatePlugin::<
+            vmux_api::command_bar::CommandBarUiState,
+        >::default())
             .add_systems(Startup, update_pages_snapshot)
             .add_systems(PreUpdate, attach_command_bar_ui_state);
     }
@@ -24,7 +27,7 @@ impl Plugin for UiStatePlugin {
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct WriteCommandBarSnapshots;
 
-#[derive(Resource, Default, Clone, Debug)]
+#[derive(Component, Default, Clone, Debug)]
 pub struct CommandBarProjection {
     pub agents: CommandBarAgentsSnapshot,
     pub workspace: CommandBarWorkspaceSnapshot,
@@ -198,7 +201,10 @@ pub struct CommandBarWorkSnapshot {
     pub projects: Vec<String>,
 }
 
-fn update_pages_snapshot(manifests: Query<&PageManifest>, mut state: ResMut<CommandBarProjection>) {
+fn update_pages_snapshot(
+    manifests: Query<&PageManifest>,
+    mut state: Single<&mut CommandBarProjection>,
+) {
     let snapshot = &mut state.pages;
     if !snapshot.pages.is_empty() {
         return;
@@ -370,8 +376,8 @@ mod tests {
     #[test]
     fn pages_snapshot_collects_only_command_bar_pages() {
         let mut app = App::new();
-        app.init_resource::<CommandBarProjection>()
-            .add_systems(Update, update_pages_snapshot);
+        app.add_systems(Update, update_pages_snapshot);
+        app.world_mut().spawn(CommandBarProjection::default());
         app.world_mut().spawn(PageManifest {
             url: "vmux://services/",
             asset_host: "services",
@@ -397,7 +403,12 @@ mod tests {
 
         app.update();
 
-        let snap = &app.world().resource::<CommandBarProjection>().pages;
+        let snapshot = app
+            .world()
+            .iter_entities()
+            .find_map(|entity| entity.get::<CommandBarProjection>())
+            .unwrap();
+        let snap = &snapshot.pages;
         assert_eq!(snap.pages.len(), 1);
         assert_eq!(snap.pages[0].page.url, "vmux://services/");
         assert_eq!(snap.pages[0].page.url, "vmux://services/");

@@ -7,7 +7,6 @@ impl Plugin for SpaceProjectPlugin {
         app.world_mut()
             .spawn((Name::new("Repository roots"), RepoRoots::default()));
         app.register_type::<ExpandedProjectDirs>()
-            .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_observer(on_project_tree_toggle)
             .add_systems(
                 Update,
@@ -42,7 +41,7 @@ fn on_project_tree_toggle(
 
 fn publish_project_roots(
     projects: SpaceProjects,
-    mut state: ResMut<vmux_command::snapshot::CommandBarProjection>,
+    mut state: Single<&mut vmux_command::snapshot::CommandBarProjection>,
 ) {
     let mut next = Vec::new();
     let mut active = None;

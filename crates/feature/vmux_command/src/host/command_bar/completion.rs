@@ -34,7 +34,7 @@ impl Plugin for CompletionPlugin {
 
 fn on_path_complete_request(
     trigger: On<UiInput<PathCompleteRequest>>,
-    state: Res<CommandBarProjection>,
+    state: Single<&CommandBarProjection>,
     browsers: NonSend<Browsers>,
     pending: Query<&PendingProjectCompletion>,
     mut index: Single<&mut ProjectIndex>,
@@ -102,7 +102,7 @@ fn on_path_complete_request(
 }
 
 fn warm_project_index(
-    state: Res<CommandBarProjection>,
+    state: Single<Ref<CommandBarProjection>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     pending: Query<&PendingProjectCompletion>,
     mut index: Single<&mut ProjectIndex>,
@@ -123,7 +123,7 @@ fn warm_project_index(
 }
 
 fn answer_settled_project_index(
-    state: Res<CommandBarProjection>,
+    state: Single<&CommandBarProjection>,
     browsers: NonSend<Browsers>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut index: Single<&mut ProjectIndex>,

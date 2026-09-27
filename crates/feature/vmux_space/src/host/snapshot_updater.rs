@@ -31,7 +31,7 @@ fn update_spaces_snapshot(
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     child_of: Query<&ChildOf>,
     host_windows: Query<&HostWindow>,
-    mut state: ResMut<CommandBarProjection>,
+    mut state: Single<&mut CommandBarProjection>,
 ) {
     let profile = crate::model::bootstrap_profile_name();
     let mut rows: Vec<(u32, SpaceSummary)> = Vec::new();
@@ -77,14 +77,14 @@ mod tests {
 
     struct Spaces {
         app: App,
-        published_at: u32,
+        published: CommandBarSpacesSnapshot,
     }
 
     impl Spaces {
         fn one() -> Self {
             let mut app = App::new();
-            app.init_resource::<CommandBarProjection>()
-                .add_systems(Update, update_spaces_snapshot);
+            app.add_systems(Update, update_spaces_snapshot);
+            app.world_mut().spawn(CommandBarProjection::default());
             let window = app.world_mut().spawn_empty().id();
             app.insert_resource(vmux_layout::window::FocusedWindow(Some(window)));
             let root = app.world_mut().spawn(HostWindow(window)).id();
@@ -96,28 +96,28 @@ mod tests {
                 vmux_core::Active,
                 ChildOf(main),
             ));
-            let published_at = Self::changed_tick(&app);
-            Self { app, published_at }
+            Self {
+                app,
+                published: CommandBarSpacesSnapshot::default(),
+            }
         }
 
         fn republished(&mut self) -> bool {
             self.app.update();
-            let now = Self::changed_tick(&self.app);
-            let moved = now != self.published_at;
-            self.published_at = now;
-            moved
-        }
-
-        fn changed_tick(app: &App) -> u32 {
-            app.world()
-                .get_resource_change_ticks::<CommandBarProjection>()
-                .expect("the snapshot")
-                .changed
-                .get()
+            let current = self.snapshot().clone();
+            let changed = current != self.published;
+            self.published = current;
+            changed
         }
 
         fn snapshot(&self) -> &CommandBarSpacesSnapshot {
-            &self.app.world().resource::<CommandBarProjection>().spaces
+            &self
+                .app
+                .world()
+                .iter_entities()
+                .find_map(|entity| entity.get::<CommandBarProjection>())
+                .unwrap()
+                .spaces
         }
 
         fn rename(&mut self, to: &str) {
@@ -167,8 +167,8 @@ mod tests {
     #[test]
     fn publishes_global_spaces_with_the_focused_windows_active_space() {
         let mut app = App::new();
-        app.init_resource::<CommandBarProjection>()
-            .add_systems(Update, update_spaces_snapshot);
+        app.add_systems(Update, update_spaces_snapshot);
+        app.world_mut().spawn(CommandBarProjection::default());
         let first_window = app.world_mut().spawn_empty().id();
         let second_window = app.world_mut().spawn_empty().id();
         app.insert_resource(vmux_layout::window::FocusedWindow(Some(first_window)));
@@ -186,7 +186,12 @@ mod tests {
 
         app.update();
 
-        let snapshot = &app.world().resource::<CommandBarProjection>().spaces;
+        let snapshot = app
+            .world()
+            .iter_entities()
+            .find_map(|entity| entity.get::<CommandBarProjection>())
+            .map(|projection| &projection.spaces)
+            .unwrap();
         assert_eq!(snapshot.active_space_id, "first");
         assert_eq!(snapshot.spaces.len(), 2);
         assert_eq!(snapshot.spaces[0].id, "first");
@@ -197,7 +202,12 @@ mod tests {
             .0 = Some(second_window);
         app.update();
 
-        let snapshot = &app.world().resource::<CommandBarProjection>().spaces;
+        let snapshot = app
+            .world()
+            .iter_entities()
+            .find_map(|entity| entity.get::<CommandBarProjection>())
+            .map(|projection| &projection.spaces)
+            .unwrap();
         assert_eq!(snapshot.active_space_id, "second");
         assert_eq!(snapshot.spaces.len(), 2);
     }

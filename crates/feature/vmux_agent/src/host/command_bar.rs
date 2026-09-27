@@ -89,7 +89,7 @@ impl AgentContribution {
 }
 
 fn publish_contributions(
-    state: Res<CommandBarProjection>,
+    state: Single<&CommandBarProjection>,
     mut previous: Local<Option<CommandBarAgentsSnapshot>>,
     mine: Query<Entity, With<AgentContribution>>,
     mut commands: Commands,

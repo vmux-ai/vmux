@@ -22,7 +22,7 @@ fn publish_workspace_snapshot(
     tab_gather: TabGatherParams,
     locale: Option<Res<ResolvedLocale>>,
     projects: Query<(&crate::tab::Tab, Option<&crate::tab::TabWorkspace>)>,
-    mut state: ResMut<CommandBarProjection>,
+    mut state: Single<&mut CommandBarProjection>,
 ) {
     let active_tab = tab_gather.active_tab.get();
     let project_root = ProjectRoot::resolve(active_tab, &projects);

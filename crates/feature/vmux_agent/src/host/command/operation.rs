@@ -87,7 +87,7 @@ fn new_chat(
 
 fn list_agents(
     mut requests: MessageReader<AgentRequestInput>,
-    command_bar: Res<vmux_command::snapshot::CommandBarProjection>,
+    command_bar: Single<&vmux_command::snapshot::CommandBarProjection>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
