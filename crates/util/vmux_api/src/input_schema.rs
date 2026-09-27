@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -360,171 +360,178 @@ impl InputSchema {
             constant: None,
         }
     }
-
-    fn strings(value: Value) -> Result<Vec<String>, String> {
-        value
-            .as_array()
-            .ok_or("input schema value must be an array")?
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_string)
-                    .ok_or("input schema array values must be strings".to_string())
-            })
-            .collect()
-    }
-
-    fn schemas(value: Value) -> Result<BTreeMap<String, Self>, String> {
-        let Value::Object(object) = value else {
-            return Err("input schema properties must be an object".to_string());
-        };
-        object
-            .into_iter()
-            .map(|(name, schema)| Self::try_from(schema).map(|schema| (name, schema)))
-            .collect()
-    }
-
-    fn take_u64(
-        object: &mut serde_json::Map<String, Value>,
-        name: &str,
-    ) -> Result<Option<u64>, String> {
-        object
-            .remove(name)
-            .map(|value| {
-                value
-                    .as_u64()
-                    .ok_or_else(|| format!("input schema {name} must be an unsigned integer"))
-            })
-            .transpose()
-    }
-
-    fn take_i64(
-        object: &mut serde_json::Map<String, Value>,
-        name: &str,
-    ) -> Result<Option<i64>, String> {
-        object
-            .remove(name)
-            .map(|value| {
-                value
-                    .as_i64()
-                    .ok_or_else(|| format!("input schema {name} must be an integer"))
-            })
-            .transpose()
-    }
 }
 
 impl TryFrom<Value> for InputSchema {
     type Error = String;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let Value::Object(mut object) = value else {
+        InputSchemaParser::parse(value)
+    }
+}
+
+struct InputSchemaParser {
+    fields: Map<String, Value>,
+}
+
+impl InputSchemaParser {
+    fn parse(value: Value) -> Result<InputSchema, String> {
+        let Value::Object(fields) = value else {
             return Err("input schema must be an object".to_string());
         };
-        let schema_type = object
-            .remove("type")
-            .map(|value| {
-                let Some(value) = value.as_str() else {
-                    return Err("input schema type must be a string".to_string());
-                };
-                match value {
-                    "object" => Ok(InputSchemaType::Object),
-                    "string" => Ok(InputSchemaType::String),
-                    "integer" => Ok(InputSchemaType::Integer),
-                    "number" => Ok(InputSchemaType::Number),
-                    "boolean" => Ok(InputSchemaType::Boolean),
-                    "array" => Ok(InputSchemaType::Array),
-                    _ => Err(format!("unsupported input schema type: {value}")),
-                }
-            })
-            .transpose()?;
-        let mut schema = Self::new(schema_type);
-        schema.description = object
-            .remove("description")
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_string)
-                    .ok_or("input schema description must be a string".to_string())
-            })
-            .transpose()?;
-        schema.required = object
-            .remove("required")
-            .map(Self::strings)
-            .transpose()?
+        Self { fields }.finish()
+    }
+
+    fn finish(mut self) -> Result<InputSchema, String> {
+        let schema_type = self.schema_type()?;
+        let mut schema = InputSchema::new(schema_type);
+        schema.description = self.string("description")?;
+        schema.required = self.strings("required")?;
+        schema.properties = self.schemas("properties")?;
+        schema.additional_properties = self
+            .boolean("additionalProperties")?
             .unwrap_or_default();
-        schema.properties = object
-            .remove("properties")
-            .map(Self::schemas)
-            .transpose()?
-            .unwrap_or_default();
-        schema.additional_properties = object
-            .remove("additionalProperties")
-            .map(|value| {
-                value
-                    .as_bool()
-                    .ok_or("input schema additionalProperties must be a boolean".to_string())
-            })
-            .transpose()?
-            .unwrap_or_default();
-        schema.definitions = object
-            .remove("$defs")
-            .map(Self::schemas)
-            .transpose()?
-            .unwrap_or_default();
-        schema.values = object
-            .remove("enum")
-            .map(Self::strings)
-            .transpose()?
-            .unwrap_or_default();
-        schema.min_length = Self::take_u64(&mut object, "minLength")?;
-        schema.max_length = Self::take_u64(&mut object, "maxLength")?;
-        schema.minimum = Self::take_i64(&mut object, "minimum")?;
-        schema.maximum = Self::take_i64(&mut object, "maximum")?;
-        schema.items = object
-            .remove("items")
-            .map(Self::try_from)
-            .transpose()?
-            .map(Box::new);
-        schema.min_items = Self::take_u64(&mut object, "minItems")?;
-        schema.max_items = Self::take_u64(&mut object, "maxItems")?;
-        schema.one_of = object
-            .remove("oneOf")
-            .or_else(|| object.remove("anyOf"))
-            .map(|value| {
-                value
-                    .as_array()
-                    .ok_or("input schema oneOf must be an array")?
-                    .iter()
-                    .cloned()
-                    .map(Self::try_from)
-                    .collect()
-            })
-            .transpose()?
-            .unwrap_or_default();
-        schema.reference = object
-            .remove("$ref")
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_string)
-                    .ok_or("input schema reference must be a string".to_string())
-            })
-            .transpose()?;
-        schema.constant = object
-            .remove("const")
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_string)
-                    .ok_or("input schema const must be a string".to_string())
-            })
-            .transpose()?;
-        if let Some(name) = object.keys().next() {
+        schema.definitions = self.schemas("$defs")?;
+        schema.values = self.strings("enum")?;
+        schema.min_length = self.unsigned_integer("minLength")?;
+        schema.max_length = self.unsigned_integer("maxLength")?;
+        schema.minimum = self.integer("minimum")?;
+        schema.maximum = self.integer("maximum")?;
+        schema.items = self.schema("items")?.map(Box::new);
+        schema.min_items = self.unsigned_integer("minItems")?;
+        schema.max_items = self.unsigned_integer("maxItems")?;
+        schema.one_of = self.alternatives()?;
+        schema.reference = self.string("$ref")?;
+        schema.constant = self.string("const")?;
+        if let Some(name) = self.fields.keys().next() {
             return Err(format!("unsupported input schema keyword: {name}"));
         }
         schema.validate()?;
         Ok(schema)
+    }
+
+    fn schema_type(&mut self) -> Result<Option<InputSchemaType>, String> {
+        let Some(value) = self.fields.remove("type") else {
+            return Ok(None);
+        };
+        let Some(value) = value.as_str() else {
+            return Err("input schema type must be a string".to_string());
+        };
+        let schema_type = match value {
+            "object" => InputSchemaType::Object,
+            "string" => InputSchemaType::String,
+            "integer" => InputSchemaType::Integer,
+            "number" => InputSchemaType::Number,
+            "boolean" => InputSchemaType::Boolean,
+            "array" => InputSchemaType::Array,
+            _ => return Err(format!("unsupported input schema type: {value}")),
+        };
+        Ok(Some(schema_type))
+    }
+
+    fn string(&mut self, name: &str) -> Result<Option<String>, String> {
+        let Some(value) = self.fields.remove(name) else {
+            return Ok(None);
+        };
+        let Some(value) = value.as_str() else {
+            return Err(format!("input schema {} must be a string", Self::label(name)));
+        };
+        Ok(Some(value.to_string()))
+    }
+
+    fn boolean(&mut self, name: &str) -> Result<Option<bool>, String> {
+        let Some(value) = self.fields.remove(name) else {
+            return Ok(None);
+        };
+        let Some(value) = value.as_bool() else {
+            return Err(format!("input schema {name} must be a boolean"));
+        };
+        Ok(Some(value))
+    }
+
+    fn strings(&mut self, name: &str) -> Result<Vec<String>, String> {
+        let Some(value) = self.fields.remove(name) else {
+            return Ok(Vec::new());
+        };
+        let Value::Array(values) = value else {
+            return Err("input schema value must be an array".to_string());
+        };
+        let mut strings = Vec::with_capacity(values.len());
+        for value in values {
+            let Value::String(value) = value else {
+                return Err("input schema array values must be strings".to_string());
+            };
+            strings.push(value);
+        }
+        Ok(strings)
+    }
+
+    fn schemas(&mut self, name: &str) -> Result<BTreeMap<String, InputSchema>, String> {
+        let Some(value) = self.fields.remove(name) else {
+            return Ok(BTreeMap::new());
+        };
+        let Value::Object(values) = value else {
+            return Err("input schema properties must be an object".to_string());
+        };
+        let mut schemas = BTreeMap::new();
+        for (name, value) in values {
+            schemas.insert(name, InputSchema::try_from(value)?);
+        }
+        Ok(schemas)
+    }
+
+    fn schema(&mut self, name: &str) -> Result<Option<InputSchema>, String> {
+        let Some(value) = self.fields.remove(name) else {
+            return Ok(None);
+        };
+        Ok(Some(InputSchema::try_from(value)?))
+    }
+
+    fn alternatives(&mut self) -> Result<Vec<InputSchema>, String> {
+        let value = match self.fields.remove("oneOf") {
+            Some(value) => Some(value),
+            None => self.fields.remove("anyOf"),
+        };
+        let Some(value) = value else {
+            return Ok(Vec::new());
+        };
+        let Value::Array(values) = value else {
+            return Err("input schema oneOf must be an array".to_string());
+        };
+        let mut schemas = Vec::with_capacity(values.len());
+        for value in values {
+            schemas.push(InputSchema::try_from(value)?);
+        }
+        Ok(schemas)
+    }
+
+    fn unsigned_integer(&mut self, name: &str) -> Result<Option<u64>, String> {
+        let Some(value) = self.fields.remove(name) else {
+            return Ok(None);
+        };
+        let Some(value) = value.as_u64() else {
+            return Err(format!(
+                "input schema {name} must be an unsigned integer"
+            ));
+        };
+        Ok(Some(value))
+    }
+
+    fn integer(&mut self, name: &str) -> Result<Option<i64>, String> {
+        let Some(value) = self.fields.remove(name) else {
+            return Ok(None);
+        };
+        let Some(value) = value.as_i64() else {
+            return Err(format!("input schema {name} must be an integer"));
+        };
+        Ok(Some(value))
+    }
+
+    fn label(name: &str) -> &str {
+        match name {
+            "$ref" => "reference",
+            name => name,
+        }
     }
 }
 
