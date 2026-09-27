@@ -20,7 +20,7 @@ use crate::runtime::cli::vibe::VibeStrategy;
 use crate::session;
 use crate::strategy::AgentStrategies;
 
-use super::command::{FocusPaneRequest, ProcessStackSpawnRequest, RenameProfileRequest};
+use super::command::RenameProfileRequest;
 pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
@@ -80,7 +80,6 @@ impl Plugin for AgentSessionPlugin {
                 super::workspace::WorkspacePlugin,
             ))
             .add_message::<AgentCommandRequest>()
-            .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
             .add_message::<AgentQueryRequest>()
             .add_message::<ScreenshotRequest>()
@@ -109,7 +108,6 @@ impl Plugin for AgentSessionPlugin {
             .add_message::<PageAgentSpawnDefaultRequest>()
             .add_message::<PageAgentAttachDefaultRequest>()
             .add_message::<TerminalStackSpawnRequest>()
-            .add_message::<ProcessStackSpawnRequest>()
             .add_message::<RestartAgentPty>()
             .add_message::<vmux_core::agent::SwapStackSession>()
             .add_message::<vmux_core::notify::BellReceived>()

@@ -3,10 +3,7 @@ use vmux_api::protocol::{AgentCommand as ServiceAgentCommand, SharedAgentCommand
 
 use crate::host::event::AgentCommandRequest;
 
-use super::application::{
-    AgentFocusPaneRequest, AgentNotifyRequest, AgentRenameProfileRequest, AgentUpdateLayoutRequest,
-    AgentUpdateSettingsRequest,
-};
+use super::application::{AgentNotifyRequest, AgentRenameProfileRequest};
 use super::browser::{
     AgentBrowserGoBackRequest, AgentBrowserGoForwardRequest, AgentBrowserHistorySearchRequest,
     AgentBrowserInstallExtensionRequest, AgentBrowserNavigateRequest, AgentOpenInNewStackRequest,
@@ -15,7 +12,6 @@ use super::operation::{
     AgentFileSearchRequest, AgentFileTouchedRequest, AgentInvokeCommandRequest, AgentListRequest,
     AgentNewChatRequest, AgentTurnEndedRequest,
 };
-use super::terminal::{AgentNewTerminalTabRequest, AgentRunShellRequest, AgentTerminalSendRequest};
 use super::{AgentReply, CommandSet};
 
 pub(super) struct DispatchPlugin;
@@ -24,50 +20,12 @@ impl Plugin for DispatchPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (
-                route_terminal_operations,
-                route_browser_operations,
-                route_application_operations,
-            )
-                .in_set(CommandSet::Dispatch),
+            (route_browser_operations, route_application_operations).in_set(CommandSet::Dispatch),
         )
         .add_systems(
             Update,
             route_remaining_operations.in_set(CommandSet::Dispatch),
         );
-    }
-}
-
-fn route_terminal_operations(
-    mut commands: MessageReader<AgentCommandRequest>,
-    mut new_terminal_tab: MessageWriter<AgentNewTerminalTabRequest>,
-    mut run_shell: MessageWriter<AgentRunShellRequest>,
-    mut terminal_send: MessageWriter<AgentTerminalSendRequest>,
-) {
-    for request in commands.read() {
-        let reply = AgentReply::new(request.request_id);
-        match &request.command {
-            ServiceAgentCommand::NewTerminalTab(payload) => {
-                new_terminal_tab.write(AgentNewTerminalTabRequest {
-                    reply,
-                    activate: !request.origin.is_agent(),
-                    payload: payload.clone(),
-                });
-            }
-            ServiceAgentCommand::RunShell(payload) => {
-                run_shell.write(AgentRunShellRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            ServiceAgentCommand::TerminalSend(payload) => {
-                terminal_send.write(AgentTerminalSendRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            _ => {}
-        }
     }
 }
 
@@ -131,10 +89,7 @@ fn route_browser_operations(
 fn route_application_operations(
     mut commands: MessageReader<AgentCommandRequest>,
     mut notify: MessageWriter<AgentNotifyRequest>,
-    mut focus_pane: MessageWriter<AgentFocusPaneRequest>,
     mut rename_profile: MessageWriter<AgentRenameProfileRequest>,
-    mut update_settings: MessageWriter<AgentUpdateSettingsRequest>,
-    mut update_layout: MessageWriter<AgentUpdateLayoutRequest>,
 ) {
     for request in commands.read() {
         let reply = AgentReply::new(request.request_id);
@@ -146,30 +101,9 @@ fn route_application_operations(
                     payload: payload.clone(),
                 });
             }
-            ServiceAgentCommand::FocusPane(payload) => {
-                focus_pane.write(AgentFocusPaneRequest {
-                    reply,
-                    allowed: !request.origin.is_agent(),
-                    payload: payload.clone(),
-                });
-            }
             ServiceAgentCommand::RenameProfile(payload) => {
                 rename_profile.write(AgentRenameProfileRequest {
                     reply,
-                    payload: payload.clone(),
-                });
-            }
-            ServiceAgentCommand::UpdateSettings(payload) => {
-                update_settings.write(AgentUpdateSettingsRequest {
-                    reply,
-                    from_agent: request.origin.is_agent(),
-                    payload: payload.clone(),
-                });
-            }
-            ServiceAgentCommand::UpdateLayout(payload) => {
-                update_layout.write(AgentUpdateLayoutRequest {
-                    reply,
-                    from_agent: request.origin.is_agent(),
                     payload: payload.clone(),
                 });
             }

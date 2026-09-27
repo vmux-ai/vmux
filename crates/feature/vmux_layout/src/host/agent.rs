@@ -1,13 +1,16 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkPin, AgentBookmarkPinUrl,
-    AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommand,
+    AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommand, AgentCommandResult, AgentFocusPane,
+    AgentUpdateLayout,
 };
 use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply};
 
-pub(super) struct BookmarkAgentPlugin;
+use crate::stack::FocusedStack;
 
-impl Plugin for BookmarkAgentPlugin {
+pub(super) struct LayoutAgentPlugin;
+
+impl Plugin for LayoutAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AgentCommandRequest>()
             .add_message::<AgentCommandResponse>()
@@ -17,6 +20,9 @@ impl Plugin for BookmarkAgentPlugin {
             .add_message::<AgentBookmarkPinUrlRequest>()
             .add_message::<AgentBookmarkUnpinRequest>()
             .add_message::<AgentBookmarkFolderCreateRequest>()
+            .add_message::<AgentFocusPaneRequest>()
+            .add_message::<AgentUpdateLayoutRequest>()
+            .add_message::<FocusPaneRequest>()
             .add_systems(
                 Update,
                 (
@@ -29,6 +35,16 @@ impl Plugin for BookmarkAgentPlugin {
                         unpin_bookmark,
                         create_bookmark_folder,
                     ),
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    route_layout_commands,
+                    request_focus,
+                    focus_pane,
+                    update_layout,
                 )
                     .chain(),
             );
@@ -69,6 +85,59 @@ struct AgentBookmarkUnpinRequest {
 struct AgentBookmarkFolderCreateRequest {
     reply: AgentReply,
     payload: AgentBookmarkFolderCreate,
+}
+
+#[derive(Message, Clone)]
+struct AgentFocusPaneRequest {
+    reply: AgentReply,
+    allowed: bool,
+    payload: AgentFocusPane,
+}
+
+#[derive(Message, Clone)]
+struct AgentUpdateLayoutRequest {
+    reply: AgentReply,
+    from_agent: bool,
+    payload: AgentUpdateLayout,
+}
+
+#[derive(Message, Clone)]
+struct FocusPaneRequest {
+    pane: String,
+}
+
+#[derive(Clone, Copy)]
+struct CurrentFocus {
+    tab: Option<Entity>,
+    pane: Option<Entity>,
+    stack: Option<Entity>,
+}
+
+impl CurrentFocus {
+    fn of(focus: &FocusedStack) -> Self {
+        Self {
+            tab: focus.tab,
+            pane: focus.pane,
+            stack: focus.stack,
+        }
+    }
+
+    fn preserve_in(self, snapshot: &mut vmux_api::protocol::layout::LayoutSnapshot) {
+        snapshot.focused = vmux_api::protocol::layout::Focus {
+            tab: self.id(crate::protocol::NodeKind::Tab, self.tab),
+            pane: self.id(crate::protocol::NodeKind::Pane, self.pane),
+            stack: self.id(crate::protocol::NodeKind::Stack, self.stack),
+        };
+        if let Some(tab) = snapshot.focused.tab.as_deref() {
+            for item in &mut snapshot.tabs {
+                item.is_active = item.id.as_deref() == Some(tab);
+            }
+        }
+    }
+
+    fn id(self, kind: crate::protocol::NodeKind, entity: Option<Entity>) -> Option<String> {
+        entity.map(|entity| crate::protocol::format_id(kind, entity.to_bits()))
+    }
 }
 
 fn route_bookmark_commands(
@@ -121,6 +190,81 @@ fn route_bookmark_commands(
             }
             _ => {}
         }
+    }
+}
+
+fn route_layout_commands(
+    mut commands: MessageReader<AgentCommandRequest>,
+    mut focus: MessageWriter<AgentFocusPaneRequest>,
+    mut update_layout: MessageWriter<AgentUpdateLayoutRequest>,
+) {
+    for request in commands.read() {
+        let reply = AgentReply::new(request.request_id);
+        match &request.command {
+            AgentCommand::FocusPane(payload) => {
+                focus.write(AgentFocusPaneRequest {
+                    reply,
+                    allowed: !request.origin.is_agent(),
+                    payload: payload.clone(),
+                });
+            }
+            AgentCommand::UpdateLayout(payload) => {
+                update_layout.write(AgentUpdateLayoutRequest {
+                    reply,
+                    from_agent: request.origin.is_agent(),
+                    payload: payload.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+fn request_focus(
+    mut requests: MessageReader<AgentFocusPaneRequest>,
+    mut focus: MessageWriter<FocusPaneRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
+) {
+    for request in requests.read() {
+        let result = if request.allowed {
+            focus.write(FocusPaneRequest {
+                pane: request.payload.pane.clone(),
+            });
+            AgentCommandResult::Ok
+        } else {
+            AgentCommandResult::Error("focus_pane is disabled for agents".to_string())
+        };
+        responses.write(request.reply.response(result));
+    }
+}
+
+fn focus_pane(
+    mut requests: MessageReader<FocusPaneRequest>,
+    child_of: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let Ok((_, bits)) = crate::protocol::parse_id(&request.pane) else {
+            continue;
+        };
+        vmux_core::focus_pane_entity(Entity::from_bits(bits), &mut commands, &child_of);
+    }
+}
+
+fn update_layout(
+    mut requests: MessageReader<AgentUpdateLayoutRequest>,
+    focus: Res<FocusedStack>,
+    mut apply: MessageWriter<crate::apply::LayoutApplyRequest>,
+) {
+    for request in requests.read() {
+        let mut snapshot = request.payload.layout.clone();
+        if request.from_agent {
+            CurrentFocus::of(&focus).preserve_in(&mut snapshot);
+        }
+        apply.write(crate::apply::LayoutApplyRequest {
+            request_id: request.reply.request_id.0,
+            snapshot,
+        });
     }
 }
 

@@ -2,7 +2,6 @@ mod application;
 mod browser;
 mod dispatch;
 mod operation;
-mod terminal;
 mod tool_call;
 
 use bevy::prelude::*;
@@ -10,9 +9,7 @@ use vmux_command::WriteCommandRequests;
 use vmux_core::agent::{AgentCommandResponse, AgentReply};
 use vmux_terminal::ServiceMessageSet;
 
-pub(crate) use application::{FocusPaneRequest, RenameProfileRequest};
-pub(crate) use terminal::ProcessStackSpawnRequest;
-
+pub(crate) use application::RenameProfileRequest;
 pub(crate) struct CommandPlugin;
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -43,7 +40,6 @@ impl Plugin for CommandPlugin {
                 browser::BrowserCommandPlugin,
                 dispatch::DispatchPlugin,
                 operation::AgentOperationPlugin,
-                terminal::TerminalCommandPlugin,
                 tool_call::ToolCallPlugin,
             ));
     }

@@ -1,3 +1,4 @@
+mod agent;
 mod appearance;
 mod projection;
 mod runtime;
@@ -29,6 +30,7 @@ impl Plugin for SettingsPlugin {
         app.add_plugins(crate::ui::SettingsPage::plugin());
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_plugins((
+            agent::AgentSettingsPlugin,
             SettingsRuntimePlugin,
             tool::SettingToolPlugin,
             state::StatePlugin,

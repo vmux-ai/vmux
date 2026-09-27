@@ -1,3 +1,4 @@
+mod agent;
 mod command;
 pub mod component;
 pub mod contract;

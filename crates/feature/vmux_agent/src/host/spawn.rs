@@ -9,7 +9,6 @@ use vmux_core::agent::{
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
 };
 use vmux_core::{LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled};
-use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::ForcePaneClose;
 use vmux_service::client::ServiceRequest;
 use vmux_service::plugin::ServiceConnected;
@@ -23,7 +22,6 @@ use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, Sess
 use crate::strategy::AgentStrategies;
 
 use super::attach::attach_page_agent_to_stack;
-use super::command::ProcessStackSpawnRequest;
 use super::page_open::{
     attach_agent_spawn_error_to_stack, attach_cli_setup_to_stack, cli_initial_prompt,
 };
@@ -50,7 +48,6 @@ impl Plugin for SpawnPlugin {
             .add_systems(
                 Update,
                 (
-                    respond_process_stack_spawn.after(super::command::CommandSet::Commands),
                     (handle_restart_agent_pty, drain_agent_restarts)
                         .chain()
                         .before(ServiceMessageSet),
@@ -71,52 +68,6 @@ impl Plugin for SpawnRequestsPlugin {
                 .chain()
                 .in_set(SpawnRequestSet),
         );
-    }
-}
-
-fn respond_process_stack_spawn(
-    mut reader: MessageReader<ProcessStackSpawnRequest>,
-    settings: Res<AppSettings>,
-    mut commands: Commands,
-) {
-    for request in reader.read() {
-        let stack_ts = if request.activate {
-            LastActivatedAt::now()
-        } else {
-            LastActivatedAt(0)
-        };
-        let stack = commands
-            .spawn((
-                vmux_layout::stack::stack_bundle(),
-                stack_ts,
-                ChildOf(request.pane),
-            ))
-            .id();
-        let title = std::path::Path::new(&request.command)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&request.command)
-            .to_string();
-        commands.entity(stack).insert(PageMetadata {
-            url: TERMINAL_PAGE_URL.to_string(),
-            title,
-            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-            ..default()
-        });
-        let launch = vmux_terminal::launch::TerminalLaunch {
-            command: request.command.clone(),
-            args: request.args.clone(),
-            cwd: request.cwd.to_string_lossy().to_string(),
-            env: request.env.clone(),
-            kind: vmux_terminal::launch::TerminalKind::Plain,
-        };
-        let term = commands
-            .spawn((
-                new_terminal_bundle_with_cwd(&settings, Some(&request.cwd)),
-                ChildOf(stack),
-            ))
-            .id();
-        commands.entity(term).insert((launch, KeyboardOwner));
     }
 }
 

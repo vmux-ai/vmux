@@ -2195,7 +2195,6 @@ mod tests {
         app.add_plugins((MinimalPlugins, SpawnPlugin))
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<crate::session::AgentSessionExited>()
-            .add_message::<crate::host::command::ProcessStackSpawnRequest>()
             .add_message::<vmux_core::agent::RestartAgentPty>()
             .add_message::<vmux_core::agent::PageAgentAttachRequest>()
             .add_message::<vmux_core::agent::PageAgentSpawnStackRequest>()

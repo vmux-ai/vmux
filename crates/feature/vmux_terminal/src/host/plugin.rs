@@ -61,6 +61,7 @@ impl Plugin for TerminalPlugin {
         app.add_message::<ServiceRequest>()
             .add_plugins((
                 vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
+                super::agent::AgentTerminalPlugin,
                 crate::TerminalToolPlugin,
                 vmux_command::CommandTypePlugin::<super::command::TerminalCloseRequest>::default(),
                 vmux_command::CommandTypePlugin::<super::command::TerminalNextRequest>::default(),
