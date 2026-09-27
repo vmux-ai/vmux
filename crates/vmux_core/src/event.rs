@@ -8,7 +8,6 @@ pub use vmux_api::{
 
 mod editor;
 mod explorer;
-mod extension;
 mod file_ui_state;
 mod lsp;
 mod page;
@@ -16,7 +15,6 @@ mod terminal;
 
 pub use editor::*;
 pub use explorer::*;
-pub use extension::*;
 pub use file_ui_state::*;
 pub use lsp::*;
 pub use page::*;

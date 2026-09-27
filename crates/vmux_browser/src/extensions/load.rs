@@ -1,5 +1,4 @@
-use vmux_core::extension::manifest;
-use vmux_core::extension::store;
+use vmux_extension::{manifest, store};
 
 use bevy::prelude::Resource;
 
@@ -37,13 +36,7 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     } else {
         unsafe { std::env::set_var("VMUX_LOAD_EXTENSIONS", dirs.join(",")) };
     }
-    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-    let loaded_path = loaded_path(&root, &profile);
-    if let Some(parent) = loaded_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    std::fs::write(loaded_path, idx.enabled_ids_for(&profile).join("\n"))
-        .map_err(|error| error.to_string())?;
+    store::save_loaded_ids(&root, &profile, &idx.enabled_ids_for(&profile))?;
     Ok(prepared)
 }
 
@@ -86,32 +79,6 @@ fn prepare_enabled_entries(
 
 fn runtime_store_root() -> std::path::PathBuf {
     vmux_core::profile::shared_data_dir().join("extensions")
-}
-
-pub fn loaded_ids() -> Vec<String> {
-    let root = store::root();
-    let profile = vmux_core::profile::active_profile_name();
-    let profile_path = loaded_path(&root, &profile);
-    std::fs::read_to_string(profile_path)
-        .or_else(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                std::fs::read_to_string(root.join("loaded.txt"))
-            } else {
-                Err(error)
-            }
-        })
-        .ok()
-        .map(|s| {
-            s.lines()
-                .filter(|l| !l.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn loaded_path(root: &std::path::Path, profile: &str) -> std::path::PathBuf {
-    root.join("loaded").join(format!("{profile}.txt"))
 }
 
 fn migrate_index_permissions(

@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, HostWindow, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput};
-use vmux_core::event::{
+use vmux_api::extension::{
     ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
     ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,
 };
-use vmux_core::extension::store;
 use vmux_core::{KeyboardOwner, host::UiStateWrite};
+use vmux_extension::store;
 use vmux_flex::prelude::Visibility;
 use vmux_layout::{Browser, LayoutCef, state::LayoutUiState};
 

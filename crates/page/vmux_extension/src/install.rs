@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use base64::Engine;
-use vmux_core::event::ExtInstallPhase;
-use vmux_core::extension::{crx, manifest, store, webstore};
+use vmux_api::extension::ExtInstallPhase;
+
+use crate::{crx, download, manifest, store, webstore};
 
 pub const DEFAULT_PRODVERSION: &str = "120.0.0.0";
 
@@ -20,7 +21,7 @@ pub fn install(
 
     let crx_path = staging.join("download.crx");
     progress(ExtInstallPhase::Downloading, None, "downloading");
-    super::download::fetch(&webstore::crx_url(&id, prodversion), &crx_path, |_, _| {})?;
+    download::fetch(&webstore::crx_url(&id, prodversion), &crx_path, |_, _| {})?;
 
     progress(ExtInstallPhase::Unpacking, None, "unpacking");
     let bytes = std::fs::read(&crx_path).map_err(|e| e.to_string())?;

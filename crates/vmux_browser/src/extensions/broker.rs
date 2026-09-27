@@ -5,7 +5,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
-use vmux_core::extension::protocol::{
+use vmux_extension::protocol::{
     ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ExtensionApiError,
     ExtensionCallerContext,
 };
@@ -154,8 +154,8 @@ pub fn drain_bridge_requests(
         }
         seen.0
             .retain(|(id, seen_session), _| id != &extension_id || *seen_session == session_id);
-        if context_id != vmux_core::extension::protocol::BRIDGE_CONTEXT_ID
-            || context_kind != vmux_core::extension::protocol::ExtensionContextKind::BridgePage
+        if context_id != vmux_extension::protocol::BRIDGE_CONTEXT_ID
+            || context_kind != vmux_extension::protocol::ExtensionContextKind::BridgePage
         {
             send_fatal_to_session(
                 &server,
@@ -1055,7 +1055,7 @@ mod tests {
         Message, WebSocket, client::IntoClientRequest, connect, http::HeaderValue,
         stream::MaybeTlsStream,
     };
-    use vmux_core::extension::protocol::{
+    use vmux_extension::protocol::{
         ApiRequest, ApiResponse, BRIDGE_PROTOCOL_VERSION, BridgeClientMessage, BridgeHello,
         BridgeServerMessage, EventSubscribe, ExtensionApiError, ExtensionCallerContext,
         ExtensionContextKind,
@@ -1370,7 +1370,7 @@ mod tests {
                 authorization: BridgeAuthorization {
                     permissions: ["storage".into(), "scripting".into()].into_iter().collect(),
                     host_permissions: vec![
-                        vmux_core::extension::match_pattern::ChromeMatchPattern::parse(
+                        vmux_extension::match_pattern::ChromeMatchPattern::parse(
                             "https://*.example.com/*",
                         )
                         .unwrap(),

@@ -529,7 +529,12 @@ A second layer adds least privilege *among* trusted pages: each message type is 
 the pages that may emit it, so a compromised page cannot pivot to another's handlers. The
 full Bevy Remote Protocol is locked to the `debug` page alone.
 
-### Chrome extensions
+### Browser extensions
+
+`vmux_extension` owns package metadata, installation, permissions, enabled state, catalog ECS,
+and the manager page. `vmux_browser` owns only Chromium runtime adapters: bridge transport,
+service workers, extension popups, and web-store injection. The adapters publish typed
+`vmux_extension` requests and do not register routes or mutate the extension catalog directly.
 
 An installed extension is never handed to CEF as it shipped. Vmux copies the package into a
 generated runtime directory and patches the manifest so the service worker becomes a stable

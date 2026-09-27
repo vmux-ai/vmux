@@ -7,7 +7,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
-use vmux_core::extension::{crx, manifest, store};
+use vmux_extension::{crx, manifest, store};
 
 const CHROMIUM_MAJOR: u32 = 148;
 const CONFORMANCE_PROFILE: &str = "extension-conformance";

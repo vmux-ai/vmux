@@ -77,6 +77,12 @@ impl VmuxRoute {
         let mut url = self.0.clone();
         let root = url.path() == "/";
         let host = url.host_str().unwrap_or_default().to_string();
+        if host == "tools" && url.path().trim_end_matches('/') == "/extensions" {
+            url.set_host(Some("extensions"))
+                .expect("static vmux route host");
+            url.set_path("/");
+            return Self(url);
+        }
         match (host.as_str(), root) {
             ("agent", _) => {
                 url.set_host(Some("sessions"))
@@ -90,10 +96,6 @@ impl VmuxRoute {
             ("lsp", true) => {
                 url.set_host(Some("tools")).expect("static vmux route host");
                 url.set_path("/lsp");
-            }
-            ("extensions", true) => {
-                url.set_host(Some("tools")).expect("static vmux route host");
-                url.set_path("/extensions");
             }
             ("cheatsheet" | "cheetsheet", true) => {
                 url.set_host(Some("shortcuts"))
@@ -182,7 +184,8 @@ mod tests {
             ("vmux://tools/", "vmux://tools/acp"),
             ("vmux://agents", "vmux://tools/acp"),
             ("vmux://lsp/", "vmux://tools/lsp"),
-            ("vmux://extensions", "vmux://tools/extensions"),
+            ("vmux://extensions", "vmux://extensions/"),
+            ("vmux://tools/extensions", "vmux://extensions/"),
             ("vmux://cheatsheet/", "vmux://shortcuts/"),
             ("vmux://cheetsheet", "vmux://shortcuts/"),
             (

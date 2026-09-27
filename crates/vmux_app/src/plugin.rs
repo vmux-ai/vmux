@@ -16,6 +16,8 @@ pub enum VmuxPlugin {
     Terminal(vmux_terminal::TerminalPlugin),
     #[plugin(feature = "editor", desktop, requires(layout))]
     Editor(vmux_editor::EditorPlugin),
+    #[plugin(feature = "extension", desktop, requires(layout))]
+    Extension(vmux_extension::ExtensionPlugin),
     #[plugin(feature = "git", desktop, requires(layout))]
     Git(vmux_git::GitPlugin),
     #[plugin(
@@ -40,7 +42,7 @@ pub enum VmuxPlugin {
     Service(vmux_service::plugin::ServicePlugin),
     #[plugin(feature = "start", desktop, requires(core))]
     Start(vmux_start::StartPlugin),
-    #[plugin(feature = "browser", desktop, requires(layout))]
+    #[plugin(feature = "browser", desktop, requires(layout, extension))]
     Browser(vmux_browser::BrowserPlugin),
     #[plugin(feature = "tool", desktop, requires(layout))]
     Tool(vmux_tool::ToolPlugin),

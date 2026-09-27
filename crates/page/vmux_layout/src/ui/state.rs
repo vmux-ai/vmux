@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use vmux_api::bookmark::{BookmarkMenuEffect, BookmarkStateEvent};
-use vmux_core::event::space::SpacesListEvent;
-use vmux_core::event::{
+use vmux_api::extension::{
     ExtListRequest, ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
 };
+use vmux_core::event::space::SpacesListEvent;
 use vmux_ui::hooks::{send, use_ui_state_root};
 
 use super::update::UpdatePhase;

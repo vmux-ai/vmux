@@ -6,6 +6,8 @@ pub use vmux_agent::AgentPlugin;
 pub use vmux_browser::BrowserPlugin;
 #[cfg(feature = "editor")]
 pub use vmux_editor::EditorPlugin;
+#[cfg(feature = "extension")]
+pub use vmux_extension::ExtensionPlugin;
 #[cfg(feature = "git")]
 pub use vmux_git::GitPlugin;
 #[cfg(feature = "layout")]

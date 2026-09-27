@@ -36,7 +36,7 @@ impl ExtensionTabSnapshot {
         mut self,
         window_id: i32,
         index: u32,
-        request: &vmux_core::extension::protocol::ApiRequest,
+        request: &vmux_extension::protocol::ApiRequest,
         authorization: &super::bridge::BridgeAuthorization,
     ) -> serde_json::Value {
         self.window_id = window_id;

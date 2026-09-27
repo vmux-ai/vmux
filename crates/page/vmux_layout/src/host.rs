@@ -171,11 +171,6 @@ pub struct OpenInNewStackRequest {
     pub url: String,
 }
 
-#[derive(Message, Clone)]
-pub struct ExtensionInstallRequest {
-    pub source: String,
-}
-
 #[cfg(test)]
 mod tests {
     #[test]

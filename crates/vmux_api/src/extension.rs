@@ -1,5 +1,3 @@
-pub const EXTENSIONS_PAGE_URL: &str = "vmux://tools/extensions";
-
 #[vmux_api::contract(Copy, Eq)]
 pub enum ExtStatus {
     Installing,

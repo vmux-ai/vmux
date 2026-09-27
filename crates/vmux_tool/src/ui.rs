@@ -30,9 +30,6 @@ pub fn Page() -> Element {
         .unwrap_or_default();
     let active_route = use_signal(|| initial_route);
     let route = active_route();
-    if route == ToolsRoute::Extensions {
-        return rsx! { crate::extension::ExtensionsManager { active_route } };
-    }
     rsx! { ToolManager { route, active_route } }
 }
 
@@ -45,7 +42,6 @@ pub(crate) enum ToolsRoute {
     Npm,
     Mcp,
     Dotfiles,
-    Extensions,
 }
 
 impl From<&str> for ToolsRoute {
@@ -64,7 +60,6 @@ impl From<&str> for ToolsRoute {
             "npm" => Self::Npm,
             "mcp" => Self::Mcp,
             "dotfiles" => Self::Dotfiles,
-            "extensions" => Self::Extensions,
             _ => Self::Acp,
         }
     }
@@ -79,7 +74,6 @@ impl ToolsRoute {
             Self::Npm => "npm",
             Self::Mcp => "mcp",
             Self::Dotfiles => "dotfiles",
-            Self::Extensions => "extensions",
         }
     }
 
@@ -94,7 +88,6 @@ impl ToolsRoute {
             Self::Npm => provider == ToolProvider::Npm,
             Self::Mcp => provider == ToolProvider::Mcp,
             Self::Dotfiles => provider == ToolProvider::Dotfiles,
-            Self::Extensions => false,
         }
     }
 
@@ -106,7 +99,6 @@ impl ToolsRoute {
             Self::Npm => translate("tools-provider-npm"),
             Self::Mcp => translate("tools-provider-mcp-servers"),
             Self::Dotfiles => translate("tools-provider-dotfiles"),
-            Self::Extensions => translate("extensions-title"),
         }
     }
 }
@@ -120,7 +112,6 @@ pub(crate) fn ToolsManagerTabs(mut active_route: Signal<ToolsRoute>) -> Element 
         (ToolsRoute::Npm, "tools-provider-npm"),
         (ToolsRoute::Mcp, "tools-provider-mcp-servers"),
         (ToolsRoute::Dotfiles, "tools-provider-dotfiles"),
-        (ToolsRoute::Extensions, "extensions-title"),
     ];
     let tabs = routes
         .into_iter()

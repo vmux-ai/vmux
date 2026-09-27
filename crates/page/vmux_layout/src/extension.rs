@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use vmux_core::event::{
+use vmux_api::extension::{
     ExtOpenManagerRequest, ExtPinRequest, ExtRow, ExtensionPopupAnchor,
     ExtensionPopupBoundsRequest, ExtensionPopupCloseRequest, ExtensionPopupEvent,
     ExtensionPopupOpenRequest, ExtensionPopupSizeEvent,

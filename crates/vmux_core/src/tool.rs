@@ -157,7 +157,6 @@ impl ToolsNavigateRequest {
             "vmux://tools/npm" => Some("vmux://tools/npm"),
             "vmux://tools/mcp" => Some("vmux://tools/mcp"),
             "vmux://tools/dotfiles" => Some("vmux://tools/dotfiles"),
-            "vmux://tools/extensions" => Some("vmux://tools/extensions"),
             _ => None,
         }
     }

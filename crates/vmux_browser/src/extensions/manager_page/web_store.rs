@@ -2,9 +2,10 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{
     Browsers, JsEmitEventPlugin, Receive, UiEventPlugin, UiInput, WebviewCommittedNavigationEvent,
 };
-use vmux_core::event::ExtBrowseStoreRequest;
-
-use super::catalog::InstallRequest;
+use vmux_api::extension::ExtBrowseStoreRequest;
+use vmux_extension::{
+    ExtensionInstallCompleted, ExtensionInstallRequest, OpenManagerRequest, store, webstore,
+};
 
 pub(super) struct WebStorePlugin;
 
@@ -20,6 +21,7 @@ impl Plugin for WebStorePlugin {
                     inject_on_navigation,
                     bevy::ecs::schedule::ApplyDeferred,
                     inject_on_load.after(crate::page_life::drain_loading_state),
+                    emit_install_result,
                 )
                     .chain(),
             );
@@ -108,14 +110,13 @@ fn inject_page(
         commands.entity(webview).remove::<WebStoreInjector>();
         return;
     }
-    let Some(extension_id) = vmux_core::extension::webstore::extension_id(url) else {
+    let Some(extension_id) = webstore::extension_id(url) else {
         commands.entity(webview).remove::<WebStoreInjector>();
         return;
     };
     let injector = WebStoreInjector::resolve(current, extension_id);
     let profile = vmux_core::profile::active_profile_name();
-    let index = vmux_core::extension::store::Index::load(&vmux_core::extension::store::root())
-        .unwrap_or_default();
+    let index = store::Index::load(&store::root()).unwrap_or_default();
     let installed = index
         .entries
         .iter()
@@ -192,14 +193,14 @@ fn inject_on_load(
 fn on_add_extension(
     trigger: On<Receive<AddExtensionRequest>>,
     injectors: Query<&WebStoreInjector>,
-    mut installs: MessageWriter<InstallRequest>,
-    mut pages: MessageWriter<vmux_layout::stack::OpenRequest>,
+    mut installs: MessageWriter<ExtensionInstallRequest>,
+    mut manager: MessageWriter<OpenManagerRequest>,
 ) {
     let request = &trigger.payload;
     let Ok(injector) = injectors.get(trigger.event().webview) else {
         return;
     };
-    let Some(id) = vmux_core::extension::webstore::extension_id(&request.id) else {
+    let Some(id) = webstore::extension_id(&request.id) else {
         return;
     };
     if injector.nonce != request.nonce || injector.extension_id != id {
@@ -207,14 +208,31 @@ fn on_add_extension(
     }
     match request.channel.as_str() {
         ADD_CHANNEL => {
-            installs.write(InstallRequest::web_store(id, trigger.event().webview));
-        }
-        MANAGE_CHANNEL => {
-            pages.write(vmux_layout::stack::OpenRequest {
-                url: Some("vmux://tools/extensions".to_string()),
+            installs.write(ExtensionInstallRequest {
+                source: id,
+                requester: Some(trigger.event().webview),
             });
         }
+        MANAGE_CHANNEL => {
+            manager.write(OpenManagerRequest);
+        }
         _ => {}
+    }
+}
+
+fn emit_install_result(
+    mut completed: MessageReader<ExtensionInstallCompleted>,
+    browsers: NonSend<Browsers>,
+) {
+    for result in completed.read() {
+        if !browsers.can_emit_to(&result.requester) {
+            continue;
+        }
+        let detail = serde_json::json!({ "id": result.id, "success": result.success });
+        let script = format!(
+            "globalThis.dispatchEvent(new CustomEvent('__vmuxWebStoreInstallResult',{{detail:{detail}}}));"
+        );
+        browsers.execute_js(&result.requester, &script);
     }
 }
 

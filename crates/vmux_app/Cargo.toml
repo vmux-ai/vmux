@@ -13,6 +13,7 @@ desktop = [
     "agent",
     "browser",
     "editor",
+    "extension",
     "git",
     "history",
     "knowledge",
@@ -36,7 +37,8 @@ core = [
     "dep:vmux_setting",
 ]
 layout = ["core", "dep:vmux_layout"]
-browser = ["layout", "dep:vmux_browser"]
+browser = ["layout", "extension", "dep:vmux_browser"]
+extension = ["layout", "dep:vmux_extension"]
 terminal = ["layout", "service", "dep:vmux_terminal"]
 editor = ["layout", "dep:vmux_editor"]
 git = ["layout", "dep:vmux_git"]
@@ -67,6 +69,7 @@ vmux_chat = { path = "../page/vmux_chat", optional = true }
 vmux_command = { path = "../page/vmux_command", optional = true }
 vmux_core = { path = "../vmux_core", optional = true }
 vmux_editor = { path = "../page/vmux_editor", optional = true }
+vmux_extension = { path = "../page/vmux_extension", optional = true }
 vmux_flex = { path = "../vmux_flex", optional = true }
 vmux_git = { path = "../vmux_git", optional = true }
 vmux_history = { path = "../page/vmux_history", optional = true }

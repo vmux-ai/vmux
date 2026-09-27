@@ -27,6 +27,7 @@ pub(super) struct DispatchPlugin;
 impl Plugin for DispatchPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceRequest>()
+            .add_message::<vmux_extension::ExtensionInstallRequest>()
             .add_systems(
                 Update,
                 (
@@ -306,7 +307,7 @@ fn handle_browser_commands(
     mut go_back: MessageWriter<vmux_layout::BrowserGoBackRequest>,
     mut go_forward: MessageWriter<vmux_layout::BrowserGoForwardRequest>,
     mut open_stack: MessageWriter<vmux_layout::OpenInNewStackRequest>,
-    mut install_extension: MessageWriter<vmux_layout::ExtensionInstallRequest>,
+    mut install_extension: MessageWriter<vmux_extension::ExtensionInstallRequest>,
     mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
     mut activate: MessageWriter<vmux_layout::active_pane::ActivatePane>,
     browse: AgentBrowserResolve,
@@ -357,8 +358,9 @@ fn handle_browser_commands(
                 continue;
             }
             ServiceAgentCommand::BrowserInstallExtension(command) => {
-                install_extension.write(vmux_layout::ExtensionInstallRequest {
+                install_extension.write(vmux_extension::ExtensionInstallRequest {
                     source: command.source.clone(),
+                    requester: None,
                 });
                 AgentCommandResult::Ok
             }

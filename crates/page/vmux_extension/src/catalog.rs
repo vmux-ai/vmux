@@ -1,21 +1,23 @@
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
-use vmux_core::event::{
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
+use vmux_api::extension::{
     ExtInstallPhase, ExtInstallProgress, ExtListRequest, ExtOpenManagerRequest, ExtPinRequest,
-    ExtRow, ExtStatus, ExtToggleRequest, ExtUninstallRequest, ExtensionsEvent,
+    ExtToggleRequest, ExtUninstallRequest, ExtensionsEvent,
 };
-use vmux_core::extension::store;
+use vmux_core::host::UiStateWrite;
 use vmux_layout::LayoutUiStateUpdates;
 
-pub(super) struct CatalogPlugin;
+use crate::{install, store};
 
-impl Plugin for CatalogPlugin {
+pub(crate) struct ExtensionCatalogPlugin;
+
+impl Plugin for ExtensionCatalogPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(ExtensionCatalog::default());
-        app.init_resource::<ExtOutbox>()
-            .add_message::<InstallRequest>()
+        app.add_message::<ExtensionInstallRequest>()
+            .add_message::<ExtensionInstallCompleted>()
+            .add_message::<OpenManagerRequest>()
             .add_plugins(UiEventPlugin::<(
                 ExtToggleRequest,
                 ExtUninstallRequest,
@@ -28,53 +30,45 @@ impl Plugin for CatalogPlugin {
             .add_observer(on_uninstall_request)
             .add_observer(on_pin_request)
             .add_observer(on_open_manager_request)
+            .add_systems(Startup, spawn_extension_catalog)
             .add_systems(
                 Update,
-                (
-                    queue_agent_installs,
-                    start_installs,
-                    drain_outbox,
-                    emit_extensions_snapshot,
-                )
-                    .chain(),
+                (start_installs, drain_outbox, emit_extensions_snapshot).chain(),
             );
+
+        #[cfg(ui)]
+        app.add_systems(Update, open_manager);
     }
 }
 
-#[derive(Message)]
-pub(super) struct InstallRequest {
-    source: String,
-    requester: Option<Entity>,
+#[derive(Message, Clone, Debug)]
+pub struct ExtensionInstallRequest {
+    pub source: String,
+    pub requester: Option<Entity>,
 }
 
-impl InstallRequest {
-    pub(super) fn web_store(source: String, requester: Entity) -> Self {
-        Self {
-            source,
-            requester: Some(requester),
-        }
-    }
-
-    fn agent(source: String) -> Self {
-        Self {
-            source,
-            requester: None,
-        }
-    }
+#[derive(Message, Clone, Debug)]
+pub struct ExtensionInstallCompleted {
+    pub requester: Entity,
+    pub id: String,
+    pub success: bool,
 }
+
+#[derive(Message, Clone, Copy, Debug, Default)]
+pub struct OpenManagerRequest;
 
 enum OutMsg {
     Progress(ExtInstallProgress),
     List(ExtensionsEvent),
-    WebStoreInstallResult {
+    InstallCompleted {
         entity: Entity,
         id: String,
         success: bool,
     },
 }
 
-#[derive(Resource, Clone, Default)]
-struct ExtOutbox(Arc<Mutex<Vec<OutMsg>>>);
+#[derive(Component, Clone, Default)]
+struct ExtensionOutbox(Arc<Mutex<Vec<OutMsg>>>);
 
 #[derive(Component, Default)]
 struct ExtensionCatalog {
@@ -117,7 +111,11 @@ struct ExtensionSubscriber {
     revision: u64,
 }
 
-fn push(outbox: &ExtOutbox, msg: OutMsg) {
+fn spawn_extension_catalog(mut commands: Commands) {
+    commands.spawn((ExtensionCatalog::default(), ExtensionOutbox::default()));
+}
+
+fn push(outbox: &ExtensionOutbox, msg: OutMsg) {
     outbox.0.lock().unwrap_or_else(|e| e.into_inner()).push(msg);
 }
 
@@ -125,63 +123,22 @@ fn snapshot() -> ExtensionsEvent {
     let root = store::root();
     let profile = vmux_core::profile::active_profile_name();
     let index = store::Index::load(&root).unwrap_or_default();
-    let loaded = super::super::load::loaded_ids();
+    let loaded = store::loaded_ids();
     index.snapshot(&profile, &loaded)
 }
 
-trait ExtensionIndexSnapshot {
-    fn snapshot(&self, profile: &str, loaded: &[String]) -> ExtensionsEvent;
-}
-
-impl ExtensionIndexSnapshot for store::Index {
-    fn snapshot(&self, profile: &str, loaded: &[String]) -> ExtensionsEvent {
-        let mut extensions = Vec::new();
-        for entry in &self.entries {
-            if !entry.installed_for(profile) {
-                continue;
-            }
-            let enabled = entry.enabled_for(profile);
-            extensions.push(ExtRow {
-                id: entry.id.clone(),
-                name: entry.name.clone(),
-                version: entry.version.clone(),
-                icon: entry.icon.clone(),
-                popup: entry.popup.clone(),
-                enabled,
-                pinned: entry.pinned_for(profile),
-                needs_approval: !entry
-                    .grants_for(profile)
-                    .covers(&entry.permissions, &entry.host_permissions),
-                required_permissions: entry.permissions.clone(),
-                required_host_permissions: entry.host_permissions.clone(),
-                status: if enabled {
-                    ExtStatus::Installed
-                } else {
-                    ExtStatus::Disabled
-                },
-            });
-        }
-        ExtensionsEvent {
-            loaded: true,
-            extensions,
-            installing: Vec::new(),
-            pending: self.is_dirty_for(profile, loaded),
-        }
-    }
-}
-
-fn queue_snapshot(outbox: &ExtOutbox) {
+fn queue_snapshot(outbox: &ExtensionOutbox) {
     push(outbox, OutMsg::List(snapshot()));
 }
 
-fn spawn_install(outbox: &ExtOutbox, request: InstallRequest) {
+fn spawn_install(outbox: &ExtensionOutbox, request: ExtensionInstallRequest) {
     let sink = outbox.clone();
     std::thread::spawn(move || {
         let key = request.source.clone();
         let progress_sink = sink.clone();
-        let result = super::super::install::install(
+        let result = install::install(
             &request.source,
-            super::super::install::DEFAULT_PRODVERSION,
+            install::DEFAULT_PRODVERSION,
             |phase, pct, message| {
                 push(
                     &progress_sink,
@@ -199,7 +156,7 @@ fn spawn_install(outbox: &ExtOutbox, request: InstallRequest) {
                 if let Some(entity) = request.requester {
                     push(
                         &sink,
-                        OutMsg::WebStoreInstallResult {
+                        OutMsg::InstallCompleted {
                             entity,
                             id: entry.id,
                             success: true,
@@ -220,7 +177,7 @@ fn spawn_install(outbox: &ExtOutbox, request: InstallRequest) {
                 if let Some(entity) = request.requester {
                     push(
                         &sink,
-                        OutMsg::WebStoreInstallResult {
+                        OutMsg::InstallCompleted {
                             entity,
                             id: key,
                             success: false,
@@ -247,7 +204,7 @@ fn on_list_request(
     catalog.replace(snapshot());
 }
 
-fn on_toggle_request(trigger: On<UiInput<ExtToggleRequest>>, outbox: Res<ExtOutbox>) {
+fn on_toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&ExtensionOutbox>) {
     let request = trigger.event().payload.clone();
     let profile = vmux_core::profile::active_profile_name();
     let _ = store::update_index(&store::root(), |index| {
@@ -258,21 +215,24 @@ fn on_toggle_request(trigger: On<UiInput<ExtToggleRequest>>, outbox: Res<ExtOutb
             request.approve_permissions,
         );
     });
-    queue_snapshot(&outbox);
+    queue_snapshot(&runtime);
 }
 
-fn on_uninstall_request(trigger: On<UiInput<ExtUninstallRequest>>, outbox: Res<ExtOutbox>) {
+fn on_uninstall_request(
+    trigger: On<UiInput<ExtUninstallRequest>>,
+    runtime: Single<&ExtensionOutbox>,
+) {
     let profile = vmux_core::profile::active_profile_name();
     let _ = store::uninstall_for_profile(&store::root(), &profile, &trigger.event().payload.id);
-    queue_snapshot(&outbox);
+    queue_snapshot(&runtime);
 }
 
-fn on_pin_request(trigger: On<UiInput<ExtPinRequest>>, outbox: Res<ExtOutbox>) {
+fn on_pin_request(trigger: On<UiInput<ExtPinRequest>>, runtime: Single<&ExtensionOutbox>) {
     let request = trigger.event().payload.clone();
-    let outbox = outbox.clone();
+    let outbox = runtime.clone();
     std::thread::spawn(move || {
         let profile = vmux_core::profile::active_profile_name();
-        let loaded = super::super::load::loaded_ids();
+        let loaded = store::loaded_ids();
         let result = store::update_index_if_changed(&store::root(), |index| {
             index
                 .set_pinned_for(&profile, &request.id, request.pinned)
@@ -302,27 +262,31 @@ fn on_pin_request(trigger: On<UiInput<ExtPinRequest>>, outbox: Res<ExtOutbox>) {
 
 fn on_open_manager_request(
     _trigger: On<UiInput<ExtOpenManagerRequest>>,
-    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
+    mut requests: MessageWriter<OpenManagerRequest>,
 ) {
-    requests.write(vmux_layout::stack::OpenRequest {
-        url: Some("vmux://tools/extensions".to_string()),
-    });
+    requests.write(OpenManagerRequest);
 }
 
-fn queue_agent_installs(
-    mut incoming: MessageReader<vmux_layout::ExtensionInstallRequest>,
-    mut outgoing: MessageWriter<InstallRequest>,
+#[cfg(ui)]
+fn open_manager(
+    mut requests: MessageReader<OpenManagerRequest>,
+    mut pages: MessageWriter<vmux_layout::stack::OpenRequest>,
 ) {
-    for request in incoming.read() {
-        outgoing.write(InstallRequest::agent(request.source.clone()));
+    for _ in requests.read() {
+        pages.write(vmux_layout::stack::OpenRequest {
+            url: Some(crate::ui::ExtensionPage::URL.to_string()),
+        });
     }
 }
 
-fn start_installs(mut requests: MessageReader<InstallRequest>, outbox: Res<ExtOutbox>) {
+fn start_installs(
+    mut requests: MessageReader<ExtensionInstallRequest>,
+    runtime: Single<&ExtensionOutbox>,
+) {
     for request in requests.read() {
         spawn_install(
-            &outbox,
-            InstallRequest {
+            &runtime,
+            ExtensionInstallRequest {
                 source: request.source.clone(),
                 requester: request.requester,
             },
@@ -331,12 +295,12 @@ fn start_installs(mut requests: MessageReader<InstallRequest>, outbox: Res<ExtOu
 }
 
 fn drain_outbox(
-    outbox: Res<ExtOutbox>,
-    browsers: NonSend<Browsers>,
+    runtime: Single<&ExtensionOutbox>,
     mut catalog: Query<&mut ExtensionCatalog>,
+    mut completed: MessageWriter<ExtensionInstallCompleted>,
 ) {
     let drained: Vec<OutMsg> = {
-        let mut queue = outbox.0.lock().unwrap_or_else(|error| error.into_inner());
+        let mut queue = runtime.0.lock().unwrap_or_else(|error| error.into_inner());
         queue.drain(..).collect()
     };
     let Ok(mut catalog) = catalog.single_mut() else {
@@ -346,19 +310,16 @@ fn drain_outbox(
         match message {
             OutMsg::List(snapshot) => catalog.replace(snapshot),
             OutMsg::Progress(progress) => catalog.update_progress(progress),
-            OutMsg::WebStoreInstallResult {
+            OutMsg::InstallCompleted {
                 entity,
                 id,
                 success,
             } => {
-                if !browsers.can_emit_to(&entity) {
-                    continue;
-                }
-                let detail = serde_json::json!({ "id": id, "success": success });
-                let script = format!(
-                    "globalThis.dispatchEvent(new CustomEvent('__vmuxWebStoreInstallResult',{{detail:{detail}}}));"
-                );
-                browsers.execute_js(&entity, &script);
+                completed.write(ExtensionInstallCompleted {
+                    requester: entity,
+                    id,
+                    success,
+                });
             }
         }
     }
@@ -367,7 +328,6 @@ fn drain_outbox(
 fn emit_extensions_snapshot(
     catalog: Query<&ExtensionCatalog>,
     mut subscribers: Query<(Entity, &mut ExtensionSubscriber)>,
-    browsers: NonSend<Browsers>,
     layout_ui: Query<(), With<LayoutUiStateUpdates>>,
     mut commands: Commands,
 ) {
@@ -375,13 +335,20 @@ fn emit_extensions_snapshot(
         return;
     };
     for (entity, mut subscriber) in &mut subscribers {
-        if subscriber.revision == catalog.revision || !browsers.can_emit_to(&entity) {
+        if subscriber.revision == catalog.revision {
             continue;
         }
+        commands.trigger(UiStateWrite::<ExtensionsEvent>::from_event(
+            entity,
+            &catalog.snapshot,
+        ));
         if layout_ui.contains(entity) {
-            commands.trigger(vmux_core::host::UiStateWrite::<
-                vmux_layout::state::LayoutUiState,
-            >::from_event(entity, &catalog.snapshot));
+            commands.trigger(
+                UiStateWrite::<vmux_layout::state::LayoutUiState>::from_event(
+                    entity,
+                    &catalog.snapshot,
+                ),
+            );
         }
         subscriber.revision = catalog.revision;
     }

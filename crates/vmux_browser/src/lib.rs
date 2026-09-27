@@ -94,7 +94,7 @@ impl Plugin for BrowserPlugin {
                         .granted_host_permissions
                         .iter()
                         .map(|pattern| {
-                            vmux_core::extension::match_pattern::ChromeMatchPattern::parse(pattern)
+                            vmux_extension::match_pattern::ChromeMatchPattern::parse(pattern)
                                 .unwrap_or_else(|error| {
                                     panic!("invalid stored host permission: {error}")
                                 })
@@ -114,7 +114,7 @@ impl Plugin for BrowserPlugin {
             vmux_command::command_bar::CommandBarPlugin,
             BrowserToolPlugin,
             platform::BrowserPlatformPlugin,
-            extensions::ExtensionsPlugin,
+            extensions::ExtensionBrowserPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
             extensions::broker::ExtensionBrokerPlugin,
             extensions::project::ExtensionProjectPlugin,

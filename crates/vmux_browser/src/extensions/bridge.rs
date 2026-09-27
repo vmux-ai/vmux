@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::StatusCode;
 use tungstenite::{Message, WebSocket, protocol::WebSocketConfig};
-use vmux_core::extension::match_pattern::ChromeMatchPattern;
-use vmux_core::extension::protocol::{
+use vmux_extension::match_pattern::ChromeMatchPattern;
+use vmux_extension::protocol::{
     BRIDGE_CONTEXT_ID, BRIDGE_MAX_FRAME_SIZE, BRIDGE_MAX_MESSAGE_SIZE, BRIDGE_PROTOCOL_VERSION,
     BridgeClientMessage, BridgeServerMessage, ExtensionApiError, ExtensionContextKind,
 };
@@ -801,7 +801,7 @@ mod tests {
         Message, WebSocket, client::IntoClientRequest, connect, http::HeaderValue,
         stream::MaybeTlsStream,
     };
-    use vmux_core::extension::protocol::{
+    use vmux_extension::protocol::{
         ApiRequest, ApiResponse, BRIDGE_PROTOCOL_VERSION, BridgeClientMessage, BridgeHello,
         BridgeServerMessage, ExtensionApiError, ExtensionContextKind,
     };
@@ -897,7 +897,7 @@ mod tests {
             namespace: "tabs".into(),
             method: "query".into(),
             arguments: serde_json::json!({}),
-            caller_context: vmux_core::extension::protocol::ExtensionCallerContext::ServiceWorker {
+            caller_context: vmux_extension::protocol::ExtensionCallerContext::ServiceWorker {
                 extension_id: EXTENSION_ID.into(),
                 context_id: "service-worker".into(),
                 url: None,
@@ -946,7 +946,7 @@ mod tests {
             namespace: "tabs".into(),
             method: "query".into(),
             arguments: serde_json::json!({}),
-            caller_context: vmux_core::extension::protocol::ExtensionCallerContext::ServiceWorker {
+            caller_context: vmux_extension::protocol::ExtensionCallerContext::ServiceWorker {
                 extension_id: EXTENSION_ID.into(),
                 context_id: "service-worker".into(),
                 url: None,
@@ -1044,7 +1044,7 @@ mod tests {
             namespace: "tabs".into(),
             method: "query".into(),
             arguments: serde_json::json!({}),
-            caller_context: vmux_core::extension::protocol::ExtensionCallerContext::ServiceWorker {
+            caller_context: vmux_extension::protocol::ExtensionCallerContext::ServiceWorker {
                 extension_id: EXTENSION_ID.into(),
                 context_id: "service-worker".into(),
                 url: None,

@@ -1,10 +1,10 @@
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use vmux_core::extension::protocol::{
+use vmux_extension::protocol::{
     BRIDGE_CHANNEL, BRIDGE_CONTEXT_ID, BRIDGE_MAX_FRAME_SIZE, BRIDGE_MAX_MESSAGE_SIZE,
     BRIDGE_PROTOCOL_VERSION, KEEPALIVE_CHANNEL,
 };
-use vmux_core::extension::{manifest, store};
+use vmux_extension::{manifest, store};
 
 use super::shim;
 

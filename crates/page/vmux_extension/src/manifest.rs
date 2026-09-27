@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::path::Path;
 
-use crate::extension::match_pattern::{ChromeMatchPattern, is_match_pattern_candidate};
+use crate::match_pattern::{ChromeMatchPattern, is_match_pattern_candidate};
 
 const MAX_PERMISSION_COUNT: usize = 256;
 const MAX_PERMISSION_LENGTH: usize = 1024;

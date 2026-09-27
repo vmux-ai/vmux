@@ -6,7 +6,6 @@ pub use plugin::CorePlugin;
 pub mod agent;
 pub mod archive;
 pub mod browser;
-pub mod extension;
 pub mod file_ui_state;
 pub mod host_spawn;
 pub mod launcher;

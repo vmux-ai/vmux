@@ -16,8 +16,7 @@ use crate::stack::{CloseStackRequest, FocusedStack};
 use crate::worktree::TabDirectoryObserved;
 use crate::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest,
-    ContributedCommandChosen, ExtensionInstallRequest, NewTabRequest, OpenInNewStackRequest,
-    PendingLaunch,
+    ContributedCommandChosen, NewTabRequest, OpenInNewStackRequest, PendingLaunch,
 };
 
 pub struct LayoutContractPlugin;
@@ -36,7 +35,6 @@ impl Plugin for LayoutContractPlugin {
             .add_message::<BrowserNavigateRequest>()
             .add_message::<CloseStackRequest>()
             .add_message::<ContributedCommandChosen>()
-            .add_message::<ExtensionInstallRequest>()
             .add_message::<LayoutApplyRequest>()
             .add_message::<LayoutApplyResponse>()
             .add_message::<LayoutSnapshotRequest>()

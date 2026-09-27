@@ -1,6 +1,6 @@
 use serde_json::Value;
-use vmux_core::extension::match_pattern::ChromeMatchPattern;
-use vmux_core::extension::protocol::{ApiRequest, ExtensionApiError};
+use vmux_extension::match_pattern::ChromeMatchPattern;
+use vmux_extension::protocol::{ApiRequest, ExtensionApiError};
 
 use super::bridge::BridgeAuthorization;
 use super::model::{ExtensionModel, ExtensionTabSnapshot};
@@ -254,7 +254,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::collections::HashSet;
-    use vmux_core::extension::protocol::ExtensionCallerContext;
+    use vmux_extension::protocol::ExtensionCallerContext;
 
     impl ExtensionModel {
         fn fixture() -> Self {

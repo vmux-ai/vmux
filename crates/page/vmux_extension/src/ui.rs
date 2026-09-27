@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::event::*;
+use vmux_api::extension::*;
 use vmux_ui::components::alert_dialog::{
     AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
     AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
@@ -13,11 +13,8 @@ use vmux_ui::components::manager::{
 use vmux_ui::hooks::{send, use_theme, use_ui_state};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-#[vmux_native::page(
-    file = "src/extension.ron",
-    component = Page
-)]
-pub struct ExtensionsPage;
+#[vmux_native::page(component = Page)]
+pub(crate) struct ExtensionPage;
 
 #[derive(Clone, PartialEq)]
 struct Approval {
@@ -44,12 +41,6 @@ impl From<&ExtRow> for Approval {
 
 #[component]
 pub fn Page() -> Element {
-    let active_route = use_signal(|| crate::ui::ToolsRoute::Extensions);
-    rsx! { ExtensionsManager { active_route } }
-}
-
-#[component]
-pub(crate) fn ExtensionsManager(active_route: Signal<crate::ui::ToolsRoute>) -> Element {
     let locale = use_theme();
     let state = use_ui_state::<ExtensionsEvent>();
     let mut search = use_signal(String::new);
@@ -76,7 +67,6 @@ pub(crate) fn ExtensionsManager(active_route: Signal<crate::ui::ToolsRoute>) -> 
 
     rsx! {
         ManagerPage {
-            crate::ui::ToolsManagerTabs { active_route }
             ManagerHeader {
                 title: translate("extensions-title"),
                 count: snapshot.extensions.len(),

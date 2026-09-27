@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::extension::webstore;
+use crate::webstore;
+use vmux_api::extension::{ExtRow, ExtStatus, ExtensionsEvent};
 
 static INDEX_LOCK: Mutex<()> = Mutex::new(());
 const INDEX_VERSION: u32 = 3;
@@ -98,7 +99,43 @@ impl Default for Index {
 }
 
 pub fn root() -> PathBuf {
-    crate::profile::extensions_dir()
+    vmux_core::profile::extensions_dir()
+}
+
+pub fn loaded_ids() -> Vec<String> {
+    let root = root();
+    let profile = vmux_core::profile::active_profile_name();
+    let profile_path = loaded_path(&root, &profile);
+    std::fs::read_to_string(profile_path)
+        .or_else(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                std::fs::read_to_string(root.join("loaded.txt"))
+            } else {
+                Err(error)
+            }
+        })
+        .ok()
+        .map(|contents| {
+            contents
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn save_loaded_ids(root: &Path, profile: &str, ids: &[String]) -> Result<(), String> {
+    std::fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let path = loaded_path(root, profile);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(path, ids.join("\n")).map_err(|error| error.to_string())
+}
+
+fn loaded_path(root: &Path, profile: &str) -> PathBuf {
+    root.join("loaded").join(format!("{profile}.txt"))
 }
 
 pub fn packages_root(root: &Path) -> PathBuf {
@@ -402,6 +439,41 @@ impl Index {
         a.sort();
         b.sort();
         a != b
+    }
+
+    pub fn snapshot(&self, profile: &str, loaded: &[String]) -> ExtensionsEvent {
+        let mut extensions = Vec::new();
+        for entry in &self.entries {
+            if !entry.installed_for(profile) {
+                continue;
+            }
+            let enabled = entry.enabled_for(profile);
+            extensions.push(ExtRow {
+                id: entry.id.clone(),
+                name: entry.name.clone(),
+                version: entry.version.clone(),
+                icon: entry.icon.clone(),
+                popup: entry.popup.clone(),
+                enabled,
+                pinned: entry.pinned_for(profile),
+                needs_approval: !entry
+                    .grants_for(profile)
+                    .covers(&entry.permissions, &entry.host_permissions),
+                required_permissions: entry.permissions.clone(),
+                required_host_permissions: entry.host_permissions.clone(),
+                status: if enabled {
+                    ExtStatus::Installed
+                } else {
+                    ExtStatus::Disabled
+                },
+            });
+        }
+        ExtensionsEvent {
+            loaded: true,
+            extensions,
+            installing: Vec::new(),
+            pending: self.is_dirty_for(profile, loaded),
+        }
     }
 }
 

@@ -10179,6 +10179,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_editor",
+ "vmux_extension",
  "vmux_git",
  "vmux_history",
  "vmux_layout",
@@ -10222,6 +10223,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_editor",
+ "vmux_extension",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
@@ -10274,6 +10276,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_editor",
+ "vmux_extension",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
@@ -10557,6 +10560,29 @@ dependencies = [
  "vmux_setting",
  "vmux_space",
  "vmux_tool",
+ "vmux_ui",
+ "zip",
+]
+
+[[package]]
+name = "vmux_extension"
+version = "0.0.34"
+dependencies = [
+ "base64 0.22.1",
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "dioxus",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "url",
+ "vmux_api",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_native",
  "vmux_ui",
  "zip",
 ]

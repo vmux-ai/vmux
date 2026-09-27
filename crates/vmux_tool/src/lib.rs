@@ -3,8 +3,6 @@
 #[cfg(not(target_os = "ios"))]
 mod connection;
 mod dotfiles;
-#[cfg(ui)]
-mod extension;
 mod homebrew;
 #[cfg(all(host, ui))]
 mod host;
@@ -40,7 +38,7 @@ pub struct ToolPlugin;
 impl Plugin for ToolPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
-        app.add_plugins((ui::ToolsPage::plugin(), extension::ExtensionsPage::plugin()));
+        app.add_plugins(ui::ToolsPage::plugin());
 
         app.add_plugins((
             ToolRuntimePlugin,
