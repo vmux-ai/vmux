@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use crate::event::{
     TermCursor, TermLine, TermThemeEvent, TermViewportPatch, TerminalUiState, TerminalUiStatePatch,
 };
-use vmux_ui::hooks::use_ui_state_root;
+use vmux_ui::hooks::use_ui_state_patches;
 
 #[derive(Clone, PartialEq)]
 pub(crate) struct TerminalRowState {
@@ -54,17 +54,8 @@ impl TerminalState {
     }
 
     fn listen(self) {
-        let root = use_ui_state_root::<TerminalUiState>();
-        let mut handled_sequence = use_signal(|| 0);
-        use_effect(move || {
-            let event = root.state.read();
-            if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
-                return;
-            }
-            handled_sequence.set(event.sequence);
-            for patch in &event.patches {
-                self.apply(patch);
-            }
+        let _error = use_ui_state_patches::<TerminalUiState>(move |patch| {
+            self.apply(patch);
         });
     }
 

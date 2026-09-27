@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use vmux_ui::hooks::use_ui_state_root;
+use vmux_ui::hooks::use_ui_state_patches;
 use vmux_ui::scroll::ScrollIntoView;
 
 use crate::event::GitOperation;
@@ -38,52 +38,43 @@ impl GitPageState {
     }
 
     fn subscribe(self) {
-        let root = use_ui_state_root::<GitUiState>();
-        let mut handled_ui_sequence = use_signal(|| 0);
-        use_effect(move || {
-            let event = root.state.read();
-            if event.sequence == 0 || event.sequence == *handled_ui_sequence.peek() {
-                return;
+        let _error = use_ui_state_patches::<GitUiState>(move |patch| {
+            if let Some(snapshot) = &patch.snapshot {
+                self.apply_snapshot(*snapshot.clone());
             }
-            handled_ui_sequence.set(event.sequence);
-            for patch in &event.patches {
-                if let Some(snapshot) = &patch.snapshot {
-                    self.apply_snapshot(*snapshot.clone());
+            if let Some(directory) = &patch.directory {
+                let mut current = self.directory;
+                current.set(*directory.clone());
+            }
+            if let Some(controller) = &patch.controller {
+                let mut current = self.controller;
+                current.set(*controller.clone());
+            }
+            if let Some(request) = &patch.branch_prompt {
+                if matches!(&request.prompt, GitBranchPrompt::Create { .. }) {
+                    let mut draft = self.branch_draft;
+                    draft.set(String::new());
                 }
-                if let Some(directory) = &patch.directory {
-                    let mut current = self.directory;
-                    current.set(*directory.clone());
+                let mut prompt = self.branch_prompt;
+                prompt.set(Some(request.prompt.clone()));
+            }
+            if let Some(request) = &patch.selection_reveal {
+                if request.revision <= (self.handled_selection_reveal)() {
+                    return;
                 }
-                if let Some(controller) = &patch.controller {
-                    let mut current = self.controller;
-                    current.set(*controller.clone());
-                }
-                if let Some(request) = &patch.branch_prompt {
-                    if matches!(&request.prompt, GitBranchPrompt::Create { .. }) {
-                        let mut draft = self.branch_draft;
-                        draft.set(String::new());
-                    }
-                    let mut prompt = self.branch_prompt;
-                    prompt.set(Some(request.prompt.clone()));
-                }
-                if let Some(request) = &patch.selection_reveal {
-                    if request.revision <= (self.handled_selection_reveal)() {
-                        continue;
-                    }
-                    let mut handled = self.handled_selection_reveal;
-                    handled.set(request.revision);
-                    ScrollIntoView::nearest(&request.id);
-                }
-                if patch.context.is_some() {
-                    self.reset_local_render_state();
-                }
-                if let Some(workspace) = &patch.workspace
-                    && workspace.error.is_empty()
-                    && !workspace.path.is_empty()
-                    && workspace.path != self.workspace()
-                {
-                    self.reset_local_render_state();
-                }
+                let mut handled = self.handled_selection_reveal;
+                handled.set(request.revision);
+                ScrollIntoView::nearest(&request.id);
+            }
+            if patch.context.is_some() {
+                self.reset_local_render_state();
+            }
+            if let Some(workspace) = &patch.workspace
+                && workspace.error.is_empty()
+                && !workspace.path.is_empty()
+                && workspace.path != self.workspace()
+            {
+                self.reset_local_render_state();
             }
         });
     }

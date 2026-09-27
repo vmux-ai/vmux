@@ -12,7 +12,7 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::inline_edit::{EditableText, InlineEdit};
 use vmux_ui::components::manager::{ManagerSelect, ManagerSelectItem, ManagerSelectItemKind};
-use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state, use_ui_state_root};
+use vmux_ui::hooks::{send, use_key_claim, use_theme, use_ui_state, use_ui_state_projection};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::sleep_ms;
 
@@ -24,23 +24,13 @@ pub(crate) struct SpacesPage;
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let root = use_ui_state_root::<SpacesUiState>();
-    let mut state = use_signal(SpacesListEvent::default);
+    let state = use_ui_state_projection::<SpacesUiState, SpacesListEvent>(|state, patch| {
+        if let Some(snapshot) = &patch.snapshot {
+            *state = *snapshot.clone();
+        }
+    })
+    .state;
     let team = use_ui_state::<TeamEvent>();
-
-    let mut handled_sequence = use_signal(|| 0);
-    use_effect(move || {
-        let update = root.state.read();
-        if update.sequence == 0 || update.sequence == *handled_sequence.peek() {
-            return;
-        }
-        handled_sequence.set(update.sequence);
-        for patch in &update.patches {
-            if let Some(snapshot) = &patch.snapshot {
-                state.set(*snapshot.clone());
-            }
-        }
-    });
 
     let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);
     use_drop(move || {

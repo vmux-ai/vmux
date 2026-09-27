@@ -25,7 +25,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::components::mcp_menu::{McpMenu, use_mcp_connections};
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_media_options::PromptMediaOptions;
-use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state};
+use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_ui_state, use_ui_state_patches};
 use vmux_ui::i18n::translate;
 use vmux_ui::ime::use_ime_guard;
 use vmux_ui::prompt_recall::{PromptHistoryDirection, prompt_history_direction};
@@ -36,36 +36,26 @@ mod media;
 mod signals;
 
 pub fn use_command_bar_ui() -> Signal<CommandBarOpenEvent> {
-    let root = vmux_ui::hooks::use_ui_state_root::<CommandBarUiState>();
     let mut state = use_signal(CommandBarOpenEvent::default);
-    let mut handled_sequence = use_signal(|| 0);
     let mut handled_focus_revision = use_signal(|| 0);
-    use_effect(move || {
-        let event = root.state.read();
-        if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
+    let _error = use_ui_state_patches::<CommandBarUiState>(move |patch| {
+        if let Some(snapshot) =
+            <CommandBarUiStatePatch as vmux_api::UiStatePatch<CommandBarOpenEvent>>::payload(patch)
+        {
+            state.set(snapshot.clone());
             return;
         }
-        handled_sequence.set(event.sequence);
-        for patch in &event.patches {
-            if let Some(snapshot) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
-                CommandBarOpenEvent,
-            >>::payload(patch)
-            {
-                state.set(snapshot.clone());
-                continue;
-            }
-            let Some(effect) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
-                CommandBarFocusEffect,
-            >>::payload(patch) else {
-                continue;
-            };
-            if effect.revision <= *handled_focus_revision.peek() {
-                continue;
-            }
-            handled_focus_revision.set(effect.revision);
-            if effect.revision != 0 {
-                focus_prompt_input();
-            }
+        let Some(effect) = <CommandBarUiStatePatch as vmux_api::UiStatePatch<
+            CommandBarFocusEffect,
+        >>::payload(patch) else {
+            return;
+        };
+        if effect.revision <= *handled_focus_revision.peek() {
+            return;
+        }
+        handled_focus_revision.set(effect.revision);
+        if effect.revision != 0 {
+            focus_prompt_input();
         }
     });
     state

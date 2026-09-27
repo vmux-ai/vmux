@@ -162,6 +162,61 @@ where
     }
 }
 
+fn use_ui_state_batch<S>(mut callback: impl FnMut(&[S::Patch]) + 'static) -> Signal<Option<String>>
+where
+    S: vmux_api::BatchedUiState + rkyv::Archive + Default + 'static,
+    S::Archived: rkyv::Deserialize<S, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    let root = use_ui_state_root::<S>();
+    let mut handled_sequence = use_signal(|| 0);
+    use_effect(move || {
+        let event = root.state.read();
+        let sequence = event.sequence();
+        if sequence == 0 || sequence == *handled_sequence.peek() {
+            return;
+        }
+        handled_sequence.set(sequence);
+        callback(event.patches());
+    });
+    root.error
+}
+
+pub fn use_ui_state_patches<S>(
+    mut callback: impl FnMut(&S::Patch) + 'static,
+) -> Signal<Option<String>>
+where
+    S: vmux_api::BatchedUiState + rkyv::Archive + Default + 'static,
+    S::Archived: rkyv::Deserialize<S, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    use_ui_state_batch::<S>(move |patches| {
+        for patch in patches {
+            callback(patch);
+        }
+    })
+}
+
+pub fn use_ui_state_projection<S, T>(
+    mut apply: impl FnMut(&mut T, &S::Patch) + 'static,
+) -> UiStateRoot<T>
+where
+    S: vmux_api::BatchedUiState + rkyv::Archive + Default + 'static,
+    S::Archived: rkyv::Deserialize<S, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    T: Default + 'static,
+{
+    let mut state = use_signal(T::default);
+    let error = use_ui_state_batch::<S>(move |patches| {
+        state.with_mut(|state| {
+            for patch in patches {
+                apply(state, patch);
+            }
+        });
+    });
+    UiStateRoot { state, error }
+}
+
 pub fn use_ui_state_patch<S, T>() -> UiStatePatchBatch<S, T>
 where
     S: vmux_api::BatchedUiState,

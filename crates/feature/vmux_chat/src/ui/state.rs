@@ -25,7 +25,7 @@ use vmux_ui::components::composer_bar::{
 use vmux_ui::components::mcp_menu::{McpConnections, use_mcp_connections};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state_root};
+use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state_patches};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -79,17 +79,8 @@ pub fn use_chat() -> Chat {
 impl Chat {
     fn listen(&self) {
         let chat = *self;
-        let root = use_ui_state_root::<ChatUiState>();
-        let mut handled_sequence = use_signal(|| 0);
-        use_effect(move || {
-            let event = root.state.read();
-            if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
-                return;
-            }
-            handled_sequence.set(event.sequence);
-            for patch in &event.patches {
-                chat.apply_ui_state(patch);
-            }
+        let _error = use_ui_state_patches::<ChatUiState>(move |patch| {
+            chat.apply_ui_state(patch);
         });
     }
 

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use vmux_api::bookmark::BookmarkMenuEffect;
 use vmux_api::extension::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent};
-use vmux_ui::hooks::use_ui_state_root;
+use vmux_ui::hooks::use_ui_state_projection;
 
 use super::update::UpdatePhase;
 use crate::event::{
@@ -31,23 +31,9 @@ pub(crate) struct LayoutPageState {
 
 impl LayoutPageState {
     fn use_state() -> LayoutUi {
-        let root = use_ui_state_root::<LayoutUiState>();
-        let mut state = use_signal(Self::default);
-        let mut handled_sequence = use_signal(|| 0);
-        use_effect(move || {
-            let event = root.state.read();
-            if event.sequence == 0 || event.sequence == *handled_sequence.peek() {
-                return;
-            }
-            handled_sequence.set(event.sequence);
-            state.with_mut(|state| {
-                for patch in &event.patches {
-                    state.apply(patch);
-                }
-            });
-        });
+        let root = use_ui_state_projection::<LayoutUiState, Self>(Self::apply);
         LayoutUi {
-            state,
+            state: root.state,
             error: root.error,
         }
     }
