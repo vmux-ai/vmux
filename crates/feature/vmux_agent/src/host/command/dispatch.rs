@@ -240,6 +240,7 @@ fn route_remaining_operations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::event::CommandOrigin;
     use vmux_api::protocol::ProcessId;
 
     #[test]
