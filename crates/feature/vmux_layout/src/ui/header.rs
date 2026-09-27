@@ -4,7 +4,6 @@ use dioxus::prelude::*;
 use vmux_api::bookmark::{
     BookmarkAddRequest, BookmarkPinUrlRequest, BookmarkToggleRequest, BookmarkUnpinRequest,
 };
-use vmux_core::PageMetadata;
 use vmux_core::event::team::{TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest};
 use vmux_ui::components::avatar::Avatar;
 use vmux_ui::components::context_menu::{ContextMenuContent, ContextMenuItem, ContextMenuTrigger};
@@ -21,7 +20,7 @@ use super::tab_drag::TabDrag;
 use super::window_drag::WindowDragRegion;
 use crate::event::{
     HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
-    StackNavigationState, StackRow, TabCloseRequest, TabCreateRequest, TabListState, TabRow,
+    StackNavigationState, StackRow, TabCloseRequest, TabCreateRequest, TabStripRow, TabStripState,
 };
 use crate::extension::ExtensionBar;
 use crate::remote::RemoteControl;
@@ -57,7 +56,7 @@ fn HeaderContent() -> Element {
     let layout = LayoutUi::current();
     let ui = layout.value();
     let stacks_state = ui.stacks.unwrap_or_default();
-    let tabs_state = ui.tabs.unwrap_or_default();
+    let tab_strip = ui.tab_strip.unwrap_or_default();
     let crate::event::HeaderState {
         active: active_row,
         metadata: active_metadata,
@@ -74,12 +73,9 @@ fn HeaderContent() -> Element {
     let tab_order = use_memo(move || {
         layout
             .value()
-            .tabs
+            .tab_strip
             .unwrap_or_default()
-            .tabs
-            .into_iter()
-            .map(|tab| tab.id)
-            .collect()
+            .order
     });
     let tab_drag = TabDrag::use_state(tab_order);
     let StackNavigationState {
@@ -88,12 +84,11 @@ fn HeaderContent() -> Element {
         can_go_forward,
         is_zoomed: _,
     } = stacks_state;
-    let TabListState { tabs } = tabs_state;
-    let tab_drag_region_revision = tabs
-        .iter()
-        .map(|tab| tab.id.as_str())
-        .collect::<Vec<_>>()
-        .join(":");
+    let TabStripState {
+        tabs,
+        order: _,
+        drag_region_revision: tab_drag_region_revision,
+    } = tab_strip;
     let tab_metrics_style = TabDrag::metrics_style();
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
     let active_url = active_row
@@ -125,14 +120,8 @@ fn HeaderContent() -> Element {
                         style: "{tab_metrics_style}",
                         for (tab_index, tab) in tabs.iter().enumerate() {
                             Tab {
-                                key: "{tab.id}",
-                                tab: {
-                                    let mut tab = tab.clone();
-                                    if tab.is_active {
-                                        tab.bg_color = active_bg_color.clone();
-                                    }
-                                    tab
-                                },
+                                key: "{tab.tab.id}",
+                                row: tab.clone(),
                                 index: tab_index,
                                 drag: tab_drag,
                                 }
@@ -246,16 +235,19 @@ fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
 }
 
 #[component]
-fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
+fn Tab(row: TabStripRow, index: usize, drag: TabDrag) -> Element {
+    let TabStripRow {
+        tab,
+        display_title,
+        mut metadata,
+    } = row;
     let visual = drag.visual(&tab.id, index);
     let id_switch = tab.id.clone();
     let id_close = tab.id.clone();
-    let display_title = if !tab.title.is_empty() {
-        tab.title.clone()
-    } else if !tab.name.is_empty() {
-        tab.name.clone()
-    } else {
+    let display_title = if display_title.is_empty() {
         translate("layout-tab")
+    } else {
+        display_title
     };
     let tooltip = display_title.clone();
     let is_active = tab.is_active;
@@ -312,12 +304,10 @@ fn Tab(tab: TabRow, index: usize, drag: TabDrag) -> Element {
     };
     let tab_style = visual.style();
 
-    let bookmark_metadata = PageMetadata {
-        title: display_title.clone(),
-        url: tab.url.clone(),
-        icon: tab.icon.clone(),
-        bg_color: tab.bg_color.clone(),
-    };
+    if metadata.title.is_empty() {
+        metadata.title = display_title.clone();
+    }
+    let bookmark_metadata = metadata;
     let pin_metadata = bookmark_metadata.clone();
     let menu_val = use_signal(|| tab.id.clone());
 

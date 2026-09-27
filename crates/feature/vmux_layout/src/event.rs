@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use vmux_api::bookmark::{BookmarkFolderChoice, BookmarkRow};
-use vmux_core::PageIcon;
+use vmux_core::{PageIcon, PageMetadata};
 
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
@@ -422,6 +422,20 @@ impl AddressParts {
 #[vmux_api::contract(Default, Eq)]
 pub struct TabListState {
     pub tabs: Vec<TabRow>,
+}
+
+#[vmux_api::contract(Default, Eq)]
+pub struct TabStripState {
+    pub tabs: Vec<TabStripRow>,
+    pub order: Vec<String>,
+    pub drag_region_revision: String,
+}
+
+#[vmux_api::contract(Eq)]
+pub struct TabStripRow {
+    pub tab: TabRow,
+    pub display_title: String,
+    pub metadata: PageMetadata,
 }
 
 #[vmux_api::contract(Eq)]

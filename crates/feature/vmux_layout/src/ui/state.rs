@@ -8,7 +8,7 @@ use vmux_ui::hooks::{send, use_ui_state_root};
 use super::update::UpdatePhase;
 use crate::event::{
     ActiveSession, BookmarkUiState, HeaderState, LayoutGeometry, RemoteUiState, SideSheetState,
-    StackNavigationState, TabBoundaryState, TabListState,
+    StackNavigationState, TabBoundaryState, TabStripState,
 };
 use crate::state::{LayoutUiState, LayoutUiStatePatch};
 
@@ -16,7 +16,7 @@ use crate::state::{LayoutUiState, LayoutUiStatePatch};
 pub(crate) struct LayoutPageState {
     pub layout: Option<LayoutGeometry>,
     pub stacks: Option<StackNavigationState>,
-    pub tabs: Option<TabListState>,
+    pub tab_strip: Option<TabStripState>,
     pub bookmarks: BookmarkUiState,
     pub side_sheet: Option<SideSheetState>,
     pub projects: TabBoundaryState,
@@ -64,8 +64,8 @@ impl LayoutPageState {
         if let Some(event) = &patch.stacks {
             self.stacks = Some(event.clone());
         }
-        if let Some(event) = &patch.tabs {
-            self.tabs = Some(event.clone());
+        if let Some(event) = &patch.tab_strip {
+            self.tab_strip = Some(event.clone());
         }
         if let Some(event) = &patch.bookmark_ui {
             self.bookmarks = event.clone();
@@ -115,7 +115,7 @@ impl LayoutPageState {
         let received = |ready| ready || error.is_some();
         let layout_ready = received(self.layout.is_some());
         let stacks_ready = received(self.stacks.is_some());
-        let tabs_ready = received(self.tabs.is_some());
+        let tabs_ready = received(self.tab_strip.is_some());
         let side_sheet_ready = received(self.side_sheet.is_some());
         let layout = self.layout.unwrap_or_default();
 
@@ -213,7 +213,7 @@ mod tests {
         assert!(!state.overlay_ready(&None));
         state.stacks = Some(Default::default());
         assert!(!state.overlay_ready(&None));
-        state.tabs = Some(Default::default());
+        state.tab_strip = Some(Default::default());
         assert!(state.overlay_ready(&None));
     }
 

@@ -11,18 +11,25 @@ use crate::event::{
     ActiveSession, ActiveSessionState, ActiveWorkspaceProject, BookmarkEntryState,
     BookmarkFolderState, BookmarkPinState, BookmarkTreeState, BookmarkUiState, HeaderState,
     PaneTreeState, SideSheetPane, SideSheetState, StackNavigationState, StackNode,
-    StackRevealTarget, TabBoundaryState,
+    StackRevealTarget, TabBoundaryState, TabListState, TabStripRow, TabStripState,
 };
+use crate::state::LayoutUiState;
 
 pub struct LayoutUiProjectionPlugin;
 
 impl Plugin for LayoutUiProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.add_observer(capture_tab_list).add_systems(
             Update,
             (
                 publish_active_session,
-                publish_header,
+                (
+                    project_header,
+                    project_tab_strip,
+                    publish_header,
+                    publish_tab_strip,
+                )
+                    .chain(),
                 (
                     project_side_sheet,
                     project_bookmark_ui,
@@ -54,10 +61,57 @@ pub struct BookmarkProjection(pub BookmarkStateEvent);
 pub struct SpacesProjection(pub vmux_core::event::space::SpacesListEvent);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
+struct TabListProjection(TabListState);
+
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+struct HeaderProjection(HeaderState);
+
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+struct TabStripProjection(TabStripState);
+
+#[derive(Component, Clone, Debug, Default, PartialEq)]
 struct SideSheetProjection(SideSheetState);
 
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 struct BookmarkUiProjection(BookmarkUiState);
+
+impl TabStripProjection {
+    fn from_sources(tabs: &TabListState, header: Option<&HeaderState>) -> Self {
+        let active_bg_color = header
+            .and_then(|header| header.active.as_ref())
+            .and_then(|active| active.bg_color.as_ref());
+        let mut rows = Vec::with_capacity(tabs.tabs.len());
+        let mut order = Vec::with_capacity(tabs.tabs.len());
+        for source in &tabs.tabs {
+            let mut tab = source.clone();
+            if tab.is_active && active_bg_color.is_some() {
+                tab.bg_color = active_bg_color.cloned();
+            }
+            let display_title = if !tab.title.is_empty() {
+                tab.title.clone()
+            } else {
+                tab.name.clone()
+            };
+            let metadata = vmux_core::PageMetadata {
+                title: display_title.clone(),
+                url: tab.url.clone(),
+                icon: tab.icon.clone(),
+                bg_color: tab.bg_color.clone(),
+            };
+            order.push(tab.id.clone());
+            rows.push(TabStripRow {
+                tab,
+                display_title,
+                metadata,
+            });
+        }
+        Self(TabStripState {
+            drag_region_revision: order.join(":"),
+            tabs: rows,
+            order,
+        })
+    }
+}
 
 struct BookmarkUiBuilder {
     folders: Vec<BookmarkFolderRow>,
@@ -423,23 +477,35 @@ fn publish_active_session(
     }
 }
 
-fn publish_header(
+fn capture_tab_list(
+    trigger: On<vmux_core::host::UiStateWrite<LayoutUiState>>,
+    mut commands: Commands,
+) {
+    let Some(tabs) = &trigger.event().patch().tabs else {
+        return;
+    };
+    commands
+        .entity(trigger.event().webview())
+        .insert(TabListProjection(tabs.clone()));
+}
+
+fn project_header(
     layouts: Query<
         (
             Entity,
             Option<&StackProjection>,
             Option<&BookmarkProjection>,
             Option<&TeamProjection>,
+            Option<&HeaderProjection>,
         ),
         With<LayoutCef>,
     >,
-    mut last: Local<std::collections::HashMap<Entity, HeaderState>>,
     mut commands: Commands,
 ) {
     let empty_stacks = StackNavigationState::default();
     let empty_bookmarks = BookmarkStateEvent::default();
     let empty_team = TeamEvent::default();
-    for (entity, stacks, bookmarks, team) in &layouts {
+    for (entity, stacks, bookmarks, team, current) in &layouts {
         let stacks = stacks
             .map(|projection| &projection.0)
             .unwrap_or(&empty_stacks);
@@ -447,16 +513,56 @@ fn publish_header(
             .map(|projection| &projection.0)
             .unwrap_or(&empty_bookmarks);
         let team = team.map(|projection| &projection.0).unwrap_or(&empty_team);
-        let event = HeaderState::from_projections(stacks, bookmarks, team);
-        if last.get(&entity) == Some(&event) {
+        let next = HeaderProjection(HeaderState::from_projections(stacks, bookmarks, team));
+        if current == Some(&next) {
             continue;
         }
-        commands.trigger(
-            vmux_core::host::UiStateWrite::<crate::state::LayoutUiState>::from_event(
-                entity, &event,
-            ),
-        );
-        last.insert(entity, event);
+        commands.entity(entity).insert(next);
+    }
+}
+
+fn project_tab_strip(
+    layouts: Query<
+        (
+            Entity,
+            &TabListProjection,
+            Option<&HeaderProjection>,
+            Option<&TabStripProjection>,
+        ),
+        With<LayoutCef>,
+    >,
+    mut commands: Commands,
+) {
+    for (entity, tabs, header, current) in &layouts {
+        let next = TabStripProjection::from_sources(&tabs.0, header.map(|header| &header.0));
+        if current == Some(&next) {
+            continue;
+        }
+        commands.entity(entity).insert(next);
+    }
+}
+
+fn publish_header(
+    projections: Query<(Entity, &HeaderProjection), Changed<HeaderProjection>>,
+    mut commands: Commands,
+) {
+    for (entity, projection) in &projections {
+        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+            entity,
+            &projection.0,
+        ));
+    }
+}
+
+fn publish_tab_strip(
+    projections: Query<(Entity, &TabStripProjection), Changed<TabStripProjection>>,
+    mut commands: Commands,
+) {
+    for (entity, projection) in &projections {
+        commands.trigger(vmux_core::host::UiStateWrite::<LayoutUiState>::from_event(
+            entity,
+            &projection.0,
+        ));
     }
 }
 
@@ -536,6 +642,41 @@ fn publish_bookmark_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_strip_projection_resolves_render_state_before_ui_delivery() {
+        let tabs = TabListState {
+            tabs: vec![crate::event::TabRow {
+                id: "tab-1".into(),
+                name: "Workspace".into(),
+                is_active: true,
+                bg_color: None,
+                title: String::new(),
+                url: "vmux://terminal/".into(),
+                icon: Default::default(),
+                is_done_unseen: false,
+            }],
+        };
+        let header = HeaderState {
+            active: Some(crate::event::StackRow {
+                title: "Terminal".into(),
+                url: "vmux://terminal/".into(),
+                icon: Default::default(),
+                is_active: true,
+                bg_color: Some("#123456".into()),
+                address: Default::default(),
+            }),
+            ..Default::default()
+        };
+
+        let projection = TabStripProjection::from_sources(&tabs, Some(&header));
+
+        assert_eq!(projection.0.order, vec!["tab-1".to_string()]);
+        assert_eq!(projection.0.drag_region_revision, "tab-1");
+        assert_eq!(projection.0.tabs[0].display_title, "Workspace");
+        assert_eq!(projection.0.tabs[0].metadata.title, "Workspace");
+        assert_eq!(projection.0.tabs[0].tab.bg_color.as_deref(), Some("#123456"));
+    }
 
     #[test]
     fn active_session_matches_the_agent_by_entity_id() {
