@@ -159,7 +159,10 @@ fn new_chat_op_id(command: &SharedAgentCommand) -> Option<ClientOpId> {
 
 async fn broker(state: &RemoteState, command: SharedAgentCommand) -> SharedResponse {
     use vmux_api::protocol::AgentCommandResult;
-    match super::super::server::broker_result(state, command.into()).await {
+    let Ok(request) = command.try_into() else {
+        return SharedResponse::Failed(SharedFailure::Invalid);
+    };
+    match super::super::server::broker_result(state, request).await {
         Some(AgentCommandResult::Text(json)) => SharedResponse::BrokerJson(json),
         Some(AgentCommandResult::Ok) | Some(AgentCommandResult::Layout(_)) => SharedResponse::Ok,
         Some(AgentCommandResult::Error(message)) => {

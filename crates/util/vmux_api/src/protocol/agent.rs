@@ -1,4 +1,4 @@
-use super::SharedAgentCommand;
+use crate::room::ClientOpId;
 use crate::{ProcessId, json::JsonValue};
 
 #[vmux_api::contract(Eq)]
@@ -177,7 +177,12 @@ pub struct AgentUpdateLayout {
 }
 
 #[vmux_api::agent]
-pub struct AgentBrowserHistoryStep {
+pub struct AgentBrowserGoBack {
+    pub pane: Option<String>,
+}
+
+#[vmux_api::agent]
+pub struct AgentBrowserGoForward {
     pub pane: Option<String>,
 }
 
@@ -197,44 +202,15 @@ pub struct AgentSpaceCreate {
     pub name: Option<String>,
 }
 
-impl AgentSpaceCreate {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        match &self.name {
-            Some(name) if name.trim().is_empty() => {
-                Err(AgentCommandValidationError::EmptySpaceName)
-            }
-            _ => Ok(()),
-        }
-    }
-}
-
 #[vmux_api::agent]
 pub struct AgentSpaceRename {
     pub space_id: String,
     pub name: String,
 }
 
-impl AgentSpaceRename {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        if self.space_id.trim().is_empty() || self.name.trim().is_empty() {
-            return Err(AgentCommandValidationError::InvalidSpaceRename);
-        }
-        Ok(())
-    }
-}
-
 #[vmux_api::agent]
 pub struct AgentSpaceDelete {
     pub space_id: String,
-}
-
-impl AgentSpaceDelete {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        if self.space_id.trim().is_empty() {
-            return Err(AgentCommandValidationError::EmptySpaceId);
-        }
-        Ok(())
-    }
 }
 
 #[vmux_api::agent]
@@ -255,6 +231,48 @@ pub struct AgentRun {
     pub mode: PlacementMode,
     pub terminal: Option<ProcessId>,
     pub done_marker: Option<String>,
+}
+
+#[vmux_api::agent]
+pub struct AgentRunWithPlacementOverride {
+    pub anchor: ProcessId,
+    pub command: String,
+    pub direction: AgentPaneDirection,
+    pub focus: bool,
+    pub beside: Option<ProcessId>,
+    pub mode: PlacementMode,
+    pub terminal: Option<ProcessId>,
+    pub done_marker: Option<String>,
+}
+
+impl From<AgentRun> for AgentRunWithPlacementOverride {
+    fn from(run: AgentRun) -> Self {
+        Self {
+            anchor: run.anchor,
+            command: run.command,
+            direction: run.direction,
+            focus: run.focus,
+            beside: run.beside,
+            mode: run.mode,
+            terminal: run.terminal,
+            done_marker: run.done_marker,
+        }
+    }
+}
+
+impl From<AgentRunWithPlacementOverride> for AgentRun {
+    fn from(run: AgentRunWithPlacementOverride) -> Self {
+        Self {
+            anchor: run.anchor,
+            command: run.command,
+            direction: run.direction,
+            focus: run.focus,
+            beside: run.beside,
+            mode: run.mode,
+            terminal: run.terminal,
+            done_marker: run.done_marker,
+        }
+    }
 }
 
 #[vmux_api::agent]
@@ -331,63 +349,6 @@ pub struct AgentBookmarkFolderCreate {
     pub name: String,
 }
 
-impl AgentBookmarkPage {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        if self.url.trim().is_empty() {
-            return Err(AgentCommandValidationError::EmptyBookmarkUrl);
-        }
-        Ok(())
-    }
-}
-
-impl AgentBookmarkAdd {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        self.page.validate()
-    }
-}
-
-impl AgentBookmarkRemove {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        if self.uuid.trim().is_empty() {
-            return Err(AgentCommandValidationError::EmptyBookmarkId);
-        }
-        Ok(())
-    }
-}
-
-impl AgentBookmarkPin {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        if self.uuid.trim().is_empty() {
-            return Err(AgentCommandValidationError::EmptyBookmarkId);
-        }
-        Ok(())
-    }
-}
-
-impl AgentBookmarkPinUrl {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        self.page.validate()
-    }
-}
-
-impl AgentBookmarkUnpin {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        if self.uuid.trim().is_empty() {
-            return Err(AgentCommandValidationError::EmptyBookmarkId);
-        }
-        Ok(())
-    }
-}
-
-impl AgentBookmarkFolderCreate {
-    fn validate(&self) -> Result<(), AgentCommandValidationError> {
-        if self.name.trim().is_empty() {
-            return Err(AgentCommandValidationError::EmptyBookmarkFolderName);
-        }
-        Ok(())
-    }
-}
-
 #[vmux_api::agent]
 pub struct AgentRequestUserChoice {
     pub anchor: ProcessId,
@@ -446,57 +407,41 @@ pub struct AgentReadKnowledge {
     pub limit: u32,
 }
 
-#[vmux_api::contract]
-pub enum AgentCommand {
-    InvokeCommand(AgentInvokeCommand),
-    NewTerminalTab(AgentNewTerminalTab),
-    RunShell(AgentRunShell),
-    BrowserNavigate(AgentBrowserNavigate),
-    BrowserInstallExtension(AgentBrowserInstallExtension),
-    TerminalSend(AgentTerminalSend),
-    FocusPane(AgentFocusPane),
-    RenameProfile(AgentRenameProfile),
-    UpdateSettings(AgentUpdateSettings),
-    UpdateLayout(AgentUpdateLayout),
-    BrowserGoBack(AgentBrowserHistoryStep),
-    BrowserGoForward(AgentBrowserHistoryStep),
-    BrowserHistorySearch(AgentBrowserHistorySearch),
-    OpenInNewStack(AgentOpenInNewStack),
-    SpaceCreate(AgentSpaceCreate),
-    SpaceRename(AgentSpaceRename),
-    SpaceDelete(AgentSpaceDelete),
-    OpenBeside(AgentOpenBeside),
-    Run(AgentRun),
-    Notify(AgentNotify),
-    FileTouched(AgentFileTouched),
-    CreateWorktree(AgentCreateWorktree),
-    TurnEnded(AgentTurnEnded),
-    RunWithPlacementOverride(AgentRun),
-    ResumeInAcp(AgentResumeInAcp),
-    ChooseWorkspace(AgentChooseWorkspace),
-    CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch),
-    BookmarkAdd(AgentBookmarkAdd),
-    BookmarkRemove(AgentBookmarkRemove),
-    BookmarkPin(AgentBookmarkPin),
-    BookmarkPinUrl(AgentBookmarkPinUrl),
-    BookmarkUnpin(AgentBookmarkUnpin),
-    BookmarkFolderCreate(AgentBookmarkFolderCreate),
-    RequestUserChoice(AgentRequestUserChoice),
-    ChooseWorkspaceAtPath(AgentChooseWorkspaceAtPath),
-    PrepareWorktree(AgentPrepareWorktree),
-    FileSearch(AgentFileSearch),
-    SetConversationTitle(AgentSetConversationTitle),
-    WriteKnowledge(AgentWriteKnowledge),
-    SearchKnowledge(AgentSearchKnowledge),
-    ReadKnowledge(AgentReadKnowledge),
-    Shared(SharedAgentCommand),
+#[vmux_api::agent]
+pub struct AgentNewChat {
+    pub client_op_id: ClientOpId,
+    pub prompt: String,
+    pub agent_url: Option<String>,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentListAgents;
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentListTeam;
+
+#[vmux_api::agent]
+pub struct AgentListModels {
+    pub sid: String,
+}
+
+#[vmux_api::agent]
+pub struct AgentSelectModel {
+    pub sid: String,
+    pub model_id: String,
+}
+
+#[vmux_api::agent]
+pub struct AgentSetEffort {
+    pub sid: String,
+    pub level: String,
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub const RECORD_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-pub const AGENT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+pub const AGENT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub const BROWSER_NAVIGATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
@@ -524,176 +469,6 @@ pub enum AgentRunStatus {
     Idle,
     Interrupted,
     Errored(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentCommandValidationError {
-    EmptyCommandId,
-    EmptyShellCommand,
-    EmptyBrowserUrl,
-    EmptyExtensionSource,
-    EmptyTerminalText,
-    EmptyPaneId,
-    EmptyProfileName,
-    EmptySettingsPath,
-    EmptyHistoryQuery,
-    EmptyStackUrl,
-    EmptySpaceName,
-    InvalidSpaceRename,
-    EmptySpaceId,
-    EmptyBookmarkUrl,
-    EmptyBookmarkId,
-    EmptyBookmarkFolderName,
-    EmptyBesideUrl,
-    EmptyRunCommand,
-    EmptyFilePath,
-    EmptyBranch,
-    InvalidUserChoice,
-    EmptyWorkspacePath,
-    InvalidKnowledgeWrite,
-    InvalidKnowledgeSearch,
-    InvalidKnowledgeRead,
-    EmptyAgentPrompt,
-}
-
-impl std::fmt::Display for AgentCommandValidationError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let message = match self {
-            Self::EmptyCommandId => "invoke_command.id is empty",
-            Self::EmptyShellCommand => "run_shell.command is empty",
-            Self::EmptyBrowserUrl => "browser_navigate.url is empty",
-            Self::EmptyExtensionSource => "browser_install_extension.source is empty",
-            Self::EmptyTerminalText => "terminal_send.text is empty",
-            Self::EmptyPaneId => "focus_pane.pane is empty",
-            Self::EmptyProfileName => "rename_profile.name is empty",
-            Self::EmptySettingsPath => "update_settings.path is empty",
-            Self::EmptyHistoryQuery => "browser_history_search.query is empty",
-            Self::EmptyStackUrl => "open_in_new_stack.url is empty",
-            Self::EmptySpaceName => "space_command.name is empty",
-            Self::InvalidSpaceRename => "space_command rename fields are empty",
-            Self::EmptySpaceId => "space_command.space_id is empty",
-            Self::EmptyBookmarkUrl => "bookmark_command.url is empty",
-            Self::EmptyBookmarkId => "bookmark_command.uuid is empty",
-            Self::EmptyBookmarkFolderName => "bookmark_command.name is empty",
-            Self::EmptyBesideUrl => "open_beside_me.url is empty",
-            Self::EmptyRunCommand => "run.command is empty",
-            Self::EmptyFilePath => "file_touched.path is empty",
-            Self::EmptyBranch => "create_worktree.branch is empty",
-            Self::InvalidUserChoice => {
-                "request_user_choice requires a question and 2 to 9 non-empty options"
-            }
-            Self::EmptyWorkspacePath => "select_project.path is empty",
-            Self::InvalidKnowledgeWrite => "write_knowledge requires a non-empty title and content",
-            Self::InvalidKnowledgeSearch => {
-                "search_knowledge requires a query and limit between 1 and 100"
-            }
-            Self::InvalidKnowledgeRead => {
-                "read_knowledge requires a path and limit between 1 and 2000"
-            }
-            Self::EmptyAgentPrompt => "new_agent_chat.prompt is empty",
-        };
-        formatter.write_str(message)
-    }
-}
-
-impl std::error::Error for AgentCommandValidationError {}
-
-pub fn validate_agent_command(command: &AgentCommand) -> Result<(), AgentCommandValidationError> {
-    match command {
-        AgentCommand::InvokeCommand(request) if request.id.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyCommandId)
-        }
-        AgentCommand::RunShell(request) if request.command.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyShellCommand)
-        }
-        AgentCommand::BrowserNavigate(request) if request.url.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyBrowserUrl)
-        }
-        AgentCommand::BrowserInstallExtension(request) if request.source.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyExtensionSource)
-        }
-        AgentCommand::TerminalSend(request) if request.text.is_empty() => {
-            Err(AgentCommandValidationError::EmptyTerminalText)
-        }
-        AgentCommand::FocusPane(request) if request.pane.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyPaneId)
-        }
-        AgentCommand::RenameProfile(request) if request.name.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyProfileName)
-        }
-        AgentCommand::UpdateSettings(request) if request.path.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptySettingsPath)
-        }
-        AgentCommand::BrowserHistorySearch(request) if request.query.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyHistoryQuery)
-        }
-        AgentCommand::OpenInNewStack(request) if request.url.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyStackUrl)
-        }
-        AgentCommand::SpaceCreate(command) => command.validate(),
-        AgentCommand::SpaceRename(command) => command.validate(),
-        AgentCommand::SpaceDelete(command) => command.validate(),
-        AgentCommand::BookmarkAdd(command) => command.validate(),
-        AgentCommand::BookmarkRemove(command) => command.validate(),
-        AgentCommand::BookmarkPin(command) => command.validate(),
-        AgentCommand::BookmarkPinUrl(command) => command.validate(),
-        AgentCommand::BookmarkUnpin(command) => command.validate(),
-        AgentCommand::BookmarkFolderCreate(command) => command.validate(),
-        AgentCommand::OpenBeside(request) if request.url.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyBesideUrl)
-        }
-        AgentCommand::Run(request) | AgentCommand::RunWithPlacementOverride(request)
-            if request.command.trim().is_empty() =>
-        {
-            Err(AgentCommandValidationError::EmptyRunCommand)
-        }
-        AgentCommand::FileTouched(request) if request.path.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyFilePath)
-        }
-        AgentCommand::CreateWorktreeOnBranch(request) if request.branch.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyBranch)
-        }
-        AgentCommand::RequestUserChoice(request)
-            if request.question.trim().is_empty()
-                || request.options.len() < 2
-                || request.options.len() > 9
-                || request
-                    .options
-                    .iter()
-                    .any(|option| option.trim().is_empty()) =>
-        {
-            Err(AgentCommandValidationError::InvalidUserChoice)
-        }
-        AgentCommand::ChooseWorkspaceAtPath(request) if request.path.trim().is_empty() => {
-            Err(AgentCommandValidationError::EmptyWorkspacePath)
-        }
-        AgentCommand::WriteKnowledge(request)
-            if request
-                .path
-                .as_ref()
-                .is_some_and(|path| path.trim().is_empty())
-                || request.title.trim().is_empty()
-                || request.content.trim().is_empty() =>
-        {
-            Err(AgentCommandValidationError::InvalidKnowledgeWrite)
-        }
-        AgentCommand::SearchKnowledge(request)
-            if request.query.trim().is_empty() || request.limit == 0 || request.limit > 100 =>
-        {
-            Err(AgentCommandValidationError::InvalidKnowledgeSearch)
-        }
-        AgentCommand::ReadKnowledge(request)
-            if request.path.trim().is_empty() || request.limit == 0 || request.limit > 2_000 =>
-        {
-            Err(AgentCommandValidationError::InvalidKnowledgeRead)
-        }
-        AgentCommand::Shared(SharedAgentCommand::NewAgentChat { prompt, .. })
-            if prompt.trim().is_empty() =>
-        {
-            Err(AgentCommandValidationError::EmptyAgentPrompt)
-        }
-        _ => Ok(()),
-    }
 }
 
 #[vmux_api::contract(Eq)]

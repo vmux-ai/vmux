@@ -4,10 +4,10 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use vmux_api::protocol::{
-    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCommand, AgentCreateWorktreeOnBranch,
-    AgentOpenBeside, AgentPaneDirection, AgentPrepareWorktree, AgentQuery, AgentRequestId,
-    AgentRequestUserChoice, AgentResumeInAcp, AgentRun, AgentRunCompletion, ClientMessage,
-    PlacementMode, ProcessId, ServiceMessage,
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentOpenBeside,
+    AgentPaneDirection, AgentPrepareWorktree, AgentQuery, AgentRequest, AgentRequestId,
+    AgentRequestUserChoice, AgentResumeInAcp, AgentRun, AgentRunCompletion,
+    AgentRunWithPlacementOverride, ClientMessage, PlacementMode, ProcessId, ServiceMessage,
 };
 use vmux_core::{HostShell, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
@@ -157,7 +157,7 @@ fn resume_in_acp(
 ) {
     for (request, name, anchor) in &calls {
         let result = ProcessAnchor::required(anchor, name.as_str())
-            .map(|anchor| AgentCommand::ResumeInAcp(AgentResumeInAcp { anchor }));
+            .and_then(|anchor| AgentRequest::encode(&AgentResumeInAcp { anchor }));
         commands.entity(request).insert(ToolCommand(result));
     }
 }
@@ -171,12 +171,12 @@ fn open_page(
             if args.url.trim().is_empty() {
                 return Err("open_page.url is empty".to_string());
             }
-            Ok(AgentCommand::OpenBeside(AgentOpenBeside {
+            AgentRequest::encode(&AgentOpenBeside {
                 anchor,
                 direction: args.direction.map(Into::into),
                 url: args.url.clone(),
                 focus: args.focus,
-            }))
+            })
         });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -198,12 +198,12 @@ fn open_file(
             } else {
                 format!("file://{path}")
             };
-            Ok(AgentCommand::OpenBeside(AgentOpenBeside {
+            AgentRequest::encode(&AgentOpenBeside {
                 anchor,
                 direction: args.direction.map(Into::into),
                 url,
                 focus: args.focus,
-            }))
+            })
         });
         match command {
             Ok(command) if protocol_requests.contains(entity) => {
@@ -277,24 +277,25 @@ fn run(
                 terminal,
                 done_marker: None,
             };
-            let command = if placement_override {
-                AgentCommand::RunWithPlacementOverride(run)
-            } else {
-                AgentCommand::Run(run)
-            };
-            Ok(command)
+            Ok((run, placement_override))
         });
         match command {
-            Ok(command) => {
+            Ok((run, placement_override)) => {
                 if let Ok(request) = protocol_requests.get(entity) {
                     commands
                         .entity(entity)
                         .insert(McpExecution::new(run_blocking(
-                            command,
+                            run,
+                            placement_override,
                             request.run_block_timeout(),
                         )));
                 } else {
-                    commands.entity(entity).insert(ToolCommand(Ok(command)));
+                    let request = if placement_override {
+                        AgentRequest::encode(&AgentRunWithPlacementOverride::from(run))
+                    } else {
+                        AgentRequest::encode(&run)
+                    };
+                    commands.entity(entity).insert(ToolCommand(request));
                 }
             }
             Err(message) => {
@@ -330,15 +331,15 @@ fn create_worktree(
     >,
 ) {
     for (entity, name, anchor, args) in &requests {
-        let command = ProcessAnchor::required(anchor, name.as_str()).map(|anchor| {
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| {
             if let Some(branch) = args.branch.clone().and_then(Trimmed::into_option) {
-                AgentCommand::CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch {
+                AgentRequest::encode(&AgentCreateWorktreeOnBranch {
                     anchor,
                     branch,
                     project: None,
                 })
             } else {
-                AgentCommand::PrepareWorktree(AgentPrepareWorktree {
+                AgentRequest::encode(&AgentPrepareWorktree {
                     anchor,
                     path: args.path.clone().and_then(Trimmed::into_option),
                     task: args.task.clone().and_then(Trimmed::into_option),
@@ -385,11 +386,11 @@ fn request_user_choice(
             if !(2..=9).contains(&options.len()) {
                 return Err("request_user_choice requires 2 to 9 options".to_string());
             }
-            Ok(AgentCommand::RequestUserChoice(AgentRequestUserChoice {
+            AgentRequest::encode(&AgentRequestUserChoice {
                 anchor,
                 question,
                 options,
-            }))
+            })
         });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -403,13 +404,13 @@ fn select_project(
     >,
 ) {
     for (entity, name, anchor, args) in &requests {
-        let command = ProcessAnchor::required(anchor, name.as_str()).map(|anchor| {
-            match args.path.clone().and_then(Trimmed::into_option) {
-                Some(path) => {
-                    AgentCommand::ChooseWorkspaceAtPath(AgentChooseWorkspaceAtPath { anchor, path })
-                }
-                None => AgentCommand::ChooseWorkspace(AgentChooseWorkspace { anchor }),
-            }
+        let command = ProcessAnchor::required(anchor, name.as_str()).and_then(|anchor| match args
+            .path
+            .clone()
+            .and_then(Trimmed::into_option)
+        {
+            Some(path) => AgentRequest::encode(&AgentChooseWorkspaceAtPath { anchor, path }),
+            None => AgentRequest::encode(&AgentChooseWorkspace { anchor }),
         });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -510,16 +511,6 @@ fn run_done_token(request_id: AgentRequestId) -> String {
     token
 }
 
-fn blocking_run_with_marker(mut run: AgentCommand, request_id: AgentRequestId) -> AgentCommand {
-    match &mut run {
-        AgentCommand::Run(run) | AgentCommand::RunWithPlacementOverride(run) => {
-            run.done_marker = Some(run_done_token(request_id));
-        }
-        _ => {}
-    }
-    run
-}
-
 fn run_result(
     process_id: &str,
     exit: Option<i32>,
@@ -562,18 +553,27 @@ fn run_completion_exit(
     }
 }
 
-async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<Value, String> {
+async fn run_blocking(
+    mut run: AgentRun,
+    placement_override: bool,
+    run_block_timeout: Duration,
+) -> Result<Value, String> {
     let connection = ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     let request_id = AgentRequestId::new();
     let token = run_done_token(request_id);
-    let run = blocking_run_with_marker(run, request_id);
+    run.done_marker = Some(token.clone());
+    let request = if placement_override {
+        AgentRequest::encode(&AgentRunWithPlacementOverride::from(run))
+    } else {
+        AgentRequest::encode(&run)
+    }?;
     connection
-        .send(&ClientMessage::AgentCommand {
+        .send(&ClientMessage::AgentRequest {
             request_id,
             anchor: None,
-            command: run,
+            request,
         })
         .await
         .map_err(|error| format!("cannot send run command: {error}"))?;
@@ -699,7 +699,7 @@ async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -
 }
 
 async fn run_agent_command(
-    command: AgentCommand,
+    request: AgentRequest,
     anchor: Option<ProcessId>,
 ) -> Result<Value, String> {
     let request_id = AgentRequestId::new();
@@ -707,10 +707,10 @@ async fn run_agent_command(
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     connection
-        .send(&ClientMessage::AgentCommand {
+        .send(&ClientMessage::AgentRequest {
             request_id,
             anchor,
-            command,
+            request,
         })
         .await
         .map_err(|error| format!("cannot send agent command: {error}"))?;

@@ -24,8 +24,6 @@ pub use terminal::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::room::ClientOpId;
-
     #[test]
     fn composed_agent_prompt_preserves_marker_literals_in_display_text() {
         let display = format!("before{PRIVATE_CONTEXT_PROMPT_MARKER}after");
@@ -170,71 +168,6 @@ mod tests {
                 && cwd == "/worktrees/quiet-amber-wolf"
                 && workspace_cwd == "/repo"
         ));
-    }
-
-    #[test]
-    fn empty_browser_navigate_url_is_invalid() {
-        assert_eq!(
-            validate_agent_command(&AgentCommand::BrowserNavigate(AgentBrowserNavigate {
-                url: String::new(),
-                pane: None,
-            })),
-            Err(AgentCommandValidationError::EmptyBrowserUrl)
-        );
-    }
-
-    #[test]
-    fn empty_agent_shell_command_is_invalid() {
-        assert_eq!(
-            validate_agent_command(&AgentCommand::RunShell(AgentRunShell {
-                command: String::new(),
-                cwd: String::new(),
-                mode: AgentShellMode::NewTab,
-            })),
-            Err(AgentCommandValidationError::EmptyShellCommand)
-        );
-    }
-
-    #[test]
-    fn empty_terminal_send_text_is_invalid() {
-        assert_eq!(
-            validate_agent_command(&AgentCommand::TerminalSend(AgentTerminalSend {
-                text: String::new(),
-                terminal: None,
-            })),
-            Err(AgentCommandValidationError::EmptyTerminalText)
-        );
-    }
-
-    #[test]
-    fn new_agent_chat_requires_prompt_and_roundtrips() {
-        assert_eq!(
-            validate_agent_command(&AgentCommand::Shared(SharedAgentCommand::NewAgentChat {
-                client_op_id: ClientOpId::new("op"),
-                prompt: "  ".to_string(),
-                agent_url: None,
-            })),
-            Err(AgentCommandValidationError::EmptyAgentPrompt)
-        );
-        let command = AgentCommand::Shared(SharedAgentCommand::NewAgentChat {
-            client_op_id: ClientOpId::new("op"),
-            prompt: "continue from my phone".to_string(),
-            agent_url: Some("vmux://sessions/claude".to_string()),
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
-        let back: AgentCommand =
-            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(back, command);
-    }
-
-    #[test]
-    fn empty_rename_profile_name_is_invalid() {
-        assert_eq!(
-            validate_agent_command(&AgentCommand::RenameProfile(AgentRenameProfile {
-                name: "  ".to_string(),
-            })),
-            Err(AgentCommandValidationError::EmptyProfileName)
-        );
     }
 
     #[test]
@@ -412,18 +345,6 @@ mod tests {
     }
 
     #[test]
-    fn notify_command_rkyv_roundtrip() {
-        let cmd = AgentCommand::Notify(AgentNotify {
-            title: Some("done".to_string()),
-            body: None,
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
-        let back: AgentCommand =
-            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(cmd, back);
-    }
-
-    #[test]
     fn bell_service_message_rkyv_roundtrip() {
         let pid = ProcessId::new();
         let msg = ServiceMessage::Bell { process_id: pid };
@@ -434,84 +355,6 @@ mod tests {
             ServiceMessage::Bell { process_id } => assert_eq!(process_id, pid),
             _ => panic!("expected ServiceMessage::Bell"),
         }
-    }
-
-    #[test]
-    fn open_beside_round_trips_and_validates() {
-        let cmd = AgentCommand::OpenBeside(AgentOpenBeside {
-            anchor: ProcessId::new(),
-            direction: Some(AgentPaneDirection::Right),
-            url: "vmux://terminal/".into(),
-            focus: true,
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
-        let back: AgentCommand =
-            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(back, cmd);
-        assert!(validate_agent_command(&cmd).is_ok());
-
-        let empty = AgentCommand::OpenBeside(AgentOpenBeside {
-            anchor: ProcessId::new(),
-            direction: Some(AgentPaneDirection::Right),
-            url: "  ".into(),
-            focus: true,
-        });
-        assert!(validate_agent_command(&empty).is_err());
-    }
-
-    #[test]
-    fn file_touched_round_trips_and_validates() {
-        let cmd = AgentCommand::FileTouched(AgentFileTouched {
-            anchor: ProcessId::new(),
-            path: "/abs/x.rs".into(),
-            line: Some(42),
-            col: Some(4),
-            end_col: Some(12),
-            kind: FileTouchKind::Edit,
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
-        let back: AgentCommand =
-            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(back, cmd);
-        assert!(validate_agent_command(&cmd).is_ok());
-
-        let empty = AgentCommand::FileTouched(AgentFileTouched {
-            anchor: ProcessId::new(),
-            path: "  ".into(),
-            line: None,
-            col: None,
-            end_col: None,
-            kind: FileTouchKind::Read,
-        });
-        assert!(validate_agent_command(&empty).is_err());
-    }
-
-    #[test]
-    fn agent_command_update_layout_rkyv_round_trip() {
-        use crate::protocol::layout::{Focus, LayoutNode, LayoutSnapshot, Tab};
-        let cmd = AgentCommand::UpdateLayout(AgentUpdateLayout {
-            layout: LayoutSnapshot {
-                tabs: vec![Tab {
-                    id: Some("tab:1".into()),
-                    name: "X".into(),
-                    is_active: true,
-                    root: LayoutNode::Pane {
-                        id: Some("pane:2".into()),
-                        is_zoomed: false,
-                        stacks: vec![],
-                    },
-                }],
-                focused: Focus {
-                    tab: Some("tab:1".into()),
-                    pane: Some("pane:2".into()),
-                    stack: None,
-                },
-            },
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
-        let recovered: AgentCommand =
-            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(recovered, cmd);
     }
 
     #[test]
@@ -580,39 +423,6 @@ mod tests {
     }
 
     #[test]
-    fn browser_navigate_with_pane_roundtrips() {
-        let cmd = AgentCommand::BrowserNavigate(AgentBrowserNavigate {
-            url: "https://example.com".to_string(),
-            pane: Some("12345".to_string()),
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
-        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded, cmd);
-    }
-
-    #[test]
-    fn browser_navigate_without_pane_roundtrips() {
-        let cmd = AgentCommand::BrowserNavigate(AgentBrowserNavigate {
-            url: "https://example.com".to_string(),
-            pane: None,
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
-        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded, cmd);
-    }
-
-    #[test]
-    fn terminal_send_with_terminal_roundtrips() {
-        let cmd = AgentCommand::TerminalSend(AgentTerminalSend {
-            text: "hi".to_string(),
-            terminal: Some("67890".to_string()),
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
-        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded, cmd);
-    }
-
-    #[test]
     fn status_response_roundtrips() {
         let msg = ServiceMessage::StatusResponse {
             uptime_secs: 42,
@@ -666,34 +476,6 @@ mod tests {
     }
 
     #[test]
-    fn update_settings_command_rkyv_roundtrip() {
-        let cmd = AgentCommand::UpdateSettings(AgentUpdateSettings {
-            path: "layout.pane.gap".to_string(),
-            value: JsonValue::Number("12.0".to_string()),
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
-        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded, cmd);
-    }
-
-    #[test]
-    fn run_with_placement_override_rkyv_roundtrip() {
-        let cmd = AgentCommand::RunWithPlacementOverride(AgentRun {
-            anchor: ProcessId::new(),
-            command: "cargo test".into(),
-            direction: AgentPaneDirection::Bottom,
-            focus: false,
-            beside: None,
-            mode: PlacementMode::Split,
-            terminal: None,
-            done_marker: Some("token".into()),
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
-        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded, cmd);
-    }
-
-    #[test]
     fn get_settings_query_rkyv_roundtrip() {
         let q = AgentQuery::GetSettings;
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
@@ -725,162 +507,6 @@ mod tests {
             settings,
             JsonValue::Object(vec![("auto_update".to_string(), JsonValue::Bool(true),)])
         );
-    }
-
-    #[test]
-    fn update_settings_validation_rejects_empty_path() {
-        let cmd = AgentCommand::UpdateSettings(AgentUpdateSettings {
-            path: "".to_string(),
-            value: JsonValue::Number("1".to_string()),
-        });
-        assert!(validate_agent_command(&cmd).is_err());
-    }
-
-    #[test]
-    fn create_worktree_validation_rejects_empty_branch() {
-        let cmd = AgentCommand::CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch {
-            anchor: ProcessId::new(),
-            branch: "  ".to_string(),
-            project: None,
-        });
-        assert!(validate_agent_command(&cmd).is_err());
-    }
-
-    #[test]
-    fn workspace_commands_rkyv_roundtrip() {
-        let commands = [
-            AgentCommand::ChooseWorkspace(AgentChooseWorkspace {
-                anchor: ProcessId::new(),
-            }),
-            AgentCommand::CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch {
-                anchor: ProcessId::new(),
-                branch: "feature/fun-terminal".into(),
-                project: None,
-            }),
-            AgentCommand::RequestUserChoice(AgentRequestUserChoice {
-                anchor: ProcessId::new(),
-                question: "Repository?".into(),
-                options: vec!["Local".into(), "Remote".into(), "Create".into()],
-            }),
-            AgentCommand::ChooseWorkspaceAtPath(AgentChooseWorkspaceAtPath {
-                anchor: ProcessId::new(),
-                path: "/repo".into(),
-            }),
-            AgentCommand::PrepareWorktree(AgentPrepareWorktree {
-                anchor: ProcessId::new(),
-                path: Some("/repo-wt".into()),
-                task: Some("feature".into()),
-                create: false,
-            }),
-        ];
-        for command in commands {
-            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
-            let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-            assert_eq!(decoded, command);
-        }
-    }
-
-    #[test]
-    fn space_and_bookmark_commands_roundtrip_and_validate() {
-        let page = AgentBookmarkPage {
-            url: "https://example.com".into(),
-            title: Some("Example".into()),
-            favicon_url: Some("https://example.com/favicon.ico".into()),
-        };
-        let commands = [
-            AgentCommand::SpaceCreate(AgentSpaceCreate {
-                name: Some("Work".into()),
-            }),
-            AgentCommand::SpaceRename(AgentSpaceRename {
-                space_id: "space-1".into(),
-                name: "Personal".into(),
-            }),
-            AgentCommand::SpaceDelete(AgentSpaceDelete {
-                space_id: "space-2".into(),
-            }),
-            AgentCommand::BookmarkAdd(AgentBookmarkAdd {
-                page: page.clone(),
-                folder: Some("folder-1".into()),
-            }),
-            AgentCommand::BookmarkRemove(AgentBookmarkRemove {
-                uuid: "bookmark-1".into(),
-            }),
-            AgentCommand::BookmarkPin(AgentBookmarkPin {
-                uuid: "bookmark-2".into(),
-            }),
-            AgentCommand::BookmarkPinUrl(AgentBookmarkPinUrl { page }),
-            AgentCommand::BookmarkUnpin(AgentBookmarkUnpin {
-                uuid: "bookmark-3".into(),
-            }),
-            AgentCommand::BookmarkFolderCreate(AgentBookmarkFolderCreate {
-                name: "Reading".into(),
-            }),
-        ];
-        for command in commands {
-            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
-            let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-            assert_eq!(decoded, command);
-            assert!(validate_agent_command(&command).is_ok());
-        }
-    }
-
-    #[test]
-    fn space_and_bookmark_payloads_reject_empty_identifiers() {
-        let commands = [
-            AgentCommand::SpaceRename(AgentSpaceRename {
-                space_id: String::new(),
-                name: "Work".into(),
-            }),
-            AgentCommand::SpaceDelete(AgentSpaceDelete {
-                space_id: " ".into(),
-            }),
-            AgentCommand::BookmarkRemove(AgentBookmarkRemove {
-                uuid: String::new(),
-            }),
-            AgentCommand::BookmarkPin(AgentBookmarkPin { uuid: " ".into() }),
-            AgentCommand::BookmarkUnpin(AgentBookmarkUnpin {
-                uuid: String::new(),
-            }),
-        ];
-        for command in commands {
-            assert!(validate_agent_command(&command).is_err());
-        }
-    }
-
-    #[test]
-    fn write_knowledge_rkyv_roundtrip() {
-        let command = AgentCommand::WriteKnowledge(AgentWriteKnowledge {
-            anchor: ProcessId::new(),
-            path: Some("projects/yc.md".into()),
-            title: "YC".into(),
-            content: "Notes".into(),
-        });
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
-        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded, command);
-    }
-
-    #[test]
-    fn knowledge_read_commands_roundtrip_and_validate() {
-        let commands = [
-            AgentCommand::SearchKnowledge(AgentSearchKnowledge {
-                anchor: ProcessId::new(),
-                query: "Obsidian links".into(),
-                limit: 20,
-            }),
-            AgentCommand::ReadKnowledge(AgentReadKnowledge {
-                anchor: ProcessId::new(),
-                path: "projects/obsidian-gap-analysis.md".into(),
-                line: 1,
-                limit: 200,
-            }),
-        ];
-        for command in commands {
-            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
-            let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
-            assert_eq!(decoded, command);
-            assert!(validate_agent_command(&command).is_ok());
-        }
     }
 
     #[test]

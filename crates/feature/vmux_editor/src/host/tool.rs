@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use vmux_api::protocol::{
-    AgentCommand, AgentFileSearch, AgentFileTouched, AgentQuery, AgentRequestId, ClientMessage,
+    AgentFileSearch, AgentFileTouched, AgentQuery, AgentRequest, AgentRequestId, ClientMessage,
     FileTouchKind, ProcessId, ServiceMessage,
 };
 use vmux_core::ProcessAnchor;
@@ -169,18 +169,16 @@ async fn read_file_result(
     let text = read_lines_bounded(&path_text, offset, limit)
         .map_err(|error| format!("read_file: {error}"))?;
     if let Some(anchor) = anchor {
-        let _ = run_agent_command(
-            AgentCommand::FileTouched(AgentFileTouched {
-                anchor,
-                path: path.to_string_lossy().into_owned(),
-                line: offset,
-                col: None,
-                end_col: None,
-                kind: FileTouchKind::Read,
-            }),
-            Some(anchor),
-        )
-        .await;
+        if let Ok(request) = AgentRequest::encode(&AgentFileTouched {
+            anchor,
+            path: path.to_string_lossy().into_owned(),
+            line: offset,
+            col: None,
+            end_col: None,
+            kind: FileTouchKind::Read,
+        }) {
+            let _ = run_agent_command(request, Some(anchor)).await;
+        }
     }
     Ok(json!({ "content": [{"type": "text", "text": text}] }))
 }
@@ -304,18 +302,16 @@ async fn grep_result(
         if let Some(file) = order.first()
             && let Ok(path) = std::fs::canonicalize(file)
         {
-            let _ = run_agent_command(
-                AgentCommand::FileTouched(AgentFileTouched {
-                    anchor,
-                    path: path.to_string_lossy().into_owned(),
-                    line: first_line.get(file).copied(),
-                    col: first_cols.get(file).map(|cols| cols.0),
-                    end_col: first_cols.get(file).map(|cols| cols.1),
-                    kind: FileTouchKind::Read,
-                }),
-                Some(anchor),
-            )
-            .await;
+            if let Ok(request) = AgentRequest::encode(&AgentFileTouched {
+                anchor,
+                path: path.to_string_lossy().into_owned(),
+                line: first_line.get(file).copied(),
+                col: first_cols.get(file).map(|cols| cols.0),
+                end_col: first_cols.get(file).map(|cols| cols.1),
+                kind: FileTouchKind::Read,
+            }) {
+                let _ = run_agent_command(request, Some(anchor)).await;
+            }
         }
         let mut canonical_paths = std::collections::HashMap::new();
         let matches = search_matches
@@ -335,16 +331,14 @@ async fn grep_result(
             })
             .collect::<Vec<_>>();
         if !matches.is_empty() {
-            let _ = run_agent_command(
-                AgentCommand::FileSearch(AgentFileSearch {
-                    anchor,
-                    root: search_path.to_string_lossy().into_owned(),
-                    query: query.clone(),
-                    matches,
-                }),
-                Some(anchor),
-            )
-            .await;
+            if let Ok(request) = AgentRequest::encode(&AgentFileSearch {
+                anchor,
+                root: search_path.to_string_lossy().into_owned(),
+                query: query.clone(),
+                matches,
+            }) {
+                let _ = run_agent_command(request, Some(anchor)).await;
+            }
         }
     }
 
@@ -393,16 +387,16 @@ fn byte_to_utf16(line: &str, byte: usize) -> u32 {
     line[..index].encode_utf16().count() as u32
 }
 
-async fn run_agent_command(command: AgentCommand, anchor: Option<ProcessId>) -> Result<(), String> {
+async fn run_agent_command(request: AgentRequest, anchor: Option<ProcessId>) -> Result<(), String> {
     let request_id = AgentRequestId::new();
     let connection = ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     connection
-        .send(&ClientMessage::AgentCommand {
+        .send(&ClientMessage::AgentRequest {
             request_id,
             anchor,
-            command,
+            request,
         })
         .await
         .map_err(|error| format!("cannot send agent command: {error}"))?;

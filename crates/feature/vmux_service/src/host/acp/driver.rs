@@ -33,8 +33,8 @@ use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
 use crate::process::{ProcessManager, ProcessUpdate};
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 use vmux_api::protocol::{
-    AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
-    ServiceMessage, SharedEvent, compose_agent_prompt,
+    AgentAttachment, AgentFileTouched, AgentRequest, AgentRequestId, AgentRunStatus,
+    ApprovalDecision, ServiceMessage, SharedEvent, compose_agent_prompt,
 };
 
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
@@ -556,17 +556,20 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
                 new_text,
             }),
             Intent::FileTouched { path, line, kind } => {
-                shared.emit(ServiceMessage::AgentCommand {
+                let Ok(request) = AgentRequest::encode(&AgentFileTouched {
+                    anchor: shared.anchor,
+                    path,
+                    line,
+                    col: None,
+                    end_col: None,
+                    kind,
+                }) else {
+                    continue;
+                };
+                shared.emit(ServiceMessage::AgentRequest {
                     request_id: AgentRequestId::new(),
                     anchor: Some(shared.anchor),
-                    command: AgentCommand::FileTouched(vmux_api::protocol::AgentFileTouched {
-                        anchor: shared.anchor,
-                        path,
-                        line,
-                        col: None,
-                        end_col: None,
-                        kind,
-                    }),
+                    request,
                 });
             }
             Intent::WorkspaceChanged(workspace) => shared.publish_workspace_change(&workspace),

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{AgentCommand, AgentQuery, AgentUpdateSettings, JsonValue};
+use vmux_api::protocol::{AgentQuery, AgentRequest, AgentUpdateSettings, JsonValue};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
 };
@@ -46,10 +46,10 @@ fn update_settings(
         let command = if args.path.trim().is_empty() {
             Err("update_settings.path is empty".to_string())
         } else {
-            Ok(AgentCommand::UpdateSettings(AgentUpdateSettings {
+            AgentRequest::encode(&AgentUpdateSettings {
                 path: args.path.clone(),
                 value: JsonValue::from(args.value.clone()),
-            }))
+            })
         };
         commands.entity(entity).insert(ToolCommand(command));
     }

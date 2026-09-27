@@ -10,7 +10,7 @@ use vmux_core::browser::{
 use vmux_terminal::TerminalStackSpawnRequest;
 
 use crate::event::{
-    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, RecordStartRequest,
+    AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, RecordStartRequest,
     RecordStartResponse, RecordStopRequest, RecordStopResponse, ScreenshotRequest,
     ScreenshotResponse,
 };
@@ -78,7 +78,7 @@ impl Plugin for AgentSessionPlugin {
                 super::spawn::SpawnPlugin,
                 super::workspace::WorkspacePlugin,
             ))
-            .add_message::<AgentCommandRequest>()
+            .add_message::<AgentRequestInput>()
             .add_message::<AgentQueryRequest>()
             .add_message::<ScreenshotRequest>()
             .add_message::<ScreenshotResponse>()

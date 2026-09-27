@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommand, AgentCommandResult};
-use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply};
+use vmux_api::protocol::{AgentCommandResult, AgentNotify};
+use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 
 use crate::host::event::CommandOrigin;
 
@@ -15,7 +15,7 @@ impl Plugin for ApplicationCommandPlugin {
 }
 
 fn notify(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     agents: Query<(
         Entity,
         &vmux_core::team::Agent,
@@ -26,7 +26,7 @@ fn notify(
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let AgentCommand::Notify(payload) = &request.command else {
+        let Ok(Some(payload)) = request.decode::<AgentNotify>() else {
             continue;
         };
         let caller = match &request.origin {

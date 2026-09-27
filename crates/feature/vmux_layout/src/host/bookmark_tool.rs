@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
     AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkPage, AgentBookmarkPin,
-    AgentBookmarkPinUrl, AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommand, AgentQuery,
+    AgentBookmarkPinUrl, AgentBookmarkRemove, AgentBookmarkUnpin, AgentQuery, AgentRequest,
 };
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
@@ -92,8 +92,8 @@ fn add(
 ) {
     for (entity, args) in &requests {
         let command =
-            RequiredText::get(args.url.clone(), "bookmark_add.url is required").map(|url| {
-                AgentCommand::BookmarkAdd(AgentBookmarkAdd {
+            RequiredText::get(args.url.clone(), "bookmark_add.url is required").and_then(|url| {
+                AgentRequest::encode(&AgentBookmarkAdd {
                     page: AgentBookmarkPage {
                         url,
                         title: args.title.clone(),
@@ -112,7 +112,7 @@ fn remove(
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_remove.uuid is required")
-            .map(|uuid| AgentCommand::BookmarkRemove(AgentBookmarkRemove { uuid }));
+            .and_then(|uuid| AgentRequest::encode(&AgentBookmarkRemove { uuid }));
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -125,18 +125,20 @@ fn pin(
         let command = match args {
             BookmarkPinArgs::Existing(args) => {
                 RequiredText::get(args.uuid.clone(), "bookmark_pin.uuid is required")
-                    .map(|uuid| AgentCommand::BookmarkPin(AgentBookmarkPin { uuid }))
+                    .and_then(|uuid| AgentRequest::encode(&AgentBookmarkPin { uuid }))
             }
             BookmarkPinArgs::Page(args) => {
-                RequiredText::get(args.url.clone(), "bookmark_pin.url is required").map(|url| {
-                    AgentCommand::BookmarkPinUrl(AgentBookmarkPinUrl {
-                        page: AgentBookmarkPage {
-                            url,
-                            title: args.title.clone(),
-                            favicon_url: args.favicon_url.clone(),
-                        },
-                    })
-                })
+                RequiredText::get(args.url.clone(), "bookmark_pin.url is required").and_then(
+                    |url| {
+                        AgentRequest::encode(&AgentBookmarkPinUrl {
+                            page: AgentBookmarkPage {
+                                url,
+                                title: args.title.clone(),
+                                favicon_url: args.favicon_url.clone(),
+                            },
+                        })
+                    },
+                )
             }
         };
         commands.entity(entity).insert(ToolCommand(command));
@@ -149,7 +151,7 @@ fn unpin(
 ) {
     for (entity, args) in &requests {
         let command = RequiredText::get(args.uuid.clone(), "bookmark_unpin.uuid is required")
-            .map(|uuid| AgentCommand::BookmarkUnpin(AgentBookmarkUnpin { uuid }));
+            .and_then(|uuid| AgentRequest::encode(&AgentBookmarkUnpin { uuid }));
         commands.entity(entity).insert(ToolCommand(command));
     }
 }
@@ -161,7 +163,7 @@ fn create_folder(
     for (entity, args) in &requests {
         let command =
             RequiredText::get(args.name.clone(), "bookmark_folder_create.name is required")
-                .map(|name| AgentCommand::BookmarkFolderCreate(AgentBookmarkFolderCreate { name }));
+                .and_then(|name| AgentRequest::encode(&AgentBookmarkFolderCreate { name }));
         commands.entity(entity).insert(ToolCommand(command));
     }
 }

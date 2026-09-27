@@ -1,6 +1,9 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommand, AgentCommandResult, SharedAgentCommand};
-use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply};
+use vmux_api::protocol::{
+    AgentCommandResult, AgentFileSearch, AgentFileTouched, AgentListAgents, AgentNewChat,
+    AgentTurnEnded,
+};
+use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 
 use super::CommandSet;
 
@@ -23,59 +26,56 @@ impl Plugin for AgentOperationPlugin {
 }
 
 fn acknowledge_file_touched(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        if matches!(&request.command, AgentCommand::FileTouched(_)) {
+        if matches!(request.decode::<AgentFileTouched>(), Ok(Some(_))) {
             responses.write(AgentReply::new(request.request_id).ok());
         }
     }
 }
 
 fn acknowledge_file_search(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        if matches!(&request.command, AgentCommand::FileSearch(_)) {
+        if matches!(request.decode::<AgentFileSearch>(), Ok(Some(_))) {
             responses.write(AgentReply::new(request.request_id).ok());
         }
     }
 }
 
 fn acknowledge_turn_ended(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        if matches!(request.command, AgentCommand::TurnEnded(_)) {
+        if matches!(request.decode::<AgentTurnEnded>(), Ok(Some(_))) {
             responses.write(AgentReply::new(request.request_id).ok());
         }
     }
 }
 
 fn new_chat(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     contributed_pages: Query<&vmux_command::snapshot::ContributedPage>,
     mut new_tabs: MessageWriter<vmux_layout::NewTabRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let AgentCommand::Shared(SharedAgentCommand::NewAgentChat {
-            prompt, agent_url, ..
-        }) = &request.command
-        else {
+        let Ok(Some(payload)) = request.decode::<AgentNewChat>() else {
             continue;
         };
         let result = match vmux_command::snapshot::ContributedPage::prompt_url(
             &contributed_pages,
-            agent_url.as_deref(),
+            payload.agent_url.as_deref(),
         ) {
             Some(url) => {
                 new_tabs.write(vmux_layout::NewTabRequest {
                     url,
-                    pending_prompt: Some(prompt.clone()),
+                    pending_prompt: Some(payload.prompt),
                 });
                 AgentCommandResult::Ok
             }
@@ -86,17 +86,14 @@ fn new_chat(
 }
 
 fn list_agents(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     command_bar: Res<vmux_command::snapshot::CommandBarProjection>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        if !matches!(
-            &request.command,
-            AgentCommand::Shared(SharedAgentCommand::ListAgents)
-        ) {
+        let Ok(Some(AgentListAgents)) = request.decode::<AgentListAgents>() else {
             continue;
-        }
+        };
         let mut agents = Vec::new();
         for agent in &command_bar.agents.acp {
             agents.push(vmux_api::room::RemoteAgent {

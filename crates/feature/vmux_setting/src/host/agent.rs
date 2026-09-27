@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommand, AgentCommandResult};
-use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply};
+use vmux_api::protocol::{AgentCommandResult, AgentUpdateSettings};
+use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 
 use super::{AppSettings, SettingsWriteRequest};
 
@@ -8,22 +8,28 @@ pub(super) struct AgentSettingsPlugin;
 
 impl Plugin for AgentSettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_message::<AgentCommandResponse>()
             .add_systems(Update, update_settings);
     }
 }
 
 fn update_settings(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     mut settings: ResMut<AppSettings>,
     mut write: MessageWriter<SettingsWriteRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let AgentCommand::UpdateSettings(payload) = &request.command else {
+        let Ok(Some(payload)) = request.decode::<AgentUpdateSettings>() else {
             continue;
         };
+        if payload.path.trim().is_empty() {
+            responses.write(AgentReply::new(request.request_id).response(
+                AgentCommandResult::Error("update_settings.path is empty".to_string()),
+            ));
+            continue;
+        }
         let result = match serde_json::Value::try_from(&payload.value) {
             Ok(value) => {
                 let mut updated = (*settings).clone();

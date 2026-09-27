@@ -1,5 +1,5 @@
 use crate::event::{
-    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin,
+    AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin,
     PageAgentAcpTerminalCreated, PageAgentApprovalResolved, PageAgentAwaitingApproval,
     PageAgentDelta, PageAgentInfo, PageAgentModeInfo, PageAgentModeSelectionResult,
     PageAgentModelInfo, PageAgentModelSelectionResult, PageAgentRunStatus, PageAgentSessionCreated,
@@ -15,7 +15,7 @@ pub(crate) struct AgentIngressPlugin;
 impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceInbound>()
-            .add_message::<AgentCommandRequest>()
+            .add_message::<AgentRequestInput>()
             .add_message::<AgentQueryRequest>()
             .add_message::<AgentToolCallRequest>()
             .add_message::<PageAgentDelta>()
@@ -37,7 +37,7 @@ impl Plugin for AgentIngressPlugin {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentIngressWriters<'w> {
-    commands: MessageWriter<'w, AgentCommandRequest>,
+    requests: MessageWriter<'w, AgentRequestInput>,
     queries: MessageWriter<'w, AgentQueryRequest>,
     tool_calls: MessageWriter<'w, AgentToolCallRequest>,
     deltas: MessageWriter<'w, PageAgentDelta>,
@@ -61,18 +61,18 @@ fn route_service_messages(
 ) {
     for inbound in inbound.read() {
         match &inbound.0 {
-            ServiceMessage::AgentCommand {
+            ServiceMessage::AgentRequest {
                 request_id,
                 anchor,
-                command,
+                request,
             } => {
-                writers.commands.write(AgentCommandRequest {
+                writers.requests.write(AgentRequestInput {
                     request_id: *request_id,
                     origin: CommandOrigin::Agent {
                         sid: None,
                         anchor: *anchor,
                     },
-                    command: command.clone(),
+                    request: request.clone(),
                 });
             }
             ServiceMessage::AgentQuery { request_id, query } => {
@@ -246,7 +246,7 @@ fn route_service_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::{AgentCommand, AgentQuery, AgentRequestId};
+    use vmux_api::protocol::{AgentQuery, AgentRenameProfile, AgentRequest, AgentRequestId};
 
     #[test]
     fn routes_agent_messages_without_terminal_ownership() {
@@ -254,12 +254,13 @@ mod tests {
         app.add_plugins((MinimalPlugins, AgentIngressPlugin));
         let request_id = AgentRequestId([7; 16]);
         app.world_mut()
-            .write_message(ServiceInbound(ServiceMessage::AgentCommand {
+            .write_message(ServiceInbound(ServiceMessage::AgentRequest {
                 request_id,
                 anchor: None,
-                command: AgentCommand::RenameProfile(vmux_api::protocol::AgentRenameProfile {
+                request: AgentRequest::encode(&AgentRenameProfile {
                     name: "Profile".into(),
-                }),
+                })
+                .unwrap(),
             }));
         app.world_mut()
             .write_message(ServiceInbound(ServiceMessage::Shared(
@@ -278,7 +279,7 @@ mod tests {
 
         let commands = app
             .world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
+            .resource_mut::<Messages<AgentRequestInput>>()
             .drain()
             .collect::<Vec<_>>();
         let deltas = app

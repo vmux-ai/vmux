@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{AgentCommand, AgentTerminalSend};
+use vmux_api::protocol::{AgentRequest, AgentTerminalSend};
 
 use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
 
@@ -35,10 +35,10 @@ fn dispatch(
         let command = if text.is_empty() {
             Err("terminal_send.text is empty".to_string())
         } else {
-            Ok(AgentCommand::TerminalSend(AgentTerminalSend {
+            AgentRequest::encode(&AgentTerminalSend {
                 text,
                 terminal: args.terminal.clone(),
-            }))
+            })
         };
         commands.entity(entity).insert(ToolCommand(command));
     }

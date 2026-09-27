@@ -6,7 +6,7 @@ use vmux_api::protocol::{
 };
 
 pub use vmux_api::protocol::ApprovalDecision;
-pub use vmux_core::agent::{AgentCommandRequest, CommandOrigin};
+pub use vmux_core::agent::{AgentRequestInput, CommandOrigin};
 
 #[derive(Message)]
 pub struct AgentQueryRequest {

@@ -7,7 +7,7 @@ use std::io::{self, BufRead};
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
-use vmux_api::protocol::{AgentCommand, AgentQuery, AgentRequestId, ClientMessage, ServiceMessage};
+use vmux_api::protocol::{AgentQuery, AgentRequest, AgentRequestId, ClientMessage, ServiceMessage};
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 
 pub struct McpPlugin;
@@ -439,7 +439,7 @@ fn initialize_result(params: &Value) -> Value {
 }
 
 async fn run_agent_command(
-    command: AgentCommand,
+    request: AgentRequest,
     anchor: Option<vmux_api::protocol::ProcessId>,
 ) -> Result<Value, String> {
     let request_id = vmux_api::protocol::AgentRequestId::new();
@@ -447,10 +447,10 @@ async fn run_agent_command(
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     connection
-        .send(&ClientMessage::AgentCommand {
+        .send(&ClientMessage::AgentRequest {
             request_id,
             anchor,
-            command,
+            request,
         })
         .await
         .map_err(|error| format!("cannot send agent command: {error}"))?;

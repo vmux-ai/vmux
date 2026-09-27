@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentCommand, AgentOpenBeside, AgentQuery, AgentReadKnowledge, AgentSearchKnowledge,
+    AgentOpenBeside, AgentQuery, AgentReadKnowledge, AgentRequest, AgentSearchKnowledge,
     AgentSetConversationTitle, AgentWriteKnowledge,
 };
 use vmux_core::ProcessAnchor;
@@ -103,13 +103,13 @@ fn open_vault(
                     name.as_str()
                 )
             })
-            .map(|anchor| {
+            .and_then(|anchor| {
                 let url = match args.provider.as_ref().unwrap_or(&VaultProvider::Overview) {
                     VaultProvider::Overview => "vmux://vault/",
                     VaultProvider::Github => "vmux://vault/?provider=github",
                     VaultProvider::CloudFolder => "vmux://vault/?provider=cloud_folder",
                 };
-                AgentCommand::OpenBeside(AgentOpenBeside {
+                AgentRequest::encode(&AgentOpenBeside {
                     anchor,
                     direction: None,
                     url: url.to_string(),
@@ -147,9 +147,7 @@ fn set_conversation_title(
                 if title.chars().count() > 120 {
                     return Err("set_conversation_title.title exceeds 120 characters".to_string());
                 }
-                Ok(AgentCommand::SetConversationTitle(
-                    AgentSetConversationTitle { anchor, title },
-                ))
+                AgentRequest::encode(&AgentSetConversationTitle { anchor, title })
             });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -177,11 +175,11 @@ fn search(
                 if !(1..=100).contains(&limit) {
                     return Err("search_knowledge.limit must be between 1 and 100".to_string());
                 }
-                Ok(AgentCommand::SearchKnowledge(AgentSearchKnowledge {
+                AgentRequest::encode(&AgentSearchKnowledge {
                     anchor,
                     query,
                     limit: limit as u16,
-                }))
+                })
             });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -213,12 +211,12 @@ fn read(
                 if !(1..=2_000).contains(&limit) {
                     return Err("read_knowledge.limit must be between 1 and 2000".to_string());
                 }
-                Ok(AgentCommand::ReadKnowledge(AgentReadKnowledge {
+                AgentRequest::encode(&AgentReadKnowledge {
                     anchor,
                     path,
                     line: line as u32,
                     limit: limit as u32,
-                }))
+                })
             });
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -245,12 +243,12 @@ fn write(
                 let title = Text::required(args.title.clone(), "write_knowledge.title is empty")?;
                 let content =
                     Text::required(args.content.clone(), "write_knowledge.content is empty")?;
-                Ok(AgentCommand::WriteKnowledge(AgentWriteKnowledge {
+                AgentRequest::encode(&AgentWriteKnowledge {
                     anchor,
                     path,
                     title,
                     content,
-                }))
+                })
             });
         commands.entity(entity).insert(ToolCommand(command));
     }

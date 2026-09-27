@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{AgentCommand, AgentRenameProfile};
+use vmux_api::protocol::{AgentRenameProfile, AgentRequest};
 use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
 
 pub struct TeamToolPlugin;
@@ -28,9 +28,9 @@ fn rename_profile(
         let command = if name.is_empty() {
             Err("rename_profile.name is empty".to_string())
         } else {
-            Ok(AgentCommand::RenameProfile(AgentRenameProfile {
+            AgentRequest::encode(&AgentRenameProfile {
                 name: name.to_string(),
-            }))
+            })
         };
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -66,7 +66,7 @@ mod tests {
                 .collect()
         }
 
-        fn dispatch(arguments: serde_json::Value) -> Result<AgentCommand, String> {
+        fn dispatch(arguments: serde_json::Value) -> Result<AgentRequest, String> {
             let mut app = Self::app();
             let request = app
                 .world_mut()
@@ -98,9 +98,9 @@ mod tests {
     fn rename_profile_dispatches_trimmed_name() {
         assert_eq!(
             TeamToolFixture::dispatch(serde_json::json!({"name": "  Junichi  "})),
-            Ok(AgentCommand::RenameProfile(AgentRenameProfile {
+            AgentRequest::encode(&AgentRenameProfile {
                 name: "Junichi".to_string(),
-            }))
+            })
         );
         assert!(TeamToolFixture::dispatch(serde_json::json!({"name": "  "})).is_err());
     }

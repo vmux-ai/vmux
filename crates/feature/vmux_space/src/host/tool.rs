@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentCommand, AgentQuery, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+    AgentQuery, AgentRequest, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
@@ -61,11 +61,9 @@ fn create(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::SpaceCreate(
-                AgentSpaceCreate {
-                    name: args.name.clone().filter(|name| !name.trim().is_empty()),
-                },
-            ))));
+            .insert(ToolCommand(AgentRequest::encode(&AgentSpaceCreate {
+                name: args.name.clone().filter(|name| !name.trim().is_empty()),
+            })));
     }
 }
 
@@ -79,10 +77,10 @@ fn rename(
         } else if args.name.trim().is_empty() {
             Err("rename_space.name is empty".to_string())
         } else {
-            Ok(AgentCommand::SpaceRename(AgentSpaceRename {
+            AgentRequest::encode(&AgentSpaceRename {
                 space_id: args.space_id.clone(),
                 name: args.name.clone(),
-            }))
+            })
         };
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -97,9 +95,9 @@ fn delete(
         let command = if space_id.trim().is_empty() {
             Err("delete_space.space_id is empty".to_string())
         } else {
-            Ok(AgentCommand::SpaceDelete(AgentSpaceDelete {
+            AgentRequest::encode(&AgentSpaceDelete {
                 space_id: space_id.clone(),
-            }))
+            })
         };
         commands.entity(entity).insert(ToolCommand(command));
     }

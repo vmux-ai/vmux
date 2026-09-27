@@ -1,13 +1,15 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommand, AgentCommandResult, ProcessId};
-use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply, AgentSession};
+use vmux_api::protocol::{
+    AgentCommandResult, AgentReadKnowledge, AgentSearchKnowledge, AgentWriteKnowledge, ProcessId,
+};
+use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput, AgentSession};
 use vmux_core::knowledge::{KnowledgeIndex, KnowledgeVault};
 
 pub(super) struct KnowledgeAgentPlugin;
 
 impl Plugin for KnowledgeAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_message::<AgentCommandResponse>()
             .add_systems(Update, (search_knowledge, read_knowledge, write_knowledge));
     }
@@ -27,13 +29,13 @@ impl AgentPaneQuery<'_, '_> {
 }
 
 fn search_knowledge(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     agents: AgentPaneQuery,
     index: Option<Res<KnowledgeIndex>>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let AgentCommand::SearchKnowledge(command) = &request.command else {
+        let Ok(Some(command)) = request.decode::<AgentSearchKnowledge>() else {
             continue;
         };
         let result = if agents.find(command.anchor).is_none() {
@@ -81,13 +83,13 @@ fn search_knowledge(
 }
 
 fn read_knowledge(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     agents: AgentPaneQuery,
     index: Option<Res<KnowledgeIndex>>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let AgentCommand::ReadKnowledge(command) = &request.command else {
+        let Ok(Some(command)) = request.decode::<AgentReadKnowledge>() else {
             continue;
         };
         let result = if agents.find(command.anchor).is_none() {
@@ -143,13 +145,13 @@ fn read_knowledge(
 }
 
 fn write_knowledge(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     agents: AgentPaneQuery,
     mut open: MessageWriter<vmux_layout::OpenBesideRequest>,
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let AgentCommand::WriteKnowledge(command) = &request.command else {
+        let Ok(Some(command)) = request.decode::<AgentWriteKnowledge>() else {
             continue;
         };
         let result = match agents.find(command.anchor) {

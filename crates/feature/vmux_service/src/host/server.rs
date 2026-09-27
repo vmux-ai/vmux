@@ -10,7 +10,7 @@ use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
 use vmux_api::protocol::{
     AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
-    ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
+    ServiceMessage, SharedMessage, compose_agent_prompt,
 };
 
 use super::query::{ProcessQueries, ProcessQueryPlugin};
@@ -797,24 +797,15 @@ async fn handle_client(
                 }));
             }
 
-            ClientMessage::AgentCommand {
+            ClientMessage::AgentRequest {
                 request_id,
                 anchor,
-                command,
+                request,
             } => {
-                if let Err(message) = validate_agent_command(&command) {
-                    let resp = ServiceMessage::Error {
-                        message: message.to_string(),
-                    };
-                    let mut w = writer.lock().await;
-                    crate::framing::write_service_message(&mut *w, &resp).await?;
-                    continue;
-                }
-
                 let broker = broker.clone();
                 let writer = writer.clone();
                 tokio::spawn(async move {
-                    let resp = match broker.command(request_id, anchor, command).await {
+                    let resp = match broker.command(request_id, anchor, request).await {
                         Ok(result) => ServiceMessage::AgentCommandResult { request_id, result },
                         Err(message) => ServiceMessage::Error { message },
                     };

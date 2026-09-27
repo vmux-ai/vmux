@@ -1,6 +1,6 @@
 use super::{
-    AgentAttachment, AgentBookmarks, AgentCommand, AgentCommandExit, AgentCommandResult,
-    AgentCommandTool, AgentImage, AgentQuery, AgentRecording, AgentRequestId, AgentRunCompletion,
+    AgentAttachment, AgentBookmarks, AgentCommandExit, AgentCommandResult, AgentCommandTool,
+    AgentImage, AgentQuery, AgentRecording, AgentRequest, AgentRequestId, AgentRunCompletion,
     AgentSpace, CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo,
     SharedEvent, SharedMessage,
 };
@@ -83,10 +83,10 @@ pub enum ClientMessage {
         key: CopyModeKey,
     },
     SubscribeAgentCommands,
-    AgentCommand {
+    AgentRequest {
         request_id: AgentRequestId,
         anchor: Option<ProcessId>,
-        command: AgentCommand,
+        request: AgentRequest,
     },
     Shutdown,
     AgentQuery {
@@ -322,10 +322,10 @@ pub enum ServiceMessage {
         alt_screen: bool,
         focus_reporting: bool,
     },
-    AgentCommand {
+    AgentRequest {
         request_id: AgentRequestId,
         anchor: Option<ProcessId>,
-        command: AgentCommand,
+        request: AgentRequest,
     },
     AgentQuery {
         request_id: AgentRequestId,

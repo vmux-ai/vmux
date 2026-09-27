@@ -263,12 +263,10 @@ mod browser_navigate_flow {
     use crate::input::RecentBrowserInteraction;
     use bevy::ecs::relationship::Relationship;
     use bevy::prelude::*;
-    use vmux_agent::event::AgentCommandRequest;
+    use vmux_agent::event::AgentRequestInput;
     use vmux_agent::host::AgentSessionPlugin;
     use vmux_agent::strategy::AgentStrategies;
-    use vmux_api::protocol::{
-        AgentBrowserNavigate, AgentCommand as ServiceAgentCommand, AgentRequestId,
-    };
+    use vmux_api::protocol::{AgentBrowserNavigate, AgentRequest, AgentRequestId};
     use vmux_core::{
         LastActivatedAt, PageMetadata, PageOpenDeferred, PageOpenError, PageOpenHandled,
         PageOpenId, PageOpenSet, PageOpenTask,
@@ -391,14 +389,15 @@ mod browser_navigate_flow {
         );
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: vmux_agent::event::CommandOrigin::User,
-                command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
+                request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "https://example.com".to_string(),
                     pane: None,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -429,14 +428,15 @@ mod browser_navigate_flow {
         app.world_mut().resource_mut::<FocusedStack>().stack = None;
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: vmux_agent::event::CommandOrigin::User,
-                command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
+                request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "https://example.com".to_string(),
                     pane: None,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -581,14 +581,15 @@ mod browser_navigate_flow {
         app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane_a);
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: vmux_agent::event::CommandOrigin::User,
-                command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
+                request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "https://example.com".to_string(),
                     pane: Some(pane_b.to_bits().to_string()),
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -626,14 +627,15 @@ mod browser_navigate_flow {
         let request_id = AgentRequestId::new();
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id,
                 origin: vmux_agent::event::CommandOrigin::User,
-                command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
+                request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://terminal/".to_string(),
                     pane: None,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -827,14 +829,15 @@ mod browser_navigate_flow {
         app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane_a);
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: vmux_agent::event::CommandOrigin::User,
-                command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
+                request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://terminal/".to_string(),
                     pane: Some(pane_b.to_bits().to_string()),
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -877,14 +880,15 @@ mod browser_navigate_flow {
         app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: vmux_agent::event::CommandOrigin::User,
-                command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
+                request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://nonsense/".to_string(),
                     pane: None,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -1005,14 +1009,15 @@ mod browser_navigate_flow {
         app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: vmux_agent::event::CommandOrigin::User,
-                command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
+                request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://sessions/claude/cli/".into(),
                     pane: None,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -1051,14 +1056,15 @@ mod browser_navigate_flow {
         app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: vmux_agent::event::CommandOrigin::User,
-                command: ServiceAgentCommand::BrowserNavigate(AgentBrowserNavigate {
+                request: AgentRequest::encode(&AgentBrowserNavigate {
                     url: "vmux://sessions/codex/cli/".into(),
                     pane: None,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();

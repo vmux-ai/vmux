@@ -2,10 +2,10 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::{AgentChatView, ChatBranchesProjection};
-use crate::event::{AgentCommandRequest, CommandOrigin};
+use crate::event::{AgentRequestInput, CommandOrigin};
 use vmux_api::protocol::{
-    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCommand as ServiceAgentCommand,
-    AgentCreateWorktreeOnBranch, AgentRequestId,
+    AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentRequest,
+    AgentRequestId,
 };
 use vmux_chat::event::{
     ChatBranch, ChatBranchesRequest, ChatGoToBranch, ChatSelectWorkspace, ComposerContext,
@@ -288,7 +288,7 @@ fn on_chat_go_to_branch(
     trigger: On<UiInput<ChatGoToBranch>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
-    mut requests: MessageWriter<AgentCommandRequest>,
+    mut requests: MessageWriter<AgentRequestInput>,
 ) {
     let evt = &trigger.event().payload;
     let Ok(parent) = child_of.get(trigger.event().webview) else {
@@ -298,23 +298,26 @@ fn on_chat_go_to_branch(
         return;
     };
     let checkout = evt.checkout.trim();
-    let command = if checkout.is_empty() {
+    let request = if checkout.is_empty() {
         let project = evt.project.trim();
-        ServiceAgentCommand::CreateWorktreeOnBranch(AgentCreateWorktreeOnBranch {
+        AgentRequest::encode(&AgentCreateWorktreeOnBranch {
             anchor: session.anchor,
             branch: evt.branch.clone(),
             project: (!project.is_empty()).then(|| project.to_string()),
         })
     } else {
-        ServiceAgentCommand::ChooseWorkspaceAtPath(AgentChooseWorkspaceAtPath {
+        AgentRequest::encode(&AgentChooseWorkspaceAtPath {
             anchor: session.anchor,
             path: checkout.to_string(),
         })
     };
-    requests.write(AgentCommandRequest {
+    let Ok(request) = request else {
+        return;
+    };
+    requests.write(AgentRequestInput {
         request_id: AgentRequestId::new(),
         origin: CommandOrigin::User,
-        command,
+        request,
     });
 }
 
@@ -322,7 +325,7 @@ fn on_chat_select_workspace(
     trigger: On<UiInput<ChatSelectWorkspace>>,
     child_of: Query<&ChildOf>,
     sessions: Query<&AcpSession>,
-    mut requests: MessageWriter<AgentCommandRequest>,
+    mut requests: MessageWriter<AgentRequestInput>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
         return;
@@ -330,12 +333,15 @@ fn on_chat_select_workspace(
     let Ok(session) = sessions.get(parent.parent()) else {
         return;
     };
-    requests.write(AgentCommandRequest {
+    let Ok(request) = AgentRequest::encode(&AgentChooseWorkspace {
+        anchor: session.anchor,
+    }) else {
+        return;
+    };
+    requests.write(AgentRequestInput {
         request_id: AgentRequestId::new(),
         origin: CommandOrigin::User,
-        command: ServiceAgentCommand::ChooseWorkspace(AgentChooseWorkspace {
-            anchor: session.anchor,
-        }),
+        request,
     });
 }
 
@@ -357,7 +363,7 @@ mod tests {
     #[test]
     fn composer_workspace_selection_dispatches_for_current_session() {
         let mut app = App::new();
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_observer(on_chat_select_workspace);
         let anchor = vmux_core::ProcessId::new();
         let stack = app
@@ -378,21 +384,25 @@ mod tests {
         });
         let requests = app
             .world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
+            .resource_mut::<Messages<AgentRequestInput>>()
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(requests.len(), 1);
         assert!(matches!(requests[0].origin, CommandOrigin::User));
-        assert!(matches!(
-            &requests[0].command,
-            ServiceAgentCommand::ChooseWorkspace(command) if command.anchor == anchor
-        ));
+        assert_eq!(
+            requests[0]
+                .decode::<AgentChooseWorkspace>()
+                .unwrap()
+                .unwrap()
+                .anchor,
+            anchor
+        );
     }
 
     #[test]
     fn an_unheld_branch_names_the_project_it_was_picked_from() {
         let mut app = App::new();
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_observer(on_chat_go_to_branch);
         let anchor = vmux_core::ProcessId::new();
         let stack = app
@@ -418,13 +428,14 @@ mod tests {
 
         let requests = app
             .world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
+            .resource_mut::<Messages<AgentRequestInput>>()
             .drain()
             .collect::<Vec<_>>();
         assert_eq!(requests.len(), 1);
-        let ServiceAgentCommand::CreateWorktreeOnBranch(command) = &requests[0].command else {
-            panic!("an unheld branch creates a worktree");
-        };
+        let command = requests[0]
+            .decode::<AgentCreateWorktreeOnBranch>()
+            .unwrap()
+            .expect("an unheld branch creates a worktree");
         assert_eq!(
             command.project.as_deref(),
             Some("/tmp/elsewhere"),

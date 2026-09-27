@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_api::protocol::{
-    AgentCommand as ServiceAgentCommand, AgentCommandResult, ClientMessage, ProcessId,
-};
+#[cfg(test)]
+use vmux_api::protocol::AgentRequest;
+use vmux_api::protocol::{AgentCommandResult, AgentResumeInAcp, ClientMessage, ProcessId};
 use vmux_command::WriteCommandRequests;
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentKind;
@@ -14,7 +14,7 @@ use vmux_terminal::Terminal;
 use vmux_terminal::launch::TerminalLaunch;
 
 use crate::AgentVariant;
-use crate::event::{AgentCommandRequest, CommandOrigin};
+use crate::event::{AgentRequestInput, CommandOrigin};
 use crate::runtime::strategy::{Strategy, StrategyKey, StrategyKind};
 use crate::session::{AgentSession, SessionId};
 
@@ -273,7 +273,7 @@ pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> Str
 }
 
 fn handle_resume_in_acp(
-    mut reader: MessageReader<AgentCommandRequest>,
+    mut reader: MessageReader<AgentRequestInput>,
     cli_sessions: Query<
         (
             &ProcessId,
@@ -290,7 +290,7 @@ fn handle_resume_in_acp(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
-        let ServiceAgentCommand::ResumeInAcp(command) = &request.command else {
+        let Ok(Some(command)) = request.decode::<AgentResumeInAcp>() else {
             continue;
         };
         let anchor = &command.anchor;
@@ -488,7 +488,7 @@ mod tests {
     pub(crate) fn resume_in_acp_command_swaps_current_cli_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<AgentCommandRequest>()
+            .add_message::<AgentRequestInput>()
             .add_message::<ServiceRequest>()
             .add_message::<vmux_core::agent::SwapStackSession>()
             .insert_resource(test_settings())
@@ -512,16 +512,14 @@ mod tests {
             },
         ));
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::ResumeInAcp(vmux_api::protocol::AgentResumeInAcp {
-                    anchor,
-                }),
+                request: AgentRequest::encode(&AgentResumeInAcp { anchor }).unwrap(),
             });
 
         app.update();

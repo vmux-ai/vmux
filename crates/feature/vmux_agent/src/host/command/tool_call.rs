@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use vmux_api::protocol::{AgentRequestId, ClientMessage};
 use vmux_service::client::ServiceRequest;
 
-use crate::event::{AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin};
+use crate::event::{AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, CommandOrigin};
 
 use super::CommandSet;
 
@@ -72,19 +72,19 @@ fn finish_agent_tool_commands(
         (Entity, &PendingAgentToolCall, &vmux_tool::ToolCommand),
         Added<vmux_tool::ToolCommand>,
     >,
-    mut command_writer: MessageWriter<AgentCommandRequest>,
+    mut request_writer: MessageWriter<AgentRequestInput>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for (entity, pending, result) in &calls {
         match &result.0 {
-            Ok(command) => {
-                command_writer.write(AgentCommandRequest {
+            Ok(request) => {
+                request_writer.write(AgentRequestInput {
                     request_id: pending.request_id,
                     origin: CommandOrigin::Agent {
                         sid: Some(pending.sid.clone()),
                         anchor: None,
                     },
-                    command: command.clone(),
+                    request: request.clone(),
                 });
             }
             Err(message) => {
@@ -167,7 +167,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, crate::CaptureToolPlugin, ToolCallPlugin))
             .add_message::<AgentToolCallRequest>()
-            .add_message::<AgentCommandRequest>()
+            .add_message::<AgentRequestInput>()
             .add_message::<AgentQueryRequest>()
             .init_resource::<CapturedAgentQueries>()
             .add_systems(

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
 use vmux_api::protocol::{
-    AgentCommand, AgentCommandTool, AgentInvokeCommand, AgentQuery, JsonValue,
+    AgentCommandTool, AgentInvokeCommand, AgentQuery, AgentRequest, JsonValue,
 };
 use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
 
@@ -379,7 +379,7 @@ impl ToolDefinition {
 }
 
 #[derive(Component, Clone, Debug)]
-pub struct ToolCommand(pub Result<AgentCommand, String>);
+pub struct ToolCommand(pub Result<AgentRequest, String>);
 
 #[derive(Component, Clone, Debug)]
 pub struct ToolQuery(pub Result<AgentQuery, String>);
@@ -456,12 +456,10 @@ fn dispatch_command_calls(mut commands: Commands, calls: PendingCommandCalls) {
     for (entity, name, arguments) in &calls {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::InvokeCommand(
-                AgentInvokeCommand {
-                    id: name.as_str().to_string(),
-                    args: JsonValue::from(arguments.0.clone()),
-                },
-            ))));
+            .insert(ToolCommand(AgentRequest::encode(&AgentInvokeCommand {
+                id: name.as_str().to_string(),
+                args: JsonValue::from(arguments.0.clone()),
+            })));
     }
 }
 

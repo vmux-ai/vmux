@@ -75,11 +75,11 @@ fn remote_enabled_at(path: &std::path::Path) -> bool {
 
 pub(crate) async fn broker_result(
     state: &RemoteState,
-    command: vmux_api::protocol::AgentCommand,
+    request: vmux_api::protocol::AgentRequest,
 ) -> Option<vmux_api::protocol::AgentCommandResult> {
     state
         .broker
-        .command(vmux_api::protocol::AgentRequestId::new(), None, command)
+        .command(vmux_api::protocol::AgentRequestId::new(), None, request)
         .await
         .ok()
 }

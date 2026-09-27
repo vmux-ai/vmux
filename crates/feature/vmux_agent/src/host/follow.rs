@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use vmux_api::protocol::AgentCommand as ServiceAgentCommand;
+#[cfg(test)]
+use vmux_api::protocol::AgentRequest;
+use vmux_api::protocol::{AgentFileSearch, AgentFileTouched};
 use vmux_command::WriteCommandRequests;
 use vmux_core::agent::AgentKind;
 use vmux_core::event::{ExplorerSearchFile, ExplorerSearchMatch};
@@ -10,7 +12,7 @@ use vmux_layout::pane::Pane;
 use vmux_setting::AppSettings;
 use vmux_terminal::ServiceMessageSet;
 
-use crate::event::{AgentCommandRequest, CommandOrigin};
+use crate::event::{AgentRequestInput, CommandOrigin};
 use crate::session::AgentSession;
 
 pub(super) struct FollowPlugin;
@@ -245,7 +247,7 @@ impl AgentFileLayout<'_, '_> {
 }
 
 fn handle_agent_file_touch(
-    mut reader: MessageReader<AgentCommandRequest>,
+    mut reader: MessageReader<AgentRequestInput>,
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
     mut file_view_mode: Option<MessageWriter<vmux_editor::FileViewModeRequest>>,
@@ -254,7 +256,7 @@ fn handle_agent_file_touch(
         std::collections::HashMap::new();
     let mut request_diff_mode = false;
     for request in reader.read() {
-        let ServiceAgentCommand::FileTouched(command) = &request.command else {
+        let Ok(Some(command)) = request.decode::<AgentFileTouched>() else {
             continue;
         };
         let anchor = &command.anchor;
@@ -391,11 +393,11 @@ fn handle_agent_file_touch(
 }
 
 fn handle_agent_file_search(
-    mut reader: MessageReader<AgentCommandRequest>,
+    mut reader: MessageReader<AgentRequestInput>,
     mut writer: MessageWriter<vmux_editor::GlobalSearchRequest>,
 ) {
     for request in reader.read() {
-        let ServiceAgentCommand::FileSearch(command) = &request.command else {
+        let Ok(Some(command)) = request.decode::<AgentFileSearch>() else {
             continue;
         };
         let files = SearchGrouping::group(&command.matches);
@@ -486,7 +488,7 @@ mod tests {
             vmux_layout::LayoutContractPlugin,
             vmux_editor::ContractPlugin,
         ))
-        .add_message::<AgentCommandRequest>()
+        .add_message::<AgentRequestInput>()
         .add_message::<vmux_core::PageOpenRequest>()
         .insert_resource(test_settings())
         .add_systems(Update, handle_agent_file_touch);
@@ -529,21 +531,22 @@ mod tests {
         kind: vmux_api::protocol::FileTouchKind,
     ) {
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::FileTouched(AgentFileTouched {
+                request: AgentRequest::encode(&AgentFileTouched {
                     anchor,
                     path: path.to_string(),
                     line: None,
                     col: None,
                     end_col: None,
                     kind,
-                }),
+                })
+                .unwrap(),
             });
     }
 
@@ -648,18 +651,18 @@ mod tests {
     pub(crate) fn file_search_forwards_results_to_editor() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_editor::ContractPlugin))
-            .add_message::<AgentCommandRequest>()
+            .add_message::<AgentRequestInput>()
             .add_systems(Update, handle_agent_file_search);
         let anchor = ProcessId::new();
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::FileSearch(AgentFileSearch {
+                request: AgentRequest::encode(&AgentFileSearch {
                     anchor,
                     root: "/repo".into(),
                     query: "needle".into(),
@@ -686,7 +689,8 @@ mod tests {
                             preview: "    needle();".into(),
                         },
                     ],
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -826,7 +830,7 @@ mod tests {
             vmux_layout::LayoutContractPlugin,
             vmux_editor::ContractPlugin,
         ))
-        .add_message::<AgentCommandRequest>()
+        .add_message::<AgentRequestInput>()
         .add_message::<vmux_core::PageOpenRequest>()
         .insert_resource(test_settings())
         .add_systems(Update, handle_agent_file_touch);
@@ -841,21 +845,22 @@ mod tests {
         app.world_mut().spawn((anchor, ChildOf(stack)));
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::FileTouched(AgentFileTouched {
+                request: AgentRequest::encode(&AgentFileTouched {
                     anchor,
                     path: "/Users/me/.agents/skills/caveman/SKILL.md".into(),
                     line: None,
                     col: None,
                     end_col: None,
                     kind: vmux_api::protocol::FileTouchKind::Read,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -882,7 +887,7 @@ mod tests {
             vmux_layout::LayoutContractPlugin,
             vmux_editor::ContractPlugin,
         ))
-        .add_message::<AgentCommandRequest>()
+        .add_message::<AgentRequestInput>()
         .add_message::<vmux_core::PageOpenRequest>()
         .insert_resource(settings)
         .add_systems(Update, handle_agent_file_touch);
@@ -898,21 +903,22 @@ mod tests {
         let path = std::env::temp_dir().join("vmux-observed-file.rs");
 
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::FileTouched(AgentFileTouched {
+                request: AgentRequest::encode(&AgentFileTouched {
                     anchor,
                     path: path.to_string_lossy().into_owned(),
                     line: None,
                     col: None,
                     end_col: None,
                     kind: vmux_api::protocol::FileTouchKind::Read,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -951,7 +957,7 @@ mod tests {
             vmux_layout::LayoutContractPlugin,
             vmux_editor::ContractPlugin,
         ))
-        .add_message::<AgentCommandRequest>()
+        .add_message::<AgentRequestInput>()
         .add_message::<vmux_core::PageOpenRequest>()
         .insert_resource(settings)
         .add_systems(Update, handle_agent_file_touch);
@@ -965,14 +971,14 @@ mod tests {
         let command_anchor = ProcessId::new();
         app.world_mut().spawn((command_anchor, ChildOf(stack)));
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(ProcessId::new()),
                 },
-                command: ServiceAgentCommand::FileTouched(AgentFileTouched {
+                request: AgentRequest::encode(&AgentFileTouched {
                     anchor: command_anchor,
                     path: std::env::temp_dir()
                         .join("vmux-mismatched-anchor.rs")
@@ -982,7 +988,8 @@ mod tests {
                     col: None,
                     end_col: None,
                     kind: vmux_api::protocol::FileTouchKind::Read,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();
@@ -1003,13 +1010,13 @@ mod tests {
         struct CapturedRunCwd(Option<PathBuf>);
 
         fn capture_run_cwd(
-            mut reader: MessageReader<AgentCommandRequest>,
+            mut reader: MessageReader<AgentRequestInput>,
             run_tab: Res<RunTab>,
             tabs: Query<&vmux_layout::tab::Tab>,
             mut captured: ResMut<CapturedRunCwd>,
         ) {
             for request in reader.read() {
-                if matches!(request.command, ServiceAgentCommand::Run(_)) {
+                if matches!(request.decode::<AgentRun>(), Ok(Some(_))) {
                     let tab = tabs.get(run_tab.0).unwrap();
                     captured.0 = AgentCwd::from_tab(tab.startup_dir.as_deref())
                         .or_agent_launch(None)
@@ -1083,7 +1090,7 @@ mod tests {
             vmux_layout::LayoutContractPlugin,
             vmux_editor::ContractPlugin,
         ))
-        .add_message::<AgentCommandRequest>()
+        .add_message::<AgentRequestInput>()
         .add_message::<vmux_core::PageOpenRequest>()
         .init_resource::<CapturedRunCwd>()
         .insert_resource(settings)
@@ -1110,14 +1117,14 @@ mod tests {
         let anchor = ProcessId::new();
         app.world_mut().spawn((anchor, ChildOf(stack)));
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::FileTouched(AgentFileTouched {
+                request: AgentRequest::encode(&AgentFileTouched {
                     anchor,
                     path: observed
                         .path()
@@ -1128,17 +1135,18 @@ mod tests {
                     col: None,
                     end_col: None,
                     kind: vmux_api::protocol::FileTouchKind::Edit,
-                }),
+                })
+                .unwrap(),
             });
         app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::Run(AgentRun {
+                request: AgentRequest::encode(&AgentRun {
                     anchor,
                     command: "pwd".into(),
                     direction: vmux_api::protocol::AgentPaneDirection::Right,
@@ -1147,7 +1155,8 @@ mod tests {
                     mode: vmux_api::protocol::PlacementMode::Auto,
                     terminal: None,
                     done_marker: None,
-                }),
+                })
+                .unwrap(),
             });
 
         app.update();

@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{
-    AgentBrowserHistorySearch, AgentBrowserHistoryStep, AgentBrowserInstallExtension,
-    AgentBrowserNavigate, AgentCommand, AgentCommandResult, AgentOpenInNewStack, AgentRequestId,
+    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
+    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentCommandResult, AgentOpenInNewStack,
+    AgentRequestId,
 };
-use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply, CommandOrigin};
+use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput, CommandOrigin};
 
 use super::agent_pane::AgentBrowserResolve;
 
@@ -11,7 +12,7 @@ pub(crate) struct AgentBrowserPlugin;
 
 impl Plugin for AgentBrowserPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_message::<AgentCommandResponse>()
             .add_message::<AgentBrowserNavigateRequest>()
             .add_message::<AgentBrowserInstallExtensionRequest>()
@@ -56,14 +57,14 @@ struct AgentBrowserInstallExtensionRequest {
 struct AgentBrowserGoBackRequest {
     reply: AgentReply,
     origin: CommandOrigin,
-    payload: AgentBrowserHistoryStep,
+    payload: AgentBrowserGoBack,
 }
 
 #[derive(Message, Clone)]
 struct AgentBrowserGoForwardRequest {
     reply: AgentReply,
     origin: CommandOrigin,
-    payload: AgentBrowserHistoryStep,
+    payload: AgentBrowserGoForward,
 }
 
 #[derive(Message, Clone)]
@@ -79,7 +80,7 @@ struct AgentOpenInNewStackRequest {
 }
 
 fn route_browser_commands(
-    mut commands: MessageReader<AgentCommandRequest>,
+    mut commands: MessageReader<AgentRequestInput>,
     mut navigate: MessageWriter<AgentBrowserNavigateRequest>,
     mut install_extension: MessageWriter<AgentBrowserInstallExtensionRequest>,
     mut go_back: MessageWriter<AgentBrowserGoBackRequest>,
@@ -89,47 +90,30 @@ fn route_browser_commands(
 ) {
     for request in commands.read() {
         let reply = AgentReply::new(request.request_id);
-        match &request.command {
-            AgentCommand::BrowserNavigate(payload) => {
-                navigate.write(AgentBrowserNavigateRequest {
-                    reply,
-                    origin: request.origin.clone(),
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::BrowserInstallExtension(payload) => {
-                install_extension.write(AgentBrowserInstallExtensionRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::BrowserGoBack(payload) => {
-                go_back.write(AgentBrowserGoBackRequest {
-                    reply,
-                    origin: request.origin.clone(),
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::BrowserGoForward(payload) => {
-                go_forward.write(AgentBrowserGoForwardRequest {
-                    reply,
-                    origin: request.origin.clone(),
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::BrowserHistorySearch(payload) => {
-                search_history.write(AgentBrowserHistorySearchRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::OpenInNewStack(payload) => {
-                open_in_new_stack.write(AgentOpenInNewStackRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            _ => {}
+        if let Ok(Some(payload)) = request.decode::<AgentBrowserNavigate>() {
+            navigate.write(AgentBrowserNavigateRequest {
+                reply,
+                origin: request.origin.clone(),
+                payload,
+            });
+        } else if let Ok(Some(payload)) = request.decode::<AgentBrowserInstallExtension>() {
+            install_extension.write(AgentBrowserInstallExtensionRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentBrowserGoBack>() {
+            go_back.write(AgentBrowserGoBackRequest {
+                reply,
+                origin: request.origin.clone(),
+                payload,
+            });
+        } else if let Ok(Some(payload)) = request.decode::<AgentBrowserGoForward>() {
+            go_forward.write(AgentBrowserGoForwardRequest {
+                reply,
+                origin: request.origin.clone(),
+                payload,
+            });
+        } else if let Ok(Some(payload)) = request.decode::<AgentBrowserHistorySearch>() {
+            search_history.write(AgentBrowserHistorySearchRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentOpenInNewStack>() {
+            open_in_new_stack.write(AgentOpenInNewStackRequest { reply, payload });
         }
     }
 }

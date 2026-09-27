@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use vmux_api::protocol::{AgentCommand, AgentCommandResult};
-use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, CommandOrigin};
+use vmux_api::protocol::{AgentCommandResult, AgentInvokeCommand};
+use vmux_core::agent::{AgentCommandResponse, AgentRequestInput, CommandOrigin};
 
 use crate::{CommandDefinition, CommandInvocation};
 
@@ -8,14 +8,14 @@ pub(super) struct AgentCommandPlugin;
 
 impl Plugin for AgentCommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_message::<AgentCommandResponse>()
             .add_systems(Update, invoke_command);
     }
 }
 
 fn invoke_command(
-    mut requests: MessageReader<AgentCommandRequest>,
+    mut requests: MessageReader<AgentRequestInput>,
     definitions: Query<&CommandDefinition>,
     mut invocations: MessageWriter<CommandInvocation>,
     agents: Query<(
@@ -27,7 +27,7 @@ fn invoke_command(
     mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in requests.read() {
-        let AgentCommand::InvokeCommand(payload) = &request.command else {
+        let Ok(Some(payload)) = request.decode::<AgentInvokeCommand>() else {
             continue;
         };
         let args = match vmux_core::JsonArguments::try_from(&payload.args) {

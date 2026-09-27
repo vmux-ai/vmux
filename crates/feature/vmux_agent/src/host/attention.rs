@@ -1,7 +1,9 @@
 use bevy::prelude::*;
-use vmux_api::protocol::AgentCommand as ServiceAgentCommand;
+#[cfg(test)]
+use vmux_api::protocol::AgentRequest;
+use vmux_api::protocol::AgentTurnEnded;
 
-use crate::event::AgentCommandRequest;
+use crate::event::AgentRequestInput;
 use crate::session::SessionId;
 
 pub(super) struct AttentionPlugin;
@@ -177,12 +179,12 @@ fn clear_agent_done(
 }
 
 fn handle_agent_turn_ended(
-    mut reader: MessageReader<AgentCommandRequest>,
+    mut reader: MessageReader<AgentRequestInput>,
     agents: Query<(Entity, &vmux_api::protocol::ProcessId), With<vmux_core::team::Agent>>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
 ) {
     for request in reader.read() {
-        let ServiceAgentCommand::TurnEnded(command) = &request.command else {
+        let Ok(Some(command)) = request.decode::<AgentTurnEnded>() else {
             continue;
         };
         let anchor = &command.anchor;
@@ -236,7 +238,7 @@ mod tests {
     pub(crate) fn turn_end_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_message::<AgentCommandRequest>()
+            .add_message::<AgentRequestInput>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, handle_agent_turn_ended);
         app
@@ -244,16 +246,14 @@ mod tests {
 
     pub(crate) fn send_turn_ended(app: &mut App, anchor: vmux_api::protocol::ProcessId) {
         app.world_mut()
-            .resource_mut::<bevy::ecs::message::Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
+            .resource_mut::<bevy::ecs::message::Messages<AgentRequestInput>>()
+            .write(AgentRequestInput {
                 request_id: vmux_api::protocol::AgentRequestId::new(),
                 origin: CommandOrigin::Agent {
                     sid: None,
                     anchor: Some(anchor),
                 },
-                command: ServiceAgentCommand::TurnEnded(vmux_api::protocol::AgentTurnEnded {
-                    anchor,
-                }),
+                request: AgentRequest::encode(&AgentTurnEnded { anchor }).unwrap(),
             });
     }
 

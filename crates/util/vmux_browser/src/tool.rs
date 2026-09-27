@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentBrowserHistorySearch, AgentBrowserHistoryStep, AgentBrowserInstallExtension,
-    AgentBrowserNavigate, AgentCommand, AgentQuery,
+    AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
+    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentQuery, AgentRequest,
 };
 use vmux_core::ProcessAnchor;
 
@@ -139,10 +139,10 @@ fn navigate(
         let command = if args.url.trim().is_empty() {
             Err("browser_navigate.url is empty".to_string())
         } else {
-            Ok(AgentCommand::BrowserNavigate(AgentBrowserNavigate {
+            AgentRequest::encode(&AgentBrowserNavigate {
                 url: args.url.clone(),
                 pane: args.pane.clone(),
-            }))
+            })
         };
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -155,11 +155,9 @@ fn go_back(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::BrowserGoBack(
-                AgentBrowserHistoryStep {
-                    pane: args.pane.clone(),
-                },
-            ))));
+            .insert(ToolCommand(AgentRequest::encode(&AgentBrowserGoBack {
+                pane: args.pane.clone(),
+            })));
     }
 }
 
@@ -170,11 +168,9 @@ fn go_forward(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::BrowserGoForward(
-                AgentBrowserHistoryStep {
-                    pane: args.pane.clone(),
-                },
-            ))));
+            .insert(ToolCommand(AgentRequest::encode(&AgentBrowserGoForward {
+                pane: args.pane.clone(),
+            })));
     }
 }
 
@@ -186,12 +182,10 @@ fn history_search(
         let command = if args.query.trim().is_empty() {
             Err("browser_history_search.query is empty".to_string())
         } else {
-            Ok(AgentCommand::BrowserHistorySearch(
-                AgentBrowserHistorySearch {
-                    query: args.query.clone(),
-                    limit: args.limit.unwrap_or(20).min(100),
-                },
-            ))
+            AgentRequest::encode(&AgentBrowserHistorySearch {
+                query: args.query.clone(),
+                limit: args.limit.unwrap_or(20).min(100),
+            })
         };
         commands.entity(entity).insert(ToolCommand(command));
     }
@@ -206,11 +200,9 @@ fn install_extension(
         let command = if source.trim().is_empty() {
             Err("browser_install_extension.source is empty".to_string())
         } else {
-            Ok(AgentCommand::BrowserInstallExtension(
-                AgentBrowserInstallExtension {
-                    source: source.clone(),
-                },
-            ))
+            AgentRequest::encode(&AgentBrowserInstallExtension {
+                source: source.clone(),
+            })
         };
         commands.entity(entity).insert(ToolCommand(command));
     }

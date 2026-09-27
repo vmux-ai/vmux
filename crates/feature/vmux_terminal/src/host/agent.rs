@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use vmux_api::protocol::{
-    AgentCommand, AgentCommandResult, AgentNewTerminalTab, AgentRunShell, AgentTerminalSend,
+    AgentCommandResult, AgentNewTerminalTab, AgentRunShell, AgentTerminalSend,
 };
-use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply};
+use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 use vmux_core::{KeyboardOwner, LastActivatedAt, PageMetadata};
 use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::FocusedStack;
@@ -15,7 +15,7 @@ pub(super) struct AgentTerminalPlugin;
 
 impl Plugin for AgentTerminalPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_message::<AgentCommandResponse>()
             .add_message::<AgentNewTerminalTabRequest>()
             .add_message::<AgentRunShellRequest>()
@@ -63,34 +63,23 @@ struct AgentTerminalSendRequest {
 }
 
 fn route_terminal_commands(
-    mut commands: MessageReader<AgentCommandRequest>,
+    mut commands: MessageReader<AgentRequestInput>,
     mut new_terminal_tab: MessageWriter<AgentNewTerminalTabRequest>,
     mut run_shell: MessageWriter<AgentRunShellRequest>,
     mut terminal_send: MessageWriter<AgentTerminalSendRequest>,
 ) {
     for request in commands.read() {
         let reply = AgentReply::new(request.request_id);
-        match &request.command {
-            AgentCommand::NewTerminalTab(payload) => {
-                new_terminal_tab.write(AgentNewTerminalTabRequest {
-                    reply,
-                    activate: !request.origin.is_agent(),
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::RunShell(payload) => {
-                run_shell.write(AgentRunShellRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::TerminalSend(payload) => {
-                terminal_send.write(AgentTerminalSendRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            _ => {}
+        if let Ok(Some(payload)) = request.decode::<AgentNewTerminalTab>() {
+            new_terminal_tab.write(AgentNewTerminalTabRequest {
+                reply,
+                activate: !request.origin.is_agent(),
+                payload,
+            });
+        } else if let Ok(Some(payload)) = request.decode::<AgentRunShell>() {
+            run_shell.write(AgentRunShellRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentTerminalSend>() {
+            terminal_send.write(AgentTerminalSendRequest { reply, payload });
         }
     }
 }

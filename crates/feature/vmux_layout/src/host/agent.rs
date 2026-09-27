@@ -1,10 +1,9 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{
     AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkPin, AgentBookmarkPinUrl,
-    AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommand, AgentCommandResult, AgentFocusPane,
-    AgentUpdateLayout,
+    AgentBookmarkRemove, AgentBookmarkUnpin, AgentCommandResult, AgentFocusPane, AgentUpdateLayout,
 };
-use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply};
+use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 
 use crate::stack::FocusedStack;
 
@@ -12,7 +11,7 @@ pub(super) struct LayoutAgentPlugin;
 
 impl Plugin for LayoutAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_message::<AgentCommandResponse>()
             .add_message::<AgentBookmarkAddRequest>()
             .add_message::<AgentBookmarkRemoveRequest>()
@@ -141,7 +140,7 @@ impl CurrentFocus {
 }
 
 fn route_bookmark_commands(
-    mut commands: MessageReader<AgentCommandRequest>,
+    mut commands: MessageReader<AgentRequestInput>,
     mut add: MessageWriter<AgentBookmarkAddRequest>,
     mut remove: MessageWriter<AgentBookmarkRemoveRequest>,
     mut pin: MessageWriter<AgentBookmarkPinRequest>,
@@ -151,71 +150,41 @@ fn route_bookmark_commands(
 ) {
     for request in commands.read() {
         let reply = AgentReply::new(request.request_id);
-        match &request.command {
-            AgentCommand::BookmarkAdd(payload) => {
-                add.write(AgentBookmarkAddRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::BookmarkRemove(payload) => {
-                remove.write(AgentBookmarkRemoveRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::BookmarkPin(payload) => {
-                pin.write(AgentBookmarkPinRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::BookmarkPinUrl(payload) => {
-                pin_url.write(AgentBookmarkPinUrlRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::BookmarkUnpin(payload) => {
-                unpin.write(AgentBookmarkUnpinRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::BookmarkFolderCreate(payload) => {
-                create_folder.write(AgentBookmarkFolderCreateRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            _ => {}
+        if let Ok(Some(payload)) = request.decode::<AgentBookmarkAdd>() {
+            add.write(AgentBookmarkAddRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentBookmarkRemove>() {
+            remove.write(AgentBookmarkRemoveRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentBookmarkPin>() {
+            pin.write(AgentBookmarkPinRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentBookmarkPinUrl>() {
+            pin_url.write(AgentBookmarkPinUrlRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentBookmarkUnpin>() {
+            unpin.write(AgentBookmarkUnpinRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentBookmarkFolderCreate>() {
+            create_folder.write(AgentBookmarkFolderCreateRequest { reply, payload });
         }
     }
 }
 
 fn route_layout_commands(
-    mut commands: MessageReader<AgentCommandRequest>,
+    mut commands: MessageReader<AgentRequestInput>,
     mut focus: MessageWriter<AgentFocusPaneRequest>,
     mut update_layout: MessageWriter<AgentUpdateLayoutRequest>,
 ) {
     for request in commands.read() {
         let reply = AgentReply::new(request.request_id);
-        match &request.command {
-            AgentCommand::FocusPane(payload) => {
-                focus.write(AgentFocusPaneRequest {
-                    reply,
-                    allowed: !request.origin.is_agent(),
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::UpdateLayout(payload) => {
-                update_layout.write(AgentUpdateLayoutRequest {
-                    reply,
-                    from_agent: request.origin.is_agent(),
-                    payload: payload.clone(),
-                });
-            }
-            _ => {}
+        if let Ok(Some(payload)) = request.decode::<AgentFocusPane>() {
+            focus.write(AgentFocusPaneRequest {
+                reply,
+                allowed: !request.origin.is_agent(),
+                payload,
+            });
+        } else if let Ok(Some(payload)) = request.decode::<AgentUpdateLayout>() {
+            update_layout.write(AgentUpdateLayoutRequest {
+                reply,
+                from_agent: request.origin.is_agent(),
+                payload,
+            });
         }
     }
 }

@@ -2,9 +2,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 
 use vmux_agent::AgentRunState;
-use vmux_agent::event::AgentCommandRequest;
-use vmux_api::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
-use vmux_core::agent::SessionId;
+use vmux_agent::event::AgentRequestInput;
+use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
+use vmux_core::agent::{AgentCommandResponse, AgentReply, SessionId};
 use vmux_core::event::team::{
     ProfileRow, TEAM_PAGE_URL, TeamEvent, TeamMemberFocusRequest, TeamMemberRow, TeamOpenRequest,
     TeamProfileCreateRequest, TeamProfileSwitchRequest, TeamProfileUpdateRequest,
@@ -18,7 +18,6 @@ use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
 use vmux_layout::space::{CurrentSpace, Space, space_of};
 use vmux_layout::stack::Stack;
-use vmux_service::client::ServiceRequest;
 
 use crate::projection::TeamStateProjection;
 
@@ -43,7 +42,8 @@ struct TeamProjectionPlugin;
 
 impl Plugin for TeamProjectionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ServiceRequest>()
+        app.add_message::<AgentRequestInput>()
+            .add_message::<AgentCommandResponse>()
             .add_plugins(UiStatePlugin::<TeamEvent>::default())
             .add_observer(replay_team)
             .add_systems(
@@ -281,7 +281,7 @@ fn build_profiles(
 }
 
 fn answer_list_team(
-    mut reader: MessageReader<AgentCommandRequest>,
+    mut reader: MessageReader<AgentRequestInput>,
     current_space: Query<Entity, With<CurrentSpace>>,
     user_q: Query<(Entity, &Profile), With<User>>,
     agent_q: Query<(
@@ -296,15 +296,12 @@ fn answer_list_team(
     space_marker: Query<(), With<Space>>,
     meta_q: Query<&PageMetadata>,
     children_q: Query<&Children>,
-    mut service_requests: MessageWriter<ServiceRequest>,
+    mut responses: MessageWriter<AgentCommandResponse>,
 ) {
     for request in reader.read() {
-        if !matches!(
-            request.command,
-            AgentCommand::Shared(SharedAgentCommand::ListTeam)
-        ) {
+        let Ok(Some(AgentListTeam)) = request.decode::<AgentListTeam>() else {
             continue;
-        }
+        };
         let members = build_team_members(
             current_space.iter().next(),
             &user_q,
@@ -318,10 +315,7 @@ fn answer_list_team(
             Ok(json) => AgentCommandResult::Text(json),
             Err(error) => AgentCommandResult::Error(format!("list_team: {error}")),
         };
-        service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
-            request_id: request.request_id,
-            result,
-        }));
+        responses.write(AgentReply::new(request.request_id).response(result));
     }
 }
 
@@ -590,7 +584,7 @@ mod tests {
     #[test]
     fn team_view_owns_active_profile_and_agent_presentation() {
         let mut app = App::new();
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_plugins(TeamProjectionPlugin);
         let space = app
             .world_mut()

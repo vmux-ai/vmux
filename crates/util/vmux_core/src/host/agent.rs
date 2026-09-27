@@ -5,7 +5,7 @@ use bevy::prelude::*;
 
 use crate::terminal::TerminalKind;
 pub use vmux_api::agent::AgentKind;
-use vmux_api::protocol::{AgentCommand, AgentCommandResult, AgentRequestId};
+use vmux_api::protocol::{AgentCommandResult, AgentRequest, AgentRequestId};
 
 #[derive(Clone, Debug, Default)]
 pub enum CommandOrigin {
@@ -28,10 +28,19 @@ impl CommandOrigin {
 }
 
 #[derive(Message)]
-pub struct AgentCommandRequest {
+pub struct AgentRequestInput {
     pub request_id: AgentRequestId,
     pub origin: CommandOrigin,
-    pub command: AgentCommand,
+    pub request: AgentRequest,
+}
+
+impl AgentRequestInput {
+    pub fn decode<T>(&self) -> Result<Option<T>, String>
+    where
+        T: vmux_api::AgentRequestContract + serde::de::DeserializeOwned,
+    {
+        self.request.decode()
+    }
 }
 
 #[derive(Clone, Message)]

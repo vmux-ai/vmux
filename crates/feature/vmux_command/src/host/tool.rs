@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{AgentCommand, AgentInvokeCommand, AgentNotify, JsonValue};
+use vmux_api::protocol::{AgentInvokeCommand, AgentNotify, AgentRequest, JsonValue};
 use vmux_tool::{AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin};
 
 pub struct CommandToolPlugin;
@@ -38,8 +38,8 @@ fn open_command_bar(
             "path" => Ok("browser_open_path_bar"),
             other => Err(format!("unknown command bar mode: {other}")),
         };
-        let command = result.map(|id| {
-            AgentCommand::InvokeCommand(AgentInvokeCommand {
+        let command = result.and_then(|id| {
+            AgentRequest::encode(&AgentInvokeCommand {
                 id: id.to_string(),
                 args: JsonValue::Object(Vec::new()),
             })
@@ -52,10 +52,10 @@ fn notify(mut commands: Commands, requests: Query<(Entity, &NotifyArgs), AddedTo
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolCommand(Ok(AgentCommand::Notify(AgentNotify {
+            .insert(ToolCommand(AgentRequest::encode(&AgentNotify {
                 title: args.title.clone(),
                 body: args.body.clone(),
-            }))));
+            })));
     }
 }
 
@@ -89,7 +89,7 @@ mod tests {
                 .collect()
         }
 
-        fn dispatch(name: &str, arguments: serde_json::Value) -> Result<AgentCommand, String> {
+        fn dispatch(name: &str, arguments: serde_json::Value) -> Result<AgentRequest, String> {
             let mut app = Self::app();
             let request = app
                 .world_mut()
@@ -129,10 +129,10 @@ mod tests {
         ] {
             assert_eq!(
                 CommandToolFixture::dispatch("open_command_bar", serde_json::json!({"mode": mode})),
-                Ok(AgentCommand::InvokeCommand(AgentInvokeCommand {
+                AgentRequest::encode(&AgentInvokeCommand {
                     id: id.to_string(),
                     args: JsonValue::Object(Vec::new()),
-                }))
+                })
             );
         }
         assert!(
@@ -148,17 +148,17 @@ mod tests {
                 "notify",
                 serde_json::json!({"title": "done", "body": "built X"}),
             ),
-            Ok(AgentCommand::Notify(AgentNotify {
+            AgentRequest::encode(&AgentNotify {
                 title: Some("done".to_string()),
                 body: Some("built X".to_string()),
-            }))
+            })
         );
         assert_eq!(
             CommandToolFixture::dispatch("notify", serde_json::json!({})),
-            Ok(AgentCommand::Notify(AgentNotify {
+            AgentRequest::encode(&AgentNotify {
                 title: None,
                 body: None,
-            }))
+            })
         );
     }
 }

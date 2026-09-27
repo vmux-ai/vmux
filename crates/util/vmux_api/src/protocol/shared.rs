@@ -1,6 +1,7 @@
 use super::{
-    AcpModelOption, AgentAttachment, AgentCommand, AgentRunStatus, ApprovalDecision, ClientMessage,
-    ServiceMessage,
+    AcpModelOption, AgentAttachment, AgentListAgents, AgentListModels, AgentListTeam, AgentNewChat,
+    AgentRequest, AgentRunStatus, AgentSelectModel, AgentSetEffort, ApprovalDecision,
+    ClientMessage, ServiceMessage,
 };
 use crate::json::JsonValue;
 use crate::room::{ClientOpId, Message, RemoteAgent, RemoteMediaEntry, RemoteSession};
@@ -71,9 +72,32 @@ pub enum SharedAgentCommand {
     },
 }
 
-impl From<SharedAgentCommand> for AgentCommand {
-    fn from(command: SharedAgentCommand) -> Self {
-        Self::Shared(command)
+impl TryFrom<SharedAgentCommand> for AgentRequest {
+    type Error = String;
+
+    fn try_from(command: SharedAgentCommand) -> Result<Self, Self::Error> {
+        match command {
+            SharedAgentCommand::NewAgentChat {
+                client_op_id,
+                prompt,
+                agent_url,
+            } => AgentRequest::encode(&AgentNewChat {
+                client_op_id,
+                prompt,
+                agent_url,
+            }),
+            SharedAgentCommand::ListAgents => AgentRequest::encode(&AgentListAgents),
+            SharedAgentCommand::ListTeam => AgentRequest::encode(&AgentListTeam),
+            SharedAgentCommand::ListModels { sid } => {
+                AgentRequest::encode(&AgentListModels { sid })
+            }
+            SharedAgentCommand::SelectModel { sid, model_id } => {
+                AgentRequest::encode(&AgentSelectModel { sid, model_id })
+            }
+            SharedAgentCommand::SetEffort { sid, level } => {
+                AgentRequest::encode(&AgentSetEffort { sid, level })
+            }
+        }
     }
 }
 

@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 use vmux_api::protocol::{
-    AgentCommand, AgentRenameProfile, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+    AgentRenameProfile, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
-use vmux_core::agent::{AgentCommandRequest, AgentCommandResponse, AgentReply};
+use vmux_core::agent::{AgentCommandResponse, AgentReply, AgentRequestInput};
 
 pub(super) struct SpaceAgentPlugin;
 
 impl Plugin for SpaceAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AgentCommandRequest>()
+        app.add_message::<AgentRequestInput>()
             .add_message::<AgentCommandResponse>()
             .add_message::<AgentSpaceCreateRequest>()
             .add_message::<AgentSpaceRenameRequest>()
@@ -62,7 +62,7 @@ struct RenameProfileRequest {
 }
 
 fn route_space_commands(
-    mut commands: MessageReader<AgentCommandRequest>,
+    mut commands: MessageReader<AgentRequestInput>,
     mut create: MessageWriter<AgentSpaceCreateRequest>,
     mut rename: MessageWriter<AgentSpaceRenameRequest>,
     mut delete: MessageWriter<AgentSpaceDeleteRequest>,
@@ -70,32 +70,14 @@ fn route_space_commands(
 ) {
     for request in commands.read() {
         let reply = AgentReply::new(request.request_id);
-        match &request.command {
-            AgentCommand::SpaceCreate(payload) => {
-                create.write(AgentSpaceCreateRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::SpaceRename(payload) => {
-                rename.write(AgentSpaceRenameRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::SpaceDelete(payload) => {
-                delete.write(AgentSpaceDeleteRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            AgentCommand::RenameProfile(payload) => {
-                rename_profile.write(AgentRenameProfileRequest {
-                    reply,
-                    payload: payload.clone(),
-                });
-            }
-            _ => {}
+        if let Ok(Some(payload)) = request.decode::<AgentSpaceCreate>() {
+            create.write(AgentSpaceCreateRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentSpaceRename>() {
+            rename.write(AgentSpaceRenameRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentSpaceDelete>() {
+            delete.write(AgentSpaceDeleteRequest { reply, payload });
+        } else if let Ok(Some(payload)) = request.decode::<AgentRenameProfile>() {
+            rename_profile.write(AgentRenameProfileRequest { reply, payload });
         }
     }
 }

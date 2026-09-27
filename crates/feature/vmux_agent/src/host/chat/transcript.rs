@@ -10,12 +10,12 @@ use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
+#[cfg(test)]
+use vmux_chat::event::ChatItem;
 use vmux_chat::event::{
     CHAT_INITIAL_ITEM_LIMIT, ChatHistoryRequest, ChatSnapshot, PendingApproval,
     QueuedPromptSnapshot,
 };
-#[cfg(test)]
-use vmux_chat::event::ChatItem;
 use vmux_chat::host::{ChatHistoryQuery, ChatHistoryResult, TranscriptPage, TranscriptTail};
 use vmux_chat::media::ChatAttachmentHydrationRequest;
 use vmux_core::PageMetadata;

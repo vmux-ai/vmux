@@ -14,10 +14,12 @@ use crate::message::{AssistantBlock, Message};
 use crate::providers::{anthropic, mistral, openai};
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
+use vmux_api::BinEvent;
 use vmux_api::protocol::{
-    AGENT_COMMAND_TIMEOUT, AGENT_QUERY_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentAttachment, AgentCommand,
-    AgentCommandResult, AgentQuery, AgentRequestId, AgentRunStatus, ApprovalDecision,
-    BROWSER_NAVIGATE_TIMEOUT, JsonValue, ProcessId, ServiceMessage, SharedEvent,
+    AGENT_QUERY_TIMEOUT, AGENT_REQUEST_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentAttachment,
+    AgentBrowserNavigate, AgentCommandResult, AgentQuery, AgentRequest, AgentRequestId,
+    AgentRunStatus, ApprovalDecision, BROWSER_NAVIGATE_TIMEOUT, JsonValue, ProcessId,
+    ServiceMessage, SharedEvent,
 };
 
 pub(crate) type AgentCommandResponses = PendingRequests<AgentRequestId, AgentCommandResult>;
@@ -53,14 +55,15 @@ impl AgentBroker {
         &self,
         request_id: AgentRequestId,
         anchor: Option<ProcessId>,
-        command: AgentCommand,
+        request: AgentRequest,
     ) -> Result<AgentCommandResult, String> {
         if self.outbound.receiver_count() == 0 {
             return Err(NO_AGENT_SUBSCRIBER.to_string());
         }
-        let timeout = match &command {
-            AgentCommand::BrowserNavigate(_) => BROWSER_NAVIGATE_TIMEOUT,
-            _ => AGENT_COMMAND_TIMEOUT,
+        let timeout = if request.id == AgentBrowserNavigate::ID {
+            BROWSER_NAVIGATE_TIMEOUT
+        } else {
+            AGENT_REQUEST_TIMEOUT
         };
         self.commands
             .request(
@@ -68,10 +71,10 @@ impl AgentBroker {
                 timeout,
                 || {
                     self.outbound
-                        .send(ServiceMessage::AgentCommand {
+                        .send(ServiceMessage::AgentRequest {
                             request_id,
                             anchor,
-                            command,
+                            request,
                         })
                         .is_ok()
                 },

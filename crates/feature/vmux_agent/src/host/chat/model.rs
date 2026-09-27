@@ -1,10 +1,12 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
-use crate::event::AgentCommandRequest;
+use crate::event::AgentRequestInput;
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
-use vmux_api::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
+use vmux_api::protocol::{
+    AgentCommandResult, AgentListModels, AgentSelectModel, AgentSetEffort, ClientMessage,
+};
 use vmux_api::room::RemoteModelState;
 use vmux_chat::event::{
     ModeState, ModelOptionEntry, ModelState, SelectMode, SelectModel, SetAgentEffort, SlashCommands,
@@ -84,7 +86,7 @@ pub(super) struct EffortSetRequest {
 }
 
 fn answer_remote_model_commands(
-    mut reader: MessageReader<AgentCommandRequest>,
+    mut reader: MessageReader<AgentRequestInput>,
     sessions: Query<(&AcpSession, &AcpModelState)>,
     settings: Res<vmux_setting::AppSettings>,
     mut selects: MessageWriter<ModelSelectRequest>,
@@ -92,43 +94,43 @@ fn answer_remote_model_commands(
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
     for request in reader.read() {
-        let AgentCommand::Shared(command) = &request.command else {
-            continue;
-        };
-        let result = match command {
-            SharedAgentCommand::ListModels { sid } => {
-                match remote_model_state(sid, &sessions, &settings) {
-                    Some(state) => match serde_json::to_string(&state) {
-                        Ok(json) => AgentCommandResult::Text(json),
-                        Err(error) => AgentCommandResult::Error(format!("list_models: {error}")),
-                    },
-                    None => AgentCommandResult::Error("no such session".to_string()),
-                }
+        let result = if let Ok(Some(payload)) = request.decode::<AgentListModels>() {
+            match remote_model_state(&payload.sid, &sessions, &settings) {
+                Some(state) => match serde_json::to_string(&state) {
+                    Ok(json) => AgentCommandResult::Text(json),
+                    Err(error) => AgentCommandResult::Error(format!("list_models: {error}")),
+                },
+                None => AgentCommandResult::Error("no such session".to_string()),
             }
-            SharedAgentCommand::SelectModel { sid, model_id } => {
-                if !sessions.iter().any(|(session, _)| session.sid == *sid) {
-                    AgentCommandResult::Error("no such session".to_string())
-                } else {
-                    selects.write(ModelSelectRequest {
-                        sid: sid.clone(),
-                        model_id: model_id.clone(),
+        } else if let Ok(Some(payload)) = request.decode::<AgentSelectModel>() {
+            if !sessions
+                .iter()
+                .any(|(session, _)| session.sid == payload.sid)
+            {
+                AgentCommandResult::Error("no such session".to_string())
+            } else {
+                selects.write(ModelSelectRequest {
+                    sid: payload.sid,
+                    model_id: payload.model_id,
+                });
+                AgentCommandResult::Ok
+            }
+        } else if let Ok(Some(payload)) = request.decode::<AgentSetEffort>() {
+            match sessions
+                .iter()
+                .find(|(session, _)| session.sid == payload.sid)
+            {
+                Some((session, _)) => {
+                    efforts.write(EffortSetRequest {
+                        agent_key: session.agent_id.clone(),
+                        level: payload.level,
                     });
                     AgentCommandResult::Ok
                 }
+                None => AgentCommandResult::Error("no such session".to_string()),
             }
-            SharedAgentCommand::SetEffort { sid, level } => {
-                match sessions.iter().find(|(session, _)| session.sid == *sid) {
-                    Some((session, _)) => {
-                        efforts.write(EffortSetRequest {
-                            agent_key: session.agent_id.clone(),
-                            level: level.clone(),
-                        });
-                        AgentCommandResult::Ok
-                    }
-                    None => AgentCommandResult::Error("no such session".to_string()),
-                }
-            }
-            _ => continue,
+        } else {
+            continue;
         };
         service_requests.write(ServiceRequest(ClientMessage::AgentCommandResponse {
             request_id: request.request_id,

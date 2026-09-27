@@ -3,7 +3,7 @@ use std::io::{self, Read};
 use bevy::app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::protocol::{
-    AGENT_COMMAND_TIMEOUT, AgentCommand, AgentCommandResult, AgentFileTouched, AgentNotify,
+    AGENT_REQUEST_TIMEOUT, AgentCommandResult, AgentFileTouched, AgentNotify, AgentRequest,
     AgentRequestId, AgentTurnEnded, ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
 };
 use vmux_core::cli::{CliInvocation, CliManifestPlugin, CliResult};
@@ -159,18 +159,21 @@ fn start_notify(
                 }
             };
             let request_id = AgentRequestId::new();
+            let Ok(request) = AgentRequest::encode(&AgentNotify { title, body }) else {
+                return Ok(());
+            };
             if let Err(error) = connection
-                .send(&ClientMessage::AgentCommand {
+                .send(&ClientMessage::AgentRequest {
                     request_id,
                     anchor,
-                    command: AgentCommand::Notify(AgentNotify { title, body }),
+                    request,
                 })
                 .await
             {
                 eprintln!("vmux notify: failed to send: {error}");
                 return Ok(());
             }
-            let _ = tokio::time::timeout(AGENT_COMMAND_TIMEOUT, async {
+            let _ = tokio::time::timeout(AGENT_REQUEST_TIMEOUT, async {
                 while let Ok(Some(message)) = connection.recv().await {
                     if let ServiceMessage::AgentCommandResult {
                         request_id: received,
@@ -219,25 +222,28 @@ fn start_file_touch(
                 return Ok(());
             };
             let request_id = AgentRequestId::new();
+            let Ok(request) = AgentRequest::encode(&AgentFileTouched {
+                anchor,
+                path: touch.path,
+                line: touch.line,
+                col: None,
+                end_col: None,
+                kind: touch.kind,
+            }) else {
+                return Ok(());
+            };
             if connection
-                .send(&ClientMessage::AgentCommand {
+                .send(&ClientMessage::AgentRequest {
                     request_id,
                     anchor: Some(anchor),
-                    command: AgentCommand::FileTouched(AgentFileTouched {
-                        anchor,
-                        path: touch.path,
-                        line: touch.line,
-                        col: None,
-                        end_col: None,
-                        kind: touch.kind,
-                    }),
+                    request,
                 })
                 .await
                 .is_err()
             {
                 return Ok(());
             }
-            let _ = tokio::time::timeout(AGENT_COMMAND_TIMEOUT, async {
+            let _ = tokio::time::timeout(AGENT_REQUEST_TIMEOUT, async {
                 while let Ok(Some(message)) = connection.recv().await {
                     if let ServiceMessage::AgentCommandResult {
                         request_id: received,
@@ -277,18 +283,21 @@ fn start_turn_end(
                 return Ok(());
             };
             let request_id = AgentRequestId::new();
+            let Ok(request) = AgentRequest::encode(&AgentTurnEnded { anchor }) else {
+                return Ok(());
+            };
             if connection
-                .send(&ClientMessage::AgentCommand {
+                .send(&ClientMessage::AgentRequest {
                     request_id,
                     anchor: Some(anchor),
-                    command: AgentCommand::TurnEnded(AgentTurnEnded { anchor }),
+                    request,
                 })
                 .await
                 .is_err()
             {
                 return Ok(());
             }
-            let _ = tokio::time::timeout(AGENT_COMMAND_TIMEOUT, async {
+            let _ = tokio::time::timeout(AGENT_REQUEST_TIMEOUT, async {
                 while let Ok(Some(message)) = connection.recv().await {
                     if let ServiceMessage::AgentCommandResult {
                         request_id: received,
