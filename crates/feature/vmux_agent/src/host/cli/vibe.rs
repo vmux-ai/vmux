@@ -2,9 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::cli::{
-    CliAgentStrategy, CliModelCatalog, ResumableSession, lines_skipping_invalid_utf8,
-};
+use super::{CliAgentStrategy, CliModelCatalog, ResumableSession, lines_skipping_invalid_utf8};
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
@@ -515,10 +513,7 @@ fn load_vibe_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, S
 }
 
 fn vibe_latest_message(path: &Path) -> String {
-    for line in crate::cli::SessionTail::lines_of(path)
-        .iter()
-        .rev()
-    {
+    for line in super::SessionTail::lines_of(path).iter().rev() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };

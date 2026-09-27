@@ -11,26 +11,24 @@ use vmux_core::team::Profile;
 use vmux_core::{PageIcon, PageIdentity};
 use vmux_session::{AgentConversationTitle, AgentMessages, AgentSession};
 
-#[vmux_native::page(file = "../vmux_chat/src/page.ron")]
-pub struct AgentChatPagePlugin;
+pub struct AgentChatPlugin;
 
-impl Plugin for AgentChatPagePlugin {
+impl Plugin for AgentChatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(Self::MANIFEST.plugin())
-            .add_plugins((
-                vmux_chat::ChatKeyPlugin,
-                vmux_chat::ChatMediaPlugin,
-                vmux_chat::composer::ChatComposerPlugin,
-                super::model::ChatModelPlugin,
-                super::composer::AgentChatComposerPlugin,
-                super::prompt::ChatPromptPlugin,
-                super::resume::ChatResumePlugin,
-                super::transcript::ChatTranscriptPlugin,
-                vmux_core::host::UiStatePlugin::<vmux_chat::state::ChatUiState>::default(),
-            ))
-            .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
-            .add_observer(on_chat_open_page)
-            .add_systems(Update, report_tab_identity);
+        app.add_plugins((
+            vmux_chat::room::ChatRoomPlugin,
+            vmux_chat::ChatKeyPlugin,
+            vmux_chat::ChatMediaPlugin,
+            vmux_chat::composer::ChatComposerPlugin,
+            super::model::ChatModelPlugin,
+            super::composer::AgentChatComposerPlugin,
+            super::prompt::ChatPromptPlugin,
+            super::resume::ChatResumePlugin,
+            super::transcript::ChatTranscriptPlugin,
+        ))
+        .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
+        .add_observer(on_chat_open_page)
+        .add_systems(Update, report_tab_identity);
     }
 }
 

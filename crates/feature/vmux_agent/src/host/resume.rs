@@ -51,7 +51,7 @@ struct ResumeListTask {
 
 struct ResumeListAnswer {
     sessions: ResumableSessions,
-    scanned: Option<Vec<crate::cli::ResumableSession>>,
+    scanned: Option<Vec<crate::host::cli::ResumableSession>>,
     labels: RepoLabels,
 }
 
@@ -108,7 +108,7 @@ impl RepoLabels {
 }
 
 fn resume_entries(
-    sessions: Vec<crate::cli::ResumableSession>,
+    sessions: Vec<crate::host::cli::ResumableSession>,
     active_kind: Option<AgentKind>,
     active_name: &str,
     labels: &mut RepoLabels,
@@ -184,7 +184,7 @@ fn resume_agent_name(
 
 #[derive(Resource, Default)]
 struct ResumableScan {
-    sessions: Vec<crate::cli::ResumableSession>,
+    sessions: Vec<crate::host::cli::ResumableSession>,
     labels: RepoLabels,
     read_at: Option<std::time::Instant>,
 }
@@ -244,10 +244,10 @@ struct Preferred;
 
 impl Preferred {
     fn first(
-        sessions: &[crate::cli::ResumableSession],
+        sessions: &[crate::host::cli::ResumableSession],
         kind: Option<AgentKind>,
         project: Option<&std::path::Path>,
-    ) -> Vec<crate::cli::ResumableSession> {
+    ) -> Vec<crate::host::cli::ResumableSession> {
         if kind.is_none() && project.is_none() {
             return sessions.to_vec();
         }
@@ -550,7 +550,7 @@ mod tests {
 
     #[test]
     fn resume_results_include_all_agent_kinds_with_source_labels() {
-        use crate::cli::ResumableSession;
+        use crate::host::cli::ResumableSession;
         use std::time::SystemTime;
 
         let session = |kind, sid: &str| ResumableSession {

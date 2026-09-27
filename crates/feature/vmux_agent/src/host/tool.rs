@@ -291,7 +291,7 @@ fn run(
                         )));
                 } else {
                     let request = if placement_override {
-                        AgentRequest::encode(&AgentRunWithPlacementOverride::from(run))
+                        AgentRequest::encode(&AgentRunWithPlacementOverride(run))
                     } else {
                         AgentRequest::encode(&run)
                     };
@@ -565,7 +565,7 @@ async fn run_blocking(
     let token = run_done_token(request_id);
     run.done_marker = Some(token.clone());
     let request = if placement_override {
-        AgentRequest::encode(&AgentRunWithPlacementOverride::from(run))
+        AgentRequest::encode(&AgentRunWithPlacementOverride(run))
     } else {
         AgentRequest::encode(&run)
     }?;

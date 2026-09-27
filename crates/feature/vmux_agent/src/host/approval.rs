@@ -191,6 +191,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
             .add_plugins(ApprovalPlugin);
+        app.update();
         let path =
             std::env::temp_dir().join(format!("vmux-agent-approval-{}.json", uuid::Uuid::new_v4()));
         let store = AgentApprovalStore::load_from(path);

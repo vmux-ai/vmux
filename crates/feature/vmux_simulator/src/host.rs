@@ -7,7 +7,7 @@ mod stream;
 mod tool;
 
 use crate::event::{HardwareButton, SimulatorClipboardOperation, SimulatorReady};
-use crate::url::{PAGE_HOST, PAGE_URL, SimulatorRoute};
+use crate::url::{PAGE_URL, SimulatorRoute};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};

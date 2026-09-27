@@ -131,7 +131,7 @@ mod tests {
 #[cfg(test)]
 mod url_tests {
     use super::*;
-    use crate::cli::vibe::VibeStrategy;
+    use crate::host::cli::vibe::VibeStrategy;
 
     fn empty_meta() -> PageMetadata {
         PageMetadata {
@@ -418,7 +418,7 @@ fn detect_file_end_time_exit(
 #[cfg(test)]
 mod discovery_tests {
     use super::*;
-    use crate::cli::vibe::VibeStrategy;
+    use crate::host::cli::vibe::VibeStrategy;
 
     #[test]
     fn pending_with_no_match_keeps_pending() {

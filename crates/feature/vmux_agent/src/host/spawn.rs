@@ -177,7 +177,7 @@ fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
     strategies: Option<Res<AgentStrategies>>,
-    models: Option<Res<crate::chat::model::AgentModelSelections>>,
+    models: Option<Res<crate::host::model::AgentModelSelections>>,
     exec_override: Option<Res<AgentExecutableOverride>>,
     mut metadata: Query<&mut PageMetadata>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
@@ -488,7 +488,7 @@ fn respond_page_agent_attach_default(
 
 fn rebuilt_args_env_for_restart(
     launch: &TerminalLaunch,
-    strategy: &dyn crate::cli::CliAgentStrategy,
+    strategy: &dyn crate::host::cli::CliAgentStrategy,
     session_id: Option<&str>,
     new_id: ProcessId,
 ) -> Result<(Vec<String>, Vec<(String, String)>, u64), String> {
@@ -708,7 +708,7 @@ mod tests {
         let new_id = ProcessId::new();
         let (args, _env, _) = rebuilt_args_env_for_restart(
             &launch,
-            &crate::cli::claude::ClaudeStrategy,
+            &crate::host::cli::claude::ClaudeStrategy,
             None,
             new_id,
         )
@@ -740,7 +740,7 @@ mod tests {
 
         let (_, env, _) = rebuilt_args_env_for_restart(
             &launch,
-            &crate::cli::codex::CodexStrategy,
+            &crate::host::cli::codex::CodexStrategy,
             None,
             ProcessId::new(),
         )
@@ -766,7 +766,7 @@ mod tests {
         assert!(
             rebuilt_args_env_for_restart(
                 &launch,
-                &crate::cli::codex::CodexStrategy,
+                &crate::host::cli::codex::CodexStrategy,
                 None,
                 ProcessId::new(),
             )

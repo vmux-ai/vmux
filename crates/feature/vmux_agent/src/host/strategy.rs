@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use bevy::prelude::Resource;
 
+use super::cli::{CliAgentStrategy, ResumableSession};
 use crate::AgentKind;
 use crate::AgentVariant;
 use crate::message::Message;
-use crate::cli::{CliAgentStrategy, ResumableSession};
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;

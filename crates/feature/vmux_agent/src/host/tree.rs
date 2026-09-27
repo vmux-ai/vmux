@@ -9,14 +9,14 @@ use vmux_core::browser::{
 };
 use vmux_terminal::TerminalStackSpawnRequest;
 
+use super::cli::claude::ClaudeStrategy;
+use super::cli::codex::CodexStrategy;
+use super::cli::vibe::VibeStrategy;
 use crate::event::{
     AgentQueryRequest, AgentRequestInput, AgentToolCallRequest, RecordStartRequest,
     RecordStartResponse, RecordStopRequest, RecordStopResponse, ScreenshotRequest,
     ScreenshotResponse,
 };
-use crate::cli::claude::ClaudeStrategy;
-use crate::cli::codex::CodexStrategy;
-use crate::cli::vibe::VibeStrategy;
 use crate::session;
 use crate::strategy::AgentStrategies;
 
@@ -38,10 +38,7 @@ pub struct AgentPagesPlugin;
 
 impl Plugin for AgentPagesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            super::chat::AgentChatPagePlugin,
-            crate::setup::AgentSetupPlugin,
-        ));
+        app.add_plugins((super::chat::AgentChatPlugin, crate::setup::AgentSetupPlugin));
     }
 }
 

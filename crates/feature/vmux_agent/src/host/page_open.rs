@@ -555,7 +555,6 @@ fn handle_agent_page_open(
             &agents,
             &cli_sessions,
             &acp_sessions,
-            &child_of_q,
             &strategies,
             &mut spawn_agent,
             &mut commands,
@@ -695,7 +694,6 @@ fn handle_agent_page_open_task(
         &vmux_core::agent::SessionId,
     )>,
     acp_sessions: &Query<&vmux_session::AcpSession>,
-    child_of_q: &Query<&ChildOf>,
     strategies: &Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
     commands: &mut Commands,
@@ -935,11 +933,7 @@ pub(crate) fn attach_agent_spawn_error_to_stack(
     commands.entity(browser).insert(KeyboardOwner);
 }
 
-pub(crate) fn attach_cli_setup_to_stack(
-    kind: AgentKind,
-    stack: Entity,
-    commands: &mut Commands,
-) {
+pub(crate) fn attach_cli_setup_to_stack(kind: AgentKind, stack: Entity, commands: &mut Commands) {
     commands.entity(stack).despawn_children();
     commands
         .entity(stack)
@@ -987,10 +981,10 @@ fn data_url_for_html(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::cli::vibe::VibeStrategy;
     use crate::host::provider::AgentExecutableOverride;
     use crate::host::spawn::{SpawnPlugin, SpawnRequestSet, SpawnRequestsPlugin};
     use crate::host::test_support::{init_worktree_test_repo, test_settings};
-    use crate::cli::vibe::VibeStrategy;
     use crate::strategy::AgentStrategies;
     use vmux_terminal::Terminal;
 
@@ -1913,11 +1907,7 @@ mod tests {
         assert!(app.world().get_entity(webview).is_ok());
         let mut views = app
             .world_mut()
-            .query_filtered::<(
-                Entity,
-                &PageMetadata,
-                &ChildOf,
-            ), With<vmux_chat::host::ChatView>>();
+            .query_filtered::<(Entity, &PageMetadata, &ChildOf), With<vmux_chat::host::ChatView>>();
         let opened: Vec<_> = views.iter(app.world()).collect();
         let [(entity, meta, parent)] = opened.as_slice() else {
             panic!("expected exactly one chat view, got {}", opened.len());
@@ -2187,7 +2177,7 @@ mod tests {
     #[test]
     pub(crate) fn cli_initial_prompt_waits_for_terminal_readiness() {
         let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(crate::cli::codex::CodexStrategy));
+        strategies.register_cli(Box::new(crate::host::cli::codex::CodexStrategy));
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SpawnPlugin))
             .add_message::<SpawnAgentInStackRequest>()

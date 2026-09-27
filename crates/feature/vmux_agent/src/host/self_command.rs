@@ -203,7 +203,7 @@ impl SelfRun {
             .ok()
             .flatten()?;
         Some(Self {
-            payload: payload.into(),
+            payload: payload.0,
             placement_override: true,
         })
     }

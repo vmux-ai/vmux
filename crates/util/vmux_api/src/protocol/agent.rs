@@ -234,46 +234,7 @@ pub struct AgentRun {
 }
 
 #[vmux_api::agent]
-pub struct AgentRunWithPlacementOverride {
-    pub anchor: ProcessId,
-    pub command: String,
-    pub direction: AgentPaneDirection,
-    pub focus: bool,
-    pub beside: Option<ProcessId>,
-    pub mode: PlacementMode,
-    pub terminal: Option<ProcessId>,
-    pub done_marker: Option<String>,
-}
-
-impl From<AgentRun> for AgentRunWithPlacementOverride {
-    fn from(run: AgentRun) -> Self {
-        Self {
-            anchor: run.anchor,
-            command: run.command,
-            direction: run.direction,
-            focus: run.focus,
-            beside: run.beside,
-            mode: run.mode,
-            terminal: run.terminal,
-            done_marker: run.done_marker,
-        }
-    }
-}
-
-impl From<AgentRunWithPlacementOverride> for AgentRun {
-    fn from(run: AgentRunWithPlacementOverride) -> Self {
-        Self {
-            anchor: run.anchor,
-            command: run.command,
-            direction: run.direction,
-            focus: run.focus,
-            beside: run.beside,
-            mode: run.mode,
-            terminal: run.terminal,
-            done_marker: run.done_marker,
-        }
-    }
-}
+pub struct AgentRunWithPlacementOverride(pub AgentRun);
 
 #[vmux_api::agent]
 pub struct AgentNotify {
