@@ -13,7 +13,9 @@ pub(crate) struct ScreenshotPlugin;
 
 impl Plugin for ScreenshotPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ScreenshotBridge>().add_systems(
+        app.world_mut()
+            .spawn((Name::new("Screenshot capture"), ScreenshotBridge::default()));
+        app.add_systems(
             Update,
             (start_screenshots, drain_screenshots)
                 .chain()
@@ -31,7 +33,7 @@ pub(crate) type WakeFn = Arc<dyn Fn() + Send + Sync>;
 const PERMISSION_MSG: &str = "Screen Recording permission required - grant it in System Settings > \
 Privacy & Security > Screen Recording, then call screenshot again.";
 
-#[derive(Resource)]
+#[derive(Component)]
 pub(crate) struct ScreenshotBridge {
     tx: Sender<ScreenshotResponse>,
     rx: Receiver<ScreenshotResponse>,
@@ -72,7 +74,7 @@ fn resolve_crop(
 fn start_screenshots(
     _non_send: NonSendMarker,
     mut reader: MessageReader<ScreenshotRequest>,
-    bridge: Res<ScreenshotBridge>,
+    bridge: Query<&ScreenshotBridge>,
     settings: Res<AppSettings>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     window_q: Query<(Entity, &Window)>,
@@ -81,6 +83,9 @@ fn start_screenshots(
     child_of_q: Query<&ChildOf>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
+    let Ok(bridge) = bridge.single() else {
+        return;
+    };
     let base_dir = crate::capture_output::output_dir(&settings);
     for req in reader.read() {
         let pane_window = req.pane.as_deref().and_then(|id| {
@@ -137,7 +142,13 @@ fn start_screenshots(
     }
 }
 
-fn drain_screenshots(bridge: Res<ScreenshotBridge>, mut writer: MessageWriter<ScreenshotResponse>) {
+fn drain_screenshots(
+    bridge: Query<&ScreenshotBridge>,
+    mut writer: MessageWriter<ScreenshotResponse>,
+) {
+    let Ok(bridge) = bridge.single() else {
+        return;
+    };
     while let Ok(response) = bridge.rx.try_recv() {
         writer.write(response);
     }

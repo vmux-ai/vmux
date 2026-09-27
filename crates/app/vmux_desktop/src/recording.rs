@@ -15,9 +15,12 @@ pub(crate) struct RecordingPlugin;
 
 impl Plugin for RecordingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RecordingBridge>()
-            .init_resource::<RecordingStatus>()
-            .add_message::<RecordingControl>()
+        app.world_mut().spawn((
+            Name::new("Recording capture"),
+            RecordingBridge::default(),
+            RecordingStatus::default(),
+        ));
+        app.add_message::<RecordingControl>()
             .add_systems(
                 Update,
                 (
@@ -50,7 +53,7 @@ pub(crate) struct RecordOutcome {
     pub result: Result<RecordingInfo, String>,
 }
 
-#[derive(Resource)]
+#[derive(Component)]
 pub(crate) struct RecordingBridge {
     pub(crate) tx: Sender<RecordOutcome>,
     rx: Receiver<RecordOutcome>,
@@ -63,7 +66,7 @@ impl Default for RecordingBridge {
     }
 }
 
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Component, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum RecordingStatus {
     #[default]
     Idle,
@@ -81,8 +84,11 @@ pub(crate) enum RecordingControl {
 fn handle_recording_control(
     _non_send: NonSendMarker,
     mut reader: MessageReader<RecordingControl>,
-    mut status: ResMut<RecordingStatus>,
+    mut status: Query<&mut RecordingStatus>,
 ) {
+    let Ok(mut status) = status.single_mut() else {
+        return;
+    };
     for ctrl in reader.read() {
         match ctrl {
             RecordingControl::Pause => {
@@ -225,9 +231,8 @@ fn start_recording(
     mut start_reader: MessageReader<RecordStartRequest>,
     mut stop_reader: MessageReader<RecordStopRequest>,
     mut start_responses: MessageWriter<RecordStartResponse>,
-    bridge: Res<RecordingBridge>,
+    runtime: Query<(&RecordingBridge, &mut RecordingStatus)>,
     settings: Res<AppSettings>,
-    mut status: ResMut<RecordingStatus>,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     window_q: Query<(Entity, &Window)>,
     host_windows: Query<&HostWindow>,
@@ -235,6 +240,9 @@ fn start_recording(
     child_of_q: Query<&ChildOf>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
+    let Ok((bridge, mut status)) = runtime.single_mut() else {
+        return;
+    };
     let default_dir = crate::capture_output::output_dir(&settings);
     for req in start_reader.read() {
         let pane_window = req.pane.as_deref().and_then(|id| {
@@ -298,11 +306,13 @@ fn auto_stop_recordings(_non_send: NonSendMarker) {
 }
 
 fn drain_recordings(
-    bridge: Res<RecordingBridge>,
+    mut runtime: Query<(&RecordingBridge, &mut RecordingStatus)>,
     mut last_auto: Local<Option<RecordingInfo>>,
-    mut status: ResMut<RecordingStatus>,
     mut stop_responses: MessageWriter<RecordStopResponse>,
 ) {
+    let Ok((bridge, mut status)) = runtime.single_mut() else {
+        return;
+    };
     while let Ok(outcome) = bridge.rx.try_recv() {
         *status = RecordingStatus::Idle;
         match outcome.request_id {

@@ -259,7 +259,13 @@ fn sync_tray_menu_state(
 }
 
 #[cfg(feature = "recording")]
-fn sync_tray_recording(status: Res<RecordingStatus>, mut runtime: NonSendMut<TrayRuntime>) {
+fn sync_tray_recording(
+    status: Query<&RecordingStatus>,
+    mut runtime: NonSendMut<TrayRuntime>,
+) {
+    let Ok(status) = status.single() else {
+        return;
+    };
     let Some(handle) = runtime.0.as_mut() else {
         return;
     };
