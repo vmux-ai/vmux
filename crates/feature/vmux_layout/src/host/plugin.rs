@@ -73,9 +73,9 @@ impl Plugin for LayoutPlugin {
                 SideSheetLayoutPlugin,
                 HeaderLayoutPlugin,
                 WorktreePlugin,
-                PageContextPlugin,
             ))
             .add_plugins((
+                PageContextPlugin,
                 TogglePlugin,
                 WebviewRevealPlugin,
                 ArchivePlugin,

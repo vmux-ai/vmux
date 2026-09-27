@@ -730,9 +730,11 @@ Persistent processes and their query runtime belong to this service boundary. Te
 render and control those processes, but the service names and exposes process operations without
 depending on terminal page concepts.
 
-The CLI uses Clap only to parse argv. A finite command becomes an operation-specific component in
-a short-lived Bevy app, asynchronous work is attached as task components, and `AppExit` follows a
-typed result. Long-running MCP stdio remains a dedicated runtime.
+The CLI uses Clap only to parse argv. Feature crates contribute command metadata through local RON
+manifests and own the typed request components and systems that execute those commands;
+`vmux_app` only composes those plugins. A finite command runs in a short-lived Bevy app and
+`AppExit` follows a typed result. Long-running MCP stdio remains a dedicated runtime over the same
+feature-composed tool registry.
 
 Two cfg aliases decide that split, emitted by `crates/build_platform_cfg.rs`: **`ui`** is
 iOS or macOS, the surfaces that run pages; **`host`** is everything that is not iOS, the

@@ -1,11 +1,10 @@
-use bevy_app::AppExit;
-use clap::Parser;
+use bevy_app::{App, AppExit};
 
 mod command;
 
-use command::Cli;
-
 #[tokio::main]
 async fn main() -> AppExit {
-    command::run(Cli::parse()).await
+    let mut app = App::new();
+    app.add_plugins(vmux_app::VmuxCliPlugin);
+    command::run(app).await
 }

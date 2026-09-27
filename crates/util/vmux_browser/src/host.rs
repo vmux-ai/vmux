@@ -5,10 +5,10 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::CommandLineConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
-use vmux_command::ReadCommandRequests;
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
 use vmux_core::{PageIdentity, PageMetadata, PageOpenSet, page::PageReady};
+use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 use vmux_layout::{
     Browser, Header, Open, PendingWebviewReveal, UpdateState,

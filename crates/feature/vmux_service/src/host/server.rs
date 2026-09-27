@@ -99,10 +99,8 @@ impl ServiceDaemonPlugin {
     ) -> Self {
         let manager = Arc::new(Mutex::new(ProcessManager::new(wake.clone())));
         let (query_plugin, queries) = ProcessQueryPlugin::new(Arc::clone(&manager), wake.clone());
-        let (client_operation_plugin, client_operations) =
-            ClientOperationPlugin::new(wake.clone());
-        let (agent_session_plugin, agent_sessions) =
-            AgentSessionPlugin::new(runtime.clone(), wake);
+        let (client_operation_plugin, client_operations) = ClientOperationPlugin::new(wake.clone());
+        let (agent_session_plugin, agent_sessions) = AgentSessionPlugin::new(runtime.clone(), wake);
         Self {
             listener: std::sync::Mutex::new(Some(listener)),
             manager,
@@ -151,11 +149,7 @@ impl Plugin for ServiceDaemonPlugin {
             .take()
             .expect("service daemon plugin can only be built once");
         let started_at = ServiceStartedAt(Instant::now());
-        app.add_plugins((
-            query_plugin,
-            client_operation_plugin,
-            agent_session_plugin,
-        ));
+        app.add_plugins((query_plugin, client_operation_plugin, agent_session_plugin));
         let task = self.runtime.spawn(async move {
             run_server(
                 listener,
@@ -279,10 +273,7 @@ async fn route_agent_input(
     drop(acp);
     let text = compose_agent_prompt(&page_agent_prompt(text, &attachments), context.as_deref());
     agent_sessions
-        .input(
-            sid,
-            crate::agent::SessionInput::User { text, attachments },
-        )
+        .input(sid, crate::agent::SessionInput::User { text, attachments })
         .await;
 }
 
@@ -1090,15 +1081,9 @@ async fn handle_client(
                 let tools: Vec<crate::stream::ToolDef> =
                     serde_json::from_str(&tools_json).unwrap_or_default();
                 let auto: std::collections::HashSet<String> = auto_tools.into_iter().collect();
-                let result = agent_sessions.spawn(
-                    sid,
-                    provider,
-                    model,
-                    cwd,
-                    tools,
-                    auto,
-                    broker.clone(),
-                ).await;
+                let result = agent_sessions
+                    .spawn(sid, provider, model, cwd, tools, auto, broker.clone())
+                    .await;
                 if let Err(message) = result {
                     let resp = ServiceMessage::Error { message };
                     let mut w = writer.lock().await;

@@ -9,6 +9,21 @@ repository.workspace = true
 
 [features]
 default = []
+cli = [
+    "agent",
+    "browser",
+    "editor",
+    "knowledge",
+    "layout",
+    "service",
+    "simulator",
+    "space",
+    "team",
+    "terminal",
+    "tool",
+    "dep:bevy_ecs",
+    "dep:vmux_mcp",
+]
 desktop = [
     "agent",
     "browser",
@@ -63,6 +78,7 @@ vault = ["layout", "dep:vmux_vault"]
 
 [dependencies]
 bevy_app = { workspace = true }
+bevy_ecs = { workspace = true, optional = true }
 vmux_agent = { path = "../../feature/vmux_agent", optional = true }
 vmux_browser = { path = "../vmux_browser", optional = true }
 vmux_chat = { path = "../../feature/vmux_chat", optional = true }
@@ -75,6 +91,7 @@ vmux_git = { path = "../../feature/vmux_git", optional = true }
 vmux_history = { path = "../../feature/vmux_history", optional = true }
 vmux_knowledge = { path = "../../feature/vmux_knowledge", optional = true }
 vmux_layout = { path = "../../feature/vmux_layout", optional = true }
+vmux_mcp = { path = "../vmux_mcp", optional = true }
 vmux_macro = { path = "../vmux_macro" }
 vmux_service = { path = "../../feature/vmux_service", optional = true }
 vmux_setting = { path = "../../feature/vmux_setting", optional = true }

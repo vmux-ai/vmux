@@ -44,7 +44,6 @@ use vmux_layout::event::{
 };
 pub use vmux_layout::{Browser, Loading};
 
-use vmux_flex::prelude::*;
 use vmux_ui::i18n::Locale;
 
 pub struct BrowserPlugin;

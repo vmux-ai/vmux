@@ -98,11 +98,7 @@ async fn sessions(state: &RemoteState) -> Vec<RemoteSession> {
 
 async fn session_exists(state: &RemoteState, sid: &str) -> bool {
     state.acp.lock().await.contains(sid)
-        || state
-            .agents
-            .remote_session(sid.to_string())
-            .await
-            .is_some()
+        || state.agents.remote_session(sid.to_string()).await.is_some()
 }
 
 async fn push_input(

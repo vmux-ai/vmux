@@ -161,15 +161,13 @@ fn plan_layout_requests(
     mut reader: MessageReader<LayoutApplyRequest>,
     active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
     tabs_q: Query<(Entity, Option<&ChildOf>), With<LayoutTab>>,
-    nodes_q: Query<
-        (
-            Option<&Children>,
-            Has<LayoutTab>,
-            Has<PaneSplit>,
-            Has<Pane>,
-            Has<Stack>,
-        ),
-    >,
+    nodes_q: Query<(
+        Option<&Children>,
+        Has<LayoutTab>,
+        Has<PaneSplit>,
+        Has<Pane>,
+        Has<Stack>,
+    )>,
     mut plans: MessageWriter<LayoutApplyPlan>,
     mut results: MessageWriter<LayoutApplyResult>,
 ) {
@@ -241,11 +239,7 @@ fn respond_to_layout_apply(
     }
 }
 
-fn apply_layout_plan(
-    world: &mut World,
-    snapshot: &LayoutSnapshot,
-    plan: &DiffPlan,
-) {
+fn apply_layout_plan(world: &mut World, snapshot: &LayoutSnapshot, plan: &DiffPlan) {
     let mut new_entities: std::collections::HashMap<*const proto::LayoutNode, Entity> =
         std::collections::HashMap::new();
     let mut materialized: Vec<(&proto::Tab, Entity)> = Vec::with_capacity(snapshot.tabs.len());
@@ -667,10 +661,7 @@ mod tests {
         }
 
         fn apply(app: &mut App, snapshot: LayoutSnapshot) -> Result<LayoutSnapshot, String> {
-            if !app
-                .world()
-                .contains_resource::<Messages<LayoutApplyPlan>>()
-            {
+            if !app.world().contains_resource::<Messages<LayoutApplyPlan>>() {
                 Self::install(app);
             }
             let request_id = [42; 16];

@@ -202,10 +202,7 @@ pub(crate) struct AgentSessionPlugin {
 }
 
 impl AgentSessionPlugin {
-    pub(crate) fn new(
-        runtime: Handle,
-        wake: mpsc::UnboundedSender<()>,
-    ) -> (Self, AgentSessions) {
+    pub(crate) fn new(runtime: Handle, wake: mpsc::UnboundedSender<()>) -> (Self, AgentSessions) {
         let (spawns, spawn_inbox) = mpsc::unbounded_channel();
         let (inputs, input_inbox) = mpsc::unbounded_channel();
         let (subscriptions, subscription_inbox) = mpsc::unbounded_channel();
@@ -642,10 +639,7 @@ fn spawn_agent_sessions(
             session_ids.insert(request.sid.clone());
             Ok(())
         } else {
-            Err(format!(
-                "unknown page-agent provider: {}",
-                request.provider
-            ))
+            Err(format!("unknown page-agent provider: {}", request.provider))
         };
         if let Some(response) = request.response.take() {
             let _ = response.send(result);
@@ -677,12 +671,13 @@ fn route_agent_session_inputs(
                     .is_some_and(|pending| pending.call_id == *call_id)
                 {
                     *pending = None;
-                    let _ = stream.0.send(ServiceMessage::Shared(
-                        SharedEvent::AgentApprovalResolved {
-                            sid: request.sid.clone(),
-                            call_id: call_id.clone(),
-                        },
-                    ));
+                    let _ =
+                        stream
+                            .0
+                            .send(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
+                                sid: request.sid.clone(),
+                                call_id: call_id.clone(),
+                            }));
                 }
             }
             if let Some(session_input) = request.input.take() {

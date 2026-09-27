@@ -1,274 +1,227 @@
-use std::future::Future;
-use std::io;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::num::NonZero;
 use std::time::Duration;
 
-use bevy_app::{App, AppExit, Plugin, Update};
+use bevy_app::{App, AppExit};
 use bevy_ecs::prelude::*;
-use bevy_tasks::futures_lite::future;
-use clap::{Parser, Subcommand};
+use clap::builder::{OsStringValueParser, PossibleValuesParser};
+use clap::error::ErrorKind;
+use clap::{Arg, ArgAction, ArgMatches, Command};
+use vmux_core::cli::{
+    CliAppHandler, CliArgumentManifest, CliCommandManifest, CliInvocation, CliManifest, CliResult,
+};
 
-pub mod mcp;
-pub mod notify;
-pub mod notify_file_touch;
-pub mod notify_turn_end;
-pub mod open;
-pub mod remote;
-pub mod service;
-pub mod tool;
-
-#[derive(Debug, Parser)]
-#[command(name = "vmux", version, about = "Vmux command-line interface")]
-pub struct Cli {
-    #[command(subcommand)]
-    pub command: Option<Command>,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum Command {
-    Mcp(mcp::McpArgs),
-    Notify(notify::NotifyRequest),
-    NotifyFileTouch(notify_file_touch::NotifyFileTouchRequest),
-    NotifyTurnEnd(notify_turn_end::NotifyTurnEndRequest),
-    Tools(tool::ToolArgs),
-    Service(service::ServiceArgs),
-    Remote(remote::RemoteArgs),
-}
-
-#[derive(Component)]
-pub(crate) struct CliTask(tokio::task::JoinHandle<Result<u8, String>>);
-
-impl CliTask {
-    pub(crate) fn spawn(task: impl Future<Output = Result<u8, String>> + Send + 'static) -> Self {
-        Self(tokio::spawn(task))
-    }
-}
-
-#[derive(Component)]
-pub(crate) struct CliResult(pub(crate) Result<u8, String>);
-
-impl CliResult {
-    pub(crate) fn from_io(result: io::Result<i32>) -> Self {
-        Self(
-            result
-                .map(|code| u8::try_from(code).unwrap_or(1))
-                .map_err(|error| error.to_string()),
-        )
-    }
-
-    pub(crate) fn from_unit(result: io::Result<()>) -> Self {
-        Self(result.map(|()| 0).map_err(|error| error.to_string()))
-    }
-}
-
-struct CliPlugin {
-    command: Option<Command>,
-}
-
-impl Plugin for CliPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                execute_open,
-                start_notification,
-                start_file_touch,
-                start_turn_end,
-                execute_tool,
-                execute_service,
-                execute_remote,
-                poll_cli_tasks,
-                finish_cli,
-            )
-                .chain(),
-        );
-
-        let mut request = app.world_mut().spawn_empty();
-        match self.command.as_ref() {
-            None => {
-                request.insert(open::OpenRequest);
-            }
-            Some(Command::Notify(command)) => {
-                request.insert(command.clone());
-            }
-            Some(Command::NotifyFileTouch(command)) => {
-                request.insert(command.clone());
-            }
-            Some(Command::NotifyTurnEnd(command)) => {
-                request.insert(command.clone());
-            }
-            Some(Command::Tools(command)) => {
-                request.insert(command.clone());
-            }
-            Some(Command::Service(command)) => {
-                request.insert(command.clone());
-            }
-            Some(Command::Remote(command)) => {
-                request.insert(command.clone());
-            }
-            Some(Command::Mcp(_)) => unreachable!(),
-        }
-    }
-}
-
-pub async fn run(cli: Cli) -> AppExit {
-    let command = match cli.command {
-        Some(Command::Mcp(args)) => {
-            return match mcp::run(args).await {
-                Ok(()) => AppExit::Success,
-                Err(error) => {
-                    eprintln!("vmux mcp: {error}");
-                    AppExit::error()
-                }
+pub async fn run(mut app: App) -> AppExit {
+    let catalog = CliCatalog::from_app(&mut app);
+    let invocation = match catalog.parse(std::env::args_os()) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            let success = matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            );
+            let _ = error.print();
+            return if success {
+                AppExit::Success
+            } else {
+                AppExit::error()
             };
         }
-        command => command,
     };
-
-    let mut app = App::new();
-    app.add_plugins(CliPlugin { command })
-        .set_runner(one_shot_runner);
-    app.run()
-}
-
-fn execute_open(
-    requests: Query<(Entity, &open::OpenRequest), Added<open::OpenRequest>>,
-    mut commands: Commands,
-) {
-    for (entity, request) in &requests {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_unit(request.execute()));
+    let app_handler = {
+        let world = app.world_mut();
+        let mut handlers = world.query::<&CliAppHandler>();
+        handlers
+            .iter(world)
+            .find(|handler| handler.command == invocation.command)
+            .copied()
+    };
+    if let Some(handler) = app_handler {
+        return exit((handler.run)(app, invocation).await);
     }
-}
 
-fn start_notification(
-    requests: Query<(Entity, &notify::NotifyRequest), Added<notify::NotifyRequest>>,
-    mut commands: Commands,
-) {
-    for (entity, request) in &requests {
-        let request = request.clone();
-        commands.entity(entity).insert(CliTask::spawn(async move {
-            request
-                .send()
-                .await
-                .map(|()| 0)
-                .map_err(|error| error.to_string())
-        }));
-    }
-}
-
-fn start_file_touch(
-    requests: Query<
-        (Entity, &notify_file_touch::NotifyFileTouchRequest),
-        Added<notify_file_touch::NotifyFileTouchRequest>,
-    >,
-    mut commands: Commands,
-) {
-    for (entity, request) in &requests {
-        let request = request.clone();
-        commands.entity(entity).insert(CliTask::spawn(async move {
-            request
-                .send()
-                .await
-                .map(|()| 0)
-                .map_err(|error| error.to_string())
-        }));
-    }
-}
-
-fn start_turn_end(
-    requests: Query<
-        (Entity, &notify_turn_end::NotifyTurnEndRequest),
-        Added<notify_turn_end::NotifyTurnEndRequest>,
-    >,
-    mut commands: Commands,
-) {
-    for (entity, request) in &requests {
-        let request = request.clone();
-        commands.entity(entity).insert(CliTask::spawn(async move {
-            request
-                .send()
-                .await
-                .map(|()| 0)
-                .map_err(|error| error.to_string())
-        }));
-    }
-}
-
-fn execute_tool(
-    requests: Query<(Entity, &tool::ToolArgs), Added<tool::ToolArgs>>,
-    mut commands: Commands,
-) {
-    for (entity, request) in &requests {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_unit(request.execute()));
-    }
-}
-
-fn execute_service(
-    requests: Query<(Entity, &service::ServiceArgs), Added<service::ServiceArgs>>,
-    mut commands: Commands,
-) {
-    for (entity, request) in &requests {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(request.execute()));
-    }
-}
-
-fn execute_remote(
-    requests: Query<(Entity, &remote::RemoteArgs), Added<remote::RemoteArgs>>,
-    mut commands: Commands,
-) {
-    for (entity, request) in &requests {
-        commands
-            .entity(entity)
-            .insert(CliResult::from_io(request.execute()));
-    }
-}
-
-fn poll_cli_tasks(mut tasks: Query<(Entity, &mut CliTask)>, mut commands: Commands) {
-    for (entity, mut task) in &mut tasks {
-        if !task.0.is_finished() {
-            continue;
-        }
-        let result = match future::block_on(&mut task.0) {
-            Ok(result) => result,
-            Err(error) => Err(error.to_string()),
-        };
-        commands
-            .entity(entity)
-            .remove::<CliTask>()
-            .insert(CliResult(result));
-    }
-}
-
-fn finish_cli(results: Query<&CliResult, Added<CliResult>>, mut exits: MessageWriter<AppExit>) {
-    for result in &results {
-        match &result.0 {
-            Ok(0) => {
-                exits.write(AppExit::Success);
-            }
-            Ok(code) => {
-                let code = NonZero::new(*code).unwrap_or(NonZero::<u8>::MIN);
-                exits.write(AppExit::Error(code));
-            }
-            Err(error) => {
-                eprintln!("vmux: {error}");
-                exits.write(AppExit::error());
-            }
-        }
-    }
-}
-
-fn one_shot_runner(mut app: App) -> AppExit {
+    app.finish();
+    app.cleanup();
+    let invocation = app.world_mut().spawn(invocation).id();
     loop {
         app.update();
-        if let Some(exit) = app.should_exit() {
-            return exit;
+        let result = app
+            .world_mut()
+            .get_entity_mut(invocation)
+            .ok()
+            .and_then(|mut entity| entity.take::<CliResult>());
+        if let Some(result) = result {
+            return exit(result);
         }
         std::thread::park_timeout(Duration::from_millis(1));
+    }
+}
+
+struct CliCatalog {
+    default: String,
+    commands: Vec<CliCommandManifest>,
+}
+
+impl CliCatalog {
+    fn from_app(app: &mut App) -> Self {
+        let mut manifests = app.world_mut().query::<&CliManifest>();
+        let mut default = None;
+        let mut commands = Vec::new();
+        for manifest in manifests.iter(app.world()) {
+            if let Some(candidate) = &manifest.default {
+                assert!(
+                    default.is_none(),
+                    "only one default CLI command may be registered"
+                );
+                default = Some(candidate.clone());
+            }
+            commands.extend(manifest.commands.iter().cloned());
+        }
+        commands.sort_by(|left, right| left.name.cmp(&right.name));
+        let mut names = BTreeSet::new();
+        for command in &commands {
+            assert!(
+                names.insert(command.name.clone()),
+                "duplicate CLI command: {}",
+                command.name
+            );
+        }
+        Self {
+            default: default.expect("one default CLI command must be registered"),
+            commands,
+        }
+    }
+
+    fn parse(
+        &self,
+        arguments: impl IntoIterator<Item = OsString>,
+    ) -> Result<CliInvocation, clap::Error> {
+        let mut command = Command::new("vmux")
+            .version(env!("CARGO_PKG_VERSION"))
+            .about("Vmux command-line interface");
+        for child in &self.commands {
+            command = command.subcommand(Self::command(child));
+        }
+        let matches = command.try_get_matches_from(arguments)?;
+        let Some((name, child_matches)) = matches.subcommand() else {
+            return Ok(CliInvocation {
+                command: self.default.clone(),
+                arguments: BTreeMap::new(),
+            });
+        };
+        let child = self
+            .commands
+            .iter()
+            .find(|command| command.name == name)
+            .expect("Clap returned an unregistered command");
+        let mut arguments = BTreeMap::new();
+        let command = Self::resolve(child, child_matches, &mut arguments);
+        Ok(CliInvocation {
+            command: command.id.clone(),
+            arguments,
+        })
+    }
+
+    fn command(manifest: &CliCommandManifest) -> Command {
+        let mut command = Command::new(manifest.name.clone());
+        if let Some(about) = &manifest.about {
+            command = command.about(about.clone());
+        }
+        for argument in &manifest.arguments {
+            command = command.arg(Self::argument(argument));
+        }
+        for child in &manifest.commands {
+            command = command.subcommand(Self::command(child));
+        }
+        if manifest.subcommand_required {
+            command = command.subcommand_required(true);
+        }
+        command
+    }
+
+    fn argument(manifest: &CliArgumentManifest) -> Arg {
+        let mut argument = Arg::new(manifest.id.clone());
+        if let Some(long) = &manifest.long {
+            argument = argument.long(long.clone());
+        }
+        if let Some(short) = manifest.short {
+            argument = argument.short(short);
+        }
+        if let Some(value_name) = &manifest.value_name {
+            argument = argument.value_name(value_name.clone());
+        }
+        if let Some(index) = manifest.index {
+            argument = argument.index(index);
+        }
+        if manifest.required {
+            argument = argument.required(true);
+        }
+        if let Some(default) = &manifest.default {
+            argument = argument.default_value(default.clone());
+        }
+        if !manifest.values.is_empty() {
+            argument = argument.value_parser(PossibleValuesParser::new(manifest.values.clone()));
+        } else if !manifest.flag {
+            argument = argument.value_parser(OsStringValueParser::new());
+        }
+        if manifest.flag {
+            argument = argument.action(ArgAction::SetTrue);
+        }
+        argument
+    }
+
+    fn resolve<'a>(
+        command: &'a CliCommandManifest,
+        matches: &ArgMatches,
+        arguments: &mut BTreeMap<String, Vec<OsString>>,
+    ) -> &'a CliCommandManifest {
+        Self::collect_arguments(&command.arguments, matches, arguments);
+        let Some((name, child_matches)) = matches.subcommand() else {
+            return command;
+        };
+        let child = command
+            .commands
+            .iter()
+            .find(|child| child.name == name)
+            .expect("Clap returned an unregistered nested command");
+        Self::resolve(child, child_matches, arguments)
+    }
+
+    fn collect_arguments(
+        manifests: &[CliArgumentManifest],
+        matches: &ArgMatches,
+        arguments: &mut BTreeMap<String, Vec<OsString>>,
+    ) {
+        for manifest in manifests {
+            if manifest.flag {
+                if matches.get_flag(&manifest.id) {
+                    arguments.insert(manifest.id.clone(), vec![OsString::from("true")]);
+                }
+                continue;
+            }
+            if manifest.values.is_empty() {
+                let Some(values) = matches.get_many::<OsString>(&manifest.id) else {
+                    continue;
+                };
+                arguments.insert(manifest.id.clone(), values.cloned().collect());
+            } else {
+                let Some(values) = matches.get_many::<String>(&manifest.id) else {
+                    continue;
+                };
+                arguments.insert(manifest.id.clone(), values.map(OsString::from).collect());
+            }
+        }
+    }
+}
+
+fn exit(result: CliResult) -> AppExit {
+    match result.0 {
+        Ok(0) => AppExit::Success,
+        Ok(code) => AppExit::Error(NonZero::new(code).unwrap_or(NonZero::<u8>::MIN)),
+        Err(error) => {
+            eprintln!("vmux: {error}");
+            AppExit::error()
+        }
     }
 }

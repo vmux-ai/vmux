@@ -12,26 +12,10 @@ path = "src/main.rs"
 [dependencies]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
-bevy_tasks = { workspace = true }
-clap = { version = "4", features = ["derive"] }
-serde_json = { workspace = true }
+clap = { version = "4", features = ["string"] }
 tokio = { workspace = true }
-vmux_agent = { path = "../../feature/vmux_agent" }
-vmux_api = { path = "../../util/vmux_api" }
-vmux_browser = { path = "../../util/vmux_browser" }
-vmux_command = { path = "../../feature/vmux_command" }
-vmux_editor = { path = "../../feature/vmux_editor" }
-vmux_knowledge = { path = "../../feature/vmux_knowledge" }
-vmux_layout = { path = "../../feature/vmux_layout" }
-vmux_mcp = { path = "../../util/vmux_mcp" }
-vmux_setting = { path = "../../feature/vmux_setting" }
-vmux_simulator = { path = "../../feature/vmux_simulator" }
-vmux_space = { path = "../../feature/vmux_space" }
-vmux_team = { path = "../../feature/vmux_team" }
-vmux_terminal = { path = "../../feature/vmux_terminal" }
-vmux_transport = { path = "../../util/vmux_transport" }
-vmux_tool = { path = "../../feature/vmux_tool" }
-vmux_service = { path = "../../feature/vmux_service" }
+vmux_app = { path = "../../util/vmux_app", features = ["cli"] }
+vmux_core = { path = "../../util/vmux_core" }
 
 [dev-dependencies]
 assert_cmd = "2"

@@ -1,0 +1,27 @@
+(
+    commands: [
+        (
+            id: "mcp",
+            name: "mcp",
+            about: Some("Run the vmux MCP server over stdio"),
+            arguments: [
+                (id: "anchor", long: Some("anchor"), value_name: Some("PROCESS_ID")),
+                (id: "profile", long: Some("profile"), value_name: Some("PROFILE")),
+                (id: "acp_session", long: Some("acp-session"), flag: true),
+                (id: "acp_terminals", long: Some("acp-terminals"), flag: true),
+                (
+                    id: "run_timeout_secs",
+                    long: Some("run-timeout-secs"),
+                    value_name: Some("SECONDS"),
+                    default: Some("50"),
+                ),
+                (
+                    id: "shell",
+                    long: Some("shell"),
+                    value_name: Some("SHELL"),
+                    default: Some(""),
+                ),
+            ],
+        ),
+    ],
+)

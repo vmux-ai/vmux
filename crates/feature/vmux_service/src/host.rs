@@ -9,6 +9,7 @@ pub mod agent;
 pub mod bundle;
 pub mod cleanup;
 pub mod cli;
+pub use cli::ServiceCliPlugin;
 pub mod client;
 pub mod framing;
 pub mod http;

@@ -1,6 +1,8 @@
 pub mod agent_setup;
 pub mod chat;
 pub mod chat_projection;
+#[cfg(host)]
+pub mod cli;
 pub mod dom_snapshot;
 pub mod editor;
 pub mod event;

@@ -41,9 +41,7 @@ pub fn attach_page_agent_to_stack(
     commands: &mut Commands,
     strategies: &Query<(&StrategyKey, &StrategyKind), With<Strategy>>,
 ) -> Option<()> {
-    attach_page_agent_to_stack_with_webview(
-        stack, provider, model, sid, None, commands, strategies,
-    )
+    attach_page_agent_to_stack_with_webview(stack, provider, model, sid, None, commands, strategies)
 }
 
 #[allow(clippy::too_many_arguments)]

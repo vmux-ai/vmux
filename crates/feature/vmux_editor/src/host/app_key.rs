@@ -13,8 +13,7 @@ use vmux_core::event::{
 
 use crate::host::editor::{Editor, FileView};
 use crate::host::panel::{
-    FilePanelChooseRequest, FilePanelDismissRequest, FilePanelNextRequest,
-    FilePanelPreviousRequest,
+    FilePanelChooseRequest, FilePanelDismissRequest, FilePanelNextRequest, FilePanelPreviousRequest,
 };
 use crate::host::shape::BufferShape;
 
@@ -70,10 +69,7 @@ fn spawn_commands(mut commands: Commands) {
         definitions.take("file_find_in_files"),
         FileKeyBinding(FileKey::FindInFiles),
     ));
-    commands.spawn((
-        definitions.take("file_panel_next"),
-        FilePanelNextKeyBinding,
-    ));
+    commands.spawn((definitions.take("file_panel_next"), FilePanelNextKeyBinding));
     commands.spawn((
         definitions.take("file_panel_previous"),
         FilePanelPreviousKeyBinding,

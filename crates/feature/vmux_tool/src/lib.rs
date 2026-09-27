@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+#[cfg(host)]
+mod cli;
 #[cfg(not(target_os = "ios"))]
 mod connection;
 mod dotfiles;
@@ -23,6 +25,8 @@ use vmux_core::tool::{
     ToolLinkRequest, ToolUninstallRequest, ToolUnlinkRequest, ToolUpdateRequest,
 };
 
+#[cfg(host)]
+pub use cli::ToolCliPlugin;
 #[cfg(not(target_os = "ios"))]
 pub use connection::{McpConnectionPlugin, McpSnapshotRequest};
 pub use dotfiles::*;

@@ -1,0 +1,43 @@
+(
+    commands: [
+        (
+            id: "service",
+            name: "service",
+            about: Some("Manage the vmux background service"),
+            subcommand_required: true,
+            commands: [
+                (id: "service.status", name: "status"),
+                (id: "service.start", name: "start"),
+                (id: "service.stop", name: "stop"),
+                (id: "service.restart", name: "restart"),
+                (
+                    id: "service.logs",
+                    name: "logs",
+                    arguments: [
+                        (id: "follow", long: Some("follow"), short: Some('f'), flag: true),
+                    ],
+                ),
+                (id: "service.install", name: "install"),
+                (id: "service.uninstall", name: "uninstall"),
+            ],
+        ),
+        (
+            id: "remote.pair",
+            name: "remote",
+            about: Some("Manage remote access"),
+            arguments: [
+                (id: "reset", long: Some("reset"), flag: true),
+            ],
+            commands: [
+                (id: "remote.list", name: "list"),
+                (
+                    id: "remote.revoke",
+                    name: "revoke",
+                    arguments: [
+                        (id: "client_id", index: Some(1), required: true, value_name: Some("CLIENT_ID")),
+                    ],
+                ),
+            ],
+        ),
+    ],
+)
