@@ -1,4 +1,4 @@
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarPage, CommandBarTab, CommandBarUiState, OpenId,
@@ -12,18 +12,16 @@ pub struct StartRosterPlugin;
 
 impl Plugin for StartRosterPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Roster>()
-            .init_resource::<Launcher>()
+        app.add_message::<Roster>()
+            .add_message::<RepublishLauncher>()
             .add_message::<PageEmit>()
+            .add_systems(Startup, spawn_start_roster)
             .add_systems(
                 Update,
                 (
-                    project_launcher
-                        .in_set(LauncherProjection)
-                        .run_if(resource_changed::<Roster>),
-                    emit_launcher
-                        .after(LauncherProjection)
-                        .run_if(resource_changed::<Launcher>),
+                    receive_roster.before(LauncherProjection),
+                    project_launcher.in_set(LauncherProjection),
+                    emit_launcher.after(LauncherProjection),
                 ),
             );
     }
@@ -32,23 +30,63 @@ impl Plugin for StartRosterPlugin {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct LauncherProjection;
 
-#[derive(Resource, Default, PartialEq)]
+#[derive(Component, Message, Clone, Default, PartialEq)]
 pub struct Roster {
     pub sessions: Vec<RemoteSession>,
     pub agents: Vec<RemoteAgent>,
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct Launcher {
     snapshot: CommandBarOpenEvent,
     sequence: u64,
 }
 
-fn project_launcher(roster: Res<Roster>, mut launcher: ResMut<Launcher>) {
+#[derive(Component)]
+struct StartRosterRuntime;
+
+#[derive(Message)]
+pub struct RepublishLauncher;
+
+fn spawn_start_roster(mut commands: Commands) {
+    commands.spawn((StartRosterRuntime, Roster::default(), Launcher::default()));
+}
+
+fn receive_roster(
+    mut messages: MessageReader<Roster>,
+    mut runtimes: Query<&mut Roster, With<StartRosterRuntime>>,
+) {
+    let Ok(mut roster) = runtimes.single_mut() else {
+        return;
+    };
+    for update in messages.read() {
+        if *roster != *update {
+            *roster = update.clone();
+        }
+    }
+}
+
+fn project_launcher(
+    mut runtimes: Query<(&Roster, &mut Launcher), (With<StartRosterRuntime>, Changed<Roster>)>,
+) {
+    let Ok((roster, mut launcher)) = runtimes.single_mut() else {
+        return;
+    };
     launcher.snapshot = Launcher::snapshot(&roster);
 }
 
-fn emit_launcher(mut launcher: ResMut<Launcher>, mut emits: MessageWriter<PageEmit>) {
+fn emit_launcher(
+    mut refreshes: MessageReader<RepublishLauncher>,
+    mut runtimes: Query<&mut Launcher, With<StartRosterRuntime>>,
+    mut emits: MessageWriter<PageEmit>,
+) {
+    let refresh = refreshes.read().next().is_some();
+    let Ok(mut launcher) = runtimes.single_mut() else {
+        return;
+    };
+    if !refresh && !launcher.is_changed() {
+        return;
+    }
     launcher.sequence = launcher.sequence.wrapping_add(1).max(1);
     let state = CommandBarUiState {
         sequence: launcher.sequence,
@@ -149,17 +187,25 @@ mod tests {
     impl Started {
         fn with(roster: Roster) -> Self {
             let mut app = App::new();
-            app.add_plugins(StartRosterPlugin).insert_resource(roster);
+            app.add_plugins(StartRosterPlugin);
             app.update();
-            Self(app)
+            let mut started = Self(app);
+            started.reroster(roster);
+            started
         }
 
         fn launcher(&self) -> &CommandBarOpenEvent {
-            &self.0.world().resource::<Launcher>().snapshot
+            &self
+                .0
+                .world()
+                .iter_entities()
+                .find_map(|entity| entity.get::<Launcher>())
+                .expect("start roster runtime")
+                .snapshot
         }
 
         fn reroster(&mut self, roster: Roster) {
-            self.0.insert_resource(roster);
+            self.0.world_mut().write_message(roster);
             self.0.update();
         }
     }

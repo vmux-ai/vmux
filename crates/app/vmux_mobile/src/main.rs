@@ -144,9 +144,7 @@ fn AppBody() -> Element {
             agents: agents(),
         };
         let mut runtime = roster_runtime.borrow_mut();
-        if runtime.app.world().get_resource::<Roster>() != Some(&roster) {
-            runtime.app.insert_resource(roster);
-        }
+        runtime.app.world_mut().write_message(roster);
     });
 
     let agents_runtime = runtime.clone();

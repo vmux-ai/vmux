@@ -1,4 +1,4 @@
-use bevy_app::{App, Plugin, Update};
+use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
 use vmux_api::page::PageEmit;
 use vmux_api::team::{TeamEvent, TeamMemberRow};
@@ -9,18 +9,16 @@ pub struct TeamRosterPlugin;
 
 impl Plugin for TeamRosterPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Members>()
-            .init_resource::<Team>()
+        app.add_message::<Members>()
+            .add_message::<RepublishTeam>()
             .add_message::<PageEmit>()
+            .add_systems(Startup, spawn_team_runtime)
             .add_systems(
                 Update,
                 (
-                    project_team
-                        .in_set(TeamProjection)
-                        .run_if(resource_changed::<Members>),
-                    emit_team
-                        .after(TeamProjection)
-                        .run_if(resource_changed::<Team>),
+                    receive_members.before(TeamProjection),
+                    project_team.in_set(TeamProjection),
+                    emit_team.after(TeamProjection),
                 ),
             );
     }
@@ -29,17 +27,55 @@ impl Plugin for TeamRosterPlugin {
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct TeamProjection;
 
-#[derive(Resource, Default, PartialEq)]
+#[derive(Component, Message, Clone, Default, PartialEq)]
 pub struct Members(pub Vec<TeamMemberRow>);
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct Team(pub TeamEvent);
 
-fn project_team(members: Res<Members>, mut team: ResMut<Team>) {
+#[derive(Component)]
+struct TeamRuntime;
+
+#[derive(Message)]
+pub struct RepublishTeam;
+
+fn spawn_team_runtime(mut commands: Commands) {
+    commands.spawn((TeamRuntime, Members::default(), Team::default()));
+}
+
+fn receive_members(
+    mut messages: MessageReader<Members>,
+    mut runtimes: Query<&mut Members, With<TeamRuntime>>,
+) {
+    let Ok(mut members) = runtimes.single_mut() else {
+        return;
+    };
+    for update in messages.read() {
+        if *members != *update {
+            *members = update.clone();
+        }
+    }
+}
+
+fn project_team(mut runtimes: Query<(&Members, &mut Team), (With<TeamRuntime>, Changed<Members>)>) {
+    let Ok((members, mut team)) = runtimes.single_mut() else {
+        return;
+    };
     team.0 = TeamStateProjection::build(members.0.clone(), Vec::new());
 }
 
-fn emit_team(team: Res<Team>, mut emits: MessageWriter<PageEmit>) {
+fn emit_team(
+    mut refreshes: MessageReader<RepublishTeam>,
+    runtimes: Query<Ref<Team>, With<TeamRuntime>>,
+    mut emits: MessageWriter<PageEmit>,
+) {
+    let refresh = refreshes.read().next().is_some();
+    let Ok(team) = runtimes.single() else {
+        return;
+    };
+    if !refresh && !team.is_changed() {
+        return;
+    }
     let Some(emit) = PageEmit::from_state(&team.0) else {
         return;
     };
@@ -55,18 +91,25 @@ mod tests {
     impl Started {
         fn with(members: Vec<TeamMemberRow>) -> Self {
             let mut app = App::new();
-            app.add_plugins(TeamRosterPlugin)
-                .insert_resource(Members(members));
+            app.add_plugins(TeamRosterPlugin);
             app.update();
-            Self(app)
+            let mut started = Self(app);
+            started.reroster(members);
+            started
         }
 
         fn team(&self) -> &TeamEvent {
-            &self.0.world().resource::<Team>().0
+            &self
+                .0
+                .world()
+                .iter_entities()
+                .find_map(|entity| entity.get::<Team>())
+                .expect("team runtime")
+                .0
         }
 
         fn reroster(&mut self, members: Vec<TeamMemberRow>) {
-            self.0.insert_resource(Members(members));
+            self.0.world_mut().write_message(Members(members));
             self.0.update();
         }
     }

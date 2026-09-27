@@ -1,7 +1,6 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use bevy_ecs::change_detection::DetectChangesMut;
 use dioxus::core::ReactiveContext;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
@@ -14,8 +13,8 @@ use vmux_chat::prompt::{Attach, Attachments, Browsed, RemoveAttachment};
 use vmux_chat::room::{Conversation, Reported, Submitted};
 use vmux_chat::state::{ChatUiState, PublishComposerEffect, RepublishChatUiState};
 use vmux_start::event::StartDataRequest;
-use vmux_start::roster::Launcher;
-use vmux_team::roster::{Members, Team};
+use vmux_start::roster::RepublishLauncher;
+use vmux_team::roster::{Members, RepublishTeam};
 
 use crate::runtime::{PageListeners, RuntimeHandle};
 use vmux_api::BinEvent;
@@ -205,7 +204,7 @@ impl PageHost for MobileHost {
                     .non_send_mut::<PageListeners>()
                     .0
                     .insert(CommandBarUiState::ID.to_string(), on_bytes);
-                mark_changed::<Launcher>(world);
+                world.write_message(RepublishLauncher);
             }
             TeamEvent::ID => {
                 poll_team(self);
@@ -215,7 +214,7 @@ impl PageHost for MobileHost {
                     .non_send_mut::<PageListeners>()
                     .0
                     .insert(TeamEvent::ID.to_string(), on_bytes);
-                mark_changed::<Team>(world);
+                world.write_message(RepublishTeam);
             }
             _ => return Err(EventListenerError::Unsupported),
         }
@@ -509,23 +508,17 @@ fn poll_team(host: &MobileHost) {
                 return;
             }
             match fetched {
-                Ok(members) => {
-                    runtime.borrow_mut().app.insert_resource(Members(members));
-                }
+                Ok(members) => runtime
+                    .borrow_mut()
+                    .app
+                    .world_mut()
+                    .write_message(Members(members)),
                 Err(ApiError::Unauthorized | ApiError::NotFound) => return,
                 Err(ApiError::Message(_)) => {}
             }
             sleep_ms(TEAM_POLL_INTERVAL_MS).await;
         }
     });
-}
-
-fn mark_changed<R: bevy_ecs::resource::Resource<Mutability = bevy_ecs::component::Mutable>>(
-    world: &mut bevy_ecs::world::World,
-) {
-    if let Some(mut resource) = world.get_resource_mut::<R>() {
-        resource.set_changed();
-    }
 }
 
 fn decode<T>(bytes: &[u8]) -> Result<T, EventListenerError>
