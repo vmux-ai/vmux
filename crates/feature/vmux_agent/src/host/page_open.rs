@@ -17,7 +17,7 @@ use super::attach::{
 };
 use super::run_terminal::AgentCwd;
 use super::spawn::PendingPageOpen;
-use crate::runtime::provider::strategy::{Strategy, StrategyKey, StrategyKind};
+use crate::runtime::strategy::{Strategy, StrategyKey, StrategyKind};
 
 pub(super) struct PageOpenPlugin;
 
@@ -946,7 +946,7 @@ pub(crate) fn attach_cli_setup_to_stack(
     vmux_layout::stack::clear_stack_children(stack, children_q, commands);
     commands
         .entity(stack)
-        .remove::<crate::vibe::setup::AgentSetupNavigated>();
+        .remove::<crate::setup::AgentSetupNavigated>();
     let title = format!("Set up {} CLI", kind.display_name());
     let url = kind.setup_url();
     commands.entity(stack).insert(PageMetadata {
@@ -958,7 +958,7 @@ pub(crate) fn attach_cli_setup_to_stack(
     let browser = commands
         .spawn((
             vmux_layout::Browser::new_with_title(&url, &title),
-            crate::vibe::setup::AgentSetupView,
+            crate::setup::AgentSetupView,
             ChildOf(stack),
         ))
         .id();

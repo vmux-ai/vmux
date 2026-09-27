@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use vmux_setting::SettingsLoadSet;
 
 use crate::echo;
-use crate::runtime::provider::strategy::{
+use crate::runtime::strategy::{
     BuildRequestFn, Endpoint, EnvVarName, ParseSseFn, Strategy, StrategyKey, StrategyKind,
     StrategyVariant,
 };

@@ -41,7 +41,7 @@ impl Plugin for AgentPagesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             super::chat::AgentChatPagePlugin,
-            crate::vibe::setup::AgentSetupPlugin,
+            crate::setup::AgentSetupPlugin,
         ));
     }
 }

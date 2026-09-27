@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-pub mod vibe;
+pub mod setup;
 
 #[cfg(host)]
 mod cli;

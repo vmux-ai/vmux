@@ -6,7 +6,7 @@ use vmux_command::snapshot::{
 use vmux_core::agent::AgentProviderTargetKind;
 use vmux_core::{ArchivedPage, LastActivatedAt, Ready};
 
-use crate::runtime::provider::strategy::{Strategy, StrategyKey};
+use crate::runtime::strategy::{Strategy, StrategyKey};
 
 pub(super) struct SnapshotPlugin;
 

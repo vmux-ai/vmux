@@ -414,10 +414,10 @@ fn respond_page_agent_attach(
     mut commands: Commands,
     strategies: Query<
         (
-            &crate::runtime::provider::strategy::StrategyKey,
-            &crate::runtime::provider::strategy::StrategyKind,
+            &crate::runtime::strategy::StrategyKey,
+            &crate::runtime::strategy::StrategyKind,
         ),
-        With<crate::runtime::provider::strategy::Strategy>,
+        With<crate::runtime::strategy::Strategy>,
     >,
 ) {
     for req in reader.read() {
@@ -437,10 +437,10 @@ fn respond_page_agent_spawn_stack(
     mut commands: Commands,
     strategies: Query<
         (
-            &crate::runtime::provider::strategy::StrategyKey,
-            &crate::runtime::provider::strategy::StrategyKind,
+            &crate::runtime::strategy::StrategyKey,
+            &crate::runtime::strategy::StrategyKind,
         ),
-        With<crate::runtime::provider::strategy::Strategy>,
+        With<crate::runtime::strategy::Strategy>,
     >,
 ) {
     for req in reader.read() {
@@ -467,10 +467,10 @@ fn respond_page_agent_spawn_default(
     mut commands: Commands,
     strategies: Query<
         (
-            &crate::runtime::provider::strategy::StrategyKey,
-            &crate::runtime::provider::strategy::StrategyKind,
+            &crate::runtime::strategy::StrategyKey,
+            &crate::runtime::strategy::StrategyKind,
         ),
-        With<crate::runtime::provider::strategy::Strategy>,
+        With<crate::runtime::strategy::Strategy>,
     >,
 ) {
     for req in reader.read() {
@@ -512,10 +512,10 @@ fn respond_page_agent_attach_default(
     mut commands: Commands,
     strategies: Query<
         (
-            &crate::runtime::provider::strategy::StrategyKey,
-            &crate::runtime::provider::strategy::StrategyKind,
+            &crate::runtime::strategy::StrategyKey,
+            &crate::runtime::strategy::StrategyKind,
         ),
-        With<crate::runtime::provider::strategy::Strategy>,
+        With<crate::runtime::strategy::Strategy>,
     >,
 ) {
     for req in reader.read() {

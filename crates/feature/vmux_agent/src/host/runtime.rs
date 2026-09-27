@@ -3,6 +3,7 @@ use bevy::prelude::*;
 pub mod acp;
 pub mod cli;
 pub mod provider;
+pub mod strategy;
 
 pub struct AgentRuntimePlugin;
 

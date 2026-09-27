@@ -15,7 +15,7 @@ use vmux_terminal::launch::TerminalLaunch;
 
 use crate::AgentVariant;
 use crate::event::{AgentCommandRequest, CommandOrigin};
-use crate::runtime::provider::strategy::{Strategy, StrategyKey, StrategyKind};
+use crate::runtime::strategy::{Strategy, StrategyKey, StrategyKind};
 use crate::session::{AgentSession, SessionId};
 
 pub(super) struct AttachPlugin;
