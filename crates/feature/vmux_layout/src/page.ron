@@ -67,7 +67,6 @@
         "ExtensionPopupCloseRequest",
         "ExtPinRequest",
         "ExtOpenManagerRequest",
-        "ExtListRequest",
         "RelaunchRequest",
         "CommandBarReadyEvent",
         "CommandBarRenderedEvent",

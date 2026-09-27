@@ -106,9 +106,6 @@ pub struct ExtPinRequest {
 #[vmux_api::ui_event]
 pub struct ExtOpenManagerRequest;
 
-#[vmux_api::ui_event]
-pub struct ExtListRequest;
-
 #[vmux_api::ui_event(Eq)]
 pub struct ExtBrowseStoreRequest {
     pub query: String,

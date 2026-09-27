@@ -17,7 +17,6 @@
         "ExtensionPopupCloseRequest",
         "ExtPinRequest",
         "ExtOpenManagerRequest",
-        "ExtListRequest",
         "ExtBrowseStoreRequest",
         "RelaunchRequest",
     ],

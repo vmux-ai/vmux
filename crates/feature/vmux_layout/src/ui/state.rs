@@ -1,9 +1,7 @@
 use dioxus::prelude::*;
 use vmux_api::bookmark::BookmarkMenuEffect;
-use vmux_api::extension::{
-    ExtListRequest, ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent,
-};
-use vmux_ui::hooks::{send, use_ui_state_root};
+use vmux_api::extension::{ExtensionPopupEvent, ExtensionPopupSizeEvent, ExtensionsEvent};
+use vmux_ui::hooks::use_ui_state_root;
 
 use super::update::UpdatePhase;
 use crate::event::{
@@ -47,9 +45,6 @@ impl LayoutPageState {
                     state.apply(patch);
                 }
             });
-        });
-        use_effect(move || {
-            let _ = send(&ExtListRequest);
         });
         LayoutUi {
             state,

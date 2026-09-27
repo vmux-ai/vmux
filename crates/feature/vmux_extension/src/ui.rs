@@ -41,14 +41,9 @@ impl From<&ExtRow> for Approval {
 
 #[component]
 pub fn Page() -> Element {
-    let locale = use_theme();
+    use_theme();
     let state = use_ui_state::<ExtensionsEvent>();
     let mut search = use_signal(String::new);
-
-    use_effect(move || {
-        locale();
-        let _ = send(&ExtListRequest);
-    });
 
     let snapshot = state();
     let query = search().trim().to_lowercase();

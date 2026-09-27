@@ -3,10 +3,12 @@ use std::sync::{Arc, Mutex};
 use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use vmux_api::extension::{
-    ExtInstallPhase, ExtInstallProgress, ExtListRequest, ExtOpenManagerRequest, ExtPinRequest,
-    ExtToggleRequest, ExtUninstallRequest, ExtensionsEvent,
+    ExtInstallPhase, ExtInstallProgress, ExtOpenManagerRequest, ExtPinRequest, ExtToggleRequest,
+    ExtUninstallRequest, ExtensionsEvent,
 };
+use vmux_core::PageMetadata;
 use vmux_core::host::UiStateWrite;
+use vmux_core::host::page::NativelyHosted;
 use vmux_layout::LayoutUiStateUpdates;
 
 use crate::{install, store};
@@ -21,11 +23,10 @@ impl Plugin for ExtensionCatalogPlugin {
             .add_plugins(UiEventPlugin::<(
                 ExtToggleRequest,
                 ExtUninstallRequest,
-                ExtListRequest,
                 ExtPinRequest,
                 ExtOpenManagerRequest,
             )>::default())
-            .add_observer(on_list_request)
+            .add_observer(on_page_ready)
             .add_observer(on_toggle_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_pin_request)
@@ -37,7 +38,8 @@ impl Plugin for ExtensionCatalogPlugin {
             );
 
         #[cfg(ui)]
-        app.add_systems(Update, open_manager);
+        app.add_systems(Startup, spawn_extension_page)
+            .add_systems(Update, open_manager);
     }
 }
 
@@ -111,8 +113,26 @@ struct ExtensionSubscriber {
     revision: u64,
 }
 
+#[derive(Component)]
+struct ExtensionManagerPage;
+
 fn spawn_extension_catalog(mut commands: Commands) {
-    commands.spawn((ExtensionCatalog::default(), ExtensionOutbox::default()));
+    let outbox = ExtensionOutbox::default();
+    let loader = outbox.clone();
+    std::thread::spawn(move || queue_snapshot(&loader));
+    commands.spawn((ExtensionCatalog::default(), outbox));
+}
+
+#[cfg(ui)]
+fn spawn_extension_page(mut commands: Commands) {
+    commands.spawn((
+        ExtensionManagerPage,
+        crate::ui::ExtensionPage::MANIFEST,
+        NativelyHosted::page(
+            crate::ui::ExtensionPage::URL,
+            crate::ui::ExtensionPage::NATIVE.title,
+        ),
+    ));
 }
 
 fn push(outbox: &ExtensionOutbox, msg: OutMsg) {
@@ -190,18 +210,26 @@ fn spawn_install(outbox: &ExtensionOutbox, request: ExtensionInstallRequest) {
     });
 }
 
-fn on_list_request(
-    trigger: On<UiInput<ExtListRequest>>,
-    mut catalog: Query<&mut ExtensionCatalog>,
+fn on_page_ready(
+    trigger: On<UiInput<vmux_api::PageReady>>,
+    pages: Query<(Has<vmux_layout::LayoutCef>, Option<&PageMetadata>)>,
+    extension_pages: Query<&NativelyHosted, With<ExtensionManagerPage>>,
     mut commands: Commands,
 ) {
-    commands
-        .entity(trigger.event().webview)
-        .insert(ExtensionSubscriber::default());
-    let Ok(mut catalog) = catalog.single_mut() else {
+    let webview = trigger.event().webview;
+    let Ok((layout, metadata)) = pages.get(webview) else {
         return;
     };
-    catalog.replace(snapshot());
+    let extension = metadata.is_some_and(|metadata| {
+        extension_pages
+            .iter()
+            .any(|page| page.answers_for(&metadata.url))
+    });
+    if layout || extension {
+        commands
+            .entity(webview)
+            .insert(ExtensionSubscriber::default());
+    }
 }
 
 fn on_toggle_request(trigger: On<UiInput<ExtToggleRequest>>, runtime: Single<&ExtensionOutbox>) {
@@ -351,5 +379,47 @@ fn emit_extensions_snapshot(
             );
         }
         subscriber.revision = catalog.revision;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_ready_subscribes_only_extension_and_layout_pages() {
+        let mut app = App::new();
+        app.add_observer(on_page_ready);
+        app.world_mut().spawn((
+            ExtensionManagerPage,
+            NativelyHosted::page("vmux://extensions/", "Extensions"),
+        ));
+        let extension = app
+            .world_mut()
+            .spawn(PageMetadata {
+                url: "vmux://extensions/".to_string(),
+                ..default()
+            })
+            .id();
+        let layout = app.world_mut().spawn(vmux_layout::LayoutCef).id();
+        let unrelated = app
+            .world_mut()
+            .spawn(PageMetadata {
+                url: "vmux://settings/".to_string(),
+                ..default()
+            })
+            .id();
+
+        for webview in [extension, layout, unrelated] {
+            app.world_mut().trigger(UiInput {
+                webview,
+                payload: vmux_api::PageReady {},
+            });
+        }
+        app.update();
+
+        assert!(app.world().get::<ExtensionSubscriber>(extension).is_some());
+        assert!(app.world().get::<ExtensionSubscriber>(layout).is_some());
+        assert!(app.world().get::<ExtensionSubscriber>(unrelated).is_none());
     }
 }
