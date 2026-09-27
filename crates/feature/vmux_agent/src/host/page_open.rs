@@ -1113,10 +1113,10 @@ mod tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
+        app.world_mut().spawn(strategies);
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .add_plugins(SpawnRequestsPlugin)
-            .insert_resource(strategies)
             .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
                 (AgentKind::Vibe, false),
             ])))
@@ -1161,10 +1161,10 @@ mod tests {
             let mut settings = test_settings();
             settings.agent.acp.clear();
             let mut app = App::new();
+            app.world_mut().spawn(AgentStrategies::default());
             app.add_plugins(MinimalPlugins)
                 .add_message::<SpawnAgentInStackRequest>()
                 .add_plugins(SpawnRequestsPlugin)
-                .insert_resource(AgentStrategies::default())
                 .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
                     (kind, false),
                 ])))
@@ -1246,9 +1246,9 @@ mod tests {
     pub(crate) fn canonical_and_legacy_setup_urls_attach_setup_page() {
         for url in ["vmux://sessions/codex/setup", "vmux://agent/codex/setup"] {
             let mut app = App::new();
+            app.world_mut().spawn(AgentStrategies::default());
             app.add_plugins(MinimalPlugins)
                 .add_message::<SpawnAgentInStackRequest>()
-                .insert_resource(AgentStrategies::default())
                 .insert_resource(test_settings())
                 .add_systems(Update, handle_agent_page_open);
 
@@ -2179,6 +2179,7 @@ mod tests {
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(crate::host::cli::codex::CodexStrategy));
         let mut app = App::new();
+        app.world_mut().spawn(strategies);
         app.add_plugins((MinimalPlugins, SpawnPlugin))
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<crate::session::AgentSessionExited>()
@@ -2187,7 +2188,6 @@ mod tests {
             .add_message::<vmux_core::agent::PageAgentSpawnStackRequest>()
             .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
             .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
-            .insert_resource(strategies)
             .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
                 (AgentKind::Codex, true),
             ])))

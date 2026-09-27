@@ -29,13 +29,14 @@ pub(crate) struct AgentSessionLifecyclePlugin;
 impl Plugin for AgentSessionLifecyclePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AgentSessionExited>()
-            .add_systems(
-                Startup,
-                (spawn_agent_session_discovery, start_agent_session_watchers).chain(),
-            )
+            .add_systems(Startup, spawn_agent_session_discovery)
             .add_systems(
                 Update,
-                (mark_dirty_on_fs_change, mark_dirty_on_pending_added),
+                (
+                    start_agent_session_watchers,
+                    mark_dirty_on_fs_change,
+                    mark_dirty_on_pending_added,
+                ),
             )
             .add_systems(
                 Update,
@@ -62,7 +63,7 @@ fn spawn_agent_session_discovery(mut commands: Commands) {
 
 #[allow(clippy::type_complexity)]
 fn format_agent_url(
-    strategies: Res<AgentStrategies>,
+    strategies: Single<&AgentStrategies>,
     mut q: Query<
         (Option<&SessionId>, &AgentSession, &mut PageMetadata),
         Or<(Changed<SessionId>, Added<AgentSession>, Added<PageMetadata>)>,
@@ -147,8 +148,8 @@ mod url_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies)
-            .add_systems(Update, format_agent_url);
+        app.world_mut().spawn(strategies);
+        app.add_systems(Update, format_agent_url);
 
         let entity = app
             .world_mut()
@@ -170,8 +171,8 @@ mod url_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies)
-            .add_systems(Update, format_agent_url);
+        app.world_mut().spawn(strategies);
+        app.add_systems(Update, format_agent_url);
 
         let entity = app
             .world_mut()
@@ -192,8 +193,8 @@ mod url_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies)
-            .add_systems(Update, format_agent_url);
+        app.world_mut().spawn(strategies);
+        app.add_systems(Update, format_agent_url);
 
         let entity = app
             .world_mut()
@@ -215,8 +216,8 @@ mod url_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies)
-            .add_systems(Update, format_agent_url);
+        app.world_mut().spawn(strategies);
+        app.add_systems(Update, format_agent_url);
 
         let entity = app
             .world_mut()
@@ -238,8 +239,8 @@ mod url_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies)
-            .add_systems(Update, format_agent_url);
+        app.world_mut().spawn(strategies);
+        app.add_systems(Update, format_agent_url);
 
         let entity = app
             .world_mut()
@@ -260,8 +261,8 @@ mod url_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies)
-            .add_systems(Update, format_agent_url);
+        app.world_mut().spawn(strategies);
+        app.add_systems(Update, format_agent_url);
 
         let entity = app
             .world_mut()
@@ -320,7 +321,7 @@ fn clear_agent_session_dirty(mut discovery: Single<&mut AgentSessionDiscovery>) 
 
 fn discover_pending_agent_sessions(
     mut commands: Commands,
-    strategies: Res<AgentStrategies>,
+    strategies: Single<&AgentStrategies>,
     pending_sessions: Query<(Entity, &PendingAgentSession)>,
     sessions: Query<(&AgentSession, &SessionId)>,
 ) {
@@ -353,29 +354,34 @@ struct AgentSessionWatcher {
     _watcher: RecommendedWatcher,
 }
 
-fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
-    for strategy in strategies.cli_strategies() {
-        let root = strategy.sessions_root();
-        if std::fs::create_dir_all(&root).is_err() {
-            continue;
-        }
-        let (tx, rx) = mpsc::channel();
-        let watcher =
-            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                if let Ok(event) = res
-                    && (event.kind.is_create() || event.kind.is_modify())
-                {
-                    let _ = tx.send(());
-                }
+fn start_agent_session_watchers(
+    strategies: Query<&AgentStrategies, Added<AgentStrategies>>,
+    mut commands: Commands,
+) {
+    for strategies in &strategies {
+        for strategy in strategies.cli_strategies() {
+            let root = strategy.sessions_root();
+            if std::fs::create_dir_all(&root).is_err() {
+                continue;
+            }
+            let (tx, rx) = mpsc::channel();
+            let watcher =
+                notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+                    if let Ok(event) = res
+                        && (event.kind.is_create() || event.kind.is_modify())
+                    {
+                        let _ = tx.send(());
+                    }
+                });
+            let Ok(mut watcher) = watcher else { continue };
+            if watcher.watch(&root, RecursiveMode::Recursive).is_err() {
+                continue;
+            }
+            commands.spawn(AgentSessionWatcher {
+                receiver: Mutex::new(rx),
+                _watcher: watcher,
             });
-        let Ok(mut watcher) = watcher else { continue };
-        if watcher.watch(&root, RecursiveMode::Recursive).is_err() {
-            continue;
         }
-        commands.spawn(AgentSessionWatcher {
-            receiver: Mutex::new(rx),
-            _watcher: watcher,
-        });
     }
 }
 
@@ -396,7 +402,7 @@ fn mark_dirty_on_fs_change(
 fn detect_file_end_time_exit(
     mut commands: Commands,
     mut exited_writer: MessageWriter<AgentSessionExited>,
-    strategies: Res<AgentStrategies>,
+    strategies: Single<&AgentStrategies>,
     sessioned: Query<(Entity, &AgentSession, &SessionId)>,
 ) {
     for (entity, agent, sid) in &sessioned {
@@ -425,8 +431,8 @@ mod discovery_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies)
-            .add_systems(Update, discover_pending_agent_sessions);
+        app.world_mut().spawn(strategies);
+        app.add_systems(Update, discover_pending_agent_sessions);
 
         let pending = PendingAgentSession {
             kind: AgentKind::Vibe,
@@ -484,8 +490,8 @@ mod discovery_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(NeverDiscovers));
-        app.insert_resource(strategies)
-            .add_systems(Update, discover_pending_agent_sessions);
+        app.world_mut().spawn(strategies);
+        app.add_systems(Update, discover_pending_agent_sessions);
 
         let pending = PendingAgentSession {
             kind: AgentKind::Vibe,
@@ -549,8 +555,8 @@ mod exit_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(EndedStrategy));
-        app.insert_resource(strategies)
-            .add_message::<AgentSessionExited>()
+        app.world_mut().spawn(strategies);
+        app.add_message::<AgentSessionExited>()
             .add_systems(Update, detect_file_end_time_exit);
 
         let entity = app

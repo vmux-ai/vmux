@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bevy::prelude::Resource;
+use bevy::prelude::Component;
 
 use super::cli::{CliAgentStrategy, ResumableSession};
 use crate::AgentKind;
@@ -13,7 +13,7 @@ pub trait AgentStrategy: Send + Sync + 'static {
     fn variant(&self) -> AgentVariant;
 }
 
-#[derive(Resource, Default, Clone)]
+#[derive(Component, Default, Clone)]
 pub struct AgentStrategies {
     cli: HashMap<AgentKind, Arc<dyn CliAgentStrategy>>,
 }

@@ -269,7 +269,7 @@ struct PromptHistoryTask {
 
 fn on_prompt_history_request(
     trigger: On<UiInput<PromptHistoryRequest>>,
-    strategies: Option<Res<AgentStrategies>>,
+    strategies: Option<Single<&AgentStrategies>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -307,7 +307,7 @@ fn drain_prompt_history_tasks(
 
 fn on_resume_list_request(
     trigger: On<UiInput<ResumeListRequest>>,
-    strategies: Option<Res<AgentStrategies>>,
+    strategies: Option<Single<&AgentStrategies>>,
     ask: ResumeAsk,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     scan: Res<ResumableScan>,
@@ -469,7 +469,7 @@ fn on_resume_session(
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     settings: Res<vmux_setting::AppSettings>,
-    strategies: Option<Res<AgentStrategies>>,
+    strategies: Option<Single<&AgentStrategies>>,
     mut commands: Commands,
     mut swap: MessageWriter<SwapStackSession>,
 ) {

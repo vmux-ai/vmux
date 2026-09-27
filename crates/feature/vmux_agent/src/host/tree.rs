@@ -46,70 +46,76 @@ pub struct AgentSessionPlugin;
 
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        strategies.register_cli(Box::new(ClaudeStrategy));
-        strategies.register_cli(Box::new(CodexStrategy));
-        app.insert_resource(strategies)
-            .add_systems(Startup, register_agent_session_route)
-            .add_plugins((
-                vmux_layout::LayoutContractPlugin,
-                vmux_editor::ContractPlugin,
-                vmux_terminal::TerminalContractPlugin,
-            ))
-            .add_plugins((
-                vmux_session::room::RoomPlugin,
-                crate::command_bar::CommandBarPlugin,
-                super::attach::AttachPlugin,
-                super::attention::AttentionPlugin,
-                super::command::CommandPlugin,
-                super::follow::FollowPlugin,
-                super::ingress::AgentIngressPlugin,
-                super::page_open::PageOpenPlugin,
-                super::provider::ProviderPlugin,
-                super::query::AgentQueryPlugin,
-                super::self_command::SelfCommandPlugin,
-                session::AgentSessionLifecyclePlugin,
-                super::snapshot_updater::SnapshotPlugin,
-                super::spawn::SpawnPlugin,
-                super::workspace::WorkspacePlugin,
-            ))
-            .add_message::<AgentRequestInput>()
-            .add_message::<AgentQueryRequest>()
-            .add_message::<ScreenshotRequest>()
-            .add_message::<ScreenshotResponse>()
-            .add_message::<BrowserSnapshotRequest>()
-            .add_message::<BrowserSnapshotResponse>()
-            .add_message::<BrowserNavigationSnapshotResponse>()
-            .add_message::<BrowserScrollRequest>()
-            .add_message::<BrowserScrollResponse>()
-            .add_message::<RecordStartRequest>()
-            .add_message::<RecordStartResponse>()
-            .add_message::<RecordStopRequest>()
-            .add_message::<RecordStopResponse>()
-            .add_message::<vmux_simulator::SimulatorTapRequest>()
-            .add_message::<vmux_simulator::SimulatorSwipeRequest>()
-            .add_message::<vmux_simulator::SimulatorTypeTextRequest>()
-            .add_message::<vmux_simulator::SimulatorKeyPressRequest>()
-            .add_message::<vmux_simulator::SimulatorButtonPressRequest>()
-            .add_message::<vmux_simulator::SimulatorControlResponse>()
-            .add_message::<vmux_simulator::SimulatorScreenshotRequest>()
-            .add_message::<vmux_simulator::SimulatorScreenshotResponse>()
-            .add_message::<AgentToolCallRequest>()
-            .add_message::<SpawnAgentInStackRequest>()
-            .add_message::<PageAgentAttachRequest>()
-            .add_message::<PageAgentSpawnStackRequest>()
-            .add_message::<PageAgentSpawnDefaultRequest>()
-            .add_message::<PageAgentAttachDefaultRequest>()
-            .add_message::<TerminalStackSpawnRequest>()
-            .add_message::<RestartAgentPty>()
-            .add_message::<vmux_core::agent::SwapStackSession>()
-            .add_message::<vmux_core::notify::BellReceived>()
-            .add_message::<vmux_core::notify::AgentAttention>()
-            .add_message::<vmux_core::notify::OsNotify>()
-            .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
-            .add_systems(Update, super::run_terminal::remember_configured_shell);
+        app.add_systems(
+            Startup,
+            (spawn_agent_strategies, register_agent_session_route).chain(),
+        );
+        app.add_plugins((
+            vmux_layout::LayoutContractPlugin,
+            vmux_editor::ContractPlugin,
+            vmux_terminal::TerminalContractPlugin,
+        ))
+        .add_plugins((
+            vmux_session::room::RoomPlugin,
+            crate::command_bar::CommandBarPlugin,
+            super::attach::AttachPlugin,
+            super::attention::AttentionPlugin,
+            super::command::CommandPlugin,
+            super::follow::FollowPlugin,
+            super::ingress::AgentIngressPlugin,
+            super::page_open::PageOpenPlugin,
+            super::provider::ProviderPlugin,
+            super::query::AgentQueryPlugin,
+            super::self_command::SelfCommandPlugin,
+            session::AgentSessionLifecyclePlugin,
+            super::snapshot_updater::SnapshotPlugin,
+            super::spawn::SpawnPlugin,
+            super::workspace::WorkspacePlugin,
+        ))
+        .add_message::<AgentRequestInput>()
+        .add_message::<AgentQueryRequest>()
+        .add_message::<ScreenshotRequest>()
+        .add_message::<ScreenshotResponse>()
+        .add_message::<BrowserSnapshotRequest>()
+        .add_message::<BrowserSnapshotResponse>()
+        .add_message::<BrowserNavigationSnapshotResponse>()
+        .add_message::<BrowserScrollRequest>()
+        .add_message::<BrowserScrollResponse>()
+        .add_message::<RecordStartRequest>()
+        .add_message::<RecordStartResponse>()
+        .add_message::<RecordStopRequest>()
+        .add_message::<RecordStopResponse>()
+        .add_message::<vmux_simulator::SimulatorTapRequest>()
+        .add_message::<vmux_simulator::SimulatorSwipeRequest>()
+        .add_message::<vmux_simulator::SimulatorTypeTextRequest>()
+        .add_message::<vmux_simulator::SimulatorKeyPressRequest>()
+        .add_message::<vmux_simulator::SimulatorButtonPressRequest>()
+        .add_message::<vmux_simulator::SimulatorControlResponse>()
+        .add_message::<vmux_simulator::SimulatorScreenshotRequest>()
+        .add_message::<vmux_simulator::SimulatorScreenshotResponse>()
+        .add_message::<AgentToolCallRequest>()
+        .add_message::<SpawnAgentInStackRequest>()
+        .add_message::<PageAgentAttachRequest>()
+        .add_message::<PageAgentSpawnStackRequest>()
+        .add_message::<PageAgentSpawnDefaultRequest>()
+        .add_message::<PageAgentAttachDefaultRequest>()
+        .add_message::<TerminalStackSpawnRequest>()
+        .add_message::<RestartAgentPty>()
+        .add_message::<vmux_core::agent::SwapStackSession>()
+        .add_message::<vmux_core::notify::BellReceived>()
+        .add_message::<vmux_core::notify::AgentAttention>()
+        .add_message::<vmux_core::notify::OsNotify>()
+        .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
+        .add_systems(Update, super::run_terminal::remember_configured_shell);
     }
+}
+
+fn spawn_agent_strategies(mut commands: Commands) {
+    let mut strategies = AgentStrategies::default();
+    strategies.register_cli(Box::new(VibeStrategy));
+    strategies.register_cli(Box::new(ClaudeStrategy));
+    strategies.register_cli(Box::new(CodexStrategy));
+    commands.spawn((Name::new("Agent strategies"), strategies));
 }
 
 fn register_agent_session_route(mut commands: Commands) {
@@ -146,7 +152,9 @@ mod tests {
             vmux_command::CommandPlugin,
             AgentSessionPlugin,
         ));
-        let strategies = app.world().resource::<AgentStrategies>();
+        app.world_mut().run_schedule(Startup);
+        let mut query = app.world_mut().query::<&AgentStrategies>();
+        let strategies = query.single(app.world()).unwrap();
         assert!(strategies.get_cli(AgentKind::Vibe).is_some());
         assert!(strategies.get_cli(AgentKind::Claude).is_some());
         assert!(strategies.get_cli(AgentKind::Codex).is_some());

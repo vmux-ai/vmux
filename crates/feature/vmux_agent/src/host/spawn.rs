@@ -176,7 +176,7 @@ type RestartedAgentLaunch = (
 fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
-    strategies: Option<Res<AgentStrategies>>,
+    strategies: Option<Single<&AgentStrategies>>,
     models: Option<Res<crate::host::model::AgentModelSelections>>,
     exec_override: Option<Res<AgentExecutableOverride>>,
     mut metadata: Query<&mut PageMetadata>,
@@ -215,7 +215,7 @@ fn handle_spawn_agent_requests(
         commands.entity(req.stack).insert(generation);
         let request = req.clone();
         let task_request = request.clone();
-        let strategies = strategies.clone();
+        let strategies = AgentStrategies::clone(strategies);
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
             let result = crate::build_agent_launch(
@@ -526,7 +526,7 @@ fn handle_restart_agent_pty(
         Without<PendingAgentRestart>,
     >,
     connected: Option<Single<(), With<ServiceConnected>>>,
-    strategies: Option<Res<AgentStrategies>>,
+    strategies: Option<Single<&AgentStrategies>>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
@@ -542,7 +542,9 @@ fn handle_restart_agent_pty(
         let kind = session.kind;
         let session_id = session_id.map(|session_id| session_id.0.clone());
         let new_id = ProcessId::new();
-        let strategies = strategies.as_deref().cloned();
+        let strategies = strategies
+            .as_ref()
+            .map(|strategies| AgentStrategies::clone(**strategies));
         let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
         let task = IoTaskPool::get().spawn(async move {
             let result = match launch {

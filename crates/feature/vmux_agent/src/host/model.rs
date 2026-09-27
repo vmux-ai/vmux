@@ -34,12 +34,7 @@ impl Plugin for ChatModelPlugin {
             .add_plugins(UiEventPlugin::<(StartSelectModel, StartSelectMode)>::default())
             .add_systems(
                 Startup,
-                (
-                    load_agent_model_selections,
-                    load_agent_mode_selections,
-                    seed_cli_model_lists,
-                )
-                    .chain(),
+                (load_agent_model_selections, load_agent_mode_selections).chain(),
             )
             .add_observer(on_select_model)
             .add_observer(on_select_mode)
@@ -50,6 +45,7 @@ impl Plugin for ChatModelPlugin {
                 Update,
                 (
                     answer_remote_model_commands,
+                    seed_cli_model_lists,
                     apply_model_selection,
                     apply_mode_selection,
                     apply_effort_setting,
@@ -460,18 +456,20 @@ fn on_start_select_mode(
 }
 
 fn seed_cli_model_lists(
-    strategies: Res<AgentStrategies>,
+    strategies: Query<&AgentStrategies, Added<AgentStrategies>>,
     mut selections: ResMut<AgentModelSelections>,
 ) {
-    for strategy in strategies.cli_strategies() {
-        let catalog = strategy.model_catalog();
-        if catalog.models.is_empty() {
-            continue;
+    for strategies in &strategies {
+        for strategy in strategies.cli_strategies() {
+            let catalog = strategy.model_catalog();
+            if catalog.models.is_empty() {
+                continue;
+            }
+            let kind = strategy.kind();
+            let agent_key = format!("cli:{}", kind.as_url_segment());
+            let url = vmux_command::snapshot::AgentPromptTarget::Cli(kind).url();
+            selections.remember_catalog(&agent_key, &url, &catalog.selected, &catalog.models);
         }
-        let kind = strategy.kind();
-        let agent_key = format!("cli:{}", kind.as_url_segment());
-        let url = vmux_command::snapshot::AgentPromptTarget::Cli(kind).url();
-        selections.remember_catalog(&agent_key, &url, &catalog.selected, &catalog.models);
     }
 }
 
