@@ -4,8 +4,9 @@ pub struct SpaceProjectPlugin;
 
 impl Plugin for SpaceProjectPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut()
+            .spawn((Name::new("Repository roots"), RepoRoots::default()));
         app.register_type::<ExpandedProjectDirs>()
-            .init_resource::<RepoRoots>()
             .init_resource::<vmux_command::snapshot::CommandBarProjection>()
             .add_observer(on_project_tree_toggle)
             .add_systems(
@@ -222,7 +223,7 @@ impl SpaceOfTab<'_, '_> {
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct RepoRoots(std::collections::HashMap<String, Option<String>>);
 
 impl RepoRoots {
@@ -250,7 +251,7 @@ fn remember_space_project(
         Option<&vmux_layout::tab::Tab>,
     )>,
     space_of_tab: SpaceOfTab,
-    mut roots: ResMut<RepoRoots>,
+    mut roots: Single<&mut RepoRoots>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     mut saves: MessageWriter<vmux_setting::SettingsSaveRequest>,
 ) {
