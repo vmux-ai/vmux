@@ -1,10 +1,11 @@
-use bevy::prelude::*;
-use vmux_chat::event::ChatKey;
+use bevy_app::{App, Plugin, Startup};
+use bevy_ecs::prelude::*;
+use crate::event::ChatKey;
 use vmux_command::{
     CommandDispatch, CommandManifest, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
 
-pub(crate) struct ChatKeyPlugin;
+pub struct ChatKeyPlugin;
 
 impl Plugin for ChatKeyPlugin {
     fn build(&self, app: &mut App) {
@@ -35,7 +36,7 @@ fn echo_key_command(
         return;
     };
     commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_chat::state::ChatUiState>::from_event(
+        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
             trigger.event().invocation().caller,
             &key.0,
         ),
@@ -45,7 +46,7 @@ fn echo_key_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_chat::state::ChatUiState;
+    use crate::state::ChatUiState;
     use vmux_command::CommandInvocation;
     use vmux_core::host::UiStateWrite;
 
@@ -66,8 +67,7 @@ mod tests {
     impl Echo {
         fn app() -> App {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .add_plugins(ChatKeyPlugin)
+            app.add_plugins(ChatKeyPlugin)
                 .init_resource::<Echoed>()
                 .add_observer(Echoed::record);
             app
@@ -75,7 +75,7 @@ mod tests {
 
         fn issue(app: &mut App, caller: Entity, id: &str) {
             app.world_mut()
-                .resource_mut::<bevy::ecs::message::Messages<CommandInvocation>>()
+                .resource_mut::<bevy_ecs::message::Messages<CommandInvocation>>()
                 .write(CommandInvocation::new(caller, id));
             app.update();
         }

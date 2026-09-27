@@ -1,5 +1,4 @@
 mod composer;
-mod key;
 mod media;
 pub(crate) mod model;
 mod prompt;
@@ -22,7 +21,7 @@ impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.add_plugins((
-            key::ChatKeyPlugin,
+            vmux_chat::ChatKeyPlugin,
             media::ChatMediaPlugin,
             model::ChatModelPlugin,
             composer::ChatComposerPlugin,
