@@ -11,7 +11,6 @@ impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<SideSheetSectionsExpanded>()
             .register_type::<SideSheetPaneExpanded>()
-            .insert_resource(SideSheetWidth(0.0))
             .add_systems(
                 PostUpdate,
                 (
@@ -87,12 +86,8 @@ pub enum SideSheetPosition {
     Bottom,
 }
 
-#[derive(Resource)]
-pub struct SideSheetWidth(pub f32);
-
 fn sync_side_sheet_visibility(
     settings: Res<LayoutSettings>,
-    mut width_res: ResMut<SideSheetWidth>,
     mut side_sheet_q: Query<
         (Entity, &SideSheetPosition, &mut Visibility, &mut Node),
         With<SideSheet>,
@@ -100,18 +95,17 @@ fn sync_side_sheet_visibility(
     added: Query<Entity, (With<SideSheet>, Added<Open>)>,
     mut removed: RemovedComponents<Open>,
 ) {
-    if width_res.0 <= 0.0 {
-        width_res.0 = crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
-    }
-
-    let width = width_res.0;
+    let configured_width =
+        crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
     for entity in &added {
         if let Ok((_, pos, mut visibility, mut node)) = side_sheet_q.get_mut(entity)
             && *pos == SideSheetPosition::Left
         {
             *visibility = Visibility::Visible;
             node.display = Display::Flex;
-            node.width = Val::Px(width);
+            if !matches!(node.width, Val::Px(width) if width > 0.0) {
+                node.width = Val::Px(configured_width);
+            }
         }
     }
     for entity in removed.read() {
@@ -228,7 +222,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(LayoutSettings::default())
-            .insert_resource(SideSheetWidth(0.0))
             .add_systems(Update, sync_side_sheet_visibility);
         let first = app
             .world_mut()

@@ -3,7 +3,7 @@ use crate::{
     cef::layout_cef_bundle,
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     settings::LayoutSettings,
-    side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
+    side_sheet::{SideSheet, SideSheetPosition},
     stack::stack_bundle,
     tab::{Tab, tab_bundle},
     unit::WindowExt,
@@ -317,7 +317,9 @@ fn spawn_window_shell(
             Transform::default(),
             Visibility::Visible,
             Node {
-                width: Val::Px(crate::event::SIDE_SHEET_WIDTH_PX),
+                width: Val::Px(
+                    crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped(),
+                ),
                 min_height: Val::Px(0.0),
                 flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
@@ -630,7 +632,6 @@ fn sync_window_layout_to_settings(
         (&SideSheetPosition, &mut Node),
         (With<SideSheet>, Without<VmuxWindow>, Without<MainColumn>),
     >,
-    mut sheet_width: ResMut<SideSheetWidth>,
 ) {
     if !settings.is_changed() {
         return;
@@ -641,7 +642,8 @@ fn sync_window_layout_to_settings(
     let pad_bottom = settings.window.pad_bottom();
     let pad_left = settings.window.pad_left();
     let gap = crate::event::PANE_GAP_PX;
-    let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
+    let configured_width =
+        crate::event::SideSheetResizeEvent::live(settings.side_sheet.width).clamped();
     for (host, mut node) in &mut window_q {
         let full_padding = hidden_windows.contains(host.0);
         node.padding = UiRect {
@@ -655,15 +657,12 @@ fn sync_window_layout_to_settings(
 
     for _ in &mut main_column_q {}
 
-    if sheet_width.0 <= 0.0 {
-        sheet_width.0 = cfg_width;
-    }
-    let live_width = sheet_width.0;
-
     for (pos, mut node) in &mut sheet_q {
         match pos {
             SideSheetPosition::Left => {
-                node.width = Val::Px(live_width);
+                if !matches!(node.width, Val::Px(width) if width > 0.0) {
+                    node.width = Val::Px(configured_width);
+                }
             }
             SideSheetPosition::Right => {
                 node.right = Val::Px(pad_right);
@@ -1259,7 +1258,6 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .insert_resource(SideSheetWidth(0.0))
             .add_systems(Update, sync_window_layout_to_settings);
         let window = app
             .world_mut()

@@ -18,7 +18,7 @@ use vmux_layout::{
         UpdateProgress, UpdateReady,
     },
     pane::{Pane, PaneSplit, SideSheetCardCollapsed},
-    side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
+    side_sheet::{SideSheet, SideSheetPosition},
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
     state::LayoutUiState,
     tab::Tab,
@@ -358,7 +358,6 @@ fn mark_page_state_dirty(
     mut removals: PageStateRemovals,
     focused_window: Res<vmux_layout::window::FocusedWindow>,
     focused_stack: Res<vmux_layout::stack::FocusedStack>,
-    side_sheet_width: Res<SideSheetWidth>,
     settings: Res<AppSettings>,
     active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
     repo_info: Option<Res<vmux_git::RepoInfoCache>>,
@@ -366,7 +365,6 @@ fn mark_page_state_dirty(
 ) {
     let resource_changed = focused_window.is_changed()
         || focused_stack.is_changed()
-        || side_sheet_width.is_changed()
         || settings.is_changed()
         || active_space
             .as_ref()
@@ -383,10 +381,9 @@ fn push_layout_state_emit(
     layout: FocusedLayout,
     child_of: Query<&ChildOf>,
     header_q: Query<(Entity, Has<Open>, Option<&ComputedNode>), With<Header>>,
-    side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>), With<SideSheet>>,
+    side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>, &Node), With<SideSheet>>,
     window_q: Query<(&HostWindow, &Node), With<VmuxWindow>>,
     windows: Query<&Window>,
-    side_sheet_width: Res<SideSheetWidth>,
     settings: Res<AppSettings>,
     revision: Res<StateRevision>,
     mut cache: Local<ProjectionCache>,
@@ -428,18 +425,30 @@ fn push_layout_state_emit(
         }
     });
 
+    let mut side_sheet_open = false;
+    let mut side_sheet_width =
+        vmux_layout::event::SideSheetResizeEvent::live(settings.layout.side_sheet.width).clamped();
+    for (entity, position, is_open, node) in &side_sheet_q {
+        if *position != SideSheetPosition::Left
+            || vmux_layout::window::host_window_of(entity, &child_of, &layout.host_windows)
+                != Some(host_window)
+        {
+            continue;
+        }
+        side_sheet_open = is_open;
+        if let Val::Px(width) = node.width {
+            side_sheet_width = width;
+        }
+        break;
+    }
+
     let payload = LayoutGeometry {
         header_open,
-        side_sheet_open: side_sheet_q.iter().any(|(entity, pos, is_open)| {
-            *pos == SideSheetPosition::Left
-                && is_open
-                && vmux_layout::window::host_window_of(entity, &child_of, &layout.host_windows)
-                    == Some(host_window)
-        }),
+        side_sheet_open,
         header_height: header_offsets
             .map(|offsets| offsets.height)
             .unwrap_or(HEADER_HEIGHT_PX),
-        side_sheet_width: side_sheet_width.0,
+        side_sheet_width,
         pane_gap: vmux_layout::event::PANE_GAP_PX,
         radius: settings.layout.radius,
         header_left: header_offsets.map(|offsets| offsets.left),

@@ -26,10 +26,7 @@ use vmux_layout::{
         HeaderAddressFocusRequest, HeaderBackRequest, HeaderForwardRequest, HeaderReloadRequest,
     },
     pane::{Pane, PaneHoverCooldown, PaneSplit, SideSheetCardCollapsed},
-    side_sheet::{
-        SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded,
-        SideSheetWidth,
-    },
+    side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded},
     stack::{ActiveTabParam, CloseStackRequest, Stack, focused_stack},
     state::LayoutUiState,
 };
@@ -496,15 +493,16 @@ fn on_hard_reload_notify_header(
 
 fn on_side_sheet_resize(
     trigger: On<UiInput<SideSheetResizeEvent>>,
-    mut width: ResMut<SideSheetWidth>,
     mut sheets: Query<(&SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<MessageWriter<vmux_setting::SettingsSaveRequest>>,
 ) {
     let resize = trigger.event().payload;
     let next = resize.clamped();
-    if width.0 != next {
-        apply_side_sheet_width(&mut width, next, &mut sheets);
+    for (position, mut node) in &mut sheets {
+        if *position == SideSheetPosition::Left && node.width != vmux_flex::prelude::Val::Px(next) {
+            node.width = vmux_flex::prelude::Val::Px(next);
+        }
     }
     if !resize.settled {
         return;
@@ -515,19 +513,6 @@ fn on_side_sheet_resize(
     settings.layout.side_sheet.width = next;
     if let Some(mut saves) = saves {
         saves.write(vmux_setting::SettingsSaveRequest);
-    }
-}
-
-fn apply_side_sheet_width(
-    width: &mut SideSheetWidth,
-    next: f32,
-    sheets: &mut Query<(&SideSheetPosition, &mut vmux_flex::prelude::Node), With<SideSheet>>,
-) {
-    width.0 = next;
-    for (position, mut node) in sheets {
-        if *position == SideSheetPosition::Left {
-            node.width = vmux_flex::prelude::Val::Px(next);
-        }
     }
 }
 
@@ -921,7 +906,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
-            .insert_resource(SideSheetWidth(220.0))
             .add_message::<vmux_setting::SettingsSaveRequest>()
             .add_observer(on_side_sheet_resize);
         let sheet = app
@@ -939,7 +923,6 @@ mod tests {
         });
         app.world_mut().flush();
 
-        assert_eq!(app.world().resource::<SideSheetWidth>().0, 320.0);
         assert_eq!(
             app.world().get::<Node>(sheet).unwrap().width,
             Val::Px(320.0)
