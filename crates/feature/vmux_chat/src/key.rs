@@ -1,8 +1,14 @@
-use crate::event::ChatKey;
+use crate::composer::ComposerState;
+use crate::event::{
+    ChatCancel, ChatEscape, ChatHistoryMoveEffect, ChatListChooseEffect, ChatListMoveEffect,
+    ChatSelectorDismissEffect, ChatSubmit,
+};
+use crate::host::ChatView;
 use bevy_app::{App, Plugin, Startup};
+use bevy_cef::prelude::UiInput;
 use bevy_ecs::prelude::*;
 use vmux_command::{
-    CommandDispatch, CommandManifest, CommandRuntimePlugin, RegisterCommandDefinitions,
+    CommandDefinitions, CommandDispatch, CommandRuntimePlugin, RegisterCommandDefinitions,
 };
 
 pub struct ChatKeyPlugin;
@@ -13,34 +19,224 @@ impl Plugin for ChatKeyPlugin {
             app.add_plugins(CommandRuntimePlugin);
         }
         app.add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
-            .add_observer(echo_key_command);
+            .add_observer(move_list)
+            .add_observer(choose_list)
+            .add_observer(move_history)
+            .add_observer(submit)
+            .add_observer(dismiss_selector)
+            .add_observer(interrupt)
+            .add_observer(cancel);
     }
 }
+
+#[derive(Component, Default)]
+pub(crate) struct ChatKeyEffectRevision(u64);
 
 #[derive(Component)]
-struct ChatKeyBinding(ChatKey);
+struct ListNextBinding;
+
+#[derive(Component)]
+struct ListPreviousBinding;
+
+#[derive(Component)]
+struct ListChooseBinding;
+
+#[derive(Component)]
+struct HistoryOlderBinding;
+
+#[derive(Component)]
+struct HistoryNewerBinding;
+
+#[derive(Component)]
+struct SubmitBinding;
+
+#[derive(Component)]
+struct DismissSelectorBinding;
+
+#[derive(Component)]
+struct InterruptBinding;
+
+#[derive(Component)]
+struct CancelBinding;
 
 fn spawn_commands(mut commands: Commands) {
-    let manifest = CommandManifest::<ChatKey>::from_ron(include_str!("key.ron"));
-    for (definition, key) in manifest.into_commands() {
-        commands.spawn((definition, ChatKeyBinding(key)));
-    }
+    let mut definitions = CommandDefinitions::from_ron(include_str!("key.ron"));
+    commands.spawn((definitions.take("chat_list_next"), ListNextBinding));
+    commands.spawn((definitions.take("chat_list_previous"), ListPreviousBinding));
+    commands.spawn((definitions.take("chat_list_choose"), ListChooseBinding));
+    commands.spawn((definitions.take("chat_history_older"), HistoryOlderBinding));
+    commands.spawn((definitions.take("chat_history_newer"), HistoryNewerBinding));
+    commands.spawn((definitions.take("chat_submit"), SubmitBinding));
+    commands.spawn((
+        definitions.take("chat_dismiss_selector"),
+        DismissSelectorBinding,
+    ));
+    commands.spawn((definitions.take("chat_interrupt"), InterruptBinding));
+    commands.spawn((definitions.take("chat_cancel"), CancelBinding));
+    definitions.assert_all_registered();
 }
 
-fn echo_key_command(
+fn move_list(
     trigger: On<CommandDispatch>,
-    keys: Query<&ChatKeyBinding>,
+    next: Query<(), With<ListNextBinding>>,
+    previous: Query<(), With<ListPreviousBinding>>,
+    mut revisions: Query<&mut ChatKeyEffectRevision>,
     mut commands: Commands,
 ) {
-    let Ok(key) = keys.get(trigger.event().command()) else {
+    let command = trigger.event().command();
+    let next = if next.contains(command) {
+        true
+    } else if previous.contains(command) {
+        false
+    } else {
         return;
     };
+    let caller = trigger.event().invocation().caller;
+    let Ok(mut revision) = revisions.get_mut(caller) else {
+        return;
+    };
+    revision.0 = revision.0.wrapping_add(1).max(1);
     commands.trigger(
         vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
-            trigger.event().invocation().caller,
-            &key.0,
+            caller,
+            &ChatListMoveEffect {
+                revision: revision.0,
+                next,
+            },
         ),
     );
+}
+
+fn choose_list(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<ListChooseBinding>>,
+    mut revisions: Query<&mut ChatKeyEffectRevision>,
+    mut commands: Commands,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
+    }
+    let caller = trigger.event().invocation().caller;
+    let Ok(mut revision) = revisions.get_mut(caller) else {
+        return;
+    };
+    revision.0 = revision.0.wrapping_add(1).max(1);
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            caller,
+            &ChatListChooseEffect {
+                revision: revision.0,
+            },
+        ),
+    );
+}
+
+fn move_history(
+    trigger: On<CommandDispatch>,
+    older: Query<(), With<HistoryOlderBinding>>,
+    newer: Query<(), With<HistoryNewerBinding>>,
+    mut revisions: Query<&mut ChatKeyEffectRevision>,
+    mut commands: Commands,
+) {
+    let command = trigger.event().command();
+    let older = if older.contains(command) {
+        true
+    } else if newer.contains(command) {
+        false
+    } else {
+        return;
+    };
+    let caller = trigger.event().invocation().caller;
+    let Ok(mut revision) = revisions.get_mut(caller) else {
+        return;
+    };
+    revision.0 = revision.0.wrapping_add(1).max(1);
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            caller,
+            &ChatHistoryMoveEffect {
+                revision: revision.0,
+                older,
+            },
+        ),
+    );
+}
+
+fn submit(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<SubmitBinding>>,
+    composers: Query<&ComposerState, With<ChatView>>,
+    mut commands: Commands,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
+    }
+    let caller = trigger.event().invocation().caller;
+    let Ok(composer) = composers.get(caller) else {
+        return;
+    };
+    commands.trigger(UiInput {
+        webview: caller,
+        payload: ChatSubmit {
+            text: composer.draft().trim().to_string(),
+        },
+    });
+}
+
+fn dismiss_selector(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<DismissSelectorBinding>>,
+    mut revisions: Query<&mut ChatKeyEffectRevision>,
+    mut commands: Commands,
+) {
+    if !bindings.contains(trigger.event().command()) {
+        return;
+    }
+    let caller = trigger.event().invocation().caller;
+    let Ok(mut revision) = revisions.get_mut(caller) else {
+        return;
+    };
+    revision.0 = revision.0.wrapping_add(1).max(1);
+    commands.trigger(
+        vmux_core::host::UiStateWrite::<crate::state::ChatUiState>::from_event(
+            caller,
+            &ChatSelectorDismissEffect {
+                revision: revision.0,
+            },
+        ),
+    );
+}
+
+fn interrupt(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<InterruptBinding>>,
+    views: Query<(), With<ChatView>>,
+    mut commands: Commands,
+) {
+    let caller = trigger.event().invocation().caller;
+    if !bindings.contains(trigger.event().command()) || !views.contains(caller) {
+        return;
+    }
+    commands.trigger(UiInput {
+        webview: caller,
+        payload: ChatEscape,
+    });
+}
+
+fn cancel(
+    trigger: On<CommandDispatch>,
+    bindings: Query<(), With<CancelBinding>>,
+    views: Query<(), With<ChatView>>,
+    mut commands: Commands,
+) {
+    let caller = trigger.event().invocation().caller;
+    if !bindings.contains(trigger.event().command()) || !views.contains(caller) {
+        return;
+    }
+    commands.trigger(UiInput {
+        webview: caller,
+        payload: ChatCancel,
+    });
 }
 
 #[cfg(test)]
@@ -51,14 +247,14 @@ mod tests {
     use vmux_core::host::UiStateWrite;
 
     #[derive(Resource, Default)]
-    struct Echoed(Vec<(Entity, ChatKey)>);
+    struct ListChoices(Vec<(Entity, u64)>);
 
-    impl Echoed {
-        fn record(trigger: On<UiStateWrite<ChatUiState>>, mut echoed: ResMut<Self>) {
-            let Some(key) = trigger.event().patch().key else {
+    impl ListChoices {
+        fn record(trigger: On<UiStateWrite<ChatUiState>>, mut choices: ResMut<Self>) {
+            let Some(effect) = trigger.event().patch().list_choose else {
                 return;
             };
-            echoed.0.push((trigger.event().webview(), key));
+            choices.0.push((trigger.event().webview(), effect.revision));
         }
     }
 
@@ -68,8 +264,8 @@ mod tests {
         fn app() -> App {
             let mut app = App::new();
             app.add_plugins(ChatKeyPlugin)
-                .init_resource::<Echoed>()
-                .add_observer(Echoed::record);
+                .init_resource::<ListChoices>()
+                .add_observer(ListChoices::record);
             app
         }
 
@@ -84,18 +280,15 @@ mod tests {
     #[test]
     fn a_resolved_key_reaches_only_the_page_that_sent_it() {
         let mut app = Echo::app();
-        let pressed = app.world_mut().spawn_empty().id();
-        let other = app.world_mut().spawn_empty().id();
+        let pressed = app.world_mut().spawn(ChatKeyEffectRevision::default()).id();
+        let other = app.world_mut().spawn(ChatKeyEffectRevision::default()).id();
 
         Echo::issue(&mut app, pressed, "chat_list_choose");
 
-        assert_eq!(
-            app.world().resource::<Echoed>().0,
-            vec![(pressed, ChatKey::ListChoose)]
-        );
+        assert_eq!(app.world().resource::<ListChoices>().0, vec![(pressed, 1)]);
         assert!(
             !app.world()
-                .resource::<Echoed>()
+                .resource::<ListChoices>()
                 .0
                 .iter()
                 .any(|(entity, _)| *entity == other)

@@ -2,8 +2,8 @@ pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
 pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
 pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
 pub use vmux_api::chat::{
-    ChatKey, ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
-    SlashCommand, SlashCommandEntry, SlashCommands,
+    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession, SlashCommand,
+    SlashCommandEntry, SlashCommands,
 };
 use vmux_api::json::JsonValue;
 pub use vmux_api::prompt_media::{
@@ -238,6 +238,28 @@ pub struct ChatComposerEffect {
     pub revision: u64,
     pub draft: String,
     pub focus: bool,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct ChatListMoveEffect {
+    pub revision: u64,
+    pub next: bool,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct ChatListChooseEffect {
+    pub revision: u64,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct ChatHistoryMoveEffect {
+    pub revision: u64,
+    pub older: bool,
+}
+
+#[vmux_api::contract(Copy, Eq)]
+pub struct ChatSelectorDismissEffect {
+    pub revision: u64,
 }
 
 #[vmux_api::ui_event]

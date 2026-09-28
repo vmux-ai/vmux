@@ -15,7 +15,8 @@ type ChatUiStateUpdates = vmux_core::host::UiState<crate::state::ChatUiState>;
     ChatAttachmentProjection,
     ChatSnapshotProjection,
     ChatMediaProjection,
-    ComposerState
+    ComposerState,
+    crate::key::ChatKeyEffectRevision
 )]
 pub struct ChatView;
 

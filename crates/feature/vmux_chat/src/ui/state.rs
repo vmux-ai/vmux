@@ -2,14 +2,16 @@ use super::scroll;
 use crate::event::ChatResumeState;
 use crate::event::{
     ApprovalDecision, ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBranch,
-    ChatBranchesRequest, ChatBranchesState, ChatCancel, ChatChoiceSelected, ChatComposerEffect,
-    ChatDraftChanged, ChatEscape, ChatHistoryRequest, ChatItem, ChatMediaEntry, ChatMediaState,
-    ChatRemoveAttachment, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
+    ChatBranchesRequest, ChatBranchesState, ChatChoiceSelected, ChatComposerEffect,
+    ChatDraftChanged, ChatHistoryMoveEffect, ChatHistoryRequest, ChatItem, ChatListChooseEffect,
+    ChatListMoveEffect, ChatMediaEntry, ChatMediaState, ChatRemoveAttachment,
+    ChatSelectorDismissEffect, ChatSlashCommandRequest, ChatSnapshot, ChatStop, ChatSubmit,
     ChatTranscriptState, ComposerContext, ModelOptionEntry, QueuedPromptSnapshot,
     ResumableSessionEntry, ResumeSession, SelectMode, SelectModel, SlashCommand, SlashCommandEntry,
 };
 use crate::format::{
-    ResumeMenuState, SelectorMode, chat_page_title, filter_models, resume_menu_state, selector_mode,
+    PromptHistoryDirection, ResumeMenuState, SelectorMode, chat_page_title, filter_models,
+    resume_menu_state, selector_mode,
 };
 use crate::state::{ChatUiState, ChatUiStatePatch};
 use crate::tab::Accent;
@@ -25,7 +27,7 @@ use vmux_ui::components::composer_bar::{
 use vmux_ui::components::mcp_menu::{McpConnections, use_mcp_connections};
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
 use vmux_ui::file_icon::FilePath;
-use vmux_ui::hooks::{send, use_selector, use_theme, use_ui_state_patches};
+use vmux_ui::hooks::{MenuDirection, send, use_selector, use_theme, use_ui_state_patches};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -47,6 +49,7 @@ pub struct Chat {
     pub slash: SlashCommands,
     pub resume: Resume,
     pub menu: ComposerMenu,
+    pub input_effect_revision: Signal<u64>,
 }
 
 pub fn use_chat() -> Chat {
@@ -70,6 +73,7 @@ pub fn use_chat() -> Chat {
         slash: use_slash_commands(),
         resume: use_resume(),
         menu: use_composer_menu(),
+        input_effect_revision: use_signal(|| 0),
     };
     chat.listen();
     chat.watch();
@@ -143,6 +147,32 @@ impl Chat {
         }
         if let Some(effect) = &patch.composer_effect {
             self.apply_composer_effect(effect);
+        }
+        if let Some(ChatListMoveEffect { revision, next }) = patch.list_move
+            && self.accepts_input_effect(revision)
+        {
+            self.move_active_list(match next {
+                true => MenuDirection::Next,
+                false => MenuDirection::Previous,
+            });
+        }
+        if let Some(ChatListChooseEffect { revision }) = patch.list_choose
+            && self.accepts_input_effect(revision)
+        {
+            self.choose_active_list();
+        }
+        if let Some(ChatHistoryMoveEffect { revision, older }) = patch.history_move
+            && self.accepts_input_effect(revision)
+        {
+            self.recall_prompt(match older {
+                true => PromptHistoryDirection::Older,
+                false => PromptHistoryDirection::Newer,
+            });
+        }
+        if let Some(ChatSelectorDismissEffect { revision }) = patch.selector_dismiss
+            && self.accepts_input_effect(revision)
+        {
+            self.dismiss_selector();
         }
     }
 
@@ -668,14 +698,6 @@ impl Chat {
 
     pub fn stop_or_flush(&self) {
         let _ = send(&ChatStop);
-    }
-
-    pub fn interrupt(&self) {
-        let _ = send(&ChatEscape);
-    }
-
-    pub fn cancel(&self) {
-        let _ = send(&ChatCancel);
     }
 
     pub fn select_slash_command(&self, command: SlashCommand) {

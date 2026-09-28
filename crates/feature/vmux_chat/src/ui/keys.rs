@@ -1,6 +1,6 @@
 use super::composer::options::ChatMenuSet;
 use super::state::Chat;
-use crate::event::{ChatItem, ChatKey};
+use crate::event::ChatItem;
 use crate::format::{
     PromptEdit, PromptHistoryDirection, edit_prompt, move_prompt_history, prompt_history_direction,
 };
@@ -11,7 +11,6 @@ use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::ComposerMenuKind;
 use vmux_ui::hooks::{
     KeyClaim, MenuDirection, choice_number_index, move_selection, send, use_key_claim,
-    use_ui_state_patch,
 };
 
 const APPROVAL_OPTION_COUNT: usize = 3;
@@ -24,8 +23,6 @@ pub struct ChatKeys {
 
 pub fn use_chat_keys(chat: Chat) -> ChatKeys {
     let handler = ChatKeyHandler(chat);
-    let events = use_ui_state_patch::<crate::state::ChatUiState, ChatKey>();
-    use_effect(move || events.for_each(|key| handler.apply(key)));
     let keys = ChatKeys {
         handler,
         claim: use_key_claim(Unclaimed::Types, move || chat.key_context()),
@@ -131,33 +128,8 @@ impl ChatKeyHandler {
         }
     }
 
-    fn apply(&self, key: ChatKey) {
-        match key {
-            ChatKey::ListNext => self.move_list(MenuDirection::Next),
-            ChatKey::ListPrevious => self.move_list(MenuDirection::Previous),
-            ChatKey::ListChoose => self.choose(),
-            ChatKey::HistoryOlder => self.recall(PromptHistoryDirection::Older),
-            ChatKey::HistoryNewer => self.recall(PromptHistoryDirection::Newer),
-            ChatKey::Submit => self.0.submit(),
-            ChatKey::DismissSelector => self.0.dismiss_selector(),
-            ChatKey::Interrupt => self.0.interrupt(),
-            ChatKey::Cancel => self.0.cancel(),
-        }
-    }
-
     fn move_list(&self, direction: MenuDirection) {
-        let Some(list) = ChatList::current(self.0) else {
-            return;
-        };
-        list.move_by(self.0, direction);
-    }
-
-    fn choose(&self) {
-        let Some(list) = ChatList::current(self.0) else {
-            return;
-        };
-        let index = *list.selection(self.0).peek();
-        list.choose(self.0, index);
+        self.0.move_active_list(direction);
     }
 
     fn recall_direction(&self, key: &str, ctrl: bool) -> Option<PromptHistoryDirection> {
@@ -178,22 +150,53 @@ impl ChatKeyHandler {
     }
 
     fn recall(&self, direction: PromptHistoryDirection) {
-        let mut history_cursor = self.0.composer.history_cursor;
-        let mut history_scratch = self.0.composer.history_scratch;
+        self.0.recall_prompt(direction);
+    }
+}
+
+impl Chat {
+    pub(super) fn move_active_list(self, direction: MenuDirection) {
+        let Some(list) = ChatList::current(self) else {
+            return;
+        };
+        list.move_by(self, direction);
+    }
+
+    pub(super) fn choose_active_list(self) {
+        let Some(list) = ChatList::current(self) else {
+            return;
+        };
+        let index = *list.selection(self).peek();
+        list.choose(self, index);
+    }
+
+    pub(super) fn recall_prompt(self, direction: PromptHistoryDirection) {
+        let mut history_cursor = self.composer.history_cursor;
+        let mut history_scratch = self.composer.history_scratch;
         let scratch = history_scratch.peek().clone();
         let (value, next_cursor, scratch) = move_prompt_history(
-            &self.0.prompt_history(),
+            &self.prompt_history(),
             *history_cursor.peek(),
             &scratch,
-            &self.0.draft(),
+            &self.draft(),
             direction,
         );
-        self.0.set_draft(value);
+        self.set_draft(value);
         history_cursor.set(next_cursor);
         history_scratch.set(scratch);
         focus_prompt_end(PROMPT_INPUT_ID);
     }
 
+    pub(super) fn accepts_input_effect(mut self, revision: u64) -> bool {
+        if revision <= *self.input_effect_revision.peek() {
+            return false;
+        }
+        self.input_effect_revision.set(revision);
+        true
+    }
+}
+
+impl ChatKeyHandler {
     fn answered_by_number(&self, event: &KeyboardEvent) -> bool {
         let modifiers = event.modifiers();
         if modifiers.meta() || modifiers.ctrl() || modifiers.alt() {

@@ -369,19 +369,6 @@ pub const WORKING_VERB_IDS: &[&str] = &[
     "agent-working-spelunking",
 ];
 
-#[vmux_api::contract(Copy, Eq)]
-pub enum ChatKey {
-    ListNext,
-    ListPrevious,
-    ListChoose,
-    HistoryOlder,
-    HistoryNewer,
-    Submit,
-    DismissSelector,
-    Interrupt,
-    Cancel,
-}
-
 #[vmux_api::ui_event(Default, Eq)]
 pub struct PromptHistoryRequest {
     pub agent: String,

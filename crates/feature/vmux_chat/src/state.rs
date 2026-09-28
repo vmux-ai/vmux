@@ -1,7 +1,8 @@
 use crate::event::{
-    ChatAttachments, ChatBranchesState, ChatComposerEffect, ChatKey, ChatMediaState,
-    ChatResumeState, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState, ModelState,
-    SlashCommands,
+    ChatAttachments, ChatBranchesState, ChatComposerEffect, ChatHistoryMoveEffect,
+    ChatListChooseEffect, ChatListMoveEffect, ChatMediaState, ChatResumeState,
+    ChatSelectorDismissEffect, ChatSnapshot, ChatTranscriptState, ComposerContext, ModeState,
+    ModelState, SlashCommands,
 };
 use crate::model::{Models, Picker};
 use crate::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
@@ -39,7 +40,10 @@ pub struct ChatUiStatePatch {
     pub mode: Option<ModeState>,
     pub model: Option<ModelState>,
     pub slash_commands: Option<SlashCommands>,
-    pub key: Option<ChatKey>,
+    pub list_move: Option<ChatListMoveEffect>,
+    pub list_choose: Option<ChatListChooseEffect>,
+    pub history_move: Option<ChatHistoryMoveEffect>,
+    pub selector_dismiss: Option<ChatSelectorDismissEffect>,
     pub transcript: Option<Box<ChatTranscriptState>>,
     pub attachments: Option<Box<ChatAttachments>>,
     pub media: Option<Box<ChatMediaState>>,

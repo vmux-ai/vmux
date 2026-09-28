@@ -1,6 +1,5 @@
 [
   (
-    kind: ListNext,
     id: "chat_list_next",
     label: "Next Option",
     group: "Chat",
@@ -12,7 +11,6 @@
     ],
   ),
   (
-    kind: ListPrevious,
     id: "chat_list_previous",
     label: "Previous Option",
     group: "Chat",
@@ -24,7 +22,6 @@
     ],
   ),
   (
-    kind: ListChoose,
     id: "chat_list_choose",
     label: "Choose Option",
     group: "Chat",
@@ -34,7 +31,6 @@
     ],
   ),
   (
-    kind: HistoryOlder,
     id: "chat_history_older",
     label: "Previous Prompt",
     group: "Chat",
@@ -45,7 +41,6 @@
     ],
   ),
   (
-    kind: HistoryNewer,
     id: "chat_history_newer",
     label: "Next Prompt",
     group: "Chat",
@@ -56,7 +51,6 @@
     ],
   ),
   (
-    kind: Submit,
     id: "chat_submit",
     label: "Send Prompt",
     group: "Chat",
@@ -66,7 +60,6 @@
     ],
   ),
   (
-    kind: DismissSelector,
     id: "chat_dismiss_selector",
     label: "Close Picker",
     group: "Chat",
@@ -76,7 +69,6 @@
     ],
   ),
   (
-    kind: Interrupt,
     id: "chat_interrupt",
     label: "Send Queued Now",
     group: "Chat",
@@ -86,7 +78,6 @@
     ],
   ),
   (
-    kind: Cancel,
     id: "chat_cancel",
     label: "Stop Turn",
     group: "Chat",
