@@ -6,19 +6,15 @@ pub(crate) struct DesktopInputPlugin;
 
 impl Plugin for DesktopInputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((vmux_input::KeyboardPlugin, ApplicationKeyPlugin));
+        app.add_plugins((vmux_input::KeyboardPlugin, DesktopKeyBindingPlugin));
     }
 }
 
-#[derive(Message, Clone, Copy)]
-pub(crate) struct ExitFullscreenRequest;
+struct DesktopKeyBindingPlugin;
 
-struct ApplicationKeyPlugin;
-
-impl Plugin for ApplicationKeyPlugin {
+impl Plugin for DesktopKeyBindingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ExitFullscreenRequest>()
-            .add_message::<crate::runtime::HideAllWindowsRequest>()
+        app.add_message::<crate::runtime::HideAllWindowsRequest>()
             .add_message::<NativeKeyInput>()
             .add_systems(Startup, spawn_application_key_bindings)
             .add_systems(
@@ -99,7 +95,7 @@ fn sync_application_key_bindings(
 fn handle_application_key_input(
     mut inputs: MessageReader<NativeKeyInput>,
     bindings: Query<(Has<ExitFullscreenKey>, Has<HideWindowsKey>), With<vmux_core::Active>>,
-    mut fullscreen: MessageWriter<ExitFullscreenRequest>,
+    mut fullscreen: MessageWriter<crate::window_state::ExitFullscreenRequest>,
     mut hide_windows: MessageWriter<crate::runtime::HideAllWindowsRequest>,
 ) {
     for input in inputs.read() {
@@ -108,7 +104,7 @@ fn handle_application_key_input(
             continue;
         };
         if exits_fullscreen {
-            fullscreen.write(ExitFullscreenRequest);
+            fullscreen.write(crate::window_state::ExitFullscreenRequest);
         }
         if hides_windows {
             hide_windows.write(crate::runtime::HideAllWindowsRequest);
@@ -125,10 +121,14 @@ mod tests {
     fn fullscreen_escape_becomes_an_ecs_request_unless_the_page_owns_it() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(ApplicationKeyPlugin);
+            .add_message::<crate::window_state::ExitFullscreenRequest>()
+            .add_plugins(DesktopKeyBindingPlugin);
         let window = app
             .world_mut()
-            .spawn(crate::window_state::WindowFullscreen(true))
+            .spawn((
+                Window::default(),
+                crate::window_state::WindowFullscreen(true),
+            ))
             .id();
         app.world_mut().entity_mut(window).insert(vmux_core::Active);
         app.update();
@@ -155,7 +155,7 @@ mod tests {
         app.update();
         assert_eq!(
             app.world_mut()
-                .resource_mut::<Messages<ExitFullscreenRequest>>()
+                .resource_mut::<Messages<crate::window_state::ExitFullscreenRequest>>()
                 .drain()
                 .count(),
             1

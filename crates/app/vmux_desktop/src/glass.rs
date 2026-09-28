@@ -331,7 +331,7 @@ fn sync_window_glass_visibility(
         &mut crate::window_state::WindowFullscreen,
     )>,
     focused_window: vmux_layout::window::FocusedWindow,
-    mut exit_fullscreen: MessageReader<crate::input::ExitFullscreenRequest>,
+    mut exit_fullscreen: MessageReader<crate::window_state::ExitFullscreenRequest>,
 ) {
     use objc2::ClassType;
     use objc2_app_kit::NSWindowStyleMask;

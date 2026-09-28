@@ -29,7 +29,7 @@ impl ServiceDaemonPlugin {
         let (authorizations, authorization_runtime) = RemoteAuthorizations::new(wake.clone());
         let (agent_sessions, agent_session_runtime) =
             AgentSessions::new(runtime.clone(), wake.clone());
-        let (acp_sessions, acp_session_runtime) = AcpSessions::new(runtime.clone(), wake);
+        let (acp_sessions, acp_session_runtime) = AcpSessions::new(runtime.clone(), wake.clone());
         let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
         let broker = AgentBroker::new(
             agent_tx.clone(),
@@ -54,6 +54,7 @@ impl ServiceDaemonPlugin {
                 acp_sessions,
                 agent_tx,
                 broker,
+                wake: wake.clone(),
                 runtime,
                 exit,
             })),
@@ -75,7 +76,11 @@ impl Plugin for ServiceDaemonPlugin {
             vmux_agent::service::AgentSessionPlugin,
             vmux_agent::acp::AcpSessionPlugin,
         ))
-        .add_systems(Startup, start_service_daemon);
+        .add_systems(Startup, start_service_daemon)
+        .add_systems(
+            Update,
+            (start_service_clients, reap_service_clients).chain(),
+        );
     }
 }
 
@@ -89,6 +94,7 @@ struct ServiceDaemonStart {
     acp_sessions: AcpSessions,
     agent_tx: broadcast::Sender<ServiceMessage>,
     broker: AgentBroker,
+    wake: mpsc::UnboundedSender<()>,
     runtime: tokio::runtime::Handle,
     exit: mpsc::Sender<()>,
 }
@@ -100,9 +106,37 @@ struct ServiceDaemon;
 struct ServiceStartedAt(Instant);
 
 #[derive(Component)]
-struct ServiceServerTask(tokio::task::JoinHandle<()>);
+struct ServiceListenerTask(tokio::task::JoinHandle<()>);
 
-impl Drop for ServiceServerTask {
+impl Drop for ServiceListenerTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+#[derive(Component, Clone)]
+struct ServiceClientRuntime {
+    runtime: tokio::runtime::Handle,
+    processes: ProcessRuntime,
+    agent_tx: broadcast::Sender<ServiceMessage>,
+    broker: AgentBroker,
+    agent_sessions: AgentSessions,
+    acp_sessions: AcpSessions,
+    shutdown: mpsc::Sender<()>,
+    wake: mpsc::UnboundedSender<()>,
+    started_at: ServiceStartedAt,
+}
+
+#[derive(Component)]
+struct ServiceConnectionInbox(mpsc::UnboundedReceiver<tokio::net::UnixStream>);
+
+#[derive(Component)]
+struct ServiceClient;
+
+#[derive(Component)]
+struct ServiceClientTask(tokio::task::JoinHandle<()>);
+
+impl Drop for ServiceClientTask {
     fn drop(&mut self) {
         self.0.abort();
     }
@@ -117,24 +151,112 @@ fn start_service_daemon(
             continue;
         };
         let started_at = ServiceStartedAt(Instant::now());
-        let task = start.runtime.spawn(async move {
-            ServiceServer {
-                listener: start.listener,
-                processes: start.processes,
-                agent_sessions: start.agent_sessions,
-                acp_sessions: start.acp_sessions,
-                agent_tx: start.agent_tx,
-                broker: start.broker,
-                started_at,
-            }
-            .run()
-            .await;
-            let _ = start.exit.send(()).await;
-        });
+        let (connections, connection_inbox) = mpsc::unbounded_channel();
+        let (shutdown, shutdown_inbox) = mpsc::channel(1);
+        let task = start.runtime.spawn(listen(
+            start.listener,
+            connections,
+            start.wake.clone(),
+            shutdown_inbox,
+            start.exit,
+        ));
         commands
             .entity(entity)
             .remove::<ServiceDaemonStartup>()
-            .insert((ServiceDaemon, started_at, ServiceServerTask(task)));
+            .insert((
+                ServiceDaemon,
+                started_at,
+                ServiceClientRuntime {
+                    runtime: start.runtime,
+                    processes: start.processes,
+                    agent_tx: start.agent_tx,
+                    broker: start.broker,
+                    agent_sessions: start.agent_sessions,
+                    acp_sessions: start.acp_sessions,
+                    shutdown,
+                    wake: start.wake,
+                    started_at,
+                },
+                ServiceConnectionInbox(connection_inbox),
+                ServiceListenerTask(task),
+            ));
+    }
+}
+
+async fn listen(
+    listener: UnixListener,
+    connections: mpsc::UnboundedSender<tokio::net::UnixStream>,
+    wake: mpsc::UnboundedSender<()>,
+    mut shutdown: mpsc::Receiver<()>,
+    exit: mpsc::Sender<()>,
+) {
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => {
+                let (stream, _) = match accepted {
+                    Ok(connection) => connection,
+                    Err(error) => {
+                        tracing::error!(%error, "accept error");
+                        continue;
+                    }
+                };
+                if connections.send(stream).is_err() {
+                    break;
+                }
+                let _ = wake.send(());
+            }
+            _ = shutdown.recv() => {
+                tracing::info!("server: drain signaled, closing listener");
+                break;
+            }
+        }
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tracing::info!("server: drain complete, exiting");
+    let _ = exit.send(()).await;
+}
+
+fn start_service_clients(
+    runtime: Single<&ServiceClientRuntime, With<ServiceDaemon>>,
+    mut inbox: Single<&mut ServiceConnectionInbox, With<ServiceDaemon>>,
+    mut commands: Commands,
+) {
+    while let Ok(stream) = inbox.0.try_recv() {
+        let client = (*runtime).clone();
+        let wake = client.wake.clone();
+        let task = client.runtime.spawn(async move {
+            if let Err(error) = handle_client(
+                stream,
+                client.processes,
+                client.agent_tx,
+                client.broker,
+                client.agent_sessions,
+                client.acp_sessions,
+                client.shutdown,
+                client.started_at,
+            )
+            .await
+            {
+                tracing::error!(%error, "client error");
+            }
+            let _ = wake.send(());
+        });
+        commands.spawn((
+            Name::new("service client"),
+            ServiceClient,
+            ServiceClientTask(task),
+        ));
+    }
+}
+
+fn reap_service_clients(
+    clients: Query<(Entity, &ServiceClientTask), With<ServiceClient>>,
+    mut commands: Commands,
+) {
+    for (entity, task) in &clients {
+        if task.0.is_finished() {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -186,74 +308,6 @@ async fn route_agent_input(
             vmux_agent::service::SessionInput::User { text, attachments },
         )
         .await;
-}
-
-struct ServiceServer {
-    listener: UnixListener,
-    processes: ProcessRuntime,
-    agent_sessions: AgentSessions,
-    acp_sessions: AcpSessions,
-    agent_tx: broadcast::Sender<ServiceMessage>,
-    broker: AgentBroker,
-    started_at: ServiceStartedAt,
-}
-
-impl ServiceServer {
-    async fn run(self) {
-        let Self {
-            listener,
-            processes,
-            agent_sessions,
-            acp_sessions,
-            agent_tx,
-            broker,
-            started_at,
-        } = self;
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-
-        loop {
-            tokio::select! {
-                accept = listener.accept() => {
-                    let (stream, _) = match accept {
-                        Ok(conn) => conn,
-                        Err(e) => {
-                            tracing::error!(error = %e, "accept error");
-                            continue;
-                        }
-                    };
-                    let processes = processes.clone();
-                    let agent_tx = agent_tx.clone();
-                    let broker = broker.clone();
-                    let agent_sessions = agent_sessions.clone();
-                    let acp_sessions = acp_sessions.clone();
-                    let shutdown_tx = shutdown_tx.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = handle_client(
-                            stream,
-                            processes,
-                            agent_tx,
-                            broker,
-                            agent_sessions,
-                            acp_sessions,
-                            shutdown_tx,
-                            started_at,
-                        )
-                        .await
-                        {
-                            tracing::error!(error = %e, "client error");
-                        }
-                    });
-                }
-                _ = shutdown_rx.recv() => {
-                    tracing::info!("server: drain signaled, closing listener");
-                    break;
-                }
-            }
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        tracing::info!("server: drain complete, exiting");
-    }
 }
 
 fn command_result_to_content(result: vmux_api::protocol::AgentCommandResult) -> (String, bool) {
@@ -1257,7 +1311,7 @@ mod tests {
             wake.clone(),
         );
         let (acp_sessions, acp_runtime) =
-            vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), wake);
+            vmux_agent::acp::AcpSessions::new(tokio::runtime::Handle::current(), wake.clone());
         drop(acp_runtime);
         let (agent_tx, _) = broadcast::channel(8);
         let broker = AgentBroker::new(
@@ -1266,17 +1320,31 @@ mod tests {
             Default::default(),
             Default::default(),
         );
-        super::ServiceServer {
-            listener,
-            processes,
-            agent_sessions,
-            acp_sessions,
-            agent_tx,
-            broker,
-            started_at: ServiceStartedAt(Instant::now()),
+        let (connections, mut connection_inbox) = mpsc::unbounded_channel();
+        let (shutdown, shutdown_inbox) = mpsc::channel(1);
+        let (exit, mut exit_inbox) = mpsc::channel(1);
+        let listener = tokio::spawn(listen(listener, connections, wake, shutdown_inbox, exit));
+        let started_at = ServiceStartedAt(Instant::now());
+        let mut clients = tokio::task::JoinSet::new();
+        loop {
+            tokio::select! {
+                Some(stream) = connection_inbox.recv() => {
+                    clients.spawn(handle_client(
+                        stream,
+                        processes.clone(),
+                        agent_tx.clone(),
+                        broker.clone(),
+                        agent_sessions.clone(),
+                        acp_sessions.clone(),
+                        shutdown.clone(),
+                        started_at,
+                    ));
+                }
+                _ = exit_inbox.recv() => break,
+            }
         }
-        .run()
-        .await;
+        clients.abort_all();
+        let _ = listener.await;
     }
 
     #[test]

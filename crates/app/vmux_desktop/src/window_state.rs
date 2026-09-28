@@ -12,15 +12,17 @@ pub(crate) struct SyncWindowFullscreen;
 
 impl Plugin for WindowStatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, ensure_window_state).add_systems(
-            Update,
-            (
-                ensure_geometry_singleton,
-                apply_geometry_on_load,
-                capture_window_geometry,
-            )
-                .chain(),
-        );
+        app.add_message::<ExitFullscreenRequest>()
+            .add_systems(PreUpdate, ensure_window_state)
+            .add_systems(
+                Update,
+                (
+                    ensure_geometry_singleton,
+                    apply_geometry_on_load,
+                    capture_window_geometry,
+                )
+                    .chain(),
+            );
         #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
         app.add_systems(
             Update,
@@ -32,6 +34,9 @@ impl Plugin for WindowStatePlugin {
         );
     }
 }
+
+#[derive(Message, Clone, Copy)]
+pub(crate) struct ExitFullscreenRequest;
 
 const MIN_WINDOW_SIZE: f32 = 100.0;
 
