@@ -55,9 +55,9 @@ fn open() -> io::Result<()> {
         if status.success() {
             return Ok(());
         }
-        return Err(io::Error::other(format!(
+        Err(io::Error::other(format!(
             "open -a Vmux exited with {status}"
-        )));
+        )))
     }
 
     #[cfg(not(target_os = "macos"))]
