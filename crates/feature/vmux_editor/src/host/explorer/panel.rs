@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_core::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelWidth};
+use vmux_core::event::{
+    ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelViewSet, ExplorerPanelWidth,
+};
 
 use super::{ExplorerPanelDefaults, ExplorerPanelSent, RevealCurrent, StackExplorerRevision};
 use crate::host::editor::FileView;
@@ -12,7 +14,11 @@ impl Plugin for PanelPlugin {
         app.add_systems(Startup, spawn_explorer_panel_defaults)
             .register_type::<StackExplorerVisibility>()
             .add_systems(Update, (load_explorer_panel_defaults, emit_explorer_panel))
+            .add_observer(toggle_explorer)
+            .add_observer(reveal_in_explorer)
+            .add_observer(open_find_in_files)
             .add_observer(on_explorer_panel_set_visible)
+            .add_observer(on_explorer_panel_view_set)
             .add_observer(on_explorer_panel_width);
     }
 }
@@ -33,6 +39,48 @@ fn spawn_explorer_panel_defaults(mut commands: Commands) {
 #[type_path = "vmux_editor::plugin"]
 pub struct StackExplorerVisibility {
     pub visible: bool,
+}
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct StackExplorerView {
+    search: bool,
+    search_focus_revision: u64,
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct ExplorerToggleRequest {
+    #[event_target]
+    entity: Entity,
+}
+
+impl From<Entity> for ExplorerToggleRequest {
+    fn from(entity: Entity) -> Self {
+        Self { entity }
+    }
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct ExplorerRevealRequest {
+    #[event_target]
+    entity: Entity,
+}
+
+impl From<Entity> for ExplorerRevealRequest {
+    fn from(entity: Entity) -> Self {
+        Self { entity }
+    }
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct ExplorerFindInFilesRequest {
+    #[event_target]
+    entity: Entity,
+}
+
+impl From<Entity> for ExplorerFindInFilesRequest {
+    fn from(entity: Entity) -> Self {
+        Self { entity }
+    }
 }
 
 type PanelUnsentReady = (
@@ -65,6 +113,7 @@ fn emit_explorer_panel(
     views: Query<(Entity, Option<&ChildOf>), PanelUnsentReady>,
     visibility: Query<&StackExplorerVisibility>,
     revisions: Query<&StackExplorerRevision>,
+    panel_views: Query<&StackExplorerView>,
     panel: Single<&ExplorerPanelDefaults>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
@@ -82,11 +131,14 @@ fn emit_explorer_panel(
             .map(|state| state.visible)
             .unwrap_or(panel.default_visible);
         let revision = revisions.get(scope).copied().unwrap_or_default();
+        let view = panel_views.get(scope).copied().unwrap_or_default();
         commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &ExplorerPanelEvent {
                 visible,
                 width: panel.width,
+                search: view.search,
+                search_focus_revision: view.search_focus_revision,
                 client_id: revision.client_id,
                 request_id: revision.request_id,
             },
@@ -135,6 +187,107 @@ fn apply_stack_explorer_panel(
     }
 }
 
+fn toggle_explorer(
+    trigger: On<ExplorerToggleRequest>,
+    child_of: Query<&ChildOf>,
+    visibility: Query<&StackExplorerVisibility>,
+    revisions: Query<&StackExplorerRevision>,
+    panel: Single<&ExplorerPanelDefaults>,
+    editors: Query<Entity, With<FileView>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
+    let visible = visibility
+        .get(scope)
+        .map(|state| state.visible)
+        .unwrap_or(panel.default_visible);
+    let request_id = revisions
+        .get(scope)
+        .map(|revision| revision.request_id)
+        .unwrap_or_default()
+        .wrapping_add(1)
+        .max(1);
+    commands.entity(scope).insert((
+        StackExplorerVisibility { visible: !visible },
+        StackExplorerRevision {
+            client_id: 0,
+            request_id,
+        },
+    ));
+    mark_explorer_panel_unsent(&editors, &mut commands);
+}
+
+fn reveal_in_explorer(
+    trigger: On<ExplorerRevealRequest>,
+    child_of: Query<&ChildOf>,
+    revisions: Query<&StackExplorerRevision>,
+    mut views: Query<&mut StackExplorerView>,
+    editors: Query<Entity, With<FileView>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
+    let request_id = revisions
+        .get(scope)
+        .map(|revision| revision.request_id)
+        .unwrap_or_default()
+        .wrapping_add(1)
+        .max(1);
+    commands.entity(scope).insert((
+        StackExplorerVisibility { visible: true },
+        StackExplorerRevision {
+            client_id: 0,
+            request_id,
+        },
+    ));
+    if let Ok(mut view) = views.get_mut(scope) {
+        view.search = false;
+    } else {
+        commands.entity(scope).insert(StackExplorerView::default());
+    }
+    mark_explorer_panel_unsent(&editors, &mut commands);
+    commands.trigger(RevealCurrent {
+        entity,
+        reveal: vmux_core::event::ExplorerReveal::Requested,
+    });
+}
+
+fn open_find_in_files(
+    trigger: On<ExplorerFindInFilesRequest>,
+    child_of: Query<&ChildOf>,
+    revisions: Query<&StackExplorerRevision>,
+    mut views: Query<&mut StackExplorerView>,
+    editors: Query<Entity, With<FileView>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
+    let request_id = revisions
+        .get(scope)
+        .map(|revision| revision.request_id)
+        .unwrap_or_default()
+        .wrapping_add(1)
+        .max(1);
+    commands.entity(scope).insert((
+        StackExplorerVisibility { visible: true },
+        StackExplorerRevision {
+            client_id: 0,
+            request_id,
+        },
+    ));
+    if let Ok(mut view) = views.get_mut(scope) {
+        view.search = true;
+        view.search_focus_revision = view.search_focus_revision.wrapping_add(1).max(1);
+    } else {
+        commands.entity(scope).insert(StackExplorerView {
+            search: true,
+            search_focus_revision: 1,
+        });
+    }
+    mark_explorer_panel_unsent(&editors, &mut commands);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn on_explorer_panel_set_visible(
     trigger: On<UiInput<ExplorerPanelSetVisible>>,
@@ -178,6 +331,30 @@ fn on_explorer_panel_set_visible(
             reveal: vmux_core::event::ExplorerReveal::Followed,
         });
     }
+}
+
+fn on_explorer_panel_view_set(
+    trigger: On<UiInput<ExplorerPanelViewSet>>,
+    child_of: Query<&ChildOf>,
+    mut views: Query<&mut StackExplorerView>,
+    editors: Query<Entity, With<FileView>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let scope = child_of.get(entity).map(ChildOf::parent).unwrap_or(entity);
+    let search = trigger.event().payload.search;
+    if let Ok(mut view) = views.get_mut(scope) {
+        view.search = search;
+        if search {
+            view.search_focus_revision = view.search_focus_revision.wrapping_add(1).max(1);
+        }
+    } else {
+        commands.entity(scope).insert(StackExplorerView {
+            search,
+            search_focus_revision: u64::from(search),
+        });
+    }
+    mark_explorer_panel_unsent(&editors, &mut commands);
 }
 
 fn on_explorer_panel_width(

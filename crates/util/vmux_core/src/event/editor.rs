@@ -518,12 +518,10 @@ impl From<CommandBarPicker> for FileStatusPickerOpen {
 }
 
 #[vmux_api::contract(Copy, Eq)]
-pub enum FileKey {
-    ToggleExplorer,
-    RevealInExplorer,
-    Find { forward: bool },
-    FindClose,
-    FindInFiles,
+pub struct FileFindEvent {
+    pub open: bool,
+    pub forward: bool,
+    pub revision: u64,
 }
 
 #[vmux_api::contract(Copy, Eq)]

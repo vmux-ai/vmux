@@ -25,18 +25,15 @@ pub(super) fn VimStatus(label: String) -> Element {
 #[component]
 pub(super) fn FindBar(
     query: Signal<String>,
-    open: Signal<bool>,
     forward: Signal<bool>,
     vim: bool,
     total: u32,
     index: u32,
 ) -> Element {
     let mut query = query;
-    let mut open = open;
     let mut regex = use_signal(|| vim);
     let ime = use_ime_guard();
     let mut close = move || {
-        open.set(false);
         query.set(String::new());
         let _ = send(&FileFindRequest {
             done: true,

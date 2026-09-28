@@ -40,9 +40,96 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)
             .add_systems(Update, (reapply_keymap_on_change, run_submitted_ex_lines))
+            .add_observer(open_file_find)
+            .add_observer(close_file_find)
             .add_observer(on_file_find_request)
             .add_observer(on_file_property_edit);
     }
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FileFindState {
+    open: bool,
+    forward: bool,
+    revision: u64,
+}
+
+impl Default for FileFindState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            forward: true,
+            revision: 0,
+        }
+    }
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct FileFindOpenRequest {
+    #[event_target]
+    entity: Entity,
+    forward: bool,
+}
+
+impl FileFindOpenRequest {
+    pub(crate) fn new(entity: Entity, forward: bool) -> Self {
+        Self { entity, forward }
+    }
+}
+
+#[derive(EntityEvent)]
+pub(crate) struct FileFindCloseRequest {
+    #[event_target]
+    entity: Entity,
+}
+
+impl From<Entity> for FileFindCloseRequest {
+    fn from(entity: Entity) -> Self {
+        Self { entity }
+    }
+}
+
+fn open_file_find(
+    trigger: On<FileFindOpenRequest>,
+    mut states: Query<&mut FileFindState>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(mut state) = states.get_mut(entity) else {
+        return;
+    };
+    state.open = true;
+    state.forward = trigger.event().forward;
+    state.revision = state.revision.wrapping_add(1).max(1);
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &FileFindEvent {
+            open: state.open,
+            forward: state.forward,
+            revision: state.revision,
+        },
+    ));
+}
+
+fn close_file_find(
+    trigger: On<FileFindCloseRequest>,
+    mut states: Query<&mut FileFindState>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(mut state) = states.get_mut(entity) else {
+        return;
+    };
+    state.open = false;
+    state.revision = state.revision.wrapping_add(1).max(1);
+    commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
+        entity,
+        &FileFindEvent {
+            open: state.open,
+            forward: state.forward,
+            revision: state.revision,
+        },
+    ));
 }
 
 pub(super) struct EditExecutionPlugin;
@@ -295,21 +382,11 @@ fn apply_edit_request(
                 continue;
             }
             EditCommand::ClearSearchHighlight => {
-                commands.trigger(
-                    vmux_core::host::UiStateWrite::<vmux_core::event::FileUiState>::from_event(
-                        entity,
-                        &vmux_core::event::FileKey::FindClose,
-                    ),
-                );
+                commands.trigger(FileFindCloseRequest::from(entity));
                 cursor_stale = true;
             }
             EditCommand::OpenFind { forward } => {
-                commands.trigger(
-                    vmux_core::host::UiStateWrite::<vmux_core::event::FileUiState>::from_event(
-                        entity,
-                        &vmux_core::event::FileKey::Find { forward: *forward },
-                    ),
-                );
+                commands.trigger(FileFindOpenRequest::new(entity, *forward));
                 continue;
             }
             EditCommand::OpenCommandLine => {
@@ -621,6 +698,9 @@ fn on_file_find_request(
     };
     if request.done || request.query.is_empty() {
         edit.core.apply(EditCommand::ClearSearchHighlight);
+        if request.done {
+            commands.trigger(FileFindCloseRequest::from(entity));
+        }
     } else if request.step {
         edit.core.apply(EditCommand::Move(Motion::SearchNext {
             reverse: request.reverse,
@@ -669,6 +749,42 @@ fn on_file_pointer(
 mod edit_flow_tests {
     use super::*;
     use crate::keymap::{KeyInput, KeymapKindExt, Mods};
+
+    #[test]
+    fn find_requests_update_the_targeted_editor_state() {
+        let mut app = App::new();
+        app.add_observer(open_file_find)
+            .add_observer(close_file_find);
+        let first = app.world_mut().spawn(FileFindState::default()).id();
+        let second = app.world_mut().spawn(FileFindState::default()).id();
+
+        app.world_mut()
+            .trigger(FileFindOpenRequest::new(first, false));
+
+        assert_eq!(
+            *app.world().get::<FileFindState>(first).unwrap(),
+            FileFindState {
+                open: true,
+                forward: false,
+                revision: 1,
+            }
+        );
+        assert_eq!(
+            *app.world().get::<FileFindState>(second).unwrap(),
+            FileFindState::default()
+        );
+
+        app.world_mut().trigger(FileFindCloseRequest::from(first));
+
+        assert_eq!(
+            *app.world().get::<FileFindState>(first).unwrap(),
+            FileFindState {
+                open: false,
+                forward: false,
+                revision: 2,
+            }
+        );
+    }
 
     #[test]
     fn vim_dd_deletes_line_via_keymap_and_core() {

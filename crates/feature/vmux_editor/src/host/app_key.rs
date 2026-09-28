@@ -8,10 +8,14 @@ use vmux_command::{
 };
 use vmux_core::event::{
     ExplorerGoto, FileEncoding, FileEncodingReopenRequest, FileEncodingSaveRequest, FileIndent,
-    FileKey, FileLineEnding, FileShapeSet, FileStatusPickerOpen,
+    FileLineEnding, FileShapeSet, FileStatusPickerOpen,
 };
 
+use crate::host::editing::FileFindOpenRequest;
 use crate::host::editor::{Editor, FileView};
+use crate::host::explorer::{
+    ExplorerFindInFilesRequest, ExplorerRevealRequest, ExplorerToggleRequest,
+};
 use crate::host::panel::{
     FilePanelChooseRequest, FilePanelDismissRequest, FilePanelNextRequest, FilePanelPreviousRequest,
 };
@@ -27,7 +31,10 @@ impl Plugin for KeyPlugin {
         app.add_plugins(UiEventPlugin::<(FileStatusPickerOpen,)>::default())
             .add_systems(Startup, spawn_commands.in_set(RegisterCommandDefinitions))
             .add_systems(Update, apply_status_picks)
-            .add_observer(echo_key_command)
+            .add_observer(toggle_explorer)
+            .add_observer(reveal_in_explorer)
+            .add_observer(open_find)
+            .add_observer(open_find_in_files)
             .add_observer(dispatch_panel_next_command)
             .add_observer(dispatch_panel_previous_command)
             .add_observer(dispatch_panel_choose_command)
@@ -37,7 +44,16 @@ impl Plugin for KeyPlugin {
 }
 
 #[derive(Component)]
-struct FileKeyBinding(FileKey);
+struct FileToggleExplorerKeyBinding;
+
+#[derive(Component)]
+struct FileRevealExplorerKeyBinding;
+
+#[derive(Component)]
+struct FileFindKeyBinding;
+
+#[derive(Component)]
+struct FileFindInFilesKeyBinding;
 
 #[derive(Component)]
 struct FilePanelNextKeyBinding;
@@ -55,19 +71,16 @@ fn spawn_commands(mut commands: Commands) {
     let mut definitions = CommandDefinitions::from_ron(include_str!("app_key.ron"));
     commands.spawn((
         definitions.take("file_toggle_explorer"),
-        FileKeyBinding(FileKey::ToggleExplorer),
+        FileToggleExplorerKeyBinding,
     ));
     commands.spawn((
         definitions.take("file_reveal_in_explorer"),
-        FileKeyBinding(FileKey::RevealInExplorer),
+        FileRevealExplorerKeyBinding,
     ));
-    commands.spawn((
-        definitions.take("file_find"),
-        FileKeyBinding(FileKey::Find { forward: true }),
-    ));
+    commands.spawn((definitions.take("file_find"), FileFindKeyBinding));
     commands.spawn((
         definitions.take("file_find_in_files"),
-        FileKeyBinding(FileKey::FindInFiles),
+        FileFindInFilesKeyBinding,
     ));
     commands.spawn((definitions.take("file_panel_next"), FilePanelNextKeyBinding));
     commands.spawn((
@@ -85,20 +98,57 @@ fn spawn_commands(mut commands: Commands) {
     definitions.assert_all_registered();
 }
 
-fn echo_key_command(
+fn toggle_explorer(
     trigger: On<CommandDispatch>,
-    keys: Query<&FileKeyBinding>,
+    keys: Query<(), With<FileToggleExplorerKeyBinding>>,
     mut commands: Commands,
 ) {
-    let Ok(key) = keys.get(trigger.event().command()) else {
+    if !keys.contains(trigger.event().command()) {
         return;
-    };
-    commands.trigger(
-        vmux_core::host::UiStateWrite::<vmux_core::event::FileUiState>::from_event(
-            trigger.event().invocation().caller,
-            &key.0,
-        ),
-    );
+    }
+    commands.trigger(ExplorerToggleRequest::from(
+        trigger.event().invocation().caller,
+    ));
+}
+
+fn reveal_in_explorer(
+    trigger: On<CommandDispatch>,
+    keys: Query<(), With<FileRevealExplorerKeyBinding>>,
+    mut commands: Commands,
+) {
+    if !keys.contains(trigger.event().command()) {
+        return;
+    }
+    commands.trigger(ExplorerRevealRequest::from(
+        trigger.event().invocation().caller,
+    ));
+}
+
+fn open_find(
+    trigger: On<CommandDispatch>,
+    keys: Query<(), With<FileFindKeyBinding>>,
+    mut commands: Commands,
+) {
+    if !keys.contains(trigger.event().command()) {
+        return;
+    }
+    commands.trigger(FileFindOpenRequest::new(
+        trigger.event().invocation().caller,
+        true,
+    ));
+}
+
+fn open_find_in_files(
+    trigger: On<CommandDispatch>,
+    keys: Query<(), With<FileFindInFilesKeyBinding>>,
+    mut commands: Commands,
+) {
+    if !keys.contains(trigger.event().command()) {
+        return;
+    }
+    commands.trigger(ExplorerFindInFilesRequest::from(
+        trigger.event().invocation().caller,
+    ));
 }
 
 fn dispatch_panel_next_command(
@@ -260,20 +310,15 @@ fn apply_status_picks(
 mod tests {
     use super::*;
     use vmux_command::CommandInvocation;
-    use vmux_core::host::FileUiStateWrite;
-
     #[derive(Resource, Default)]
-    struct Echoed(Vec<(Entity, FileKey)>);
+    struct FindRequests(Vec<Entity>);
 
     #[derive(Resource, Default)]
     struct PanelRequests(Vec<Entity>);
 
-    impl Echoed {
-        fn record(trigger: On<FileUiStateWrite>, mut echoed: ResMut<Self>) {
-            let Some(key) = trigger.event().patch().key else {
-                return;
-            };
-            echoed.0.push((trigger.event().webview(), key));
+    impl FindRequests {
+        fn record(trigger: On<FileFindOpenRequest>, mut seen: ResMut<Self>) {
+            seen.0.push(trigger.event_target());
         }
     }
 
@@ -292,9 +337,9 @@ mod tests {
                 .add_plugins(KeyPlugin)
                 .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
                 .add_message::<FileStatusPicked>()
-                .init_resource::<Echoed>()
+                .init_resource::<FindRequests>()
                 .init_resource::<PanelRequests>()
-                .add_observer(Echoed::record)
+                .add_observer(FindRequests::record)
                 .add_observer(PanelRequests::record);
             app
         }
@@ -316,8 +361,18 @@ mod tests {
         Echo::issue(&mut app, pressed, "file_panel_choose");
 
         assert_eq!(app.world().resource::<PanelRequests>().0, vec![pressed]);
-        assert!(app.world().resource::<Echoed>().0.is_empty());
+        assert!(app.world().resource::<FindRequests>().0.is_empty());
         assert!(!app.world().resource::<PanelRequests>().0.contains(&other));
+    }
+
+    #[test]
+    fn a_find_key_dispatches_a_targeted_ecs_request() {
+        let mut app = Echo::app();
+        let pressed = app.world_mut().spawn_empty().id();
+
+        Echo::issue(&mut app, pressed, "file_find");
+
+        assert_eq!(app.world().resource::<FindRequests>().0, vec![pressed]);
     }
 
     #[derive(Resource, Default)]

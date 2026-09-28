@@ -311,6 +311,8 @@ mod tests {
                 );
             }
 
+            app.update();
+
             (app, views)
         }
 

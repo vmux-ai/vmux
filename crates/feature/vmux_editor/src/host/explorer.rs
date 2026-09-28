@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::event::{
-    ExplorerCloseEditor, ExplorerCollapseAll, ExplorerPanelSetVisible, ExplorerPanelWidth,
-    ExplorerRevealCurrent, ExplorerTreePrefetch, ExplorerTreeRefresh, ExplorerTreeToggle,
-    FileDirEntry,
+    ExplorerCloseEditor, ExplorerCollapseAll, ExplorerPanelSetVisible, ExplorerPanelViewSet,
+    ExplorerPanelWidth, ExplorerRevealCurrent, ExplorerTreePrefetch, ExplorerTreeRefresh,
+    ExplorerTreeToggle, FileDirEntry,
 };
 
 mod fs;
@@ -24,6 +24,7 @@ use mutation::MutationPlugin;
 use outline::OutlinePlugin;
 use panel::PanelPlugin;
 pub use panel::StackExplorerVisibility;
+pub(crate) use panel::{ExplorerFindInFilesRequest, ExplorerRevealRequest, ExplorerToggleRequest};
 pub use search::GlobalSearchRequest;
 use search::SearchPlugin;
 use tree::{ExplorerDirLoadRequest, TreePlugin};
@@ -171,6 +172,7 @@ impl Plugin for ExplorerPlugin {
             ExplorerRevealCurrent,
             ExplorerCloseEditor,
             ExplorerPanelSetVisible,
+            ExplorerPanelViewSet,
             ExplorerPanelWidth,
         )>::default())
         .add_plugins(UiEventPlugin::<(ExplorerCollapseAll,)>::default());

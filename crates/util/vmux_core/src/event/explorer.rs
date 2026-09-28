@@ -77,8 +77,15 @@ pub struct OutlineEvent {
 pub struct ExplorerPanelEvent {
     pub visible: bool,
     pub width: u32,
+    pub search: bool,
+    pub search_focus_revision: u64,
     pub client_id: u64,
     pub request_id: u64,
+}
+
+#[vmux_api::ui_event(Copy, Eq)]
+pub struct ExplorerPanelViewSet {
+    pub search: bool,
 }
 
 #[vmux_api::ui_event(Eq)]

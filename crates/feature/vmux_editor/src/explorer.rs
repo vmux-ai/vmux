@@ -1205,12 +1205,10 @@ fn SidebarViewSwitch(view: Signal<SidebarView>) -> Element {
             title: current.switch_label(),
             onclick: move |event: Event<MouseData>| {
                 event.stop_propagation();
-                let mut view = view;
                 let next = view.peek().other();
-                view.set(next);
-                if next.is_search() {
-                    FocusClaim::new(SEARCH_INPUT_ID).request();
-                }
+                let _ = send(&ExplorerPanelViewSet {
+                    search: next.is_search(),
+                });
             },
             TitleButtonIcon { glyph: current.switch_glyph() }
         }

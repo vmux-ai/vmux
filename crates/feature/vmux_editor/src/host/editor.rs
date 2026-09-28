@@ -14,7 +14,8 @@ use crate::wrap::WrapView;
     vmux_core::host::FileUiStateUpdates,
     FileDocumentRevision,
     crate::host::panel::FilePanel,
-    crate::host::directory::FileDirectoryNavigation
+    crate::host::directory::FileDirectoryNavigation,
+    crate::host::editing::FileFindState
 )]
 pub struct FileView {
     pub path: PathBuf,

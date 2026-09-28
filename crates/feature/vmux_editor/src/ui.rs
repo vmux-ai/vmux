@@ -29,7 +29,7 @@ use toolbar::{EditorTabStrip, FindBar, VimStatus};
 
 use crate::breadcrumb::EditorBreadcrumbs;
 use crate::explorer::SidebarView;
-use crate::page_key::{FilePage as FilePageState, use_file_keys};
+use crate::page_key::use_file_keys;
 use crate::page_model::{
     CellMetrics, ColumnRuler, EditorTabItem, NoteCursorActivation, editor_drag_started,
     gutter_width, note_cursor_activation, severity_color_class, span_style,
@@ -163,7 +163,9 @@ pub fn Page() -> Element {
     let mut word_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let find_open = use_signal(|| false);
     let find_forward = use_signal(|| true);
+    let mut find_revision = use_signal(|| 0u64);
     let sidebar_view = use_signal(SidebarView::default);
+    let mut explorer_search_focus_revision = use_signal(|| 0u64);
     let find_query = use_signal(String::new);
     let mut find_total = use_signal(|| 0u32);
     let mut find_index = use_signal(|| 0u32);
@@ -187,21 +189,45 @@ pub fn Page() -> Element {
     let mut doc_title = use_signal(String::new);
     let is_markdown = use_memo(move || document_kind() == FileDocumentKind::Markdown);
 
-    let file_page = FilePageState {
-        mode,
-        explorer,
-        panel,
-        find_open,
-        find_forward,
-        sidebar_view,
-    };
-    let keys = use_file_keys(file_page);
+    let keys = use_file_keys(panel);
     use_context_provider(|| keys);
 
     let explorer_panel = use_file_ui::<ExplorerPanelEvent>();
     use_effect(move || {
         explorer_panel.for_each(|event| {
+            let mut view = sidebar_view;
+            view.set(match event.search {
+                true => SidebarView::Search,
+                false => SidebarView::Explorer,
+            });
+            if event.search && event.search_focus_revision > explorer_search_focus_revision() {
+                explorer_search_focus_revision.set(event.search_focus_revision);
+                spawn(async move {
+                    sleep_ms(0).await;
+                    FocusClaim::new(crate::explorer::SEARCH_INPUT_ID).request();
+                });
+            }
             explorer.apply_panel(event);
+        })
+    });
+
+    let find_event = use_file_ui::<FileFindEvent>();
+    use_effect(move || {
+        find_event.for_each(|event| {
+            if event.revision <= find_revision() {
+                return;
+            }
+            find_revision.set(event.revision);
+            let mut open = find_open;
+            let mut forward = find_forward;
+            open.set(event.open);
+            forward.set(event.forward);
+            if event.open {
+                spawn(async move {
+                    sleep_ms(0).await;
+                    focus_find_input();
+                });
+            }
         })
     });
 
@@ -895,7 +921,6 @@ pub fn Page() -> Element {
                 if find_open() {
                     FindBar {
                         query: find_query,
-                        open: find_open,
                         forward: find_forward,
                         vim: keymap() == vmux_core::KeymapKind::Vim,
                         total: find_total(),

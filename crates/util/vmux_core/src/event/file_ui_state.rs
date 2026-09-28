@@ -1,7 +1,7 @@
 use super::{
     ExplorerFocusEvent, ExplorerFsResult, ExplorerPanelEvent, ExplorerSearchEvent,
     ExplorerTreeEvent, FileCodeActions, FileCursorEvent, FileDiagnostics, FileDirectoryState,
-    FileDirtyEvent, FileEditFailure, FileEncodingEvent, FileErrorEvent, FileHover, FileKey,
+    FileDirtyEvent, FileEditFailure, FileEncodingEvent, FileErrorEvent, FileFindEvent, FileHover,
     FileKeymapEvent, FileLspStatus, FileMediaEvent, FileMetaEvent, FileNoteEvent, FilePanelState,
     FilePreviewEvent, FileRenamePrompt, FileScrollByEvent, FileShapeEvent, FileThemeEvent,
     FileTidyPromptEvent, FileViewModeEvent, FileViewportPatch, LspInstallProgress,
@@ -44,7 +44,7 @@ pub struct FileUiStatePatch {
     pub rename_begin: Option<FileRenamePrompt>,
     pub panel: Option<FilePanelState>,
     pub git_state: Option<FileGitState>,
-    pub key: Option<FileKey>,
+    pub find: Option<FileFindEvent>,
 }
 
 #[vmux_api::ui_state(Default)]

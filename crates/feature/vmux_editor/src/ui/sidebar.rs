@@ -1,7 +1,5 @@
 use dioxus::prelude::*;
-use vmux_core::event::{
-    ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelWidth, ExplorerRevealCurrent,
-};
+use vmux_core::event::{ExplorerPanelEvent, ExplorerPanelSetVisible, ExplorerPanelWidth};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 use vmux_ui::platform::{now_millis, random_index, sleep_ms};
@@ -165,23 +163,6 @@ impl ExplorerPane {
     pub(crate) fn toggle(mut self, mode: Signal<Mode>) {
         self.user_chose.set(true);
         self.set_visible(!(self.visible)(), mode);
-    }
-
-    pub(crate) fn show(mut self, mode: Signal<Mode>) {
-        if (self.visible)() {
-            return;
-        }
-        self.user_chose.set(true);
-        self.set_visible(true, mode);
-    }
-
-    pub(crate) fn reveal_current(mut self, mode: Signal<Mode>) {
-        if (self.visible)() {
-            let _ = send(&ExplorerRevealCurrent);
-            return;
-        }
-        self.user_chose.set(true);
-        self.set_visible(true, mode);
     }
 
     pub(super) fn show_if_room(self, mode: Signal<Mode>) {

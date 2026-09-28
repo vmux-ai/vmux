@@ -731,6 +731,7 @@ fn panel_open_reveals_current_file() {
 fn panel_width_clamps() {
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, PanelPlugin));
+    app.update();
     let e = app
         .world_mut()
         .spawn(FileView {
