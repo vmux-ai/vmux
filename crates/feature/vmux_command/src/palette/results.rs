@@ -10,6 +10,7 @@ use vmux_ui::i18n::translate;
 pub use vmux_api::command_bar::{CommandBarResultItem, ResumeSection};
 
 use super::query::{PaletteQuery, is_data_uri};
+use crate::search_engine::SearchEngines;
 
 pub struct SlashRows;
 
@@ -401,7 +402,7 @@ pub fn start_page_results(
     let trimmed = query.trim();
     if PaletteQuery(trimmed).is_start_prompt() {
         let engines = if search_engines.is_empty() {
-            SearchEngine::ALL.as_slice()
+            SearchEngines::ALL.as_slice()
         } else {
             search_engines
         };

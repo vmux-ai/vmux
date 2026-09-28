@@ -17,6 +17,7 @@ use super::style::{
     result_secondary_text_class, result_shortcut_badge_class, result_terminal_path_class,
     result_trailing_slot_class,
 };
+use crate::search_engine::SearchEngines;
 
 #[component]
 pub fn ResultRow(
@@ -232,11 +233,11 @@ pub fn ResultRow(
                                 div { class: result_content_row_class(),
                                     Favicon {
                                         favicon_url: String::new(),
-                                        url: engine.search_url(query),
+                                        url: SearchEngines::url(*engine, query),
                                         class: result_favicon_class().to_string(),
                                         globe_class: result_leading_icon_class().to_string(),
                                     }
-                                    span { class: result_primary_text_class(), "Search with {engine.name()}" }
+                                    span { class: result_primary_text_class(), "Search with {SearchEngines::name(*engine)}" }
                                 }
                                 span { class: result_trailing_slot_class(), "\u{21b5}" }
                             },

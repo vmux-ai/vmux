@@ -9,6 +9,7 @@ pub mod ui;
 
 pub mod event;
 pub mod palette;
+mod search_engine;
 pub mod size;
 pub use vmux_api::open_target;
 pub use vmux_api::prompt_media;

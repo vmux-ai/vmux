@@ -83,30 +83,6 @@ mod tests {
     }
 
     #[test]
-    fn search_engines_build_encoded_urls() {
-        assert_eq!(
-            SearchEngine::Google.search_url("hello world"),
-            "https://www.google.com/search?q=hello+world"
-        );
-        assert_eq!(
-            SearchEngine::Bing.search_url("hello world"),
-            "https://www.bing.com/search?q=hello+world"
-        );
-        assert_eq!(
-            SearchEngine::DuckDuckGo.search_url("hello world"),
-            "https://duckduckgo.com/?q=hello+world"
-        );
-        assert_eq!(
-            SearchEngine::Brave.search_url("hello world"),
-            "https://search.brave.com/search?q=hello+world"
-        );
-        assert_eq!(
-            SearchEngine::Kagi.search_url("hello world"),
-            "https://kagi.com/search?q=hello+world"
-        );
-    }
-
-    #[test]
     fn command_bar_open_event_carries_target_enum() {
         let event = CommandBarOpenEvent {
             target: Some(crate::open_target::OpenTarget::InNewStack),

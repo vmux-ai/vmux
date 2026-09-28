@@ -1,4 +1,7 @@
-use crate::event::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
+#[cfg(test)]
+use crate::event::SearchEngine;
+use crate::event::{CommandBarRecentFile, CommandBarWorkDir};
+use crate::search_engine::SearchEngines;
 use crate::snapshot::CommandBarProjection;
 use bevy::prelude::*;
 use vmux_core::terminal::{Terminal, TerminalLaunch};
@@ -125,13 +128,13 @@ pub fn update_recent_files_snapshot(
         .take(RECENT_FILES_CAP)
         .map(|(_, f)| f)
         .collect();
-    let mut engine_recency = SearchEngine::ALL
+    let mut engine_recency = SearchEngines::ALL
         .into_iter()
         .map(|engine| {
             let latest = urls
                 .iter()
                 .filter_map(|(meta, _, visited)| {
-                    (SearchEngine::from_url(&meta.url) == Some(engine)).then_some(visited.0)
+                    (SearchEngines::from_url(&meta.url) == Some(engine)).then_some(visited.0)
                 })
                 .max()
                 .unwrap_or(i64::MIN);
@@ -314,7 +317,7 @@ mod tests {
 
         let snapshot = projection(&mut app);
         let engines = &snapshot.work.search_engines;
-        assert_eq!(engines.len(), SearchEngine::ALL.len());
+        assert_eq!(engines.len(), SearchEngines::ALL.len());
         assert_eq!(
             &engines[..3],
             &[

@@ -43,6 +43,7 @@ use vmux_history::now_millis;
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 use crate::ResolvedLocale;
+use crate::search_engine::SearchEngines;
 use vmux_core::KeyboardOwner;
 use vmux_flex::prelude::*;
 
@@ -834,7 +835,7 @@ fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     } else if crate::palette::looks_like_url(value) {
         format!("https://{}", value)
     } else {
-        search_engine.search_url(value)
+        SearchEngines::url(search_engine, value)
     }
 }
 

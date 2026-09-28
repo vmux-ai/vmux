@@ -1,8 +1,8 @@
 use vmux_api::command_bar::{
     AgentModels, AgentModes, CommandBarOpenEvent, CommandBarPick, CommandBarPicker,
-    CommandBarPromptContext, CommandPaletteProjection, ExCommandName, ExRequest, HistoryEntry,
-    InvokeRequest, OpenRequest, PathEntry, PickRequest, PromptRequest, SwitchSpaceRequest,
-    SwitchTabRequest, TerminalRequest,
+    CommandBarPromptContext, CommandPaletteProjection, ExRequest, HistoryEntry, InvokeRequest,
+    OpenRequest, PathEntry, PickRequest, PromptRequest, SwitchSpaceRequest, SwitchTabRequest,
+    TerminalRequest,
 };
 use vmux_api::open_target::OpenTarget;
 use vmux_api::prompt_media::ChatAttachment;
@@ -13,6 +13,8 @@ use vmux_api::space::ProjectRow;
 use vmux_ui::components::agent_menu::ComposerAgentOption;
 use vmux_ui::i18n::translate;
 use vmux_ui::list_nav::MenuDirection;
+
+use crate::search_engine::SearchEngines;
 
 use self::results::{
     CommandBarResultItem, PickerRows, SlashRows, active_space_index, filter_results,
@@ -419,7 +421,48 @@ impl PaletteGlyph {
 
 pub struct ExLine;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExCommandName {
+    pub name: &'static str,
+    pub hint: &'static str,
+}
+
 impl ExLine {
+    pub const COMMANDS: [ExCommandName; 8] = [
+        ExCommandName {
+            name: "w",
+            hint: "ex-write",
+        },
+        ExCommandName {
+            name: "wq",
+            hint: "ex-write-quit",
+        },
+        ExCommandName {
+            name: "q",
+            hint: "ex-quit",
+        },
+        ExCommandName {
+            name: "q!",
+            hint: "ex-quit-force",
+        },
+        ExCommandName {
+            name: "noh",
+            hint: "ex-nohighlight",
+        },
+        ExCommandName {
+            name: "d",
+            hint: "ex-delete",
+        },
+        ExCommandName {
+            name: "y",
+            hint: "ex-yank",
+        },
+        ExCommandName {
+            name: "s/",
+            hint: "ex-substitute",
+        },
+    ];
+
     pub fn claims(query: &str) -> bool {
         query.starts_with(':')
     }
@@ -432,7 +475,10 @@ impl ExLine {
     pub fn suggestions(query: &str) -> Vec<CommandBarResultItem> {
         let typed = query.strip_prefix(':').unwrap_or(query).trim_start();
         let mut rows = Vec::new();
-        for entry in ExCommandName::matching(typed) {
+        for entry in Self::COMMANDS {
+            if !entry.name.starts_with(typed) {
+                continue;
+            }
             rows.push(CommandBarResultItem::Ex {
                 name: entry.name.to_string(),
                 hint: translate(entry.hint),
@@ -821,7 +867,7 @@ impl PaletteState {
             }
             CommandBarResultItem::Search { engine, query } => Some(PaletteDecision::open(
                 true,
-                &engine.search_url(query),
+                &SearchEngines::url(*engine, query),
                 self.open_target,
             )),
             CommandBarResultItem::PartialIndex
@@ -1870,7 +1916,7 @@ mod tests {
 
         let offered = PaletteState::modal(&state, PaletteDraft::typed(":"));
         let names = ExNames::list(&offered);
-        assert_eq!(names.len(), ExCommandName::ALL.len(), "{names:?}");
+        assert_eq!(names.len(), ExLine::COMMANDS.len(), "{names:?}");
 
         let narrowed = PaletteState::modal(&state, PaletteDraft::typed(":w"));
         assert_eq!(ExNames::list(&narrowed), vec!["w", "wq"]);
@@ -1941,7 +1987,7 @@ mod tests {
         assert_eq!(
             picked.submit_modal(&[]),
             PaletteDecision::Ex(ExRequest {
-                line: ExCommandName::ALL[1].name.to_string(),
+                line: ExLine::COMMANDS[1].name.to_string(),
             }),
             "an empty line still runs the row the user walked to: {:?}",
             picked.rows

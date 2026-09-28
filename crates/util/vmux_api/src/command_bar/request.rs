@@ -108,59 +108,6 @@ pub struct CommandPaletteRemoveAttachmentRequest {
     pub path: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ExCommandName {
-    pub name: &'static str,
-    pub hint: &'static str,
-}
-
-impl ExCommandName {
-    pub const ALL: [Self; 8] = [
-        Self {
-            name: "w",
-            hint: "ex-write",
-        },
-        Self {
-            name: "wq",
-            hint: "ex-write-quit",
-        },
-        Self {
-            name: "q",
-            hint: "ex-quit",
-        },
-        Self {
-            name: "q!",
-            hint: "ex-quit-force",
-        },
-        Self {
-            name: "noh",
-            hint: "ex-nohighlight",
-        },
-        Self {
-            name: "d",
-            hint: "ex-delete",
-        },
-        Self {
-            name: "y",
-            hint: "ex-yank",
-        },
-        Self {
-            name: "s/",
-            hint: "ex-substitute",
-        },
-    ];
-
-    pub fn matching(typed: &str) -> Vec<Self> {
-        let mut found = Vec::new();
-        for entry in Self::ALL {
-            if entry.name.starts_with(typed) {
-                found.push(entry);
-            }
-        }
-        found
-    }
-}
-
 #[vmux_api::ui_event(Default, Eq)]
 pub struct StartSelectWorkspace {
     pub current_dir: String,
