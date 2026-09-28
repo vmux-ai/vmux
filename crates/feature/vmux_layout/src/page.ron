@@ -97,7 +97,7 @@
         "ChatPasteMedia",
         "ChatMediaListRequest",
         "ChatAttachPaths",
-        "PageKeyContext",
+        "UiKeyContext",
         "KeyStroke",
         "KeyClaims",
     ],

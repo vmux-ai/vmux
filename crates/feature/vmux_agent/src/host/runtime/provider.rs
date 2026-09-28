@@ -8,13 +8,13 @@ use crate::event::{
     UiAgentSnapshot,
 };
 use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
-use crate::run_state::AgentRunState;
 use crate::run_state_kind::LastRunStateKind;
 use crate::toast::ToastPlugin;
 use vmux_api::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
 use vmux_core::service::ServiceConnected;
 use vmux_core::service::ServiceRequest;
 use vmux_session::AcpSession;
+use vmux_session::AgentRunState;
 use vmux_session::{
     AgentApprovalPolicy, AgentMessageTimes, AgentMessages, AgentSession, PromptQueue,
 };

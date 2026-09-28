@@ -50,7 +50,7 @@
         "GitStashPopRequest",
         "GitStashPushRequest",
         "ProjectActivateRequest",
-        "PageKeyContext",
+        "UiKeyContext",
         "KeyStroke",
         "KeyClaims",
     ],

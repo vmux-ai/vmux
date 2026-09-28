@@ -43,6 +43,7 @@ rfd = { workspace = true }
 uuid = { workspace = true }
 vmux_clipboard = { path = "../../util/vmux_clipboard" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_session = { path = "../../util/vmux_session" }
 
 [lints]
 workspace = true

@@ -555,7 +555,7 @@ fn send_pending_agent_continuations(
         Option<&vmux_session::AcpSession>,
         Option<&vmux_session::AgentSession>,
         Option<&AgentSession>,
-        Option<&mut crate::run_state::AgentRunState>,
+        Option<&mut vmux_session::AgentRunState>,
     )>,
     connected: Option<Single<(), With<ServiceConnected>>>,
     mut commands: Commands,
@@ -583,7 +583,7 @@ fn send_pending_agent_continuations(
         };
         if !matches!(
             *state,
-            crate::run_state::AgentRunState::Idle | crate::run_state::AgentRunState::Errored(_)
+            vmux_session::AgentRunState::Idle | vmux_session::AgentRunState::Errored(_)
         ) {
             continue;
         }
@@ -591,7 +591,7 @@ fn send_pending_agent_continuations(
             sid,
             &continuation.0,
         )));
-        *state = crate::run_state::AgentRunState::Streaming;
+        *state = vmux_session::AgentRunState::Streaming;
         commands.entity(entity).remove::<PendingAgentContinuation>();
     }
 }

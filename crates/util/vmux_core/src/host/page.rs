@@ -296,7 +296,7 @@ impl PageManifest {
     }
 
     pub fn answers_for(&self, url: &str) -> bool {
-        vmux_api::PageEventPermissions {
+        vmux_api::UiEventPermissions {
             url: self.url,
             owns_subtree: self.owns_subtree,
             permissions: &[],

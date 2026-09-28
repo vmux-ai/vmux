@@ -20,10 +20,7 @@ impl KeyStrokePlugin {
 impl bevy::prelude::Plugin for KeyStrokePlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_message::<NativeKeyInput>()
-            .add_plugins(bevy_cef::prelude::UiEventPlugin::<(
-                KeyStroke,
-                PageKeyContext,
-            )>::default());
+            .add_plugins(bevy_cef::prelude::UiEventPlugin::<(KeyStroke, UiKeyContext)>::default());
     }
 }
 
@@ -78,7 +75,7 @@ pub struct NativeKeyClaimSet;
 pub struct NativeKeyInputSet;
 
 #[vmux_api::ui_event(Default, Eq)]
-pub struct PageKeyContext {
+pub struct UiKeyContext {
     pub keys: Vec<String>,
 }
 

@@ -629,7 +629,7 @@ fn handle_swap_stack_session(
             .remove::<vmux_session::AgentSession>()
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
-            .remove::<crate::AgentRunState>()
+            .remove::<vmux_session::AgentRunState>()
             .remove::<crate::handoff::ImportedConversation>()
             .remove::<crate::handoff::PendingHandoff>()
             .remove::<vmux_core::AgentWorkingDir>()

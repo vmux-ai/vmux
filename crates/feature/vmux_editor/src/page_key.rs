@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use vmux_core::event::FilePanelState;
-use vmux_core::input::{PageKeyContext, Unclaimed};
+use vmux_core::input::{UiKeyContext, Unclaimed};
 use vmux_ui::hooks::{KeyClaim, send, use_key_claim};
 
 pub(crate) fn use_file_keys(panel: Signal<FilePanelState>) -> FileKeys {
@@ -14,7 +14,7 @@ pub(crate) fn use_file_keys(panel: Signal<FilePanelState>) -> FileKeys {
         }),
     };
     use_drop(move || {
-        let _ = send(&PageKeyContext { keys: Vec::new() });
+        let _ = send(&UiKeyContext { keys: Vec::new() });
     });
     keys
 }

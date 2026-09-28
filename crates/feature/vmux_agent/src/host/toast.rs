@@ -1,7 +1,7 @@
-use crate::run_state::AgentRunState;
 use crate::run_state_kind::{AgentRunStateKind, LastRunStateKind};
 use bevy::prelude::*;
 use bevy_cef::prelude::UiEventPlugin;
+use vmux_session::AgentRunState;
 use vmux_session::{AcpSession, AgentSession};
 
 pub(crate) struct ToastPlugin;

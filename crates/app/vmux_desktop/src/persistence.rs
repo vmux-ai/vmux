@@ -1139,8 +1139,6 @@ mod tests {
     #[test]
     fn persisted_terminal_tab_reattaches_saved_process() {
         let mut app = App::new();
-        app.world_mut()
-            .spawn(vmux_agent::strategy::AgentStrategies::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -1190,8 +1188,6 @@ mod tests {
             "vmux://vault/?provider=github",
         ] {
             let mut app = App::new();
-            app.world_mut()
-                .spawn(vmux_agent::strategy::AgentStrategies::default());
             app.add_plugins(MinimalPlugins)
                 .insert_resource(test_settings())
                 .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -1240,8 +1236,6 @@ mod tests {
     #[test]
     fn a_restored_web_page_is_still_rebuilt_as_a_cef_browser() {
         let mut app = App::new();
-        app.world_mut()
-            .spawn(vmux_agent::strategy::AgentStrategies::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -1711,8 +1705,6 @@ mod tests {
         let _home = HomeEnvGuard::use_temp_home("runtime-loaded-space-rebuilds-browser-views");
         let mut app = App::new();
         app.world_mut()
-            .spawn(vmux_agent::strategy::AgentStrategies::default());
-        app.world_mut()
             .spawn(crate::boot_status::RestoreComplete::default());
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
@@ -1995,8 +1987,6 @@ mod tests {
             .expect("write version");
 
         let mut app = App::new();
-        app.world_mut()
-            .spawn(vmux_agent::strategy::AgentStrategies::default());
         app.world_mut()
             .spawn(crate::boot_status::RestoreComplete::default());
         app.add_plugins(MinimalPlugins)

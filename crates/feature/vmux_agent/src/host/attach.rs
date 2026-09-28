@@ -75,7 +75,7 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
         },
         crate::AgentMessages::default(),
         crate::AgentApprovalPolicy::default(),
-        crate::AgentRunState::default(),
+        vmux_session::AgentRunState::default(),
         vmux_core::team::Profile::agent(kind),
         vmux_core::team::Agent {
             sid: sid.to_string(),
@@ -161,7 +161,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
         },
         crate::AgentMessages::default(),
         crate::AgentApprovalPolicy::default(),
-        crate::AgentRunState::default(),
+        vmux_session::AgentRunState::default(),
         vmux_core::team::Profile::registry(name, agent_id),
         vmux_core::team::Agent {
             sid: sid.to_string(),

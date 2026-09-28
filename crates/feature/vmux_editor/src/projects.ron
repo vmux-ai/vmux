@@ -9,7 +9,7 @@
     permissions: [
         "PageReady",
         "ThemeEvent",
-        "PageKeyContext",
+        "UiKeyContext",
         "KeyStroke",
         "KeyClaims",
     ],

@@ -5,7 +5,7 @@ use crate::format::{
     PromptEdit, PromptHistoryDirection, edit_prompt, move_prompt_history, prompt_history_direction,
 };
 use dioxus::prelude::*;
-use vmux_core::input::{KeyStroke, PageKeyContext, Unclaimed};
+use vmux_core::input::{KeyStroke, UiKeyContext, Unclaimed};
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::components::composer_bar::ComposerMenuKind;
@@ -28,7 +28,7 @@ pub fn use_chat_keys(chat: Chat) -> ChatKeys {
         claim: use_key_claim(Unclaimed::Types, move || chat.key_context()),
     };
     use_drop(move || {
-        let _ = send(&PageKeyContext { keys: Vec::new() });
+        let _ = send(&UiKeyContext { keys: Vec::new() });
     });
     keys
 }

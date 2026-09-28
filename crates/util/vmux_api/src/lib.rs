@@ -36,7 +36,7 @@ pub use bin_event::{AgentRequestContract, BinEvent, HostEvent, PageReady, UiEven
 pub use icon::{BuiltinIcon, PageIcon};
 pub use input_schema::{InputSchema, InputSchemaType};
 #[cfg(feature = "bevy")]
-pub use page::PageEventPermissions;
+pub use page::UiEventPermissions;
 pub use page_metadata::{PageIdentity, PageMetadata};
 pub use process_id::ProcessId;
 pub use route::{InvalidVmuxRoute, VmuxRoute};

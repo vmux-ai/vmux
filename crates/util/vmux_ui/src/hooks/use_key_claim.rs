@@ -2,7 +2,7 @@ use crate::hooks::use_ui_state::use_ui_state;
 use crate::key_stroke::PressedKey;
 use crate::transport::event_listener::send;
 use dioxus::prelude::*;
-use vmux_core::input::{KeyClaims, KeyStroke, KeyVerdict, PageKeyContext, Unclaimed};
+use vmux_core::input::{KeyClaims, KeyStroke, KeyVerdict, UiKeyContext, Unclaimed};
 
 pub fn use_key_claim(
     unclaimed: Unclaimed,
@@ -15,7 +15,7 @@ pub fn use_key_claim(
         if !resolves {
             return;
         }
-        let _ = send(&PageKeyContext { keys: context() });
+        let _ = send(&UiKeyContext { keys: context() });
     });
 
     KeyClaim {

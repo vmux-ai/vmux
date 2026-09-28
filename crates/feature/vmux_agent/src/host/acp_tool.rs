@@ -19,7 +19,7 @@ use vmux_tool::{
 };
 
 use crate::acp_registry::{self, BinaryTarget, RegistryAgent};
-use crate::run_state::AgentRunState;
+use vmux_session::AgentRunState;
 
 pub(crate) struct AcpToolPlugin;
 

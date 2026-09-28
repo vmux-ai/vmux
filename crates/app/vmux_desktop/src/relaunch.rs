@@ -8,7 +8,7 @@ impl Plugin for RelaunchPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             bevy_cef::prelude::UiEventPlugin::<(RelaunchRequest,)>::default(),
-            bevy_cef::prelude::JsEmitEventPlugin::<PageRelaunchRequest>::default(),
+            bevy_cef::prelude::JsEmitEventPlugin::<UiRelaunchRequest>::default(),
         ))
         .add_observer(on_restart_request)
         .add_observer(on_page_relaunch)
@@ -17,7 +17,7 @@ impl Plugin for RelaunchPlugin {
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct PageRelaunchRequest {
+pub(crate) struct UiRelaunchRequest {
     channel: String,
 }
 
@@ -156,7 +156,7 @@ fn on_restart_request(_trigger: On<UiInput<RelaunchRequest>>, mut exit: MessageW
     relaunch_now(&mut exit, None);
 }
 
-fn on_page_relaunch(trigger: On<Receive<PageRelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
+fn on_page_relaunch(trigger: On<Receive<UiRelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
     if trigger.payload.channel == "vmux-relaunch" {
         relaunch_now(&mut exit, None);
     }

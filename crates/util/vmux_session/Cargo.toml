@@ -13,6 +13,7 @@ bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 vmux_api = { path = "../vmux_api", features = ["bevy"] }
 
 [lints]

@@ -3,7 +3,6 @@ use bevy_cef::prelude::{Browsers, UiEventPlugin, UiInput};
 
 use super::model::{ModeProjection, ModelProjection};
 use crate::handoff::ImportedConversation;
-use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::runtime::acp::{AcpModeState, AcpModelState};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 #[cfg(test)]
@@ -22,6 +21,7 @@ use vmux_core::chat::{group_turns_before, group_turns_tail, grouped_item_count};
 use vmux_core::team::{Profile, User};
 use vmux_session::AcpSession;
 use vmux_session::{AgentConversationTitle, AgentMessageTimes, AgentMessages, PromptQueue};
+use vmux_session::{AgentRunState, AgentTurnMeta};
 
 pub(super) struct ChatTranscriptPlugin;
 

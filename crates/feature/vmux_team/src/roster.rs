@@ -1,6 +1,6 @@
 use bevy_app::{App, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
-use vmux_api::page::PageEmit;
+use vmux_api::page::UiStateEmit;
 use vmux_api::team::{TeamEvent, TeamMemberRow};
 
 use crate::projection::TeamStateProjection;
@@ -11,7 +11,7 @@ impl Plugin for TeamRosterPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Members>()
             .add_message::<RepublishTeam>()
-            .add_message::<PageEmit>()
+            .add_message::<UiStateEmit>()
             .add_systems(Startup, spawn_team_runtime)
             .add_systems(
                 Update,
@@ -67,7 +67,7 @@ fn project_team(mut runtimes: Query<(&Members, &mut Team), (With<TeamRuntime>, C
 fn emit_team(
     mut refreshes: MessageReader<RepublishTeam>,
     runtimes: Query<Ref<Team>, With<TeamRuntime>>,
-    mut emits: MessageWriter<PageEmit>,
+    mut emits: MessageWriter<UiStateEmit>,
 ) {
     let refresh = refreshes.read().next().is_some();
     let Ok(team) = runtimes.single() else {
@@ -76,7 +76,7 @@ fn emit_team(
     if !refresh && !team.is_changed() {
         return;
     }
-    let Some(emit) = PageEmit::from_state(&team.0) else {
+    let Some(emit) = UiStateEmit::from_state(&team.0) else {
         return;
     };
     emits.write(emit);

@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy_ecs::prelude::Component;
 use std::time::Duration;
 
 #[derive(Component, Default)]

@@ -10347,6 +10347,7 @@ dependencies = [
  "vmux_core",
  "vmux_layout",
  "vmux_native",
+ "vmux_session",
  "vmux_ui",
 ]
 
@@ -10934,6 +10935,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "serde",
+ "serde_json",
  "vmux_api",
 ]
 
@@ -11081,6 +11083,7 @@ dependencies = [
  "vmux_core",
  "vmux_layout",
  "vmux_native",
+ "vmux_session",
  "vmux_space",
  "vmux_tool",
  "vmux_ui",

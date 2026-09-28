@@ -1,13 +1,13 @@
 use bevy_ecs::message::Message;
 
 #[derive(bevy_ecs::component::Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PageEventPermissions {
+pub struct UiEventPermissions {
     pub url: &'static str,
     pub owns_subtree: bool,
     pub permissions: &'static [&'static str],
 }
 
-impl PageEventPermissions {
+impl UiEventPermissions {
     pub fn allows(&self, page_url: &str, permission: &str) -> bool {
         self.answers_for(page_url) && self.permissions.contains(&permission)
     }
@@ -74,12 +74,12 @@ impl PageEventPermissions {
 }
 
 #[derive(Message)]
-pub struct PageEmit {
+pub struct UiStateEmit {
     pub id: String,
     pub bytes: Vec<u8>,
 }
 
-impl PageEmit {
+impl UiStateEmit {
     pub fn from_state<T>(state: &T) -> Option<Self>
     where
         T: crate::UiState
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn page_permissions_use_exact_names() {
-        let permissions = PageEventPermissions {
+        let permissions = UiEventPermissions {
             url: "vmux://tools/",
             owns_subtree: true,
             permissions: &["ToolsRefreshRequest"],
@@ -119,29 +119,29 @@ mod tests {
     #[test]
     fn the_most_specific_page_owns_its_permissions() {
         let pages = [
-            PageEventPermissions {
+            UiEventPermissions {
                 url: "vmux://tools/",
                 owns_subtree: true,
                 permissions: &["BroadRequest"],
             },
-            PageEventPermissions {
+            UiEventPermissions {
                 url: "vmux://tools/lsp",
                 owns_subtree: false,
                 permissions: &["LspRequest"],
             },
         ];
 
-        assert!(PageEventPermissions::allows_page(
+        assert!(UiEventPermissions::allows_page(
             &pages,
             "vmux://tools/lsp",
             "LspRequest"
         ));
-        assert!(!PageEventPermissions::allows_page(
+        assert!(!UiEventPermissions::allows_page(
             &pages,
             "vmux://tools/lsp",
             "BroadRequest"
         ));
-        assert!(PageEventPermissions::allows_page(
+        assert!(UiEventPermissions::allows_page(
             &pages,
             "vmux://tools/npm",
             "BroadRequest"

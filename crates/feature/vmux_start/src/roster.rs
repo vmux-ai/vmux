@@ -3,7 +3,7 @@ use bevy_ecs::prelude::*;
 use vmux_api::command_bar::{
     CommandBarOpenEvent, CommandBarPage, CommandBarTab, CommandBarUiState, OpenId,
 };
-use vmux_api::page::PageEmit;
+use vmux_api::page::UiStateEmit;
 
 use vmux_api::icon::PageIcon;
 use vmux_api::room::{RemoteAgent, RemoteSession};
@@ -14,7 +14,7 @@ impl Plugin for StartRosterPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Roster>()
             .add_message::<RepublishLauncher>()
-            .add_message::<PageEmit>()
+            .add_message::<UiStateEmit>()
             .add_systems(Startup, spawn_start_roster)
             .add_systems(
                 Update,
@@ -78,7 +78,7 @@ fn project_launcher(
 fn emit_launcher(
     mut refreshes: MessageReader<RepublishLauncher>,
     mut runtimes: Query<&mut Launcher, With<StartRosterRuntime>>,
-    mut emits: MessageWriter<PageEmit>,
+    mut emits: MessageWriter<UiStateEmit>,
 ) {
     let refresh = refreshes.read().next().is_some();
     let Ok(mut launcher) = runtimes.single_mut() else {
@@ -92,7 +92,7 @@ fn emit_launcher(
         sequence: launcher.sequence,
         patches: vec![launcher.snapshot.clone().into()],
     };
-    let Some(emit) = PageEmit::from_state(&state) else {
+    let Some(emit) = UiStateEmit::from_state(&state) else {
         return;
     };
     emits.write(emit);

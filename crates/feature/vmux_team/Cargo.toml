@@ -29,6 +29,7 @@ ron = { workspace = true }
 vmux_agent = { path = "../vmux_agent" }
 vmux_command = { path = "../vmux_command" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_session = { path = "../../util/vmux_session" }
 vmux_tool = { path = "../vmux_tool" }
 vmux_space = { path = "../vmux_space" }
 

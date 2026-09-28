@@ -4,7 +4,7 @@ use bevy_cef_core::prelude::*;
 use rkyv::bytecheck::CheckBytes;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use vmux_api::{PageEventPermissions, UiEvent};
+use vmux_api::{UiEvent, UiEventPermissions};
 
 #[derive(Resource, Default)]
 pub struct BinIpcEventRawBuffer(pub Vec<BinIpcEventRaw>);
@@ -81,7 +81,7 @@ where
         Update,
         (move |commands: Commands,
                buffer: Res<BinIpcEventRawBuffer>,
-               permissions: Query<&PageEventPermissions>| {
+               permissions: Query<&UiEventPermissions>| {
             receive_ui_events::<E>(commands, buffer, permissions);
         })
         .after(drain_bin_ipc_events),
@@ -125,11 +125,11 @@ impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
 impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
 
 fn page_has_permission<'a>(
-    permissions: impl Iterator<Item = &'a PageEventPermissions>,
+    permissions: impl Iterator<Item = &'a UiEventPermissions>,
     page_url: &str,
     permission: &str,
 ) -> bool {
-    PageEventPermissions::allows_page(permissions, page_url, permission)
+    UiEventPermissions::allows_page(permissions, page_url, permission)
 }
 
 fn decode_ui_event<E>(event: &BinIpcEventRaw, permitted: bool) -> Option<E>
@@ -147,7 +147,7 @@ where
 fn receive_ui_events<E>(
     mut commands: Commands,
     buffer: Res<BinIpcEventRawBuffer>,
-    permissions: Query<&PageEventPermissions>,
+    permissions: Query<&UiEventPermissions>,
 ) where
     E: UiEvent + rkyv::Archive + Send + Sync + 'static,
     E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn page_manifest_permissions_restrict_event_types() {
-        let permissions = [PageEventPermissions {
+        let permissions = [UiEventPermissions {
             url: "vmux://allowed/",
             owns_subtree: false,
             permissions: &[RestrictedEvent::PERMISSION],

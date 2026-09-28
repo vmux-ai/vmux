@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 
-use vmux_agent::AgentRunState;
 use vmux_agent::event::AgentRequestInput;
 use vmux_api::protocol::{AgentCommandResult, AgentListTeam};
 use vmux_core::PageMetadata;
@@ -18,6 +17,7 @@ use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
 use vmux_layout::projection::TeamProjection as LayoutTeamProjection;
 use vmux_layout::space::{CurrentSpace, Space, space_of};
 use vmux_layout::stack::Stack;
+use vmux_session::AgentRunState;
 
 use crate::projection::TeamStateProjection;
 

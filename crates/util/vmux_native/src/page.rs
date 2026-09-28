@@ -34,8 +34,8 @@ impl NativePage {
         }
     }
 
-    pub const fn page_permissions(&self) -> vmux_api::PageEventPermissions {
-        vmux_api::PageEventPermissions {
+    pub const fn page_permissions(&self) -> vmux_api::UiEventPermissions {
+        vmux_api::UiEventPermissions {
             url: self.url,
             owns_subtree: self.owns_subtree,
             permissions: self.permissions,

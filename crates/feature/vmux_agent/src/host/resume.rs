@@ -3,7 +3,6 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
-use crate::run_state::AgentRunState;
 use crate::strategy::{AgentStrategies, acp_agent_kind, sort_sessions};
 use vmux_api::chat::{PromptHistory, PromptHistoryRequest};
 use vmux_chat::event::{
@@ -14,6 +13,7 @@ use vmux_chat::host::{ChatResumeProjection, ChatView};
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
 use vmux_session::AcpSession;
+use vmux_session::AgentRunState;
 use vmux_session::AgentSession;
 
 pub(super) struct ChatResumePlugin;

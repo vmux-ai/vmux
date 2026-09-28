@@ -22,7 +22,7 @@
         "TeamProfileCreateRequest",
         "TeamProfileSwitchRequest",
         "TeamProfileUpdateRequest",
-        "PageKeyContext",
+        "UiKeyContext",
         "KeyStroke",
         "KeyClaims",
     ],

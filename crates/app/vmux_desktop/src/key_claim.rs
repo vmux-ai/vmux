@@ -3,7 +3,7 @@ use bevy_cef::prelude::{UiInput, WebviewSource};
 use vmux_command::shortcut::{KeyContext, Keymap};
 use vmux_core::host::page::HostsPage;
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
-use vmux_core::input::{KeyClaims, PageKeyContext};
+use vmux_core::input::{KeyClaims, UiKeyContext};
 
 pub struct KeyClaimPlugin;
 
@@ -32,10 +32,7 @@ fn start_page_context(
     }
 }
 
-fn receive_page_context(
-    trigger: On<UiInput<PageKeyContext>>,
-    mut contexts: Query<&mut KeyContext>,
-) {
+fn receive_page_context(trigger: On<UiInput<UiKeyContext>>, mut contexts: Query<&mut KeyContext>) {
     let Ok(mut current) = contexts.get_mut(trigger.event_target()) else {
         return;
     };
@@ -176,7 +173,7 @@ mod tests {
         fn publish(app: &mut App, page: Entity, keys: &[&str]) {
             app.world_mut().trigger(UiInput {
                 webview: page,
-                payload: PageKeyContext {
+                payload: UiKeyContext {
                     keys: keys.iter().map(|key| (*key).to_string()).collect(),
                 },
             });

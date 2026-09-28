@@ -9,13 +9,13 @@ use crate::prompt::{AttachmentPreviews, Attachments, Browsed, Media};
 use crate::room::{Agents, Conversation, LiveTurn, Log, RoomTranscript, Snapshot};
 use bevy_app::{App, Last, Plugin, Startup, Update};
 use bevy_ecs::prelude::*;
-use vmux_api::page::PageEmit;
+use vmux_api::page::UiStateEmit;
 
 pub struct ChatUiStatePlugin;
 
 impl Plugin for ChatUiStatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<PageEmit>()
+        app.add_message::<UiStateEmit>()
             .add_message::<PublishComposerEffect>()
             .add_message::<RepublishChatUiState>()
             .add_systems(Startup, spawn_chat_runtime)
@@ -109,7 +109,7 @@ fn publish_composer_effects(
 
 fn emit_ui_state(
     mut runtimes: Query<&mut ChatUiStateProjection, With<ChatRuntime>>,
-    mut emits: MessageWriter<PageEmit>,
+    mut emits: MessageWriter<UiStateEmit>,
 ) {
     let Ok(mut projection) = runtimes.single_mut() else {
         return;
@@ -122,7 +122,7 @@ fn emit_ui_state(
         sequence: projection.sequence,
         patches: std::mem::take(&mut projection.patches),
     };
-    let Some(emit) = PageEmit::from_state(&state) else {
+    let Some(emit) = UiStateEmit::from_state(&state) else {
         return;
     };
     emits.write(emit);

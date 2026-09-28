@@ -35,7 +35,11 @@ pub struct AgentPagesPlugin;
 impl Plugin for AgentPagesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            super::chat_projection::AgentChatPlugin,
+            vmux_chat::ChatPlugin,
+            super::model::ChatModelPlugin,
+            super::prompt::ChatPromptPlugin,
+            super::resume::ChatResumePlugin,
+            super::transcript::ChatTranscriptPlugin,
             crate::setup::AgentSetupPlugin,
         ));
     }

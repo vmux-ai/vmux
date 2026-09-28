@@ -13,7 +13,7 @@
         "TermMouseEvent",
         "TermLinkOpenRequest",
         "TermResizeEvent",
-        "PageKeyContext",
+        "UiKeyContext",
         "KeyStroke",
         "KeyClaims",
     ],

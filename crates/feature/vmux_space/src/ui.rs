@@ -6,7 +6,7 @@ use crate::event::{
 };
 use dioxus::prelude::*;
 use vmux_core::event::team::{TeamEvent, TeamProfileSwitchRequest};
-use vmux_core::input::{PageKeyContext, Unclaimed};
+use vmux_core::input::{UiKeyContext, Unclaimed};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
@@ -34,7 +34,7 @@ pub fn Page() -> Element {
 
     let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);
     use_drop(move || {
-        let _ = send(&PageKeyContext { keys: Vec::new() });
+        let _ = send(&UiKeyContext { keys: Vec::new() });
     });
 
     let spaces = state.read().spaces.clone();

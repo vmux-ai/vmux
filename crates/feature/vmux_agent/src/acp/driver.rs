@@ -14,11 +14,14 @@ use agent_client_protocol::schema::v1::{
     PromptCapabilities, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
-    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigSelectOptions, SessionId, SessionModeState, SessionNotification, SessionUpdate,
+    SessionConfigOption, SessionId, SessionModeState, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalExitStatus, TerminalId,
     TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+};
+#[cfg(test)]
+use agent_client_protocol::schema::v1::{
+    SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
 };
 use agent_client_protocol::{Client, Responder};
 use base64::Engine;

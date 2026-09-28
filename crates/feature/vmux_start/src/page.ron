@@ -44,7 +44,7 @@
         "PromptHistoryRequest",
         "ResumeListRequest",
         "ResumeSession",
-        "PageKeyContext",
+        "UiKeyContext",
         "KeyStroke",
         "KeyClaims",
     ],

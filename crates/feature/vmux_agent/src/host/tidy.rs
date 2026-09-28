@@ -259,8 +259,8 @@ fn tidy_on_agent_attention(
 fn tidy_acp_on_idle(
     settings: Option<Res<AppSettings>>,
     sessions: Query<
-        (&vmux_session::AcpSession, &crate::AgentRunState),
-        Changed<crate::AgentRunState>,
+        (&vmux_session::AcpSession, &vmux_session::AgentRunState),
+        Changed<vmux_session::AgentRunState>,
     >,
     layout: AgentFileLayout,
     last_activated: Query<&vmux_core::LastActivatedAt>,
@@ -275,7 +275,7 @@ fn tidy_acp_on_idle(
         return;
     }
     for (session, state) in &sessions {
-        if !matches!(state, crate::AgentRunState::Idle) {
+        if !matches!(state, vmux_session::AgentRunState::Idle) {
             continue;
         }
         let Some(agent_pane) = layout.agent_pane(session.anchor) else {
@@ -296,10 +296,10 @@ fn tidy_acp_on_idle(
 fn tidy_page_on_idle(
     settings: Option<Res<AppSettings>>,
     sessions: Query<
-        (&ChildOf, &crate::AgentRunState),
+        (&ChildOf, &vmux_session::AgentRunState),
         (
             With<vmux_session::AgentSession>,
-            Changed<crate::AgentRunState>,
+            Changed<vmux_session::AgentRunState>,
         ),
     >,
     layout: AgentFileLayout,
@@ -315,7 +315,7 @@ fn tidy_page_on_idle(
         return;
     }
     for (parent, state) in &sessions {
-        if !matches!(state, crate::AgentRunState::Idle) {
+        if !matches!(state, vmux_session::AgentRunState::Idle) {
             continue;
         }
         tidy_follow_pane(
@@ -423,7 +423,7 @@ mod tests {
                     provider: "claude".to_string(),
                     model: "cli".to_string(),
                 },
-                crate::AgentRunState::Streaming,
+                vmux_session::AgentRunState::Streaming,
                 ChildOf(agent_pane),
             ))
             .id();
@@ -443,8 +443,8 @@ mod tests {
         assert!(close_stack_requests(&app).is_empty());
 
         *app.world_mut()
-            .get_mut::<crate::AgentRunState>(agent_stack)
-            .unwrap() = crate::AgentRunState::Idle;
+            .get_mut::<vmux_session::AgentRunState>(agent_stack)
+            .unwrap() = vmux_session::AgentRunState::Idle;
         app.update();
 
         let mut closed = close_stack_requests(&app);

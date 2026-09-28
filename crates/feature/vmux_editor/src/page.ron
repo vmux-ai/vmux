@@ -75,7 +75,7 @@
         "GitCommitRequest",
         "GitPushRequest",
         "GitHunkRequest",
-        "PageKeyContext",
+        "UiKeyContext",
         "KeyStroke",
         "KeyClaims",
     ],

@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::event::{AgentApprovalReply, AgentChoiceSelected};
-use crate::run_state::AgentRunState;
 use vmux_api::protocol::{AgentAttachment, ClientMessage, SharedMessage};
 use vmux_chat::composer::{ComposerQueriesChanged, ComposerState};
 use vmux_chat::event::{
@@ -12,6 +11,7 @@ use vmux_chat::event::{
 use vmux_chat::host::{ChatAttachmentProjection, ChatView};
 use vmux_core::service::ServiceRequest;
 use vmux_session::AcpSession;
+use vmux_session::AgentRunState;
 use vmux_session::{
     AgentConversationTitle, AgentSession, PromptQueue, provisional_conversation_title,
 };

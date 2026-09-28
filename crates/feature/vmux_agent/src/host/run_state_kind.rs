@@ -1,6 +1,6 @@
 use bevy::prelude::Component;
 
-use crate::run_state::AgentRunState;
+use vmux_session::AgentRunState;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AgentRunStateKind {

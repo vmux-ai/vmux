@@ -3,7 +3,7 @@ use bevy_cef_core::prelude::*;
 use rkyv::api::high::HighSerializer;
 use rkyv::ser::allocator::ArenaHandle;
 use rkyv::util::AlignedVec;
-use vmux_api::{HostEvent, PageEventPermissions};
+use vmux_api::{HostEvent, UiEventPermissions};
 
 #[derive(Reflect, Debug, Clone, EntityEvent)]
 #[reflect(opaque)]
@@ -75,12 +75,12 @@ impl Plugin for BinHostEmitPlugin {
 fn bin_host_emit(
     trigger: On<BinHostEmitEvent>,
     browsers: NonSend<Browsers>,
-    permissions: Query<&PageEventPermissions>,
+    permissions: Query<&UiEventPermissions>,
 ) {
     let Some(page_url) = browsers.page_url(&trigger.webview()) else {
         return;
     };
-    if !PageEventPermissions::allows_page(permissions.iter(), &page_url, trigger.permission()) {
+    if !UiEventPermissions::allows_page(permissions.iter(), &page_url, trigger.permission()) {
         warn!(
             "blocked binary host event {} for unexpected page URL {page_url}",
             trigger.id()

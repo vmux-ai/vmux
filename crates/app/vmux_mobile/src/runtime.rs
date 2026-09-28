@@ -8,7 +8,7 @@ use bevy_ecs::message::{Message, MessageReader};
 use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::system::NonSendMut;
 use bevy_window::AppLifecycle;
-use vmux_api::page::PageEmit;
+use vmux_api::page::UiStateEmit;
 use vmux_ui::hooks::transport::BytesListener;
 
 #[derive(Clone)]
@@ -25,20 +25,20 @@ pub(crate) struct MobileRuntime {
 }
 
 #[derive(Default)]
-pub(crate) struct PageListeners(pub(crate) HashMap<String, BytesListener>);
+pub(crate) struct UiStateListeners(pub(crate) HashMap<String, BytesListener>);
 
 pub(crate) struct MobileRuntimePlugin;
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
-struct DeliverPageEmits;
+struct DeliverUiStateEmits;
 
 impl Plugin for MobileRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AppLifecycle>()
-            .add_message::<PageEmit>()
-            .insert_non_send(PageListeners::default())
-            .init_schedule(DeliverPageEmits)
-            .add_systems(DeliverPageEmits, deliver_page_emits);
+            .add_message::<UiStateEmit>()
+            .insert_non_send(UiStateListeners::default())
+            .init_schedule(DeliverUiStateEmits)
+            .add_systems(DeliverUiStateEmits, deliver_ui_state);
     }
 }
 
@@ -91,7 +91,7 @@ impl RuntimeHandle {
         };
         let world = runtime.app.world_mut();
         world
-            .non_send_mut::<PageListeners>()
+            .non_send_mut::<UiStateListeners>()
             .0
             .insert(id.to_string(), listener);
         world.write_message(refresh);
@@ -129,7 +129,7 @@ impl RuntimeHandle {
             return;
         }
         runtime.app.update();
-        runtime.app.world_mut().run_schedule(DeliverPageEmits);
+        runtime.app.world_mut().run_schedule(DeliverUiStateEmits);
         if runtime.lifecycle == AppLifecycle::WillSuspend {
             runtime.lifecycle = AppLifecycle::Suspended;
         }
@@ -139,13 +139,13 @@ impl RuntimeHandle {
     }
 }
 
-fn deliver_page_emits(
-    mut emitted: MessageReader<PageEmit>,
-    mut listeners: NonSendMut<PageListeners>,
+fn deliver_ui_state(
+    mut emitted: MessageReader<UiStateEmit>,
+    mut listeners: NonSendMut<UiStateListeners>,
 ) {
     for emit in emitted.read() {
         let Some(listener) = listeners.0.get_mut(&emit.id) else {
-            tracing::debug!(id = emit.id, "page emit had no listener");
+            tracing::debug!(id = emit.id, "UI state emit had no listener");
             continue;
         };
         listener(&emit.bytes);

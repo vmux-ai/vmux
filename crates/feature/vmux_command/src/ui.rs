@@ -17,7 +17,7 @@ use crate::ui::signals::{
 };
 use dioxus::prelude::*;
 use vmux_api::command_bar::CommandBarPicker;
-use vmux_core::input::{PageKeyContext, Unclaimed};
+use vmux_core::input::{UiKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::composer::{PROMPT_INPUT_ID, PromptComposer, focus_prompt_end};
@@ -80,7 +80,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut handled_close = use_signal(|| None);
 
     use_drop(move || {
-        let _ = send(&PageKeyContext { keys: Vec::new() });
+        let _ = send(&UiKeyContext { keys: Vec::new() });
     });
 
     use_effect(move || {
