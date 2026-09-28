@@ -54,9 +54,28 @@ impl Plugin for AcpAgentPlugin {
     }
 }
 
-const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab starts in ~/.vmux/projects and has no selected project. Before accessing project files or running project commands, call select_project with the known project path or without a path to open the picker. Paths inside ~/.vmux/projects are selected immediately; paths outside it require explicit user approval in the native picker. For a new project, do not ask the user to invent a folder location. First call request_user_choice with two concrete options: create the project at a suggested path under ~/.vmux/projects, or choose an existing project. Use ~/.vmux/projects/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/projects/local/<project> otherwise. If the user chooses creation, use run only to create the empty directory, then call select_project with that path. vmux will offer Git initialization and use the new project root directly; never call create_worktree for that new project. Do not search the user's home directory. General questions and self-contained terminal demonstrations may use the current directory without selecting a project.";
-const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): Project activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected project before inspecting, editing, testing, or running it.";
-const REPOSITORY_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The selected project is a Git repository, but this tab is not isolated. Reading and inspection are allowed without a worktree. Never call create_worktree for requests that only read, show, search, or explain existing files. Immediately before the first edit, write, test, build, or other mutation, call create_worktree. It reuses a known linked worktree, automatically uses one unambiguous existing worktree, or creates one when none exists. If it reports multiple candidates, ask the user with request_user_choice to choose an existing path or Create new worktree, then call create_worktree again with path or create=true. Never run git worktree add yourself.";
+#[derive(Component, serde::Deserialize)]
+struct AcpWorkspacePolicy {
+    unbound: String,
+    pending_worktree: String,
+    repository_needs_worktree: String,
+}
+
+impl AcpWorkspacePolicy {
+    fn bundled() -> Self {
+        ron::from_str(include_str!("acp/workspace_policy.ron"))
+            .expect("bundled ACP workspace policy is valid RON")
+    }
+
+    fn context(&self, state: AcpWorkspaceState) -> Option<&str> {
+        match state {
+            AcpWorkspaceState::Bound => None,
+            AcpWorkspaceState::Unbound => Some(&self.unbound),
+            AcpWorkspaceState::PendingWorktree => Some(&self.pending_worktree),
+            AcpWorkspaceState::RepositoryNeedsWorktree => Some(&self.repository_needs_worktree),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AcpWorkspaceState {
@@ -93,15 +112,11 @@ fn ancestor_acp_workspace_state(
 }
 
 fn acp_prompt_context(
+    policy: &AcpWorkspacePolicy,
     handoff: Option<String>,
     workspace_state: Option<AcpWorkspaceState>,
 ) -> Option<String> {
-    let policy = match workspace_state {
-        Some(AcpWorkspaceState::Unbound) => Some(UNBOUND_WORKSPACE_CONTEXT),
-        Some(AcpWorkspaceState::PendingWorktree) => Some(PENDING_WORKTREE_CONTEXT),
-        Some(AcpWorkspaceState::RepositoryNeedsWorktree) => Some(REPOSITORY_WORKTREE_CONTEXT),
-        Some(AcpWorkspaceState::Bound) | None => None,
-    };
+    let policy = workspace_state.and_then(|state| policy.context(state));
     match (handoff, policy) {
         (Some(handoff), Some(policy)) => Some(format!("{handoff}\n\n{policy}")),
         (Some(handoff), None) => Some(handoff),
@@ -184,7 +199,11 @@ struct AcpCatalogFetch {
 }
 
 fn spawn_acp_catalog(mut commands: Commands) {
-    commands.spawn((Name::new("ACP catalog"), AcpCatalog::default()));
+    commands.spawn((
+        Name::new("ACP catalog"),
+        AcpCatalog::default(),
+        AcpWorkspacePolicy::bundled(),
+    ));
 }
 
 fn start_catalog_fetch(mut commands: Commands) {
@@ -568,6 +587,7 @@ fn send_acp_input(
     workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
     pending_projects: Query<(), With<crate::host::PendingAgentProject>>,
     repositories_needing_worktrees: Query<(), With<crate::host::RepositoryNeedsWorktree>>,
+    policy: Single<&AcpWorkspacePolicy>,
     modes: Option<Single<&crate::host::model::AgentModeSelections>>,
     mut service_requests: MessageWriter<ServiceRequest>,
 ) {
@@ -598,7 +618,7 @@ fn send_acp_input(
             &pending_projects,
             &repositories_needing_worktrees,
         );
-        let context = acp_prompt_context(handoff, workspace_state);
+        let context = acp_prompt_context(&policy, handoff, workspace_state);
         let preferred_mode = modes
             .as_ref()
             .map(|modes| modes.selected_for(&session.agent_id).to_string())
@@ -727,7 +747,8 @@ mod tests {
 
     #[test]
     fn unbound_workspace_context_requires_project_selection_before_file_access() {
-        let context = acp_prompt_context(None, Some(AcpWorkspaceState::Unbound)).unwrap();
+        let policy = AcpWorkspacePolicy::bundled();
+        let context = acp_prompt_context(&policy, None, Some(AcpWorkspaceState::Unbound)).unwrap();
 
         assert!(context.contains("Before accessing project files"));
         assert!(context.contains("select_project"));
@@ -743,8 +764,13 @@ mod tests {
 
     #[test]
     fn repository_context_defers_worktree_until_mutation() {
-        let context =
-            acp_prompt_context(None, Some(AcpWorkspaceState::RepositoryNeedsWorktree)).unwrap();
+        let policy = AcpWorkspacePolicy::bundled();
+        let context = acp_prompt_context(
+            &policy,
+            None,
+            Some(AcpWorkspaceState::RepositoryNeedsWorktree),
+        )
+        .unwrap();
 
         assert!(context.contains("Reading and inspection are allowed"));
         assert!(context.contains("Never call create_worktree"));
@@ -756,7 +782,9 @@ mod tests {
 
     #[test]
     fn pending_worktree_context_requires_waiting_for_activation() {
+        let policy = AcpWorkspacePolicy::bundled();
         let context = acp_prompt_context(
+            &policy,
             Some("prior conversation".into()),
             Some(AcpWorkspaceState::PendingWorktree),
         )
@@ -770,8 +798,10 @@ mod tests {
 
     #[test]
     fn bound_workspace_keeps_only_handoff_context() {
+        let policy = AcpWorkspacePolicy::bundled();
         assert_eq!(
             acp_prompt_context(
+                &policy,
                 Some("prior conversation".into()),
                 Some(AcpWorkspaceState::Bound),
             )

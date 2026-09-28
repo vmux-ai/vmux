@@ -19,6 +19,8 @@ pub mod room;
 pub mod selector;
 
 #[cfg(host)]
+pub use host::ChatPlugin;
+#[cfg(host)]
 pub use key::ChatKeyPlugin;
 #[cfg(host)]
 pub use media::ChatMediaPlugin;

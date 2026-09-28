@@ -41,6 +41,7 @@ app = [
     "dep:image",
     "dep:notify",
     "dep:rfd",
+    "dep:ron",
     "dep:tempfile",
     "dep:tokio",
     "dep:toml",
@@ -92,6 +93,7 @@ chrono = { workspace = true, optional = true }
 notify = { workspace = true, optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"], optional = true }
 rfd = { workspace = true, optional = true }
+ron = { workspace = true, optional = true }
 crossbeam-channel = { version = "0.5", optional = true }
 futures-lite = { version = "2", optional = true }
 futures-util = { version = "0.3", optional = true }

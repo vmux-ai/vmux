@@ -38,7 +38,10 @@ pub struct AgentPagesPlugin;
 
 impl Plugin for AgentPagesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((super::chat::AgentChatPlugin, crate::setup::AgentSetupPlugin));
+        app.add_plugins((
+            super::chat_projection::AgentChatPlugin,
+            crate::setup::AgentSetupPlugin,
+        ));
     }
 }
 

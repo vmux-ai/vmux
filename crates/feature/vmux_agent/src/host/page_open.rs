@@ -30,7 +30,8 @@ impl Plugin for PageOpenPlugin {
             Update,
             (
                 release_agent_transition_paint,
-                prepare_agent_tab_worktrees.before(drain_agent_tab_worktrees),
+                prepare_agent_tab_worktrees,
+                start_agent_tab_worktrees,
                 drain_agent_tab_worktrees,
                 handle_agent_page_open,
             )
@@ -51,11 +52,15 @@ pub(crate) struct AgentPageOpenWorkspace<'w, 's> {
 #[derive(Component)]
 struct PendingAgentWorktree {
     tab: Entity,
+    tab_name: String,
     startup_dir: Option<String>,
     workspace: vmux_layout::tab::TabWorkspace,
     metadata: vmux_layout::tab::TabWorktree,
-    task: Task<Result<vmux_layout::worktree::TabWorktreeActivation, String>>,
+    managed_root: PathBuf,
 }
+
+#[derive(Component)]
+struct AgentWorktreeTask(Task<Result<vmux_layout::worktree::TabWorktreeActivation, String>>);
 
 #[derive(Component, Clone, Copy)]
 struct AwaitingAgentWorktree {
@@ -102,37 +107,6 @@ impl AgentChatTarget {
             }
             crate::AgentUrl::Cli { .. } => None,
         }
-    }
-}
-
-struct RestoredAgentWorktree {
-    tab_name: String,
-    startup_dir: Option<String>,
-    workspace: vmux_layout::tab::TabWorkspace,
-    metadata: vmux_layout::tab::TabWorktree,
-    managed_root: PathBuf,
-}
-
-impl RestoredAgentWorktree {
-    fn start(
-        self,
-        wake: Option<bevy::winit::EventLoopProxy<bevy::winit::WinitUserEvent>>,
-    ) -> Task<Result<vmux_layout::worktree::TabWorktreeActivation, String>> {
-        IoTaskPool::get().spawn(async move {
-            let result = vmux_layout::worktree::ensure_tab_worktree_available(
-                &vmux_layout::tab::Tab {
-                    name: self.tab_name,
-                    startup_dir: self.startup_dir,
-                },
-                &self.workspace,
-                &self.metadata,
-                &self.managed_root,
-            );
-            if let Some(wake) = wake {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-            result
-        })
     }
 }
 
@@ -329,14 +303,15 @@ fn prepare_agent_tab_worktrees(
         if !has_workspace {
             commands.entity(tab_entity).insert(workspace.clone());
         }
-        let request = if let Some(metadata) = metadata {
+        let pending_worktree = if let Some(metadata) = metadata {
             commands
                 .entity(tab_entity)
                 .remove::<crate::host::RepositoryNeedsWorktree>();
             if ready.is_some_and(|ready| ready.is_current(&tab, &workspace, metadata)) {
                 None
             } else {
-                Some(RestoredAgentWorktree {
+                Some(PendingAgentWorktree {
+                    tab: tab_entity,
                     tab_name: tab.name.clone(),
                     startup_dir: tab.startup_dir.clone(),
                     workspace: workspace.clone(),
@@ -363,25 +338,47 @@ fn prepare_agent_tab_worktrees(
             }
             None
         };
-        let Some(request) = request else {
+        let Some(pending_worktree) = pending_worktree else {
             commands
                 .entity(tab_entity)
                 .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
             continue;
         };
-        let pending = commands
-            .spawn(PendingAgentWorktree {
-                tab: tab_entity,
-                startup_dir: tab.startup_dir.clone(),
-                workspace: workspace.clone(),
-                metadata: request.metadata.clone(),
-                task: request.start(wake.clone()),
-            })
-            .id();
+        let pending = commands.spawn(pending_worktree).id();
         pending_by_tab.insert(tab_entity, pending);
         commands
             .entity(task_entity)
             .insert((PageOpenDeferred, AwaitingAgentWorktree { pending }));
+    }
+}
+
+fn start_agent_tab_worktrees(
+    pending: Query<(Entity, &PendingAgentWorktree), Without<AgentWorktreeTask>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    for (entity, pending) in &pending {
+        let tab = vmux_layout::tab::Tab {
+            name: pending.tab_name.clone(),
+            startup_dir: pending.startup_dir.clone(),
+        };
+        let workspace = pending.workspace.clone();
+        let metadata = pending.metadata.clone();
+        let managed_root = pending.managed_root.clone();
+        let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+        let task = IoTaskPool::get().spawn(async move {
+            let result = vmux_layout::worktree::ensure_tab_worktree_available(
+                &tab,
+                &workspace,
+                &metadata,
+                &managed_root,
+            );
+            if let Some(wake) = wake {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+            result
+        });
+        commands.entity(entity).insert(AgentWorktreeTask(task));
     }
 }
 
@@ -397,7 +394,7 @@ fn release_agent_transition_paint(
 }
 
 fn drain_agent_tab_worktrees(
-    mut pending: Query<(Entity, &mut PendingAgentWorktree)>,
+    mut pending: Query<(Entity, &PendingAgentWorktree, &mut AgentWorktreeTask)>,
     mut tabs: Query<(
         &mut vmux_layout::tab::Tab,
         Option<&vmux_layout::tab::TabWorkspace>,
@@ -406,11 +403,8 @@ fn drain_agent_tab_worktrees(
     waiting: Query<(Entity, &AwaitingAgentWorktree, &PageOpenTask)>,
     mut commands: Commands,
 ) {
-    for (pending_entity, mut pending) in &mut pending {
-        if pending.is_added() {
-            continue;
-        }
-        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+    for (pending_entity, pending, mut task) in &mut pending {
+        let Some(result) = future::block_on(future::poll_once(&mut task.0)) else {
             continue;
         };
         let outcome = match tabs.get_mut(pending.tab) {
@@ -1536,16 +1530,20 @@ mod tests {
         app.world_mut()
             .entity_mut(stack)
             .insert(vmux_start::StartInlineTransition { webview: start });
-        app.world_mut().spawn(PendingAgentWorktree {
-            tab,
-            startup_dir: Some(metadata.checkout_dir.clone()),
-            workspace,
-            metadata,
-            task: IoTaskPool::get().spawn(async {
+        app.world_mut().spawn((
+            PendingAgentWorktree {
+                tab,
+                tab_name: "Feature".into(),
+                startup_dir: Some(metadata.checkout_dir.clone()),
+                workspace,
+                metadata,
+                managed_root: PathBuf::from("/project/.worktrees"),
+            },
+            AgentWorktreeTask(IoTaskPool::get().spawn(async {
                 future::pending::<Result<vmux_layout::worktree::TabWorktreeActivation, String>>()
                     .await
-            }),
-        });
+            })),
+        ));
         let task = app
             .world_mut()
             .spawn(PageOpenTask {

@@ -1,9 +1,7 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{UiEventPlugin, UiInput};
 
 use crate::host::run_state::AgentRunState;
 use vmux_chat::activity::ActivityIcon;
-use vmux_chat::event::ChatOpenPage;
 use vmux_chat::host::ChatView;
 use vmux_chat::tab::Accent;
 use vmux_core::chat::group_turns_tail;
@@ -16,31 +14,15 @@ pub struct AgentChatPlugin;
 impl Plugin for AgentChatPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            vmux_chat::room::ChatRoomPlugin,
-            vmux_chat::ChatKeyPlugin,
-            vmux_chat::ChatMediaPlugin,
-            vmux_chat::composer::ChatComposerPlugin,
+            vmux_chat::ChatPlugin,
             super::model::ChatModelPlugin,
             super::composer::AgentChatComposerPlugin,
             super::prompt::ChatPromptPlugin,
             super::resume::ChatResumePlugin,
             super::transcript::ChatTranscriptPlugin,
         ))
-        .add_plugins(UiEventPlugin::<(ChatOpenPage,)>::default())
-        .add_observer(on_chat_open_page)
         .add_systems(Update, report_tab_identity);
     }
-}
-
-fn on_chat_open_page(
-    trigger: On<UiInput<ChatOpenPage>>,
-    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
-) {
-    let url = trigger.event().payload.url.clone();
-    if url.is_empty() {
-        return;
-    }
-    requests.write(vmux_layout::stack::OpenRequest { url: Some(url) });
 }
 
 const TAIL_ITEMS: usize = 1;

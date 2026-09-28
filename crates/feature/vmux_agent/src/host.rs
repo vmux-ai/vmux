@@ -10,7 +10,7 @@ pub(crate) mod approval;
 pub mod attach;
 pub mod attention;
 mod capture_tool;
-pub mod chat;
+mod chat_projection;
 mod cli;
 pub mod command;
 pub mod command_bar;

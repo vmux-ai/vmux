@@ -10166,6 +10166,7 @@ dependencies = [
  "reqwest",
  "rfd 0.15.4",
  "rkyv",
+ "ron 0.8.1",
  "serde",
  "serde_json",
  "serial_test",
@@ -10344,6 +10345,7 @@ dependencies = [
  "vmux_clipboard",
  "vmux_command",
  "vmux_core",
+ "vmux_layout",
  "vmux_native",
  "vmux_ui",
 ]

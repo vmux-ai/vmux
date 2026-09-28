@@ -1,3 +1,7 @@
+#[cfg(host)]
+use bevy_app::{App, Plugin};
+#[cfg(host)]
+use bevy_cef::prelude::{UiEventPlugin, UiInput};
 use bevy_ecs::prelude::*;
 
 use crate::composer::ComposerState;
@@ -8,6 +12,35 @@ use crate::event::{
 };
 
 type ChatUiStateUpdates = vmux_core::host::UiState<crate::state::ChatUiState>;
+
+#[cfg(host)]
+pub struct ChatPlugin;
+
+#[cfg(host)]
+impl Plugin for ChatPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            crate::room::ChatRoomPlugin,
+            crate::ChatKeyPlugin,
+            crate::ChatMediaPlugin,
+            crate::composer::ChatComposerPlugin,
+        ))
+        .add_plugins(UiEventPlugin::<(crate::event::ChatOpenPage,)>::default())
+        .add_observer(open_page);
+    }
+}
+
+#[cfg(host)]
+fn open_page(
+    trigger: On<UiInput<crate::event::ChatOpenPage>>,
+    mut requests: MessageWriter<vmux_layout::stack::OpenRequest>,
+) {
+    let url = trigger.event().payload.url.clone();
+    if url.is_empty() {
+        return;
+    }
+    requests.write(vmux_layout::stack::OpenRequest { url: Some(url) });
+}
 
 #[derive(Component)]
 #[require(
