@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
     AgentBrowserGoBack, AgentBrowserGoForward, AgentBrowserHistorySearch,
-    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentQuery, AgentRequest,
+    AgentBrowserInstallExtension, AgentBrowserNavigate, AgentBrowserScroll, AgentBrowserSnapshot,
+    AgentRequest,
 };
 use vmux_core::ProcessAnchor;
 
@@ -218,7 +219,7 @@ fn snapshot(
     for (entity, anchor, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::BrowserSnapshot {
+            .insert(ToolQuery(AgentRequest::encode(&AgentBrowserSnapshot {
                 pane: BrowserPane::from(args.target.clone()).into(),
                 anchor: anchor.map(|anchor| anchor.0),
             })));
@@ -236,7 +237,7 @@ fn scroll(
         };
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::BrowserScroll {
+            .insert(ToolQuery(AgentRequest::encode(&AgentBrowserScroll {
                 pane: BrowserPane::from(target).into(),
                 to,
                 delta,

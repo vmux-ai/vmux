@@ -1,14 +1,14 @@
 use super::SimulatorButton;
 use crate::{ProcessId, json::JsonValue};
 
-#[vmux_api::contract(Copy, Eq)]
-pub struct SimulatorTap {
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentSimulatorTap {
     pub x: u32,
     pub y: u32,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub struct SimulatorSwipe {
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentSimulatorSwipe {
     pub start_x: u32,
     pub start_y: u32,
     pub end_x: u32,
@@ -16,20 +16,100 @@ pub struct SimulatorSwipe {
     pub duration_ms: u32,
 }
 
-#[vmux_api::contract(Eq)]
-pub struct SimulatorTypeText {
+#[vmux_api::agent(Eq)]
+pub struct AgentSimulatorTypeText {
     pub text: String,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub struct SimulatorKeyPress {
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentSimulatorKeyPress {
     pub keycode: u8,
 }
 
-#[vmux_api::contract(Copy, Eq)]
-pub struct SimulatorButtonPress {
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentSimulatorButtonPress {
     pub button: SimulatorButton,
 }
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentReadLayout {
+    pub anchor: Option<ProcessId>,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentReadProcessOutput {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentReadProcessTranscript {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentProcessCommandExit {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentProcessRunCompletion {
+    pub process_id: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentGetSettings;
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentListSpaces;
+
+#[vmux_api::agent(Eq)]
+pub struct AgentScreenshot {
+    pub pane: Option<String>,
+}
+
+#[vmux_api::agent(Eq)]
+pub struct AgentBrowserSnapshot {
+    pub pane: Option<String>,
+    pub anchor: Option<ProcessId>,
+}
+
+#[vmux_api::agent(Eq)]
+pub struct AgentBrowserScroll {
+    pub pane: Option<String>,
+    pub to: Option<String>,
+    pub delta: Option<i32>,
+    pub anchor: Option<ProcessId>,
+}
+
+#[vmux_api::agent(Eq)]
+pub struct AgentRecordStart {
+    pub gif: bool,
+    pub max_secs: u32,
+    pub pane: Option<String>,
+}
+
+#[vmux_api::agent(Eq)]
+pub struct AgentRecordStop {
+    pub dir: Option<String>,
+    pub name: Option<String>,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentBookmarkList;
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentSimulatorScreenshot;
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentWorkingDirectory {
+    pub anchor: ProcessId,
+}
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentVaultStatus;
+
+#[vmux_api::agent(Copy, Eq)]
+pub struct AgentListCommands;
 
 #[vmux_api::contract(Eq)]
 pub struct AgentSpace {
@@ -89,61 +169,6 @@ pub struct AgentCommandTool {
     pub name: String,
     pub description: String,
     pub input_schema: JsonValue,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum AgentQuery {
-    ReadLayout {
-        anchor: Option<ProcessId>,
-    },
-    ReadProcessOutput {
-        process_id: ProcessId,
-    },
-    ReadProcessTranscript {
-        process_id: ProcessId,
-    },
-    ProcessCommandExit {
-        process_id: ProcessId,
-    },
-    ProcessRunCompletion {
-        process_id: ProcessId,
-    },
-    GetSettings,
-    ListSpaces,
-    Screenshot {
-        pane: Option<String>,
-    },
-    BrowserSnapshot {
-        pane: Option<String>,
-        anchor: Option<ProcessId>,
-    },
-    BrowserScroll {
-        pane: Option<String>,
-        to: Option<String>,
-        delta: Option<i32>,
-        anchor: Option<ProcessId>,
-    },
-    RecordStart {
-        gif: bool,
-        max_secs: u32,
-        pane: Option<String>,
-    },
-    RecordStop {
-        dir: Option<String>,
-        name: Option<String>,
-    },
-    BookmarkList,
-    SimulatorScreenshot,
-    SimulatorTap(SimulatorTap),
-    SimulatorSwipe(SimulatorSwipe),
-    SimulatorTypeText(SimulatorTypeText),
-    SimulatorKeyPress(SimulatorKeyPress),
-    SimulatorButtonPress(SimulatorButtonPress),
-    WorkingDirectory {
-        anchor: ProcessId,
-    },
-    VaultStatus,
-    ListCommands,
 }
 
 #[vmux_api::contract(Eq)]

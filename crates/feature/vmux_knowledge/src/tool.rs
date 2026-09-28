@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentOpenBeside, AgentQuery, AgentReadKnowledge, AgentRequest, AgentSearchKnowledge,
-    AgentSetConversationTitle, AgentWriteKnowledge,
+    AgentOpenBeside, AgentReadKnowledge, AgentRequest, AgentSearchKnowledge,
+    AgentSetConversationTitle, AgentVaultStatus, AgentWriteKnowledge,
 };
 use vmux_core::ProcessAnchor;
 use vmux_tool::{
@@ -86,7 +86,7 @@ fn vault_status(mut commands: Commands, calls: Query<Entity, AddedTool<VaultStat
     for request in &calls {
         commands
             .entity(request)
-            .insert(ToolQuery(Ok(AgentQuery::VaultStatus)));
+            .insert(ToolQuery(AgentRequest::encode(&AgentVaultStatus)));
     }
 }
 

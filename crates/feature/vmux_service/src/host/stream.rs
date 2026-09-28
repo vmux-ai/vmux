@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::message::Message;
+use vmux_api::room::Message;
 
 pub type BuildRequest =
     fn(model: &str, messages: &[Message], tools: &[ToolDef], api_key: &str) -> reqwest::Request;

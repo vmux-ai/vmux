@@ -63,7 +63,8 @@ pub(crate) use self::workspace::{
     PendingAgentChoice, PendingAgentProject, RepositoryNeedsWorktree,
 };
 
-pub use vmux_service::{http, message, stream};
+pub use vmux_api::room as message;
+pub use vmux_service::{http, stream};
 
 pub use cli::CliAgentStrategy;
 pub use event::{

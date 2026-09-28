@@ -7,7 +7,9 @@ use std::io::{self, BufRead};
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
-use vmux_api::protocol::{AgentQuery, AgentRequest, AgentRequestId, ClientMessage, ServiceMessage};
+use vmux_api::protocol::{
+    AgentListCommands, AgentRequest, AgentRequestId, ClientMessage, ServiceMessage,
+};
 use vmux_core::{HostShell, JsonArguments, ProcessAnchor};
 
 pub struct McpPlugin;
@@ -291,7 +293,8 @@ fn start_list_tools(
                     && let Ok(ServiceMessage::AgentCommandsResult {
                         result: Ok(commands),
                         ..
-                    }) = agent_query(&connection, AgentQuery::ListCommands).await
+                    }) =
+                        agent_query(&connection, AgentRequest::encode(&AgentListCommands)?).await
                 {
                     definitions = vmux_tool::ToolDefinition::merge_commands(definitions, commands)?;
                 }
@@ -499,7 +502,7 @@ pub fn command_result_to_mcp_response(
 
 async fn agent_query(
     connection: &vmux_service::client::ServiceConnection,
-    query: AgentQuery,
+    query: AgentRequest,
 ) -> Result<ServiceMessage, String> {
     let request_id = AgentRequestId::new();
     connection
@@ -526,6 +529,7 @@ async fn agent_query(
 fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId> {
     match message {
         ServiceMessage::AgentLayoutResult { request_id, .. }
+        | ServiceMessage::AgentQueryError { request_id, .. }
         | ServiceMessage::ProcessOutputResult { request_id, .. }
         | ServiceMessage::ProcessTranscriptResult { request_id, .. }
         | ServiceMessage::ProcessCommandExitResult { request_id, .. }
@@ -547,7 +551,7 @@ fn query_response_request_id(message: &ServiceMessage) -> Option<AgentRequestId>
     }
 }
 
-async fn run_agent_query(query: vmux_api::protocol::AgentQuery) -> Result<Value, String> {
+async fn run_agent_query(query: AgentRequest) -> Result<Value, String> {
     let connection = vmux_service::client::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
@@ -557,6 +561,7 @@ async fn run_agent_query(query: vmux_api::protocol::AgentQuery) -> Result<Value,
 
 pub fn query_response_to_mcp_response(response: ServiceMessage) -> Value {
     match response {
+        ServiceMessage::AgentQueryError { message, .. } => tool_error(&message),
         ServiceMessage::AgentLayoutResult {
             result: Ok(snapshot),
             ..

@@ -149,10 +149,10 @@ fn fail_agent_tool_calls(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::AgentQuery;
+    use vmux_api::protocol::{AgentRequest, AgentScreenshot};
 
     #[derive(Resource, Default)]
-    struct CapturedAgentQueries(Vec<AgentQuery>);
+    struct CapturedAgentQueries(Vec<AgentRequest>);
 
     impl CapturedAgentQueries {
         fn read(mut requests: MessageReader<AgentQueryRequest>, mut captured: ResMut<Self>) {
@@ -186,9 +186,11 @@ mod tests {
             });
         app.update();
 
-        assert!(matches!(
-            app.world().resource::<CapturedAgentQueries>().0.as_slice(),
-            [AgentQuery::Screenshot { pane: None }]
-        ));
+        let captured = app.world().resource::<CapturedAgentQueries>();
+        assert_eq!(captured.0.len(), 1);
+        assert_eq!(
+            captured.0[0].decode::<AgentScreenshot>().unwrap(),
+            Some(AgentScreenshot { pane: None })
+        );
     }
 }

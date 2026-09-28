@@ -6,8 +6,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::message::Message;
 use vmux_core::agent::AgentKind;
-use vmux_service::message::Message;
 
 use crate::McpServerConfig;
 use crate::strategy::AgentStrategy;

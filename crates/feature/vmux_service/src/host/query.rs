@@ -4,7 +4,11 @@ use bevy::prelude::*;
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 
 use crate::process::ProcessManager;
-use vmux_api::protocol::{AgentCommandExit, AgentRunCompletion, ProcessId};
+use vmux_api::protocol::{
+    AgentCommandExit, AgentProcessCommandExit, AgentProcessRunCompletion, AgentReadProcessOutput,
+    AgentReadProcessTranscript, AgentRequest, AgentRequestId, AgentRunCompletion, ProcessId,
+    ServiceMessage,
+};
 
 #[derive(Component)]
 struct ProcessOutputQuery {
@@ -143,6 +147,38 @@ impl ProcessQueries {
         receiver
             .await
             .map_err(|_| "service query was cancelled".to_string())?
+    }
+
+    pub(crate) async fn response(
+        &self,
+        request_id: AgentRequestId,
+        request: &AgentRequest,
+    ) -> Result<Option<ServiceMessage>, String> {
+        if let Some(request) = request.decode::<AgentReadProcessOutput>()? {
+            return Ok(Some(ServiceMessage::ProcessOutputResult {
+                request_id,
+                result: self.output(request.process_id).await,
+            }));
+        }
+        if let Some(request) = request.decode::<AgentReadProcessTranscript>()? {
+            return Ok(Some(ServiceMessage::ProcessTranscriptResult {
+                request_id,
+                result: self.transcript(request.process_id).await,
+            }));
+        }
+        if let Some(request) = request.decode::<AgentProcessCommandExit>()? {
+            return Ok(Some(ServiceMessage::ProcessCommandExitResult {
+                request_id,
+                result: self.command_exit(request.process_id).await,
+            }));
+        }
+        if let Some(request) = request.decode::<AgentProcessRunCompletion>()? {
+            return Ok(Some(ServiceMessage::ProcessRunCompletionResult {
+                request_id,
+                result: self.run_completion(request.process_id).await,
+            }));
+        }
+        Ok(None)
     }
 }
 

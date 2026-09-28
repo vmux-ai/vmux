@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
 use agent_client_protocol::schema::v1::{
     ContentBlock, Plan, PlanEntryStatus, SessionUpdate, ToolCall, ToolCallContent,
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 use vmux_api::protocol::AgentAttachment;
+use vmux_api::room::{AssistantBlock, Message, PlanStep, SubagentBlock};
 use vmux_core::host::workspace::WorkspaceLocation;
 
 #[derive(Debug, Clone, PartialEq)]

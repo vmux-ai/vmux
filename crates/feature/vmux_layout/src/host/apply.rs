@@ -199,7 +199,7 @@ fn apply_layout_plans(
     child_of: Query<&ChildOf>,
     activated: Query<&LastActivatedAt>,
     mut tabs: Query<&mut LayoutTab>,
-    mut splits: Query<(Entity, &mut PaneSplit, &mut Node)>,
+    mut splits: Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     mut pane_sizes: Query<&mut PaneSize>,
     mut metadata: Query<&mut PageMetadata>,
     mut focused: ResMut<crate::stack::FocusedStack>,
@@ -270,7 +270,7 @@ fn apply_layout_plan(
     child_of: &Query<&ChildOf>,
     activated: &Query<&LastActivatedAt>,
     tabs: &mut Query<&mut LayoutTab>,
-    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    splits: &mut Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     pane_sizes: &mut Query<&mut PaneSize>,
     metadata: &mut Query<&mut PageMetadata>,
     focused: &mut crate::stack::FocusedStack,
@@ -372,7 +372,7 @@ fn materialize_descendants(
     node: &proto::LayoutNode,
     new_entities: &mut std::collections::HashMap<*const proto::LayoutNode, Entity>,
     children_q: &Query<&Children>,
-    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    splits: &mut Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     terminal_spawn: &mut MessageWriter<TerminalLayoutSpawnRequest>,
     page_open: &mut MessageWriter<PageOpenRequest>,
     commands: &mut Commands,
@@ -464,7 +464,7 @@ fn materialize_descendants(
 
 fn find_root_split_child(
     children: &Query<&Children>,
-    splits: &Query<(Entity, &mut PaneSplit, &mut Node)>,
+    splits: &Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     tab: Entity,
 ) -> Option<Entity> {
     children
@@ -475,7 +475,7 @@ fn find_root_split_child(
 }
 
 fn set_split_direction(
-    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    splits: &mut Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     entity: Entity,
     direction: proto::SplitDirection,
 ) {
@@ -483,15 +483,17 @@ fn set_split_direction(
         proto::SplitDirection::Row => PaneSplitDirection::Row,
         proto::SplitDirection::Column => PaneSplitDirection::Column,
     };
-    if let Ok((_, mut split, mut node)) = splits.get_mut(entity) {
+    if let Ok((_, mut split, node)) = splits.get_mut(entity) {
         split.direction = pane_split_dir;
-        node.flex_direction = match pane_split_dir {
-            PaneSplitDirection::Row => FlexDirection::Row,
-            PaneSplitDirection::Column => FlexDirection::Column,
-        };
-        let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
-        node.column_gap = gap.column_gap;
-        node.row_gap = gap.row_gap;
+        if let Some(mut node) = node {
+            node.flex_direction = match pane_split_dir {
+                PaneSplitDirection::Row => FlexDirection::Row,
+                PaneSplitDirection::Column => FlexDirection::Column,
+            };
+            let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
+            node.column_gap = gap.column_gap;
+            node.row_gap = gap.row_gap;
+        }
     }
 }
 
@@ -557,7 +559,7 @@ fn collect_existing_ids(
 fn apply_tab(
     tab: &proto::Tab,
     tabs: &mut Query<&mut LayoutTab>,
-    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    splits: &mut Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     pane_sizes: &mut Query<&mut PaneSize>,
     metadata: &mut Query<&mut PageMetadata>,
 ) {
@@ -628,7 +630,7 @@ fn resolve_node_entity(
 
 fn apply_node(
     layout: &proto::LayoutNode,
-    splits: &mut Query<(Entity, &mut PaneSplit, &mut Node)>,
+    splits: &mut Query<(Entity, &mut PaneSplit, Option<&mut Node>)>,
     pane_sizes: &mut Query<&mut PaneSize>,
     metadata: &mut Query<&mut PageMetadata>,
 ) {
@@ -647,15 +649,17 @@ fn apply_node(
                     proto::SplitDirection::Row => PaneSplitDirection::Row,
                     proto::SplitDirection::Column => PaneSplitDirection::Column,
                 };
-                if let Ok((_, mut split, mut node)) = splits.get_mut(entity) {
+                if let Ok((_, mut split, node)) = splits.get_mut(entity) {
                     split.direction = pane_split_dir;
-                    node.flex_direction = match pane_split_dir {
-                        PaneSplitDirection::Row => FlexDirection::Row,
-                        PaneSplitDirection::Column => FlexDirection::Column,
-                    };
-                    let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
-                    node.column_gap = gap.column_gap;
-                    node.row_gap = gap.row_gap;
+                    if let Some(mut node) = node {
+                        node.flex_direction = match pane_split_dir {
+                            PaneSplitDirection::Row => FlexDirection::Row,
+                            PaneSplitDirection::Column => FlexDirection::Column,
+                        };
+                        let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
+                        node.column_gap = gap.column_gap;
+                        node.row_gap = gap.row_gap;
+                    }
                 }
             }
             if !flex_weights.is_empty() && flex_weights.len() == children.len() {

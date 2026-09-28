@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentQuery, AgentRequest, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
+    AgentListSpaces, AgentRequest, AgentSpaceCreate, AgentSpaceDelete, AgentSpaceRename,
 };
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
@@ -50,7 +50,7 @@ fn list_spaces(mut commands: Commands, calls: Query<Entity, AddedTool<ListSpaces
     for request in &calls {
         commands
             .entity(request)
-            .insert(ToolQuery(Ok(AgentQuery::ListSpaces)));
+            .insert(ToolQuery(AgentRequest::encode(&AgentListSpaces)));
     }
 }
 

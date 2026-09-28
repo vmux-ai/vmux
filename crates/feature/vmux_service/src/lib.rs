@@ -1,6 +1,5 @@
 pub use vmux_api::service as event;
 
-pub mod message;
 pub mod remote;
 
 #[cfg(host)]

@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use vmux_api::protocol::{
     AgentChooseWorkspace, AgentChooseWorkspaceAtPath, AgentCreateWorktreeOnBranch, AgentOpenBeside,
-    AgentPaneDirection, AgentPrepareWorktree, AgentQuery, AgentRequest, AgentRequestId,
-    AgentRequestUserChoice, AgentResumeInAcp, AgentRun, AgentRunCompletion,
-    AgentRunWithPlacementOverride, ClientMessage, PlacementMode, ProcessId, ServiceMessage,
+    AgentPaneDirection, AgentPrepareWorktree, AgentProcessRunCompletion, AgentReadProcessOutput,
+    AgentReadProcessTranscript, AgentRequest, AgentRequestId, AgentRequestUserChoice,
+    AgentResumeInAcp, AgentRun, AgentRunCompletion, AgentRunWithPlacementOverride,
+    AgentWorkingDirectory, ClientMessage, PlacementMode, ProcessId, ServiceMessage,
 };
 use vmux_core::{HostShell, ProcessAnchor};
 use vmux_mcp::protocol::{McpExecution, McpRequest};
@@ -421,11 +422,10 @@ fn read_terminal(
     requests: Query<(Entity, &ReadTerminalArgs), AddedTool<ReadTerminalArgs>>,
 ) {
     for (entity, args) in &requests {
-        let query = args
-            .terminal
-            .parse()
-            .map(|process_id| AgentQuery::ReadProcessOutput { process_id })
-            .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string());
+        let query = match args.terminal.parse() {
+            Ok(process_id) => AgentRequest::encode(&AgentReadProcessOutput { process_id }),
+            Err(_) => Err("read_terminal.terminal must be a valid terminal id".to_string()),
+        };
         commands.entity(entity).insert(ToolQuery(query));
     }
 }
@@ -443,7 +443,7 @@ async fn agent_working_directory(anchor: Option<ProcessId>) -> Result<PathBuf, S
     connection
         .send(&ClientMessage::AgentQuery {
             request_id,
-            query: AgentQuery::WorkingDirectory { anchor },
+            query: AgentRequest::encode(&AgentWorkingDirectory { anchor })?,
         })
         .await
         .map_err(|error| format!("cannot send query: {error}"))?;
@@ -648,7 +648,7 @@ async fn run_completion(
     connection
         .send(&ClientMessage::AgentQuery {
             request_id,
-            query: AgentQuery::ProcessRunCompletion { process_id },
+            query: AgentRequest::encode(&AgentProcessRunCompletion { process_id })?,
         })
         .await
         .map_err(|error| format!("cannot send query: {error}"))?;
@@ -676,7 +676,10 @@ async fn read_full_text(connection: &ServiceConnection, process_id: ProcessId) -
     if connection
         .send(&ClientMessage::AgentQuery {
             request_id,
-            query: AgentQuery::ReadProcessTranscript { process_id },
+            query: match AgentRequest::encode(&AgentReadProcessTranscript { process_id }) {
+                Ok(query) => query,
+                Err(_) => return String::new(),
+            },
         })
         .await
         .is_err()

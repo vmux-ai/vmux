@@ -16,10 +16,10 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use vmux_core::agent::SessionId;
 use vmux_core::{CreatedAt, ProcessId};
 
-use crate::message::Message;
 use crate::process::ProcessManager;
 use crate::remote::RemoteSession;
 use vmux_api::protocol::ServiceMessage;
+use vmux_api::room::Message;
 
 pub(crate) struct AcpSessionPlugin {
     inbox: StdMutex<Option<AcpSessionReceivers>>,

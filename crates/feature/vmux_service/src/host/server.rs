@@ -461,6 +461,7 @@ fn command_result_to_content(result: vmux_api::protocol::AgentCommandResult) -> 
 
 fn query_response_to_content(response: ServiceMessage) -> Option<(String, bool)> {
     let content = match response {
+        ServiceMessage::AgentQueryError { message, .. } => (message, true),
         ServiceMessage::AgentLayoutResult { result, .. } => match result {
             Ok(snapshot) => (serde_json::to_string(&snapshot).unwrap_or_default(), false),
             Err(message) => (message, true),
@@ -928,28 +929,9 @@ async fn handle_client(
             }
 
             ClientMessage::AgentQuery { request_id, query } => {
-                let response = match query {
-                    vmux_api::protocol::AgentQuery::ReadProcessOutput { process_id } => {
-                        ServiceMessage::ProcessOutputResult {
-                            request_id,
-                            result: process_queries.output(process_id).await,
-                        }
-                    }
-                    vmux_api::protocol::AgentQuery::ReadProcessTranscript { process_id } => {
-                        ServiceMessage::ProcessTranscriptResult {
-                            request_id,
-                            result: process_queries.transcript(process_id).await,
-                        }
-                    }
-                    vmux_api::protocol::AgentQuery::ProcessCommandExit { process_id } => {
-                        let result = process_queries.command_exit(process_id).await;
-                        ServiceMessage::ProcessCommandExitResult { request_id, result }
-                    }
-                    vmux_api::protocol::AgentQuery::ProcessRunCompletion { process_id } => {
-                        let result = process_queries.run_completion(process_id).await;
-                        ServiceMessage::ProcessRunCompletionResult { request_id, result }
-                    }
-                    query => {
+                let response = match process_queries.response(request_id, &query).await {
+                    Ok(Some(response)) => response,
+                    Ok(None) => {
                         let broker = broker.clone();
                         let writer = writer.clone();
                         tokio::spawn(async move {
@@ -966,9 +948,26 @@ async fn handle_client(
                         });
                         continue;
                     }
+                    Err(message) => ServiceMessage::Error { message },
                 };
                 let mut writer = writer.lock().await;
                 crate::framing::write_service_message(&mut *writer, &response).await?;
+            }
+
+            ClientMessage::AgentQueryError {
+                request_id,
+                message,
+            } => {
+                route_agent_query_response(
+                    request_id,
+                    ServiceMessage::AgentQueryError {
+                        request_id,
+                        message,
+                    },
+                    &pending_queries,
+                    &broker,
+                )
+                .await;
             }
 
             ClientMessage::AgentLayoutResult { request_id, result } => {

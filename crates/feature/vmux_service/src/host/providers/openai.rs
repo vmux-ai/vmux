@@ -1,9 +1,9 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::message::{AssistantBlock, Message};
 use crate::providers::openai_shared::tools_to_function_specs;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
+use vmux_api::room::{AssistantBlock, Message};
 
 pub const PROVIDER: &str = "openai";
 pub const ENDPOINT: &str = "https://api.openai.com/v1/responses";

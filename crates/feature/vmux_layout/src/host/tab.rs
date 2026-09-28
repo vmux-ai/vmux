@@ -39,6 +39,7 @@ impl Plugin for TabPlugin {
         .init_resource::<crate::window::FocusedWindow>()
         .add_message::<CloseTabRequest>()
         .add_message::<crate::NewTabRequest>()
+        .add_message::<vmux_core::launcher::LauncherDismissRequest>()
         .add_plugins(UiEventPlugin::<(
             TabCreateRequest,
             TabCloseRequest,

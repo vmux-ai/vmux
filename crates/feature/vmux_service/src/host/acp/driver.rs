@@ -36,6 +36,9 @@ use vmux_api::protocol::{
     AgentAttachment, AgentFileTouched, AgentRequest, AgentRequestId, AgentRunStatus,
     ApprovalDecision, ServiceMessage, SharedEvent, compose_agent_prompt,
 };
+#[cfg(test)]
+use vmux_api::room::AssistantBlock;
+use vmux_api::room::Message;
 
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
@@ -269,7 +272,7 @@ impl AcpShared {
             .map(|state| state.message(&self.sid))
     }
 
-    pub fn remote_messages(&self) -> Vec<crate::message::Message> {
+    pub fn remote_messages(&self) -> Vec<Message> {
         self.projector.lock().unwrap().messages().to_vec()
     }
 
@@ -2749,8 +2752,8 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert!(matches!(
             &messages[1],
-            crate::message::Message::Assistant { blocks }
-                if matches!(blocks.as_slice(), [crate::message::AssistantBlock::Text(text)] if text.len() == 300)
+            Message::Assistant { blocks }
+                if matches!(blocks.as_slice(), [AssistantBlock::Text(text)] if text.len() == 300)
         ));
         assert!(matches!(
             stream_rx.try_recv(),

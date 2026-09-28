@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::{AgentQuery, AgentRequest, AgentUpdateSettings, JsonValue};
+use vmux_api::protocol::{AgentGetSettings, AgentRequest, AgentUpdateSettings, JsonValue};
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
 };
@@ -34,7 +34,7 @@ fn get_settings(mut commands: Commands, calls: Query<Entity, AddedTool<GetSettin
     for request in &calls {
         commands
             .entity(request)
-            .insert(ToolQuery(Ok(AgentQuery::GetSettings)));
+            .insert(ToolQuery(AgentRequest::encode(&AgentGetSettings)));
     }
 }
 

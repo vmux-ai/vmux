@@ -17,6 +17,7 @@ pub(crate) struct AgentIngressPlugin;
 impl Plugin for AgentIngressPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ServiceInbound>()
+            .add_message::<ServiceRequest>()
             .add_message::<AgentCommandResponse>()
             .add_message::<AgentRequestInput>()
             .add_message::<AgentQueryRequest>()
@@ -278,7 +279,7 @@ fn route_service_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_api::protocol::{AgentQuery, AgentRenameProfile, AgentRequest, AgentRequestId};
+    use vmux_api::protocol::{AgentRenameProfile, AgentRequest, AgentRequestId, AgentVaultStatus};
 
     #[test]
     fn routes_agent_messages_without_terminal_ownership() {
@@ -304,7 +305,7 @@ mod tests {
         app.world_mut()
             .write_message(ServiceInbound(ServiceMessage::AgentQuery {
                 request_id,
-                query: AgentQuery::VaultStatus,
+                query: AgentRequest::encode(&AgentVaultStatus).unwrap(),
             }));
 
         app.update();
@@ -331,6 +332,9 @@ mod tests {
         assert_eq!(deltas[0].text, "hello");
         assert_eq!(queries.len(), 1);
         assert_eq!(queries[0].request_id, request_id);
-        assert!(matches!(queries[0].query, AgentQuery::VaultStatus));
+        assert_eq!(
+            queries[0].query.decode::<AgentVaultStatus>().unwrap(),
+            Some(AgentVaultStatus)
+        );
     }
 }

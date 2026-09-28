@@ -6,11 +6,11 @@ use base64::Engine;
 use crate::RemotePaths;
 use crate::acp::AcpSessions;
 use crate::agent::{AgentBroker, AgentSessions};
-use crate::message::Message;
 use crate::remote::authorization::RemoteAuthorizations;
 use crate::remote::client_operation::ClientOperations;
 use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
 use vmux_api::protocol::AgentAttachment;
+use vmux_api::room::Message;
 
 pub(crate) const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_ATTACHMENTS: usize = 16;

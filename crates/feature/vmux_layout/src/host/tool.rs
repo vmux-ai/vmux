@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentInvokeCommand, AgentQuery, AgentRequest, AgentUpdateLayout, JsonValue, layout,
+    AgentInvokeCommand, AgentReadLayout, AgentRequest, AgentUpdateLayout, JsonValue, layout,
 };
 use vmux_core::ProcessAnchor;
 use vmux_tool::{
@@ -44,7 +44,7 @@ fn read_layout(
     for (request, anchor) in &calls {
         commands
             .entity(request)
-            .insert(ToolQuery(Ok(AgentQuery::ReadLayout {
+            .insert(ToolQuery(AgentRequest::encode(&AgentReadLayout {
                 anchor: anchor.map(|anchor| anchor.0),
             })));
     }

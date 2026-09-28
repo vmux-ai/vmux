@@ -115,10 +115,11 @@ Remote agent operations are flat `SharedMessage` variants rather than a nested r
 The QUIC application protocol is `vmux/5`; changing the positional rkyv wire contract requires
 another ALPN version.
 
-`AgentQuery` is the serialized request discriminant. Replies use operation-specific
-`ServiceMessage` variants with typed `Result<T, String>` payloads; there is no shared
-`AgentQueryResult` bag passed through host ECS. Browser snapshot and scroll replies remain
-separate typed messages before crossing that transport boundary.
+Agent commands and queries use the same routed `AgentRequest` envelope. Each operation is a
+separate `#[vmux_api::agent]` payload identified by its typed protocol ID; there is no aggregate
+query enum. Replies use operation-specific `ServiceMessage` variants with typed
+`Result<T, String>` payloads. Browser snapshot and scroll replies remain separate typed messages
+before crossing that transport boundary.
 
 The hellos are JSON and everything after is rkyv, deliberately. rkyv encodes enum variants
 **positionally** — a peer one release behind does not fail to decode a reordered variant,

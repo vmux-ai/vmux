@@ -998,7 +998,7 @@ impl TerminalSettings {
 
 const DEFAULT_SETTINGS: &str = include_str!("../settings.ron");
 
-#[derive(Resource)]
+#[derive(Component)]
 pub(crate) struct SettingsWatcher {
     rx: Mutex<mpsc::Receiver<()>>,
     path: std::path::PathBuf,
@@ -1109,7 +1109,7 @@ fn read_settings_and_path() -> (AppSettings, Option<std::path::PathBuf>) {
     }
 }
 
-fn load_settings(mut commands: Commands) {
+fn load_settings(mut commands: Commands, runtime: Single<Entity, With<LastSelfWriteHash>>) {
     let (settings, config_path) = read_settings_and_path();
     vmux_ui::i18n::Locale::requested(Some(&settings.appearance.locale)).make_current();
 
@@ -1133,7 +1133,7 @@ fn load_settings(mut commands: Commands) {
                     bevy::log::warn!("Failed to watch settings dir: {e}");
                 } else {
                     bevy::log::info!("Watching {} for changes", path.display());
-                    commands.insert_resource(SettingsWatcher {
+                    commands.entity(*runtime).insert(SettingsWatcher {
                         rx: Mutex::new(rx),
                         path,
                         _watcher: watcher,
@@ -1148,7 +1148,7 @@ fn load_settings(mut commands: Commands) {
 }
 
 fn reload_settings_on_change(
-    watcher: Option<Res<SettingsWatcher>>,
+    watcher: Option<Single<&SettingsWatcher>>,
     mut settings: ResMut<AppSettings>,
     mut layout_settings: ResMut<LayoutSettings>,
     mut confirm_close: ResMut<ConfirmCloseSettings>,
@@ -1625,7 +1625,7 @@ fn flush_settings_save(
 
 fn persist_settings_to_disk(
     mut reader: MessageReader<SettingsWriteRequest>,
-    watcher: Option<Res<SettingsWatcher>>,
+    watcher: Option<Single<&SettingsWatcher>>,
     mut last_hash: Single<&mut LastSelfWriteHash>,
 ) {
     for request in reader.read() {

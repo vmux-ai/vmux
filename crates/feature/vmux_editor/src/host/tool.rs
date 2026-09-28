@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use vmux_api::protocol::{
-    AgentFileSearch, AgentFileTouched, AgentQuery, AgentRequest, AgentRequestId, ClientMessage,
-    FileTouchKind, ProcessId, ServiceMessage,
+    AgentFileSearch, AgentFileTouched, AgentRequest, AgentRequestId, AgentWorkingDirectory,
+    ClientMessage, FileTouchKind, ProcessId, ServiceMessage,
 };
 use vmux_core::ProcessAnchor;
 use vmux_mcp::protocol::McpExecution;
@@ -101,7 +101,7 @@ async fn agent_working_directory(anchor: Option<ProcessId>) -> Result<PathBuf, S
     connection
         .send(&ClientMessage::AgentQuery {
             request_id,
-            query: AgentQuery::WorkingDirectory { anchor },
+            query: AgentRequest::encode(&AgentWorkingDirectory { anchor })?,
         })
         .await
         .map_err(|error| format!("cannot send query: {error}"))?;

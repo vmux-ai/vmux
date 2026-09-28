@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentQuery, SimulatorButton, SimulatorButtonPress, SimulatorKeyPress, SimulatorSwipe,
-    SimulatorTap, SimulatorTypeText,
+    AgentRequest, AgentSimulatorButtonPress, AgentSimulatorKeyPress, AgentSimulatorScreenshot,
+    AgentSimulatorSwipe, AgentSimulatorTap, AgentSimulatorTypeText, SimulatorButton,
 };
 use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery};
 
@@ -85,7 +85,7 @@ fn screenshot(mut commands: Commands, calls: Query<Entity, AddedTool<SimulatorSc
     for entity in &calls {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::SimulatorScreenshot)));
+            .insert(ToolQuery(AgentRequest::encode(&AgentSimulatorScreenshot)));
     }
 }
 
@@ -93,10 +93,10 @@ fn tap(mut commands: Commands, requests: Query<(Entity, &TapArgs), AddedTool<Tap
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::SimulatorTap(SimulatorTap {
+            .insert(ToolQuery(AgentRequest::encode(&AgentSimulatorTap {
                 x: args.x,
                 y: args.y,
-            }))));
+            })));
     }
 }
 
@@ -104,13 +104,13 @@ fn swipe(mut commands: Commands, requests: Query<(Entity, &SwipeArgs), AddedTool
     for (entity, args) in &requests {
         let duration_ms = args.duration_ms.unwrap_or(300);
         let query = if (1..=10_000).contains(&duration_ms) {
-            Ok(AgentQuery::SimulatorSwipe(SimulatorSwipe {
+            AgentRequest::encode(&AgentSimulatorSwipe {
                 start_x: args.start_x,
                 start_y: args.start_y,
                 end_x: args.end_x,
                 end_y: args.end_y,
                 duration_ms,
-            }))
+            })
         } else {
             Err("simulator_swipe.duration_ms must be between 1 and 10000".to_string())
         };
@@ -123,9 +123,9 @@ fn type_text(mut commands: Commands, requests: Query<(Entity, &TypeArgs), AddedT
         let query = if args.text.is_empty() {
             Err("simulator_type.text is empty".to_string())
         } else {
-            Ok(AgentQuery::SimulatorTypeText(SimulatorTypeText {
+            AgentRequest::encode(&AgentSimulatorTypeText {
                 text: args.text.clone(),
-            }))
+            })
         };
         commands.entity(entity).insert(ToolQuery(query));
     }
@@ -135,11 +135,9 @@ fn key(mut commands: Commands, requests: Query<(Entity, &KeyArgs), AddedTool<Key
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::SimulatorKeyPress(
-                SimulatorKeyPress {
-                    keycode: args.keycode,
-                },
-            ))));
+            .insert(ToolQuery(AgentRequest::encode(&AgentSimulatorKeyPress {
+                keycode: args.keycode,
+            })));
     }
 }
 
@@ -147,11 +145,11 @@ fn button(mut commands: Commands, requests: Query<(Entity, &ButtonArgs), AddedTo
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::SimulatorButtonPress(
-                SimulatorButtonPress {
+            .insert(ToolQuery(AgentRequest::encode(
+                &AgentSimulatorButtonPress {
                     button: args.button.into(),
                 },
-            ))));
+            )));
     }
 }
 
@@ -185,7 +183,7 @@ mod tests {
                 .collect()
         }
 
-        fn dispatch(name: &str, arguments: serde_json::Value) -> Result<AgentQuery, String> {
+        fn dispatch(name: &str, arguments: serde_json::Value) -> Result<AgentRequest, String> {
             let mut app = Self::app();
             let request = app
                 .world_mut()
@@ -225,55 +223,67 @@ mod tests {
 
     #[test]
     fn simulator_controls_dispatch_typed_queries() {
+        let screenshot =
+            SimulatorToolFixture::dispatch("simulator_screenshot", serde_json::json!({})).unwrap();
         assert_eq!(
-            SimulatorToolFixture::dispatch("simulator_screenshot", serde_json::json!({})),
-            Ok(AgentQuery::SimulatorScreenshot)
+            screenshot.decode::<AgentSimulatorScreenshot>().unwrap(),
+            Some(AgentSimulatorScreenshot)
         );
+        let tap = SimulatorToolFixture::dispatch(
+            "simulator_tap",
+            serde_json::json!({"x": 120, "y": 240}),
+        )
+        .unwrap();
         assert_eq!(
-            SimulatorToolFixture::dispatch(
-                "simulator_tap",
-                serde_json::json!({"x": 120, "y": 240}),
-            ),
-            Ok(AgentQuery::SimulatorTap(SimulatorTap { x: 120, y: 240 }))
+            tap.decode::<AgentSimulatorTap>().unwrap(),
+            Some(AgentSimulatorTap { x: 120, y: 240 })
         );
+        let swipe = SimulatorToolFixture::dispatch(
+            "simulator_swipe",
+            serde_json::json!({
+                "start_x": 100,
+                "start_y": 700,
+                "end_x": 100,
+                "end_y": 200,
+            }),
+        )
+        .unwrap();
         assert_eq!(
-            SimulatorToolFixture::dispatch(
-                "simulator_swipe",
-                serde_json::json!({
-                    "start_x": 100,
-                    "start_y": 700,
-                    "end_x": 100,
-                    "end_y": 200,
-                }),
-            ),
-            Ok(AgentQuery::SimulatorSwipe(SimulatorSwipe {
+            swipe.decode::<AgentSimulatorSwipe>().unwrap(),
+            Some(AgentSimulatorSwipe {
                 start_x: 100,
                 start_y: 700,
                 end_x: 100,
                 end_y: 200,
                 duration_ms: 300,
-            }))
+            })
         );
+        let text =
+            SimulatorToolFixture::dispatch("simulator_type", serde_json::json!({"text": "hello"}))
+                .unwrap();
         assert_eq!(
-            SimulatorToolFixture::dispatch("simulator_type", serde_json::json!({"text": "hello"})),
-            Ok(AgentQuery::SimulatorTypeText(SimulatorTypeText {
+            text.decode::<AgentSimulatorTypeText>().unwrap(),
+            Some(AgentSimulatorTypeText {
                 text: "hello".to_string(),
-            }))
+            })
         );
+        let key =
+            SimulatorToolFixture::dispatch("simulator_key", serde_json::json!({"keycode": 40}))
+                .unwrap();
         assert_eq!(
-            SimulatorToolFixture::dispatch("simulator_key", serde_json::json!({"keycode": 40})),
-            Ok(AgentQuery::SimulatorKeyPress(SimulatorKeyPress {
-                keycode: 40,
-            }))
+            key.decode::<AgentSimulatorKeyPress>().unwrap(),
+            Some(AgentSimulatorKeyPress { keycode: 40 })
         );
+        let button = SimulatorToolFixture::dispatch(
+            "simulator_button",
+            serde_json::json!({"button": "home"}),
+        )
+        .unwrap();
         assert_eq!(
-            SimulatorToolFixture::dispatch(
-                "simulator_button",
-                serde_json::json!({"button": "home"}),
-            ),
-            Ok(AgentQuery::SimulatorButtonPress(SimulatorButtonPress {
+            button.decode::<AgentSimulatorButtonPress>().unwrap(),
+            Some(AgentSimulatorButtonPress {
                 button: SimulatorButton::Home,
-            }))
+            })
         );
     }
 

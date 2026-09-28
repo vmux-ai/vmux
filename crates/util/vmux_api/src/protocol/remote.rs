@@ -1,8 +1,8 @@
 use super::{
     AgentAttachment, AgentBookmarks, AgentCommandExit, AgentCommandResult, AgentCommandTool,
-    AgentImage, AgentQuery, AgentRecording, AgentRequest, AgentRequestId, AgentRunCompletion,
-    AgentSpace, CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo,
-    SharedEvent, SharedMessage,
+    AgentImage, AgentRecording, AgentRequest, AgentRequestId, AgentRunCompletion, AgentSpace,
+    CommandLifecycleKind, CopyModeKey, JsonValue, ManagedMcpServer, ProcessInfo, SharedEvent,
+    SharedMessage,
 };
 use crate::{ProcessId, TermCursor, TermLine, TermSelectionRange};
 
@@ -91,7 +91,11 @@ pub enum ClientMessage {
     Shutdown,
     AgentQuery {
         request_id: AgentRequestId,
-        query: AgentQuery,
+        query: AgentRequest,
+    },
+    AgentQueryError {
+        request_id: AgentRequestId,
+        message: String,
     },
     AgentLayoutResult {
         request_id: AgentRequestId,
@@ -329,7 +333,11 @@ pub enum ServiceMessage {
     },
     AgentQuery {
         request_id: AgentRequestId,
-        query: AgentQuery,
+        query: AgentRequest,
+    },
+    AgentQueryError {
+        request_id: AgentRequestId,
+        message: String,
     },
     AgentLayoutResult {
         request_id: AgentRequestId,

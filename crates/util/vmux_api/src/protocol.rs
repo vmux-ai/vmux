@@ -161,33 +161,32 @@ mod tests {
     }
 
     #[test]
-    fn agent_query_read_layout_rkyv_round_trip() {
-        let q = AgentQuery::ReadLayout { anchor: None };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
-        let recovered: AgentQuery =
-            rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(recovered, AgentQuery::ReadLayout { anchor: None });
+    fn agent_read_layout_routes_and_decodes() {
+        let request = AgentRequest::encode(&AgentReadLayout { anchor: None }).unwrap();
+        assert_eq!(
+            request.decode::<AgentReadLayout>().unwrap(),
+            Some(AgentReadLayout { anchor: None })
+        );
     }
 
     #[test]
-    fn agent_query_working_directory_rkyv_round_trip() {
-        let query = AgentQuery::WorkingDirectory {
+    fn agent_working_directory_routes_and_decodes() {
+        let query = AgentWorkingDirectory {
             anchor: ProcessId::new(),
         };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&query).unwrap();
-        let recovered: AgentQuery =
-            rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        let request = AgentRequest::encode(&query).unwrap();
+        let recovered = request.decode::<AgentWorkingDirectory>().unwrap();
 
-        assert_eq!(recovered, query);
+        assert_eq!(recovered, Some(query));
     }
 
     #[test]
     fn agent_command_catalog_rkyv_round_trip() {
-        let query = AgentQuery::ListCommands;
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&query).unwrap();
-        let recovered: AgentQuery =
-            rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(recovered, query);
+        let request = AgentRequest::encode(&AgentListCommands).unwrap();
+        assert_eq!(
+            request.decode::<AgentListCommands>().unwrap(),
+            Some(AgentListCommands)
+        );
 
         let request_id = AgentRequestId::new();
         let response = ServiceMessage::AgentCommandsResult {
@@ -216,35 +215,32 @@ mod tests {
     }
 
     #[test]
-    fn agent_query_screenshot_rkyv_round_trip() {
-        let q = AgentQuery::Screenshot {
+    fn agent_screenshot_routes_and_decodes() {
+        let query = AgentScreenshot {
             pane: Some("pane:42".into()),
         };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
-        let back: AgentQuery = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(back, q);
+        let request = AgentRequest::encode(&query).unwrap();
+        assert_eq!(request.decode::<AgentScreenshot>().unwrap(), Some(query));
 
-        let none = AgentQuery::Screenshot { pane: None };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&none).unwrap();
-        let back: AgentQuery = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(back, none);
+        let none = AgentScreenshot { pane: None };
+        let request = AgentRequest::encode(&none).unwrap();
+        assert_eq!(request.decode::<AgentScreenshot>().unwrap(), Some(none));
     }
 
     #[test]
-    fn agent_query_simulator_control_rkyv_round_trip() {
-        let query = AgentQuery::SimulatorSwipe(SimulatorSwipe {
+    fn agent_simulator_control_routes_and_decodes() {
+        let query = AgentSimulatorSwipe {
             start_x: 120,
             start_y: 700,
             end_x: 120,
             end_y: 200,
             duration_ms: 300,
-        });
+        };
 
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&query).unwrap();
-        let recovered: AgentQuery =
-            rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        let request = AgentRequest::encode(&query).unwrap();
+        let recovered = request.decode::<AgentSimulatorSwipe>().unwrap();
 
-        assert_eq!(recovered, query);
+        assert_eq!(recovered, Some(query));
     }
 
     #[test]
@@ -297,26 +293,24 @@ mod tests {
     }
 
     #[test]
-    fn agent_query_record_start_rkyv_round_trip() {
-        let q = AgentQuery::RecordStart {
+    fn agent_record_start_routes_and_decodes() {
+        let query = AgentRecordStart {
             gif: true,
             max_secs: 120,
             pane: Some("pane:7".into()),
         };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
-        let back: AgentQuery = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(back, q);
+        let request = AgentRequest::encode(&query).unwrap();
+        assert_eq!(request.decode::<AgentRecordStart>().unwrap(), Some(query));
     }
 
     #[test]
-    fn agent_query_record_stop_rkyv_round_trip() {
-        let q = AgentQuery::RecordStop {
+    fn agent_record_stop_routes_and_decodes() {
+        let query = AgentRecordStop {
             dir: Some("/tmp/out".into()),
             name: None,
         };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
-        let back: AgentQuery = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(back, q);
+        let request = AgentRequest::encode(&query).unwrap();
+        assert_eq!(request.decode::<AgentRecordStop>().unwrap(), Some(query));
     }
 
     #[test]
@@ -466,11 +460,12 @@ mod tests {
     }
 
     #[test]
-    fn get_settings_query_rkyv_roundtrip() {
-        let q = AgentQuery::GetSettings;
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
-        let decoded = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded, q);
+    fn get_settings_query_routes_and_decodes() {
+        let request = AgentRequest::encode(&AgentGetSettings).unwrap();
+        assert_eq!(
+            request.decode::<AgentGetSettings>().unwrap(),
+            Some(AgentGetSettings)
+        );
     }
 
     #[test]

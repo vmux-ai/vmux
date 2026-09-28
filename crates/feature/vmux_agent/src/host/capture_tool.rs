@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::Deserialize;
-use vmux_api::protocol::AgentQuery;
+use vmux_api::protocol::{AgentRecordStart, AgentRecordStop, AgentRequest, AgentScreenshot};
 use vmux_tool::{AddedTool, ToolAppExt, ToolDispatchSet, ToolManifestPlugin, ToolQuery};
 
 pub struct CaptureToolPlugin;
@@ -47,7 +47,7 @@ fn screenshot(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::Screenshot {
+            .insert(ToolQuery(AgentRequest::encode(&AgentScreenshot {
                 pane: OptionalText::trim(args.pane.clone()),
             })));
     }
@@ -60,7 +60,7 @@ fn record_start(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::RecordStart {
+            .insert(ToolQuery(AgentRequest::encode(&AgentRecordStart {
                 gif: args.gif,
                 max_secs: args.max_secs.unwrap_or(600),
                 pane: OptionalText::trim(args.pane.clone()),
@@ -75,7 +75,7 @@ fn record_stop(
     for (entity, args) in &requests {
         commands
             .entity(entity)
-            .insert(ToolQuery(Ok(AgentQuery::RecordStop {
+            .insert(ToolQuery(AgentRequest::encode(&AgentRecordStop {
                 dir: OptionalText::trim(args.dir.clone()),
                 name: OptionalText::trim(args.name.clone()),
             })));
@@ -123,7 +123,7 @@ mod tests {
                 .collect()
         }
 
-        fn dispatch(name: &str, arguments: serde_json::Value) -> Result<AgentQuery, String> {
+        fn dispatch(name: &str, arguments: serde_json::Value) -> Result<AgentRequest, String> {
             let mut app = Self::app();
             let request = app
                 .world_mut()
@@ -156,13 +156,17 @@ mod tests {
 
     #[test]
     fn screenshot_dispatches_optional_pane() {
+        let request = CaptureToolFixture::dispatch("screenshot", serde_json::json!({})).unwrap();
         assert_eq!(
-            CaptureToolFixture::dispatch("screenshot", serde_json::json!({})),
-            Ok(AgentQuery::Screenshot { pane: None })
+            request.decode::<AgentScreenshot>().unwrap(),
+            Some(AgentScreenshot { pane: None })
         );
+        let request =
+            CaptureToolFixture::dispatch("screenshot", serde_json::json!({"pane": "pane:7"}))
+                .unwrap();
         assert_eq!(
-            CaptureToolFixture::dispatch("screenshot", serde_json::json!({"pane": "pane:7"})),
-            Ok(AgentQuery::Screenshot {
+            request.decode::<AgentScreenshot>().unwrap(),
+            Some(AgentScreenshot {
                 pane: Some("pane:7".to_string()),
             })
         );
@@ -170,31 +174,36 @@ mod tests {
 
     #[test]
     fn recording_dispatches_defaults_and_output() {
+        let request = CaptureToolFixture::dispatch("record_start", serde_json::json!({})).unwrap();
         assert_eq!(
-            CaptureToolFixture::dispatch("record_start", serde_json::json!({})),
-            Ok(AgentQuery::RecordStart {
+            request.decode::<AgentRecordStart>().unwrap(),
+            Some(AgentRecordStart {
                 gif: false,
                 max_secs: 600,
                 pane: None,
             })
         );
+        let request = CaptureToolFixture::dispatch(
+            "record_start",
+            serde_json::json!({"gif": true, "max_secs": 30, "pane": "pane:3"}),
+        )
+        .unwrap();
         assert_eq!(
-            CaptureToolFixture::dispatch(
-                "record_start",
-                serde_json::json!({"gif": true, "max_secs": 30, "pane": "pane:3"}),
-            ),
-            Ok(AgentQuery::RecordStart {
+            request.decode::<AgentRecordStart>().unwrap(),
+            Some(AgentRecordStart {
                 gif: true,
                 max_secs: 30,
                 pane: Some("pane:3".to_string()),
             })
         );
+        let request = CaptureToolFixture::dispatch(
+            "record_stop",
+            serde_json::json!({"dir": "/tmp/out", "name": "feature-x"}),
+        )
+        .unwrap();
         assert_eq!(
-            CaptureToolFixture::dispatch(
-                "record_stop",
-                serde_json::json!({"dir": "/tmp/out", "name": "feature-x"}),
-            ),
-            Ok(AgentQuery::RecordStop {
+            request.decode::<AgentRecordStop>().unwrap(),
+            Some(AgentRecordStop {
                 dir: Some("/tmp/out".to_string()),
                 name: Some("feature-x".to_string()),
             })

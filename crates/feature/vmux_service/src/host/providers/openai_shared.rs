@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::message::{AssistantBlock, Message};
 use crate::stream::{StopReason, StreamEvent, ToolDef};
+use vmux_api::room::{AssistantBlock, Message};
 
 #[derive(Deserialize)]
 struct ChunkRoot<'a> {

@@ -4,9 +4,7 @@ use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
-use vmux_api::protocol::{
-    AgentCommandTool, AgentInvokeCommand, AgentQuery, AgentRequest, JsonValue,
-};
+use vmux_api::protocol::{AgentCommandTool, AgentInvokeCommand, AgentRequest, JsonValue};
 use vmux_core::{HostShell, JsonArguments, RegistrationOrder};
 
 use vmux_api::InputSchema;
@@ -395,7 +393,7 @@ impl ToolDefinition {
 pub struct ToolCommand(pub Result<AgentRequest, String>);
 
 #[derive(Component, Clone, Debug)]
-pub struct ToolQuery(pub Result<AgentQuery, String>);
+pub struct ToolQuery(pub Result<AgentRequest, String>);
 
 #[derive(Clone, Copy, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]

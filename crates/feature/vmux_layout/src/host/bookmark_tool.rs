@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 use vmux_api::protocol::{
-    AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkPage, AgentBookmarkPin,
-    AgentBookmarkPinUrl, AgentBookmarkRemove, AgentBookmarkUnpin, AgentQuery, AgentRequest,
+    AgentBookmarkAdd, AgentBookmarkFolderCreate, AgentBookmarkList, AgentBookmarkPage,
+    AgentBookmarkPin, AgentBookmarkPinUrl, AgentBookmarkRemove, AgentBookmarkUnpin, AgentRequest,
 };
 use vmux_tool::{
     AddedTool, ToolAppExt, ToolCommand, ToolDispatchSet, ToolManifestPlugin, ToolQuery,
@@ -82,7 +82,7 @@ fn list(mut commands: Commands, calls: Query<Entity, AddedTool<BookmarkListArgs>
     for request in &calls {
         commands
             .entity(request)
-            .insert(ToolQuery(Ok(AgentQuery::BookmarkList)));
+            .insert(ToolQuery(AgentRequest::encode(&AgentBookmarkList)));
     }
 }
 
