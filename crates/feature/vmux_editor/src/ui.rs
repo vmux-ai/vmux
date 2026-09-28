@@ -100,7 +100,6 @@ pub fn Page() -> Element {
     let mut lsp_status = use_signal(|| Option::<FileLspStatus>::None);
     let mut lsp_capabilities = use_signal(Vec::<EditorCapability>::new);
     let mut lsp_install_notice = use_signal(|| Option::<LspInstallProgress>::None);
-    let mut lsp_install_request = use_signal(|| Option::<(String, String)>::None);
     let mut lsp_notice_generation = use_signal(|| 0u32);
     let mut code_actions = use_signal(Vec::<String>::new);
     let mut code_action_sel = use_signal(|| 0usize);
@@ -250,7 +249,6 @@ pub fn Page() -> Element {
             hover_diag.set(None);
             lsp_status.set(None);
             lsp_install_notice.set(None);
-            lsp_install_request.set(None);
             lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
             explorer.show_if_room(mode);
             note_blocks.set(Vec::new());
@@ -536,22 +534,6 @@ pub fn Page() -> Element {
             if s.path != git_path() {
                 return;
             }
-            if s.state == LspServerState::Missing
-                && let Some(package) = s.package.clone()
-            {
-                let request = (s.path.clone(), package.clone());
-                if lsp_install_request() != Some(request.clone()) {
-                    lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
-                    lsp_install_request.set(Some(request));
-                    lsp_install_notice.set(Some(LspInstallProgress {
-                        name: package.clone(),
-                        phase: InstallPhase::Resolving,
-                        pct: None,
-                        message: translate("lsp-status-installing"),
-                    }));
-                    let _ = send(&LspInstallRequest { name: package });
-                }
-            }
             lsp_capabilities.set(s.capabilities.clone());
             lsp_status.set(Some(s));
         })
@@ -560,10 +542,6 @@ pub fn Page() -> Element {
     let install_progress = use_file_ui::<LspInstallProgress>();
     use_effect(move || {
         install_progress.for_each(|progress| {
-            let active = lsp_install_request().is_some_and(|(_, package)| package == progress.name);
-            if !active {
-                return;
-            }
             let delay = match progress.phase {
                 InstallPhase::Done => Some(LSP_NOTICE_DONE_MS),
                 InstallPhase::Failed => Some(LSP_NOTICE_FAILED_MS),
@@ -571,12 +549,7 @@ pub fn Page() -> Element {
             };
             lsp_install_notice.set(Some(progress));
             if let Some(delay) = delay {
-                schedule_lsp_notice_clear(
-                    lsp_install_notice,
-                    lsp_install_request,
-                    lsp_notice_generation,
-                    delay,
-                );
+                schedule_lsp_notice_clear(lsp_install_notice, lsp_notice_generation, delay);
             }
         })
     });
@@ -584,9 +557,7 @@ pub fn Page() -> Element {
     let package_status = use_file_ui::<LspPackageStatus>();
     use_effect(move || {
         package_status.for_each(|status| {
-            if status.status != LspPkgStatus::Installed
-                || lsp_install_request().is_none_or(|(_, package)| package != status.name)
-            {
+            if status.status != LspPkgStatus::Installed {
                 return;
             }
             lsp_install_notice.set(Some(LspInstallProgress {
@@ -597,7 +568,6 @@ pub fn Page() -> Element {
             }));
             schedule_lsp_notice_clear(
                 lsp_install_notice,
-                lsp_install_request,
                 lsp_notice_generation,
                 LSP_NOTICE_DONE_MS,
             );
@@ -2002,7 +1972,6 @@ pub(super) fn diff_tone(marker: GitLineStatus) -> DiffTone {
 
 fn schedule_lsp_notice_clear(
     mut notice: Signal<Option<LspInstallProgress>>,
-    mut request: Signal<Option<(String, String)>>,
     mut generation: Signal<u32>,
     delay: u32,
 ) {
@@ -2012,7 +1981,6 @@ fn schedule_lsp_notice_clear(
         sleep_ms(delay).await;
         if generation() == id {
             notice.set(None);
-            request.set(None);
         }
     });
 }

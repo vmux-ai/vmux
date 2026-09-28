@@ -24,6 +24,7 @@ impl Plugin for ManagerPlugin {
         app.add_plugins(Self::MANIFEST.plugin())
             .add_plugins(vmux_layout::native_open::HostedPagePlugin::<LspManagerPage>::default())
             .add_plugins(UiStatePlugin::<LspManagerUiState>::default())
+            .add_message::<PackageInstallRequest>()
             .add_plugins(UiEventPlugin::<(
                 LspCatalogRequest,
                 LspInstallRequest,
@@ -36,7 +37,13 @@ impl Plugin for ManagerPlugin {
             .add_observer(on_update_request)
             .add_systems(
                 Update,
-                (start_catalog_jobs, start_install_jobs, start_uninstall_jobs).chain(),
+                (
+                    enqueue_package_installs,
+                    start_catalog_jobs,
+                    start_install_jobs,
+                    start_uninstall_jobs,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
@@ -53,6 +60,12 @@ impl Plugin for ManagerPlugin {
                     .chain(),
             );
     }
+}
+
+#[derive(Clone, Message)]
+pub(crate) struct PackageInstallRequest {
+    pub target: Entity,
+    pub name: String,
 }
 
 #[derive(Component, Default)]
@@ -471,18 +484,36 @@ fn on_catalog_request(
     ));
 }
 
-fn on_install_request(trigger: On<UiInput<LspInstallRequest>>, mut commands: Commands) {
-    commands.spawn(PendingPackageInstall {
+fn on_install_request(
+    trigger: On<UiInput<LspInstallRequest>>,
+    mut requests: MessageWriter<PackageInstallRequest>,
+) {
+    requests.write(PackageInstallRequest {
         target: trigger.event().webview,
         name: trigger.event().payload.name.clone(),
     });
 }
 
-fn on_update_request(trigger: On<UiInput<LspUpdateRequest>>, mut commands: Commands) {
-    commands.spawn(PendingPackageInstall {
+fn on_update_request(
+    trigger: On<UiInput<LspUpdateRequest>>,
+    mut requests: MessageWriter<PackageInstallRequest>,
+) {
+    requests.write(PackageInstallRequest {
         target: trigger.event().webview,
         name: trigger.event().payload.name.clone(),
     });
+}
+
+fn enqueue_package_installs(
+    mut requests: MessageReader<PackageInstallRequest>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        commands.spawn(PendingPackageInstall {
+            target: request.target,
+            name: request.name.clone(),
+        });
+    }
 }
 
 fn on_uninstall_request(trigger: On<UiInput<LspUninstallRequest>>, mut commands: Commands) {

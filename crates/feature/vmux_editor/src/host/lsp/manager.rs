@@ -1466,6 +1466,7 @@ fn lsp_status_system(
     settings: Res<vmux_setting::AppSettings>,
     manager: Single<&LspManager>,
     browsers: NonSend<Browsers>,
+    mut installs: MessageWriter<crate::lsp::manager_page::PackageInstallRequest>,
     mut commands: Commands,
 ) {
     use vmux_core::event::{FileLspStatus, LspServerState};
@@ -1488,19 +1489,28 @@ fn lsp_status_system(
         if !browsers.can_emit_to(&entity) {
             continue;
         }
+        let package = (!overrides.contains_key(ext))
+            .then(|| crate::lsp::registry::preferred_package(ext))
+            .flatten()
+            .map(str::to_string);
         commands.trigger(vmux_core::host::FileUiStateWrite::from_event(
             entity,
             &FileLspStatus {
                 path: fv.path.to_string_lossy().into_owned(),
                 server: spec.command.clone(),
-                package: (!overrides.contains_key(ext))
-                    .then(|| crate::lsp::registry::preferred_package(ext))
-                    .flatten()
-                    .map(str::to_string),
+                package: package.clone(),
                 state: desired,
                 capabilities: manager.menu_capabilities(&fv.path),
             },
         ));
+        if desired == LspServerState::Missing
+            && let Some(name) = package
+        {
+            installs.write(crate::lsp::manager_page::PackageInstallRequest {
+                target: entity,
+                name,
+            });
+        }
         commands.entity(entity).insert(LspStatusSent {
             state: desired,
             path: fv.path.clone(),
