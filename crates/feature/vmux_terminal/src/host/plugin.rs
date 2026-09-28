@@ -52,21 +52,28 @@ impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::TerminalPage::plugin());
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
         app.add_plugins(
             Self::MANIFEST
                 .plugin()
                 .route(vmux_core::HostSpawnRoute::page("vmux://terminal/")),
         )
         .add_message::<ServiceRequest>()
+        .add_message::<super::command::TerminalCloseRequest>()
+        .add_message::<super::command::TerminalNextRequest>()
+        .add_message::<super::command::TerminalPrevRequest>()
+        .add_message::<super::command::TerminalClearRequest>()
+        .add_message::<super::command::CopyModeRequest>()
+        .add_systems(
+            Startup,
+            spawn_terminal_commands.in_set(vmux_command::RegisterCommandDefinitions),
+        )
         .add_plugins((
             vmux_core::host::UiStatePlugin::<vmux_core::event::TerminalUiState>::default(),
             super::agent::AgentTerminalPlugin,
             crate::TerminalToolPlugin,
-            vmux_command::CommandTypePlugin::<super::command::TerminalCloseRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::TerminalNextRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::TerminalPrevRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::TerminalClearRequest>::default(),
-            vmux_command::CommandTypePlugin::<super::command::CopyModeRequest>::default(),
         ))
         .add_plugins(crate::contract::TerminalContractPlugin)
         .register_type::<crate::launch::TerminalLaunch>()
@@ -85,6 +92,36 @@ impl Plugin for TerminalPlugin {
             crate::theme::TerminalThemePlugin,
         ));
     }
+}
+
+fn spawn_terminal_commands(mut commands: Commands) {
+    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("command.ron"));
+    commands.spawn(
+        definitions
+            .take("terminal_close")
+            .message::<super::command::TerminalCloseRequest>(),
+    );
+    commands.spawn(
+        definitions
+            .take("terminal_next")
+            .message::<super::command::TerminalNextRequest>(),
+    );
+    commands.spawn(
+        definitions
+            .take("terminal_prev")
+            .message::<super::command::TerminalPrevRequest>(),
+    );
+    commands.spawn(
+        definitions
+            .take("terminal_clear")
+            .message::<super::command::TerminalClearRequest>(),
+    );
+    commands.spawn(
+        definitions
+            .take("terminal_copy_mode")
+            .message::<super::command::CopyModeRequest>(),
+    );
+    definitions.assert_all_registered();
 }
 
 struct TerminalServicePlugin;

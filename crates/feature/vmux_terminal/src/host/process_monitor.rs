@@ -4,7 +4,7 @@ use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_api::protocol::{ClientMessage, ProcessId};
 use vmux_api::service::*;
-use vmux_command::{CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin};
+use vmux_command::{CommandDefinitions, CommandInvocation};
 use vmux_core::host::{UiState, UiStatePlugin, UiStateWrite};
 use vmux_core::page::PageReady;
 use vmux_core::service::ServiceConnected;
@@ -27,18 +27,25 @@ impl Plugin for ProcessMonitorPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::monitor::ProcessMonitorPage::plugin());
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
         app.add_plugins(crate::monitor::ProcessMonitorPage::MANIFEST.plugin())
             .add_message::<ServiceProcessSnapshot>()
-            .add_systems(Startup, spawn_process_monitor)
+            .add_message::<OpenServicesRequest>()
+            .add_systems(
+                Startup,
+                (
+                    spawn_process_monitor,
+                    spawn_process_monitor_commands.in_set(vmux_command::RegisterCommandDefinitions),
+                ),
+            )
             .add_plugins(UiEventPlugin::<(
                 ProcessNavigateEvent,
                 ProcessKillEvent,
                 ProcessKillAllEvent,
             )>::default())
-            .add_plugins((
-                UiStatePlugin::<ProcessesUiState>::default(),
-                CommandTypePlugin::<OpenServicesRequest>::default(),
-            ))
+            .add_plugins(UiStatePlugin::<ProcessesUiState>::default())
             .add_systems(
                 Update,
                 (
@@ -74,12 +81,6 @@ impl HostedPage for ProcessMonitorView {
 #[derive(Message)]
 struct OpenServicesRequest;
 
-impl CommandRequest for OpenServicesRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("process_monitor.ron")).select(&["service_open"])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for OpenServicesRequest {
     type Error = ();
 
@@ -89,6 +90,16 @@ impl TryFrom<&CommandInvocation> for OpenServicesRequest {
             _ => Err(()),
         }
     }
+}
+
+fn spawn_process_monitor_commands(mut commands: Commands) {
+    let mut definitions = CommandDefinitions::from_ron(include_str!("process_monitor.ron"));
+    commands.spawn(
+        definitions
+            .take("service_open")
+            .message::<OpenServicesRequest>(),
+    );
+    definitions.assert_all_registered();
 }
 
 fn open_services(

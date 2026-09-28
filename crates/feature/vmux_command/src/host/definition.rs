@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::marker::PhantomData;
 
 use bevy::prelude::*;
 use vmux_ui::i18n::Locale;
@@ -157,15 +156,6 @@ impl CommandDefinitions {
             .into_iter()
             .map(CommandDefinitionManifest::into_definition)
             .collect()
-    }
-
-    pub fn select(self, ids: &[&str]) -> Vec<CommandDefinition> {
-        let mut definitions = self;
-        let mut selected = Vec::with_capacity(ids.len());
-        for id in ids {
-            selected.push(definitions.take(id));
-        }
-        selected
     }
 
     pub fn take(&mut self, id: &str) -> CommandDefinition {
@@ -619,36 +609,6 @@ pub struct DispatchCommandInvocations;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RegisterCommandDefinitions;
 
-pub trait CommandRequest: Message + for<'a> TryFrom<&'a CommandInvocation> {
-    fn definitions() -> Vec<CommandDefinition>;
-}
-
-pub struct CommandTypePlugin<T>(PhantomData<fn() -> T>);
-
-impl<T> Default for CommandTypePlugin<T> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<T: CommandRequest> Plugin for CommandTypePlugin<T> {
-    fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<CommandRuntimePlugin>() {
-            app.add_plugins(CommandRuntimePlugin);
-        }
-        app.add_message::<T>().add_systems(
-            Startup,
-            spawn_command_definitions::<T>.in_set(RegisterCommandDefinitions),
-        );
-    }
-}
-
-fn spawn_command_definitions<T: CommandRequest>(mut commands: Commands) {
-    for definition in T::definitions() {
-        commands.spawn(definition).observe(dispatch_request::<T>);
-    }
-}
-
 pub struct CommandRuntimePlugin;
 
 impl Plugin for CommandRuntimePlugin {
@@ -757,17 +717,6 @@ fn dispatch_command_invocations(
     }
 }
 
-fn dispatch_request<T: CommandRequest>(
-    trigger: On<CommandDispatch>,
-    mut requests: MessageWriter<T>,
-) {
-    let Ok(request) = T::try_from(&trigger.invocation) else {
-        warn!(command = %trigger.invocation.id, "command request rejected its registered definition");
-        return;
-    };
-    requests.write(request);
-}
-
 impl KeyCombo {
     fn parse(value: &str) -> Option<Self> {
         let mut modifiers = Modifiers::default();
@@ -804,12 +753,6 @@ mod tests {
     #[derive(Message)]
     struct TestToggleRequest;
 
-    impl CommandRequest for TestToggleRequest {
-        fn definitions() -> Vec<CommandDefinition> {
-            vec![CommandDefinition::new("test_toggle", "Toggle", "Test").direct("Super+t")]
-        }
-    }
-
     impl TryFrom<&CommandInvocation> for TestToggleRequest {
         type Error = ();
 
@@ -820,15 +763,6 @@ mod tests {
 
     #[derive(Message)]
     struct AgentVisibleRequest;
-
-    impl CommandRequest for AgentVisibleRequest {
-        fn definitions() -> Vec<CommandDefinition> {
-            vec![
-                CommandDefinition::new("agent_visible", "Visible", "Agent")
-                    .mcp(CommandMcp::new("Visible", vmux_api::InputSchema::object()).allow_agent()),
-            ]
-        }
-    }
 
     impl TryFrom<&CommandInvocation> for AgentVisibleRequest {
         type Error = ();
@@ -841,17 +775,6 @@ mod tests {
     #[derive(Message)]
     struct UserOnlyRequest;
 
-    impl CommandRequest for UserOnlyRequest {
-        fn definitions() -> Vec<CommandDefinition> {
-            vec![
-                CommandDefinition::new("user_only", "Only", "User").mcp(CommandMcp::new(
-                    "User only",
-                    vmux_api::InputSchema::object(),
-                )),
-            ]
-        }
-    }
-
     impl TryFrom<&CommandInvocation> for UserOnlyRequest {
         type Error = ();
 
@@ -862,12 +785,6 @@ mod tests {
 
     #[derive(Message)]
     struct DuplicateCommandA;
-
-    impl CommandRequest for DuplicateCommandA {
-        fn definitions() -> Vec<CommandDefinition> {
-            vec![CommandDefinition::new("duplicate", "First", "Test")]
-        }
-    }
 
     impl TryFrom<&CommandInvocation> for DuplicateCommandA {
         type Error = ();
@@ -880,12 +797,6 @@ mod tests {
     #[derive(Message)]
     struct DuplicateCommandB;
 
-    impl CommandRequest for DuplicateCommandB {
-        fn definitions() -> Vec<CommandDefinition> {
-            vec![CommandDefinition::new("duplicate", "Second", "Test")]
-        }
-    }
-
     impl TryFrom<&CommandInvocation> for DuplicateCommandB {
         type Error = ();
 
@@ -896,12 +807,6 @@ mod tests {
 
     #[derive(Message, Debug, PartialEq, Eq)]
     struct AliasedCommand(String);
-
-    impl CommandRequest for AliasedCommand {
-        fn definitions() -> Vec<CommandDefinition> {
-            vec![CommandDefinition::new("canonical", "Canonical", "Test").alias("legacy")]
-        }
-    }
 
     impl TryFrom<&CommandInvocation> for AliasedCommand {
         type Error = ();
@@ -914,12 +819,6 @@ mod tests {
     #[derive(Message)]
     struct DuplicateAlias;
 
-    impl CommandRequest for DuplicateAlias {
-        fn definitions() -> Vec<CommandDefinition> {
-            vec![CommandDefinition::new("alias_owner", "Alias", "Test").alias("duplicate")]
-        }
-    }
-
     impl TryFrom<&CommandInvocation> for DuplicateAlias {
         type Error = ();
 
@@ -928,11 +827,53 @@ mod tests {
         }
     }
 
+    struct CommandTestApp;
+
+    impl CommandTestApp {
+        fn empty() -> App {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, CommandRuntimePlugin));
+            app
+        }
+
+        fn register<T>(app: &mut App, definition: CommandDefinition)
+        where
+            T: Message + for<'a> TryFrom<&'a CommandInvocation>,
+        {
+            app.add_message::<T>();
+            app.world_mut().spawn(definition.message::<T>());
+        }
+
+        fn test_toggle() -> App {
+            let mut app = Self::empty();
+            Self::register::<TestToggleRequest>(
+                &mut app,
+                CommandDefinition::new("test_toggle", "Toggle", "Test").direct("Super+t"),
+            );
+            app
+        }
+
+        fn agent_commands() -> App {
+            let mut app = Self::empty();
+            Self::register::<AgentVisibleRequest>(
+                &mut app,
+                CommandDefinition::new("agent_visible", "Visible", "Agent")
+                    .mcp(CommandMcp::new("Visible", vmux_api::InputSchema::object()).allow_agent()),
+            );
+            Self::register::<UserOnlyRequest>(
+                &mut app,
+                CommandDefinition::new("user_only", "Only", "User").mcp(CommandMcp::new(
+                    "User only",
+                    vmux_api::InputSchema::object(),
+                )),
+            );
+            app
+        }
+    }
+
     #[test]
     fn registered_command_dispatches_to_its_typed_message() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandTypePlugin::<TestToggleRequest>::default());
+        let mut app = CommandTestApp::test_toggle();
         let caller = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
@@ -950,9 +891,7 @@ mod tests {
 
     #[test]
     fn registered_command_contributes_metadata_and_shortcuts() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandTypePlugin::<TestToggleRequest>::default());
+        let mut app = CommandTestApp::test_toggle();
         app.update();
         let mut query = app.world_mut().query::<&CommandDefinition>();
         let definitions = query.iter(app.world()).cloned().collect::<Vec<_>>();
@@ -971,9 +910,11 @@ mod tests {
 
     #[test]
     fn alias_dispatches_with_the_canonical_id() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandTypePlugin::<AliasedCommand>::default());
+        let mut app = CommandTestApp::empty();
+        CommandTestApp::register::<AliasedCommand>(
+            &mut app,
+            CommandDefinition::new("canonical", "Canonical", "Test").alias("legacy"),
+        );
         let caller = app.world_mut().spawn_empty().id();
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
@@ -992,35 +933,36 @@ mod tests {
     #[test]
     #[should_panic(expected = "duplicate command id: duplicate")]
     fn duplicate_command_ids_are_rejected() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins((
-            CommandTypePlugin::<DuplicateCommandA>::default(),
-            CommandTypePlugin::<DuplicateCommandB>::default(),
-        ));
+        let mut app = CommandTestApp::empty();
+        CommandTestApp::register::<DuplicateCommandA>(
+            &mut app,
+            CommandDefinition::new("duplicate", "First", "Test"),
+        );
+        CommandTestApp::register::<DuplicateCommandB>(
+            &mut app,
+            CommandDefinition::new("duplicate", "Second", "Test"),
+        );
         app.update();
     }
 
     #[test]
     #[should_panic(expected = "duplicate command id: duplicate")]
     fn aliases_cannot_collide_with_command_ids() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins((
-            CommandTypePlugin::<DuplicateCommandA>::default(),
-            CommandTypePlugin::<DuplicateAlias>::default(),
-        ));
+        let mut app = CommandTestApp::empty();
+        CommandTestApp::register::<DuplicateCommandA>(
+            &mut app,
+            CommandDefinition::new("duplicate", "First", "Test"),
+        );
+        CommandTestApp::register::<DuplicateAlias>(
+            &mut app,
+            CommandDefinition::new("alias_owner", "Alias", "Test").alias("duplicate"),
+        );
         app.update();
     }
 
     #[test]
     fn command_entities_expose_and_dispatch_the_registered_request_definition() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins((
-            CommandTypePlugin::<AgentVisibleRequest>::default(),
-            CommandTypePlugin::<UserOnlyRequest>::default(),
-        ));
+        let mut app = CommandTestApp::agent_commands();
         app.update();
 
         let definitions = {
@@ -1062,12 +1004,7 @@ mod tests {
 
     #[test]
     fn command_entities_reject_unlisted_access_and_malformed_arguments() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins((
-            CommandTypePlugin::<AgentVisibleRequest>::default(),
-            CommandTypePlugin::<UserOnlyRequest>::default(),
-        ));
+        let mut app = CommandTestApp::agent_commands();
         app.update();
         let caller = app.world_mut().spawn_empty().id();
         let definitions = {

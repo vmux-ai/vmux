@@ -24,7 +24,10 @@ pub struct WindowLayoutPlugin;
 
 impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_command::CommandTypePlugin::<MinimizeWindowRequest>::default())
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<MinimizeWindowRequest>()
             .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
@@ -37,6 +40,10 @@ impl Plugin for WindowLayoutPlugin {
             .add_systems(
                 Startup,
                 request_default_layout.in_set(LayoutStartupSet::DefaultTab),
+            )
+            .add_systems(
+                Startup,
+                spawn_window_commands.in_set(vmux_command::RegisterCommandDefinitions),
             )
             .add_systems(
                 Startup,
@@ -102,13 +109,6 @@ impl FocusedWindow<'_, '_> {
 #[derive(Message)]
 struct MinimizeWindowRequest;
 
-impl vmux_command::CommandRequest for MinimizeWindowRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vmux_command::CommandDefinitions::from_ron(include_str!("window.ron"))
-            .select(&["minimize_window"])
-    }
-}
-
 impl TryFrom<&vmux_command::CommandInvocation> for MinimizeWindowRequest {
     type Error = ();
 
@@ -117,6 +117,16 @@ impl TryFrom<&vmux_command::CommandInvocation> for MinimizeWindowRequest {
             .then_some(Self)
             .ok_or(())
     }
+}
+
+fn spawn_window_commands(mut commands: Commands) {
+    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("window.ron"));
+    commands.spawn(
+        definitions
+            .take("minimize_window")
+            .message::<MinimizeWindowRequest>(),
+    );
+    definitions.assert_all_registered();
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

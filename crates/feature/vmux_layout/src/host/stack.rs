@@ -12,7 +12,7 @@ use bevy::{
 use moonshine_save::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-use vmux_command::{CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin};
+use vmux_command::{CommandDefinitions, CommandInvocation};
 pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_flex::prelude::*;
@@ -26,41 +26,46 @@ pub struct StackPlugin;
 
 impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            CommandTypePlugin::<OpenRequest>::default(),
-            CommandTypePlugin::<CloseRequest>::default(),
-            CommandTypePlugin::<FocusRequest>::default(),
-            CommandTypePlugin::<MoveRequest>::default(),
-        ))
-        .register_type::<Stack>()
-        .add_message::<CloseStackRequest>()
-        .add_systems(
-            Update,
-            (
-                handle_open_requests,
-                handle_close_requests,
-                handle_focus_requests,
-                handle_move_requests,
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<OpenRequest>()
+            .add_message::<CloseRequest>()
+            .add_message::<FocusRequest>()
+            .add_message::<MoveRequest>()
+            .add_systems(
+                Startup,
+                spawn_stack_commands.in_set(vmux_command::RegisterCommandDefinitions),
             )
-                .chain()
-                .in_set(StackCommandSet)
-                .in_set(LayoutRequestSet::Handle),
-        )
-        .add_systems(
-            Update,
-            handle_close_stack_requests
-                .in_set(CloseStackSet)
-                .in_set(LayoutRequestSet::Handle),
-        )
-        .add_systems(
-            Update,
-            compute_focused_stack
-                .in_set(ComputeFocusSet)
-                .after(LayoutRequestSet::Handle)
-                .after(crate::active::ensure_active_tab)
-                .after(crate::active::ensure_active_stack)
-                .after(crate::active::ensure_active_branch),
-        );
+            .register_type::<Stack>()
+            .add_message::<CloseStackRequest>()
+            .add_systems(
+                Update,
+                (
+                    handle_open_requests,
+                    handle_close_requests,
+                    handle_focus_requests,
+                    handle_move_requests,
+                )
+                    .chain()
+                    .in_set(StackCommandSet)
+                    .in_set(LayoutRequestSet::Handle),
+            )
+            .add_systems(
+                Update,
+                handle_close_stack_requests
+                    .in_set(CloseStackSet)
+                    .in_set(LayoutRequestSet::Handle),
+            )
+            .add_systems(
+                Update,
+                compute_focused_stack
+                    .in_set(ComputeFocusSet)
+                    .after(LayoutRequestSet::Handle)
+                    .after(crate::active::ensure_active_tab)
+                    .after(crate::active::ensure_active_stack)
+                    .after(crate::active::ensure_active_branch),
+            );
     }
 }
 
@@ -70,12 +75,6 @@ pub struct CloseStackSet;
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct OpenRequest {
     pub url: Option<String>,
-}
-
-impl CommandRequest for OpenRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("stack.ron")).select(&["open_in_new_stack"])
-    }
 }
 
 impl TryFrom<&CommandInvocation> for OpenRequest {
@@ -94,12 +93,6 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CloseRequest;
 
-impl CommandRequest for CloseRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("stack.ron")).select(&["stack_close"])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for CloseRequest {
     type Error = ();
 
@@ -110,13 +103,6 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusRequest(pub SiblingDirection);
-
-impl CommandRequest for FocusRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("stack.ron"))
-            .select(&["stack_next", "stack_previous"])
-    }
-}
 
 impl TryFrom<&CommandInvocation> for FocusRequest {
     type Error = ();
@@ -133,13 +119,6 @@ impl TryFrom<&CommandInvocation> for FocusRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MoveRequest(pub SiblingDirection);
 
-impl CommandRequest for MoveRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("stack.ron"))
-            .select(&["stack_swap_prev", "stack_swap_next"])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for MoveRequest {
     type Error = ();
 
@@ -150,6 +129,23 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
             _ => Err(()),
         }
     }
+}
+
+fn spawn_stack_commands(mut commands: Commands) {
+    let mut definitions = CommandDefinitions::from_ron(include_str!("stack.ron"));
+    commands.spawn(
+        definitions
+            .take("open_in_new_stack")
+            .message::<OpenRequest>(),
+    );
+    commands.spawn(definitions.take("stack_close").message::<CloseRequest>());
+    for id in ["stack_next", "stack_previous"] {
+        commands.spawn(definitions.take(id).message::<FocusRequest>());
+    }
+    for id in ["stack_swap_prev", "stack_swap_next"] {
+        commands.spawn(definitions.take(id).message::<MoveRequest>());
+    }
+    definitions.assert_all_registered();
 }
 
 #[derive(Component)]
@@ -767,11 +763,7 @@ mod tests {
 
     #[test]
     fn stack_mcp_definitions_are_the_dispatchable_command_set() {
-        let mut definitions = Vec::new();
-        definitions.extend(OpenRequest::definitions());
-        definitions.extend(CloseRequest::definitions());
-        definitions.extend(FocusRequest::definitions());
-        definitions.extend(MoveRequest::definitions());
+        let definitions = CommandDefinitions::from_ron(include_str!("stack.ron")).into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

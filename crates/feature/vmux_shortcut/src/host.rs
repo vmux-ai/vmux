@@ -7,8 +7,6 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::{HostWindow, UiEventPlugin, UiInput};
 use std::collections::{BTreeMap, HashMap};
-#[cfg(test)]
-use vmux_command::CommandRequest;
 use vmux_command::shortcut::{KeyCombo, KeyContext, Keymap, Shortcut};
 use vmux_command::{CommandDefinition, ResolvedLocale};
 use vmux_core::input::{NativeKeyCapture, NativeKeyInput, NativeKeyInputSet};
@@ -606,6 +604,24 @@ mod tests {
     use vmux_core::{KeyModifiers, PageMetadata, PageOpenId, PageOpenTask};
     use vmux_layout::native_open::NativeOpenPlugin;
 
+    struct LayoutCommandFixture;
+
+    impl LayoutCommandFixture {
+        fn definitions(panes: bool, tabs: bool) -> Vec<CommandDefinition> {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            if panes {
+                app.add_plugins(vmux_layout::pane::PaneCommandPlugin);
+            }
+            if tabs {
+                app.add_plugins(vmux_layout::tab::TabCommandPlugin);
+            }
+            app.update();
+            let mut query = app.world_mut().query::<&CommandDefinition>();
+            query.iter(app.world()).cloned().collect()
+        }
+    }
+
     fn stroke(code: &str, ctrl: bool) -> ShortcutStroke {
         ShortcutStroke {
             code: code.to_string(),
@@ -746,17 +762,7 @@ mod tests {
 
     #[test]
     fn event_lists_hidden_and_visible_shortcuts() {
-        let mut definitions = vmux_layout::pane::OpenRequest::definitions();
-        definitions.extend(vmux_layout::pane::CloseRequest::definitions());
-        definitions.extend(vmux_layout::pane::FocusRequest::definitions());
-        definitions.extend(vmux_layout::pane::ArrangeRequest::definitions());
-        definitions.extend(vmux_layout::pane::ResizeRequest::definitions());
-        definitions.extend(vmux_layout::pane::ToggleZoomRequest::definitions());
-        definitions.extend(vmux_layout::tab::OpenRequest::definitions());
-        definitions.extend(vmux_layout::tab::CreateRequest::definitions());
-        definitions.extend(vmux_layout::tab::CloseRequest::definitions());
-        definitions.extend(vmux_layout::tab::FocusRequest::definitions());
-        definitions.extend(vmux_layout::tab::MoveRequest::definitions());
+        let definitions = LayoutCommandFixture::definitions(true, true);
         let event = ShortcutCatalog::build(
             &Keymap::defaults_with(&definitions),
             KeyContext::NONE,
@@ -780,12 +786,7 @@ mod tests {
 
     #[test]
     fn event_exposes_chords_as_individual_strokes() {
-        let mut definitions = vmux_layout::pane::OpenRequest::definitions();
-        definitions.extend(vmux_layout::pane::CloseRequest::definitions());
-        definitions.extend(vmux_layout::pane::FocusRequest::definitions());
-        definitions.extend(vmux_layout::pane::ArrangeRequest::definitions());
-        definitions.extend(vmux_layout::pane::ResizeRequest::definitions());
-        definitions.extend(vmux_layout::pane::ToggleZoomRequest::definitions());
+        let definitions = LayoutCommandFixture::definitions(true, false);
         let event = ShortcutCatalog::build(
             &Keymap::defaults_with(&definitions),
             KeyContext::NONE,

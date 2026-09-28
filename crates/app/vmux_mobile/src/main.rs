@@ -1,9 +1,9 @@
 #![allow(non_snake_case)]
 
 mod credentials;
+mod host;
 mod lifecycle;
 mod logs;
-mod page_host;
 mod pairing;
 mod qr_scanner;
 mod quic;
@@ -123,7 +123,7 @@ fn AppBody() -> Element {
     let sessions = connection.sessions;
     let agents = connection.agents;
     let session = use_session(runtime.clone());
-    let composer = page_host::use_composer_exchange();
+    let composer = host::use_composer_exchange();
     let mut team_open = use_signal(|| false);
 
     let page_back_runtime = runtime.clone();
@@ -137,7 +137,7 @@ fn AppBody() -> Element {
     let host_runtime = runtime.clone();
     use_effect(move || {
         if let Some(client) = api() {
-            page_host::install(host_runtime.clone(), client, sessions, session, composer);
+            host::install(host_runtime.clone(), client, sessions, session, composer);
         }
     });
 

@@ -12,7 +12,7 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 #[cfg(test)]
 use vmux_command::CommandDefinition;
-use vmux_command::{CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin};
+use vmux_command::{CommandDefinitions, CommandInvocation};
 use vmux_core::Order;
 pub use vmux_core::workspace::TabCommandSet;
 use vmux_flex::prelude::*;
@@ -78,13 +78,18 @@ pub struct TabCommandPlugin;
 
 impl Plugin for TabCommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            CommandTypePlugin::<OpenRequest>::default(),
-            CommandTypePlugin::<CreateRequest>::default(),
-            CommandTypePlugin::<CloseRequest>::default(),
-            CommandTypePlugin::<FocusRequest>::default(),
-            CommandTypePlugin::<MoveRequest>::default(),
-        ));
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<OpenRequest>()
+            .add_message::<CreateRequest>()
+            .add_message::<CloseRequest>()
+            .add_message::<FocusRequest>()
+            .add_message::<MoveRequest>()
+            .add_systems(
+                Startup,
+                spawn_tab_commands.in_set(vmux_command::RegisterCommandDefinitions),
+            );
     }
 }
 
@@ -109,12 +114,6 @@ pub struct OpenRequest {
     pub url: Option<String>,
 }
 
-impl CommandRequest for OpenRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("tab.ron")).select(&["open_in_new_tab"])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for OpenRequest {
     type Error = ();
 
@@ -131,12 +130,6 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CreateRequest;
 
-impl CommandRequest for CreateRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("tab.ron")).select(&["new_task"])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for CreateRequest {
     type Error = ();
 
@@ -148,12 +141,6 @@ impl TryFrom<&CommandInvocation> for CreateRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CloseRequest;
 
-impl CommandRequest for CloseRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("tab.ron")).select(&["close_tab"])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for CloseRequest {
     type Error = ();
 
@@ -164,24 +151,6 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusRequest(pub TabFocus);
-
-impl CommandRequest for FocusRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("tab.ron")).select(&[
-            "next_tab",
-            "prev_tab",
-            "tab_select_1",
-            "tab_select_2",
-            "tab_select_3",
-            "tab_select_4",
-            "tab_select_5",
-            "tab_select_6",
-            "tab_select_7",
-            "tab_select_8",
-            "tab_select_last",
-        ])
-    }
-}
 
 impl TryFrom<&CommandInvocation> for FocusRequest {
     type Error = ();
@@ -207,13 +176,6 @@ impl TryFrom<&CommandInvocation> for FocusRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MoveRequest(pub SiblingDirection);
 
-impl CommandRequest for MoveRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("tab.ron"))
-            .select(&["swap_tab_prev", "swap_tab_next"])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for MoveRequest {
     type Error = ();
 
@@ -224,6 +186,32 @@ impl TryFrom<&CommandInvocation> for MoveRequest {
             _ => Err(()),
         }
     }
+}
+
+fn spawn_tab_commands(mut commands: Commands) {
+    let mut definitions = CommandDefinitions::from_ron(include_str!("tab.ron"));
+    commands.spawn(definitions.take("open_in_new_tab").message::<OpenRequest>());
+    commands.spawn(definitions.take("new_task").message::<CreateRequest>());
+    commands.spawn(definitions.take("close_tab").message::<CloseRequest>());
+    for id in [
+        "next_tab",
+        "prev_tab",
+        "tab_select_1",
+        "tab_select_2",
+        "tab_select_3",
+        "tab_select_4",
+        "tab_select_5",
+        "tab_select_6",
+        "tab_select_7",
+        "tab_select_8",
+        "tab_select_last",
+    ] {
+        commands.spawn(definitions.take(id).message::<FocusRequest>());
+    }
+    for id in ["swap_tab_prev", "swap_tab_next"] {
+        commands.spawn(definitions.take(id).message::<MoveRequest>());
+    }
+    definitions.assert_all_registered();
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -698,12 +686,7 @@ mod tests {
 
     #[test]
     fn tab_mcp_definition_dispatches_to_the_typed_request() {
-        let mut definitions = Vec::new();
-        definitions.extend(OpenRequest::definitions());
-        definitions.extend(CreateRequest::definitions());
-        definitions.extend(CloseRequest::definitions());
-        definitions.extend(FocusRequest::definitions());
-        definitions.extend(MoveRequest::definitions());
+        let definitions = CommandDefinitions::from_ron(include_str!("tab.ron")).into_vec();
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)

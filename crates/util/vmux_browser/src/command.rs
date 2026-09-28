@@ -5,10 +5,9 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_api::VmuxRoute;
-use vmux_command::{
-    CommandDefinition, CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin,
-    ReadCommandRequests,
-};
+#[cfg(test)]
+use vmux_command::CommandDefinition;
+use vmux_command::{CommandDefinitions, CommandInvocation, ReadCommandRequests};
 use vmux_core::{
     HostSpawnRoute, PageMetadata, PageOpenRequest, PageOpenTarget,
     host::{UiStateWrite, page::NativelyHosted},
@@ -37,35 +36,40 @@ pub(crate) struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            CommandTypePlugin::<NavigationRequest>::default(),
-            CommandTypePlugin::<OpenRequest>::default(),
-            CommandTypePlugin::<ZoomRequest>::default(),
-            CommandTypePlugin::<ShowDevToolsRequest>::default(),
-        ))
-        .add_observer(on_header_back)
-        .add_observer(on_header_forward)
-        .add_observer(on_header_reload)
-        .add_observer(on_header_address_focus)
-        .add_observer(on_side_sheet_stack_activate)
-        .add_observer(on_side_sheet_stack_close)
-        .add_observer(on_side_sheet_stack_create)
-        .add_observer(on_side_sheet_project_open)
-        .add_observer(on_side_sheet_section)
-        .add_observer(on_side_sheet_resize)
-        .add_observer(on_reload_notify_header)
-        .add_observer(on_hard_reload_notify_header)
-        .add_systems(
-            Update,
-            (
-                handle_navigation_requests,
-                handle_open_requests,
-                handle_zoom_requests,
-                show_dev_tools,
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<NavigationRequest>()
+            .add_message::<OpenRequest>()
+            .add_message::<ZoomRequest>()
+            .add_message::<ShowDevToolsRequest>()
+            .add_systems(
+                Startup,
+                spawn_browser_commands.in_set(vmux_command::RegisterCommandDefinitions),
             )
-                .chain()
-                .in_set(ReadCommandRequests),
-        );
+            .add_observer(on_header_back)
+            .add_observer(on_header_forward)
+            .add_observer(on_header_reload)
+            .add_observer(on_header_address_focus)
+            .add_observer(on_side_sheet_stack_activate)
+            .add_observer(on_side_sheet_stack_close)
+            .add_observer(on_side_sheet_stack_create)
+            .add_observer(on_side_sheet_project_open)
+            .add_observer(on_side_sheet_section)
+            .add_observer(on_side_sheet_resize)
+            .add_observer(on_reload_notify_header)
+            .add_observer(on_hard_reload_notify_header)
+            .add_systems(
+                Update,
+                (
+                    handle_navigation_requests,
+                    handle_open_requests,
+                    handle_zoom_requests,
+                    show_dev_tools,
+                )
+                    .chain()
+                    .in_set(ReadCommandRequests),
+            );
     }
 }
 
@@ -76,12 +80,6 @@ pub enum NavigationRequest {
     Reload,
     HardReload,
     Stop,
-}
-
-impl CommandRequest for NavigationRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("navigation.ron")).into_vec()
-    }
 }
 
 impl TryFrom<&CommandInvocation> for NavigationRequest {
@@ -116,12 +114,6 @@ impl OpenRequest {
     }
 }
 
-impl CommandRequest for OpenRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("open.ron")).into_vec()
-    }
-}
-
 impl TryFrom<&CommandInvocation> for OpenRequest {
     type Error = ();
 
@@ -141,12 +133,6 @@ pub enum ZoomRequest {
     Reset,
 }
 
-impl CommandRequest for ZoomRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("zoom.ron")).into_vec()
-    }
-}
-
 impl TryFrom<&CommandInvocation> for ZoomRequest {
     type Error = ();
 
@@ -164,12 +150,6 @@ impl TryFrom<&CommandInvocation> for ZoomRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShowDevToolsRequest;
 
-impl CommandRequest for ShowDevToolsRequest {
-    fn definitions() -> Vec<CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("dev_tools.ron")).into_vec()
-    }
-}
-
 impl TryFrom<&CommandInvocation> for ShowDevToolsRequest {
     type Error = ();
 
@@ -177,6 +157,21 @@ impl TryFrom<&CommandInvocation> for ShowDevToolsRequest {
         (invocation.id == "browser_dev_tools")
             .then_some(Self)
             .ok_or(())
+    }
+}
+
+fn spawn_browser_commands(mut commands: Commands) {
+    for definition in CommandDefinitions::from_ron(include_str!("navigation.ron")).into_vec() {
+        commands.spawn(definition.message::<NavigationRequest>());
+    }
+    for definition in CommandDefinitions::from_ron(include_str!("open.ron")).into_vec() {
+        commands.spawn(definition.message::<OpenRequest>());
+    }
+    for definition in CommandDefinitions::from_ron(include_str!("zoom.ron")).into_vec() {
+        commands.spawn(definition.message::<ZoomRequest>());
+    }
+    for definition in CommandDefinitions::from_ron(include_str!("dev_tools.ron")).into_vec() {
+        commands.spawn(definition.message::<ShowDevToolsRequest>());
     }
 }
 
@@ -696,12 +691,11 @@ mod tests {
 
     #[test]
     fn browser_mcp_definitions_are_the_dispatchable_command_set() {
-        let definitions = NavigationRequest::definitions()
-            .into_iter()
-            .chain(OpenRequest::definitions())
-            .chain(ZoomRequest::definitions())
-            .chain(ShowDevToolsRequest::definitions())
-            .collect::<Vec<_>>();
+        let mut definitions =
+            CommandDefinitions::from_ron(include_str!("navigation.ron")).into_vec();
+        definitions.extend(CommandDefinitions::from_ron(include_str!("open.ron")).into_vec());
+        definitions.extend(CommandDefinitions::from_ron(include_str!("zoom.ron")).into_vec());
+        definitions.extend(CommandDefinitions::from_ron(include_str!("dev_tools.ron")).into_vec());
         let tools = definitions
             .iter()
             .filter_map(CommandDefinition::agent_tool)
@@ -802,13 +796,15 @@ mod tests {
     #[test]
     fn command_invocations_dispatch_to_concrete_requests() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins((
-            CommandTypePlugin::<NavigationRequest>::default(),
-            CommandTypePlugin::<OpenRequest>::default(),
-            CommandTypePlugin::<ZoomRequest>::default(),
-            CommandTypePlugin::<ShowDevToolsRequest>::default(),
-        ));
+        app.add_plugins((MinimalPlugins, vmux_command::CommandRuntimePlugin))
+            .add_message::<NavigationRequest>()
+            .add_message::<OpenRequest>()
+            .add_message::<ZoomRequest>()
+            .add_message::<ShowDevToolsRequest>()
+            .add_systems(
+                Startup,
+                spawn_browser_commands.in_set(vmux_command::RegisterCommandDefinitions),
+            );
         app.world_mut()
             .resource_mut::<Messages<CommandInvocation>>()
             .write_batch([

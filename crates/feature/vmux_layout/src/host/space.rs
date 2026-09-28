@@ -44,7 +44,13 @@ pub struct CurrentSpaceSet;
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::space"]
-#[require(Save, EffectiveStartupDir, vmux_core::EffectiveStartupUrl)]
+#[require(
+    Save,
+    SpaceId,
+    EffectiveStartupDir,
+    vmux_core::EffectiveStartupUrl,
+    crate::profile::Profile
+)]
 pub struct Space;
 
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]

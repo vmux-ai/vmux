@@ -19,7 +19,7 @@ use bevy::{
 };
 use moonshine_save::prelude::*;
 use vmux_api::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
-use vmux_command::{CommandDefinitions, CommandInvocation, CommandRequest, CommandTypePlugin};
+use vmux_command::{CommandDefinitions, CommandInvocation};
 #[cfg(test)]
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 #[cfg(test)]
@@ -80,17 +80,6 @@ pub struct OpenRequest {
     pub url: Option<String>,
 }
 
-impl CommandRequest for OpenRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&[
-            "open_in_pane_top",
-            "open_in_pane_right",
-            "open_in_pane_bottom",
-            "open_in_pane_left",
-        ])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for OpenRequest {
     type Error = ();
 
@@ -144,12 +133,6 @@ impl TryFrom<&CommandInvocation> for OpenRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CloseRequest;
 
-impl CommandRequest for CloseRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&["close_pane"])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for CloseRequest {
     type Error = ();
 
@@ -160,18 +143,6 @@ impl TryFrom<&CommandInvocation> for CloseRequest {
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusRequest(pub PaneFocus);
-
-impl CommandRequest for FocusRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&[
-            "toggle_pane",
-            "select_pane_left",
-            "select_pane_right",
-            "select_pane_up",
-            "select_pane_down",
-        ])
-    }
-}
 
 impl TryFrom<&CommandInvocation> for FocusRequest {
     type Error = ();
@@ -190,20 +161,6 @@ impl TryFrom<&CommandInvocation> for FocusRequest {
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArrangeRequest(pub PaneArrangement);
-
-impl CommandRequest for ArrangeRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&[
-            "swap_pane_prev",
-            "swap_pane_next",
-            "rotate_forward",
-            "rotate_backward",
-            "mirror_panes",
-            "mirror_panes_horizontal",
-            "mirror_panes_vertical",
-        ])
-    }
-}
 
 impl TryFrom<&CommandInvocation> for ArrangeRequest {
     type Error = ();
@@ -229,18 +186,6 @@ impl TryFrom<&CommandInvocation> for ArrangeRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResizeRequest(pub PaneResize);
 
-impl CommandRequest for ResizeRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&[
-            "equalize_pane_size",
-            "resize_pane_left",
-            "resize_pane_right",
-            "resize_pane_up",
-            "resize_pane_down",
-        ])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for ResizeRequest {
     type Error = ();
 
@@ -259,18 +204,56 @@ impl TryFrom<&CommandInvocation> for ResizeRequest {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToggleZoomRequest;
 
-impl CommandRequest for ToggleZoomRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        CommandDefinitions::from_ron(include_str!("pane.ron")).select(&["zoom_pane"])
-    }
-}
-
 impl TryFrom<&CommandInvocation> for ToggleZoomRequest {
     type Error = ();
 
     fn try_from(invocation: &CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "zoom_pane").then_some(Self).ok_or(())
     }
+}
+
+fn spawn_pane_commands(mut commands: Commands) {
+    let mut definitions = CommandDefinitions::from_ron(include_str!("pane.ron"));
+    for id in [
+        "open_in_pane_top",
+        "open_in_pane_right",
+        "open_in_pane_bottom",
+        "open_in_pane_left",
+    ] {
+        commands.spawn(definitions.take(id).message::<OpenRequest>());
+    }
+    commands.spawn(definitions.take("close_pane").message::<CloseRequest>());
+    for id in [
+        "toggle_pane",
+        "select_pane_left",
+        "select_pane_right",
+        "select_pane_up",
+        "select_pane_down",
+    ] {
+        commands.spawn(definitions.take(id).message::<FocusRequest>());
+    }
+    for id in [
+        "swap_pane_prev",
+        "swap_pane_next",
+        "rotate_forward",
+        "rotate_backward",
+        "mirror_panes",
+        "mirror_panes_horizontal",
+        "mirror_panes_vertical",
+    ] {
+        commands.spawn(definitions.take(id).message::<ArrangeRequest>());
+    }
+    for id in [
+        "equalize_pane_size",
+        "resize_pane_left",
+        "resize_pane_right",
+        "resize_pane_up",
+        "resize_pane_down",
+    ] {
+        commands.spawn(definitions.take(id).message::<ResizeRequest>());
+    }
+    commands.spawn(definitions.take("zoom_pane").message::<ToggleZoomRequest>());
+    definitions.assert_all_registered();
 }
 
 pub struct PanePlugin;
@@ -296,14 +279,19 @@ pub struct PaneCommandPlugin;
 
 impl Plugin for PaneCommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            CommandTypePlugin::<OpenRequest>::default(),
-            CommandTypePlugin::<CloseRequest>::default(),
-            CommandTypePlugin::<FocusRequest>::default(),
-            CommandTypePlugin::<ArrangeRequest>::default(),
-            CommandTypePlugin::<ResizeRequest>::default(),
-            CommandTypePlugin::<ToggleZoomRequest>::default(),
-        ));
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<OpenRequest>()
+            .add_message::<CloseRequest>()
+            .add_message::<FocusRequest>()
+            .add_message::<ArrangeRequest>()
+            .add_message::<ResizeRequest>()
+            .add_message::<ToggleZoomRequest>()
+            .add_systems(
+                Startup,
+                spawn_pane_commands.in_set(vmux_command::RegisterCommandDefinitions),
+            );
     }
 }
 

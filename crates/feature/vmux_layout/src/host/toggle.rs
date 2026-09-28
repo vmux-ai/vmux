@@ -13,7 +13,14 @@ pub struct TogglePlugin;
 
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(vmux_command::CommandTypePlugin::<ToggleLayoutRequest>::default())
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
+        app.add_message::<ToggleLayoutRequest>()
+            .add_systems(
+                Startup,
+                spawn_toggle_command.in_set(vmux_command::RegisterCommandDefinitions),
+            )
             .add_systems(
                 Update,
                 handle_visibility_requests.in_set(LayoutRequestSet::Handle),
@@ -28,19 +35,22 @@ impl Plugin for TogglePlugin {
 #[derive(Message)]
 struct ToggleLayoutRequest;
 
-impl vmux_command::CommandRequest for ToggleLayoutRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vmux_command::CommandDefinitions::from_ron(include_str!("toggle.ron"))
-            .select(&["toggle_layout"])
-    }
-}
-
 impl TryFrom<&vmux_command::CommandInvocation> for ToggleLayoutRequest {
     type Error = ();
 
     fn try_from(invocation: &vmux_command::CommandInvocation) -> Result<Self, Self::Error> {
         (invocation.id == "toggle_layout").then_some(Self).ok_or(())
     }
+}
+
+fn spawn_toggle_command(mut commands: Commands) {
+    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("toggle.ron"));
+    commands.spawn(
+        definitions
+            .take("toggle_layout")
+            .message::<ToggleLayoutRequest>(),
+    );
+    definitions.assert_all_registered();
 }
 
 #[derive(Component, Default, Debug)]
@@ -232,8 +242,8 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<ToggleLayoutRequest>()
             .add_systems(Update, handle_visibility_requests);
-        let first_window = app.world_mut().spawn_empty().id();
-        let second_window = app.world_mut().spawn_empty().id();
+        let first_window = app.world_mut().spawn(Window::default()).id();
+        let second_window = app.world_mut().spawn(Window::default()).id();
         app.world_mut()
             .entity_mut(first_window)
             .insert(vmux_core::Active);

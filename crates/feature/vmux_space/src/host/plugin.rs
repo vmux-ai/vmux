@@ -24,12 +24,11 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(ui)]
         app.add_plugins(crate::ui::SpacesPage::plugin());
+        if !app.is_plugin_added::<vmux_command::CommandRuntimePlugin>() {
+            app.add_plugins(vmux_command::CommandRuntimePlugin);
+        }
         app.add_plugins(Self::MANIFEST.plugin())
-            .add_plugins((
-                vmux_command::CommandTypePlugin::<OpenRequest>::default(),
-                SpaceAgentPlugin,
-                super::composer::SpaceComposerPlugin,
-            ))
+            .add_plugins((SpaceAgentPlugin, super::composer::SpaceComposerPlugin))
             .add_plugins(super::SpaceToolPlugin)
             .add_plugins(vmux_layout::LayoutContractPlugin)
             .add_plugins(vmux_core::host::UiStatePlugin::<SpacesUiState>::default())
@@ -39,6 +38,11 @@ impl Plugin for SpacePlugin {
             .add_message::<SpaceDeleteRequest>()
             .add_message::<SpaceOpenPageRequest>()
             .add_message::<SpaceRenameRequest>()
+            .add_message::<OpenRequest>()
+            .add_systems(
+                Startup,
+                spawn_space_commands.in_set(vmux_command::RegisterCommandDefinitions),
+            )
             .add_systems(
                 Update,
                 (
@@ -111,13 +115,6 @@ pub struct OpenRequest {
     pub url: Option<String>,
 }
 
-impl vmux_command::CommandRequest for OpenRequest {
-    fn definitions() -> Vec<vmux_command::CommandDefinition> {
-        vmux_command::CommandDefinitions::from_ron(include_str!("plugin.ron"))
-            .select(&["open_in_new_space"])
-    }
-}
-
 impl TryFrom<&vmux_command::CommandInvocation> for OpenRequest {
     type Error = ();
 
@@ -128,6 +125,16 @@ impl TryFrom<&vmux_command::CommandInvocation> for OpenRequest {
             })
             .ok_or(())
     }
+}
+
+fn spawn_space_commands(mut commands: Commands) {
+    let mut definitions = vmux_command::CommandDefinitions::from_ron(include_str!("plugin.ron"));
+    commands.spawn(
+        definitions
+            .take("open_in_new_space")
+            .message::<OpenRequest>(),
+    );
+    definitions.assert_all_registered();
 }
 
 fn update_effective_startup(
@@ -873,7 +880,6 @@ mod tests {
     use crate::model::{SpaceRecord, bootstrap_profile_name};
     use crate::spaces::space_profile_bundle;
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_command::CommandRequest;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -881,7 +887,8 @@ mod tests {
 
     #[test]
     fn space_mcp_definition_dispatches_to_the_typed_request() {
-        let definitions = OpenRequest::definitions();
+        let definitions =
+            vmux_command::CommandDefinitions::from_ron(include_str!("plugin.ron")).into_vec();
         let tools = definitions
             .iter()
             .filter_map(vmux_command::CommandDefinition::agent_tool)
