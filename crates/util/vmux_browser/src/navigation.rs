@@ -21,6 +21,7 @@ use vmux_terminal::{self as terminal, Terminal};
 
 use crate::host::{PendingNavigationUpdate, send_page_open_response};
 use crate::input::RecentBrowserInteraction;
+use crate::snapshot::BrowserTarget;
 
 pub(crate) struct NavigationPlugin;
 
@@ -169,33 +170,13 @@ pub(crate) fn sync_page_metadata_to_tab(
 
 fn handle_browser_go_back_requests(
     mut reader: MessageReader<vmux_layout::BrowserGoBackRequest>,
-    focus: vmux_layout::stack::FocusedStack,
-    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
-    browsers: Query<(Entity, &ChildOf), With<Browser>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stacks: Query<Entity, With<Stack>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    targets: BrowserTarget,
     host_histories: Query<(), With<HostHistory>>,
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let target = match request.pane.as_deref() {
-            Some(s) => vmux_layout::target::parse_browser_target(s, &panes, &stacks),
-            None => focus
-                .pane
-                .filter(|p| panes.contains(*p))
-                .map(vmux_layout::target::BrowserTarget::Pane),
-        };
-        let Some(target) = target else { continue };
-        let Some(webview) = vmux_layout::target::webview_for_target(
-            target,
-            &pane_children,
-            &stack_ts,
-            &browsers,
-            &terminals,
-        ) else {
+        let Some(webview) = targets.resolve_pane(request.pane.as_deref()) else {
             continue;
         };
         if host_histories.contains(webview) {
@@ -211,33 +192,13 @@ fn handle_browser_go_back_requests(
 
 fn handle_browser_go_forward_requests(
     mut reader: MessageReader<vmux_layout::BrowserGoForwardRequest>,
-    focus: vmux_layout::stack::FocusedStack,
-    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
-    browsers: Query<(Entity, &ChildOf), With<Browser>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stacks: Query<Entity, With<Stack>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    targets: BrowserTarget,
     host_histories: Query<(), With<HostHistory>>,
     mut host_history_steps: MessageWriter<HostHistoryStep>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        let target = match request.pane.as_deref() {
-            Some(s) => vmux_layout::target::parse_browser_target(s, &panes, &stacks),
-            None => focus
-                .pane
-                .filter(|p| panes.contains(*p))
-                .map(vmux_layout::target::BrowserTarget::Pane),
-        };
-        let Some(target) = target else { continue };
-        let Some(webview) = vmux_layout::target::webview_for_target(
-            target,
-            &pane_children,
-            &stack_ts,
-            &browsers,
-            &terminals,
-        ) else {
+        let Some(webview) = targets.resolve_pane(request.pane.as_deref()) else {
             continue;
         };
         if host_histories.contains(webview) {

@@ -12,8 +12,7 @@ use vmux_core::dom_snapshot::{RawSnapshot, shape_snapshot};
 use vmux_core::terminal::{ProcessExited, Terminal};
 use vmux_layout::active_pane::ActivePaneQuery;
 use vmux_layout::pane::{Pane, PaneSplit};
-use vmux_layout::stack::{Stack, active_stack_in_pane};
-use vmux_layout::target::active_webview_for_tab;
+use vmux_layout::stack::Stack;
 use vmux_layout::{Browser, Loading};
 
 pub(crate) struct SnapshotPlugin;
@@ -134,34 +133,31 @@ impl BrowserTarget<'_, '_> {
         if let Some(webview) = webview {
             return self.browsers.contains(webview).then_some(webview);
         }
-        if let Some(target) = pane {
-            return vmux_layout::target::parse_browser_target(target, &self.panes, &self.stacks)
-                .and_then(|target| {
-                    vmux_layout::target::webview_for_target(
-                        target,
-                        &self.pane_children,
-                        &self.stack_ts,
-                        &self.browsers,
-                        &self.terminals,
-                    )
-                });
+        if pane.is_some() {
+            return self.resolve_pane(pane);
         }
-        self.default()
+        self.resolve_pane(None).or_else(|| self.most_recent())
     }
 
-    fn default(&self) -> Option<Entity> {
-        self.active
-            .local()
-            .pane
-            .filter(|pane| self.panes.contains(*pane))
-            .and_then(|pane| {
-                active_webview_for_tab(
-                    active_stack_in_pane(pane, &self.pane_children, &self.stack_ts),
-                    &self.browsers,
-                    &self.terminals,
-                )
-            })
-            .or_else(|| self.most_recent())
+    pub(crate) fn resolve_pane(&self, pane: Option<&str>) -> Option<Entity> {
+        let target = match pane {
+            Some(target) => {
+                vmux_layout::target::parse_browser_target(target, &self.panes, &self.stacks)
+            }
+            None => self
+                .active
+                .local()
+                .pane
+                .filter(|pane| self.panes.contains(*pane))
+                .map(vmux_layout::target::BrowserTarget::Pane),
+        }?;
+        vmux_layout::target::webview_for_target(
+            target,
+            &self.pane_children,
+            &self.stack_ts,
+            &self.browsers,
+            &self.terminals,
+        )
     }
 
     fn most_recent(&self) -> Option<Entity> {
